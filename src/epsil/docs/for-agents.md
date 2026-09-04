@@ -124,7 +124,7 @@ actually happens → write instead:**
 | `len(xs)` | Inert + did-you-mean | `Length(xs)` |
 | `s[0]` / `len(s)` on a string | Works — a string is a collection of its characters (grapheme clusters), 1-based | `s[1]`, `Length(s)` |
 | `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `Join(a, b)` |
-| `xs[2] = 9` | Runtime error value — no element assignment; collections are immutable values | Rebuild: `Map`, `Join(xs, [v])`, `Append(xs, v)` |
+| `xs[2] = 9` | Runtime error value — no element assignment; collections are immutable values | Rebuild: `Map`; in a loop, `ListFrom(Join(xs, [v]))` |
 | `and` / `or` / `not` | Parse diagnostics (reserved words) | `&&`, `\|\|`, `!` |
 | `x**0.5` habits: `x^1/2` | Parses as `(x^1)/2` — precedence, not a root | `Sqrt(x)` or `x^(1/2)` |
 | `math.floor`, `np.mean` | No modules/namespaces | Everything is global: `Floor`, `Mean`, `Sin`, … |
@@ -139,6 +139,9 @@ work; `2 in [1, 2, 3]` works; lowercase `true`/`false` are accepted
 (canonically `True`/`False`).
 
 ## Verified Idioms
+
+The [Style Guide](/epsil/style/) states each idiom with its reason; this
+section is the short form.
 
 Exactness and numeric approximation:
 
@@ -187,11 +190,13 @@ a
 // ➔ 21
 ```
 
-Building a list in a loop (each `[k]` literal snapshots the current value):
+Building a list in a loop — spread the old list into a new literal (each
+literal snapshots the current value); never `Join(xs, [k])` on every turn,
+which nests a lazy recipe per turn and takes seconds by a thousand elements:
 
 ```epsil
 let xs = []
-for k in 1..3 { xs = Join(xs, [k * k]) }
+for k in 1..3 { xs = [...xs, k * k] }
 xs
 // ➔ [1, 4, 9]
 ```

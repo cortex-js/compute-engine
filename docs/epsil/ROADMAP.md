@@ -24,10 +24,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
   orphan, multiple, and through-boxing comments require a broader metadata
   model. The current lossy contract remains public in
   `src/epsil/docs/comments.md`.
-- **Loop accumulation.** Repeated `xs = Join(xs, [x])` builds an O(n)-deep lazy
-  recipe. Prefer documenting `Map`/`Fold` for value construction; an engine
-  optimization may flatten materialized operands only after preserving lazy
-  `Join`, tuple atomicity, effects, and size limits.
 - **Compilation tails.** Epsil has no comprehension syntax (`Map`/`Filter`
   and the pipe are the idiom), and the engine's `Comprehension`, stepped or
   descending `Range`, multi-`Element` `Loop`, and destructuring `for (p, q)
@@ -59,9 +55,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
 - **Test runner.** Consider `epsil test` with test blocks and assertion
   builtins. Assertions should produce ordinary error values and diagnostics,
   not introduce a new effect label.
-- **Style guide.** Consolidate the idioms currently distributed across
-  `examples.md`, `for-agents.md`, and test headers: declaration style,
-  recursion, collection pipelines, indexing, errors-as-values, and effects.
 
 ## Maintenance
 

@@ -98,6 +98,11 @@ Understand **how Epsil evaluates** — exact values, mutable bindings, lazy
 collections, ordinary error values, and session scope.
 </ReadMore>
 
+<ReadMore path="/epsil/style/">
+Write **idiomatic Epsil** — the style guide: declarations, recursion,
+pipelines, building lists, errors as values, effects, and pattern matching.
+</ReadMore>
+
 ## Tools and Integrations
 
 <ReadMore path="/epsil/for-agents/">

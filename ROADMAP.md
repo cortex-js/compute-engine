@@ -845,6 +845,36 @@ compiled `match` with no matching case yields `NaN`, not an error value, so
 nothing in compiled code can be told apart as an error; collections and
 records; every `Match` on the Python target.
 
+### Growing a list one element per loop turn costs seconds by a few hundred turns (OPEN, perf — found 2026-09-04 writing the Epsil style guide)
+
+`let xs = []; for k in 1..n { xs = Join(xs, [k]) }` — the idiom the Epsil
+docs recommended until 2026-09-04 — evaluates to a variadic `Join` with one
+`[k]` operand per turn (`Join` canonicalization flattens the nesting), and
+each turn re-canonicalizes the whole recipe. Measured on a loaded box
+(load average 30–80, so the absolute numbers are inflated; the ratios are
+the finding): `Length(xs)` after the loop took about 1.4 s at n = 250, 6 s at
+n = 500 and 30 s at n = 1000 — a factor of 4 to 5 per doubling, worse than
+quadratic. `Append(xs, k)` (a variadic `Append`) and the spread literal
+`[...xs, k]` (which evaluates to the same `Join`, not to a snapshot) scale
+the same way. Materializing each turn, `xs = ListFrom(Join(xs, [k]))`,
+stores a flat list but still took 2 s at n = 250 and 6.7 s at n = 500 in the
+same run: re-boxing an n-element list costs tens of microseconds PER
+ELEMENT, so the per-turn O(n) has a constant large enough to make any
+element-per-turn growth unusable beyond a few hundred elements. By
+comparison `ListFrom(Map(k => k, 1..n))` took 16 ms at n = 250 and 18 ms
+at n = 500 in the same run, and a plain scalar loop of 4000 turns 51 ms.
+
+Two questions before any engine change, both from the Epsil roadmap's
+original gating (lazy `Join` semantics, tuple atomicity, effects and size
+limits must be preserved): whether `Join` over materialized operands should
+fold them into one literal at canonicalization time (that alone does not
+remove the per-element re-boxing cost the `ListFrom` variant shows), and
+where the per-element cost of canonicalizing an n-element `List` comes from
+(the likelier lever). The docs now steer to `Map`/`Fold` and keep growing
+loops short (`src/epsil/docs/style.md`, "Building a list one element at a
+time"); the measurement should be repeated on a quiet box before the lever
+is chosen.
+
 ### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (OPEN, compile — found 2026-09-03 reviewing the `while let` compile work)
 
 `match xs { [h, ...t] => do { let t = 7; Length([t]) } }` and

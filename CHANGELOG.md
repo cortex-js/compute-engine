@@ -60,8 +60,34 @@
   executes its examples, so neither the index nor the examples can drift
   from the engine.
 
+- **Epsil: a style guide.** `src/epsil/docs/style.md` (published at
+  `/epsil/style/`) states the idioms of well-written Epsil with their
+  reasons and an executed example each: `const` versus `let` and when to
+  annotate, math-style versus block-style functions and recursion without
+  ceremony, pipelines over loops, building a list without growing a lazy
+  recipe, 1-based indexing, errors as values, effects at the edges, pattern
+  matching, strings, and naming. The examples and agent guide now point at
+  it, and their "build a list with `Join` in a loop" idiom — which grows a
+  lazy recipe one operand per turn and takes tens of seconds by a thousand
+  elements — is replaced by `Map`/`Fold`, or `ListFrom` around the growth
+  step when a loop must extend a list.
+
 ### Resolved Issues
 
+- **A discrete pmf or CDF at a symbolic point agrees with the literal
+  route.** `PDF(PoissonDistribution(2), x)` evaluated to the bare closed
+  form `2^x / (x!·e²)`, the continuous interpolation of the mass: with
+  `x := 0.5` afterwards it answered `0.216` where the literal
+  `PDF(PoissonDistribution(2), 0.5)` answers `0`, and the symbolic CDF
+  omitted the `Floor` the literal route applies (`0.261` against `0.135`
+  at `x = 0.5`, `NaN` against `0` at `x = −1`). The symbolic forms now
+  carry the support guard: `Which(⌊x⌋ = x ∧ x ≥ 0, closed, True, 0)` for
+  the Poisson pmf (with `x ≤ n` for the binomial), and `Which(x < 0, 0,
+  True, GammaRegularized(⌊x⌋ + 1, λ))` for the CDF (with `x ≥ n → 1` for
+  the binomial). Each clause the point's type already proves is left
+  out, so a point declared `integer<0..>` keeps the bare closed form. The
+  guarded forms compile, and match the literal route at integer,
+  non-integer and negative points on both lanes.
 - **A compiled operand that is a scalar OR a collection by its static type
   is no longer claimed by the scalar code paths.** On the `javascript`
   target, an operand typed `integer | vector<integer^2>` — a `Which` whose

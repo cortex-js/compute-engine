@@ -193,11 +193,17 @@ dictionary — evaluates its elements when the statement executes. Assigning
 one to a variable stores a snapshot of the element *values*:
 
 ```epsil
-let xs = []
-for k in 1..3 { xs = Join(xs, [k]) }
+let k = 1
+let xs = [k, k + 1]
+k = 10
 xs
-// ➔ [1, 2, 3]
+// ➔ [1, 2]
 ```
+
+(A spread inside a literal, `[...xs, k]`, is the exception: it is the lazy
+`Join` described next, not a snapshot — see the
+[Style Guide](/epsil/style/#building-a-list-one-element-at-a-time) before
+growing a list in a loop.)
 
 Lazy collection **operators** — `Range`, `Map`, `Filter`, `Take`, `Join` —
 are *generators*: their operands (bounds, sources, functions) are evaluated

@@ -14,7 +14,8 @@ executes each code fence directly through `executeEpsil`, while
 `test/epsil/programs.test.ts` provides deeper assertions for representative
 results and runtime behavior.
 
-A few idioms these programs rely on:
+A few idioms these programs rely on (the [Style Guide](/epsil/style/)
+collects them all, with the reasons):
 
 - Loops (`for`, `while`) are evaluated **for effect** — accumulate into a
   variable (a number, or a list built up with `Join`/`Append`), or use
@@ -88,12 +89,15 @@ a
 // ➔ 21
 ```
 
-**Collecting values in a loop.** A list accumulates through `Join`; each
-appended literal snapshots the loop variable's current value:
+**Collecting values in a loop.** A list grows by spreading the old one into
+a new literal; each literal snapshots the loop variable's current value. (A
+`Join(xs, [k])` on every turn would nest a lazy recipe once per turn and
+slow to a crawl by a thousand elements — see the
+[Style Guide](/epsil/style/#building-a-list-one-element-at-a-time).)
 
 ```epsil
 let xs = []
-for k in 1..3 { xs = Join(xs, [k]) }
+for k in 1..3 { xs = [...xs, k] }
 xs
 // ➔ [1, 2, 3]
 ```
