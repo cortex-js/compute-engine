@@ -3532,6 +3532,7 @@ type OperandStructure =
  }
   | {
   kind: "number";
+  tier: Type;
   literal: 0 | 1;
   rational: readonly [bigint, bigint];
  }
@@ -3606,9 +3607,26 @@ to trust an operand's type. Lives on the structure node, not in
 
 \{
   `kind`: `"number"`;
+  `tier`: [`Type`](#type-3);
   `literal`: `0` \| `1`;
   `rational`: readonly \[`bigint`, `bigint`\];
  \}
+
+#### OperandStructure.tier
+
+```ts
+tier: Type;
+```
+
+The tier the literal contributes to a COMPOSITE type: `integer`,
+`rational`, `real`, `complex`, `imaginary`, `nan`, `infinity`, or
+the signed pair `+oo | -oo`. A literal's handler-visible type
+(`type` on the descriptor) carries its value or an enclosing range;
+a composite built from the literal — a tuple's component, a list's
+element, a record's field — is a stored contract and carries the
+tier instead, so a container handler reads it here and never
+builds the literal type only to widen it away. Read off the value
+(`numberLiteralTierType`, `boxed-expression/literal-tier.ts`).
 
 #### OperandStructure.rational?
 
