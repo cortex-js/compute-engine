@@ -213,8 +213,9 @@ operation (an aggregate, an index) at the point of definition.
 
 Per [Principles](/epsil/principles/), "errors are values": a *runtime*
 problem — a type error, an out-of-domain argument, reassigning a `const` —
-becomes an `Error` value embedded in the result, not a thrown exception. A
-program never throws to its host for a runtime problem.
+becomes an `Error` value that propagates outward through the enclosing
+expressions and becomes their result, not a thrown exception. A program never
+throws to its host for a runtime problem.
 
 *Parse*-time problems are different: a malformed program surfaces as a
 **diagnostic**, not as a value. So do the few execution-time problems that are

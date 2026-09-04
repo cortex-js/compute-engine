@@ -131,8 +131,14 @@ describe('D6.2 — overlap-deferred validation', () => {
       'bl',
       ce.box(['List', ['List', 'True', 'False'], ['List', 'False', 'True']])
     );
-    // Boolean tensors have no arithmetic field: the handler declines.
-    expect(det.evaluate().operator).toBe('Determinant');
+    // Boolean tensors have no arithmetic field: the handler declines, and
+    // the deferred parameter check then refutes the value it was handed —
+    // the answer is that `incompatible-type` error (an operand that fails
+    // only when evaluated bubbles, docs/ERROR-MODEL.md §3), never a crash.
+    // Until 2026-09-03 the error stayed embedded in an inert `Determinant`.
+    const v = det.evaluate();
+    expect(v.operator).toBe('Error');
+    expect(v.toString()).toContain('incompatible-type');
   });
 
   test('deferred acceptance does not narrow an inferred symbol to the param', () => {

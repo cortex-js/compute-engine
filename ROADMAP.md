@@ -651,7 +651,17 @@ deliberately left out of that change.
   semantically stable (`parseType(typeToString(t))` equals `t`), so this
   is a readability defect in hovers and error messages only.
 
-### A strict operator embeds an operand's EVALUATION-TIME error instead of bubbling it (OPEN, error-model — found 2026-09-03 implementing `RuntimeError`)
+### A strict operator embeds an operand's EVALUATION-TIME error instead of bubbling it (FIXED 2026-09-03 — found 2026-09-03 implementing `RuntimeError`)
+
+**Resolution:** not a ruling — `docs/ERROR-MODEL.md` §3 is settled and
+already covers it (`Sin(err) → err`, with `Sin(If(False, 5, err))` as its
+own evaluation-time example). The pre-handler operand scan (step 4-err) and
+the late result absorption in `boxed-function.ts` now also run for a node
+that was valid at boxing time, under the same exclusions, and the async lane
+mirrors both (`_absorbsEvaluatedOperandError`). `Sin(Length(5))`,
+`1 + Length(5)` and `Sin(g(-1))` are the error, with the operator hop on the
+breadcrumb. The Epsil wording ("embedded in the result") is corrected in
+`src/epsil/docs/evaluation.md`. Historical record follows.
 
 `Sin(Length(5)).evaluate()` is `sin(Error(incompatible-type, …))` — an
 invalid tree, type `error` — and `1 + Length(5)` is `1 + Error(…)`; the same

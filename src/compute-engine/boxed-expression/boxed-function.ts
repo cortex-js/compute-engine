@@ -3358,7 +3358,8 @@ export class BoxedFunction
   private _spliceSpreadOps(): ReadonlyArray<Expression> | Expression | null {
     if (!this._ops.some((x) => x.operator === 'Spread')) return null;
     const spliced: Expression[] = [];
-    for (const x of this._ops) {
+    for (let i = 0; i < this._ops.length; i++) {
+      const x = this._ops[i];
       if (x.operator !== 'Spread' || !isFunction(x) || x.nops !== 1) {
         spliced.push(x);
         continue;
@@ -3369,9 +3370,71 @@ export class BoxedFunction
       if (isFunction(v, 'Tuple')) spliced.push(...v.ops);
       else if (isNumber(v) || isString(v) || isFunction(v, 'List'))
         return this.engine.typeError('tuple', v.type, x.op1);
-      else return this;
+      else if (!v.isValid && this._absorbsEvaluatedOperandError()) {
+        // The spread argument evaluated to an error (`f(...g(x))` for a `g`
+        // that fails): a demanded operand's error is this node's value
+        // (`docs/ERROR-MODEL.md` §3), exactly as it would be in a positional
+        // slot — not an unresolved spread that keeps the call symbolic.
+        const err = errorValue(v, { operator: this._operator, index: i + 1 });
+        if (err !== undefined) return err;
+        return this;
+      } else return this;
     }
     return spliced;
+  }
+
+  /**
+   * The error of an argument a USER FUNCTION refused, with THIS node's hop on
+   * its breadcrumb — or `undefined` when `result` is not that shape.
+   *
+   * A function literal applied to an argument its annotated parameter
+   * rejects answers the inert application with the argument marked
+   * (`Apply((n) => n + 1, Error(incompatible-type, "b"))`, the document form
+   * of the refusal; `makeLambda` in `function-utils.ts`). Collapsing that
+   * form through `errorValue` would record the hop as `Apply` argument 2 —
+   * the internal representation — where the user wrote `bump("b")`: the hop
+   * is this node's operator, and the position is the argument's own (the
+   * callee occupies the first operand of `Apply`).
+   */
+  private _refusedArgumentError(result: Expression): Expression | undefined {
+    if (this._operator === 'Apply' || !isFunction(result, 'Apply'))
+      return undefined;
+    const ops = result.ops;
+    for (let i = 1; i < ops.length; i++) {
+      if (ops[i].isValid) continue;
+      const err = errorValue(ops[i], { operator: this._operator, index: i });
+      if (err !== undefined) return err;
+    }
+    return undefined;
+  }
+
+  /**
+   * The error carried by a broadcast LIFT that has just been evaluated
+   * (`evaluateBroadcastLiftsOnce`), with this node's hop on its breadcrumb,
+   * or `undefined` when no lifted operand evaluated to one.
+   *
+   * A lift is a scalar operand evaluated once and repeated into every cell
+   * (`[1, 2] ^ Length(5)`). If its value is an error, every cell would be
+   * that error and the broadcast would answer a list of error cells — a
+   * frozen container hiding a decided failure of a DEMANDED operand, which
+   * `docs/ERROR-MODEL.md` §3 makes the node's value instead. Only lifted
+   * operands are read (`bops[i] !== ops[i]`): a collection operand that
+   * supplies cells keeps a failed cell in place, as the freeze rule says.
+   */
+  private _liftedOperandError(
+    bops: ReadonlyArray<Expression>
+  ): Expression | undefined {
+    if (!this._absorbsEvaluatedOperandError()) return undefined;
+    for (let i = 0; i < bops.length; i++) {
+      const lifted = bops[i];
+      if (lifted === this._ops[i] || lifted.isValid) continue;
+      const err = errorValue(lifted, {
+        operator: this._operator,
+        index: i + 1,
+      });
+      if (err !== undefined) return err;
+    }
+    return undefined;
   }
 
   /**
@@ -3502,6 +3565,33 @@ export class BoxedFunction
   }
 
   /**
+   * True when an error that appears in an operand only by EVALUATING it —
+   * the node itself was valid at boxing time (`Sin(Length(5))`,
+   * `1 + f(x)` for a user function that fails) — bubbles as this node's
+   * value before the handler runs. `docs/ERROR-MODEL.md` §3 makes no
+   * distinction between an error present at boxing and one produced by
+   * evaluating a demanded operand (`Sin(err) → err`; `Sin(If(False, 5,
+   * err))` is the error "because the selection demanded the failing arm and
+   * the error is then the operand's value"), so the exclusions are the same
+   * as at every other absorption site: an observer (`inspectsErrors`) is
+   * entitled to see the error, a collection head keeps a failed cell in
+   * place, and a selecting operator holds its operands and decides for
+   * itself. An UNBOUND node has no handler to protect.
+   *
+   * Until 2026-09-03 this case was excluded outright ("no error minted
+   * during this evaluation changes its propagation"), which left
+   * `Sin(Length(5))` as the invalid tree `sin(Error(…))` — an inert answer
+   * to a decided failure, which §1 forbids.
+   */
+  private _absorbsEvaluatedOperandError(): boolean {
+    const def = this._def ?? undefined;
+    if (def === undefined) return false;
+    if (isOperatorDef(def) && def.operator.inspectsErrors) return false;
+    if (isCollectionHead(this)) return false;
+    return !this._defersErrorAbsorption();
+  }
+
+  /**
    * True when this node's error absorption waits until after the handler has
    * run, instead of happening before it.
    *
@@ -3613,12 +3703,39 @@ export class BoxedFunction
 
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     const compute = this._computeValueUnabsorbed(options);
+    if (this.isValid) {
+      // A node valid at boxing time. Step 4-err bubbles an operand that
+      // evaluates to an error — but only for operands the framework
+      // evaluates. A LAZY operator that demands every operand (`Add`,
+      // `Multiply`) evaluates them inside its handler, so such an error
+      // surfaces in its RESULT instead: `1 + Length(5)` came back as the
+      // invalid tree `1 + Error(…)`. `docs/ERROR-MODEL.md` §3 makes that
+      // error the node's value, under the same exclusions
+      // (`_absorbsEvaluatedOperandError`). A SELECTING operator is excluded
+      // there because it decides for itself, but the demanded arm's error it
+      // returns still owes the operator hop on its breadcrumb, which
+      // `_resultError` adds. The predicates depend only on the definition,
+      // so they are read here, once, and an excluded node — an observer, a
+      // collection head — keeps the unwrapped `compute`. A valid result, the
+      // common case, pays one cached `isValid` read; a frozen collection or
+      // an undecided selection in the result is returned as it is
+      // (`errorValue` does not descend into them).
+      const selecting = this._defersErrorAbsorption();
+      if (!selecting && !this._absorbsEvaluatedOperandError()) return compute;
+      return () => {
+        const result = compute();
+        if (result.isValid) return result;
+        if (selecting) return this._resultError(result) ?? result;
+        return (
+          this._refusedArgumentError(result) ?? errorValue(result) ?? result
+        );
+      };
+    }
     // The late half of the demanded-operands rule
     // (`_absorbsErrorAfterHandler`): the handler runs on the invalid tree,
     // and only an error that reached its RESULT — i.e. one a selection
-    // actually demanded — bubbles. The cached `isValid` test comes FIRST so a
-    // valid tree, the common case, never pays for the rest.
-    if (this.isValid || !this._absorbsErrorAfterHandler()) return compute;
+    // actually demanded — bubbles.
+    if (!this._absorbsErrorAfterHandler()) return compute;
     return () => {
       const result = compute();
       return this._resultError(result) ?? result;
@@ -3744,6 +3861,8 @@ export class BoxedFunction
         // collection decide the semantics — a mismatch erroring under the eager
         // threshold and silently truncating above it.
         const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const liftError = this._liftedOperandError(bops);
+        if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
 
@@ -3816,6 +3935,8 @@ export class BoxedFunction
         // Broadcast rulings (2026-07-24) — see step 2 above (both run before
         // the lazy form, so size does not decide the semantics).
         const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const liftError = this._liftedOperandError(bops);
+        if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
 
@@ -3892,12 +4013,15 @@ export class BoxedFunction
         // Broadcast rulings (2026-07-24), as in steps 2/2b: lifted operands are
         // evaluated ONCE, and the length check runs before the lazy form so the
         // SIZE of a source never decides the semantics.
+        const declaredOps = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const liftError = this._liftedOperandError(declaredOps);
+        if (liftError !== undefined) return liftError;
         const mapped = declaredBroadcast(
           this.engine,
           this.operator,
           declaredLiteral,
           declaredPlan,
-          evaluateBroadcastLiftsOnce(this._ops!, options),
+          declaredOps,
           (x) => isFiniteBroadcastParticipant(x),
           options
         );
@@ -3935,25 +4059,33 @@ export class BoxedFunction
       const tail = holdMap(this, (x) => x.evaluate(options));
 
       //
-      // 4-err/ An operand that was held back by the demanded-operands rule
-      // has now evaluated: if a selection did demand the failing arm, the
-      // error is that operand's VALUE, and an error value in an operand
-      // position bubbles like any other (rung 3). Absorbing it HERE, before
-      // the handler, is what keeps a handler from answering something else
-      // about an operand it cannot use — `Sin(<error>)` must be the error,
-      // not `NaN`.
+      // 4-err/ An operand has now evaluated to an error — either one held
+      // back by the demanded-operands rule whose arm a selection did demand,
+      // or one MINTED by this evaluation (`Sin(Length(5))`, `1 + f(x)` for a
+      // failing user function). Either way the error is that operand's
+      // VALUE, and an error value in an operand position bubbles like any
+      // other (rung 3; `docs/ERROR-MODEL.md` §3 draws no line between the
+      // two). Absorbing it HERE, before the handler, is what keeps a handler
+      // from answering something else about an operand it cannot use —
+      // `Sin(<error>)` must be the error, not `NaN` — and what keeps the
+      // fallback below from re-boxing the operator over the error into an
+      // invalid tree.
       //
-      // Gated on the node being statically invalid, so a valid tree never
-      // pays for the scan and no error minted during THIS evaluation changes
-      // its propagation. `_absorbsErrorAfterHandler` excludes the observers
-      // and collections, as every absorption site does; it also excludes a
-      // selecting operator scanning its OWN operands, which `tail` still
-      // holds unevaluated (it is lazy) — there an error is precisely the arm
-      // whose demand is not decided yet, and the absorption belongs on the
-      // result instead.
+      // The gate depends on how the node arrived: a node that was invalid at
+      // boxing time uses the late-absorption predicate (which excludes a
+      // selecting operator scanning its OWN operands — `tail` still holds
+      // them unevaluated, and there an error is precisely the arm whose
+      // demand is not decided yet, so the absorption belongs on the result
+      // instead); a node that was valid uses `_absorbsEvaluatedOperandError`,
+      // the same exclusions without the invalid-tree premise. The scan
+      // itself costs one cached `isValid` read per operand.
       //
-      if (this._absorbsErrorAfterHandler() && !this._defersErrorAbsorption()) {
+      const absorbsOperandErrors = this.isValid
+        ? this._absorbsEvaluatedOperandError()
+        : this._absorbsErrorAfterHandler() && !this._defersErrorAbsorption();
+      if (absorbsOperandErrors) {
         for (let i = 0; i < tail.length; i++) {
+          if (tail[i].isValid) continue;
           const err = errorValue(tail[i], {
             operator: this._operator,
             index: i + 1,
@@ -4440,9 +4572,20 @@ export class BoxedFunction
     options?: Partial<EvaluateOptions>
   ): () => Promise<Expression> {
     const compute = this._computeValueAsyncUnabsorbed(options);
-    // Late error absorption, mirroring `_computeValue` (`isValid` first, for
-    // the same reason).
-    if (this.isValid || !this._absorbsErrorAfterHandler()) return compute;
+    // Late error absorption, mirroring `_computeValue` — both branches.
+    if (this.isValid) {
+      const selecting = this._defersErrorAbsorption();
+      if (!selecting && !this._absorbsEvaluatedOperandError()) return compute;
+      return async () => {
+        const result = await compute();
+        if (result.isValid) return result;
+        if (selecting) return this._resultError(result) ?? result;
+        return (
+          this._refusedArgumentError(result) ?? errorValue(result) ?? result
+        );
+      };
+    }
+    if (!this._absorbsErrorAfterHandler()) return compute;
     return async () => {
       const result = await compute();
       return this._resultError(result) ?? result;
@@ -4529,6 +4672,8 @@ export class BoxedFunction
         // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2,
         // including running before the lazy form.
         const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+        const liftError = this._liftedOperandError(bops);
+        if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
 
@@ -4594,6 +4739,8 @@ export class BoxedFunction
         // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2b,
         // including running before the lazy form.
         const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+        const liftError = this._liftedOperandError(bops);
+        if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
 
@@ -4661,12 +4808,18 @@ export class BoxedFunction
           isFiniteBroadcastParticipant(x)
         )
       ) {
+        const declaredOps = await evaluateBroadcastLiftsOnceAsync(
+          this._ops!,
+          options
+        );
+        const liftError = this._liftedOperandError(declaredOps);
+        if (liftError !== undefined) return liftError;
         const mapped = await declaredBroadcastAsync(
           this.engine,
           this.operator,
           declaredLiteral,
           declaredPlan,
-          await evaluateBroadcastLiftsOnceAsync(this._ops!, options),
+          declaredOps,
           (x) => isFiniteBroadcastParticipant(x),
           options
         );
@@ -4716,6 +4869,24 @@ export class BoxedFunction
         this,
         async (x) => await x.evaluateAsync(options)
       );
+
+      //
+      // 3-err/ Parity with the sync path's step 4-err: an operand that
+      // evaluated to an error is this node's value, before the handler runs.
+      //
+      const absorbsOperandErrors = this.isValid
+        ? this._absorbsEvaluatedOperandError()
+        : this._absorbsErrorAfterHandler() && !this._defersErrorAbsorption();
+      if (absorbsOperandErrors) {
+        for (let i = 0; i < tail.length; i++) {
+          if (tail[i].isValid) continue;
+          const err = errorValue(tail[i], {
+            operator: this._operator,
+            index: i + 1,
+          });
+          if (err !== undefined) return err;
+        }
+      }
 
       // The resolved overload arm for the Contract B gates below, computed
       // at most once per evaluation — see the sync path's twin.

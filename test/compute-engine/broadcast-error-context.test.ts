@@ -64,16 +64,20 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
     expect(result.op1.toString()).toBe('2');
     expect(result.ops![2].toString()).toBe('4');
 
-    // The failing element carries the context, in the existing `ErrorTrace`
-    // breadcrumb (§2a) under a distinct `ErrorBroadcast` head.
+    // The failing element IS the error (an application that refuses its
+    // argument answers the error, docs/ERROR-MODEL.md §3 — until 2026-09-03
+    // the cell was the inert `Apply(literal, Error(…))` refusal form), with
+    // the hop the user wrote (`bump`, argument 1) and the element-wise
+    // context in the same `ErrorTrace` breadcrumb (§2a) under a distinct
+    // `ErrorBroadcast` head.
     expect(result.ops![1].json).toEqual([
-      'Apply',
-      ['Function', ['Block', ['Add', 'n', 1]], ['Typed', 'n', "'integer'"]],
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'integer'", "'string'"],
+      "'b'",
       [
-        'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'string'"],
-        "'b'",
-        ['ErrorTrace', ['ErrorBroadcast', "'bump'", 2, 3]],
+        'ErrorTrace',
+        ['ErrorFrame', "'bump'", 1],
+        ['ErrorBroadcast', "'bump'", 2, 3],
       ],
     ]);
   });
@@ -87,7 +91,7 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
         .evaluate()
         .toString()
     ).toBe(
-      `[2,Apply((n) => n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)"),4]`
     );
   });
 
@@ -97,10 +101,10 @@ describe('BROADCAST ERROR CONTEXT — box route', () => {
     const result = ce
       .box(['bump', ['List', { str: 'a' }, { str: 'b' }]])
       .evaluate();
-    expect(broadcastFrames(result.op1.ops![1])).toEqual([
+    expect(broadcastFrames(result.op1)).toEqual([
       { operator: 'bump', index: 1, length: 2 },
     ]);
-    expect(broadcastFrames(result.ops![1].ops![1])).toEqual([
+    expect(broadcastFrames(result.ops![1])).toEqual([
       { operator: 'bump', index: 2, length: 2 },
     ]);
   });
@@ -221,7 +225,7 @@ describe('BROADCAST ERROR CONTEXT — Epsil route', () => {
       `function bump(n: integer) { n + 1 }\nbump([1, "b", 3])`
     );
     expect(value.toString()).toBe(
-      `[2,Apply((n) => n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)"),4]`
     );
   });
 
@@ -234,7 +238,7 @@ describe('BROADCAST ERROR CONTEXT — Epsil route', () => {
     const runtime = diagnostics.filter((x) => x.message[0] === 'runtime-error');
     expect(runtime).toHaveLength(1);
     expect(runtime[0].message[2]).toBe(
-      'while applying bump element-wise over 3 elements (element 2)'
+      'in bump argument 1, while applying bump element-wise over 3 elements (element 2)'
     );
   });
 
@@ -313,8 +317,9 @@ describe('BROADCAST ERROR CONTEXT — nothing else moves', () => {
   test('`errorFrames()` ignores the broadcast entry', () => {
     const ce = new ComputeEngine();
     withBump(ce);
-    const err = ce.box(['bump', ['List', { str: 'a' }]]).evaluate().op1.ops![1];
-    expect(errorFrames(err)).toEqual([]);
+    const err = ce.box(['bump', ['List', { str: 'a' }]]).evaluate().op1;
+    // The refusal hop is an `ErrorFrame`; the broadcast entry is not one.
+    expect(errorFrames(err)).toEqual([{ operator: 'bump', index: 1 }]);
     expect(broadcastFrames(err)).toEqual([
       { operator: 'bump', index: 1, length: 1 },
     ]);

@@ -920,6 +920,29 @@ answer and the fix landed. An entry with no FIXED date is still open.
   would answer `number` for `integer ⊔ nan`, losing the element tier
   again. Values did not move — an out-of-band numeric access is still
   `NaN`, and `Missing` is still the non-numeric marker.
+- **FIXED 2026-09-03: an operand that becomes an error only by EVALUATING
+  it bubbles like one that was an error at boxing time.** `Sin(Length(5))`
+  evaluated to the invalid tree `sin(Error(…))`, `1 + Length(5)` to
+  `1 + Error(…)`, and `Sin(g(-1))` for a user function that fails likewise —
+  inert answers to decided failures, against §3 (`Sin(err) → err`, which
+  draws no line between the two). Cause: the pre-handler scan over the
+  evaluated operands (step 4-err of `_computeValueUnabsorbed`) and the late
+  absorption on the result were both gated on the node being INVALID at
+  boxing time, so an error minted during the evaluation itself never
+  propagated. Both now also run for a node that was valid, under the same
+  exclusions (an observer sees the error, a collection keeps its failed
+  cell, a selecting operator decides for itself —
+  `_absorbsEvaluatedOperandError`); the async lane, which had neither step,
+  mirrors both, and so do a spread argument that evaluates to an error and a
+  broadcast lift that does. Breadcrumbs gain the operator hop (`Sin` argument
+  1). A consequence for user functions: the inert refusal form a literal
+  answers when an annotated parameter rejects its argument
+  (`Apply((n) => n + 1, Error(…))`, the document form of decision 6 in the
+  lambda design) now collapses to the error at the call, with the hop named
+  after the function the user wrote (`bump` argument 1) — so an element-wise
+  failure's cell is the error itself, still carrying its `ErrorBroadcast`
+  context. Pinned by `test/compute-engine/evaluation-time-error-bubbling.test.ts`
+  and the updated `broadcast-error-context.test.ts`.
 - **RULED and IMPLEMENTED 2026-09-03: `RuntimeError(code)` constructs an
   error value at run time.** A written `Error(…)` stays what §1 says it is —
   a static diagnostic node that invalidates its tree, so a function whose
