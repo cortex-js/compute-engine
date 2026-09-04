@@ -77,6 +77,7 @@ import {
   validateArguments,
   checkNumericArgs,
   inferNumericArgs,
+  runtimeCheckExemptParam,
 } from './validate.js';
 import {
   overloadArms,
@@ -85,6 +86,7 @@ import {
   type OverloadResolution,
 } from './overload.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { typesOverlap } from '../../common/type/reduce.js';
 import {
   COLLECTION_SHAPE_TYPE,
   NUMERIC_TYPES,
@@ -653,6 +655,101 @@ export function beginInferenceTransaction(ce: ComputeEngine): void {
 export function endInferenceTransaction(ce: ComputeEngine): void {
   ce._inferenceTxDepth -= 1;
   if (ce._inferenceTxDepth === 0) ce._freshlyInferred = null;
+}
+
+/**
+ * True when the boxing validation seam can admit the call without running
+ * `validateArguments`: nothing about these operands could be refused, and
+ * nothing the check-only validation does besides refusing (a repair, a
+ * substitution) applies to them.
+ *
+ * The signature is a single arm with no type variables, and the operand
+ * count fits it. Every operand is either
+ * - a SYMBOL that names a value (not an operator — an unapplied operator
+ *   symbol is what the devolve repair rewrites), holds no value and has no
+ *   static assignment evidence (a held value is exactly what the seam must
+ *   check against a ranged parameter), and whose type is a subtype of its
+ *   parameter or, at a parameter the runtime conformance check covers,
+ *   OVERLAPS it — the rule the full validation applies to a symbolic
+ *   operand there; or
+ * - a NUMBER literal whose value type is a subtype of its parameter (a
+ *   literal `2` at `real<0<..>`; a `NaN` literal is never a subtype of a
+ *   numeric carrier and takes the full path, where the NaN policy decides).
+ *
+ * Everything else takes the full validation: a string (character
+ * narrowing), a collection literal (the threadable admission), an
+ * application (its type must be derived and tested), `Missing`, a spread;
+ * a collection-typed symbol at a scalar parameter overlaps nothing and
+ * fails the tests above; and a parameter the runtime conformance check
+ * exempts — a callable, a collection kind, `any`, `unknown`, a type
+ * variable — is tested by subtype only, never by overlap, because the
+ * plain path's specialized admissions decide those. Measured on
+ * the trivial heads the seam costs most on: `PoissonDistribution(lam)` and
+ * `Element(x, S)` paid about 1.4 µs in `validateArguments` for a call that
+ * could not be refused.
+ */
+function triviallyAdmittedCall(
+  ce: ComputeEngine,
+  signature: Type,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return false;
+  const required = signature.args ?? [];
+  const optional = signature.optArgs ?? [];
+  const variadic = signature.variadicArg;
+  // A mandatory variadic tail (`+`) needs one operand past every optional
+  // position; an optional one (`*`) needs none.
+  const minCount =
+    variadic !== undefined && signature.variadicMin === 1
+      ? required.length + optional.length + 1
+      : required.length;
+  if (ops.length < minCount) return false;
+  if (variadic === undefined && ops.length > required.length + optional.length)
+    return false;
+  for (let i = 0; i < ops.length; i++) {
+    const param =
+      i < required.length
+        ? required[i].type
+        : i < required.length + optional.length
+          ? optional[i - required.length].type
+          : variadic!.type;
+    if (freeTypeVariables(param).size > 0) return false;
+    const op = ops[i];
+    if (isSymbol(op)) {
+      if (op.operatorDefinition !== undefined) return false;
+      // A symbol not yet declared holds nothing (it is declared `unknown`
+      // on first use); a declared one must hold no value and carry no
+      // static assignment evidence.
+      const def = op.valueDefinition;
+      if (
+        def !== undefined &&
+        (def.value !== undefined ||
+          ce._staticAssignmentEvidence?.get(def) !== undefined)
+      )
+        return false;
+      // A symbol whose type fits the parameter is admitted outright (the
+      // `any` parameters of the set family take this branch). Otherwise the
+      // plain path's rule for a symbolic operand applies: admitted when its
+      // type OVERLAPS the parameter, deferring the decision to the runtime
+      // conformance check — so a symbol the numeric-context inference has
+      // typed `number` still passes a ranged `real<0<..>` — except at a
+      // parameter that check exempts (a callable, a collection kind, a type
+      // variable), where the plain path's specialized admissions are the
+      // authority and this call takes the full validation.
+      const t = op.type.type;
+      if (isSubtype(t, param)) continue;
+      if (runtimeCheckExemptParam(param)) return false;
+      if (typesOverlap(t, param)) continue;
+      return false;
+    }
+    if (isNumber(op)) {
+      if (isSubtype(op.type.type, param)) continue;
+      return false;
+    }
+    return false;
+  }
+  return true;
 }
 
 /** True when every declared parameter of `signature` is numeric. */
@@ -2481,7 +2578,10 @@ function applyOperatorDefinition(
           result.isValid;
         const numericParams =
           sameHeadValid && allParamsNumeric(opDef.signature.type);
-        if (sameHeadValid) {
+        if (
+          sameHeadValid &&
+          !triviallyAdmittedCall(ce, opDef.signature.type, result.ops)
+        ) {
           // The validation runs in CHECK-ONLY mode: every verdict, repair
           // and substitution of the plain path — an unapplied operator
           // symbol devolved to a variable, a fresh matrix inference, a

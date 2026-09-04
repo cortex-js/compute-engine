@@ -109,4 +109,28 @@ describe('boxing validation seam for canonical-handler heads', () => {
     expect(ce.parse('w[1]').isValid).toBe(true);
     expect(errorCode(ce.parse('\\sin(3)[1]').op1)).toBeDefined();
   });
+
+  test('the early-out of the seam keeps every verdict', () => {
+    // A call whose operands are valueless symbols overlapping their
+    // parameters, or number literals inside them, skips the validation
+    // machinery; anything the machinery could refuse still reaches it.
+    const ce = new ComputeEngine();
+    // The first boxing types `lam` as `number` (numeric context); the second
+    // boxing admits it by overlap with `real<0<..>`, as the full path does.
+    expect(ce.box(['PoissonDistribution', 'lam']).isValid).toBe(true);
+    expect(ce.box('lam').type.toString()).toBe('number');
+    expect(ce.box(['PoissonDistribution', 'lam']).isValid).toBe(true);
+    ce.declare('k', 'integer');
+    expect(ce.box(['PoissonDistribution', 'k']).isValid).toBe(true);
+    expect(ce.box(['PoissonDistribution', 3]).isValid).toBe(true);
+    expect(ce.box(['PoissonDistribution', 0]).isValid).toBe(false);
+    ce.declare('u', 'string');
+    expect(ce.box(['PoissonDistribution', 'u']).isValid).toBe(false);
+    ce.assign('s', -3);
+    expect(ce.box(['PoissonDistribution', 's']).isValid).toBe(false);
+    expect(ce.box(['PoissonDistribution', 'NaN']).isValid).toBe(false);
+    // An operator symbol as an operand is not trivial: it takes the full
+    // path, where the devolve repair applies.
+    expect(ce.box(['Element', 'n', 'N']).isValid).toBe(true);
+  });
 });

@@ -94,7 +94,10 @@
   `AC` in `P = AC ∩ BD` stays inert, as before). A provable off-carrier
   operand of the trigonometric family, such as `Sin(+oo)`, is now refused
   at boxing instead of at evaluation, and so is a range used as a range
-  bound. At this seam, threadable validation now checks a collection's element
+  bound. The check is skipped for a call it could not refuse (valueless
+  symbols and in-range number literals), so a constructor such as
+  `PoissonDistribution(lam)` boxes within about half a microsecond of
+  what it cost before. At this seam, threadable validation now checks a collection's element
   carrier itself, so canonical numeric heads no longer need a second
   `checkNumericArgs` validation pass; the arithmetic fast paths continue to
   perform their existing single numeric check.
