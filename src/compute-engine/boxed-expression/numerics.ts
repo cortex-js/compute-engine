@@ -97,12 +97,17 @@ export function asBigint(
     const exact = exactIntegerValue(num);
     if (exact !== null) return exact;
 
-    if (num.im !== 0) return null;
-
-    // Not an exact integer: only accept a genuine integer-valued float.
-    if (!Number.isInteger(num.re)) return null;
-
-    return BigInt(num.re);
+    // Every lane answers `asExact` for an integer-valued number (the exact
+    // lane is its own, the machine and bignum lanes lift theirs), so a
+    // value `exactIntegerValue` declined is NOT an integer, and the only
+    // thing left to read would be its machine projection. That projection
+    // is a trap: `1/10^400` projects to the double `0` and
+    // `99999999999999999999/10^20` to `1`, both "integer-valued floats",
+    // and the `Divide` boxing route (`box.ts`) read them as the integers
+    // `0` and `1` — `Divide(1/10^400, 3)` folded to `0` and `Divide(r, 1)`
+    // to `1`, where `Multiply` kept the same values exact. A bignum
+    // `1e-400` projects to `0` the same way. So a non-integer declines.
+    return null;
   }
 
   if (x instanceof BigDecimal || typeof x === 'string') return bigint(x);

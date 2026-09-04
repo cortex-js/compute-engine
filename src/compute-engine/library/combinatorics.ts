@@ -20,7 +20,12 @@ import {
   isNonPositiveIntegerLiteral,
   isRealLiteral,
 } from '../boxed-expression/infinite-point.js';
-import { gamma, bigGamma, gammaln } from '../numerics/special-functions.js';
+import {
+  gamma,
+  bigGamma,
+  gammaln,
+  estimatedFactorialDigits,
+} from '../numerics/special-functions.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
 import {
@@ -50,14 +55,6 @@ const SYMBOLIC_EXPANSION_CAP = 20n;
 
 /** log10(φ): F(n) has ≈ n·log10(φ) decimal digits (φ = golden ratio). */
 const LOG10_PHI = Math.log10((1 + Math.sqrt(5)) / 2);
-
-/** Rough estimate of the decimal digit count of n!, via lgamma(n+1). */
-function estimatedFactorialDigits(n: number): number {
-  if (!Number.isFinite(n) || n < 0) return Infinity;
-  if (n < 2) return 1;
-  const digits = gammaln(n + 1) / Math.LN10;
-  return Number.isFinite(digits) ? digits : Infinity;
-}
 
 /** Rough estimate of the decimal digit count of Binomial(n, k), via lgamma. */
 function estimatedBinomialDigits(n: bigint, k: bigint): number {

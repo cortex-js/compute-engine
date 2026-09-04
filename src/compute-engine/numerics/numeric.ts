@@ -303,6 +303,11 @@ export function factorial2(n: number): number {
   while (n > 2) {
     n -= 2;
     result *= n;
+    // The product overflows to `Infinity` near n = 300 and every later
+    // step multiplies `Infinity`: leaving the loop there bounds it to a
+    // few hundred steps instead of `n/2` (`factorial2(1e15)` spun for
+    // 5·10^14 steps to answer the same `Infinity`).
+    if (!Number.isFinite(result)) return result;
   }
 
   return result;

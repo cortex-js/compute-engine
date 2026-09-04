@@ -2954,3 +2954,51 @@ describe('Chop preserves exact operands', () => {
     );
   });
 });
+
+describe('Factorial above the exact digit cap', () => {
+  // `Factorial(10^400)` — about 4·10^402 digits — never returned: the bigint
+  // product grows with every step, so no step cap bounds it. Above
+  // `MAX_EXACT_FACTORIAL_DIGITS` the exact route stays symbolic and the
+  // numeric route overflows to `+oo`, the float reading of Γ(x+1).
+  test('Factorial(10^400) stays symbolic and numericizes to +oo', () => {
+    const big = ce.number(10n ** 400n);
+    const started = Date.now();
+    const exact = ce.box(['Factorial', big]).evaluate();
+    expect(exact.operator).toBe('Factorial');
+    expect(exact.op1.isSame(big)).toBe(true);
+    expect(ce.box(['Factorial', big]).N().isSame(ce.PositiveInfinity)).toBe(
+      true
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test('Factorial(10^6) stays symbolic; Factorial(10^4) is computed exactly', () => {
+    // 10^6! has about 5.6·10^6 digits, above the cap; 10^4! has 35 660.
+    expect(ce.box(['Factorial', 1000000]).evaluate().operator).toBe(
+      'Factorial'
+    );
+    const small = ce.box(['Factorial', 10000]).evaluate();
+    expect(small.isExact).toBe(true);
+    expect(small.isInteger).toBe(true);
+  });
+
+  test('Factorial2 of a huge integer stays symbolic and returns promptly', () => {
+    const started = Date.now();
+    expect(ce.box(['Factorial2', 1e15]).evaluate().operator).toBe(
+      'Factorial2'
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('Factorial2 digit cap (review pins)', () => {
+  test('a negative integer still answers NaN', () => {
+    expect(ce.box(['Factorial2', -3]).evaluate().isNaN).toBe(true);
+    expect(ce.box(['Factorial2', -1]).evaluate().isNaN).toBe(true);
+  });
+  test('above the cap the numeric route overflows to +oo', () => {
+    expect(ce.box(['Factorial2', 1e15]).N().isSame(ce.PositiveInfinity)).toBe(
+      true
+    );
+  });
+});

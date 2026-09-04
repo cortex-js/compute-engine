@@ -646,11 +646,17 @@ export class MachineNumericValue extends NumericValue {
     return this.decimal === other.re && this.im === other.im;
   }
 
+  // An exact operand orders the pair itself (`ExactNumericValue._order()`,
+  // reversed): its bigint magnitude may lie outside the double range or
+  // within an ulp of this value, and the exact lane compares such a pair
+  // exactly where `this.decimal < other.re` read a projection. This keeps
+  // `a.lt(b)` and `b.gt(a)` in agreement across the two lanes.
   lt(other: number | NumericValue): boolean | undefined {
     // Complex values are unordered: any non-real operand → indeterminate
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal < other;
     if (other.im !== 0) return undefined;
+    if (other instanceof ExactNumericValue) return other.gt(this.decimal);
     return this.decimal < other.re;
   }
 
@@ -658,6 +664,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal <= other;
     if (other.im !== 0) return undefined;
+    if (other instanceof ExactNumericValue) return other.gte(this.decimal);
     return this.decimal <= other.re;
   }
 
@@ -665,6 +672,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal > other;
     if (other.im !== 0) return undefined;
+    if (other instanceof ExactNumericValue) return other.lt(this.decimal);
     return this.decimal > other.re;
   }
 
@@ -672,6 +680,7 @@ export class MachineNumericValue extends NumericValue {
     if (this.im !== 0) return undefined;
     if (typeof other === 'number') return this.decimal >= other;
     if (other.im !== 0) return undefined;
+    if (other instanceof ExactNumericValue) return other.lte(this.decimal);
     return this.decimal >= other.re;
   }
 }

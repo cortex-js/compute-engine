@@ -533,7 +533,7 @@ deliberately left out of that change.
 
 ### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
 
-- **RULED 2026-09-03 (Arno): fix all four in one gated round of their own.** The exact numeric layer — measured
+- **RULED 2026-09-03 (Arno): fix all four in one gated round of their own. FIXED 2026-09-03 (unstaged, awaiting release) — resolution below the list.** The exact numeric layer — measured
   while fixing the distributions' bignum handling (2026-09-02):**
   1. **`ExactNumericValue.lt/lte/gt/gte` compare the DOUBLE projections**
      (`numeric-value/exact-numeric-value.ts`, `return this.re < other.re`),
@@ -565,6 +565,49 @@ deliberately left out of that change.
   own gate (recommended — the comparison defect is engine-wide), or accept
   the double projection as the exact layer's comparison contract and
   document it.
+
+  RESOLUTION (2026-09-03): three root causes, not four.
+  1. `ExactNumericValue.lt/lte/gt/gte` compare exactly: signs first, then
+     the squares of the magnitudes `a²·c·e²` against `d²·f·b²` in bigint
+     (`orderExact`, `numeric-value/exact-numeric-value.ts`), with a
+     double cross-multiplication fast path for radical-free machine
+     rationals whose products are safe integers, so the hot integer
+     comparisons allocate nothing. A float operand compares through
+     `bignumRe` at working precision (the pair is inexact on one side);
+     an infinite operand is recognized from the STORED `[±Infinity, 1]`
+     encoding, never from the projection — a finite `10^400` projects to
+     `Infinity` too. The machine lane delegates to the exact lane when
+     its operand is exact, so `a.isLess(b)` and `b.isGreater(a)` agree
+     across lanes. The distributions' `litOrder` stays: it also decides
+     equality without the engine tolerance, which `compare.ts` applies.
+  2. `Factorial` gains a digit cap, `MAX_EXACT_FACTORIAL_DIGITS`
+     (`library/arithmetic.ts`, 10^6 digits, the combinatorics convention):
+     above it the exact route stays symbolic and `.N()` overflows to
+     `+oo`. `Factorial2` takes the same cap at half the digits, and the
+     machine `factorial2` kernel leaves its loop once the product is
+     `Infinity` (`Factorial2(10^15)` spun for 5·10^14 steps). The Poisson
+     pmf keeps its off-scale guard: with the factorial symbolic the closed
+     form's numeric reading is the indeterminate `∞ · 0 / ∞`, not the
+     underflow `0`.
+  3 and 4. One defect: `asBigint` (`boxed-expression/numerics.ts`) fell
+     through to the "integer-valued float" test for an EXACT non-integer,
+     and the `Divide` boxing route folds a bigint pair. `1/10^400`
+     projects to the double `0` and `99999999999999999999/10^20` to `1`,
+     so `Divide(1/10^400, 3)` boxed as `0` and `Divide(r, 1)` as `1`. Every
+     lane lifts an integer-valued number through `asExact`, so a value the
+     exact extraction declined is a non-integer in every lane, and it now
+     declines outright (the review found the bignum `1e-400` took the same
+     projection route). The "float
+     denominator" reading of item 4 was a misread of the JSON: `10^20` is
+     exactly representable as a float, so `numberToExpression` emits the
+     lossless JSON number by design, and the value was stored as a bigint
+     pair throughout; only the division lost it. Both CDF examples now
+     answer their exact argument.
+  Pins: `relational-operators.test.ts` ("Exact ordering of number
+  literals"), `arithmetic.test.ts` ("Factorial above the exact digit
+  cap"), `exactness-regressions.test.ts` ("asBigint declines an exact
+  non-integer"), `error-model-distributions.test.ts` ("exact rationals at
+  the edge of the double range in a CDF").
 
 - **RULED 2026-09-03 (Arno): keep it symbolic — closed.** `BetaRegularized` stays symbolic at every point outside
   `x ∈ [0, 1], a > 0, b > 0`, infinite points included.** The batch-8

@@ -624,3 +624,23 @@ describe('Contract B — distribution moments are unaffected by the flip', () =>
     }
   });
 });
+
+describe('exact rationals at the edge of the double range in a CDF', () => {
+  // Both points used to answer through a `Divide` fold that read the double
+  // projection of the exact argument (`asBigint`, `boxed-expression/numerics.ts`).
+  test('CDF(Uniform(0, 1), 10^-400) is 10^-400, not 0', () => {
+    const e = new ComputeEngine();
+    const tiny = e.box(['Power', 10, -400]).evaluate();
+    const cdf = e.box(['CDF', UNIFORM, tiny] as any).evaluate();
+    expect(cdf.isSame(tiny)).toBe(true);
+    expect(cdf.isSame(0)).toBe(false);
+  });
+
+  test('CDF(Uniform(0, 1), 1 - 10^-20) is 1 - 10^-20, not 1', () => {
+    const e = new ComputeEngine();
+    const below = e.parse('1-\\frac{1}{10^{20}}').evaluate();
+    const cdf = e.box(['CDF', UNIFORM, below] as any).evaluate();
+    expect(cdf.isSame(below)).toBe(true);
+    expect(cdf.isSame(1)).toBe(false);
+  });
+});

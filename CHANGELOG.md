@@ -15,6 +15,32 @@
   case, a literal operand, or a pin counts for nothing. See `epsil doc
   match-not-exhaustive`.
 
+### Resolved Issues
+
+- **Exact number literals are ordered exactly.** `Less(10^400, 10^500)`
+  and `Greater(10^500, 10^400)` were both `False`, and `a.isLess(b)`
+  disagreed with `b.isGreater(a)`: the exact numeric lane compared the
+  machine projections of its operands, and a magnitude outside the double
+  range has no double to compare. Two rationals within an ulp of each other
+  (`1 + 10^(-20)` against `1`) compared equal for the same reason. The exact
+  lane now orders `(a/b)√c` against `(d/e)√f` from the signs and the bigint
+  squares of the magnitudes, with an allocation-free fast path for the
+  small integers and rationals, and the machine lane defers to it for an
+  exact operand so the two lanes agree from either side.
+- **`Factorial` of an integer whose factorial is impractically large stays
+  symbolic instead of never returning.** `Factorial(10^400)` — about
+  4·10^402 digits — hung; above one million digits the exact route now
+  keeps `Factorial(n)` and `.N()` answers `+oo`. `Factorial2` takes the
+  same cap, and its machine kernel no longer spins through `n/2` steps
+  after its product has overflowed (`Factorial2(10^15)`).
+- **Dividing an exact rational at the edge of the double range no longer
+  loses it.** `Divide(1/10^400, 3)` boxed as `0` and
+  `Divide(99999999999999999999/10^20, 1)` as `1`: the integer extraction
+  behind the `Divide` fold accepted an exact non-integer whose float
+  projection happened to be integer-valued. `CDF(UniformDistribution(0, 1),
+  10^-400)` is `10^-400` and `CDF(UniformDistribution(0, 1), 1 - 10^-20)`
+  is `1 - 10^-20`; both answered the rounded endpoint.
+
 ## 0.122.0 _2026-09-03_
 
 ### Breaking Changes

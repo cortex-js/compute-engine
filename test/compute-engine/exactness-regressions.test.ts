@@ -929,3 +929,47 @@ describe('D2 — inexact arguments numericize under evaluate() (all numeric oper
     });
   });
 });
+
+describe('asBigint declines an exact non-integer whatever its projection', () => {
+  // `asBigint` fell through to the "integer-valued float" test for an exact
+  // rational, and the `Divide` boxing route (`box.ts`) folds a bigint pair:
+  // `1/10^400` projects to the double `0` and `99999999999999999999/10^20`
+  // to `1`, so `Divide(1/10^400, 3)` boxed as `0/3 = 0` and `Divide(r, 1)`
+  // as `1/1 = 1`, where `Multiply` kept the same values exact.
+  test('a rational below the double range survives a division', () => {
+    const tiny = ce.box(['Power', 10, -400]).evaluate();
+    expect(ce.function('Divide', [tiny, ce.One]).evaluate().isSame(tiny)).toBe(
+      true
+    );
+    const third = ce.function('Divide', [tiny, ce.number(3)]).evaluate();
+    expect(third.isSame(ce.box(['Divide', 1, ['Multiply', 3, ['Power', 10, 400]]]).evaluate())).toBe(true);
+    expect(third.isSame(0)).toBe(false);
+    expect(third.isExact).toBe(true);
+  });
+
+  test('a rational within an ulp of an integer survives a division', () => {
+    const r = ce.box(['Rational', 99999999999999999999n, 10n ** 20n]);
+    expect(r.isExact).toBe(true);
+    expect(ce.box(['Divide', r, 1]).evaluate().isSame(r)).toBe(true);
+    expect(ce.box(['Divide', r, 1]).evaluate().isSame(1)).toBe(false);
+    expect(
+      ce
+        .box(['Divide', r, 2])
+        .evaluate()
+        .isSame(ce.box(['Rational', 99999999999999999999n, 2n * 10n ** 20n]))
+    ).toBe(true);
+    // The value round-trips through its JSON: the denominator `10^20` is
+    // exactly representable as a float, so the JSON number is lossless.
+    expect(ce.box(r.json).isSame(r)).toBe(true);
+  });
+});
+
+describe('asBigint declines a non-integer bignum (review pin)', () => {
+  test('a bignum below the double range survives a division', () => {
+    const tiny = ce.number(ce.bignum('1e-400'));
+    const q = ce.box(['Divide', tiny, 3]).evaluate();
+    expect(q.isSame(0)).toBe(false);
+    expect(q.re).not.toBe(0 * -1);
+    expect(q.bignumRe?.toString()).toMatch(/e-401$/);
+  });
+});

@@ -1317,33 +1317,105 @@ export class ExactNumericValue extends NumericValue {
     return this.im === other.im && this.bignumRe.eq(other.bignumRe ?? other.re);
   }
 
-  lt(other: number | NumericValue): boolean | undefined {
-    // Complex values are unordered: any non-real operand → indeterminate
+  /**
+   * The order of this value against `other`, both real: `-1`, `0` or `1`,
+   * or `undefined` when the pair is unordered (a complex operand, a NaN).
+   *
+   * Two exact values compare EXACTLY. The former `this.re < other.re` read
+   * the machine projections, and a magnitude outside the double range has
+   * no double to compare: `10^400` and `10^500` both project to `Infinity`,
+   * so `10^400 < 10^500` was `false` and `10^500 > 10^400` was `false` too,
+   * and two distinct rationals within an ulp of each other (`1 + 10^(-20)`
+   * against `1`) compared equal. The order of `(a/b)√c` and `(d/e)√f` is
+   * decided from the signs first, then — both non-zero and of one sign —
+   * from the squares, `a²·c·e²` against `d²·f·b²` in bigint, which is exact
+   * for every representable value. Machine rationals without a radical take
+   * a cross-multiplication in doubles when both products are safe integers,
+   * so the hot integer and small-rational comparisons allocate no bigint.
+   *
+   * A `number` operand that is a safe integer compares exactly through the
+   * same path. Any other operand (a float, the inexact lanes) compares at
+   * working precision through `bignumRe`, as `eq()` does: the pair is
+   * inexact on one side already, and the bignum projection keeps the
+   * exponent range the double projection loses.
+   */
+  private _order(other: number | NumericValue): -1 | 0 | 1 | undefined {
     if (this.im !== 0) return undefined;
-    if (typeof other === 'number') return this.re < other;
-    if (other.im !== 0) return undefined;
-    return this.re < other.re;
+    // Whether THIS value is infinite is read from the stored encoding
+    // (`[±Infinity, 1]`), never from the projection `this.re`: a finite
+    // `10^400` projects to `Infinity` as well, and reading the projection
+    // ordered it EQUAL to `+oo`.
+    const infinite = isInfiniteEncoding(this.rational);
+    if (typeof other !== 'number') {
+      if (other.im !== 0 || other.isNaN) return undefined;
+      if (other instanceof ExactNumericValue) return orderExact(this, other);
+      // The other lane's infiniteness is read from its own flags, never
+      // from its projection: a finite `BigNumericValue` holding `10^400`
+      // projects `.re` to `Infinity` while `bignumRe` keeps its value.
+      if (infinite || other.isPositiveInfinity || other.isNegativeInfinity)
+        return orderAgainstInfinite(
+          infinite ? this.re : undefined,
+          other.isPositiveInfinity
+            ? Infinity
+            : other.isNegativeInfinity
+              ? -Infinity
+              : 0
+        );
+      const otherRe = other.re;
+      return (
+        orderFromProjections(this.re, otherRe) ??
+        orderBignum(this.bignumRe, other.bignumRe ?? otherRe)
+      );
+    }
+    if (Number.isNaN(other)) return undefined;
+    if (infinite || !Number.isFinite(other))
+      return orderAgainstInfinite(infinite ? this.re : undefined, other);
+    if (Number.isSafeInteger(other)) return orderExactVsInteger(this, other);
+    return (
+      orderFromProjections(this.re, other) ?? orderBignum(this.bignumRe, other)
+    );
+  }
+
+  lt(other: number | NumericValue): boolean | undefined {
+    // Complex values are unordered: any non-real operand → indeterminate.
+    // A NaN operand is unordered too: every comparison with it is `false`,
+    // as in IEEE 754 and the inexact lanes.
+    if (this.isNaN) return false;
+    const o = this._order(other);
+    if (o === undefined) return this._unorderedAnswer(other);
+    return o < 0;
   }
 
   lte(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
-    if (typeof other === 'number') return this.re <= other;
-    if (other.im !== 0) return undefined;
-    return this.re <= other.re;
+    if (this.isNaN) return false;
+    const o = this._order(other);
+    if (o === undefined) return this._unorderedAnswer(other);
+    return o <= 0;
   }
 
   gt(other: number | NumericValue): boolean | undefined {
-    if (this.im !== 0) return undefined;
-    if (typeof other === 'number') return this.re > other;
-    if (other.im !== 0) return undefined;
-    return this.re > other.re;
+    if (this.isNaN) return false;
+    const o = this._order(other);
+    if (o === undefined) return this._unorderedAnswer(other);
+    return o > 0;
   }
 
   gte(other: number | NumericValue): boolean | undefined {
+    if (this.isNaN) return false;
+    const o = this._order(other);
+    if (o === undefined) return this._unorderedAnswer(other);
+    return o >= 0;
+  }
+
+  /** The answer of an ordering test whose pair `_order()` could not order:
+   * `undefined` for a complex operand (the documented "indeterminate"), and
+   * `false` for a NaN operand (IEEE 754: every comparison with NaN fails,
+   * which is what `this.re < NaN` used to answer). */
+  private _unorderedAnswer(other: number | NumericValue): boolean | undefined {
     if (this.im !== 0) return undefined;
-    if (typeof other === 'number') return this.re >= other;
-    if (other.im !== 0) return undefined;
-    return this.re >= other.re;
+    if (typeof other === 'number')
+      return Number.isNaN(other) ? false : undefined;
+    return other.isNaN ? false : undefined;
   }
 
   // When using add(), inexact values propagate, i.e. '1.2 + 1/4' -> '1.45'
@@ -1584,6 +1656,150 @@ function componentToString(rational: Rational, radical: number): string {
 /** Serialize one exact component `rational · √radical` to MathJSON (the
  * shapes historically produced by `ExactNumericValue.toJSON()` for real
  * values). */
+/** The order of two doubles (`-1`, `0`, `1`); NaN is the caller's job. */
+function orderDoubles(a: number, b: number): -1 | 0 | 1 {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The order of a bignum against a bignum or a double, at the working
+ * precision of the bignum operand. */
+function orderBignum(a: BigDecimal, b: BigDecimal | number): -1 | 0 | 1 {
+  return a.lt(b) ? -1 : a.gt(b) ? 1 : 0;
+}
+
+/** Whether a rational carries the non-finite encoding (`[±Infinity, 1]`;
+ * the NaN encoding `[NaN, 1]` is the caller's job). A bigint rational is
+ * always finite. */
+function isInfiniteEncoding(r: Rational): boolean {
+  const n = r[0];
+  return typeof n === 'number' && !Number.isFinite(n) && !Number.isNaN(n);
+}
+
+/**
+ * The order of a pair of which at least one side is infinite. `a` is this
+ * value's double when it is the infinite encoding, `undefined` when it is
+ * finite (its projection may still overflow, which is why it is not
+ * passed); `b` is the other side's double, finite or not.
+ */
+function orderAgainstInfinite(a: number | undefined, b: number): -1 | 0 | 1 {
+  if (a === undefined) return b > 0 ? -1 : 1; // finite against ±∞
+  if (!Number.isFinite(b)) return orderDoubles(a, b); // ±∞ against ±∞
+  return a > 0 ? 1 : -1; // ±∞ against a finite
+}
+
+/**
+ * The order of two values decided from their double projections when the
+ * projections are far enough apart to be trusted, `undefined` otherwise.
+ *
+ * An exact value's projection (`rationalAsFloat(r) · √radical`) carries up
+ * to a few ulps of rounding error, and it underflows to `0` or a denormal
+ * (with far less precision) or overflows to `Infinity` outside the double
+ * range. So the projections decide the order only when both are finite,
+ * normal magnitudes and differ by more than the accumulated error — an
+ * eight-ulp relative margin, comfortably above the two roundings, one
+ * division, one square root and one product that build the projection.
+ * Every other pair falls through to the exact or bignum comparison. This
+ * is the fast path of the exact-against-inexact comparisons, which are
+ * far more frequent than the pairs that need the `BigDecimal` division.
+ */
+function orderFromProjections(a: number, b: number): -1 | 1 | undefined {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return undefined;
+  const scale = Math.max(Math.abs(a), Math.abs(b));
+  if (scale < 1e-300) return undefined;
+  if (Math.abs(a - b) <= 8 * Number.EPSILON * scale) return undefined;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * The exact order of a REAL exact value `x = (a/b)√c` against a safe
+ * integer `n`, without allocating an `ExactNumericValue` for `n` (a
+ * comparison against a small integer literal is the most frequent shape).
+ * `x` may carry the non-finite encodings, which the caller has handled.
+ */
+function orderExactVsInteger(x: ExactNumericValue, n: number): -1 | 0 | 1 {
+  const [a, b] = x.rational;
+  const sa = a < 0 ? -1 : a > 0 ? 1 : 0;
+  const sn = n < 0 ? -1 : n > 0 ? 1 : 0;
+  if (sa !== sn) return sa < sn ? -1 : 1;
+  if (sa === 0) return 0;
+  const c = x.radical;
+  if (c === 1 && typeof a === 'number') {
+    const q = Math.abs(n) * (b as number);
+    if (Number.isSafeInteger(q)) {
+      const o = orderDoubles(Math.abs(a), q);
+      return sa > 0 ? o : (-o as -1 | 0 | 1);
+    }
+  }
+  // |a|²·c against n²·b², in bigint.
+  const A = BigInt(a);
+  const B = BigInt(b);
+  const N = BigInt(n);
+  const o = bigSign(A * A * BigInt(c) - N * N * B * B);
+  return sa > 0 ? o : (-o as -1 | 0 | 1);
+}
+
+/** The sign of a bigint as `-1 | 0 | 1`. */
+function bigSign(n: bigint): -1 | 0 | 1 {
+  return n < 0n ? -1 : n > 0n ? 1 : 0;
+}
+
+/**
+ * The exact order of two REAL exact values `x = (a/b)√c` and `y = (d/e)√f`.
+ * See `ExactNumericValue._order()` for the contract and the reason the
+ * double projections cannot decide it.
+ *
+ * Both values are finite unless their rational carries the `[±Infinity, 1]`
+ * encoding, which has a faithful double projection and compares as such.
+ */
+function orderExact(x: ExactNumericValue, y: ExactNumericValue): -1 | 0 | 1 {
+  const [a, b] = x.rational;
+  const [d, e] = y.rational;
+  // The infinite encodings compare as doubles against each other, and
+  // against a finite value by their sign alone — the finite value's own
+  // projection may overflow to the same `Infinity`.
+  if (isInfiniteEncoding(x.rational))
+    return orderAgainstInfinite(
+      a as number,
+      isInfiniteEncoding(y.rational) ? (d as number) : 0
+    );
+  if (isInfiniteEncoding(y.rational))
+    return orderAgainstInfinite(undefined, d as number);
+
+  // Signs first: the denominators are positive, so the sign of each value
+  // is the sign of its numerator.
+  const sa = a < 0 ? -1 : a > 0 ? 1 : 0;
+  const sd = d < 0 ? -1 : d > 0 ? 1 : 0;
+  if (sa !== sd) return sa < sd ? -1 : 1;
+  if (sa === 0) return 0;
+
+  const c = x.radical;
+  const f = y.radical;
+
+  // Fast path: no radical, machine rationals. `|a|·e` against `|d|·b` in
+  // doubles is exact while both products are safe integers.
+  if (c === 1 && f === 1 && typeof a === 'number' && typeof d === 'number') {
+    const p = Math.abs(a) * (e as number);
+    const q = Math.abs(d) * (b as number);
+    if (Number.isSafeInteger(p) && Number.isSafeInteger(q)) {
+      const o = orderDoubles(p, q);
+      return sa > 0 ? o : (-o as -1 | 0 | 1);
+    }
+  }
+
+  // General path: compare the squares of the magnitudes in bigint,
+  // `a²·c·e²` against `d²·f·b²`. Squaring is monotone on non-negative
+  // reals, so the order of the magnitudes is the order of the squares; for
+  // two negative values that order is reversed.
+  const A = BigInt(a);
+  const B = BigInt(b);
+  const D = BigInt(d);
+  const E = BigInt(e);
+  const lhs = A * A * BigInt(c) * E * E;
+  const rhs = D * D * BigInt(f) * B * B;
+  const o = bigSign(lhs - rhs);
+  return sa > 0 ? o : (-o as -1 | 0 | 1);
+}
+
 function componentToExpression(
   rational: Rational,
   radical: number

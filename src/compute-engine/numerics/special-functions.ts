@@ -42,6 +42,19 @@ export function gammaln(z: number): number {
   );
 }
 
+/**
+ * Rough estimate of the decimal digit count of `n!`, via `lgamma(n+1)`. A
+ * non-finite or negative `n` estimates `Infinity` (there is no exact
+ * factorial to size), so a caller that caps exact factorials by their digit
+ * count must handle a negative operand before asking.
+ */
+export function estimatedFactorialDigits(n: number): number {
+  if (!Number.isFinite(n) || n < 0) return Infinity;
+  if (n < 2) return 1;
+  const digits = gammaln(n + 1) / Math.LN10;
+  return Number.isFinite(digits) ? digits : Infinity;
+}
+
 const GAMMA_OVERFLOW_THRESHOLD = 171.6243769563027;
 
 function gammaLanczos(z: number): number {

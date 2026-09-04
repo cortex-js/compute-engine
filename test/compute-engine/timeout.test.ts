@@ -24,20 +24,24 @@ describe('TIMEOUT', () => {
       expect(result.isFinite).toBe(true);
     });
 
-    it('nested factorial (700!)! throws CancellationError (sync)', () => {
-      expect(() => limited(() => ce.parse('(700!)!').evaluate())).toThrow(
+    // `200000!` (about 973 000 digits, just under the exact digit cap
+    // `MAX_EXACT_FACTORIAL_DIGITS` of `library/arithmetic.ts`) takes
+    // seconds to materialize. The former slow case, `(700!)!`, is ABOVE the
+    // cap and now stays symbolic at once, so it can no longer time out.
+    it('a huge factorial throws CancellationError (sync)', () => {
+      expect(() => limited(() => ce.parse('200000!').evaluate())).toThrow(
         CancellationError
       );
     });
 
-    it('nested factorial (700!)! aborts via an AbortSignal (async)', async () => {
+    it('a huge factorial aborts via an AbortSignal (async)', async () => {
       // Async work is not bounded by a span (TIMEOUT-MODEL.md §6.4); it is
       // interrupted by an `AbortSignal`. `Factorial` is one of the four
       // signal-instrumented handlers, so the abort is delivered.
       const ctrl = new AbortController();
       setTimeout(() => ctrl.abort(), 50);
       await expect(
-        ce.parse('(700!)!').evaluateAsync({ signal: ctrl.signal })
+        ce.parse('200000!').evaluateAsync({ signal: ctrl.signal })
       ).rejects.toThrow(CancellationError);
     });
   });
@@ -468,8 +472,9 @@ describe('TIMEOUT', () => {
 
   describe('deadline cleanup', () => {
     it('deadline is reset after timeout so subsequent evaluations work', () => {
-      // First: trigger a timeout
-      expect(() => limited(() => ce.parse('(700!)!').evaluate())).toThrow(
+      // First: trigger a timeout (see the `Factorial` block above for why
+      // `200000!` is the slow case)
+      expect(() => limited(() => ce.parse('200000!').evaluate())).toThrow(
         CancellationError
       );
 
@@ -609,7 +614,7 @@ describe('withTimeLimit', () => {
       engine.withTimeLimit(50, () => {
         engine.withTimeLimit(60_000, () => {
           // The effective deadline is still the outer 50ms one.
-          while (true) engine.parse('(700!)!').evaluate();
+          while (true) engine.parse('200000!').evaluate();
         });
       })
     ).toThrow(CancellationError);

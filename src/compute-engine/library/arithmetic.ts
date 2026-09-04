@@ -56,6 +56,7 @@ import {
 import {
   gamma,
   gammaln,
+  estimatedFactorialDigits,
   incompleteGammaUpper,
   bigGamma,
   bigGammaln,
@@ -223,6 +224,17 @@ const INTEGER_PREDICATE_CARRIER_TYPE = parseType('complex | nan');
  * `Power` evaluate handler enforces it — see the comment on the `Power`
  * signature. */
 const POWER_EXPONENT_CARRIER_TYPE = parseType('complex | signed_infinity');
+
+/**
+ * Above this many decimal digits an exact factorial is impractical to
+ * materialize: the bigint product grows with every step, so a STEP cap
+ * cannot bound the work, and `Factorial(10^400)` — a result of about
+ * 4·10^402 digits — never returned. The handlers stay symbolic above it on
+ * the exact route and overflow to `+oo` under `numericApproximation`.
+ * Mirrors `MAX_EXACT_COMBINATORICS_DIGITS` in `library/combinatorics.ts`
+ * (same value, same convention: a dedicated per-file constant).
+ */
+const MAX_EXACT_FACTORIAL_DIGITS = 1_000_000;
 import {
   foldQuantityOperands,
   isQuantity,
@@ -2155,7 +2167,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? 'unsigned'
             : undefined,
       canonical: (args, { engine }) => engine._fn('Factorial', [args[0]]),
-      evaluate: ([x]) => {
+      evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
@@ -2193,6 +2205,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A positive *non-integer* real is `Γ(x+1)`, not the rounded-integer
         // factorial — `Factorial(2.5)` is Γ(3.5) ≈ 3.323, not `2`.
         if (!x.isInteger) return ce.number(gamma(1 + x.re));
+        // An integer whose factorial has more digits than the exact cap
+        // stays symbolic on the exact route (the value is a perfectly good
+        // integer the machine cannot hold) and overflows to `+oo` under
+        // `numericApproximation`, the float reading of Γ(x+1) there.
+        if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
+          return numericApproximation ? ce.number(gamma(1 + x.re)) : undefined;
         try {
           return ce.number(
             run(
@@ -2207,7 +2225,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
       },
-      evaluateAsync: async ([x], { signal }) => {
+      evaluateAsync: async ([x], { signal, numericApproximation }) => {
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
@@ -2236,6 +2254,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // A positive non-integer real is `Γ(x+1)`, not the rounded factorial.
         if (!x.isInteger) return ce.number(gamma(1 + x.re));
+        // Above the exact digit cap — see the synchronous handler above.
+        if (estimatedFactorialDigits(x.re) > MAX_EXACT_FACTORIAL_DIGITS)
+          return numericApproximation ? ce.number(gamma(1 + x.re)) : undefined;
 
         try {
           return ce.number(
@@ -2304,7 +2325,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           : (x.isNegative && x.isInteger) || x.isExtendedReal === false
             ? 'unsigned'
             : undefined,
-      evaluate: (ops) => {
+      evaluate: (ops, { numericApproximation }) => {
         // 2^{\frac{n}{2}+\frac{1}{4}(1-\cos(\pi n))}\pi^{\frac{1}{4}(\cos(\pi n)-1)}\Gamma\left(\frac{n}{2}+1\right)
 
         const x = ops[0];
@@ -2328,6 +2349,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const n = toInteger(x);
         if (n === null) return undefined;
         const ce = x.engine;
+        // `n!!` has about half the digits of `n!`. Above the exact digit
+        // cap the bignum loop below (one step per two integers up to `n`,
+        // the operand growing at every step) is impractical, so the value
+        // stays symbolic on the exact route and overflows to `+oo` under
+        // `numericApproximation` — the `Factorial` convention. The cap
+        // asks only for a non-negative `n`: the digit estimate is
+        // `Infinity` for a negative one, whose kernels answer NaN below.
+        if (
+          n >= 0 &&
+          estimatedFactorialDigits(n) / 2 > MAX_EXACT_FACTORIAL_DIGITS
+        )
+          return numericApproximation ? ce.number(factorial2(n)) : undefined;
         if (bignumPreferred(ce))
           return ce.number(
             run(

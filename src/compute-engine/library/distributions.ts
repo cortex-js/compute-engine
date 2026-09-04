@@ -885,8 +885,10 @@ function distributionPDF(
       )
         return ce.Zero;
       // An index beyond the double range keeps the closed form off the
-      // factorial: `Factorial(10^400)` has more digits than the machine can
-      // hold and does not return. Under `.N()` the answer is the underflow
+      // factorial: `Factorial(10^400)` has more digits than the exact cap
+      // (`MAX_EXACT_FACTORIAL_DIGITS`, `library/arithmetic.ts`) and stays
+      // symbolic, and the closed form's numeric reading is then the
+      // indeterminate `∞ · 0 / ∞`. Under `.N()` the answer is the underflow
       // to `0`, which is the numeric route's honest reading — the mass is
       // below the smallest positive double for every rate this head can
       // hold. The EXACT route stays symbolic instead: `0` is not the value.

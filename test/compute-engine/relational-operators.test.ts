@@ -775,3 +775,111 @@ describe('Chains SHORT-CIRCUIT: a chain is a conjunction of its adjacent pairs (
     ]);
   });
 });
+
+describe('Exact ordering of number literals', () => {
+  // `ExactNumericValue.lt/lte/gt/gte` used to compare the machine
+  // projections (`this.re < other.re`). A magnitude outside the double
+  // range has no double to compare — `10^400` and `10^500` both project to
+  // `Infinity` — so `Less(10^400, 10^500)` and `Greater(10^500, 10^400)`
+  // were BOTH `False`, and `a.isLess(b)` disagreed with `b.isGreater(a)`.
+  test('two exact integers beyond the double range are ordered', () => {
+    const a = ce.number(10n ** 400n);
+    const b = ce.number(10n ** 500n);
+    expect(ce.box(['Less', a, b]).evaluate().symbol).toBe('True');
+    expect(ce.box(['Greater', b, a]).evaluate().symbol).toBe('True');
+    expect(ce.box(['Less', b, a]).evaluate().symbol).toBe('False');
+    expect(a.isLess(b)).toBe(true);
+    expect(b.isGreater(a)).toBe(true);
+    expect(a.isGreater(b)).toBe(false);
+    expect(b.isLess(a)).toBe(false);
+    expect(a.isLessEqual(b)).toBe(true);
+    expect(b.isGreaterEqual(a)).toBe(true);
+    // Negative magnitudes reverse the order.
+    expect(a.neg().isGreater(b.neg())).toBe(true);
+    expect(b.neg().isLess(a.neg())).toBe(true);
+  });
+
+  test('two exact rationals within an ulp of each other are ordered', () => {
+    // `1 + 10^(-20)` and `1` round to the SAME double.
+    const above = ce.parse('1+\\frac{1}{10^{20}}').evaluate();
+    expect(above.isGreater(ce.One)).toBe(true);
+    expect(ce.One.isLess(above)).toBe(true);
+    expect(above.isLess(ce.One)).toBe(false);
+    // Tiny magnitudes that both project to the double `0`.
+    const tiny = ce.box(['Power', 10, -400]).evaluate();
+    const tinier = ce.box(['Power', 10, -500]).evaluate();
+    expect(tiny.isGreater(tinier)).toBe(true);
+    expect(tinier.isLess(tiny)).toBe(true);
+    expect(tiny.isGreater(ce.Zero)).toBe(true);
+  });
+
+  test('radicals are ordered exactly', () => {
+    expect(ce.parse('\\sqrt{2}').isLess(ce.parse('\\sqrt{3}'))).toBe(true);
+    expect(ce.parse('-\\sqrt{2}').isGreater(ce.parse('-\\sqrt{3}'))).toBe(
+      true
+    );
+    // 7/5 = 1.4 < √2 < 3/2
+    expect(ce.parse('\\frac{7}{5}').isLess(ce.parse('\\sqrt{2}'))).toBe(true);
+    expect(ce.parse('\\frac{3}{2}').isGreater(ce.parse('\\sqrt{2}'))).toBe(
+      true
+    );
+    // (a/b)√c against the same value spelled differently: 2√3 = √12.
+    const x = ce.parse('2\\sqrt{3}');
+    const y = ce.parse('\\sqrt{12}');
+    expect(x.isLess(y)).toBe(false);
+    expect(x.isGreater(y)).toBe(false);
+  });
+
+  test('a machine float and an exact value order the same way from both sides', () => {
+    const big = ce.number(10n ** 400n);
+    const half = ce.number(0.5);
+    expect(half.isLess(big)).toBe(true);
+    expect(big.isGreater(half)).toBe(true);
+    expect(big.isLess(half)).toBe(false);
+    const third = ce.parse('\\frac{1}{3}');
+    expect(half.isLess(third)).toBe(false);
+    expect(third.isLess(half)).toBe(true);
+    expect(half.isGreater(third)).toBe(true);
+  });
+
+  test('the infinities and NaN keep their order', () => {
+    const big = ce.number(10n ** 400n);
+    expect(big.isLess(ce.PositiveInfinity)).toBe(true);
+    expect(ce.PositiveInfinity.isGreater(big)).toBe(true);
+    expect(big.isGreater(ce.NegativeInfinity)).toBe(true);
+    expect(ce.NegativeInfinity.isLess(big)).toBe(true);
+    expect(ce.box(['Less', big, 'NaN']).evaluate().symbol).not.toBe('True');
+    expect(ce.box(['Greater', big, 'NaN']).evaluate().symbol).not.toBe('True');
+  });
+});
+
+describe('Exact ordering against the other lanes (review pins)', () => {
+  test('a finite bignum beyond the double range is not read as an infinity', () => {
+    // `1.5·10^400` in the bignum lane projects `.re` to `Infinity` while its
+    // bignum keeps the value; the exact lane must read its infinity FLAGS.
+    const bn = ce.number(ce.bignum('1.5e400'));
+    expect(ce.number(10n ** 500n).isGreater(bn)).toBe(true);
+    expect(ce.number(10n ** 500n).isLess(bn)).toBe(false);
+    expect(ce.number(10n ** 300n).isLess(bn)).toBe(true);
+    expect(bn.isGreater(ce.number(10n ** 300n))).toBe(true);
+    expect(bn.isLess(ce.number(10n ** 500n))).toBe(true);
+  });
+
+  test('an exact NaN operand is unordered from either side', () => {
+    const half = ce.parse('\\frac{1}{2}');
+    expect(half.isLess(ce.NaN)).not.toBe(true);
+    expect(half.isGreater(ce.NaN)).not.toBe(true);
+    expect(ce.NaN.isLess(half)).not.toBe(true);
+    expect(ce.Zero.isLessEqual(ce.NaN)).not.toBe(true);
+  });
+
+  test('an exact value against a small integer literal', () => {
+    expect(ce.parse('\\frac{1}{2}').isLess(1)).toBe(true);
+    expect(ce.parse('\\frac{-3}{2}').isLess(-1)).toBe(true);
+    expect(ce.parse('-\\sqrt{2}').isLess(-1)).toBe(true);
+    expect(ce.parse('\\sqrt{2}').isGreater(1)).toBe(true);
+    expect(ce.parse('\\sqrt{2}').isLess(2)).toBe(true);
+    expect(ce.parse('\\frac{1}{2}').isLessEqual(0.5)).toBe(true);
+    expect(ce.parse('\\frac{1}{2}').isLess(0.5)).toBe(false);
+  });
+});
