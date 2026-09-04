@@ -90,7 +90,8 @@ use the ordinary textual representation of a value.
 ## Checking a Program Without Evaluating It
 
 `epsil check` parses a program and reports its diagnostics — syntax errors,
-malformed strings, invalid type annotations, `match` shape problems, and the
+malformed strings, invalid type annotations, `match` shape problems (a
+`match` over a sum type that leaves a variant uncovered included), and the
 trap lints (`=` inside a call argument, a literal index `0`, a `//` comment
 that reads as floor division) — without evaluating anything. It also prepares
 the program to run (still without running it) and reports the problems that

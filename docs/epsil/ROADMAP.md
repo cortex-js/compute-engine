@@ -15,9 +15,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
 - **UFCS/dot calls.** Decide whether `a.f(b)` may mean `f(a, b)`. Any proposal
   must remain unambiguous with dictionary, record, object, and component field
   access; the pipe remains the existing composition syntax.
-- **Match exhaustiveness.** Add a lint for statically known sums and other
-  closed scrutinee types. Do not claim exhaustiveness for open or untagged
-  unions without a sound proof.
 - **Mutually recursive one-step definitions.** Self-recursion works in a
   one-step definition. Mutually recursive functions still require explicit
   `let` declarations for every name before assignment. Removing that ceremony

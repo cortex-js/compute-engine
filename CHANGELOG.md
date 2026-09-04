@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### New Features
+
+- **Epsil: `match` exhaustiveness lint.** A `match` whose subject is
+  annotated with a closed type — a sum declared with
+  `type light = red | green | yellow`, or `boolean` — now reports a
+  `match-not-exhaustive` warning when some value of that type reaches no
+  case, spelling each uncovered value as the pattern that would match it
+  (`yellow()`, `node(_, _)`, `false`). The check runs in the static pass, so
+  `epsil check` and a program run both report it, and it only ever claims a
+  type it can enumerate from a declaration: an unannotated subject, an
+  ordinary type, or a union with a member that is not a variant stays silent.
+  A case covers a value only when it matches it unconditionally; a guarded
+  case, a literal operand, or a pin counts for nothing. See `epsil doc
+  match-not-exhaustive`.
+
 ## 0.122.0 _2026-09-03_
 
 ### Breaking Changes

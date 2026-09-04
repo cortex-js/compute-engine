@@ -516,6 +516,8 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Range pattern bounds must be numeric literals; use a guard (e.g. "n if n >= lo && n <= hi => …") to test against a computed bound`;
     case 'range-pattern-step':
       return `A stepped range is not a pattern; write "lo..hi" (two numeric bounds), or use a guard`;
+    case 'match-not-exhaustive':
+      return `The "match" on a "${args[0]}" value has no case for ${args[1]}; add a case for each, or a final "_" case`;
     case 'range-pattern-empty':
       return `Range pattern "${args[0]}..${args[1]}" is empty (the lower bound is greater than the upper bound); this case can never match`;
     case 'floor-division-comment':

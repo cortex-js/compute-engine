@@ -159,6 +159,16 @@ Use `Floor(a / b)` for the integer quotient.
 
 To stop a pipeline early, restructure with a condition or a Take/Filter stage instead of breaking out of a callback.
 
+## `match-not-exhaustive`
+
+A `match` whose subject has a CLOSED type — a sum declared with `type light = red | green | yellow`, or `boolean` — has no case for some of the values the subject can hold; the message spells each uncovered value as the pattern that would match it (`yellow()`, `node(_, _)`, `false`). Such a subject evaluates to the `match-no-case` error value, which is rarely what was meant.
+
+Add a case for each uncovered value, or a final `_` case if they share a result. A case covers a value only when it matches it UNCONDITIONALLY: a constructor pattern whose operands are all wildcards or bindings (`node(v, cs)`, `node(v, ...)`), a typed binding (`x: green`), a wildcard or bare binding, or an or-alternative of those. A case with an `if` guard, a literal operand (`lit(0)`) or a pin (`== value`) is conditional and counts for nothing, because the check does not reason about conditions.
+
+The check reads the subject's type from its annotation — a parameter (`function f(t: light)`), a typed `let`/`const`, or a typed `match` binding — and only ever reports a type it can enumerate from a declaration. A subject without an annotation, or of an open type (`integer`, `string`, a union with a member that is not a variant such as `light | nothing`), is never reported. It is a warning: the program still runs.
+
+No warning does not make the `match` total. A `boolean` subject that stays symbolic (an undecided comparison) is neither `true` nor `false`, and a declared name with no value (`let u: light` without an initializer) is not one of its constructors; both reach no case even when every alternative is covered. A final `_` case handles them.
+
 ## `symbol-expected`
 
 A name was required at this position — after `let` or `const`, as a `for` loop's variable, as a function's or parameter's name — but something else was found there (`let = 42`).

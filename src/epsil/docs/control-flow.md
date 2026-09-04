@@ -708,6 +708,44 @@ match 3 {
 
 Evaluating this expression yields `Error("match-no-case", 3)`.
 
+### Exhaustiveness
+
+When the subject's type is **closed** — a sum declared with `type light = red |
+green | yellow` (see [Types](/epsil/types/)), or `boolean` — `epsil check` and
+a program run both report a `match-not-exhaustive` warning if some value of
+that type reaches no case, spelling each uncovered value as the pattern that
+would match it:
+
+```epsil
+type light = red | green | yellow
+function canGo(t: light) -> boolean {
+  match t {
+    green() => true
+  }
+}
+// warning: The "match" on a "light" value has no case for red(), yellow()
+```
+
+A case covers a value only when it matches it unconditionally: a constructor
+pattern whose operands are all bindings, `_` or `...` (`node(v, cs)`,
+`node(v, ...)`), a typed binding (`g: green`, or `x: light` for the whole
+sum), a wildcard or bare binding, or an or-alternative of those. A case with
+an `if` guard, a literal operand (`jnum(0)`) or a pin (`== value`) is
+conditional and counts for nothing, since the check does not reason about
+conditions. The subject's type is read from its annotation — a parameter, a
+typed `let`/`const`, or a typed `match` binding — and only a type the check
+can enumerate from a declaration is ever reported: an unannotated subject, an
+ordinary type like `integer`, or a union with a member that is not a variant
+(`light | nothing`) stays silent. It is a warning, not an error: the program
+still runs, and an uncovered subject evaluates to the `match-no-case` error
+value above.
+
+Silence is not a proof of totality. A `boolean` subject that stays symbolic
+(an undecided comparison such as `x < 3` with `x` unknown) is neither `true`
+nor `false`, and a declared name with no value (`let u: light` without an
+initializer) is not one of its constructors; both reach no case even when
+every alternative is covered. A final `_` case handles them.
+
 ### `if let` {#if-let}
 
 When one case is what matters and everything else is the fallback, `if let`

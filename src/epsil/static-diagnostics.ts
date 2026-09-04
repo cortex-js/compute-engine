@@ -71,6 +71,10 @@ import {
   sameParameterDomain,
 } from '../compute-engine/clause-identity.js';
 import { signatureNotes } from './signature-notes.js';
+import {
+  matchExhaustivenessDiagnostics,
+  type AnnotationScope,
+} from './match-exhaustiveness.js';
 
 /**
  * `locateError`'s slot-name resolver, bound to an engine: the callee's
@@ -560,6 +564,11 @@ function canonicalizationDiagnostics(
   // definition is never mutated outside the journaled `_infer` channel.
   const effectDeclared = new Set<string>();
 
+  // The annotations in force for the `match` exhaustiveness lint, threaded
+  // through the whole program so a top-level `let t: light = …` types `t`
+  // for the statements that follow (see `match-exhaustiveness.ts`).
+  const annotations: AnnotationScope = new Map();
+
   for (const statement of statements) {
     const redefinition = redefinitionDiagnostic(
       statement,
@@ -602,6 +611,18 @@ function canonicalizationDiagnostics(
     } finally {
       ce._epsilDeclarationRoute = enclosingRoute;
     }
+
+    // The `match` exhaustiveness lint runs on the RAW statement (the patterns
+    // are only readable there), but only after the statement is boxed: a
+    // `type` statement registers its sum when it is canonicalized, and the
+    // lint resolves annotations against that registry.
+    matchExhaustivenessDiagnostics(
+      ce,
+      statement,
+      source,
+      diagnostics,
+      annotations
+    );
 
     // REDEFINITION DISCIPLINE — the statement's names enter the unit's
     // collector only now, once it has actually been canonicalized WITHOUT a

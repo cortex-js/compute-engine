@@ -63,6 +63,7 @@ export type DiagnosticCode =
   | 'match-alternative-binding' // a named binding appears inside an or-alternative
   | 'match-multiple-rest' // more than one `...rest` in a single list/tuple pattern
   | 'match-irrefutable-case' // %0 = binding name — a non-final case that matches anything
+  | 'match-not-exhaustive' // (warning) %0 = the subject's declared type, %1 = the uncovered alternatives spelled as patterns (`red(), yellow()`) — a `match` on a closed type (a sugar-declared sum, or `boolean`) with no case for some inhabitant, so that subject evaluates to the `match-no-case` error value. Static tier only: the subject must be a name with a declared annotation in scope
   | 'if-let-equal-expected' // an `if let` head is missing the `=` between its pattern and its subject
   | 'if-let-irrefutable' // (warning) %0 = binding name — an `if let` pattern that matches anything (a bare binding or `_`, no type guard), so the statement cannot fail and an `else` would never run; a plain `let` binds unconditionally
   | 'while-let-equal-expected' // a `while let` head is missing the `=` between its pattern and its subject
