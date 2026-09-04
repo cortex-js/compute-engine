@@ -176,6 +176,53 @@ to the declared first parameter wherever it is written:
 `tag(prefix: "n", self: 5)` and `Tagged.tag(prefix: "n", self: 5)` both
 dispatch on `5`.
 
+### The dot form: `c.area()` {#dot-call}
+
+A protocol function can also be called **with the dot**, the value first:
+`c.area()` is exactly `area(c)`, and `c.scale(2)` is `scale(c, 2)`. The
+value before the dot becomes the first argument, which is the argument the
+call dispatches on. Because any expression can be the receiver, calls
+chain from left to right:
+
+```epsil-live
+protocol Shape {
+  function area(self: Self) -> number
+  function scale(self: Self, k: number) -> Self
+}
+type Circle = tuple<r: number> is Shape {
+  function area(self: Circle) -> number { Pi * self.r^2 }
+  function scale(self: Circle, k: number) -> Circle { Circle(self.r * k) }
+}
+
+let c = Circle(1)
+(c.area(), c.scale(2).area(), c.scale(k: 2))
+// ➔ (pi, 4pi, Circle(2))
+```
+
+The parentheses are what make the dot a call. Without them, `c.area` is a
+field or [property](#properties) read, and on a `function` member it is
+the `protocol-function-not-a-field` error; `c.area` is never a function
+value that remembers `c`. And the dot reaches **members** only: a field, a
+property, or a protocol function. A library function or a plain function is
+not a member of anything, so `xs.Sort()` is the error
+`dot-call-not-a-protocol-function`; write `Sort(xs)`, or chain such calls
+with the [pipe](/epsil/operators/#pipe), `xs |> Sort |> Reverse`.
+
+Two details follow from the rest of the language. A field the receiver's
+type declares wins over a protocol function of the same name, so on a
+record or object whose field `f` holds a function, `v.f(2)` still calls the
+stored function. And a number literal never takes a dot (`5.name()` reads as
+`5.` followed by `name()`, the same rule that makes `2.x` a multiplication):
+bind the number to a name first.
+
+When two protocols the type conforms to declare the same member, the bare
+call and the dot form are both `protocol-call-ambiguous`; the qualified
+dot form names the protocol: `c.(Shape.area)()`. And because the dot names
+a member, it reaches the protocol even when a definition of your own has
+taken the bare name (see [above](#when-the-bare-name-is-taken-qualify)):
+with your own `area` in scope, `area(c)` calls yours and `c.area()` still
+calls the protocol's.
+
 ## Properties
 
 A protocol can require **properties**, read with ordinary field syntax.

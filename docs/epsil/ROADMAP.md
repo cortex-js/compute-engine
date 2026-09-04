@@ -12,9 +12,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
 - **Unit literals.** Units currently enter through LaTeX islands or
   `Quantity(value, unit)`. Native unit notation needs a grammar and
   round-trip decision before implementation.
-- **UFCS/dot calls.** Decide whether `a.f(b)` may mean `f(a, b)`. Any proposal
-  must remain unambiguous with dictionary, record, object, and component field
-  access; the pipe remains the existing composition syntax.
 
 ## Runtime and representation
 

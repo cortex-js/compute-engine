@@ -3357,7 +3357,7 @@ export function lookup(
  * `isValueDef`/`isOperatorDef` from `boxed-expression/utils`, to avoid a
  * dependency cycle.)
  */
-function isApplicableDef(def: BoxedDefinition): boolean {
+export function isApplicableDef(def: BoxedDefinition): boolean {
   if ('operator' in def) return true;
   if ('value' in def) {
     const t = (def as { value: BoxedValueDefinition }).value.type;

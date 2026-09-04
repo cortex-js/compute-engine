@@ -550,16 +550,24 @@ type string is Comparable {
   function compare(self: Self, other: Self) -> string { "proto" }
 }`);
 
-  test('`Comparable.compare` parses as Apply(Field(…), …)', () => {
+  test('`Comparable.compare(x, y)` parses as a member call and canonicalizes to Apply(Field(…), …)', () => {
+    // The parse is the generic member-call node (`c.area(2)` parses the same
+    // way); its canonical handler recognizes a receiver that names a
+    // protocol and produces the qualified-call shape everything downstream
+    // reads (`docs/plans/2026-09-04-protocol-member-dot-call.md`).
     const [ast] = parseEpsil('Comparable.compare(x, y)');
     expect(JSON.parse(JSON.stringify(ast))).toMatchObject({
       fn: [
-        'Apply',
-        { fn: ['Field', { sym: 'Comparable' }, { str: 'compare' }] },
+        'MemberCall',
+        { sym: 'Comparable' },
+        { str: 'compare' },
         { sym: 'x' },
         { sym: 'y' },
       ],
     });
+    expect(ce().box(ast!).toString()).toBe(
+      'Apply(Field("Comparable", "compare"), x, y)'
+    );
   });
 
   test('`Field` on a protocol symbol is a FUNCTION VALUE', () => {

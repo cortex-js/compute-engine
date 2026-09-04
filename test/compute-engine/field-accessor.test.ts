@@ -57,12 +57,25 @@ describe('Epsil `.` grammar', () => {
     expect(diags.length).toBeGreaterThan(0);
   });
 
-  test('a call on a field value: p.x(2) → Apply(Field(p, "x"), 2)', () => {
+  test('a call on a field value: p.x(2) parses as a member call and canonicalizes to Apply(Field(p, "x"), 2)', () => {
+    // The parse is the member-call node; on a receiver whose type declares
+    // the field, canonicalization gives the call of the stored value
+    // (`docs/plans/2026-09-04-protocol-member-dot-call.md`, rule 2).
     const [ast, diags] = parseEpsil('p.x(2)');
     expect(diags).toEqual([]);
     const fn = JSON.parse(JSON.stringify(ast)).fn;
-    expect(fn[0]).toBe('Apply');
-    expect(fn[1].fn[0]).toBe('Field');
+    expect(fn[0]).toBe('MemberCall');
+    expect(fn[1]).toMatchObject({ sym: 'p' });
+    expect(fn[2]).toEqual({ str: 'x' });
+    const ce = new ComputeEngine();
+    ce.declare('p', 'record{x: (number) -> number}');
+    expect(ce.box(ast!).toString()).toBe('Apply(Field(p, "x"), 2)');
+    // A parenthesized field read applied to arguments keeps the `Apply`
+    // shape at the parse: `(p.x)(2)`.
+    const [parenthesized] = parseEpsil('(p.x)(2)');
+    const pfn = JSON.parse(JSON.stringify(parenthesized)).fn;
+    expect(pfn[0]).toBe('Apply');
+    expect(pfn[1].fn[0]).toBe('Field');
   });
 
   test('serialization round-trips: p.x + q.y', () => {

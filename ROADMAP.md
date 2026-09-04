@@ -198,12 +198,38 @@ fixed in that change. One item remains.
   those kernels should scale their sums (the paired-statistics typing item
   below).
 - **`validateArguments` admits a collection with provably non-numeric cells for
-  a threadable numeric parameter (OPEN — found 2026-09-04 by the boxing
-  validation seam).** `Ln(["a", "b"])` and `Sqrt(["a", "b"])` are valid at
-  boxing on the plain path; the handler-side numeric re-check used to mask this
-  for the canonical-handler heads, and the seam's threadable admission now
-  rejects such a collection for those heads only. The element-type read belongs
-  in the threadable admission of `validate.ts`, its own measured change.
+  a threadable numeric parameter (FIXED 2026-09-04 — found 2026-09-04 by the
+  boxing validation seam).** `Ln(["a", "b"])` and `Sqrt(["a", "b"])` were valid
+  at boxing: the numeric fast path (`checkNumericArgs`) admitted any dimensioned
+  list through its tensor arm ahead of its own reject arm, and the declaration
+  route ran the element-carrier check (`validateThreadableOperand`) for the
+  canonical-handler seam only. The fast path now rejects a provably non-numeric
+  collection before every admission, and the declaration route runs the check
+  for every `broadcastable` LIBRARY operator, on the plain path and the seam
+  alike. A user-defined function (`isUserFunctionDefinition`) stays fail-open
+  on purpose: its broadcast runs per element at evaluation and each failing
+  cell reports its own error with a broadcast frame
+  (`broadcast-error-context.test.ts`), which a whole-collection refusal would
+  take away. Measured cost: none (`Abs(xs)` over a `list<number>` symbol boxes
+  in the same 5.4 µs as `Abs(x)`). Pinned in
+  `test/compute-engine/non-numeric-collection-operand.test.ts`.
+- **The element-carrier check at a threadable numeric slot tests numericity,
+  not the declared parameter (OPEN, ruling — found 2026-09-04 by the review of
+  the non-numeric collection admission fix).** `validateThreadableOperand`
+  (`boxed-expression/validate.ts`) refuses a collection whose cells are
+  provably NOT NUMBERS (`list<string>`), but admits a collection whose numeric
+  cells are provably outside the parameter's carrier: `Sin(zs)` with
+  `zs: list<+oo | -oo>` is valid at boxing where the scalar `Sin(+oo)` is
+  refused (`Sin` declares a finite `complex` carrier), and a tuple of strings
+  passes because `typeIsProvablyNonNumericCollection` ignores tuples on
+  purpose (tuples thread as points). Closing this means comparing the
+  one-rank element carrier, absence stripped, against the resolved parameter
+  with the same admission rules the scalar path uses — the Contract B
+  exceptional-point policy (`nanPolicyAt`), ranged parameters, and the tuple
+  lift — which is a change to the admission contract, not a local fix.
+  Options: (a) keep the numericity test and accept that a numeric-but-wrong
+  collection fails per cell at evaluation, (b) compare against the parameter.
+  If nothing is decided, (a) stands.
 - **A matrix p-norm for `p ∉ {1, 2, ∞}` stays inert.** The order passes the
   declared precondition (it is a well-formed order at rank 1) and the operand is
   inside the carrier, but the general matrix p-norm has no closed form and would

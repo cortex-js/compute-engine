@@ -40,7 +40,12 @@ import {
   type CallbackSupply,
 } from '../boxed-expression/callback-arity.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
-import { applicable, canonicalFunctionLiteral } from '../function-utils.js';
+import {
+  applicable,
+  canonicalFunctionLiteral,
+  isApplicableDef,
+  lookupApplicable,
+} from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
 // (collections → compile-expression → base-compiler → library/utils → collections)
 import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
@@ -70,6 +75,7 @@ import {
   TupleType,
   Type,
 } from '../../common/type/types.js';
+import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
   containsBroadcastableType,
@@ -151,12 +157,14 @@ import { deriveApplicationType } from '../boxed-expression/derive-application-ty
 import {
   evaluateProtocolProperty,
   immutableValueAssignmentError,
+  isProtocolDispatcher,
   protocolFunctionMemberOwners,
   protocolMemberSignature,
   protocolMemberValue,
   protocolOfName,
   protocolOfSymbol,
   protocolPropertyTypeOfReceiver,
+  protocolsWithMember,
 } from '../engine-protocols.js';
 
 // From NumPy:
@@ -2332,6 +2340,147 @@ function fieldBearingType(
   if (t.kind === 'union' || t.kind === 'intersection' || t.kind === 'negation')
     return undefined;
   return 'none';
+}
+
+/**
+ * The canonical form of a member call, `receiver.name(args)` in Epsil and
+ * `MemberCall(receiver, "name", args…)` in MathJSON. The operands arrive as
+ * WRITTEN (the operator holds them), and the result is one of the shapes the
+ * rest of the engine already handles, so no canonical expression contains a
+ * `MemberCall`:
+ *
+ * 1. The receiver names a PROTOCOL (`Shape.area(c)`): the qualified call,
+ *    `Apply(Field(Shape, "area"), c)`, exactly what it has always
+ *    canonicalized to.
+ * 2. The receiver's static type declares a field `name` (a record, an object
+ *    layout, a named tuple), or is a dictionary: a call of the stored value,
+ *    `Apply(Field(receiver, "name"), args…)`. A field wins over a protocol
+ *    member of the same name.
+ * 3. `name` is a protocol function member, for which the engine installed a
+ *    dispatcher operator: the bare dispatcher call `name(receiver, args…)`.
+ *    The dispatcher's own canonical, type, effects and evaluate handlers then
+ *    own the call — arity and argument checks, the static result type, the
+ *    effects union over the conformers, compilation, and the
+ *    `protocol-implementation-missing` / `protocol-call-ambiguous` verdicts.
+ * 4. Otherwise `Apply(Field(receiver, "name"), args…)`, whose evaluation
+ *    reports what a dotted read of that name reports (`unknown-field` on a
+ *    nominal type). One case is refused here with a better message: a
+ *    receiver whose type is decided and has no fields, and a `name` that is
+ *    a known function but not a protocol member (`xs.Sort()`), is
+ *    `dot-call-not-a-protocol-function`, which names the spellings that
+ *    work, `Sort(xs)` and `xs |> Sort`.
+ *
+ * The field-versus-member choice (rule 2 against rule 3) reads the receiver's
+ * STATIC type. An undecided type (an unannotated parameter) takes rule 3; the
+ * design note (`docs/plans/2026-09-04-protocol-member-dot-call.md`) records
+ * that as an accepted limit.
+ */
+function canonicalMemberCall(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  const [receiver, member, ...args] = ops;
+  // A malformed node (an operand missing, or a member that is not a name)
+  // keeps the `MemberCall` head with the offending operand replaced by an
+  // error. The head then stays, so the `evaluate` handler must not feed the
+  // result back to this function: the rewrite would never converge.
+  if (receiver === undefined || member === undefined)
+    return ce._fn('MemberCall', checkArity(ce, [...ops], 2));
+  const name = isString(member) ? member.string : sym(member);
+  // The receiver is bound (`.canonical` binds, it does not substitute a
+  // symbol's value) so that its static type and its definition can be read.
+  const base = receiver.canonical;
+  if (name === undefined)
+    return ce._fn('MemberCall', [
+      base,
+      ce.typeError('string', member.type, member.toString()),
+      ...args.map((x) => x.canonical),
+    ]);
+  const storedCall = (): Expression =>
+    ce.function('Apply', [
+      ce.function('Field', [base, ce.string(name)]),
+      ...args,
+    ]);
+
+  // 1. A protocol name: the qualified call.
+  if (protocolOfSymbol(ce, base) !== undefined) return storedCall();
+
+  // 2. A field the receiver's static type declares. A dictionary's keys are
+  // not part of its type, so a dictionary receiver always reads the key
+  // (`d.f(2)` is `d["f"](2)`, absent key included). A bare `record` or
+  // `object` type names no fields, so it decides nothing here.
+  const t = base.type.type;
+  const rt = fieldBearingType(t);
+  // A bare `dictionary` reaches `fieldBearingType` as "no field information"
+  // (`undefined`), so it is recognized here, after resolving an alias or a
+  // nominal reference to it.
+  const declaresField =
+    (resolveTypeReference(t) ?? t) === 'dictionary' ||
+    (rt !== undefined &&
+      rt !== 'none' &&
+      (rt.kind === 'dictionary' ||
+        (rt.kind === 'tuple'
+          ? rt.elements.some((x) => x.name === name)
+          : rt.elements[name] !== undefined)));
+  if (declaresField) return storedCall();
+
+  // 3. A protocol function member: the bare dispatcher call.
+  const def = lookupApplicable(name, ce.context.lexicalScope, ce);
+  if (isProtocolDispatcher(def)) return ce.function(name, [base, ...args]);
+  // The bare name may be TAKEN by a definition of the author's own, which
+  // shadows the dispatcher for the bare call (`area(c)` runs the author's
+  // `area`). The dot names a member, so it reaches the protocol regardless,
+  // through the qualified call — the same lowering as `c.(Shape.area)()`.
+  // With several protocols declaring the member, the receiver's static type
+  // picks the one that applies when it can decide; otherwise the field
+  // route below reports the read with its qualified-name advice.
+  const owners = protocolsWithMember(ce, name);
+  if (owners.length > 0) {
+    const applicable =
+      owners.length === 1
+        ? [owners[0].name]
+        : protocolFunctionMemberOwners(ce, t, name);
+    if (applicable.length === 1)
+      return ce.function('ProtocolMember', [
+        ce.string(applicable[0]),
+        ce.string(name),
+        base,
+        ...args,
+      ]);
+    // Several protocols declare the member, the bare name is taken, and the
+    // receiver's static type does not single one out (it is undecided, or
+    // it conforms through more than one). Without the dispatcher there is
+    // no cross-protocol call to lower to, so the author must name the
+    // protocol — the same advice the bare call's ambiguity gives.
+    const names =
+      applicable.length > 1 ? applicable : owners.map((r) => r.name);
+    return ce.error(
+      [
+        'protocol-call-ambiguous',
+        `\`${name}\` is a function member of ${names.map((p) => `\`${p}\``).join(' and ')}, and the bare name \`${name}\` is taken by a definition of your own. Qualify it — \`x.(${names[0]}.${name})(…)\` — to name the one you meant.`,
+      ],
+      sym(base) ?? base.toString()
+    );
+  }
+
+  // 4. A known function that is not a protocol member, on a value that has
+  // no fields at all: refused with the two spellings that work. Only a
+  // definition that can be applied counts as a known function (`lookupApplicable`
+  // hands back a plain value binding when nothing applicable exists), a
+  // protocol PROPERTY of that name is read (it may hold a function the
+  // parentheses then call), and an invalid receiver keeps its own error.
+  if (
+    rt === 'none' &&
+    base.isValid &&
+    def !== undefined &&
+    isApplicableDef(def) &&
+    protocolPropertyTypeOfReceiver(ce, t, name) === undefined
+  )
+    return ce.error(
+      ['dot-call-not-a-protocol-function', name, typeToString(t)],
+      sym(base) ?? base.toString()
+    );
+  return storedCall();
 }
 
 //
@@ -7210,6 +7359,41 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return `${compile(base)}.${'xyzw'[i]}`;
       }
       return undefined;
+    },
+  },
+
+  // A member call, `c.area(2)` in Epsil: a parse-level node that
+  // canonicalization rewrites into one of two shapes it already knows, so no
+  // canonical expression ever contains it. Which shape is decided in
+  // `canonicalMemberCall` below: the call of a STORED FUNCTION when the
+  // receiver's static type declares a field of that name, `Apply(Field(c,
+  // "area"), 2)`; the bare protocol dispatcher call `area(c, 2)` when `area`
+  // is a protocol function member. The design and the ruled rules are in
+  // `docs/plans/2026-09-04-protocol-member-dot-call.md`.
+  MemberCall: {
+    description: [
+      'Call the member `name` of a value with the value as its first argument: `c.area(2)` in Epsil.',
+      'A parse-level node. Canonicalization rewrites it to `Apply(Field(c, "area"), 2)` when the receiver\'s type declares a field `area` (a stored function is called), or to the bare protocol call `area(c, 2)` when `area` is a protocol function member; a canonical expression never contains it.',
+    ],
+    // The operands are HELD so that the canonical handler receives them as
+    // written. A named argument (`c.scale(k: 2)`) travels as a parse carrier
+    // that the named-argument seam permutes against the callee's signature
+    // when the CALL is boxed; the callee is only known once this handler has
+    // chosen the shape, so the carrier must reach the handler intact. A
+    // strict operator would have canonicalized it into an
+    // `argument-names-unavailable` error first.
+    lazy: true,
+    signature: '(receiver: any, member: string, arguments: any*) -> unknown',
+    canonical: (ops, { engine: ce }) => canonicalMemberCall(ce, ops),
+    // Reached only by a node that skipped canonicalization (a structural
+    // form, a raw box evaluated directly): resolve it the same way. A node
+    // the rewrite could not resolve (a malformed one, see
+    // `canonicalMemberCall`) keeps its head and is returned as it is —
+    // evaluating it again would loop.
+    evaluate: (ops, options) => {
+      const resolved = canonicalMemberCall(options.engine, ops);
+      if (resolved.operator === 'MemberCall') return resolved;
+      return resolved.evaluate(options);
     },
   },
 

@@ -116,19 +116,48 @@ function excludedFromScalarInference(op: Expression): boolean {
 }
 
 /**
+ * True when the NON-ABSENT cells of a collection type are provably
+ * non-numeric: `list<string>` and `list<string | missing>` qualify,
+ * `list<number | missing>` and `list<unknown>` do not, and neither does a
+ * collection of nothing but absences (`list<missing>`), whose cells are all
+ * owned by the operator's propagation policy. The absence arm is stripped
+ * first so that it cannot mask a non-numeric carrier: the absence admission
+ * (`typeContainsMissing`) is decided on what is left.
+ */
+function collectionCellsProvablyNonNumeric(t: Type): boolean {
+  const carrier = stripMissingFromType(t);
+  if (
+    typeof carrier !== 'string' &&
+    'elements' in carrier &&
+    carrier.elements === 'never'
+  )
+    return false;
+  return typeIsProvablyNonNumericCollection(carrier);
+}
+
+/**
  * Validate the element carrier of an operand admitted through a threadable
  * numeric parameter.
  *
  * Threadability admits a collection where the declared parameter describes
  * one scalar cell. That admission must still reject a collection whose static
- * element type is provably non-numeric (`list<string>` at a `complex` slot).
- * The canonical-handler seam opts into this check to avoid a second
- * `checkNumericArgs()` walk after it has already validated every operand.
- * The ordinary broadcast path deliberately remains fail-open so evaluation
- * can report a mismatch per cell with its broadcast context.
+ * element type is provably non-numeric (`list<string>` at a `complex` slot):
+ * `Ln(["a", "b"])` is an invalid call at boxing, the same as `Ln("a")`, not a
+ * valid call that fails in every cell at evaluation. The check runs for a
+ * `broadcastable: true` LIBRARY OPERATOR, on the plain boxing path and on the
+ * boxing seam of a `canonical`-handler head alike, so every operator route
+ * agrees with the numeric fast path (`checkNumericArgs`). A USER FUNCTION
+ * does not opt in (`checkNumericCollections`), whether it is a value
+ * definition or a lambda promoted to an operator definition
+ * (`isUserFunctionDefinition`): its broadcast is performed per element by
+ * the lambda machinery at evaluation, and each failing cell reports its own
+ * `incompatible-type` with a broadcast frame
+ * (`broadcast-error-context.test.ts`), which a whole-collection refusal at
+ * boxing would take away.
  *
  * An unknown/weak element type remains fail-open, as elsewhere in argument
- * validation: the evaluate-time numeric gate decides once values are known.
+ * validation: the evaluate-time numeric gate decides once values are known,
+ * and reports a mismatch per cell with its broadcast context.
  */
 function validateThreadableOperand(
   ce: ComputeEngine,
@@ -136,12 +165,13 @@ function validateThreadableOperand(
   param: Type,
   displayParam?: Type
 ): Expression {
-  // Missing cells are owned by the operator's propagation policy and remain
-  // valid broadcast input (`Sin(list<missing>) -> list<number>`).
-  if (typeContainsMissing(op.type.type)) return op;
+  // The non-absent cells decide: `list<string | missing>` is refused like
+  // `list<string>`. Missing cells themselves are owned by the operator's
+  // propagation policy and remain valid broadcast input
+  // (`Sin(list<missing>) -> list<number>`, `Sin(list<number | missing>)`).
   if (
     isSubtype(param, 'number') &&
-    typeIsProvablyNonNumericCollection(op.type.type)
+    collectionCellsProvablyNonNumeric(op.type.type)
   )
     return ce.typeError(displayParam ?? param, op.type, op);
   return op;
@@ -428,6 +458,22 @@ export function checkNumericArgs(
     } else if (op.type.isUnknown || op.type.type === 'any') {
       // Unknown or any type. Keep it that way, infer later
       xs.push(op);
+    } else if (collectionCellsProvablyNonNumeric(op.type.type)) {
+      // The static element type is concrete and provably non-numeric
+      // (`list<string^2>`, `set<boolean>`, `list<string | missing>`). The
+      // element type already disproves numericity, so reject WITHOUT
+      // walking: `Ln(["a", "b"])` is an invalid call at boxing, the same as
+      // `Ln("a")`, not a valid call that fails in every cell at evaluation.
+      // This arm must come before every admission below — the absence arm,
+      // which would otherwise admit `list<string | missing>` on the strength
+      // of its `missing` cells, and the tensor arm, which admits any
+      // dimensioned list, whatever its cells hold — and it agrees with
+      // `validateThreadableOperand` on the definition route, so a head on
+      // either route refuses the same collection. Derived from the shared
+      // `typeIsProvablyNonNumericCollection` predicate so this stays in
+      // lockstep with the `Add`/`Multiply` type handlers.
+      isValid = false;
+      xs.push(ce.typeError('number', op.type, op));
     } else if (typeContainsMissing(op.type.type)) {
       // An absent (`Missing`) or possibly-absent (`T | missing`) operand in a
       // numeric position. Every numeric operator resolves to `propagate`
@@ -455,16 +501,8 @@ export function checkNumericArgs(
         // (1) The static type already proves every element is a number (mirror
         // the indeterminate-size branch below). Accept without walking.
         xs.push(op);
-      } else if (typeIsProvablyNonNumericCollection(op.type.type)) {
-        // (2) The static element type is concrete and provably non-numeric
-        // (e.g. `indexed_collection<string>`). The element type already
-        // disproves numericity, so reject WITHOUT walking. Derived from the
-        // shared `typeIsProvablyNonNumericCollection` predicate so this stays
-        // in lockstep with the `Add`/`Multiply` type handlers (item 30).
-        isValid = false;
-        xs.push(ce.typeError('number', op.type, op));
       } else if (op.isLazyCollection) {
-        // (3) The static element type is indeterminate (`any`/`unknown`), and
+        // (2) The static element type is indeterminate (`any`/`unknown`), and
         // this is a lazy collection: `.each()` would materialize every element
         // just to type-check it. For a large lazy source (item 16:
         // `\frac{[1...1e8]}{2}` hung `ce.parse`) that is O(size) at
@@ -475,7 +513,7 @@ export function checkNumericArgs(
         // rather than erroring at canonicalization.
         xs.push(op);
       } else {
-        // (3, eager) An eager, operand-backed collection (e.g. a literal
+        // (2, eager) An eager, operand-backed collection (e.g. a literal
         // `List`) with an indeterminate element type: its elements are already
         // stored, so walking is cheap. Check that all elements are numbers and
         // infer the type of the elements. Use a local flag: `isValid` may
@@ -1599,10 +1637,13 @@ export interface ValidateArgumentsInternals {
    * not a second source of types. */
   noInference?: boolean;
   /** Ask threadable numeric slots to reject a collection whose static element
-   * carrier is provably non-numeric. The canonical-handler seam uses this in
-   * place of its former second `checkNumericArgs()` pass. Ordinary broadcast
-   * validation stays fail-open so evaluation can report errors per cell with
-   * their broadcast context. */
+   * carrier is provably non-numeric (`validateThreadableOperand`). Set for a
+   * `broadcastable: true` library operator on both operator routes — the
+   * plain boxing path and the canonical-handler seam — so its declaration
+   * refuses `Ln(["a", "b"])` at boxing as the numeric fast path does. A user
+   * function (`isUserFunctionDefinition`) leaves it unset: its per-element
+   * broadcast reports a mismatch per cell, with the broadcast context, at
+   * evaluation. */
   checkNumericCollections?: boolean;
 }
 
@@ -1735,6 +1776,11 @@ export function validateArguments(
                   // trial would judge an inapplicable callback admissible and
                   // report the arm viable.
                   operatorName: internals?.operatorName,
+                  // The collection verdict is the operator's too: a trial
+                  // that admitted a `list<string>` at a numeric arm would
+                  // rank that arm viable, and final validation would then
+                  // refuse the call instead of selecting a string arm.
+                  checkNumericCollections: internals?.checkNumericCollections,
                 }
               );
               // `null` = valid, operands unchanged. In trial mode no repair

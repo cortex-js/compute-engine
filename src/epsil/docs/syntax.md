@@ -433,6 +433,16 @@ the number, so `2.x` is the multiplication `2. * x`, and `1..5` stays a
 range. See [Types](/epsil/types/#values-of-a-new-type-are-opaque) for what
 `p.x` means on values of declared types, records and dictionaries.
 
+A field clause immediately followed — again with no whitespace — by a
+parenthesized argument list is a **member call**: `c.area()` calls the
+protocol function `area` with `c` as its first argument, the same call as
+`area(c)`, and `c.scale(2)` is `scale(c, 2)`. Only a protocol function is
+reached this way; on a value whose type declares a field of that name, the
+form keeps meaning "read the field, then call what it holds" (`p.x(2)`
+above). The parenthesized read `(c.area)(2)` is that field read applied to
+arguments, never a member call. See
+[Protocols](/epsil/protocols/#dot-call).
+
 In all three cases the `(`, `[` or `.` must directly abut the
 callee/indexed expression: whitespace before it means the form is a
 separate primary (or, for `.`, a diagnosed stray token), not a

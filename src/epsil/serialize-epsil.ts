@@ -499,6 +499,71 @@ export function serializeEpsil(
     },
 
     //
+    // Member call: `["MemberCall", base, "name", args…]` → `base.name(args)`.
+    // The parse of `c.area(2)`; canonicalization rewrites the node away, so
+    // only a raw tree prints this way (a canonical protocol call prints as
+    // the bare call it became, `area(c, 2)`).
+    //
+    MemberCall: (expr: MathJsonExpression): FormattingBlock => {
+      const base = operand(expr, 1);
+      const name = stringValue(operand(expr, 2)) ?? symbol(operand(expr, 2));
+      // A number never takes a dot (the lexer folds `5.` into the number),
+      // so a numeric receiver keeps the generic call form, which parses.
+      if (base === null || name === null || isNumberLiteral(base))
+        return serializeGenericFunction(expr);
+      const baseBlock =
+        OPERATORS[operator(base)] !== undefined
+          ? fmt.line('(', serializeExpression(base), ')')
+          : serializeExpression(base);
+      return fmt.line(
+        baseBlock,
+        fmt.text('.' + escapeSymbol(name)),
+        fmt.fencedList(
+          '(',
+          fmt.separator(','),
+          ')',
+          operands(expr).slice(2).map(serializeExpression)
+        )
+      );
+    },
+
+    //
+    // Qualified member call: `["ProtocolMember", "P", "name", base, args…]`
+    // → `base.(P.name)(args)`, the qualified spelling of a member call. With
+    // fewer than three operands there is no receiver to hang the dot on, and
+    // the generic call form is used.
+    //
+    ProtocolMember: (expr: MathJsonExpression): FormattingBlock => {
+      if (nops(expr) < 3) return serializeGenericFunction(expr);
+      const protocol =
+        stringValue(operand(expr, 1)) ?? symbol(operand(expr, 1));
+      const name = stringValue(operand(expr, 2)) ?? symbol(operand(expr, 2));
+      const base = operand(expr, 3);
+      // A numeric receiver keeps the generic form, as for `MemberCall`.
+      if (
+        protocol === null ||
+        name === null ||
+        base === null ||
+        isNumberLiteral(base)
+      )
+        return serializeGenericFunction(expr);
+      const baseBlock =
+        OPERATORS[operator(base)] !== undefined
+          ? fmt.line('(', serializeExpression(base), ')')
+          : serializeExpression(base);
+      return fmt.line(
+        baseBlock,
+        fmt.text(`.(${escapeSymbol(protocol)}.${escapeSymbol(name)})`),
+        fmt.fencedList(
+          '(',
+          fmt.separator(','),
+          ')',
+          operands(expr).slice(3).map(serializeExpression)
+        )
+      );
+    },
+
+    //
     // Dictionary
     //
     // `["Dictionary", ["KeyValuePair", key, value], …]` → `{key -> value, …}`;

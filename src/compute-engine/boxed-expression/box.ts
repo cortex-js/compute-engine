@@ -1901,7 +1901,14 @@ function makeCanonicalFunctionCore(
       if (normalized.kind === 'ok') ops = [ops[0], ...normalized.ops];
       // `unavailable` leaves `ops` alone: the carriers decline as before.
     }
-  } else if (named && name !== 'Apply') {
+  } else if (named && name !== 'Apply' && name !== 'MemberCall') {
+    // `MemberCall` is excluded for the same reason `Apply` is: its own
+    // parameters are `(receiver, member, arguments*)`, and a name written in
+    // `c.scale(k: 2)` is meant for the callee the node resolves to, not for
+    // `MemberCall`. The operator holds its operands, so the carriers reach
+    // its canonical handler intact, and the call it builds — the dispatcher
+    // call `scale(c, k: 2)`, or the qualified `Apply(Field(P, m), …)` — comes
+    // back through this seam under the head that does carry the names.
     const split = splitNamedArguments(ops);
     if (split) {
       const normalized = normalizeNamedArguments(
@@ -2606,7 +2613,11 @@ function applyOperatorDefinition(
               operatorName: name,
               nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
               noInference: true,
-              checkNumericCollections: numericParams,
+              // A `broadcastable: true` library operator refuses a provably
+              // non-numeric collection at boxing (see the plain route below
+              // for the user-function exception).
+              checkNumericCollections:
+                opDef.broadcastable === true && !opDef.isUserFunctionDefinition,
             }
           );
           if (checked && checked.some((x) => !x.isValid)) {
@@ -2707,6 +2718,19 @@ function applyOperatorDefinition(
           // is tested ahead of carrier disjointness — see
           // `nanPolicyAdmitsParam` in `validate.ts`.
           nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
+          // A `broadcastable: true` LIBRARY operator — an elementwise head
+          // such as `Abs`, `Sin`, `Ln` — refuses a provably non-numeric
+          // collection at a threadable numeric slot at boxing
+          // (`Abs(["a", "b"])`), as the numeric fast path and the
+          // canonical-handler seam do. A user function promoted to an
+          // operator definition (an assigned lambda, a multi-clause
+          // function) is `broadcastable` too — the vectorization default
+          // sets the flag — but its broadcast runs per element at
+          // evaluation, and each failing cell reports its own error with a
+          // broadcast frame, so it stays fail-open here
+          // (`isUserFunctionDefinition`).
+          checkNumericCollections:
+            opDef.broadcastable === true && !opDef.isUserFunctionDefinition,
         }
       );
 

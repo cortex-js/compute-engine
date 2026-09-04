@@ -1,7 +1,40 @@
 ## [Unreleased]
 
+### New Features
+
+- **A protocol function can be called with the dot.** In Epsil, `c.area()` is
+  the call `area(c)`, and `c.scale(2)` is `scale(c, 2)`: the value before the
+  dot is the first argument, the one the call dispatches on, and any expression
+  can be the receiver, so calls chain (`c.scale(2).area()`). Named arguments
+  follow the receiver (`c.scale(k: 2)`), and the qualified form
+  `c.(Shape.area)()` names the protocol when two protocols declare the same
+  member. Only protocol functions are reached this way: `xs.Sort()` is the new
+  error `dot-call-not-a-protocol-function`, whose message names `Sort(xs)` and
+  `xs |> Sort`. Without parentheses `c.area` keeps its meaning, a field or
+  property read. A field the receiver's type declares still wins over a member
+  of the same name, so `p.x(2)` on a record keeps calling the stored function.
+  The parse of `base.name(args)` is the new
+  `["MemberCall", base, "name", ...args]` node, which canonicalization rewrites
+  into the bare call or into `Apply(Field(...))`; the qualified `Shape.area(c)`
+  parses the same way and canonicalizes to the shape it always had.
+
 ### Resolved Issues
 
+- **A collection of non-numbers at a numeric elementwise operator is refused
+  at boxing, on every route.** `Ln(["a", "b"])`, `Sqrt(["a", "b"])`,
+  `Abs(["a", "b"])` and `Add(["a"], 1)` were valid calls that failed in every
+  cell at evaluation, while `Sin(["a", "b"])` was refused at boxing: the
+  numeric fast path admitted any dimensioned list through its tensor arm, and
+  the declaration route only read a collection's element type for a head with
+  a `canonical` handler. A collection whose static element type is provably
+  non-numeric (`list<string>`, `list<boolean>`, `set<string>`, a nested list of
+  strings) is now an `incompatible-type` error at boxing at every
+  `broadcastable` library operator, the same verdict the scalar `Ln("a")`
+  gets. A collection that could hold numbers (`list<integer | string>`, an
+  `unknown` element type, an absence arm) keeps the fail-open admission and
+  reports a mismatch per cell at evaluation, and so does every user-defined
+  function: its broadcast runs per element and each failing cell carries its
+  broadcast frame.
 - **A LaTeX set-builder with a comma-separated condition list now parses as a
   comprehension.** `\{ k : k \in \{1, 2, 3\}, k > 1 \}` parsed as a literal
   set whose second element was the condition,

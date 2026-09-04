@@ -769,8 +769,11 @@ describe('a protocol FUNCTION member read as a field', () => {
     expect(value(SIZED_IMPL, 'b.span')).toContain(
       'ErrorCode("protocol-function-not-a-field", "span", "Sized", "read")'
     );
-    // The call spelling makes no difference: the field read fails first.
-    expect(value(SIZED_IMPL, 'b.span()')).toContain(
+    // WITH parentheses the dot is a member call, `span(b)`: the parentheses
+    // are what tell the two apart (`docs/plans/2026-09-04-protocol-member-dot-call.md`).
+    expect(value(SIZED_IMPL, 'b.span()')).toBe('2');
+    // A parenthesized read applied to arguments is still the read.
+    expect(value(SIZED_IMPL, '(b.span)()')).toContain(
       'protocol-function-not-a-field'
     );
   });

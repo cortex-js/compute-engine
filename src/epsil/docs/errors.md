@@ -231,9 +231,17 @@ A `type` statement appears inside a block or a function body. Types are engine-g
 
 A protocol's `function` member was read with a dot, as if it were a field or a property.
 
-A protocol declares two kinds of member, and they are used differently. A `function` member is CALLED, with the receiver as its first argument: `span(b)`. A `readonly` or `readwrite` member is a PROPERTY, read with a dot: `b.area`. So `b.span` is a spelling mistake rather than a missing field — the name exists, on a protocol the value conforms to.
+A protocol declares two kinds of member, and they are used differently. A `function` member is CALLED, with the receiver as its first argument: `span(b)`, or with the dot and parentheses, `b.span()`. A `readonly` or `readwrite` member is a PROPERTY, read with a dot and no parentheses: `b.area`. So `b.span` — no parentheses — is a spelling mistake rather than a missing field — the name exists, on a protocol the value conforms to. The parentheses are what make the dot a call; `b.span` is never a function value bound to `b`.
 
 The mirror mistake, calling a property (`area(b)`), is reported as `protocol-property-not-callable`.
+
+## `dot-call-not-a-protocol-function`
+
+A function that is not a protocol member was called with a dot, as in `xs.Sort()`.
+
+The dot reaches the MEMBERS of a value: its fields, its protocol properties, and — with parentheses — its protocol functions. `c.area()` calls the protocol function `area` with `c` as its first argument, and is the same call as `area(c)`. A library function or a plain user function is not a member of anything, so it is not reached this way: write the call directly, `Sort(xs)`, or pipe the value into it, `xs |> Sort`. Pipelines are the spelling for chaining such functions: `xs |> Sort |> Reverse`.
+
+To make a function callable with the dot, declare it in a `protocol` and conform the type to that protocol.
 
 ## `protocol-declaration-not-top-level`
 

@@ -959,10 +959,10 @@ export function typeCouldBeNumericCollection(
  * qualify.
  *
  * Companion to {@link typeCouldBeNumericCollection}, kept next to it so the two
- * stay in lockstep. Used by `checkNumericArgs` (`validate.ts`) to reject a
- * statically non-numeric collection operand of a threadable numeric operator
- * (`Add`/`Multiply`/…) *without walking its elements* — the element type
- * already disproves numericity.
+ * stay in lockstep. Used by `validateThreadableOperand` (`validate.ts`) to
+ * reject a statically non-numeric collection operand of a threadable numeric
+ * operator (`Add`/`Multiply`/`Ln`/…) at boxing *without walking its
+ * elements* — the element type already disproves numericity.
  */
 export function typeIsProvablyNonNumericCollection(
   type: Type,

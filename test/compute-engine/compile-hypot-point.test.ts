@@ -184,18 +184,33 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     ]);
   });
 
-  test('a complex element still fails closed', () => {
-    // `Math.hypot` has no complex call form. The head was protected by the
-    // string branch of the broadcast gate until its codegen became a
-    // function; it is listed in `REAL_ONLY_CODEGEN_HEADS` so the decline
-    // survives.
-    const expr: BoxedExpression = ce.box([
+  test('a complex element is projected element-wise; an all-complex list fails closed', () => {
+    // `Math.hypot` has no complex call form, and the head is listed in
+    // `REAL_ONLY_CODEGEN_HEADS`. Over an array with a complex element LANE
+    // the real-only lowering runs over the element-wise real projection
+    // (a real element keeps its value, any other becomes NaN — the Tycho
+    // item 251 design, `docs/COMPILATION-MODEL.md` "Complex modes"), so a
+    // mixed list compiles and the complex cell answers NaN. A list whose
+    // every element is provably non-real still declines at compile time.
+    const mixed: BoxedExpression = ce.box([
       'Hypot',
       ['List', ['Complex', 1, 1], 2],
       3,
     ]);
+    const r = compile(mixed, { fallback: false, constantFold: false });
+    expect(r?.success).toBe(true);
+    const value = r!.run!({}) as number[];
+    expect(value).toHaveLength(2);
+    expect(Number.isNaN(value[0])).toBe(true);
+    expect(value[1]).toBeCloseTo(Math.hypot(2, 3), 12);
+
+    const allComplex: BoxedExpression = ce.box([
+      'Hypot',
+      ['List', ['Complex', 1, 1], ['Complex', 0, 2]],
+      3,
+    ]);
     expect(() =>
-      compile(expr, { fallback: false, constantFold: false })
+      compile(allComplex, { fallback: false, constantFold: false })
     ).toThrow(/Fail closed/);
   });
 });

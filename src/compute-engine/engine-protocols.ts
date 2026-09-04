@@ -3558,7 +3558,7 @@ function dispatcherScope(ce: IComputeEngine): Scope {
 
 /** Every protocol that declares `member` as a FUNCTION requirement, in
  * registration order. */
-function protocolsWithMember(
+export function protocolsWithMember(
   ce: ProtocolReadView,
   member: string
 ): ProtocolRecord[] {

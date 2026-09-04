@@ -7448,7 +7448,20 @@ export class Parser {
         // base never takes a field: the lexer folds a first trailing dot into
         // the numeric literal (`2.x` is `2. * x`), and a second dot
         // (`1.2.3`) keeps its historical unexpected-symbol diagnostic.
-        expr = this.parseField(expr);
+        const field = this.parseField(expr);
+        // A field clause immediately followed by an argument list is a MEMBER
+        // CALL, `c.area(2)`: the member `area` called with `c` as its first
+        // argument. It is a distinct node from a field read applied to
+        // arguments — `(c.area)(2)` keeps the `Apply(Field(…))` shape — because
+        // the two mean different things: a protocol FUNCTION member is only
+        // reachable through the call form, and the read form of the same name
+        // stays the `protocol-function-not-a-field` error.
+        expr =
+          field !== expr &&
+          this.current.type === 'OPEN_PAREN' &&
+          !this.current.precededByWhitespace
+            ? this.parseMemberCall(field)
+            : field;
       } else break;
     }
     return expr;
@@ -7513,6 +7526,53 @@ export class Parser {
       ['Field', base, { str: name }] as MathJsonExpression[],
       start,
       nameTok.end
+    );
+  }
+
+  /** A member call: the field clause `field` (already parsed, the cursor on
+   * the `(` that abuts it) followed by its argument list.
+   *
+   * - `c.area(2)`, a plain field clause, lowers to
+   *   `["MemberCall", c, "area", 2]`. The `MemberCall` operator decides at
+   *   canonicalization whether `area` is a field the receiver's type declares
+   *   (then the node means `Apply(Field(c, "area"), 2)`, a call of the stored
+   *   value) or a protocol function member (then it means `area(c, 2)`). The
+   *   decision needs the engine's types and protocol registry, which the
+   *   parser does not have; see `docs/plans/2026-09-04-protocol-member-dot-call.md`.
+   * - `c.(Shape.area)(2)`, a QUALIFIED field clause, names the protocol, so
+   *   it lowers directly to `["ProtocolMember", "Shape", "area", c, 2]` — the
+   *   qualified member call, dispatching inside `Shape` only. This is the
+   *   spelling that resolves a `protocol-call-ambiguous` error.
+   *
+   * Spread and named arguments are admitted, as in any call argument list. */
+  private parseMemberCall(field: MathJsonExpression): MathJsonExpression {
+    const start = this.localStart(field) ?? this.current.start;
+    const { values, end } = this.parseBracketedList(
+      'CLOSE_PAREN',
+      ')',
+      false,
+      true,
+      true
+    );
+    // `parseField` produced either a `Field` or a `ProtocolProperty` node (on
+    // a failed field clause it returns the base itself, and the caller does
+    // not reach here).
+    if (operator(field) === 'ProtocolProperty')
+      return this.wrap(
+        [
+          'ProtocolMember',
+          operand(field, 1)!,
+          operand(field, 2)!,
+          operand(field, 3)!,
+          ...values,
+        ],
+        start,
+        end
+      );
+    return this.wrap(
+      ['MemberCall', operand(field, 1)!, operand(field, 2)!, ...values],
+      start,
+      end
     );
   }
 

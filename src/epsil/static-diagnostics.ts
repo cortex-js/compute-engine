@@ -139,6 +139,11 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   'argument-names-unavailable',
   'argument-optional-skipped',
   'argument-names-required',
+  // A dotted call of a function that is not a protocol member (`xs.Sort()`).
+  // The `MemberCall` canonical handler (`library/collections.ts`) refuses it
+  // once the receiver's static type is decided, so it is a canonicalization
+  // error and `epsil check` can report it.
+  'dot-call-not-a-protocol-function',
   // A collection operator's callback declares a different number of
   // parameters than the operator passes it (`Map((p, q) => p + q, xs)`). The
   // operators mint it from their canonical handlers, so — like the
@@ -1588,12 +1593,23 @@ export function describeError(error: MathJsonExpression): string {
         payload[2] === 'assign'
           ? ' and cannot be assigned'
           : owners.length === 1
-            ? `: call it as \`${payload[0]}(x)\``
+            ? `: call it as \`${payload[0]}(x)\` or \`x.${payload[0]}()\``
             : '; more than one applies here, so call it with a qualified name';
       detail =
         payload.length >= 2 && owners.length > 0
           ? `\`${payload[0]}\` is a function member of the ${owners.join(' and ')} ${kinds}, not a field${advice}`
           : `a protocol function member is not a field (${payload.join(', ')})`;
+      break;
+    }
+    case 'dot-call-not-a-protocol-function': {
+      // Payload: [name, receiver type]. The dot reaches protocol members
+      // only, so the message names the two spellings that call an ordinary
+      // function on the value.
+      const [name, type] = payload;
+      detail =
+        name === undefined
+          ? 'only a protocol function can be called with a dot'
+          : `\`${name}\` is not a protocol function${type === undefined ? '' : ` on a value of type \`${type}\``}: write \`${name}(x)\` or \`x |> ${name}\``;
       break;
     }
     default: {
