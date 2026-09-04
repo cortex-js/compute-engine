@@ -52,6 +52,18 @@
 
 ### Resolved Issues
 
+- **A compiled branch condition with an impure operand is three-valued
+  like any other.** `If(Random() > 0.5 ∧ x > 0, a, b)` compiled to a
+  plain truthiness test and took the else arm at `x = NaN`, because the
+  decidedness analysis declined any condition with an effectful operand
+  (its tests used to name an operand three times). The lowering binds
+  every leaf once, so the exemption is gone: the draw happens once per
+  call, or not at all when a decided sibling short-circuits it, and the
+  no-branch answer `NaN` is given at NaN, for a lone relation, a
+  connective, a `Which` guard and a statement-form `If` alike. Two shapes
+  keep the truthiness lowering, because binding would change what they
+  evaluate: an impure chain (`Less(5, 1, Random())`) and one impure node
+  written in two positions.
 - **The Python target emitted JavaScript for a `Comprehension`.** With no
   Python lowering of its own, `Comprehension(body, Element(x, …))` went
   through the shared emission and produced the JavaScript arrow-function

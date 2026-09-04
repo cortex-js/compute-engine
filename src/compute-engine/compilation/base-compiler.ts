@@ -6047,7 +6047,10 @@ export class BaseCompiler {
       // "Branch conditions that cannot be decided" comment on
       // `conditionDecidability`. A condition decidable by construction reports
       // `null` and gets the plain conditional expression below.
-      const decidability = BaseCompiler.conditionDecidability(args[0]);
+      const decidability = BaseCompiler.conditionDecidability(
+        args[0],
+        target.bindExpr !== undefined
+      );
       if (decidability === null)
         return `((${BaseCompiler.compile(
           args[0],
@@ -6138,7 +6141,10 @@ export class BaseCompiler {
         // `conditionDecidability`. A condition decidable by construction
         // reports `null` and gets the plain chain of conditional
         // expressions below.
-        const decidability = BaseCompiler.conditionDecidability(cond);
+        const decidability = BaseCompiler.conditionDecidability(
+          cond,
+          target.bindExpr !== undefined
+        );
         if (decidability === null) {
           const condCode =
             i === 0
@@ -12533,6 +12539,13 @@ export class BaseCompiler {
   // An UNDECIDED first conjunct still evaluates the second, because Kleene
   // needs it — `And(undecided, false)` is `false`.
   //
+  // Because every leaf is bound once and reached at most once, an IMPURE
+  // condition takes the same lowering: `If(Random() < 2 ∧ x > 0, a, b)`
+  // draws once per call, and answers the absence marker at `x = NaN`
+  // instead of the else arm the plain `&&` chose. What is left of the old
+  // exemption is listed at `conditionNode`: a target with no binding form,
+  // an impure chain, and one impure node in two positions.
+  //
   // A leaf's own value is three-valued too: a relation is
   // `d ? <comparison> : undecided`, where `d` is the operand test above, and
   // a value-shaped leaf is `c === true ? true : c === false ? false :
@@ -12606,18 +12619,31 @@ export class BaseCompiler {
    *
    * `null` means the condition needs no test: it is decided by construction —
    * every leaf it reaches compares values that can never be the undecided one
-   * — or the analysis declines it (an impure or collection-valued operand
-   * under a connective). Both answers keep the plain conditional expression
+   * — or the analysis declines it (a collection-valued operand under a
+   * connective, or an impure operand on a target that cannot bind a value in
+   * expression position). Both answers keep the plain conditional expression
    * the compiler emitted before this analysis existed, so nothing is added on
    * the common path.
+   *
+   * `canBind` says whether the caller can bind an operand's value to a name
+   * before the test reads it (`bindExpr` on the target, or a block-scoped
+   * constant for a statement). The tests name an operand more than once, so
+   * an IMPURE operand — a `Random` draw, a call with effects — is admitted
+   * only when it can be bound and therefore evaluated once: an impure
+   * condition is then three-valued like any other. Without a binding form
+   * it is declined and keeps the plain truthiness selection, rather than
+   * running its effects at every naming.
    *
    * Otherwise the root node's `test` says which lowering the caller uses:
    * `'value'` inspects the condition's own value for `true`/`false`,
    * `'operands'` tests a relation's operands for NaN, and `'connective'`
    * combines its operands' pairs by the Kleene tables.
    */
-  static conditionDecidability(cond: Expression): ConditionNode | null {
-    const node = BaseCompiler.conditionNode(cond);
+  static conditionDecidability(
+    cond: Expression,
+    canBind = true
+  ): ConditionNode | null {
+    const node = BaseCompiler.conditionNode(cond, canBind);
     if (node === null || BaseCompiler.isDecidedByConstruction(node))
       return null;
     return node;
@@ -12625,12 +12651,16 @@ export class BaseCompiler {
 
   /**
    * The decidedness analysis of one sub-expression of a branch condition, or
-   * `null` when it cannot be analyzed (an impure relation, or a connective the
-   * analysis declines). Unlike `conditionDecidability`, a sub-expression that
-   * is decided by construction still gets a node: its VALUE takes part in the
-   * test of the connective above it.
+   * `null` when it cannot be analyzed (an impure relation on a target that
+   * cannot bind, or a connective the analysis declines). Unlike
+   * `conditionDecidability`, a sub-expression that is decided by construction
+   * still gets a node: its VALUE takes part in the test of the connective
+   * above it.
    */
-  private static conditionNode(cond: Expression): ConditionNode | null {
+  private static conditionNode(
+    cond: Expression,
+    canBind: boolean
+  ): ConditionNode | null {
     if (isSymbol(cond, 'True') || isSymbol(cond, 'False'))
       return {
         negate: false,
@@ -12646,16 +12676,32 @@ export class BaseCompiler {
     // `!` over the condition itself, which would turn an undecided value into
     // a confident `true`.
     if (h === 'Not' && cond.nops === 1) {
-      const inner = BaseCompiler.conditionNode(cond.ops[0]);
+      const inner = BaseCompiler.conditionNode(cond.ops[0], canBind);
       return inner === null ? null : { ...inner, negate: !inner.negate };
     }
-    if (h === 'And' || h === 'Or') return BaseCompiler.connectiveNode(cond, h);
+    if (h === 'And' || h === 'Or')
+      return BaseCompiler.connectiveNode(cond, h, canBind);
     if (!BaseCompiler.BRANCH_RELATIONS.has(h))
       return { negate: false, test: { kind: 'value', expr: cond } };
-    // The operands are named again inside the test, so an impure relation is
-    // declined: an operand cheap enough to stay inline is emitted a second and
-    // third time, which would run its effects again.
-    if (cond.isPure !== true) return null;
+    // The operands are named again inside the test. An operand with effects
+    // is therefore bound to a name first and evaluated once
+    // (`withConditionOperands` for a lone relation, `kleeneRelationLeaf`
+    // under a connective) — which needs a binding form. Without one the
+    // relation is declined: inlining the operand would run its effects at
+    // every naming. Two impure shapes are declined even with one, because
+    // the binding would change what the relation evaluates:
+    // - a CHAIN (`Less(5, 1, Random())`, three or more operands): the test
+    //   binds every operand up front, where the chain's own emitted `&&`
+    //   skips a later operand once an earlier pair is false — the draw
+    //   would happen where the plain lowering makes none;
+    // - the SAME impure node in two positions (`Less(d, d)` built from one
+    //   boxed `d`): the binding is keyed on the node (`_codeOverrides`), so
+    //   one draw would stand for the two evaluations that were written.
+    if (cond.isPure !== true) {
+      if (!canBind || cond.nops > 2) return null;
+      if (cond.nops === 2 && cond.op1 === cond.op2 && cond.op1.isPure !== true)
+        return null;
+    }
     return {
       negate: false,
       test: {
@@ -12670,23 +12716,33 @@ export class BaseCompiler {
    * The decidedness analysis of an `And`/`Or`, or `null` when the connective
    * is declined and the caller keeps the plain truthiness test.
    *
-   * Two operands are declined. An IMPURE one, for the reason a relation's is:
-   * the test names every leaf again, which would run its effects a second
-   * time — and `isPure` on the connective answers for the whole subtree at
-   * once. And a COLLECTION-valued one, because a connective over a collection
-   * broadcasts element-wise; that lowering is the target's `selection` hook
-   * (`_SYS.select`), which the `If`/`Which` compilation consults before this
-   * analysis and which has its own no-match marker per cell.
+   * A COLLECTION-valued operand is declined, because a connective over a
+   * collection broadcasts element-wise; that lowering is the target's
+   * `selection` hook (`_SYS.select`), which the `If`/`Which` compilation
+   * consults before this analysis and which has its own no-match marker per
+   * cell. An IMPURE operand is admitted when the target can bind: the lazy
+   * lowering (`kleeneConnective`, `kleeneRelationLeaf`) binds every leaf
+   * exactly once, in operand order, and an operand a SETTLING sibling
+   * short-circuits away (a decided `false` before it in an `And`, a decided
+   * `true` in an `Or`) is never reached — so a `Random` draw inside the
+   * condition is drawn at most once. The draw count differs from the plain
+   * `&&` spelling in one case, on purpose: an `And` operand that follows an
+   * UNDECIDED sibling is still evaluated, because the Kleene table needs it
+   * (`And(undecided, false)` is `false`), where the emitted `&&` treated
+   * the sibling's ordinary `false` as settling and never reached it.
+   * Without a binding form the leaves decline themselves
+   * (`conditionNode`).
    */
   private static connectiveNode(
     cond: Expression & FunctionInterface,
-    op: 'And' | 'Or'
+    op: 'And' | 'Or',
+    canBind: boolean
   ): ConditionNode | null {
-    if (cond.nops === 0 || cond.isPure !== true) return null;
+    if (cond.nops === 0) return null;
     const operands: ConditionNode[] = [];
     for (const operand of cond.ops) {
       if (operand.type.matches('collection<any>')) return null;
-      const node = BaseCompiler.conditionNode(operand);
+      const node = BaseCompiler.conditionNode(operand, canBind);
       if (node === null) return null;
       operands.push(node);
     }
@@ -12730,11 +12786,12 @@ export class BaseCompiler {
    * Both are plain comparisons, with no function call, and together they cost
    * no more than either one alone. `code` appears in the result up to three
    * times, which is why the caller passes the NAME of a costly operand here
-   * rather than the operand's own source (`withConditionOperands`), and why
-   * only an operand without side effects reaches this function at all (see
-   * `conditionDecidability`). A fragment that is not a single token is
-   * parenthesized, because `===` binds looser than most operators an operand
-   * may contain.
+   * rather than the operand's own source (`withConditionOperands`,
+   * `kleeneRelationLeaf`): an operand with effects is always bound, so the
+   * name is what gets repeated, never the effect (an impure operand reaches
+   * the analysis only when the caller can bind — `conditionDecidability`). A
+   * fragment that is not a single token is parenthesized, because `===`
+   * binds looser than most operators an operand may contain.
    */
   private static operandDecidedConjuncts(
     code: TargetSource,

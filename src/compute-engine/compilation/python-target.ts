@@ -1757,7 +1757,10 @@ function compilePythonBranch(
   compileCond: (c: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  const decidability = BaseCompiler.conditionDecidability(cond);
+  const decidability = BaseCompiler.conditionDecidability(
+    cond,
+    target.bindExpr !== undefined
+  );
   // The condition is decidable by construction, so it needs no extra test.
   if (decidability === null)
     return `((${thenCode}) if (${compileCond(cond)}) else (${elseCode}))`;

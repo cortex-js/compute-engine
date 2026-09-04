@@ -1216,7 +1216,11 @@ document's history):
   `False` everywhere else); the compiled lane's answer stands. Three
   companion rulings the same day: the three-valued lowering extends to
   IMPURE conditions (every leaf bound once — the triple-evaluation reason
-  for the exemption no longer holds under the lazy shape); a repeated
+  for the exemption no longer holds under the lazy shape; FIXED
+  2026-09-04: `conditionDecidability` admits an impure operand whenever
+  the target can bind it, and `If(Random() > 0.5 ∧ x > 0, a, b)` draws
+  once per call and answers `NaN` at `x = NaN` — pinned in
+  `test/compute-engine/compile-impure-condition.test.ts`); a repeated
   vars-object member read inside a guard stays free (a getter with
   effects is outside the compiled contract); a desugared `while` exit
   test keeps the no-arm rule (an undecided loop condition runs to the

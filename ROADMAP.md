@@ -1154,7 +1154,7 @@ form (`BaseCompiler.conditionDecidability`). Two reaches of it are open.
   same `If` and relies on its iteration cap. Recorded 2026-09-02 as a
   consequence of the ruling; a desugared exit test could be exempted (a
   synthesized `If` is not a user selection) if that is preferred.
-- **RULED 2026-09-03 (Arno): extend the three-valued lowering to impure conditions, lone relations included, binding every leaf once.** An IMPURE connective in condition position still
+- **RULED 2026-09-03 (Arno): extend the three-valued lowering to impure conditions, lone relations included, binding every leaf once. FIXED 2026-09-04 (unstaged, awaiting release): the purity declines in `conditionDecidability` are gone; an impure operand is bound once by the lowering that already existed (`withConditionOperands` for a lone relation, `kleeneRelationLeaf` under a connective), so `If(Random() > 0.5 ∧ x > 0, a, b)` draws once per call and answers `NaN` at `x = NaN`. The one exemption left is a target with no `bindExpr`, which none of the targets reaching the analysis is (GPU and interval targets take their own `If` entries first). Pins in `test/compute-engine/compile-impure-condition.test.ts`.** An IMPURE connective in condition position still
   selects by truthiness.** `conditionDecidability` answers `null` for any
   condition with an impure leaf, so `If(Random() > 0.5 ∧ x > 0, a, b)` at
   `x = NaN` takes the else arm. A lone impure relation behaves the same
