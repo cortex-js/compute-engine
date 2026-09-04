@@ -874,9 +874,7 @@ describe('SLICE (range)', () => {
     expect(viaSpan.at(-1)?.json).toEqual(viaBounds.at(-1)?.json);
     expect(viaSpan.at(5)).toBeUndefined();
     expect(viaSpan.type.toString()).toBe(viaBounds.type.toString());
-    expect(viaSpan.type.toString()).toMatchInlineSnapshot(
-      `list<integer>`
-    );
+    expect(viaSpan.type.toString()).toMatchInlineSnapshot(`list<integer>`);
   });
 
   test('a symbol declared or inferred `range` is a span operand', () => {
@@ -1131,9 +1129,7 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     const m = engine.box('mtx');
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>).
-    expect(m.type.toString()).toMatchInlineSnapshot(
-      `matrix<integer^(3x3)>`
-    );
+    expect(m.type.toString()).toMatchInlineSnapshot(`matrix<integer^(3x3)>`);
     // A single index into the matrix yields a row (vector), not a scalar. The
     // access may be out of band, so the honest type carries the `| missing`
     // arm (§3.C `T | marker(T)`).
@@ -1436,9 +1432,7 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
         ['List', ['Tuple', { str: 'a' }, 1], ['Tuple', { str: 'b' }, 2]],
       ])
       .evaluate();
-    expect(d.type.toString()).toBe(
-      'record{a: integer, b: integer}'
-    );
+    expect(d.type.toString()).toBe('record{a: integer, b: integer}');
   });
 });
 
@@ -1769,8 +1763,8 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
 
   test('Join', () =>
     expect(evaluate(['Join', list1, list2])).toMatchInlineSnapshot(
-      `["List", 100, 4, 2, 62, 34, "ContinuationPlaceholder", 8, 9, 7, 2, 24]`
-    )); // 11 elements: default materialization shows a 5-element head and tail
+      `["List", 100, 4, 2, 62, 34, 16, 8, 9, 7, 2, 24]`
+    )); // two list literals fold into one at canonicalization: all 11 elements
 
   // A tuple operand is ONE element, not a sequence to splice: the point-list
   // accumulation idiom `L → Join(L, P)`. Previously the point's components
@@ -2880,9 +2874,7 @@ describe('DICTIONARY LITERAL TYPE SYNTHESIS', () => {
       ['KeyValuePair', { str: 'x' }, 1],
       ['KeyValuePair', { str: 'y' }, 2],
     ]);
-    expect(d.type.toString()).toBe(
-      'record{x: integer, y: integer}'
-    );
+    expect(d.type.toString()).toBe('record{x: integer, y: integer}');
   });
 
   test('the synthesized record still satisfies a dictionary annotation', () => {
@@ -2950,9 +2942,7 @@ describe('KEYS / VALUES', () => {
 
   test('Values type reflects the value types', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Values', dict]).type.toString()).toBe(
-      'list<integer>'
-    );
+    expect(ce.box(['Values', dict]).type.toString()).toBe('list<integer>');
   });
 
   test('Keys, Values and iteration order agree', () => {
@@ -5117,7 +5107,12 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
         .toString()
     ).toBe('[1,2,3,4]');
     // A scalar spread is one element: `Join(5)` is `[5]`.
-    expect(ce2.box(['List', ['Spread', 5]]).evaluate().toString()).toBe('[5]');
+    expect(
+      ce2
+        .box(['List', ['Spread', 5]])
+        .evaluate()
+        .toString()
+    ).toBe('[5]');
   });
 
   test('an infinite spread stays lazy', () => {
@@ -5386,9 +5381,9 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
       ce2.expr(['Contains', ['Interval', NOO, OO], NOO]).evaluate().symbol
     ).toBe('False');
     // `Range` already answered this way; the two constructors now agree.
-    expect(
-      ce2.expr(['Contains', ['Range', 1, OO], OO]).evaluate().symbol
-    ).toBe('False');
+    expect(ce2.expr(['Contains', ['Range', 1, OO], OO]).evaluate().symbol).toBe(
+      'False'
+    );
   });
 
   test('finite membership is unchanged, endpoints included', () => {
@@ -5425,13 +5420,19 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     const len = ce2.expr(['Length', ['Range', 1, OO]]).evaluate();
     expect(len.toString()).toBe('+oo');
     expect(len.isSame(ce2.PositiveInfinity)).toBe(true);
-    expect(ce2.expr(['Length', ['Range', NOO, -1]]).evaluate().toString()).toBe(
-      '+oo'
-    );
+    expect(
+      ce2
+        .expr(['Length', ['Range', NOO, -1]])
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
     // A bounded Range still counts, and still types exactly `integer`.
-    expect(ce2.expr(['Length', ['Range', 1, 10]]).evaluate().toString()).toBe(
-      '10'
-    );
+    expect(
+      ce2
+        .expr(['Length', ['Range', 1, 10]])
+        .evaluate()
+        .toString()
+    ).toBe('10');
     expect(String(ce2.expr(['Length', ['Range', 1, 10]]).type)).toBe('integer');
     // An `Interval` keeps the inert form.
     expect(ce2.expr(['Length', ['Interval', 0, 1]]).evaluate().operator).toBe(
@@ -5480,9 +5481,12 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     expect(ce2.expr(['Count', ['List', 1, 2, 3]]).type.toString()).toBe(
       'integer'
     );
-    expect(ce2.expr(['Count', ['List', 1, 2, 3]]).evaluate().toString()).toBe(
-      '3'
-    );
+    expect(
+      ce2
+        .expr(['Count', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('3');
     expect(ce2.expr(['Count', ['Set', 1, 2, 3]]).type.toString()).toBe(
       'integer'
     );
@@ -5527,12 +5531,18 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     expect(r.at(1)).toBeUndefined();
     // `At`/`First` report the numeric absence marker for a position that
     // holds no element; what matters is that `-oo` is not handed out as one.
-    expect(ce2.expr(['At', ['Range', NOO, -1], 1]).evaluate().toString()).toBe(
-      'NaN'
-    );
-    expect(ce2.expr(['First', ['Range', NOO, -1]]).evaluate().toString()).toBe(
-      'NaN'
-    );
+    expect(
+      ce2
+        .expr(['At', ['Range', NOO, -1], 1])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+    expect(
+      ce2
+        .expr(['First', ['Range', NOO, -1]])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
     // `Take` has nothing to take, so it stays in its lazy form.
     expect(ce2.expr(['Take', ['Range', NOO, -1], 3]).evaluate().operator).toBe(
       'Take'
@@ -5553,9 +5563,12 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     const r = ce2.expr(['Range', 1, OO]);
     expect(r.isEnumerableCollection).toBe(true);
     expect(r.at(3)?.toString()).toBe('3');
-    expect(ce2.expr(['First', ['Range', 1, OO]]).evaluate().toString()).toBe(
-      '1'
-    );
+    expect(
+      ce2
+        .expr(['First', ['Range', 1, OO]])
+        .evaluate()
+        .toString()
+    ).toBe('1');
     expect(
       ce2
         .expr(['ListFrom', ['Take', ['Range', 1, OO], 3]])
@@ -5564,8 +5577,11 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
     ).toBe('[1,2,3]');
     // An endless range has no last element: asking for one is declined, and
     // reports the numeric absence marker rather than the extent marker.
-    expect(ce2.expr(['Last', ['Range', 1, OO]]).evaluate().toString()).toBe(
-      'NaN'
-    );
+    expect(
+      ce2
+        .expr(['Last', ['Range', 1, OO]])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
   });
 });

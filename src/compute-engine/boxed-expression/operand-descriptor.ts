@@ -263,45 +263,182 @@ export function describe(
     if (shared !== undefined) return shared;
   }
   const type = typeOverride ?? op._literalType ?? op.type.type;
-  const tf = factsFromType(type);
+  const descriptor = new ExpressionOperandDescriptor(op, type, walk);
+  if (typeOverride === undefined) walk?.set(op, descriptor);
+  return descriptor;
+}
 
-  // Every fact beyond what the type proves is computed ON FIRST READ and
-  // memoized. The value-channel reads are not free: a collection value's
-  // finiteness or element type comes from its operator's collection
-  // handlers, and a `Range` whose bound is a `Sum` evaluates that bound to
-  // answer its `count`. Reading every fact eagerly made building a
-  // descriptor — which happens for every operand of every derivation —
-  // evaluate operands no handler was going to ask about, and moved that
-  // evaluation OUTSIDE the purity guard's window, where a state write went
-  // unreported (a `sgn` read of `Random(Range(1, Sum(…)))` advanced the
-  // cache axis through its type derivation). Lazily, a handler pays only
-  // for the facts it reads, and reads them inside the guarded window.
+// The memo bits of `ExpressionOperandFacts`: one bit per fact that has been
+// computed. A fact's VALUE can legitimately be `undefined` (the undecided
+// branch of a `Tri`, an absent sign), so presence cannot be read from the
+// slot itself.
+const FINITE_COMPUTED = 1;
+const SGN_COMPUTED = 2;
+const CLOSED_COMPUTED = 4;
+const COLLECTION_COMPUTED = 8;
+const FINITE_COLLECTION_COMPUTED = 16;
+const INDEXED_COMPUTED = 32;
+const ELEMENT_TYPE_COMPUTED = 64;
 
-  const collectionOf = (): Tri => {
-    if (tf.collection === true) return true;
-    return op.isCollection === true ? true : tf.collection;
-  };
-  const indexedOf = (): Tri => {
-    if (tf.indexed === true) return true;
-    return op.isIndexedCollection === true ? true : tf.indexed;
-  };
-  const finiteCollectionOf = (): Tri => {
-    if (tf.finiteCollection !== undefined) return tf.finiteCollection;
-    return collectionOf() !== false ? op.isFiniteCollection : undefined;
-  };
+/**
+ * The facts of a real operand, each computed ON FIRST READ and memoized.
+ *
+ * A class with prototype getters, not an object literal with accessor
+ * properties: a descriptor is built for EVERY operand of EVERY type
+ * derivation — every element of a list literal each time a fresh list is
+ * typed — and an accessor-bearing literal plus the closures it captured cost
+ * about 1.6 µs per operand before a single fact was read, forty times the
+ * cost of an instance whose getters live on the prototype. That allocation
+ * was the whole per-element cost of typing a list.
+ *
+ * The value-channel reads are not free: a collection value's finiteness or
+ * element type comes from its operator's collection handlers, and a `Range`
+ * whose bound is a `Sum` evaluates that bound to answer its `count`. Reading
+ * every fact eagerly made building a descriptor evaluate operands no handler
+ * was going to ask about, and moved that evaluation OUTSIDE the purity
+ * guard's window, where a state write went unreported (a `sgn` read of
+ * `Random(Range(1, Sum(…)))` advanced the cache axis through its type
+ * derivation). Lazily, a handler pays only for the facts it reads, and reads
+ * them inside the guarded window. The facts the TYPE proves are lazy for the
+ * same reason of cost: they take six lattice checks (`factsFromType`), and
+ * the handlers that read only the type and the structure — the `List` shape
+ * analysis — were paying for them on every operand.
+ */
+class ExpressionOperandFacts implements OperandFacts {
+  // ECMAScript private fields, not TypeScript `private`: a `type` handler
+  // receives descriptors and no expressions (`OperandDescriptor`,
+  // `types-definitions.ts`), and a TypeScript-private property is an
+  // ordinary property at runtime that a handler could read the operand
+  // through.
+  readonly #op: Expression;
+  readonly #type: Type;
+  private _computed = 0;
+  private _typeFacts: ReturnType<typeof factsFromType> | undefined;
+  private _finite: Tri;
+  private _sgn: Sign | undefined;
+  private _closed: Tri;
+  private _collection: Tri;
+  private _finiteCollection: Tri;
+  private _indexed: Tri;
+  private _elementType: Type | undefined;
 
-  const finiteOf = (): Tri => {
+  constructor(op: Expression, type: Type) {
+    this.#op = op;
+    this.#type = type;
+  }
+
+  private typeFacts(): ReturnType<typeof factsFromType> {
+    return (this._typeFacts ??= factsFromType(this.#type));
+  }
+
+  get finite(): Tri {
+    if (!(this._computed & FINITE_COMPUTED)) {
+      this._computed |= FINITE_COMPUTED;
+      this._finite = this.finiteOf();
+    }
+    return this._finite;
+  }
+
+  // Value channel first (a literal's value, a symbol's held value or
+  // assumptions, an application's operator `sgn` handler), then the sign
+  // the type itself proves (a ranged declaration, a literal's value type,
+  // a ranged result type). The `.sgn` getter is a pure read for every
+  // operand kind (the `describe` doc comment states the contract): a
+  // symbol delegates to its held value — a held expression's operator
+  // handler included, behind a cycle guard — and an application dispatches
+  // its operator's `sgn` handler, memoized per node.
+  get sgn(): Sign | undefined {
+    if (!(this._computed & SGN_COMPUTED)) {
+      this._computed |= SGN_COMPUTED;
+      const op = this.#op;
+      let sgn: Sign | undefined;
+      if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
+      this._sgn = sgn ?? signOfType(this.#type);
+    }
+    return this._sgn;
+  }
+
+  get closed(): Tri {
+    if (!(this._computed & CLOSED_COMPUTED)) {
+      this._computed |= CLOSED_COMPUTED;
+      this._closed = this.#op.isConstant;
+    }
+    return this._closed;
+  }
+
+  get collection(): Tri {
+    if (!(this._computed & COLLECTION_COMPUTED)) {
+      this._computed |= COLLECTION_COMPUTED;
+      const tf = this.typeFacts();
+      this._collection =
+        tf.collection === true || this.#op.isCollection === true
+          ? true
+          : tf.collection;
+    }
+    return this._collection;
+  }
+
+  get finiteCollection(): Tri {
+    if (!(this._computed & FINITE_COLLECTION_COMPUTED)) {
+      this._computed |= FINITE_COLLECTION_COMPUTED;
+      const tf = this.typeFacts();
+      this._finiteCollection =
+        tf.finiteCollection !== undefined
+          ? tf.finiteCollection
+          : this.collection !== false
+            ? this.#op.isFiniteCollection
+            : undefined;
+    }
+    return this._finiteCollection;
+  }
+
+  get indexed(): Tri {
+    if (!(this._computed & INDEXED_COMPUTED)) {
+      this._computed |= INDEXED_COMPUTED;
+      const tf = this.typeFacts();
+      this._indexed =
+        tf.indexed === true || this.#op.isIndexedCollection === true
+          ? true
+          : tf.indexed;
+    }
+    return this._indexed;
+  }
+
+  get shape(): readonly number[] | undefined {
+    return this.typeFacts().shape;
+  }
+
+  // The per-instance element type: the operand's own collection handler,
+  // consulted only for an application whose operator declares one. The
+  // `elttype` family reads literal operands and static types (the
+  // set-comprehension and interval handlers are rewritten to that
+  // contract with the handler migration), so the read is pure.
+  get elementType(): Type | undefined {
+    if (!(this._computed & ELEMENT_TYPE_COMPUTED)) {
+      this._computed |= ELEMENT_TYPE_COMPUTED;
+      const op = this.#op;
+      this._elementType =
+        !isFunction(op) || this.collection === false
+          ? undefined
+          : op.operatorDefinition?.collection?.elttype?.(op);
+    }
+    return this._elementType;
+  }
+
+  private finiteOf(): Tri {
+    const tf = this.typeFacts();
     if (tf.finite !== undefined) return tf.finite;
+    const op = this.#op;
     if (isNumber(op)) return op.isFinite;
     if (isSymbol(op)) {
-      // Symmetric with the sign read below: a held NUMBER value is a pure
+      // Symmetric with the sign read above: a held NUMBER value is a pure
       // source, and a wide-typed symbol (`w: number`) can legitimately hold
       // `±∞` or `NaN` that its type does not reveal. A held non-number
       // value decides nothing.
       const held = op.valueDefinition?.value;
       return held !== undefined && isNumber(held) ? held.isFinite : undefined;
     }
-    if (isFunction(op) && isSubtype(type, 'number')) {
+    if (isFunction(op) && isSubtype(this.#type, 'number')) {
       // The value channel is the REFUTATION backstop for the generic-point
       // convention. A result type is deliberately optimistic about
       // finiteness: an operator that is finite at a generic point claims a
@@ -324,94 +461,51 @@ export function describe(
       return op.isFinite;
     }
     return undefined;
-  };
+  }
+}
 
-  // Value channel first (a literal's value, a symbol's held value or
-  // assumptions, an application's operator `sgn` handler), then the sign
-  // the type itself proves (a ranged declaration, a literal's value type,
-  // a ranged result type). The `.sgn` getter is a pure read for every
-  // operand kind (the constructor comment above states the contract): a
-  // symbol delegates to its held value — a held expression's operator
-  // handler included, behind a cycle guard — and an application dispatches
-  // its operator's `sgn` handler, memoized per node.
-  const sgnOf = (): Sign | undefined => {
-    let sgn: Sign | undefined;
-    if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
-    return sgn ?? signOfType(type);
-  };
+/**
+ * The descriptor of a real operand (`describe`). No `valid`, `application`,
+ * or `inferred` field: an error operand's TYPE is `'error'` (validity is a
+ * type read); whether the operand is an application is a structural question
+ * (`structureOf()`); and the inferred-type flag is an input to the engine's
+ * own derivation steps, not a handler fact — it rides the `structureOf()`
+ * symbol node.
+ */
+class ExpressionOperandDescriptor implements OperandDescriptor {
+  // Private fields for the same reason as in `ExpressionOperandFacts`: the
+  // operand and the walk memo (which maps expressions) must not be reachable
+  // from a handler.
+  readonly #op: Expression;
+  #walk: DescriptorMemo | undefined;
+  readonly facts: OperandFacts;
+  private _structure: OperandStructure | undefined;
+  private _structureComputed = false;
 
-  // The per-instance element type: the operand's own collection handler,
-  // consulted only for an application whose operator declares one. The
-  // `elttype` family reads literal operands and static types (the
-  // set-comprehension and interval handlers are rewritten to that
-  // contract with the handler migration), so the read is pure.
-  const elementTypeOf = (): Type | undefined => {
-    if (!isFunction(op) || collectionOf() === false) return undefined;
-    return op.operatorDefinition?.collection?.elttype?.(op);
-  };
+  constructor(
+    op: Expression,
+    readonly type: Type,
+    walk: DescriptorMemo | undefined
+  ) {
+    this.#op = op;
+    this.#walk = walk;
+    this.facts = new ExpressionOperandFacts(op, type);
+  }
 
-  // No `valid`, `application`, or `inferred` field: an error operand's TYPE
-  // is `'error'` (validity is a type read); whether the operand is an
-  // application is a structural question (`structureOf()`); and the
-  // inferred-type flag is an input to the engine's own derivation steps,
-  // not a handler fact — it rides the `structureOf()` symbol node.
-  const memo: Partial<{
-    finite: Tri;
-    sgn: Sign | undefined;
-    closed: Tri;
-    collection: Tri;
-    finiteCollection: Tri;
-    indexed: Tri;
-    elementType: Type | undefined;
-  }> = {};
-  const facts: OperandFacts = {
-    get finite(): Tri {
-      if (!('finite' in memo)) memo.finite = finiteOf();
-      return memo.finite;
-    },
-    get sgn(): Sign | undefined {
-      if (!('sgn' in memo)) memo.sgn = sgnOf();
-      return memo.sgn;
-    },
-    get closed(): Tri {
-      if (!('closed' in memo)) memo.closed = op.isConstant;
-      return memo.closed;
-    },
-    get collection(): Tri {
-      if (!('collection' in memo)) memo.collection = collectionOf();
-      return memo.collection;
-    },
-    get finiteCollection(): Tri {
-      if (!('finiteCollection' in memo))
-        memo.finiteCollection = finiteCollectionOf();
-      return memo.finiteCollection;
-    },
-    get indexed(): Tri {
-      if (!('indexed' in memo)) memo.indexed = indexedOf();
-      return memo.indexed;
-    },
-    shape: tf.shape,
-    get elementType(): Type | undefined {
-      if (!('elementType' in memo)) memo.elementType = elementTypeOf();
-      return memo.elementType;
-    },
+  // An instance property, not a prototype method: two call sites copy the
+  // function out of the descriptor unbound (`{ type, facts: d.facts,
+  // structureOf: d.structureOf }`, the missing-strip rewrap), and a method
+  // would lose its `this` there.
+  readonly structureOf = (): OperandStructure | undefined => {
+    if (!this._structureComputed) {
+      this._structureComputed = true;
+      this._structure = structureOfExpression(
+        this.#op,
+        (this.#walk ??= new Map())
+      );
+    }
+    return this._structure;
   };
-
-  let structureMemo: OperandStructure | undefined;
-  let structureComputed = false;
-  const descriptor: OperandDescriptor = {
-    type,
-    facts,
-    structureOf: () => {
-      if (!structureComputed) {
-        structureComputed = true;
-        structureMemo = structureOfExpression(op, (walk ??= new Map()));
-      }
-      return structureMemo;
-    },
-  };
-  if (typeOverride === undefined) walk?.set(op, descriptor);
-  return descriptor;
 }
 
 /**

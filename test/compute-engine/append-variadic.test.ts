@@ -13,6 +13,12 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * point of the flatten), so the reference for "element-for-element equal to
  * the nested form" is the STRUCTURAL form: bound, collection handlers live,
  * but not canonicalized.
+ *
+ * The sources below are `Range(1, 2)`, a lazy view, not the list literal
+ * `[1, 2]`: a `Join` or `Append` whose operands are all list literals folds
+ * into one list literal at canonicalization (pinned in
+ * `join-append-literal-fold.test.ts`), which would leave nothing to observe
+ * here.
  */
 
 const ce = new ComputeEngine();
@@ -33,9 +39,7 @@ function profile(e: ReturnType<typeof structural>) {
     count,
     each: finite ? [...e.each()].map((x) => x.toString()) : undefined,
     at: finite
-      ? Array.from({ length: count }, (_, i) =>
-          e.at(i + 1)?.toString()
-        ).concat(
+      ? Array.from({ length: count }, (_, i) => e.at(i + 1)?.toString()).concat(
           Array.from({ length: count }, (_, i) => e.at(-(i + 1))?.toString())
         )
       : undefined,
@@ -44,15 +48,15 @@ function profile(e: ReturnType<typeof structural>) {
 
 describe('Append: variadic signature', () => {
   test('the binary MathJSON form is unchanged', () => {
-    const e = ce.box(['Append', ['List', 1, 2], 3]);
-    expect(e.json).toEqual(['Append', ['List', 1, 2], 3]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3]);
+    expect(e.json).toEqual(['Append', ['Range', 1, 2], 3]);
     expect(e.nops).toBe(2);
     expect(elements(e)).toEqual(['1', '2', '3']);
     expect(e.evaluate().toString()).toBe('[1,2,3]');
   });
 
   test('an explicit 3-ary form is accepted (box route)', () => {
-    const e = ce.box(['Append', ['List', 1, 2], 3, 4]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3, 4]);
     expect(e.isValid).toBe(true);
     expect(e.nops).toBe(3);
     expect(e.count).toBe(4);
@@ -61,7 +65,7 @@ describe('Append: variadic signature', () => {
 
   test('an explicit 3-ary form is accepted (ce.function route)', () => {
     const e = ce.function('Append', [
-      ce.box(['List', 1, 2]),
+      ce.box(['Range', 1, 2]),
       ce.box(3),
       ce.box(4),
     ]);
@@ -71,7 +75,7 @@ describe('Append: variadic signature', () => {
   });
 
   test('an explicit 3-ary form is accepted (parse route)', () => {
-    const e = ce.parse('\\mathrm{Append}([1,2], 3, 4)');
+    const e = ce.parse('\\mathrm{Append}(\\mathrm{Range}(1,2), 3, 4)');
     expect(e.operator).toBe('Append');
     expect(e.isValid).toBe(true);
     expect(e.nops).toBe(3);
@@ -95,19 +99,19 @@ describe('Append: appended values stay atomic', () => {
     // [label, nested, flattened]
     [
       'scalar',
-      ['Append', ['Append', ['List', 1, 2], 3], 4],
-      ['Append', ['List', 1, 2], 3, 4],
+      ['Append', ['Append', ['Range', 1, 2], 3], 4],
+      ['Append', ['Range', 1, 2], 3, 4],
     ],
     [
       'list (a row appended to a matrix)',
       [
         'Append',
-        ['Append', ['List', ['List', 1, 2], ['List', 3, 4]], ['List', 5, 6]],
+        ['Append', ['List', ['Range', 1, 2], ['List', 3, 4]], ['List', 5, 6]],
         ['List', 7, 8],
       ],
       [
         'Append',
-        ['List', ['List', 1, 2], ['List', 3, 4]],
+        ['List', ['Range', 1, 2], ['List', 3, 4]],
         ['List', 5, 6],
         ['List', 7, 8],
       ],
@@ -119,12 +123,7 @@ describe('Append: appended values stay atomic', () => {
         ['Append', ['List', ['Tuple', 1, 2]], ['Tuple', 3, 4]],
         ['Tuple', 5, 6],
       ],
-      [
-        'Append',
-        ['List', ['Tuple', 1, 2]],
-        ['Tuple', 3, 4],
-        ['Tuple', 5, 6],
-      ],
+      ['Append', ['List', ['Tuple', 1, 2]], ['Tuple', 3, 4], ['Tuple', 5, 6]],
     ],
   ];
 
@@ -135,7 +134,7 @@ describe('Append: appended values stay atomic', () => {
   test('a row appended to a matrix is one row, not two elements', () => {
     const e = ce.box([
       'Append',
-      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['Range', 1, 2], ['List', 3, 4]],
       ['List', 5, 6],
     ]);
     expect(e.count).toBe(3);
@@ -173,12 +172,14 @@ describe('Append: a tuple SOURCE is still enumerated', () => {
   test('and agrees with the nested form element-for-element', () =>
     expect(
       profile(ce.box(['Append', ['Append', ['Tuple', 1, 2], 3], 4]))
-    ).toEqual(profile(structural(['Append', ['Append', ['Tuple', 1, 2], 3], 4]))));
+    ).toEqual(
+      profile(structural(['Append', ['Append', ['Tuple', 1, 2], 3], 4]))
+    ));
 });
 
 describe('Append/Join: same-head flatten', () => {
   test('a chain of k Appends is ONE node of width k + 1', () => {
-    let e: Expression = ['List', 0];
+    let e: Expression = ['Range', 0, 0];
     for (let i = 1; i <= 12; i++) e = ['Append', e, i];
     const boxed = ce.box(e);
     expect(boxed.operator).toBe('Append');
@@ -190,42 +191,42 @@ describe('Append/Join: same-head flatten', () => {
   });
 
   test('the flatten is route-independent (box / parse / ce.function)', () => {
-    const viaBox = ce.box(['Append', ['Append', ['List', 1, 2], 3], 4]);
+    const viaBox = ce.box(['Append', ['Append', ['Range', 1, 2], 3], 4]);
     const viaParse = ce.parse(
-      '\\mathrm{Append}(\\mathrm{Append}([1,2], 3), 4)'
+      '\\mathrm{Append}(\\mathrm{Append}(\\mathrm{Range}(1,2), 3), 4)'
     );
     const viaFn = ce.function('Append', [
-      ce.function('Append', [ce.box(['List', 1, 2]), ce.box(3)]),
+      ce.function('Append', [ce.box(['Range', 1, 2]), ce.box(3)]),
       ce.box(4),
     ]);
     for (const e of [viaBox, viaParse, viaFn]) {
       expect(e.operator).toBe('Append');
       expect(e.nops).toBe(3);
-      expect(e.json).toEqual(['Append', ['List', 1, 2], 3, 4]);
+      expect(e.json).toEqual(['Append', ['Range', 1, 2], 3, 4]);
     }
   });
 
   test('a single un-nested Append is not rewritten', () => {
-    const e = ce.box(['Append', ['List', 1, 2], 3]);
-    expect(e.json).toEqual(['Append', ['List', 1, 2], 3]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3]);
+    expect(e.json).toEqual(['Append', ['Range', 1, 2], 3]);
   });
 
   test('Join(Join(a, b), c) flattens to one Join', () => {
     const e = ce.box([
       'Join',
-      ['Join', ['List', 1, 2], ['List', 3]],
+      ['Join', ['Range', 1, 2], ['List', 3]],
       ['List', 4],
     ]);
     expect(e.operator).toBe('Join');
     expect(e.nops).toBe(3);
-    expect(e.json).toEqual(['Join', ['List', 1, 2], ['List', 3], ['List', 4]]);
+    expect(e.json).toEqual(['Join', ['Range', 1, 2], ['List', 3], ['List', 4]]);
     expect(elements(e)).toEqual(['1', '2', '3', '4']);
   });
 
   test('an inner Join keeps its atomic tuple operand atomic', () => {
     const e = ce.box([
       'Join',
-      ['Join', ['List', 1, 2], ['Tuple', 3, 4]],
+      ['Join', ['Range', 1, 2], ['Tuple', 3, 4]],
       ['List', 5],
     ]);
     expect(e.nops).toBe(3);
@@ -234,11 +235,7 @@ describe('Append/Join: same-head flatten', () => {
 
   // NO cross-head rewrites — a deliberate, reviewed decision.
   test('Append(Join(c, d), v) stays nested', () => {
-    const e = ce.box([
-      'Append',
-      ['Join', ['List', 1, 2], ['List', 3]],
-      4,
-    ]);
+    const e = ce.box(['Append', ['Join', ['Range', 1, 2], ['List', 3]], 4]);
     expect(e.operator).toBe('Append');
     expect(e.nops).toBe(2);
     expect(e.op1.operator).toBe('Join');
@@ -246,11 +243,7 @@ describe('Append/Join: same-head flatten', () => {
   });
 
   test('Join(Append(c, v), d) stays nested', () => {
-    const e = ce.box([
-      'Join',
-      ['Append', ['List', 1, 2], 3],
-      ['List', 4],
-    ]);
+    const e = ce.box(['Join', ['Append', ['Range', 1, 2], 3], ['List', 4]]);
     expect(e.operator).toBe('Join');
     expect(e.nops).toBe(2);
     expect(e.op1.operator).toBe('Append');
@@ -261,7 +254,7 @@ describe('Append/Join: same-head flatten', () => {
     // Append(Join(Append([1,2], 3), [4]), 5) — three heads, three levels.
     const e = ce.box([
       'Append',
-      ['Join', ['Append', ['List', 1, 2], 3], ['List', 4]],
+      ['Join', ['Append', ['Range', 1, 2], 3], ['List', 4]],
       5,
     ]);
     expect(e.operator).toBe('Append');
@@ -304,9 +297,13 @@ describe('Append: indexing over the combined length', () => {
     ).toEqual(['5', '4', '3', '2', '1']));
 
   test('out-of-range indices are undefined', () =>
-    expect(
-      [0, 6, 7, -6, -7].map((i) => ce.box(ternary).at(i))
-    ).toEqual([undefined, undefined, undefined, undefined, undefined]));
+    expect([0, 6, 7, -6, -7].map((i) => ce.box(ternary).at(i))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]));
 
   test('contains() sees both the source and every appended value', () => {
     const e = ce.box(ternary);
@@ -328,10 +325,9 @@ describe('Append: indexing over the combined length', () => {
 });
 
 describe('Append: a non-finite source is not forced', () => {
-  const inf: Expression = ['Append', ['Cycle', ['List', 1, 2]], 5, 6];
+  const inf: Expression = ['Append', ['Cycle', ['Range', 1, 2]], 5, 6];
 
-  test('count stays Infinity', () =>
-    expect(ce.box(inf).count).toBe(Infinity));
+  test('count stays Infinity', () => expect(ce.box(inf).count).toBe(Infinity));
 
   test('isFiniteCollection is false', () =>
     expect(ce.box(inf).isFiniteCollection).toBe(false));
@@ -343,10 +339,14 @@ describe('Append: a non-finite source is not forced', () => {
     ]));
 
   test('flattening a non-finite chain reports the same as the nested form', () => {
-    const flat = ce.box(['Append', ['Append', ['Cycle', ['List', 1, 2]], 5], 6]);
+    const flat = ce.box([
+      'Append',
+      ['Append', ['Cycle', ['Range', 1, 2]], 5],
+      6,
+    ]);
     const nested = structural([
       'Append',
-      ['Append', ['Cycle', ['List', 1, 2]], 5],
+      ['Append', ['Cycle', ['Range', 1, 2]], 5],
       6,
     ]);
     expect(flat.nops).toBe(3);
@@ -360,13 +360,13 @@ describe('Append: invalid operands decline the flatten', () => {
   const cases: [string, Expression, Expression][] = [
     [
       'a Nothing appended value',
-      ['Append', ['List', 1, 2], 'Nothing'],
-      ['Append', ['List', 1, 2], ['Error', "'missing'"]],
+      ['Append', ['Range', 1, 2], 'Nothing'],
+      ['Append', ['Range', 1, 2], ['Error', "'missing'"]],
     ],
     [
       'a missing appended value',
-      ['Append', ['List', 1, 2]],
-      ['Append', ['List', 1, 2], ['Error', "'missing'"]],
+      ['Append', ['Range', 1, 2]],
+      ['Append', ['Range', 1, 2], ['Error', "'missing'"]],
     ],
     [
       'a non-collection source',
@@ -391,28 +391,28 @@ describe('Append: invalid operands decline the flatten', () => {
     });
 
   test('an invalid INNER Append is not spliced into the outer one', () => {
-    const e = ce.box(['Append', ['Append', ['List', 1, 2], 'Nothing'], 5]);
+    const e = ce.box(['Append', ['Append', ['Range', 1, 2], 'Nothing'], 5]);
     expect(e.isValid).toBe(false);
     expect(e.nops).toBe(2);
     expect(e.op1.operator).toBe('Append');
     expect(e.json).toEqual([
       'Append',
-      ['Append', ['List', 1, 2], ['Error', "'missing'"]],
+      ['Append', ['Range', 1, 2], ['Error', "'missing'"]],
       5,
     ]);
   });
 
   test('an invalid OUTER appended value declines the flatten', () => {
-    const e = ce.box(['Append', ['Append', ['List', 1, 2], 3], 'Nothing']);
+    const e = ce.box(['Append', ['Append', ['Range', 1, 2], 3], 'Nothing']);
     expect(e.isValid).toBe(false);
     expect(e.nops).toBe(2);
     expect(e.op1.operator).toBe('Append');
   });
 
   test('route parity for the error results', () => {
-    const viaBox = ce.box(['Append', ['List', 1, 2], 'Nothing']);
+    const viaBox = ce.box(['Append', ['Range', 1, 2], 'Nothing']);
     const viaFn = ce.function('Append', [
-      ce.box(['List', 1, 2]),
+      ce.box(['Range', 1, 2]),
       ce.box('Nothing'),
     ]);
     expect(viaFn.isValid).toBe(false);
@@ -423,7 +423,11 @@ describe('Append: invalid operands decline the flatten', () => {
 describe('Append: the compile targets follow the variadic form', () => {
   // A flattened `Append` reaches the targets with k trailing operands; a
   // binary-only lowering would silently DROP all but the first.
-  const flat: Expression = ['Append', ['Append', ['List', 1, 2], 3], 4];
+  // A SYMBOL source: a literal-list source folds into one list literal at
+  // canonicalization (`join-append-literal-fold.test.ts`), so the spread
+  // lowering would never be reached.
+  ce.declare('xs', 'list<integer>');
+  const flat: Expression = ['Append', ['Append', 'xs', 3], 4];
 
   // `constantFold: false` on every compile below: these `Append` expressions
   // are closed (all-literal operands), so compile-time constant folding would
@@ -432,18 +436,18 @@ describe('Append: the compile targets follow the variadic form', () => {
   const NO_FOLD = { constantFold: false } as const;
 
   test('JavaScript', () =>
-    expect(compile(ce.box(flat), NO_FOLD)?.code).toBe('[...([1, 2]), 3, 4]'));
+    expect(compile(ce.box(flat), NO_FOLD)?.code).toBe('[...(_.xs), 3, 4]'));
 
   test('Python', () =>
     expect(new PythonTarget().compile(ce.box(flat), NO_FOLD)?.code).toBe(
-      '[*[1, 2], 3, 4]'
+      '[*xs, 3, 4]'
     ));
 
   test('the binary form is unchanged', () => {
-    const binary: Expression = ['Append', ['List', 1, 2], 3];
-    expect(compile(ce.box(binary), NO_FOLD)?.code).toBe('[...([1, 2]), 3]');
+    const binary: Expression = ['Append', 'xs', 3];
+    expect(compile(ce.box(binary), NO_FOLD)?.code).toBe('[...(_.xs), 3]');
     expect(new PythonTarget().compile(ce.box(binary), NO_FOLD)?.code).toBe(
-      '[*[1, 2], 3]'
+      '[*xs, 3]'
     );
   });
 });
@@ -452,37 +456,32 @@ describe('Append: the result type folds the appended values in', () => {
   // Pre-existing blind spot, fixed here: the binary handler was
   // `joinResultType([ops[0]])`, which ignored the appended value's type.
   test('a string appended to an integer list widens the element type', () =>
-    expect(ce.box(['Append', ['List', 1, 2], { str: 'x' }]).type.toString()).toBe(
-      'list<integer | string>'
-    ));
+    expect(
+      ce.box(['Append', ['Range', 1, 2], { str: 'x' }]).type.toString()
+    ).toBe('list<integer | string>'));
 
   test('a homogeneous append does not widen', () =>
-    expect(ce.box(['Append', ['List', 1, 2], 3]).type.toString()).toBe(
+    expect(ce.box(['Append', ['Range', 1, 2], 3]).type.toString()).toBe(
       'list<integer>'
     ));
 
   test('the flattened form agrees with the nested form', () => {
+    // A declared symbol source for the tuple pair: a list-literal source
+    // folds into a shaped literal (`list<…^3>`) that the structural nested
+    // form cannot produce.
+    ce.declare('ts', 'list<tuple<integer, integer>>');
     const pairs: [Expression, Expression][] = [
       [
-        ['Append', ['Append', ['List', 1, 2], 3], { str: 'x' }],
-        ['Append', ['List', 1, 2], 3, { str: 'x' }],
+        ['Append', ['Append', ['Range', 1, 2], 3], { str: 'x' }],
+        ['Append', ['Range', 1, 2], 3, { str: 'x' }],
       ],
       [
         ['Append', ['Append', ['Tuple', 1, 2], 3], 4],
         ['Append', ['Tuple', 1, 2], 3, 4],
       ],
       [
-        [
-          'Append',
-          ['Append', ['List', ['Tuple', 1, 2]], ['Tuple', 3, 4]],
-          ['Tuple', 5, 6],
-        ],
-        [
-          'Append',
-          ['List', ['Tuple', 1, 2]],
-          ['Tuple', 3, 4],
-          ['Tuple', 5, 6],
-        ],
+        ['Append', ['Append', 'ts', ['Tuple', 3, 4]], ['Tuple', 5, 6]],
+        ['Append', 'ts', ['Tuple', 3, 4], ['Tuple', 5, 6]],
       ],
     ];
     for (const [nested, flat] of pairs)
@@ -494,7 +493,12 @@ describe('Append: the result type folds the appended values in', () => {
   test('a point list keeps matching list<tuple<…>>', () =>
     expect(
       ce
-        .box(['Append', ['List', ['Tuple', 1, 2]], ['Tuple', 3, 4], ['Tuple', 5, 6]])
+        .box([
+          'Append',
+          ['List', ['Tuple', 1, 2]],
+          ['Tuple', 3, 4],
+          ['Tuple', 5, 6],
+        ])
         .type.matches('list<tuple<number, number>>')
     ).toBe(true));
 });
@@ -522,9 +526,7 @@ describe('Append: a tuple SOURCE contributes its ELEMENT type', () => {
 
   test('a TRAILING tuple is still an atomic element', () => {
     const e = ce.box(['Append', ['List', ['Tuple', 1, 2]], ['Tuple', 3, 4]]);
-    expect(e.type.toString()).toBe(
-      'list<tuple<integer, integer>>'
-    );
+    expect(e.type.toString()).toBe('list<tuple<integer, integer>^2>');
   });
 
   test('a heterogeneous tuple source widens to the union of its members', () =>
@@ -551,7 +553,7 @@ describe('Append: the 1-ary identity form (non-strict)', () => {
   });
 
   test('a non-empty source is not empty', () => {
-    const e = looseCe.box(['Append', ['List', 1, 2]]);
+    const e = looseCe.box(['Append', ['Range', 1, 2]]);
     expect(e.count).toBe(2);
     expect(e.isEmptyCollection).toBe(false);
     expect(elements(e)).toEqual(['1', '2']);
@@ -564,13 +566,15 @@ describe('Append: the 1-ary identity form (non-strict)', () => {
   });
 
   test('it compiles to the identity, not an interpreter fallback', () => {
+    // A unary `Append` is not folded into its source literal: the identity
+    // form is what is under test here.
     const e = looseCe.box(['Append', ['List', 1, 2]]);
     // `constantFold: false`: the operand is a literal list, so compile-time
     // constant folding would emit `[1, 2]` and the identity lowering under test
     // would never run.
     expect(compile(e, { constantFold: false })?.code).toBe('[...([1, 2])]');
-    expect(
-      new PythonTarget().compile(e, { constantFold: false })?.code
-    ).toBe('[*[1, 2]]');
+    expect(new PythonTarget().compile(e, { constantFold: false })?.code).toBe(
+      '[*[1, 2]]'
+    );
   });
 });

@@ -1205,8 +1205,13 @@ export abstract class _BoxedExpression implements Expression {
     return this.simplify();
   }
 
-  evaluateAsync(_options?: Partial<EvaluateOptions>): Promise<Expression> {
-    return Promise.resolve(this.evaluate());
+  // The options are forwarded: a leaf (a number, a symbol, a string) has no
+  // asynchronous work of its own, but `numericApproximation` and the other
+  // options decide WHAT it evaluates to, and dropping them made
+  // `[1/3].evaluateAsync({ numericApproximation: true })` keep the rational
+  // where the synchronous route floats it.
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    return Promise.resolve(this.evaluate(options));
   }
 
   N(): Expression {

@@ -731,8 +731,7 @@ describe('DISPLAY DIGITS', () => {
   describe('Sum/Product additive bodies are fenced (Tycho item 55)', () => {
     test('an Add body round-trips value-for-value', () => {
       const s = ce.box(
-        ce.parse('\\sum_{i=1}^{3}\\left(i+1\\right)', { canonical: false })
-          .json
+        ce.parse('\\sum_{i=1}^{3}\\left(i+1\\right)', { canonical: false }).json
       );
       expect(s.latex).toEqual('\\sum_{i=1}^3(i+1)');
       expect(ce.parse(s.latex).evaluate().re).toBe(9); // was 7: (\sum i)+1
@@ -807,10 +806,18 @@ describe('A symbol bound to a lazy collection serializes as its name (Tycho item
   test('lazy collection EXPRESSIONS still materialize', () => {
     const engine = new ComputeEngine();
     expect(engine.box(['Range', 1, 5]).toString()).toEqual('[1,2,3,4,5]');
-    expect(
-      engine.parse('[k^2 \\operatorname{for} k=1..3]').toString()
-    ).toEqual('[1,4,9]');
-    const joined = engine.box(['Join', ['List', 1, 2], ['List', 3]]).evaluate();
+    expect(engine.parse('[k^2 \\operatorname{for} k=1..3]').toString()).toEqual(
+      '[1,4,9]'
+    );
+    // A `Join` of list literals folds into one list literal at
+    // canonicalization, so it is a lazy view no longer: its serialization is
+    // the literal itself. A lazy source keeps the view.
+    const folded = engine.box(['Join', ['List', 1, 2], ['List', 3]]).evaluate();
+    expect(folded.isLazyCollection).toBe(false);
+    expect(folded.toString()).toEqual('[1,2,3]');
+    const joined = engine
+      .box(['Join', ['Range', 1, 2], ['List', 3]])
+      .evaluate();
     expect(joined.isLazyCollection).toBe(true);
     expect(joined.toString()).toEqual('[1,2,3]');
     expect(joined.latex).toEqual('\\bigl\\lbrack1, 2, 3\\bigr\\rbrack');

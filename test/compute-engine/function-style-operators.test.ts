@@ -24,7 +24,7 @@ describe('Function-style aliases for existing operators', () => {
   });
 
   test('\\operatorname{join}(L, M) parses to Join', () => {
-    const expr = ce.parse('\\operatorname{join}([1, 2], [3, 4])');
+    const expr = ce.parse('\\operatorname{join}(L, M)');
     expect(expr.operator).toBe('Join');
   });
 

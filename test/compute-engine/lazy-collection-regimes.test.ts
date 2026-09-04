@@ -176,13 +176,13 @@ describe('lazy collection regimes', () => {
   // classification is checked against what the memo's eligibility test
   // actually sees at runtime.
   const CHANGE_1_INSTANCES: Record<string, Expression> = {
-    Append: ['Append', ['List', 1, 2], 3],
+    Append: ['Append', ['Range', 1, 2], 3],
     Combinations: ['Combinations', ['List', 1, 2, 3], 2],
     Cycle: ['Cycle', ['List', 1, 2, 3]],
     Drop: ['Drop', ['List', 1, 2, 3], 1],
     Fill: ['Fill', ['Function', ['Add', '_', '_2']], ['Tuple', 3, 3]],
     Iterate: ['Iterate', ['Function', ['Multiply', '_', 2]], 1],
-    Join: ['Join', ['List', 1, 2], ['List', 3, 4]],
+    Join: ['Join', ['Range', 1, 2], ['List', 3, 4]],
     Linspace: ['Linspace', 1, 10, 5],
     Most: ['Most', ['List', 1, 2, 3]],
     Permutations: ['Permutations', ['List', 1, 2, 3]],
@@ -237,6 +237,10 @@ describe('lazy collection regimes', () => {
 // it only added CI flake. Performance ownership for the accumulator shape is
 // the benchmarks harness (`benchmarks/`), not this suite.
 
+// The subjects below take a `Range` source, never the list literal `[1, 2]`:
+// a `Join` or `Append` whose operands are all list literals folds into ONE
+// list literal at canonicalization (`join-append-literal-fold.test.ts`), and
+// a list literal is not a lazy view, so it has no memo to observe.
 describe('lazy collection evaluate memo', () => {
   test('each iteration re-uses the previous result', () => {
     // The decisive, DETERMINISTIC probe, in the real loop shape: the `Assign`
@@ -246,7 +250,7 @@ describe('lazy collection evaluate memo', () => {
     // sub-quadratic is that iteration k−1's RESULT is still a memo hit after
     // the assign — which is what evaluating it to itself means.
     const ce = new ComputeEngine();
-    ce.assign('xs', ce.box(['List']));
+    ce.assign('xs', ce.box(['Range', 1, 2]));
     let previous: ReturnType<typeof ce.box> | undefined = undefined;
     for (let i = 0; i < 20; i++) {
       if (previous) expect(previous.evaluate()).toBe(previous);
@@ -256,7 +260,7 @@ describe('lazy collection evaluate memo', () => {
       ce.assign('xs', r);
       previous = r;
     }
-    expect(previous!.count).toBe(20);
+    expect(previous!.count).toBe(22);
   });
 
   test('an evaluated view survives an unrelated Assign', () => {
@@ -265,7 +269,7 @@ describe('lazy collection evaluate memo', () => {
     // invalidated by the accumulator's own writes and never hit. A constant,
     // pure view gets a generation-INDEPENDENT entry instead.
     const ce = new ComputeEngine();
-    const e = ce.box(['Append', ['List', 1, 2], 3]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3]);
     const r = e.evaluate();
     ce.assign('unrelated', ce.number(1));
     expect(e.evaluate()).toBe(r);
@@ -323,7 +327,7 @@ describe('lazy collection evaluate memo', () => {
 
   test('non-default options are unaffected', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['Append', ['List', 1, 2], 3]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3]);
     // Prime the memo first: an explicit `materialization` must not read it.
     expect(e.evaluate().isLazyCollection).toBe(true);
     const materialized = e.evaluate({ materialization: true });
@@ -406,7 +410,7 @@ describe('lazy collection evaluate memo', () => {
 
   test('a pure constant view evaluates to the same object twice', () => {
     const ce = new ComputeEngine();
-    const e = ce.box(['Append', ['List', 1, 2], 3]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3]);
     const first = e.evaluate();
     expect(e.evaluate()).toBe(first);
     // The result is self-primed: evaluating it is the identity, which is what
@@ -433,7 +437,7 @@ describe('lazy collection evaluate memo — async parity', () => {
     // so what keeps the loop sub-quadratic is that iteration k−1's RESULT is
     // still a memo hit afterwards — i.e. it evaluates to ITSELF.
     const ce = new ComputeEngine();
-    ce.assign('xs', ce.box(['List']));
+    ce.assign('xs', ce.box(['Range', 1, 2]));
     let previous: BoxedExpr | undefined = undefined;
     for (let i = 0; i < 20; i++) {
       if (previous) expect(await previous.evaluateAsync()).toBe(previous);
@@ -443,17 +447,17 @@ describe('lazy collection evaluate memo — async parity', () => {
       ce.assign('xs', r);
       previous = r;
     }
-    expect(previous!.count).toBe(20);
+    expect(previous!.count).toBe(22);
   });
 
   test('a sync entry is an async hit, and an async entry a sync hit', async () => {
     // ONE memo, not two: whichever path fills it, the other reads it.
     const ce = new ComputeEngine();
-    const e = ce.box(['Append', ['List', 1, 2], 3]);
+    const e = ce.box(['Append', ['Range', 1, 2], 3]);
     const sync = e.evaluate();
     expect(await e.evaluateAsync()).toBe(sync);
 
-    const other = ce.box(['Append', ['List', 4, 5], 6]);
+    const other = ce.box(['Append', ['Range', 4, 5], 6]);
     const async = await other.evaluateAsync();
     expect(other.evaluate()).toBe(async);
     // …and the async path primes the result the same way, which is what makes
@@ -468,7 +472,7 @@ describe('lazy collection evaluate memo — async parity', () => {
     // global: without the slot each caller runs its own operand walk,
     // since the memo is only written when the first one settles.
     const ce = new ComputeEngine();
-    const node = ce.box(['Append', ['List', 1, 2], 3]);
+    const node = ce.box(['Append', ['Range', 1, 2], 3]);
     const original = (node as any)._computeValueAsync;
     let walks = 0;
     (node as any)._computeValueAsync = function (
@@ -504,7 +508,7 @@ describe('lazy collection evaluate memo — async parity', () => {
         return ce.number(42);
       },
     } as any);
-    const e = ce.box(['Append', ['List', 1, 2], ['BoomAsync']]);
+    const e = ce.box(['Append', ['Range', 1, 2], ['BoomAsync']]);
 
     const controller = new AbortController();
     controller.abort();
@@ -534,7 +538,7 @@ describe('lazy collection evaluate memo — async parity', () => {
         return ce.number(7);
       },
     } as any);
-    const e = ce.box(['Append', ['List', 1], ['BoomAsync2']]);
+    const e = ce.box(['Append', ['Range', 1, 1], ['BoomAsync2']]);
     await expect(e.evaluateAsync()).rejects.toThrow('boom');
     expect((e as any)._value.value).toBeNull();
     fail = false;
@@ -560,7 +564,9 @@ describe('lazy collection evaluate memo — async parity', () => {
 
     ce.precision = 60;
     const high = (
-      await ce.box(['Append', ['List', 1], ['N', ['Divide', 1, 3]]]).evaluateAsync()
+      await ce
+        .box(['Append', ['List', 1], ['N', ['Divide', 1, 3]]])
+        .evaluateAsync()
     )
       .at(2)!
       .toString();
@@ -632,7 +638,11 @@ describe('lazy collection evaluate memo — async parity', () => {
     expect((scalar as any)._value.value).toBeNull();
 
     // A def-lazy view (`Map`): outside the set by the `lazy` flag.
-    const map = ce.box(['Map', ['List', 1, 2, 3], ['Function', ['Add', '_', 1]]]);
+    const map = ce.box([
+      'Map',
+      ['List', 1, 2, 3],
+      ['Function', ['Add', '_', 1]],
+    ]);
     const r = await map.evaluateAsync();
     expect(r.toString()).toBe(map.evaluate().toString());
     expect((map as any)._value.value).toBeNull();
@@ -852,7 +862,9 @@ describe('conditional-handler shape queries are linear in depth', () => {
     expect(
       countingBaseReads(base, () => expect(chain.isEmptyCollection).toBe(false))
     ).toBeLessThan(50);
-    expect(countingBaseReads(base, () => expect(chain.at(1)!.re).toBe(129))).toBeLessThan(50);
+    expect(
+      countingBaseReads(base, () => expect(chain.at(1)!.re).toBe(129))
+    ).toBeLessThan(50);
 
     // The evaluated view answers the same. (Evaluation itself is O(depth²) —
     // each level runs its own shape queries — which the memo then collapses
@@ -866,10 +878,14 @@ describe('conditional-handler shape queries are linear in depth', () => {
 
 describe('conditional-handler chains enumerate like their eager equivalents', () => {
   /** Apply the same index script to a plain JS array. */
-  function applyJs(xs: number[], script: [string, number, number?][]): number[] {
+  function applyJs(
+    xs: number[],
+    script: [string, number, number?][]
+  ): number[] {
     const out = [...xs];
     for (const [op, index, value] of script) {
-      const i0 = index > 0 ? index - 1 : out.length + index + (op === 'Insert' ? 1 : 0);
+      const i0 =
+        index > 0 ? index - 1 : out.length + index + (op === 'Insert' ? 1 : 0);
       if (op === 'Insert') out.splice(i0, 0, value!);
       else if (op === 'DeleteAt') out.splice(i0, 1);
       else out[i0] = value!;
@@ -878,7 +894,11 @@ describe('conditional-handler chains enumerate like their eager equivalents', ()
   }
 
   /** Apply the same index script to a Compute Engine list. */
-  function applyCe(ce: ComputeEngine, n: number, script: [string, number, number?][]) {
+  function applyCe(
+    ce: ComputeEngine,
+    n: number,
+    script: [string, number, number?][]
+  ) {
     let xs = ce.function(
       'List',
       Array.from({ length: n }, (_, i) => ce.number(i))
@@ -937,7 +957,11 @@ describe('conditional-handler memo staleness gates', () => {
     // declined fall-through, not the eager handler.
     const ce = new ComputeEngine();
     ce.assign('y', ce.number(5));
-    const e = ce.function('Insert', [bigList(ce), ce.number(1), ce.symbol('y')]);
+    const e = ce.function('Insert', [
+      bigList(ce),
+      ce.number(1),
+      ce.symbol('y'),
+    ]);
     expect(e.evaluate().operator).toBe('Insert');
     expect(e.evaluate().at(1)?.re).toBe(5);
     ce.assign('y', ce.number(7));

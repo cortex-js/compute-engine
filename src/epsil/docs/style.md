@@ -129,16 +129,10 @@ See [Pipelines](/epsil/control-flow/#pipelines) and
 
 ## Building a list one element at a time
 
-**Do not grow a list one element per loop turn.** `Join(xs, [k])`,
-`Append(xs, k)`, and the spread literal `[...xs, k]` all evaluate to a lazy
-recipe — a `Join` or `Append` with one operand per turn so far — and every
-turn re-canonicalizes the whole recipe. The cost grows faster than the
-square of the number of turns: a few hundred turns take seconds, a thousand
-take tens of seconds, while the same list as a `Map` takes milliseconds.
-
-**Write the list as a pipeline.** A list whose element `k` depends only on
-`k` is a `Map`; a running value is a `Fold` whose accumulator is a scalar;
-a filtered selection is a `Filter`. These build the list once.
+**Prefer a pipeline when the list has a formula.** A list whose element `k`
+depends only on `k` is a `Map`; a running value is a `Fold` whose accumulator
+is a scalar; a filtered selection is a `Filter`. These build the list once,
+and their cost does not grow with the length in any way that matters.
 
 ```epsil
 Map(k => k^2, 1..5)
@@ -150,17 +144,18 @@ Fold((acc, k) => acc + 1/k, 0, 1..10)
 // ➔ 7381/2520
 ```
 
-**When a loop must extend a list, keep it short, and materialize.** Every
-form of growth — lazy or not — pays a cost proportional to the list's
-current length on each turn, so the whole loop costs at least the square of
-its length; a few hundred turns is the practical range. Wrapping the growth
-step in `ListFrom` does not change that, but it stores a flat list, so what
-the loop leaves behind is cheap to read.
+**Growing a list in a loop is fine for lists of a few thousand elements.**
+`Join(xs, [k])`, `Append(xs, k)` and the spread literal `[...xs, k]` all
+produce a plain list literal when `xs` holds one: the engine folds a join of
+list literals into one literal. Each turn copies the current list, so the
+whole loop costs the square of its length — a thousand turns take under a
+second on a typical machine, a hundred take a few milliseconds. Past a few
+thousand elements, write the pipeline instead.
 
 ```epsil
 let seen = []
 for word in ["a", "b", "a"] {
-  if !(word in seen) { seen = ListFrom(Join(seen, [word])) }
+  if !(word in seen) { seen = Join(seen, [word]) }
 }
 seen
 // ➔ ["a", "b"]
@@ -168,8 +163,8 @@ seen
 
 The default `iterationLimit` stops a loop after 1024 turns, so a loop that
 builds anything larger needs the engine's limit raised (see
-[Interruptibility](/epsil/evaluation/#interruptibility)) — one more reason to
-prefer the pipeline. The measurement behind the rule is in the
+[Interruptibility](/epsil/evaluation/#interruptibility)). The measurement
+behind these figures is in the
 [performance note](#loop-accumulation-measured) at the end of this page.
 
 ## Indexing
@@ -312,20 +307,20 @@ a lowercase one is a user-defined variable, function, or type (`total`,
 
 ## Loop accumulation, measured {#loop-accumulation-measured}
 
-The rule in [Building a list one element at a time](#building-a-list-one-element-at-a-time)
-comes from this measurement, taken on one machine with the interpreter
-(a compiled program is not affected in the same way):
+The figures in [Building a list one element at a time](#building-a-list-one-element-at-a-time)
+come from this measurement, taken on one machine with the interpreter
+(a compiled program copies a native array per turn and is faster still):
 
-| Turns / elements | `Map(k => k, 1..n)` | `xs = Join(xs, [k])` in a loop | `xs = ListFrom(Join(xs, [k]))` in a loop |
-|:-----------------|--------------------:|-------------------------------:|-----------------------------------------:|
-| 250 | 16 ms | 4.7 s | 2.0 s |
-| 500 | 18 ms | 16.6 s | 6.7 s |
-| 1000 | 27 ms | (not run) | 30.6 s |
+| Turns / elements | `Map(k => k, 1..n)` | `xs = Join(xs, [k])` in a loop | `xs = [...xs, k]` in a loop | `xs = ListFrom(Join(xs, [k]))` in a loop |
+|:-----------------|--------------------:|-------------------------------:|----------------------------:|-----------------------------------------:|
+| 250 | 15 ms | 127 ms | 125 ms | 165 ms |
+| 500 | 8 ms | 276 ms | 272 ms | 370 ms |
+| 1000 | 12 ms | 857 ms | 859 ms | 1246 ms |
 
-The numbers were taken in one run on a shared machine under load, so each
-is inflated; what the table shows is the shape — the pipeline does not
-grow with `n` in any way that matters, and every element-per-turn form
-grows by a factor of three to five per doubling.
-
-A `Join` or `Append` inside a loop is a lazy recipe nested once per turn;
-the alternatives keep the list flat.
+The pipeline does not grow with `n` in any way that matters; every
+element-per-turn form grows by a factor of about three per doubling, the
+cost of copying a list that is twice as long twice as often. Before the
+engine folded a join of list literals into one literal (2026-09-04), the
+same loop kept a lazy `Join` view with one operand per turn and re-checked
+all of them on every turn: 4.7 s at 250 turns and 16.6 s at 500 on the same
+kind of machine.

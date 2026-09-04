@@ -22,45 +22,42 @@ import { ComputeEngine } from '../../src/compute-engine';
  * exception: a finite literal bound caps the result at `n` elements whatever
  * `b` is, so `true` is derived WITHOUT resolving `b` (its exact `count` still
  * fails closed, below). */
-const CYCLES: [
-  string,
-  (ce: ComputeEngine) => void,
-  (boolean | undefined)[],
-][] = [
+const CYCLES: [string, (ce: ComputeEngine) => void, (boolean | undefined)[]][] =
   [
-    'a := b, b := a',
-    (ce) => {
-      ce.assign('a', ce.parse('b'));
-      ce.assign('b', ce.parse('a'));
-    },
-    [undefined, false],
-  ],
-  [
-    'a := Take(b, 2), b := Drop(a, 1)',
-    (ce) => {
-      ce.assign('a', ce.box(['Take', 'b', 2]));
-      ce.assign('b', ce.box(['Drop', 'a', 1]));
-    },
-    [true],
-  ],
-  [
-    'a := Append(b, 1), b := a',
-    (ce) => {
-      ce.assign('a', ce.box(['Append', 'b', 1]));
-      ce.assign('b', ce.parse('a'));
-    },
-    [undefined, false],
-  ],
-  [
-    'a := b, b := c, c := a',
-    (ce) => {
-      ce.assign('a', ce.parse('b'));
-      ce.assign('b', ce.parse('c'));
-      ce.assign('c', ce.parse('a'));
-    },
-    [undefined, false],
-  ],
-];
+    [
+      'a := b, b := a',
+      (ce) => {
+        ce.assign('a', ce.parse('b'));
+        ce.assign('b', ce.parse('a'));
+      },
+      [undefined, false],
+    ],
+    [
+      'a := Take(b, 2), b := Drop(a, 1)',
+      (ce) => {
+        ce.assign('a', ce.box(['Take', 'b', 2]));
+        ce.assign('b', ce.box(['Drop', 'a', 1]));
+      },
+      [true],
+    ],
+    [
+      'a := Append(b, 1), b := a',
+      (ce) => {
+        ce.assign('a', ce.box(['Append', 'b', 1]));
+        ce.assign('b', ce.parse('a'));
+      },
+      [undefined, false],
+    ],
+    [
+      'a := b, b := c, c := a',
+      (ce) => {
+        ce.assign('a', ce.parse('b'));
+        ce.assign('b', ce.parse('c'));
+        ce.assign('c', ce.parse('a'));
+      },
+      [undefined, false],
+    ],
+  ];
 
 describe('indirect symbol reference cycles do not overflow the stack', () => {
   for (const [name, setup, finiteAnswers] of CYCLES) {
@@ -198,19 +195,23 @@ describe('the cycle guard does not affect well-formed bindings', () => {
 });
 
 describe('an indirect cycle behaves like the direct self-reference it mirrors', () => {
-  // `d := Append(d, 1)` has always evaluated to `[1]`: the guarded inner
-  // reference contributes nothing and the enclosing expression is evaluated
-  // with what remains. An INDIRECT cycle takes one more hop before the guard
-  // fires, so it produces one more element — but it must stay in that family
-  // rather than unwinding to some arbitrary depth.
-  test('Append cycle materializes a bounded list, not an invented one', () => {
+  // `d := Append(d, 1)` used to evaluate to `[1]`: the guarded inner
+  // reference contributed nothing and the enclosing expression was evaluated
+  // with what remained. Since 0.123.1 a lazy collection operator no longer
+  // drops an operand that yields nothing from its walk (a valueless
+  // collection-typed symbol was silently lost the same way), so the cycle
+  // stays the unevaluated `Append` view, and its source operand reads as the
+  // symbol. An INDIRECT cycle takes one more hop before the guard fires and
+  // must land in the same family rather than unwinding to some arbitrary
+  // depth: the view over the OTHER symbol of the cycle.
+  test('Append cycle stays the Append view, not an invented list', () => {
     const direct = new ComputeEngine();
     direct.assign('d', direct.box(['Append', 'd', 1]));
-    expect(direct.box('d').evaluate().toString()).toBe('[1]');
+    expect(direct.box('d').evaluate().toString()).toBe('Append(d, 1)');
 
     const indirect = new ComputeEngine();
     indirect.assign('a', indirect.box(['Append', 'b', 1]));
     indirect.assign('b', indirect.parse('a'));
-    expect(indirect.box('a').evaluate().toString()).toBe('[1,1]');
+    expect(indirect.box('a').evaluate().toString()).toBe('Append(b, 1)');
   });
 });

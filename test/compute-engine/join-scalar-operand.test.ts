@@ -16,7 +16,9 @@ describe('a scalar operand is one element', () => {
     const e = ce.box(['Join', ['List', 1, 2, 3], 10]);
     expect(e.isValid).toBe(true);
     expect(e.evaluate().toString()).toBe('[1,2,3,10]');
-    expect(String(e.type)).toBe('list<integer>');
+    // The literal operands fold into one list literal at canonicalization,
+    // whose type carries the shape.
+    expect(String(e.type)).toBe('vector<integer^4>');
   });
 
   test('parse route', () => {
@@ -34,9 +36,9 @@ describe('a scalar operand is one element', () => {
   test('a scalar ahead of a list, and a symbol declared a number', () => {
     ce.declare('k', 'number');
     ce.assign('k', 7);
-    expect(ce.parse('\\operatorname{join}(0, L, k)').evaluate().toString()).toBe(
-      '[0,1,2,3,7]'
-    );
+    expect(
+      ce.parse('\\operatorname{join}(0, L, k)').evaluate().toString()
+    ).toBe('[0,1,2,3,7]');
   });
 
   test('the lazy accessors read the element', () => {
@@ -49,7 +51,12 @@ describe('a scalar operand is one element', () => {
   });
 
   test('a set-kind join deduplicates the scalar', () => {
-    expect(ce.box(['Join', ['Set', 1, 2], 2]).evaluate().toString()).toBe('Set(1, 2)');
+    expect(
+      ce
+        .box(['Join', ['Set', 1, 2], 2])
+        .evaluate()
+        .toString()
+    ).toBe('Set(1, 2)');
   });
 
   test('a union whose every arm is atomic is one element', () => {
@@ -85,18 +92,26 @@ describe('a scalar spread in a literal is one element', () => {
   });
 
   test('set literal', () => {
-    expect(ce.box(['Set', ['Spread', ['Set', 1, 2]], ['Spread', 2]]).toString()).toBe('Set(1, 2)');
+    expect(
+      ce.box(['Set', ['Spread', ['Set', 1, 2]], ['Spread', 2]]).toString()
+    ).toBe('Set(1, 2)');
   });
 });
 
 describe('compiled targets append it as one element', () => {
   test('javascript: scalar and tuple operands', () => {
-    const r = compile(ce.box(['Join', 'L', 10]), { to: 'javascript', fallback: false });
-    expect(r.run!()).toEqual([1, 2, 3, 10]);
-    const t = compile(ce.box(['Join', ['List', ['Tuple', 0, 0]], ['Tuple', 1, 2]]), {
+    const r = compile(ce.box(['Join', 'L', 10]), {
       to: 'javascript',
       fallback: false,
     });
+    expect(r.run!()).toEqual([1, 2, 3, 10]);
+    const t = compile(
+      ce.box(['Join', ['List', ['Tuple', 0, 0]], ['Tuple', 1, 2]]),
+      {
+        to: 'javascript',
+        fallback: false,
+      }
+    );
     expect(t.run!()).toEqual([
       [0, 0],
       [1, 2],
@@ -107,18 +122,27 @@ describe('compiled targets append it as one element', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('P', { type: 'list<tuple<number, number>>' });
     ce2.declare('q', 'tuple<number, number> | tuple<number, number, number>');
-    const js = compile(ce2.box(['Join', 'P', 'q']), { to: 'javascript', fallback: false });
+    const js = compile(ce2.box(['Join', 'P', 'q']), {
+      to: 'javascript',
+      fallback: false,
+    });
     expect(js.run!({ P: [[0, 0]], q: [1, 2] })).toEqual([
       [0, 0],
       [1, 2],
     ]);
-    const py = compile(ce2.box(['Join', 'P', 'q']), { to: 'python', fallback: false });
+    const py = compile(ce2.box(['Join', 'P', 'q']), {
+      to: 'python',
+      fallback: false,
+    });
     expect(py.code).toBe('[*P, q]');
   });
 
   test('python: the wrapped scalar is unpacked as one element', () => {
     ce.declare('M', 'list<number>');
-    const r = compile(ce.box(['Join', 'M', 10]), { to: 'python', fallback: false });
+    const r = compile(ce.box(['Join', 'M', 10]), {
+      to: 'python',
+      fallback: false,
+    });
     expect(r.code).toBe('[*M, *[10]]');
   });
 });

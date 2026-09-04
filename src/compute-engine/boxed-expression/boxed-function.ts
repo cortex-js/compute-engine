@@ -576,6 +576,13 @@ export class BoxedFunction
    * simply misses the fast path and goes to `cachedValue`, which serves the
    * right cell. */
   private _typeGeneration = -1;
+  /** The world version (`engine._worldVersion`) under which the
+   * constant-keyed type entry of a literal list tree was stored — see the
+   * literal-list exception in `get type`. */
+  private _typeEpoch = -1;
+  /** Whether this node is a literal list tree (`_isLiteralListTree`),
+   * decided once: the structure of a node never changes. */
+  private _literalListTree: boolean | undefined;
 
   constructor(
     ce: ComputeEngine,
@@ -2045,37 +2052,61 @@ export class BoxedFunction
       return typeCell.value ?? BoxedType.unknown;
     }
 
-    // Keyed on the engine generation, unconditionally. An earlier shape gave
-    // an all-constant, pure node a generation-INDEPENDENT key, on the premise
-    // that nothing could change such a node's answer. The premise holds for
-    // the operands and not for the OPERATOR: rewriting a user function's
-    // definition in place — `f(x) = x + 1`, then `f(x) = "hello"` — changes
-    // what `f(2)` types as, while `2` stays every bit as constant. An entry
+    // Keyed on the engine generation, with ONE exception below. An earlier
+    // shape gave every all-constant, pure node a generation-INDEPENDENT key,
+    // on the premise that nothing could change such a node's answer. The
+    // premise holds for the operands and not for the OPERATOR: rewriting a
+    // user function's definition in place — `f(x) = x + 1`, then
+    // `f(x) = "hello"` — changes what `f(2)` types as, while `2` stays every
+    // bit as constant, and declaring `f` after `f(2)` was first typed changes
+    // it too (a `declare` advances only the generation axis). An entry
     // stamped with no generation is reached by no counter at all, so a node
     // whose type had been read once went on answering from the
     // pre-redefinition state for the rest of the engine's life. Keying it
-    // honestly measured free: the full suite ran 242 s against 250 s with the
-    // constant key, and the only workload that regressed was a synthetic loop
-    // re-reading a fixed set of constant nodes across hundreds of generation
-    // bumps (1800 reads, +6 ms). `sgn` and the `_eagerSource` slot in `at()`
-    // shared the key and lost it for the same reason.
+    // honestly measured free for ordinary workloads: the full suite ran
+    // 242 s against 250 s with the constant key. `sgn` and the
+    // `_eagerSource` slot in `at()` shared the key and lost it for the same
+    // reason.
     //
-    // The lazy-collection evaluate memo keeps its constant key
-    // (`_lazyCollectionMemoKey`) because it carries a second gate the three
-    // slots here never had: a hit also requires `_lazyValueEpoch` to equal
-    // the engine's current `_worldVersion`, and a redefinition advances that
-    // version, so its generation-independent entries do expire.
+    // The exception is a LITERAL LIST TREE: a `List` whose elements are
+    // number or string literals, or such lists (`_isLiteralListTree`). Its
+    // type depends on no definition, no symbol and no assumption — only on
+    // engine configuration, and a configuration change advances the world
+    // version — so it takes a constant key gated on `_worldVersion`, the
+    // gate the lazy-collection evaluate memo (`_lazyCollectionMemoKey`) uses
+    // for the same purpose. Without it an accumulator loop
+    // (`xs = Join(xs, [k])` under `Assign`, which advances the generation
+    // every turn) re-typed its whole list four times PER TURN — the symbol's
+    // type revision, the assignment's type derivation, the operand
+    // descriptor and the operand NaN check each paid the O(n) walk — and the
+    // loop cost 13 ms a turn at 300 elements where the same loop without the
+    // assignment cost 0.2 ms.
     // The one place a derived type is stored: a type past `TYPE_SIZE_LIMIT`
     // nodes is widened here (`boundTypeSize`), so no reader — this engine's
     // or a hover's — ever walks a type with a slot per leaf of a shared
     // value. Every other type in the engine descends from a stored one or
     // from text the user wrote.
+    let key: number | undefined = generation;
+    if (this._isLiteralListTree()) {
+      const epoch = this.engine._worldVersion;
+      if (this._typeEpoch !== epoch) {
+        // A new world: discard the constant entry (and the assumptions-hidden
+        // cell, which a symbol-free node never needs) so the read below
+        // recomputes and stores under this epoch.
+        this._type.value = null;
+        this._type.generation = -1;
+        this._type.objectDeps = undefined;
+        this._type.suppressed = undefined;
+        this._typeEpoch = epoch;
+      }
+      key = undefined;
+    }
     const compute = (): BoxedType =>
       new BoxedType(boundTypeSize(type(this)), this.engine._typeResolver);
     const result =
       cachedValue(
         this._type,
-        generation,
+        key,
         compute,
         CACHE_STATS
           ? {
@@ -2092,6 +2123,24 @@ export class BoxedFunction
     // generation (signature inference does) must leave the fast path closed.
     this._typeGeneration = generation;
     return result;
+  }
+
+  /** Is this node a `List` whose elements are number or string literals or
+   * literal list trees themselves? Decided once per node — the structure
+   * never changes — and read by `get type` for its constant cache key. A
+   * nested list reads its own memo, so a shared tower is walked once per
+   * node, not once per path. */
+  private _isLiteralListTree(): boolean {
+    if (this._literalListTree !== undefined) return this._literalListTree;
+    this._literalListTree =
+      this._operator === 'List' &&
+      this._ops.every(
+        (op) =>
+          isNumber(op) ||
+          isString(op) ||
+          (op instanceof BoxedFunction && op._isLiteralListTree())
+      );
+    return this._literalListTree;
   }
 
   /** The shape of the tensor (dimensions), derived from the type */
@@ -6125,8 +6174,23 @@ function type(expr: BoxedFunction): Type {
     // JOIN over every viable arm (§4.3): a result type wants the most precise
     // arm, an operand constraint must be the weakest — conflating them
     // reintroduces the §4.5 unsoundness.
-    const resolved = resolvedArm(expr, sig) ?? sig;
-    let sigResult = functionResult(resolved) ?? 'unknown';
+    // Resolved ON FIRST READ: the resolution and the arm solve below walk
+    // every operand through overload resolution, and when a `type` handler
+    // answers (every collection head, most numeric heads) their result is
+    // discarded. A `Join` accumulator with hundreds of operands was paying
+    // both for nothing on every turn. The readers are all downstream of the
+    // handler call: the declared result (when the handler declines) and the
+    // Contract B adjustment.
+    let resolvedMemo: Type | undefined;
+    let resolvedComputed = false;
+    const resolvedOf = (): Type | undefined => {
+      if (!resolvedComputed) {
+        resolvedComputed = true;
+        resolvedMemo = resolvedArm(expr, sig) ?? sig;
+      }
+      return resolvedMemo;
+    };
+    let sigResult: Type = 'unknown';
 
     // The DECLARED `broadcastable<T>` slot plan of this definition (Option A,
     // ratified 2026-08-08 — see `broadcastableParamSlots`). `undefined` for
@@ -6141,7 +6205,8 @@ function type(expr: BoxedFunction): Type {
     // substitute; an unsolvable residue falls back to `unknown`, never to a
     // variable. The solve mirrors `validateArguments`' — same gates, same
     // bindings — for the same reason `resolvedArm` recomputes its policies.
-    {
+    const declaredResultType = (): Type => {
+      const resolved = resolvedOf();
       const instantiated = instantiatedResultType(resolved, expr.ops, {
         // The SAME gate `box.ts` hands `validateArguments` (§4.5: validation
         // and result typing solve one constraint problem) — per position when
@@ -6153,8 +6218,8 @@ function type(expr: BoxedFunction): Type {
         stripMissing: (i) => def.stripsMissingAt(i),
         lazy: def.lazy,
       });
-      if (instantiated !== undefined) sigResult = instantiated;
-    }
+      return instantiated ?? functionResult(resolved) ?? 'unknown';
+    };
 
     // Missing-value absorption (§3.B of the missing-value typing design). When
     // this application resolves to `propagate` and some operand carries a
@@ -6211,7 +6276,7 @@ function type(expr: BoxedFunction): Type {
       // signature): the NaN-evidence derivation inside must read the SAME
       // carriers the runtime gates read, or an overload's numeric arm
       // propagates NaN at runtime while the derived type stays NaN-free.
-      const adjust = def.contractBResultAdjustment(expr.ops, resolved);
+      const adjust = def.contractBResultAdjustment(expr.ops, resolvedOf());
       if (adjust === 'none') return t;
       // A scalar NaN operand in a `propagate` slot makes the VALUE of the
       // whole application `NaN`, whatever the codomain's shape: the NaN
@@ -6323,7 +6388,8 @@ function type(expr: BoxedFunction): Type {
           sigResult = calculatedType.type;
         else
           sigResult =
-            parseType(calculatedType, expr.engine._typeResolver) ?? sigResult;
+            parseType(calculatedType, expr.engine._typeResolver) ??
+            declaredResultType();
         // Literal types are handler-visible only (`_literalType`, ruling O9
         // first half): a handler that echoes one into its result must not
         // store an over-specific contract nobody wrote (`tuple<1, 2>`), so
@@ -6339,6 +6405,10 @@ function type(expr: BoxedFunction): Type {
       // (`Fract(x)` for an empty-typed `x` is `never`, not `real<0..1>`).
       sigResult = 'never';
     }
+    // The handler declined (or there is none): the result is the declared
+    // one, solved at this call site.
+    if (!typeHandlerAnswered && sigResult !== 'never')
+      sigResult = declaredResultType();
     // With no per-operator type handler, the declared result type is taken
     // verbatim. Do not add a generic argument-based narrowing here (e.g.
     // narrowing a handler-less `-> number` result to the join of the operand
@@ -6696,7 +6766,7 @@ function type(expr: BoxedFunction): Type {
       // `paramsAreScalar(sig)` does on the value route. A ground signature
       // yields `undefined` and keeps `sigResult` untouched.
       const lambdaResult =
-        instantiatedResultType(resolved, expr.ops, { threadable: true }) ??
+        instantiatedResultType(resolvedOf(), expr.ops, { threadable: true }) ??
         sigResult;
       const lifted = lambdaBroadcastType(
         expr.ops,

@@ -105,6 +105,7 @@ import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { sumVariantInfo } from '../sum-representation.js';
 import type {
+  EvaluateOptions,
   Expression,
   FunctionInterface,
   OperandDescriptor,
@@ -3155,6 +3156,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           .filter((op) => !isSymbol(op, 'Nothing'))
       );
     },
+    // The async twin of the handler above. `List` is `lazy`, so its elements
+    // reach the handler unevaluated on the async route too, and without this
+    // handler `evaluateAsync()` fell back to the sync handler, which cannot
+    // await: an element whose operator has only an `evaluateAsync` handler
+    // (a user-declared asynchronous operator) stayed unevaluated inside the
+    // literal. Elements are awaited one at a time, in order, so an impure
+    // element's effects happen in the same order as on the sync route.
+    evaluateAsync: async (
+      ops,
+      { engine, numericApproximation, materialization, signal }
+    ) => {
+      const options = { numericApproximation, materialization, signal };
+      const evaluated = async (
+        xs: ReadonlyArray<Expression>
+      ): Promise<Expression[]> => {
+        const result: Expression[] = [];
+        for (const op of xs) {
+          const value = await op.evaluateAsync(options);
+          if (!isSymbol(value, 'Nothing')) result.push(value);
+        }
+        return result;
+      };
+      if (materialization)
+        return engine._fn('List', await evaluated(enlist(ops)));
+      if (
+        ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
+      )
+        return undefined;
+      return engine.function('List', await evaluated(ops));
+    },
     eq: defaultCollectionEq,
     collection: basicIndexedCollectionHandlers(),
   } as OperatorDefinition,
@@ -3198,7 +3229,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (comp !== null) {
         // Materialize the comprehension as a literal set if the (filtered)
         // domain is enumerable and small enough; otherwise stay symbolic.
-        const elements = enumerateSetComprehension(comp);
+        const elements = enumerateSetComprehension(comp, {
+          numericApproximation,
+          materialization,
+        });
         if (
           elements === undefined ||
           elements.length > MAX_SIZE_EAGER_COLLECTION
@@ -3212,6 +3246,33 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         'Set',
         ops.map((op) => op.evaluate({ numericApproximation, materialization }))
       );
+    },
+    // The async twin: see `List`'s `evaluateAsync` for why a lazy literal
+    // needs one. A comprehension awaits its domain, values, condition and
+    // body (`enumerateSetComprehensionAsync`); the elements of a literal set
+    // are awaited one at a time, in order.
+    evaluateAsync: async (
+      ops,
+      { engine: ce, numericApproximation, materialization, signal }
+    ) => {
+      const comp = parseSetComprehension(ops);
+      if (comp !== null) {
+        const elements = await enumerateSetComprehensionAsync(comp, {
+          numericApproximation,
+          materialization,
+          signal,
+        });
+        if (
+          elements === undefined ||
+          elements.length > MAX_SIZE_EAGER_COLLECTION
+        )
+          return undefined;
+        return ce.function('Set', elements);
+      }
+      const options = { numericApproximation, materialization, signal };
+      const elements: Expression[] = [];
+      for (const op of ops) elements.push(await op.evaluateAsync(options));
+      return ce.function('Set', elements);
     },
     eq: (a: Expression, b: Expression) => {
       // `b` may be an unevaluated set-valued expression (`Intersection(…)`,
@@ -6362,7 +6423,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (args.some((x) => !x.isValid)) return ce._fn('Join', args);
 
       const source = args[0];
-      if (
+      const joined =
         source !== undefined &&
         isFunction(source, 'Join') &&
         source.isCanonical &&
@@ -6370,10 +6431,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // a list/set/record/dictionary), but an atomic operand must never be
         // spliced.
         !isAtomicJoinOperand(source)
-      )
-        return ce._fn('Join', [...source.ops, ...args.slice(1)]);
+          ? [...source.ops, ...args.slice(1)]
+          : args;
 
-      return ce._fn('Join', args);
+      // Literal-list fold: when every operand is a `List` literal, the join
+      // IS the literal list of their elements, so build that list now instead
+      // of a lazy view over it. The same splice the list literal's spread
+      // form performs eagerly (`[...[1, 2], 3]` is `[1, 2, 3]`, see
+      // `canonicalList`). This is what keeps each turn of an accumulator loop
+      // (`xs = Join(xs, [k])`) at the cost of one copy of the current list,
+      // the cost `[...xs, k]` already had: without it the loop's value is a
+      // `Join` with one operand PER TURN, and every evaluation of that node
+      // walks all of its operands several times over (validation, overload
+      // resolution for the type, finiteness, purity, the rebuilt result's
+      // type again). The loop as a whole is still quadratic in the number of
+      // elements, as any immutable append is. A `List` operand is always list-kind, so no set, keyed
+      // or string operand can be present and the result kind is a list. The
+      // fold is bounded by the engine's collection size cap, past which the
+      // lazy view is kept.
+      const folded = foldLiteralListJoin(ce, joined);
+      if (folded !== undefined) return folded;
+
+      return ce._fn('Join', joined);
     },
     type: joinResultTypeD,
     collection: {
@@ -6648,14 +6727,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const source = args[0];
       // The operands are already canonical, so an inner `Append` has itself
       // been flattened: one level of splicing keeps the chain at depth 1.
-      if (
-        isFunction(source, 'Append') &&
-        source.isCanonical &&
-        source.nops >= 2
-      )
-        return ce._fn('Append', [...source.ops, ...args.slice(1)]);
+      const appended =
+        isFunction(source, 'Append') && source.isCanonical && source.nops >= 2
+          ? [...source.ops, ...args.slice(1)]
+          : args;
 
-      return ce._fn('Append', args);
+      // Literal-list fold, the `Append` twin of the one in `Join`'s
+      // handler: appending values to a `List` literal IS the literal list
+      // with those values as its last elements, so build that list now.
+      // Each appended value is one element whatever its type (a list value
+      // is appended whole), which is exactly what a `List` literal holds.
+      // Same size bound as `Join`'s fold.
+      const folded = foldLiteralListAppend(ce, appended);
+      if (folded !== undefined) return folded;
+
+      return ce._fn('Append', appended);
     },
     type: appendResultTypeD,
     collection: {
@@ -11645,7 +11731,10 @@ function parseSetComprehension(
  * must then stay symbolic.
  */
 function enumerateSetComprehension(
-  comp: SetComprehension
+  comp: SetComprehension,
+  // The evaluation options of the enclosing `evaluate`, when the enumeration
+  // serves one: `numericApproximation` decides what a body evaluates to.
+  options?: Partial<EvaluateOptions>
 ): Expression[] | undefined {
   const { body, variable, domain, condition } = comp;
   if (variable === undefined || domain === undefined) return undefined;
@@ -11668,7 +11757,7 @@ function enumerateSetComprehension(
   // The domain may reference symbols with assigned values, e.g.
   // `Range(1, n)` with `n := 5`: retry with the evaluated domain
   if (result.status !== 'success') {
-    const evaluatedDomain = domain.evaluate();
+    const evaluatedDomain = domain.evaluate(options);
     if (!evaluatedDomain.isSame(domain)) result = extract(evaluatedDomain);
   }
   if (result.status !== 'success') return undefined;
@@ -11679,7 +11768,61 @@ function enumerateSetComprehension(
   const isIdentity = isSymbol(body) && body.symbol === variable;
   const elements: Expression[] = [];
   for (const value of result.values) {
-    const x = isIdentity ? value : body.subs({ [variable]: value }).evaluate();
+    // An extracted value is an OPERAND of the domain, not its evaluation:
+    // an enumerable literal domain is extracted without evaluating its
+    // elements (`{k : k ∈ {x, 2}}` with `x := 5` produced `Set(x, 2)`).
+    const x = isIdentity
+      ? value.evaluate(options)
+      : body.subs({ [variable]: value }).evaluate(options);
+    if (!elements.some((y) => y.isSame(x))) elements.push(x);
+  }
+  return elements;
+}
+
+/**
+ * The async twin of `enumerateSetComprehension`: the domain (when it must be
+ * evaluated), every extracted value, the condition at every value and each
+ * substituted body are awaited with the caller's evaluation options, so an
+ * element, a domain or a condition whose operator has only an `evaluateAsync`
+ * handler is evaluated. The finite domain is extracted WITHOUT the condition
+ * — the big-operator helper `extractFiniteDomainWithReason` would filter it
+ * synchronously — and the condition is applied here: a value whose verdict is
+ * neither `True` nor `False` makes the whole enumeration undecidable, and the
+ * comprehension stays symbolic, as it does on the synchronous route.
+ */
+async function enumerateSetComprehensionAsync(
+  comp: SetComprehension,
+  options: Partial<EvaluateOptions>
+): Promise<Expression[] | undefined> {
+  const { body, variable, domain, condition } = comp;
+  if (variable === undefined || domain === undefined) return undefined;
+  const ce = body.engine;
+  const extract = (dom: Expression) =>
+    extractFiniteDomainWithReason(
+      ce._fn('Element', [ce.symbol(variable), dom]),
+      ce
+    );
+  let result = extract(domain);
+  if (result.status !== 'success') {
+    const evaluatedDomain = await domain.evaluateAsync(options);
+    if (!evaluatedDomain.isSame(domain)) result = extract(evaluatedDomain);
+  }
+  if (result.status !== 'success') return undefined;
+  const isIdentity = isSymbol(body) && body.symbol === variable;
+  const elements: Expression[] = [];
+  for (const extracted of result.values) {
+    // See the synchronous twin: an extracted value is a domain OPERAND.
+    const value = await extracted.evaluateAsync(options);
+    if (condition !== undefined) {
+      const verdict = await condition
+        .subs({ [variable]: value })
+        .evaluateAsync(options);
+      if (isSymbol(verdict, 'False')) continue;
+      if (!isSymbol(verdict, 'True')) return undefined;
+    }
+    const x = isIdentity
+      ? value
+      : await body.subs({ [variable]: value }).evaluateAsync(options);
     if (!elements.some((y) => y.isSame(x))) elements.push(x);
   }
   return elements;
@@ -11928,6 +12071,56 @@ function isProvablyScalarJoinOperand(op: Expression): boolean {
     return !typeCouldBeCollection(t);
   };
   return atomic(op.type.type);
+}
+
+/**
+ * The `List` literal a `Join` of `List` literals stands for, or `undefined`
+ * when the fold does not apply: some operand is not a `List` literal (a
+ * symbol, a lazy view, a tuple, a set, a string), or the folded list would
+ * exceed the engine's collection size cap (`ce.maxCollectionSize`), in which
+ * case the lazy `Join` view is kept — a view costs nothing per element.
+ *
+ * The elements are the operands' elements, shared, in order. Only the
+ * `List` head is inspected: a `List` literal is list-kind whatever its
+ * elements are, so the result kind is a list and no deduplication or key
+ * merge could apply. An empty operand list (`Join()`) is not folded, so the
+ * empty join keeps its own node.
+ */
+function foldLiteralListJoin(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length === 0) return undefined;
+  let total = 0;
+  for (const op of ops) {
+    if (!isFunction(op, 'List') || !op.isCanonical) return undefined;
+    total += op.nops;
+  }
+  // One operand: the join IS that list, and nothing is copied, so the size
+  // cap (which bounds the COPY) does not apply.
+  if (ops.length === 1) return ops[0];
+  if (total > ce.maxCollectionSize) return undefined;
+  const elements: Expression[] = [];
+  for (const op of ops) if (isFunction(op, 'List')) elements.push(...op.ops);
+  return ce._fn('List', elements);
+}
+
+/**
+ * The `List` literal an `Append` to a `List` literal stands for, or
+ * `undefined` when the source is not a `List` literal or the result would
+ * exceed the engine's collection size cap. See `foldLiteralListJoin`.
+ * Every appended value is one element, so the values are placed after the
+ * source's elements as they are.
+ */
+function foldLiteralListAppend(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  const source = ops[0];
+  if (ops.length < 2 || !isFunction(source, 'List') || !source.isCanonical)
+    return undefined;
+  if (source.nops + ops.length - 1 > ce.maxCollectionSize) return undefined;
+  return ce._fn('List', [...source.ops, ...ops.slice(1)]);
 }
 
 /** The undeduplicated element enumeration of a `Map` node.
