@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { isRepairableOperatorSymbol } from '../../src/compute-engine/boxed-expression/overload';
 
 /**
  * Prose-style fallback for un-applied builtin operators (MathNet corpus,
@@ -102,5 +103,77 @@ describe('un-applied builtin operator devolves to a symbol', () => {
     const ce = new ComputeEngine();
     const expr = ce.box(['Add', 'Sin', 1]);
     expect(JSON.stringify(expr.json)).toContain('Error');
+  });
+});
+
+describe('the devolution runs at every parameter position', () => {
+  // The repair lives in the argument validation that every declared
+  // signature goes through. It used to run only for a REQUIRED parameter:
+  // the optional and variadic gates raised `incompatible-type` on the bare
+  // builtin instead, so `Range(1, N)` (upper bound = the optional second
+  // parameter of `(number, number?, step: number?)`) and `Max(1, N)` (the
+  // variadic tail) refused the same `N` that `N + 1` and `Range(N)` accept.
+  // Each assertion takes a fresh engine: the first devolution of `N` in an
+  // engine shadows the builtin, so a second expression in the same engine
+  // would see an ordinary variable and never reach the repair.
+  test('optional parameter: Range upper bound and step', () => {
+    expect(new ComputeEngine().box(['Range', 1, 'N']).json).toEqual([
+      'Range',
+      1,
+      'N',
+    ]);
+    expect(new ComputeEngine().box(['Range', 1, 'D']).json).toEqual([
+      'Range',
+      1,
+      'D',
+    ]);
+    expect(new ComputeEngine().box(['Range', 1, 10, 'N']).json).toEqual([
+      'Range',
+      1,
+      10,
+      'N',
+    ]);
+    expect(new ComputeEngine().parse('[1,\\ldots,N]').json).toEqual([
+      'Range',
+      1,
+      'N',
+    ]);
+  });
+
+  test('variadic parameter: Max / Min tail', () => {
+    expect(new ComputeEngine().box(['Max', 1, 'N']).json).toEqual([
+      'Max',
+      1,
+      'N',
+    ]);
+    expect(new ComputeEngine().box(['Min', 2, 'N', 'M']).json).toEqual([
+      'Min',
+      2,
+      'N',
+      'M',
+    ]);
+  });
+
+  test('the trial-mode precondition matches the repair', () => {
+    // An overload trial admits an operand by this write-free precondition
+    // and the winning arm's real validation then runs the repair. The two
+    // must agree: a user-assigned function hoisted into the root scope is
+    // refused by the repair, so the precondition must refuse it too, or an
+    // arm survives its trial and fails the real validation with no sibling
+    // arm tried.
+    const ce = new ComputeEngine();
+    ce.assign('F', ['Function', ['Square', 'x'], 'x']);
+    expect(isRepairableOperatorSymbol(ce, ce.box('F'))).toBe(false);
+    expect(isRepairableOperatorSymbol(ce, ce.box('N'))).toBe(true);
+    ce.declare('G', '(number) -> number');
+    expect(isRepairableOperatorSymbol(ce, ce.box('G'))).toBe(false);
+  });
+
+  test('a user-declared function in an optional slot is still refused', () => {
+    const ce = new ComputeEngine();
+    ce.declare('F', '(number) -> number');
+    const e = ce.box(['Range', 1, 'F']);
+    expect(e.isValid).toBe(false);
+    expect(JSON.stringify(e.json)).toContain('incompatible-type');
   });
 });

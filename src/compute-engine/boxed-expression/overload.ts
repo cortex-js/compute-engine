@@ -289,8 +289,14 @@ export function armArityCapable(arm: FunctionSignature, opType: Type): boolean {
  * filter cannot perform the declaration itself (§4.2).
  *
  * Stays in lockstep with `devolveUnappliedOperator`: the operand must be bound
- * to an OPERATOR definition, and a value binding counts only when the repair
- * itself created it (a user-declared symbol keeps its declared-type check).
+ * to an OPERATOR definition; a root-scope operator counts only when it is a
+ * library builtin, not a user-assigned function literal (`ce.assign('F', x ↦
+ * x²)` hoists into the same parentless scope as the library, and the repair
+ * refuses it so that `F` used as a value surfaces `incompatible-type`); and a
+ * value binding counts only when the repair itself created it (a
+ * user-declared symbol keeps its declared-type check). A precondition wider
+ * than the repair would let an overload arm survive its trial and then fail
+ * the real validation with no sibling arm tried.
  */
 export function isRepairableOperatorSymbol(
   ce: ComputeEngine,
@@ -306,7 +312,12 @@ export function isRepairableOperatorSymbol(
   // Use the tagged union's discriminant directly: importing the general
   // definition guards from `./utils.js` would close a runtime cycle.
   const def = scope.bindings.get(name)!;
-  if (!scope.parent) return 'operator' in def;
+  if (!scope.parent) {
+    if (!('operator' in def)) return false;
+    // `_isLambda` is a field of the operator-definition class, not of its
+    // public interface; read it structurally for the same cycle reason.
+    return (def.operator as { _isLambda?: boolean })._isLambda !== true;
+  }
   return 'value' in def && def.value._isDevolvedShadow === true;
 }
 

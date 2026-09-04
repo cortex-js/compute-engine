@@ -2,6 +2,21 @@
 
 ### Resolved Issues
 
+- **A bare single-letter builtin name in an OPTIONAL or VARIADIC slot
+  devolves to a variable, as it does in a required slot.** `Range(1, N)`,
+  `Range(1, 10, N)`, `Max(1, N)` and `Min(2, N, M)` boxed an
+  `incompatible-type` error on the `N` (its type is the builtin's
+  `(any, integer?) -> unknown`) where `N + 1`, `Range(N)` and
+  `Element(n, N)` read it as a variable: the "un-applied standard-library
+  operator used as a value means a variable" repair ran only at the
+  required-parameter gate of argument validation. The optional and variadic
+  gates now run the same two construction-level repairs (this devolution
+  and the fresh matrix inference repair), and a trial validation admits
+  them by precondition as the required gate does. A user-declared function
+  in such a slot is still refused. Reached the boxing seam of 0.123.0 first:
+  `Range` had no signature validation before it, so `[1, \\ldots, N]`
+  with an undeclared `N` boxed on 0.122.0 and was refused on 0.123.0
+  (Tycho item 250).
 - **A valueless collection-typed operand was silently dropped by the lazy
   collection operators.** With `v` declared `list<number>` and not yet
   assigned, `Join([1], v)` evaluated to `[1]` and `Append(v, 2)` to `[2]`,

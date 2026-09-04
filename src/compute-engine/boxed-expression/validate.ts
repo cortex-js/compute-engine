@@ -2402,6 +2402,47 @@ export function validateArguments(
         i += 1;
         continue;
       }
+      // The two repairs that rewrite an operand at construction time — a
+      // fresh matrix inference re-boxed against the parameter, and a bare
+      // single-letter builtin (`N`, `D`) devolved to a variable — run here
+      // exactly as they do for a required parameter. A trial validation
+      // admits an operand by the repair's write-free precondition without
+      // running it; a real validation runs the repair. An optional slot sees
+      // the same operands a required slot does: `Range(1, N)` puts the bare
+      // builtin `N` in the optional upper bound, and `N` must become a
+      // variable there as it does in `Range(N)` or `N + 1`.
+      if (internals?.trial) {
+        if (couldRepairFreshMatrixInference(ce, op, param, freshlyInferred)) {
+          result.push(op);
+          i += 1;
+          continue;
+        }
+        if (isRepairableOperatorSymbol(ce, op)) {
+          result.push(op);
+          i += 1;
+          continue;
+        }
+      } else {
+        const repaired = repairFreshMatrixInference(
+          ce,
+          op,
+          param,
+          freshlyInferred
+        );
+        if (repaired) {
+          result.push(repaired);
+          substituted = true;
+          i += 1;
+          continue;
+        }
+        const devolved = devolveUnappliedOperator(ce, op);
+        if (devolved !== null) {
+          result.push(devolved);
+          substituted = true;
+          i += 1;
+          continue;
+        }
+      }
       // Overlap-deferred validation (§D6.2) — see the required-param gate.
       if (overlapsForDeferredValidation(op.type.type, param)) {
         result.push(op);
@@ -2569,6 +2610,43 @@ export function validateArguments(
           result.push(op);
           deferredIdx.add(result.length - 1);
           continue;
+        }
+        // The two repairs that rewrite an operand at construction time (a
+        // fresh matrix inference re-boxed against the parameter, a bare
+        // single-letter builtin devolved to a variable) run for a variadic
+        // operand as they do for a required or optional one: a trial
+        // validation admits by the write-free precondition, a real validation
+        // runs the repair. `Max(1, N)` puts the bare builtin `N` in the
+        // variadic tail.
+        if (internals?.trial) {
+          if (
+            couldRepairFreshMatrixInference(ce, op, varParam, freshlyInferred)
+          ) {
+            result.push(op);
+            continue;
+          }
+          if (isRepairableOperatorSymbol(ce, op)) {
+            result.push(op);
+            continue;
+          }
+        } else {
+          const repaired = repairFreshMatrixInference(
+            ce,
+            op,
+            varParam,
+            freshlyInferred
+          );
+          if (repaired) {
+            result.push(repaired);
+            substituted = true;
+            continue;
+          }
+          const devolved = devolveUnappliedOperator(ce, op);
+          if (devolved !== null) {
+            result.push(devolved);
+            substituted = true;
+            continue;
+          }
         }
         // Overlap-deferred validation (§D6.2) — see the required-param gate.
         if (overlapsForDeferredValidation(op.type.type, varParam)) {
