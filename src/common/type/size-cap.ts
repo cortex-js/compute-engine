@@ -149,11 +149,16 @@ function mapComponents(t: Readonly<Type>, f: (x: Type) => Type): Type {
       return { ...t, elements };
     }
     case 'tuple':
-      return { ...t, elements: t.elements.map((e) => ({ ...e, type: f(e.type) })) };
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({ ...e, type: f(e.type) })),
+      };
     case 'signature':
       return {
         ...t,
-        ...(t.args ? { args: t.args.map((a) => ({ ...a, type: f(a.type) })) } : {}),
+        ...(t.args
+          ? { args: t.args.map((a) => ({ ...a, type: f(a.type) })) }
+          : {}),
         ...(t.optArgs
           ? { optArgs: t.optArgs.map((a) => ({ ...a, type: f(a.type) })) }
           : {}),

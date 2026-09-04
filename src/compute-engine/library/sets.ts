@@ -13,7 +13,6 @@ import { flatten } from '../boxed-expression/flatten.js';
 import {
   isFunction,
   isNumber,
-  isString,
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';

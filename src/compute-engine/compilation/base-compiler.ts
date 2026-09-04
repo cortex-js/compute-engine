@@ -7190,7 +7190,11 @@ export class BaseCompiler {
     const isPointListShaped = (a: Expression): boolean => {
       if (isBoundPossiblyCollectionTyped(a)) return false;
       const t = compilationType(a);
-      if (typeof t !== 'string' && t.kind === 'list' && (t.dimensions?.length ?? 0) > 1)
+      if (
+        typeof t !== 'string' &&
+        t.kind === 'list' &&
+        (t.dimensions?.length ?? 0) > 1
+      )
         return false;
       const elt = collectionElementType(t);
       return (
