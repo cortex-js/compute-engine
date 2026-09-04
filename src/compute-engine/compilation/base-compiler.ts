@@ -2325,9 +2325,7 @@ export class BaseCompiler {
       (!a.isCollection || a.isIndexedCollection);
     // A maybe-complex collection with no positional lowering keeps the
     // caller's decline.
-    if (
-      maybe.some((a) => !positional(a) && a.type.matches('collection<any>'))
-    )
+    if (maybe.some((a) => !positional(a) && a.type.matches('collection<any>')))
       return undefined;
     // An array operand whose element lane is UNDECIDED (`undefined`: a
     // `broadcastable<complex>` parameter) is not a candidate — it keeps its
@@ -7636,8 +7634,7 @@ export class BaseCompiler {
         if (tuples.length === 1) {
           if (
             !collection.every(
-              (a) =>
-                a === tuples[0] || BaseCompiler.isScalarElementSource(a)
+              (a) => a === tuples[0] || BaseCompiler.isScalarElementSource(a)
             )
           )
             return null;

@@ -3589,7 +3589,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           'not written out as a Tuple literal. Fail closed (D6).'
       );
     if (pointHasBroadcastComponent(args[0])) {
-      if (args[1] != null && isString(args[1]) && args[1].string !== 'Frobenius')
+      if (
+        args[1] != null &&
+        isString(args[1]) &&
+        args[1].string !== 'Frobenius'
+      )
         throw new Error(
           `Norm: the "${args[1].string}" norm does not compile. ` +
             `Fail closed (D6).`
@@ -3616,7 +3620,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         // the norm, never a source (this module does not import
         // `collection-utils`, see `isNumericTupleParticipant` below).
         const ct = jsType(c);
-        const isPoint = ct === 'tuple' || (typeof ct !== 'string' && ct.kind === 'tuple');
+        const isPoint =
+          ct === 'tuple' || (typeof ct !== 'string' && ct.kind === 'tuple');
         const broadcasts =
           !isPoint &&
           (c.isCollection || c.type.matches('indexed_collection<any>'));
@@ -3632,7 +3637,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         return p;
       });
       const ord =
-        args[1] != null && !isString(args[1]) ? `, ${bind(compile(args[1]))}` : '';
+        args[1] != null && !isString(args[1])
+          ? `, ${bind(compile(args[1]))}`
+          : '';
       return (
         `((${bound.join(', ')}) => _SYS.bcast((${params.join(', ')}) => ` +
         `_SYS.norm([${components.join(', ')}]${ord}), ${sources.join(', ')}))` +
