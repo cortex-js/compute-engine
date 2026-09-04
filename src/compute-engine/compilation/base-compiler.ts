@@ -9961,6 +9961,13 @@ export class BaseCompiler {
       }
     }
 
+    // A target that overrides `Match` wholesale (a function-valued handler)
+    // keeps it in value position, where its handler is consulted.
+    if (h === 'Match' && typeof target.functions?.(h) !== 'function') {
+      const stmt = BaseCompiler.compileMatchStatement(expr, target);
+      if (stmt !== undefined) return stmt;
+    }
+
     // …and the same statement as a bare (unwrapped) loop body.
     if (h === 'Assign' && isFunction(expr.ops[0], 'Tuple')) {
       const stmts = BaseCompiler.desugarPatternAssign(expr, target);
@@ -13072,7 +13079,8 @@ export class BaseCompiler {
   private static compileMatchBody(
     cc: CompiledCase,
     accessors: Map<string, string> | undefined,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    sequenceNames?: ReadonlySet<string>
   ): string {
     if (cc.captureNames.length === 0)
       return BaseCompiler.compile(cc.body.canonical, target);
@@ -13085,7 +13093,7 @@ export class BaseCompiler {
       throw new Error('Match: case body is not compilable. Fail closed (D6).');
     return BaseCompiler.compile(
       bodyClosure.op1,
-      BaseCompiler.matchCaptureTarget(accessors, target)
+      BaseCompiler.matchCaptureTarget(accessors, target, sequenceNames)
     );
   }
 
@@ -13094,7 +13102,8 @@ export class BaseCompiler {
   private static compileMatchGuard(
     cc: CompiledCase,
     accessors: Map<string, string> | undefined,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    sequenceNames?: ReadonlySet<string>
   ): string | undefined {
     if (!cc.hasGuard || cc.guard === undefined) return undefined;
     if (cc.captureNames.length === 0)
@@ -13108,7 +13117,7 @@ export class BaseCompiler {
       throw new Error('Match: case guard is not compilable. Fail closed (D6).');
     return BaseCompiler.compile(
       guardClosure.op1,
-      BaseCompiler.matchCaptureTarget(accessors, target)
+      BaseCompiler.matchCaptureTarget(accessors, target, sequenceNames)
     );
   }
 
@@ -13116,13 +13125,27 @@ export class BaseCompiler {
    * `a → s[0]`), delegating everything else to the base target. */
   private static matchCaptureTarget(
     accessors: Map<string, string> | undefined,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    sequenceNames?: ReadonlySet<string>
   ): CompileTarget<Expression> {
     if (accessors === undefined || accessors.size === 0) return target;
+    // A `...rest` capture holds a run of elements (`CompileTarget.
+    // sequenceVars`, name → accessor): the list and tuple emitters spread it
+    // while the name still resolves to that accessor.
+    let sequenceVars = target.sequenceVars;
+    if (sequenceNames !== undefined && sequenceNames.size > 0) {
+      const merged = new Map(target.sequenceVars ?? []);
+      for (const name of sequenceNames) {
+        const accessor = accessors.get(name);
+        if (accessor !== undefined) merged.set(name, accessor);
+      }
+      sequenceVars = merged;
+    }
     return {
       ...target,
       var: (id) => accessors.get(id) ?? target.var(id),
       boundVars: BaseCompiler.withBoundNames(target, [...accessors.keys()]),
+      sequenceVars,
     };
   }
 
@@ -13226,6 +13249,39 @@ export class BaseCompiler {
     s: string,
     target: CompileTarget<Expression>
   ): string {
+    const { cond, accessors, sequenceNames } = BaseCompiler.matchCaseTest(
+      engine,
+      cc,
+      s,
+      target
+    );
+    const body = BaseCompiler.compileMatchBody(
+      cc,
+      accessors,
+      target,
+      sequenceNames
+    );
+    return `if (${cond}) return ${body};`;
+  }
+
+  /**
+   * The JS test that a non-irrefutable case matches the subject bound to
+   * `s` — its pattern test and its guard, conjoined — with the accessor of
+   * each name the pattern binds. Shared by the value form (`emitMatchCaseJS`)
+   * and the statement form (`compileMatchStatement`), which differ only in
+   * what they emit under the test. A refutable tier-3 pattern has no compiled
+   * matcher and fails closed here.
+   */
+  private static matchCaseTest(
+    engine: ComputeEngine,
+    cc: CompiledCase,
+    s: string,
+    target: CompileTarget<Expression>
+  ): {
+    cond: string;
+    accessors: Map<string, string> | undefined;
+    sequenceNames?: ReadonlySet<string>;
+  } {
     if (cc.tier === 0 || cc.tier === 1) {
       const cond = BaseCompiler.matchLeafCondition(
         engine,
@@ -13236,25 +13292,51 @@ export class BaseCompiler {
         target
       );
       const guard = BaseCompiler.compileMatchGuard(cc, undefined, target);
-      const full = guard === undefined ? cond : `(${cond}) && (${guard})`;
-      return `if (${full}) return ${BaseCompiler.compileMatchBody(cc, undefined, target)};`;
+      return {
+        cond: guard === undefined ? cond : `(${cond}) && (${guard})`,
+        accessors: undefined,
+      };
     }
 
     if (cc.tier === 2) {
       const conds: string[] = [];
       const accessors = new Map<string, string>();
+      const sequenceNames = new Set<string>();
       BaseCompiler.walkMatchShape(
         engine,
         cc.shape!,
         s,
         conds,
         accessors,
-        target
+        target,
+        sequenceNames
       );
-      const guard = BaseCompiler.compileMatchGuard(cc, accessors, target);
+      const guard = BaseCompiler.compileMatchGuard(
+        cc,
+        accessors,
+        target,
+        sequenceNames
+      );
       if (guard !== undefined) conds.push(`(${guard})`);
-      const body = BaseCompiler.compileMatchBody(cc, accessors, target);
-      return `if (${conds.join(' && ')}) return ${body};`;
+      return { cond: conds.join(' && '), accessors, sequenceNames };
+    }
+
+    // A bare binding or `_` WITH a guard (`x: integer`, `n if n > 0`) is
+    // classified tier 3 by the ladder — the generic matcher binds it — but
+    // its test is the guard alone, with the name bound to the subject.
+    if (
+      cc.tier === 3 &&
+      cc.hasGuard &&
+      cc.rawPatterns?.length === 1 &&
+      isWildcard(cc.rawPatterns[0]) &&
+      cc.captureNames.length <= 1
+    ) {
+      const accessors =
+        cc.captureNames.length === 1
+          ? new Map([[cc.captureNames[0], s]])
+          : undefined;
+      const guard = BaseCompiler.compileMatchGuard(cc, accessors, target);
+      return { cond: guard ?? 'true', accessors };
     }
 
     // The SUM-CONSTRUCTOR tier (`docs/plans/2026-08-12-sum-type-sugar-and-
@@ -13263,7 +13345,7 @@ export class BaseCompiler {
     // (which reaches it with the generic matcher), but the compiler CAN lower
     // it — against the same per-sum representation policy the constructors
     // emit under.
-    const ctor = BaseCompiler.emitMatchConstructorCaseJS(engine, cc, s, target);
+    const ctor = BaseCompiler.matchConstructorTest(engine, cc, s, target);
     if (ctor !== undefined) return ctor;
 
     // Tier 3, refutable: no compiled reference implementation of the generic
@@ -13273,6 +13355,117 @@ export class BaseCompiler {
     throw new Error(
       `Match: pattern '${p?.toString() ?? '?'}' is not compilable; ` +
         `rewrite with destructuring or guards. Fail closed (D6).`
+    );
+  }
+
+  /**
+   * Compile a `Match` that stands as a STATEMENT in a loop body (or in a
+   * branch of a statement-form `If` inside one) to a chain of `if`/`else`
+   * statements, or `undefined` when the `Match` is not that shape and the
+   * value form (`compileMatchJS`) must take it.
+   *
+   * The value form is an arrow function, so a `break` or `continue` in a
+   * case body cannot reach the enclosing loop — which is exactly what a
+   * `match` arm inside a `for` body does, and what Epsil's `while let` lowers
+   * to: `Loop(Match(subject, MatchCase(pattern, body), MatchCase(_,
+   * Break())))`. Emitted as statements the control flow is native:
+   *
+   *   { const _s = subject;
+   *     if (Array.isArray(_s) && _s.length >= 1) { <body with h → _s[0]> }
+   *     else { break } }
+   *
+   * The case tests and capture accessors are the value form's
+   * (`matchCaseTest`); the bodies go through `compileLoopBody`, so a `Block`
+   * body is a statement list and its `break`/`continue`/`Return` are
+   * statements. The subject is bound once to a block-scoped constant.
+   *
+   * Statement position has no value to hold a `match-no-case` error, so only
+   * a `Match` with an irrefutable case takes this form; the first such case
+   * is the `else` and the cases after it are dead, as in the value form. Any
+   * other `Match` keeps the value form, which reports its shortfall. A large
+   * integer-constant
+   * dispatch is emitted as an `if` chain here, not the value form's
+   * `switch`: a `break` inside a `switch` would end the `switch`, not the
+   * loop. JavaScript only — the GPU targets override `Match` wholesale, and
+   * the interval and Python targets decline the head.
+   */
+  private static compileMatchStatement(
+    expr: Expression & FunctionInterface,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if ((target.language ?? 'javascript') !== 'javascript') return undefined;
+    const engine = expr.engine;
+    const args = expr.ops;
+    const plan = getMatchPlan(engine, args);
+    if (plan.errorAlt !== undefined) return undefined;
+    const cases = plan.segments.flatMap((seg) => seg.cases);
+    const lastIndex = cases.findIndex((cc) =>
+      BaseCompiler.isIrrefutableCase(cc)
+    );
+    if (lastIndex < 0) return undefined;
+    const last = cases[lastIndex];
+
+    // As in the value form, emission runs under a blind CSE instance: the
+    // guards and bodies are compiled from closure trees the plan builds, not
+    // from the `Match` operands a region could have indexed.
+    return BaseCompiler.withCseBlind(target, () => {
+      const s = BaseCompiler.tempVar(target);
+      const nl = target.ws('\n');
+      const branches: string[] = [];
+      for (const cc of cases.slice(0, lastIndex)) {
+        const { cond, accessors, sequenceNames } = BaseCompiler.matchCaseTest(
+          engine,
+          cc,
+          s,
+          target
+        );
+        const body = BaseCompiler.compileMatchStatementBody(
+          cc,
+          accessors,
+          target,
+          sequenceNames
+        );
+        branches.push(`if (${cond}) {${nl}${body}${nl}}`);
+      }
+      const acc =
+        last.captureNames.length === 1
+          ? new Map([[last.captureNames[0], s]])
+          : undefined;
+      const fallback = BaseCompiler.compileMatchStatementBody(
+        last,
+        acc,
+        target
+      );
+      const chain =
+        branches.length === 0
+          ? fallback
+          : `${branches.join(' else ')} else {${nl}${fallback}${nl}}`;
+      const subjCode = BaseCompiler.compile(args[0], target);
+      return `{ const ${s} = ${subjCode};${nl}${chain}${nl}}`;
+    });
+  }
+
+  /** A case body in statement position (`compileMatchStatement`): the same
+   * closure-rebound body `compileMatchBody` compiles as a value, handed to
+   * the loop-body compiler instead. */
+  private static compileMatchStatementBody(
+    cc: CompiledCase,
+    accessors: Map<string, string> | undefined,
+    target: CompileTarget<Expression>,
+    sequenceNames?: ReadonlySet<string>
+  ): string {
+    if (cc.captureNames.length === 0)
+      return BaseCompiler.compileLoopBody(cc.body.canonical, target);
+    const bodyClosure = buildCaseClosure(
+      cc.body.engine,
+      cc.body,
+      cc.captureNames
+    );
+    if (bodyClosure === undefined || !isFunction(bodyClosure))
+      throw new Error('Match: case body is not compilable. Fail closed (D6).');
+    return BaseCompiler.compileLoopBody(
+      bodyClosure.op1,
+      BaseCompiler.matchCaptureTarget(accessors, target, sequenceNames)
     );
   }
 
@@ -13302,6 +13495,21 @@ export class BaseCompiler {
     s: string,
     target: CompileTarget<Expression>
   ): string | undefined {
+    const test = BaseCompiler.matchConstructorTest(engine, cc, s, target);
+    if (test === undefined) return undefined;
+    const body = BaseCompiler.compileMatchBody(cc, test.accessors, target);
+    return `if (${test.cond}) return ${body};`;
+  }
+
+  /** The test and accessors of a sum-constructor case (see
+   * `emitMatchConstructorCaseJS`), or `undefined` when the case is not one
+   * the constructor tier can lower. */
+  private static matchConstructorTest(
+    engine: ComputeEngine,
+    cc: CompiledCase,
+    s: string,
+    target: CompileTarget<Expression>
+  ): { cond: string; accessors: Map<string, string> } | undefined {
     if ((target.language ?? 'javascript') !== 'javascript') return undefined;
     const pats = cc.rawPatterns;
     if (pats === undefined || pats.length === 0) return undefined;
@@ -13339,8 +13547,7 @@ export class BaseCompiler {
     const conds = [`(${cond})`];
     const guard = BaseCompiler.compileMatchGuard(cc, accessors, target);
     if (guard !== undefined) conds.push(`(${guard})`);
-    const body = BaseCompiler.compileMatchBody(cc, accessors, target);
-    return `if (${conds.join(' && ')}) return ${body};`;
+    return { cond: conds.join(' && '), accessors };
   }
 
   /** The total JS test that `base` holds a value of the given erased
@@ -13526,7 +13733,9 @@ export class BaseCompiler {
     base: string,
     conds: string[],
     accessors: Map<string, string>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** Receives the name of a `...rest` capture (see `matchCaptureTarget`). */
+    sequenceNames?: Set<string>
   ): void {
     // Dictionary shapes are a tier-2 fixed shape for the interpreter, but the
     // compiler does not implement dict destructuring (native dict values have no
@@ -13550,7 +13759,8 @@ export class BaseCompiler {
         `${base}[${i}]`,
         conds,
         accessors,
-        target
+        target,
+        sequenceNames
       )
     );
     const sLen = node.suffix.length;
@@ -13561,7 +13771,8 @@ export class BaseCompiler {
         `${base}[${base}.length - ${sLen} + ${j}]`,
         conds,
         accessors,
-        target
+        target,
+        sequenceNames
       )
     );
     if (node.rest !== undefined && node.rest.key !== null) {
@@ -13570,6 +13781,7 @@ export class BaseCompiler {
         name,
         `${base}.slice(${node.prefix.length}, ${base}.length - ${sLen})`
       );
+      sequenceNames?.add(name);
     }
   }
 
@@ -13580,7 +13792,8 @@ export class BaseCompiler {
     access: string,
     conds: string[],
     accessors: Map<string, string>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    sequenceNames?: Set<string>
   ): void {
     switch (el.kind) {
       case 'ignore':
@@ -13605,7 +13818,8 @@ export class BaseCompiler {
           access,
           conds,
           accessors,
-          target
+          target,
+          sequenceNames
         );
         return;
     }

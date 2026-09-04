@@ -394,3 +394,90 @@ describe('COMPILE Match — range patterns', () => {
     );
   });
 });
+
+describe('COMPILE Match — rest captures and guarded bindings', () => {
+  it('a rest capture spreads into a list or tuple literal, as its Sequence does', () => {
+    // The interpreter binds `...t` to a `Sequence` that splices into the
+    // list holding it; the compiled rest is an array, spread by the list
+    // and tuple emitters (`CompileTarget.sequenceVars`). Before that,
+    // `[h, ...t] => [t]` compiled to a list holding the tail.
+    const tail: MathJsonExpression = [
+      'Match',
+      'xs',
+      ['MatchCase', ['List', '_h', '___t'], ['List', 't']],
+      ['MatchCase', '_', 0],
+    ];
+    const r = compile(ce.box(tail), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ xs: [1, 2, 3] })).toEqual([2, 3]);
+    expect(r.run!({ xs: [1, 2] })).toEqual([2]);
+    expect(r.run!({ xs: [1] })).toEqual([]);
+    expect(ce.box(tail).subs({ xs: ['List', 1, 2, 3] }).evaluate().json).toEqual(
+      ['List', 2, 3]
+    );
+
+    const middle: MathJsonExpression = [
+      'Match',
+      'xs',
+      ['MatchCase', ['List', '_h', '___t', '_l'], ['List', 0, 't', 'l']],
+      ['MatchCase', '_', 0],
+    ];
+    const m = compile(ce.box(middle), { fallback: false });
+    expect(m.success).toBe(true);
+    expect(m.run!({ xs: [1, 2, 3, 4] })).toEqual([0, 2, 3, 4]);
+  });
+
+  it('a bare binding with a guard compiles as the guard alone', () => {
+    const expr: MathJsonExpression = [
+      'Match',
+      'x',
+      ['MatchCase', '_n', ['Greater', 'n', 3], ['Multiply', 'n', 2]],
+      ['MatchCase', '_', 0],
+    ];
+    const r = compile(ce.box(expr), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 5 })).toBe(10);
+    expect(r.run!({ x: 2 })).toBe(0);
+  });
+});
+
+describe('COMPILE Match — rest captures in guards, nested shapes, and shadowing', () => {
+  const tail = (body: MathJsonExpression, guard?: MathJsonExpression): MathJsonExpression => [
+    'Match',
+    'xs',
+    guard === undefined
+      ? ['MatchCase', ['List', '_h', '___t'], body]
+      : ['MatchCase', ['List', '_h', '___t'], guard, body],
+    ['MatchCase', '_', 0],
+  ];
+
+  it('a guard sees the rest as a sequence too', () => {
+    const r = compile(ce.box(tail(1, ['Equal', ['Length', ['List', 't']], 2])), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ xs: [1, 2, 3] })).toBe(1);
+    expect(r.run!({ xs: [1, 2] })).toBe(0);
+  });
+
+  it('a rest captured by a nested list pattern spreads as well', () => {
+    const expr: MathJsonExpression = [
+      'Match',
+      'xs',
+      ['MatchCase', ['List', ['List', '_h', '___t']], ['List', 't']],
+      ['MatchCase', '_', 0],
+    ];
+    const r = compile(ce.box(expr), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ xs: [[1, 2, 3]] })).toEqual([2, 3]);
+  });
+
+  it('a binder that shadows the rest name is not spread', () => {
+    // The lambda parameter `t` resolves elsewhere than the rest accessor, so
+    // `[t]` inside it is a one-element list, as the interpreter has it.
+    const r = compile(
+      ce.box(tail(['Map', ['Function', ['List', 't'], 't'], ['List', 9]])),
+      { fallback: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.run!({ xs: [1, 2, 3] })).toEqual([[9]]);
+  });
+});

@@ -75,9 +75,9 @@
   `Loop` and `Match` (the wildcard arm breaks) and the serializer spells that
   shape back as `while let`. A pattern that cannot fail is the
   `while-let-irrefutable` warning; a missing `=` is `while-let-equal-expected`.
-  Neither compile target lowers the shape yet: the JavaScript target declines
-  it (a `Match` arm cannot break out of its compiled arrow) and the program
-  runs in the interpreter, and the Python target fails closed on the `Match`.
+  The JavaScript target compiles it natively (a `Match` standing as a loop
+  statement is emitted as an `if`/`else` chain whose wildcard arm is a real
+  `break`); the Python target fails closed on the `Match`.
 
 
 ### Resolved Issues
@@ -95,17 +95,30 @@
   evaluate to a lazy collection whose operator is not `List`, so
   `match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took the wildcard (and
   a `while let [h, ...] = xs { xs = Rest(xs) }` loop ended after one turn).
-  The case holding the list pattern now reads such a finite subject (up to
-  100 000 elements) as a list: a fixed-shape pattern reads the positions it
-  names in place and copies only a named `...rest`, and an earlier case still
-  sees the subject as it is, so a pin ahead of the list case compares
-  verbatim. Tuples stay atomic and a string is text, not a list.
-- **Compiling a `Match` whose arm breaks fails closed with a named cause.**
-  The JavaScript `Match` emission is an arrow function, so a `break`,
-  `continue` or `Return` in a case body cannot reach the enclosing loop; it
-  used to surface as a late `Unexpected token 'break'` syntax error when the
-  unit was instantiated. The target now declines the `Match` up front, naming
-  the control operator, and the fallback runs the program in the interpreter.
+  The case holding the list pattern now reads such a finite subject as a
+  list: a fixed-shape pattern reads the positions it names in place, at any
+  nesting, and copies only a named `...rest`; an earlier case still sees the
+  subject as it is, so a pin ahead of the list case compares verbatim. Only
+  a copy is capped (100 000 elements; past it the case does not match).
+  Tuples stay atomic and a string is text, not a list.
+- **A `match` arm can `break` or `continue` in compiled code.** The
+  JavaScript `Match` emission is an arrow function, so a `break` in a case
+  body could not reach the enclosing loop; it surfaced as a late
+  `Unexpected token 'break'` syntax error when the unit was instantiated. A
+  `Match` that stands as a statement in a loop body — a `match` arm that
+  breaks a `for`, or the `while let` lowering — is now emitted as an
+  `if`/`else` statement chain with native control flow. A `Match` in value
+  position keeps the arrow form and declines a `break`, `continue` or
+  `Return` up front, naming the control operator.
+- **A compiled `...rest` capture splices into a list.** The interpreter
+  binds the rest of a list pattern to a `Sequence` that splices into the
+  list holding it, so `[h, ...t] => [t]` is the tail; the compiled rest is an
+  array and `[t]` compiled to a list holding the tail — a silent wrong
+  answer, and a `while let [h, ...t] = xs { xs = [t] }` loop that never
+  ended. The list and tuple emitters now spread a rest capture.
+- **A bare binding with a guard compiles.** `n if n > 3 => …` is classified
+  for the generic matcher and failed closed on the JavaScript target; it now
+  compiles as the guard alone with the name bound to the subject.
 - **A scalar function over a list of points keeps the point shape in its
   type.** With `P: list<tuple<number, number>>`, `Sqrt(P)`, `Sin(P)`,
   `Exp(P)` and `Power(P, 2)` typed `list<number>` while their values are

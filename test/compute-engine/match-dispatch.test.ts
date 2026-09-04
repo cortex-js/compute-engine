@@ -703,3 +703,27 @@ describe('MATCH in a function body — closures are per evaluation', () => {
     expect(ce.box(['clfr_g', 5]).evaluate().toString()).toBe('0');
   });
 });
+
+describe('MATCH ladder — lazy list subjects agree with the reference path', () => {
+  // A fixed-shape pattern over a lazy list value runs the same `matchShape`
+  // on both paths, so they cannot disagree; a nested lazy list is read the
+  // same way.
+  it('Rest(xs) against [h, ...t], at the top level and nested', () => {
+    const top: MathJsonExpression = [
+      'Match',
+      ['Rest', ['List', 1, 2, 3]],
+      ['MatchCase', ['List', '_h', '___t'], ['List', 't']],
+      ['MatchCase', '_', 0],
+    ];
+    expect(ladder(top)).toBe('[3]');
+    expect(reference(top)).toBe('[3]');
+    const nested: MathJsonExpression = [
+      'Match',
+      ['List', ['Rest', ['List', 1, 2, 3]], 9],
+      ['MatchCase', ['List', ['List', '_h', '___t'], '_z'], ['List', 'h', 'z']],
+      ['MatchCase', '_', 0],
+    ];
+    expect(ladder(nested)).toBe('[2,9]');
+    expect(reference(nested)).toBe('[2,9]');
+  });
+});

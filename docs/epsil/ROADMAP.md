@@ -38,13 +38,10 @@ Items are demand-gated unless another roadmap gives them higher priority.
 - **Compilation tails.** Epsil programs using `Comprehension`,
   stepped/descending `Range`, or multi-`Element` `Loop` still depend on target
   support. The Python target must continue to fail closed until it implements
-  equivalent lowering. `while let` — and any `match` arm that `break`s — is
-  not lowered by the JavaScript target either: its `Match` emission is an
-  arrow function, so a `break` in an arm cannot reach the loop. The target
-  declines the `Match` (naming the control operator) and the program runs in
-  the interpreter. A statement-form `Match` emission for loop bodies —
-  `while (true) { if (!<shape test>) break; <bindings>; <body> }` for the
-  `while let` shape — would close it.
+  equivalent lowering. A `match` on the JavaScript target compiles natively
+  in statement position (a `while let`, or a `match` arm that `break`s a
+  `for`) and in value position; a typed binding (`v: !error`) still fails
+  closed there, because `MatchesType` has no compiled type registry.
 
 ## Tooling and documentation
 

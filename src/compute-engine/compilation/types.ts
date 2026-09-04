@@ -846,6 +846,21 @@ export interface CompileTarget<Expr = unknown> {
   boundVars?: ReadonlySet<string>;
 
   /**
+   * The bound names that hold a SEQUENCE rather than a single value, each
+   * mapped to the accessor code it resolves to: the `...rest` a list or tuple
+   * pattern binds, which the interpreter wraps as a `Sequence` that splices
+   * into whatever holds it (`[h, ...t] => [t]` is the tail as a list, not a
+   * list holding the tail). A compiled rest is a JavaScript array, so an
+   * emitter that places such a name as an element of a list or tuple literal
+   * spreads it (`[...t]`) — but only while `var(name)` still returns the
+   * recorded accessor: a nested binder (a lambda parameter, a block local, an
+   * inner capture) that shadows the name resolves it elsewhere, and its value
+   * is not a sequence. Set by the match compiler's capture target; absent
+   * everywhere else.
+   */
+  sequenceVars?: ReadonlyMap<string, string>;
+
+  /**
    * Block locals whose declared value is a function literal, keyed by the
    * local's name: `const g = (k) => …` inside a compiled `Block`. The
    * declaration lowers to a value binding (`let g = ((k) => …)`), so a later

@@ -207,10 +207,12 @@ const planCache = new WeakMap<ReadonlyArray<Expression>, MatchPlan>();
 //
 
 /** Evaluate a `["Match", subject, …cases]` expression. */
-/** Cap on the length of a lazy list value the matcher reads as a list (see
- * `lazyListLength`). Beyond it the subject is matched as it is — a lazy
- * collection, which no list pattern matches — so a pathological subject
- * (`Range(1, 10^9)`) never forces an unbounded walk or copy. */
+/** Cap on the number of elements the matcher COPIES out of a lazy list
+ * value (see `lazyListLength`): the elements a named `...rest` binds, or the
+ * whole value when a tier-3 list pattern needs a `List` node. Reading
+ * positions in place needs no cap. A copy beyond the cap is refused and the
+ * case fails to match, so a pathological subject (`Range(1, 10^9)` bound to a
+ * named rest) never forces an unbounded walk. */
 const MAX_MATCH_LIST_MATERIALIZATION = 100_000;
 
 /**
@@ -227,41 +229,105 @@ const MAX_MATCH_LIST_MATERIALIZATION = 100_000;
  * wildcard, and a `while let [h, ...] = xs { xs = Rest(xs) }` loop ended
  * after one turn.
  *
- * So a finite, indexed, non-`List` collection of at most
- * `MAX_MATCH_LIST_MATERIALIZATION` elements is read as a list — by the case
- * that holds a list pattern, and only by it: a fixed-shape case reads the
- * elements it names through `at()` and copies only a named rest
- * (`matchShape`), while a tier-3 list pattern gets a `List` copy
- * (`matchPattern`). An earlier case sees the subject as it is, so a pin of
- * `Range(1, 3)` still compares verbatim, and nothing is enumerated when an
- * earlier case wins. Tuples stay atomic and a string is text, not a list, so
- * neither qualifies; a subject that is already a `List` needs nothing. Only
- * the TOP level is read this way: a lazy list nested inside a list literal
- * (`[Rest(xs), 1]`) is still matched structurally.
+ * So a finite, indexed, non-`List` collection is read as a list — by the
+ * case that holds a list pattern, and only by it: a fixed-shape case reads
+ * the positions it names through `at()`, at any nesting, and copies only a
+ * named rest (`matchShape`), while a tier-3 list pattern gets a `List` copy
+ * at each position its pattern spells a list (`lazyListView`). An earlier
+ * case sees the subject as it is, so a pin of `Range(1, 3)` still compares
+ * verbatim, and nothing is enumerated when an earlier case wins. Tuples
+ * stay atomic and a string is text, not a list, so neither qualifies; a
+ * subject that is already a `List` needs nothing. Only a COPY is capped
+ * (`MAX_MATCH_LIST_MATERIALIZATION`); reads in place are not.
  */
 function lazyListLength(subject: Expression): number | undefined {
   if (!isFunction(subject) || subject.operator === 'List') return undefined;
   if (isTuple(subject) || isTextAtom(subject)) return undefined;
   if (!isFiniteIndexedCollection(subject)) return undefined;
   const count = subject.count;
-  if (
-    typeof count !== 'number' ||
-    !Number.isFinite(count) ||
-    count > MAX_MATCH_LIST_MATERIALIZATION
-  )
-    return undefined;
+  if (typeof count !== 'number' || !Number.isFinite(count)) return undefined;
   return count;
 }
 
-/** Whether a raw case pattern is a list pattern at its top level, or an
- * or-alternative one of whose branches is — the patterns for which a lazy
- * list subject is read as a list (`lazyListLength`). */
-function patternWantsList(raw: Expression): boolean {
-  if (isFunction(raw, 'List')) return true;
-  return (
-    isFunction(raw, 'Alternatives') &&
-    raw.ops.some((a) => isFunction(a, 'List'))
-  );
+/** Whether `subject` holds a lazy list value (`lazyListLength`) at a
+ * position where `raw` spells a list pattern — the top level, or an element
+ * a nested list pattern lines up with (aligned as `lazyListView` aligns
+ * them). */
+function hasLazyListAt(subject: Expression, raw: Expression): boolean {
+  if (!isFunction(raw, 'List')) return false;
+  if (lazyListLength(subject) !== undefined) return true;
+  if (!isFunction(subject, 'List')) return false;
+  const elements = subject.ops;
+  const pops = raw.ops;
+  const restIndex = pops.findIndex(isRestWildcard);
+  const prefix = restIndex < 0 ? pops : pops.slice(0, restIndex);
+  const suffix = restIndex < 0 ? [] : pops.slice(restIndex + 1);
+  for (let i = 0; i < prefix.length && i < elements.length; i++)
+    if (hasLazyListAt(elements[i], prefix[i])) return true;
+  for (let j = 0; j < suffix.length; j++) {
+    const i = elements.length - suffix.length + j;
+    if (i >= 0 && i < elements.length && hasLazyListAt(elements[i], suffix[j]))
+      return true;
+  }
+  return false;
+}
+
+/** Whether a raw pattern element is a rest wildcard (`__x`, `___x`, `___`),
+ * the one element of a list pattern that stands for any number of
+ * subject elements. */
+function isRestWildcard(p: Expression): boolean {
+  const s = sym(p);
+  return typeof s === 'string' && s.startsWith('__');
+}
+
+/**
+ * The subject a tier-3 list pattern is matched against: `subject` with a
+ * `List` copy in place of every lazy list value at a position where `raw`
+ * spells a list pattern — the top level, and the elements a nested list
+ * pattern lines up with (the prefix before a rest wildcard from the front,
+ * the suffix after it from the back). The generic matcher compares
+ * operators, so it needs the copies; the fixed-shape tier reads in place
+ * and needs none (`matchShape`). Returns `null` when a copy would exceed
+ * `MAX_MATCH_LIST_MATERIALIZATION` — the case then fails to match — and the
+ * subject itself when nothing had to be copied. The cap bounds each
+ * position's copy on its own; the pattern bounds how many positions there
+ * are, so the total is bounded too, by the cap times the pattern's list
+ * positions.
+ */
+function lazyListView(
+  ce: ComputeEngine,
+  subject: Expression,
+  raw: Expression
+): Expression | null {
+  if (!isFunction(raw, 'List')) return subject;
+  let elements: ReadonlyArray<Expression>;
+  const lazyLength = lazyListLength(subject);
+  if (lazyLength !== undefined) {
+    if (lazyLength > MAX_MATCH_LIST_MATERIALIZATION) return null;
+    elements = [...subject.each()];
+  } else if (isFunction(subject, 'List')) elements = subject.ops;
+  else return subject;
+
+  const pops = raw.ops;
+  const restIndex = pops.findIndex(isRestWildcard);
+  const prefix = restIndex < 0 ? pops : pops.slice(0, restIndex);
+  const suffix = restIndex < 0 ? [] : pops.slice(restIndex + 1);
+  const copied = [...elements];
+  let changed = lazyLength !== undefined;
+  const view = (i: number, p: Expression): boolean => {
+    if (i < 0 || i >= elements.length || !isFunction(p, 'List')) return true;
+    const v = lazyListView(ce, elements[i], p);
+    if (v === null) return false;
+    if (v !== elements[i]) {
+      copied[i] = v;
+      changed = true;
+    }
+    return true;
+  };
+  for (let i = 0; i < prefix.length; i++) if (!view(i, prefix[i])) return null;
+  for (let j = 0; j < suffix.length; j++)
+    if (!view(elements.length - suffix.length + j, suffix[j])) return null;
+  return changed ? ce.function('List', copied) : subject;
 }
 
 export function evaluateMatch(
@@ -542,6 +608,14 @@ function matchShape(
       return false;
 
   if (node.rest !== undefined && node.rest.key !== null) {
+    // A named rest is the one COPY a fixed-shape case makes; out of a lazy
+    // value it is capped (`MAX_MATCH_LIST_MATERIALIZATION`).
+    const restLength = length - sLen - node.prefix.length;
+    if (
+      subject.operator !== node.operator &&
+      restLength > MAX_MATCH_LIST_MATERIALIZATION
+    )
+      return false;
     const middle: Expression[] = [];
     for (let i = node.prefix.length; i < length - sLen; i++)
       middle.push(element(i));
@@ -1171,11 +1245,22 @@ function matchPattern(
   if (range !== undefined)
     return rangeContains(subject, range.lo, range.hi) ? {} : null;
 
-  // A lazy list value is copied into a `List` for a list pattern, once per
-  // case that asks (`lazyListLength` says when; the fixed-shape tier reads
-  // elements in place instead, see `matchShape`).
-  if (patternWantsList(raw) && lazyListLength(subject) !== undefined)
-    subject = ce.function('List', [...subject.each()]);
+  // A lazy list value somewhere the pattern spells a list: a fixed-shape
+  // pattern is matched by the SAME routine the ladder's tier 2 runs
+  // (`matchShape`, reading in place), so the reference path and the ladder
+  // cannot disagree on such a subject; any other list pattern gets `List`
+  // copies where it needs them (`lazyListView`), and a copy past the cap
+  // fails the case.
+  if (hasLazyListAt(subject, raw)) {
+    const shape = classifyShape(raw);
+    if (shape !== undefined && !hasRepeatedKeys(shape)) {
+      const shaped: Substitution = {};
+      return matchShape(ce, shape, subject, shaped) ? shaped : null;
+    }
+    const viewed = lazyListView(ce, subject, raw);
+    if (viewed === null) return null;
+    subject = viewed;
+  }
 
   const pattern = resolvePins(ce, raw);
   if (!patternHasDict(pattern))

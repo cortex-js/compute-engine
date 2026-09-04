@@ -1701,6 +1701,28 @@ function compileJSCharacters(
 // target defined it. That made `Add(toString, 1)` refuse to compile as a
 // bogus "built-in operator with no fixed arity" instead of compiling
 // `toString` as an ordinary free symbol.
+
+/** The compiled operand `x` of a list or tuple literal, spread when it is a
+ * name bound to a sequence (`target.sequenceVars`): the `...rest` of a list
+ * pattern is a JavaScript array standing for a run of elements, not one
+ * element. The name must still resolve to the rest's accessor — a binder
+ * inside the case body that shadows it (a lambda parameter, a block local)
+ * resolves it to an ordinary value. */
+function spreadIfSequence(
+  x: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const code = compile(x);
+  if (
+    isSymbol(x) &&
+    target !== undefined &&
+    target.sequenceVars?.get(x.symbol) === target.var(x.symbol)
+  )
+    return `...${code}`;
+  return code;
+}
+
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
@@ -2030,12 +2052,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cln(${complexOperandCode(args[0], compile)})`;
     return `Math.log(${compile(args[0])})`;
   },
-  List: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
+  // A name bound to a SEQUENCE (the `...rest` of a list pattern,
+  // `target.sequenceVars`) splices into the literal, as its interpreter
+  // `Sequence` value does: `[h, ...t] => [t]` is the tail itself.
+  List: (args, compile, target) =>
+    `[${args.map((x) => spreadIfSequence(x, compile, target)).join(', ')}]`,
   // Matrix wraps List(List(...), ...) — compile the body (first arg) which
   // is the nested List structure; remaining args are delimiters/column spec
   Matrix: (args, compile) => compile(args[0]),
   // Tuple compiles identically to List
-  Tuple: (args, compile) => `[${args.map((x) => compile(x)).join(', ')}]`,
+  Tuple: (args, compile, target) =>
+    `[${args.map((x) => spreadIfSequence(x, compile, target)).join(', ')}]`,
   // Element count of a compiled collection. Only an indexed collection lowers
   // to a JS array; a dictionary or string operand fails closed (D6).
   Length: (args, compile) => {

@@ -402,52 +402,134 @@ describe('EPSIL WHILE LET — compilation', () => {
   const source =
     'let k = 0\nlet s = 0\nwhile let 0..4 = k { s = s + k; k = k + 1 }\ns';
 
-  test('the JavaScript target declines: a Match arm cannot break out of its arrow', () => {
-    // `compileMatchJS` emits an arrow-IIFE, so the `Break` in the wildcard
-    // arm has nowhere to go; the target names that cause and the fallback
-    // runs the program through the interpreter.
+  /** Compile an Epsil program for the JavaScript target and run it. */
+  function compiled(src: string): {
+    success: boolean;
+    error?: string;
+    value: unknown;
+  } {
     const ce = new ComputeEngine();
-    const [ast, diags] = parseEpsil(source);
+    const [ast, diags] = parseEpsil(src);
     expect(diags).toEqual([]);
     const result = compile(ce.box(ast!));
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Match: a case body contains `Break`/);
+    return { success: result.success, error: result.error, value: result.run() };
+  }
+
+  test('the JavaScript target compiles the loop as statements', () => {
+    // The `Match` is the loop body's statement, so it takes the statement
+    // form (`compileMatchStatement`): an `if`/`else` chain whose wildcard arm
+    // is a real `break`, not the value form's arrow function.
+    const ce = new ComputeEngine();
+    const [ast] = parseEpsil(source);
+    const result = compile(ce.box(ast!));
+    expect(result.success).toBe(true);
+    expect(result.code).toContain('while (true)');
+    expect(result.code).toContain('} else {\nbreak');
     expect(String(result.run())).toBe('10');
   });
 
-  test('a Return anywhere in an arm is declined; a nested loop owns its break', () => {
-    // A `Loop` inside the arm owns the `Break` in it, so that shape compiles;
-    // a `Return` passes through a `Loop` unchanged in the interpreter, so one
-    // under a nested loop would still be swallowed by the arrow and is
-    // declined.
+  test('a rest capture splices into a list, as its Sequence does interpreted', () => {
+    // `...t` is a JavaScript array in compiled code; `[t]` spreads it, so
+    // the loop drains the list instead of nesting it one level per turn.
+    expect(
+      compiled(
+        'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...t] = xs { s = s + h; xs = [t] }\ns'
+      )
+    ).toMatchObject({ success: true, value: 6 });
+    expect(
+      compiled(
+        'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns'
+      )
+    ).toMatchObject({ success: true, value: 6 });
+  });
+
+  test('break, continue, nesting, and a match arm that breaks a for', () => {
+    expect(
+      compiled(
+        'let k = 0\nlet n = 0\nwhile let 0..10 = k { k = k + 1; if k == 3 { break }; n = n + 1 }\n[k, n]'
+      )
+    ).toMatchObject({ success: true, value: [3, 2] });
+    expect(
+      compiled(
+        'let k = 0\nlet n = 0\nwhile let 0..5 = k { k = k + 1; if k == 3 { continue }; n = n + 1 }\n[k, n]'
+      )
+    ).toMatchObject({ success: true, value: [6, 5] });
+    expect(
+      compiled(
+        'let n = 0\nfor i in [1, 2, 3] {\n  let k = 0\n  while let 0..5 = k { k = k + 1; n = n + 1; if k == 2 { break } }\n}\nn'
+      )
+    ).toMatchObject({ success: true, value: 6 });
+    expect(
+      compiled(
+        'let n = 0\nfor x in [1, 2, 3, 4] {\n  match x {\n    3 => do { break }\n    _ => do { n = n + x }\n  }\n}\nn'
+      )
+    ).toMatchObject({ success: true, value: 3 });
+  });
+
+  test('a match in VALUE position keeps the value form, which declines a break', () => {
+    // Only a `Match` standing as a statement takes the statement form; one
+    // whose value is used is still the arrow function, and a `break` in an
+    // arm cannot leave it — declined up front, naming the cause, and the
+    // fallback runs the interpreter.
+    const r = compiled(
+      'let x = 1\nfor i in [1, 2] { let y = match x { 1 => do { break }; _ => 0 } }\nx'
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/Match: a case body contains `Break`/);
+    expect(r.value).toBe(1);
+  });
+
+  test('the value form declines a Return under a nested loop in an arm', () => {
+    // A `Loop` owns the `Break`/`Continue` inside it but passes a `Return`
+    // through, so the control scan keeps looking under a nested loop.
     const ce = new ComputeEngine();
     const returning = ce.box([
       'Block',
       [
-        'Loop',
+        'Assign',
+        'y',
         [
           'Match',
           'x',
           ['MatchCase', 1, ['Block', ['Loop', ['Block', ['Return', 9]]]]],
-          ['MatchCase', '_', ['Block', ['Assign', 'x', ['Add', 'x', 1]]]],
+          ['MatchCase', '_', 0],
         ],
       ],
-      'x',
+      'y',
     ]);
-    expect(compile(returning).success).toBe(false);
-    expect(compile(returning).error).toMatch(
-      /Match: a case body contains `Return`/
-    );
-    const owned = ce.box([
-      'Loop',
+    const r = compile(returning);
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/Match: a case body contains `Return`/);
+  });
+
+  test('an irrefutable case before the end is the fallback; later cases are dead', () => {
+    // Epsil's parser refuses a non-final irrefutable case, so this shape only
+    // arrives as hand-written MathJSON; the statement form ends the chain at
+    // the first irrefutable case, as the value form does.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Block',
+      ['Assign', 'k', 0],
+      ['Assign', 'n', 0],
       [
-        'Match',
-        'x',
-        ['MatchCase', 1, ['Block', ['Loop', ['Block', ['Break']]]]],
-        ['MatchCase', '_', ['Block', ['Assign', 'x', ['Add', 'x', 1]]]],
+        'Loop',
+        [
+          'Match',
+          'k',
+          [
+            'MatchCase',
+            ['Range', 0, 2],
+            ['Block', ['Assign', 'k', ['Add', 'k', 1]], ['Assign', 'n', ['Add', 'n', 1]]],
+          ],
+          ['MatchCase', '_', ['Break']],
+          ['MatchCase', 1, ['Block', ['Assign', 'n', 100]]],
+        ],
       ],
+      'n',
     ]);
-    expect(compile(owned).success).toBe(true);
+    const r = compile(expr);
+    expect(r.success).toBe(true);
+    expect(r.run()).toBe(3);
   });
 
   test('the Python target fails closed on the Match', () => {

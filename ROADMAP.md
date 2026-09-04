@@ -753,36 +753,51 @@ f(x) { … }` idiom works for engine-raised failures only. Probe:
 `executeEpsil(ce, 'let g = x => Error("neg")\ng(1)')` (diagnostic, `g(1)`
 inert).
 
-### A list pattern reads a lazy list subject only up to 100 000 elements, and only at the top level (OPEN, ruling needed — found 2026-09-03 implementing Epsil `while let`)
+### A list pattern read a lazy list subject only up to 100 000 elements, and only at the top level; the JavaScript target declined every `while let` (FIXED 2026-09-03, RULED — found 2026-09-03 implementing Epsil `while let`)
 
 `match Rest([1, 2, 3]) { [h, ...] => h; _ => "no" }` took the wildcard: a
 list pattern is matched structurally and needs list elements to descend
 into, while `Rest(xs)`, `Drop(xs, 1)`, `Range(1, 3)` or a `Map` evaluate to
-a finite indexed collection whose operator is not `List`. Fixed 2026-09-03:
-the case that holds the list pattern now reads such a subject as a list
-(`lazyListLength` in `boxed-expression/match-dispatch.ts`) — a fixed-shape
-pattern reads the positions it names through `at()` and copies only a named
-`...rest`; a tier-3 list pattern gets a `List` copy. Two limits remain, and
-both are semantic, not just cost:
+a finite indexed collection whose operator is not `List`. The first fix read
+such a subject as a list, but capped the read at 100 000 elements and only
+at the top level; and the JavaScript target declined every `while let`,
+because its `Match` emission is an arrow function a `break` cannot leave.
 
-- **A cap of 100 000 elements** (`MAX_MATCH_LIST_MATERIALIZATION`). A lazy
-  list value of 100 001 elements matches no list pattern while one of
-  100 000 does. The cap exists so a `Range(1, 10^9)` subject never forces an
-  unbounded walk; both the laddered path and the reference path apply it,
-  so they agree. Options: keep the cap (document it, as `control-flow.md`
-  now does); raise it; or remove it for the fixed-shape tier, whose reads
-  are O(pattern size) and need no cap, keeping it only where a copy is
-  unavoidable (a named rest, a tier-3 pattern).
-- **Only the top level.** A lazy list nested inside a list literal
-  (`[Rest(xs), 1]` against `[[h, ...], 1]`) is still matched structurally
-  and fails. Reading nested positions lazily means teaching `matchElement`
-  and the generic matcher's `List` arm the same `at()`-based access.
+Ruled 2026-09-03 and closed the same day:
 
-Also open: the JavaScript target declines every `while let` (and any
-`match` arm that `break`s), because `compileMatchJS` emits an arrow
-function a `break` cannot leave. It fails closed naming the control
-operator; a statement-form `Match` emission for loop bodies would close it
-(`docs/epsil/ROADMAP.md`, "Compilation tails").
+- The cap is a COPY guard only (`MAX_MATCH_LIST_MATERIALIZATION` in
+  `boxed-expression/match-dispatch.ts`). A fixed-shape pattern reads the
+  positions it names in place through `at()`, at any nesting, with no cap;
+  only a named `...rest` and a tier-3 list pattern copy, and a copy past the
+  cap fails the case. The reference path copies where the pattern spells a
+  list (`lazyListView`), so it agrees with the ladder.
+- A `Match` standing as a statement in a loop body is emitted as an
+  `if`/`else` chain with native `break`/`continue`
+  (`compileMatchStatement` in `compilation/base-compiler.ts`); the case
+  tests are the value form's (`matchCaseTest`). Only a `Match` whose last
+  case is irrefutable takes this form. Found on the way and fixed: a
+  compiled `...rest` capture is an array and `[t]` nested it instead of
+  splicing (`CompileTarget.sequenceVars`); a bare binding with a guard
+  failed closed.
+
+Still failing closed on purpose: a typed binding (`v: !error`) on the
+JavaScript target, since `MatchesType` has no compiled type registry; every
+`Match` on the Python target.
+
+### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (OPEN, compile — found 2026-09-03 reviewing the `while let` compile work)
+
+`match xs { [h, ...t] => do { let t = 7; Length([t]) } }` and
+`((t) => do { let t = 7; t })(1)` both evaluate to the error
+`The symbol "t" is already declared in this scope` in the interpreter: a
+block directly under a binder may not redeclare the binder's name. The
+JavaScript target compiles both — the block's `let t = 7` shadows the
+parameter or the capture accessor — and answers `1` and `7`, so a program the
+interpreter rejects runs compiled with a value. The compiled answer is the
+one most languages give, so this is a ruling: either the interpreter admits
+the shadowing (a scope-rule change) or the block compiler fails closed on a
+`Declare` whose name is in `target.boundVars` (`compileBlock` and
+`compileLoopBody`, `compilation/base-compiler.ts`). Not specific to `match`:
+every binder has it.
 
 ### A scalar handler lifted over a list of points drops the tuple level: `Sqrt(P)`, `Sin(P)`, `Power(P, 2)` type `list<number>` for a value that is a list of points (FIXED 2026-09-03 — found 2026-09-03 while fixing Tycho items 245/246)
 
@@ -909,7 +924,7 @@ under 5 ms. Pinned in
 `test/compute-engine/tycho-item-225-fold-size-walk-dag-linear.test.ts`
 ("canonicalizing over a shared list tower").
 
-### Type-level readers walk a DAG-shaped TYPE once per path: a shared nested tuple, or a shared RAGGED list, is exponential in its depth (OPEN — measured 2026-09-03 while fixing the list-tower overflow above)
+### Type-level readers walk a DAG-shaped TYPE once per path: a shared nested tuple, or a shared RAGGED list, is exponential in its depth (FIXED 2026-09-03 by a size bound on derived types — measured 2026-09-03 while fixing the list-tower overflow above)
 
 A tuple literal built the same way (`t = Tuple(t, t)` repeated) does not
 overflow, but every canonical operation over it doubles with each level:
@@ -928,13 +943,43 @@ the `List` type handler declines the shape claim and falls back to
 the child types shared by object identity — a DAG-shaped type — and reading
 `.type`, `Length` or `Hold` over it takes 0.1 s at 20 levels, 3 to 5 s at 26
 and over a minute at 32. `widen` itself is one of the per-path readers
-(`widen2` calls `isSubtype` on the element types). A fix is a memo keyed by
-type-object identity inside the type-lattice readers (`isSubtype`,
-`typeToString`, `hasFreeVariables`, `typeCouldBeNumericTuple`, …), or a
-type representation that shares or summarizes repeated component types — a
-type-system decision, not a visited set in a collection walker. The
-evaluate path (`evaluate`, `.N()`, `simplify`, `match`) is proportional to
-the leaf count for every such value, which is the size of its result.
+(`widen2` calls `isSubtype` on the element types). Resolution (2026-09-03, user-ruled): a derived type is bounded in SIZE at
+the one place it is stored, the `type` getter of `boxed-function.ts`
+(`boundTypeSize`, `src/common/type/size-cap.ts`, limit `TYPE_SIZE_LIMIT` =
+256 nodes). Past the limit every compound component keeps its kind and its
+arity and its own components become `unknown`: `tuple<tuple<A, B>,
+tuple<C, D>>` becomes `tuple<tuple<unknown, unknown>, tuple<unknown,
+unknown>>`. The bound is on the total size, because 256 copies of one child
+nested eight deep is a type of 256^8 slots that no depth cap or width cap
+catches alone; the top level is never flattened, so a wide flat tuple keeps
+every slot type (its type is linear in the literal, as the value is). The
+components are NOT widened to the bare kind (`tuple`, `list`), and the
+width cap that was considered (a tuple past 256 elements becoming bare
+`tuple`) was not adopted: the engine's tuple gates (`isTuple` and its 38
+callers, the `tuples` broadcast exemption) recognize a tuple only by the
+compound spelling, and `2·t` over a bare-`tuple`-typed value evaluated to a
+list broadcast (`Map`) where the value is a point. A tuple with `unknown`
+components is the shape those gates already admit (Tycho item 30), and
+every arithmetic form over a flattened tower evaluates component-wise as it
+did under the limit. `Negate` over a shared tuple tower also rebuilt the
+tower once per path (`negateTupleComponents`, `negate.ts`); it now shares
+its result as the input does. Pins: `test/compute-engine/type-size-cap.test.ts`.
+The evaluate path (`evaluate`, `.N()`, `simplify`, `match`) stays
+proportional to the leaf count, which is the size of its result.
+
+### A symbol declared with the bare `tuple` type is not treated as a tuple by arithmetic (OPEN, semantics — found 2026-09-03 while bounding derived types)
+
+With `ce.declare('w', 'tuple')`, `ce.parse('2w').type` is `number`: the
+`Multiply` type handler and the `tuples` broadcast exemption recognize a tuple
+by the compound spelling only (`isTuple` in `collection-utils.ts` answers
+`false` for the primitive `tuple`, while `typeCouldBeNumericTuple` answers
+`true` for it), so a scalar times a bare-typed tuple types as a scalar, which
+no value of it can be. A literal tuple never carries the bare spelling (its
+derived type keeps its arity even past the size bound), so only declared
+symbols are affected. The fix is to admit the bare `tuple` in `isTuple` and
+to measure the 38 call sites, most of which then keep a bare-typed symbol out
+of the list broadcast, which is the correct reading.
+
 
 ### The LaTeX round-trip gate (`npm run check:roundtrip`, part of `ci:corpus-pipeline`) is red at the 0.121.0 release commit (FIXED 2026-09-03, unreleased — measured 2026-09-03 on a clean worktree at `1ce34ecb`)
 

@@ -417,9 +417,9 @@ is structurally not `0`, even though it *could* be zero semantically. Use
 A list pattern matches a list *value* whatever produced it: `Rest(xs)`,
 `Drop(xs, 1)` or `Range(1, 3)` evaluate to a lazy collection rather than a
 list literal, and the case holding the list pattern reads it as a list —
-element by element for the positions the pattern names, with a copy only for
-a named `...rest`. (A lazy list of more than 100 000 elements is left as it
-is, and then matches only the wildcard.)
+element by element for the positions the pattern names, at any nesting, with
+a copy only for a named `...rest`. (A copy of more than 100 000 elements is
+refused, and the case then does not match.)
 
 The final catch-all may also be spelled `otherwise`, a synonym for a bare
 `_` pattern (it takes a guard the same way, and binds nothing):
