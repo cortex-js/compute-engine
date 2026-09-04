@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A LaTeX set-builder with a comma-separated condition list now parses as a
+  comprehension.** `\{ k : k \in \{1, 2, 3\}, k > 1 \}` parsed as a literal
+  set whose second element was the condition,
+  `["Set", ["Colon", "k", ["Element", "k", ...]], ["Greater", "k", 1]]`, so it
+  evaluated to itself. The `:` and `\mid` forms with one or more extra
+  conditions now produce `["Set", "k", ["Condition", ["And", ...]]]`, the shape
+  the single-condition form already produced, and evaluate to `{2, 3}`; the
+  domain may also sit on the left of the colon (`\{ k \in S : k > 1, k < 3 \}`).
+  A trailing comma inside a set literal or a compact piecewise
+  (`\{ x < 0 : 1, x, \}`) no longer leaves a stray element behind.
+
 ## 0.123.2 _2026-09-04_
 
 ### Improvements

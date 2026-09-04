@@ -248,3 +248,94 @@ describe('LaTeX-parsed set-builder forms', () => {
     expect(s.evaluate().nops).toBe(2);
   });
 });
+
+// A comma-separated condition list after the `:` or `\mid` — `{k : k ∈ S, k > 1}`
+// — used to parse as a literal set with the condition as a SECOND element
+// (`Set(Colon(k, k ∈ S), k > 1)`), so the expression evaluated to itself. The
+// parser now joins the conditions under `And` inside the `Condition` operand,
+// the same shape the single-condition form produces.
+describe('LaTeX set-builder with a comma-separated condition list', () => {
+  const ce = freshEngine();
+
+  test('\\{ k : k \\in S, k > 1 \\} parses to one Condition operand', () => {
+    const s = ce.parse('\\{ k : k \\in \\{1, 2, 3\\}, k > 1 \\}');
+    expect(s.json).toEqual([
+      'Set',
+      'k',
+      [
+        'Condition',
+        ['And', ['Element', 'k', ['Set', 1, 2, 3]], ['Greater', 'k', 1]],
+      ],
+    ]);
+    expect(s.evaluate().json).toEqual(['Set', 2, 3]);
+  });
+
+  test('the body may be an expression of the bound variable', () => {
+    const s = ce.parse('\\{ 2k : k \\in \\{1, 2, 3\\}, k > 1 \\}');
+    expect(s.evaluate().json).toEqual(['Set', 4, 6]);
+  });
+
+  test('every extra element is a further condition', () => {
+    const s = ce.parse('\\{ k : k \\in \\{1, 2, 3\\}, k > 1, k < 3 \\}');
+    expect(s.evaluate().json).toEqual(['Set', 2]);
+  });
+
+  test('\\mid takes the same condition list as the colon', () => {
+    const s = ce.parse('\\{ k \\mid k \\in \\{1, 2, 3\\}, k > 1 \\}');
+    expect(s.evaluate().json).toEqual(['Set', 2, 3]);
+  });
+
+  test('the domain may sit on the left of the colon', () => {
+    const s = ce.parse('\\{ k \\in \\{1, 2, 3\\} : k > 1, k < 3 \\}');
+    expect(s.json).toEqual([
+      'Set',
+      ['Element', 'k', ['Set', 1, 2, 3]],
+      ['Condition', ['And', ['Greater', 'k', 1], ['Less', 'k', 3]]],
+    ]);
+    expect(s.evaluate().json).toEqual(['Set', 2]);
+  });
+
+  test('an unknown domain with two conditions stays a comprehension', () => {
+    const s = ce.parse('\\{ x : x > 0, x < 5 \\}');
+    expect(s.json).toEqual([
+      'Set',
+      'x',
+      ['Condition', ['And', ['Greater', 'x', 0], ['Less', 'x', 5]]],
+    ]);
+    expect(s.count).toBeUndefined();
+    // The Condition operand is preserved, not treated as a literal element
+    expect(s.evaluate().operator).toBe('Set');
+    expect(s.evaluate().nops).toBe(2);
+  });
+
+  test('a trailing comma adds no condition', () => {
+    expect(ce.parse('\\{ k : k \\in \\{1, 2, 3\\}, \\}').json).toEqual(
+      ce.parse('\\{ k : k \\in \\{1, 2, 3\\} \\}').json
+    );
+    expect(
+      ce.parse('\\{ k : k \\in \\{1, 2, 3\\}, k > 1, \\}').json
+    ).toEqual(ce.parse('\\{ k : k \\in \\{1, 2, 3\\}, k > 1 \\}').json);
+  });
+
+  test('the serialized form parses back to the same expression', () => {
+    for (const src of [
+      '\\{ k : k \\in \\{1, 2, 3\\}, k > 1 \\}',
+      '\\{ x : x > 0, x < 5 \\}',
+      '\\{ k \\in \\{1, 2, 3\\} : k > 1, k < 3 \\}',
+    ]) {
+      const e = ce.parse(src);
+      const back = ce.parse(e.toLatex({ materialization: false }));
+      expect(back.isSame(e)).toBe(true);
+    }
+  });
+
+  test('a compact piecewise with a comparison left side is unchanged', () => {
+    expect(ce.parse('\\{ x < 0 : 1, x \\}').json).toEqual([
+      'Which',
+      ['Less', 'x', 0],
+      1,
+      'True',
+      'x',
+    ]);
+  });
+});

@@ -100,6 +100,21 @@ describe('A2 — Compact piecewise parsing', () => {
     expect(expr.ops!.length).toEqual(4); // cond1, val1, True, default
   });
 
+  test('a trailing comma after the default is dropped', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\left\\{x > 0 : 1, 0,\\right\\}');
+    expect(expr.operator).toEqual('Which');
+    expect(expr.ops!.length).toEqual(4); // cond1, val1, True, default
+  });
+
+  test('an authored Nothing default is not a trailing comma', () => {
+    // `\\mathrm{Nothing}` and an empty trailing segment both parse to the
+    // symbol `Nothing`; only the spelling tells them apart.
+    const ce = new ComputeEngine();
+    const expr = ce.parse('\\left\\{x > 0 : 1, \\mathrm{Nothing}\\right\\}');
+    expect(expr.json).toEqual(['Which', ['Less', 0, 'x'], 1, 'True', 'Nothing']);
+  });
+
   test('{cond:val} (no default) parses to Which with implicit default', () => {
     // Desmos behavior: missing default = Undefined.
     const ce = new ComputeEngine();

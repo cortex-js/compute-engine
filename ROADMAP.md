@@ -301,19 +301,25 @@ at a time") now presents the growing loop as acceptable for lists of a few
 thousand elements and keeps steering to `Map`/`Fold` when the list has a
 formula; its measured table was refreshed.
 
-### The LaTeX form of a set comprehension with a condition is not a comprehension (OPEN, parser — found 2026-09-04 by the review of the growing-list round)
+### The LaTeX form of a set comprehension with a condition is not a comprehension (FIXED 2026-09-04 — found 2026-09-04 by the review of the growing-list round)
 
-`\{ k : k \in \{1, 2, 3\}, k > 1 \}` parses to
+`\{ k : k \in \{1, 2, 3\}, k > 1 \}` parsed to
 `["Set", ["Colon", "k", ["Element", "k", ["Set", 1, 2, 3]]], ["Less", 1, "k"]]`
-— the condition is a SECOND operand of the `Set` — and `parseSetComprehension`
-(`library/collections.ts`) reads only form A,
-`["Set", body, ["Element", v, domain, cond?]]`, and form B,
-`["Set", ["Element", v, domain], ["Condition", pred]]`. So the expression
-evaluates to itself on both routes, where the MathJSON form A evaluates to
-`Set(2, 3)`. Either the LaTeX parser should produce form A (the condition inside
-the `Element`) or the reader should accept the parsed shape; the parser is the
-better place, since the parsed shape is a two-element set literal to every other
-reader too.
+— the condition was a SECOND operand of the `Set` — so the expression evaluated
+to itself on both routes, where the MathJSON form
+`["Set", "k", ["Element", "k", S, cond]]` evaluated to `Set(2, 3)`. The `:`
+and `\mid` bind tighter than the `,` separator, so the `Set` matchfix handler
+(`latex-syntax/dictionary/definitions-sets.ts`) received a sequence whose first
+element was the `Colon` (or `Divides`) and whose later elements were the extra
+conditions, and read it as a literal set. The handler now joins the conditions
+under `And` inside a `Condition` operand — the shape the single-condition form
+already produced — for both the `{body : cond, cond…}` and the
+`{v \in S : cond, cond…}` spellings. The same pass drops the trailing element a
+trailing comma leaves in the sequence, which had also broken the compact
+piecewise detection for `\{ x < 0 : 1, x, \}`; the marker is read from the
+spelling the comma parselet records (`hasTrailingEmptySegment`), never from
+the value being `Nothing`, so an authored `\mathrm{Nothing}` default survives. Pinned in
+`test/compute-engine/set-comprehension.test.ts` and `a2-restrictions.test.ts`.
 
 ### An asynchronous-only operator inside a held operand is not awaited (OPEN, async — found 2026-09-04 by the review of the growing-list round)
 

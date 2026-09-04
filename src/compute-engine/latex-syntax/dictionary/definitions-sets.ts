@@ -21,7 +21,10 @@ import {
   DIVISION_PRECEDENCE,
   POSTFIX_PRECEDENCE,
 } from '../types.js';
-import { tryInferRangeFromElements } from './definitions-core.js';
+import {
+  hasTrailingEmptySegment,
+  tryInferRangeFromElements,
+} from './definitions-core.js';
 import { OPEN_DELIMITER_PREFIX } from '../parse.js';
 
 /**
@@ -1090,7 +1093,16 @@ export const DEFINITIONS_SETS: LatexDictionary = [
       // LHS (mirrors the single-Colon discriminator above). A final non-Colon
       // element, if present, becomes the default: True, default.
       if (h === 'Sequence') {
-        const elements = operands(body);
+        // A trailing comma (`{1, 2,}`, `{x < 0 : 1, x,}`) arrives as a final
+        // `Nothing` element. Drop it here so it neither breaks the piecewise
+        // detection below nor lands inside a set-builder condition. The
+        // marker is recognized from the SPELLING (an empty token segment,
+        // recorded by the comma parselet), never from the parsed value being
+        // the symbol `Nothing`: an authored `{x < 0 : 1, \mathrm{Nothing}}` is
+        // a piecewise with an explicit default and must keep it.
+        let elements = operands(body);
+        if (elements.length > 1 && hasTrailingEmptySegment(body))
+          elements = elements.slice(0, -1);
         const colonElements = elements.filter((el) => operator(el) === 'Colon');
         const allPiecewise =
           colonElements.length > 0 &&
@@ -1121,6 +1133,41 @@ export const DEFINITIONS_SETS: LatexDictionary = [
             }
           }
           return ['Which', ...whichOps];
+        }
+        // Set-builder with a comma-separated condition list:
+        // `{k : k \in S, k > 1}` or `{k \mid k \in S, k > 1}`. The `:` and
+        // `\mid` bind tighter than the `,` separator, so the sequence's first
+        // element is `Colon(body, cond1)` (or `Divides(body, cond1)` for
+        // `\mid`) and every later element is a further condition. The
+        // conditions are joined under `And`, which gives the same
+        // `["Set", body, ["Condition", pred]]` shape as the single-condition
+        // form above, so the `Set` operator reads both alike. A first element
+        // whose left side is a comparison is a compact piecewise branch, not
+        // a set-builder body: the piecewise branch above takes it when every
+        // `Colon` element is comparison-headed, and otherwise the sequence is
+        // left to the enumerated `Set` fallback below.
+        const first = elements[0];
+        const firstOp = operator(first);
+        if (firstOp === 'Colon' || firstOp === 'Divides') {
+          const builderBody = operand(first, 1);
+          const cond = operand(first, 2);
+          const builderBodyOp =
+            builderBody !== null ? operator(builderBody) : null;
+          if (
+            builderBody !== null &&
+            cond !== null &&
+            !(builderBodyOp !== null && COMPARISON_HEADS.has(builderBodyOp))
+          ) {
+            const conditions = [cond, ...elements.slice(1)];
+            return [
+              'Set',
+              builderBody,
+              [
+                'Condition',
+                conditions.length === 1 ? conditions[0] : ['And', ...conditions],
+              ],
+            ];
+          }
         }
         // An ellipsis element sequence (`{1, \dots, 9}`, `{0, 2, \dots, 10}`)
         // denotes an integer range, the same as the bracket form

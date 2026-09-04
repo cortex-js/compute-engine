@@ -542,6 +542,30 @@ function parseBareOperatorElement(
 }
 
 /**
+ * The `Sequence` arrays built by the comma parselets whose LAST element came
+ * from an EMPTY token segment — a trailing comma, as in `{1, 2,}` — rather
+ * than from an authored expression. Both spellings push the symbol `Nothing`,
+ * so a consumer that must tell them apart asks here: the `Set` matchfix
+ * handler drops a trailing comma but keeps an authored `\mathrm{Nothing}`
+ * (`{x < 0 : 1, \mathrm{Nothing}}` is a piecewise with an explicit default,
+ * `{x < 0 : 1, x,}` a piecewise with a trailing comma). The record is keyed
+ * by the array object itself, so it lives exactly as long as the parse result
+ * and needs no reset between parses.
+ */
+const TRAILING_EMPTY_SEQUENCES = new WeakSet<object>();
+
+/** Did the last element of this comma-separated `Sequence` come from a
+ * trailing comma (an empty token segment) rather than from an authored
+ * expression? `false` for anything the comma parselets did not build. */
+export function hasTrailingEmptySegment(
+  seq: MathJsonExpression | null
+): boolean {
+  return (
+    typeof seq === 'object' && seq !== null && TRAILING_EMPTY_SEQUENCES.has(seq)
+  );
+}
+
+/**
  * Parse a sequence of expressions separated with `sep`
  *
  * `out.trailingEmpty` reports whether the LAST element came from an EMPTY
@@ -2181,9 +2205,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
     ): MathJsonExpression | null => {
-      const seq = parseSequence(parser, terminator, lhs, 20, ',');
+      const spelling = { trailingEmpty: false };
+      const seq = parseSequence(parser, terminator, lhs, 20, ',', spelling);
       if (seq === null) return null;
-      return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
+      const sequence: MathJsonExpression = ['Sequence', ...seq];
+      if (spelling.trailingEmpty) TRAILING_EMPTY_SEQUENCES.add(sequence);
+      return ['Delimiter', sequence, { str: ',' }];
     },
   },
   // Entry to handle the case of a single comma
@@ -2193,9 +2220,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'prefix',
     precedence: 20,
     parse: (parser, terminator): MathJsonExpression | null => {
-      const seq = parseSequence(parser, terminator, null, 20, ',');
+      const spelling = { trailingEmpty: false };
+      const seq = parseSequence(parser, terminator, null, 20, ',', spelling);
       if (seq === null) return null;
-      return ['Delimiter', ['Sequence', ...seq], { str: ',' }];
+      const sequence: MathJsonExpression = ['Sequence', ...seq];
+      if (spelling.trailingEmpty) TRAILING_EMPTY_SEQUENCES.add(sequence);
+      return ['Delimiter', sequence, { str: ',' }];
     },
   },
   {
