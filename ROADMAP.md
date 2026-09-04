@@ -179,6 +179,17 @@ fixed in that change. One item remains.
 
 ### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
 
+- **The discrete pmf/CDF guards at a SYMBOLIC point use the tolerant relations,
+  where the literal route is exact at the support boundary (OPEN, ruling — found
+  2026-09-04 while guarding the symbolic forms).**
+  `PDF(PoissonDistribution(2), x)` is `Which(⌊x⌋ = x ∧ x ≥ 0, closed, True, 0)`
+  (`discreteSupportGuard`, `library/distributions.ts`), and its `Equal` and
+  `GreaterEqual` compare within the engine tolerance once `x` holds a value, so
+  `x := 5 - 10^-20` selects the integer arm and the `x ≥ 5` arm of a CDF guard,
+  while the literal route `PDF(PoissonDistribution(2), 5 - 10^-20)` tests
+  exactly and answers 0. Options: make the symbolic guard exact (a
+  tolerance-free relation the guard can name), or accept the tolerant reading as
+  the symbolic route's contract and pin the boundary.
 - **`GammaRegularized(a, 0)` for a negative non-integer `a`** is a decided
   divergence (`sign(Γ(a))·∞`, verified) left symbolic for uniformity with the
   surrounding `a < 0` capability gap (the kernel computes `Q(a, z)` for
