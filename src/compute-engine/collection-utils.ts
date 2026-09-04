@@ -1168,9 +1168,51 @@ export function broadcastCollectionElementType(
   return dimensionlessIndexedElement(expr.type.type);
 }
 
+/**
+ * Whether a union has a branch that is a GENUINE scalar under broadcast: not
+ * collection-shaped, not a tuple, not a string — a number, a boolean, a
+ * symbol type. (A tuple and a string are atomic under broadcast and count on
+ * the scalar side of `scalarOrCollectionUnionBranches`, but they are not
+ * what a fixed-shape list branch broadcasts AGAINST — see
+ * `dimensionlessIndexedElement`.) A non-union answers `false`.
+ */
+export function unionHasGenuineScalarBranch(t: Readonly<Type>): boolean {
+  const u = resolveTypeAlias(t);
+  if (typeof u === 'string' || u.kind !== 'union') return false;
+  return u.types.some((branch) => {
+    const b = resolveTypeAlias(branch);
+    if (b === 'unknown' || b === 'any' || b === 'value' || b === 'never')
+      return false;
+    if (b === 'string' || isTupleShapedType(b)) return false;
+    if (typeof b !== 'string' && b.kind === 'broadcastable') return false;
+    return !isSubtype(b, COLLECTION_SHAPE_TYPE);
+  });
+}
+
+/**
+ * The element type of a broadcast-collection type: an unbounded 1-D `list`
+ * or `indexed_collection`, a `range`, or a UNION holding such a branch.
+ *
+ * `inUnion` marks a call on one BRANCH of a union that has a GENUINE scalar
+ * branch (`unionHasGenuineScalarBranch`). A fixed shape (`vector<n>`,
+ * `matrix`) on its own is not a broadcast trigger — the tensor handlers type
+ * it component-wise — but INSIDE such a union (`integer | vector<integer^2>`,
+ * the type of a `Which` returning a 2-element list or `-1`) no tensor
+ * handler ever sees it: the union is not a tensor type, so arithmetic over
+ * it fell through to the scalar tiers and typed `2·u` and `sin(u)` as
+ * `number` for a value that may be a vector. A dimensioned list branch of
+ * such a union therefore counts, and contributes its element type; the
+ * branch keeps its dimensions when it is re-wrapped
+ * (`rewrapCollectionBranch`). A union with NO genuine scalar branch
+ * (`tuple<number, number> | vector<number^2>`, `vector<2> | vector<3>`) is
+ * left as it was: its fixed-shape branches do not broadcast against a
+ * scalar, and typing them through the scalar lift would describe a tuple
+ * value by a scalar cell.
+ */
 function dimensionlessIndexedElement(
   t: Type,
-  seen?: AliasDescent
+  seen?: AliasDescent,
+  inUnion = false
 ): Type | undefined {
   // A transparent alias of a list IS that list (see
   // `typeCouldBeNumericCollection`), so the trigger reads the body it
@@ -1190,12 +1232,14 @@ function dimensionlessIndexedElement(
   if (t.kind === 'indexed_collection') return t.elements;
   // A `list` broadcasts only when it is unbounded/dimensionless (a plain
   // `list<E>`). A fixed shape (`vector<n>`, `matrix`) carries `dimensions` and
-  // is left to tensor typing.
+  // is left to tensor typing — except as a branch of a union beside a
+  // genuine scalar, see above.
   if (t.kind === 'list')
-    return t.dimensions === undefined ? t.elements : undefined;
+    return t.dimensions === undefined || inUnion ? t.elements : undefined;
   if (t.kind === 'union') {
+    const scalarSibling = unionHasGenuineScalarBranch(t);
     for (const b of t.types) {
-      const e = dimensionlessIndexedElement(b, seen);
+      const e = dimensionlessIndexedElement(b, seen, scalarSibling);
       if (e !== undefined) return e;
     }
   }
@@ -1235,8 +1279,10 @@ export function broadcastSiblingType(t: Readonly<Type>): Type {
   // broadcast lift, `test/compute-engine/alias-broadcast-lift.test.ts`).
   t = resolveTypeAlias(t);
   if (typeof t === 'string' || t.kind !== 'union') return t as Type;
+  const scalarSibling = unionHasGenuineScalarBranch(t);
   const branches = t.types.filter(
-    (b) => dimensionlessIndexedElement(b) !== undefined
+    (b) =>
+      dimensionlessIndexedElement(b, undefined, scalarSibling) !== undefined
   );
   if (branches.length === 0) return t as Type;
   const elements = broadcastElementType(t);
@@ -1302,8 +1348,10 @@ export function scalarOrCollectionUnionBranches(
   if (typeof t === 'string' || t.kind !== 'union') return undefined;
   const collections: Type[] = [];
   let hasScalarBranch = false;
+  const scalarSibling = unionHasGenuineScalarBranch(t);
   for (const b of t.types) {
-    if (dimensionlessIndexedElement(b) !== undefined) collections.push(b);
+    if (dimensionlessIndexedElement(b, undefined, scalarSibling) !== undefined)
+      collections.push(b);
     else if (typeof b !== 'string' && b.kind === 'broadcastable') {
       collections.push({ kind: 'indexed_collection', elements: b.elements });
       hasScalarBranch = true;

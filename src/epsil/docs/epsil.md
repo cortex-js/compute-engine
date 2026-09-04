@@ -128,6 +128,11 @@ calls and indexing.
 **Operators** — arithmetic, logic, relational, and the pipeline operator.
 </ReadMore>
 
+<ReadMore path="/epsil/library/">
+**Standard library** — every function and constant by category, with
+signatures, summaries, and executable examples.
+</ReadMore>
+
 <ReadMore path="/epsil/control-flow/">
 **Control flow** — `if`/`else`, `match`, loops, blocks, and functions.
 </ReadMore>

@@ -159,6 +159,7 @@ describe('EPSIL DOCUMENTATION', () => {
       (block) =>
         block.language === 'epsil-live' ||
         basename(block.file) === 'examples.md' ||
+        basename(block.file) === 'library.md' ||
         basename(block.file) === 'for-agents.md' ||
         basename(block.file) === 'from-python.md' ||
         basename(block.file) === 'from-mathematica.md'

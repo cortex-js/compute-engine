@@ -1065,8 +1065,12 @@ export interface BaseDefinition {
 
   /** A list of examples of how to use this symbol or operator.
    *
-   * Each example is a string, which can be a MathJSON expression or LaTeX, bracketed by `$` signs.
-   * For example, `["Add", 1, 2]` or `$\\sin(\\pi/4)$`.
+   * Each example is one line of Epsil source — `Rationalize(1.75)` — that
+   * evaluates on a fresh engine to a value worth showing. A trailing `//`
+   * comment is allowed and is replaced by the value the example evaluates
+   * to when the standard-library page is generated
+   * (`scripts/build-library-docs.ts`); that page executes every example, so
+   * one that stops evaluating fails the documentation build.
    */
   examples: string | string[];
 

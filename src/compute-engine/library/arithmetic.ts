@@ -293,6 +293,7 @@ import {
   isTuple,
   isShapedNumericType,
   resolveShapedTypeAlias,
+  unionHasGenuineScalarBranch,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
 
@@ -813,7 +814,11 @@ function isFixedShapeCollectionType(t0: Type): boolean {
  */
 function dimensionlessIndexedElementType(
   t0: Type,
-  seen?: Set<object>
+  seen?: Set<object>,
+  /** A call on one branch of a union that has a genuine scalar branch: a
+   * dimensioned list branch counts, as in the `collection-utils.ts` original
+   * (no tensor handler sees a union). */
+  inUnion = false
 ): Type | undefined {
   if (typeof t0 === 'object' && t0.kind === 'reference') {
     if (seen?.has(t0) === true) return undefined;
@@ -827,12 +832,14 @@ function dimensionlessIndexedElementType(
   if (typeof t === 'string') return undefined;
   if (t.kind === 'indexed_collection') return t.elements;
   // A `list` broadcasts only when it is unbounded/dimensionless. A fixed
-  // shape carries `dimensions` and is left to tensor typing.
+  // shape carries `dimensions` and is left to tensor typing — except as a
+  // branch of a union.
   if (t.kind === 'list')
-    return t.dimensions === undefined ? t.elements : undefined;
+    return t.dimensions === undefined || inUnion ? t.elements : undefined;
   if (t.kind === 'union') {
+    const scalarSibling = unionHasGenuineScalarBranch(t);
     for (const b of t.types) {
-      const e = dimensionlessIndexedElementType(b, seen);
+      const e = dimensionlessIndexedElementType(b, seen, scalarSibling);
       if (e !== undefined) return e;
     }
   }

@@ -1047,7 +1047,11 @@ describe('the string-evidence walk has no depth cutoff', () => {
     ce.declare('nm', 'numish');
     const r = compile(ce.box(['Equal', 'nm', 4]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"(Math.abs((_.nm) - (4)) <= 1e-10)"`);
+    // `numish` is a number OR a list at run time, so the equality lowers
+    // through `_SYS.eq`, which compares a scalar as a scalar and a list
+    // element-wise, as interpreted (Tycho item 249,
+    // `unionAdmitsIndexedCollection`).
+    expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((_.nm), (4), 1e-10)"`);
   });
 });
 
@@ -1996,7 +2000,15 @@ describe('a wide index-slot union is not string evidence', () => {
     ce.declare('wq4', 'boolean | indexed_collection | number | string');
     const r = compile(ce.box(['Less', 'wq4', 1]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"_.wq4 < 1"`);
+    // Exempt from the STRING decline, but its `indexed_collection` arm is
+    // positive evidence of a possible array at run time, so the comparison
+    // lowers through the run-time-dispatching broadcast (a scalar `wq4`
+    // compares as a scalar; an array compares element-wise, as interpreted)
+    // rather than the bare `<`, which would coerce an array (Tycho item 249,
+    // `unionAdmitsIndexedCollection`).
+    expect(r.code).toMatchInlineSnapshot(
+      `"_SYS.bcast((_tv1, _tv2) => (_tv1 < _tv2), (_.wq4), (1))"`
+    );
   });
 
   test('`Length` of a string list is an integer, and carries no evidence either way', () => {

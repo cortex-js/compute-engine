@@ -242,8 +242,9 @@ An absent numeric field evaluates to `NaN`; an absent nonnumeric field remains
 
 ## Library Quick Roster
 
-Verified operator names, so you don't have to guess (search for more with
-`epsil doc <keywords>`):
+Verified operator names, so you don't have to guess. The complete index, by
+category with signatures, is the [Standard Library](/epsil/library/) page;
+search by concept with `epsil doc <keywords>`.
 
 - **Numbers**: `Abs`, `Floor`, `Ceil` (not `Ceiling`), `Round`, `Sqrt`,
   `Max`, `Min` (each takes a list or varargs), `Mod`, `GCD`, `LCM`,

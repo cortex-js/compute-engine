@@ -59,9 +59,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
 - **Test runner.** Consider `epsil test` with test blocks and assertion
   builtins. Assertions should produce ordinary error values and diagnostics,
   not introduce a new effect label.
-- **Standard-library index.** Build human-facing categorized tables from the
-  same operator metadata used by `epsil doc`, with signatures, summaries, and
-  executable examples. Avoid a separately maintained inventory.
 - **Style guide.** Consolidate the idioms currently distributed across
   `examples.md`, `for-agents.md`, and test headers: declaration style,
   recursion, collection pipelines, indexing, errors-as-values, and effects.

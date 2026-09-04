@@ -30,6 +30,7 @@ import {
   isPointListValue,
   isPossiblyCollectionTyped,
   isTuple,
+  isTupleShapedType,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -995,9 +996,70 @@ function jsComplexObjectTest(a: string): string {
   return `(${a} !== null && typeof ${a} === "object" && typeof ${a}.re === "number")`;
 }
 
+/**
+ * True when `t` is a UNION with at least one indexed-collection branch and at
+ * least one branch that is not a collection — an operand that is "a scalar OR
+ * a JS array at run time" by its static type alone (`integer |
+ * vector<integer^2>`, the type of a `Which` whose arms return a 2-element list
+ * or the scalar `-1`).
+ *
+ * The typing-side `isPossiblyCollectionTyped` (`collection-utils.ts`) is
+ * deliberately FALSE for this shape: the type of arithmetic over such an
+ * operand is computed PER BRANCH by the union lift, which is the sharper
+ * answer for a TYPE. Code generation has no per-branch path — one emission
+ * must serve both run-time shapes — so the compile-side twins
+ * (`isBoundPossiblyCollectionTyped` here, `isPossiblyCollectionTypedJS` in
+ * `javascript-target.ts`) admit the shape through this helper and route it
+ * to the run-time-dispatching lowerings (`_SYS.bcast`, the `Array.isArray`
+ * guarded reduce). Before that, `2·x` and `x + 1` over such an operand
+ * compiled to the bare scalar operators — `NaN` and `"1,21"` behind
+ * `success: true` — and `Sum(x)` (Desmos `.total`) failed closed with "no
+ * indexing set" (Tycho item 249).
+ *
+ * A string branch and a TUPLE branch are atomic at run time — a string
+ * lowers to a JS string, a tuple is a point that every element-wise lowering
+ * keeps whole (`_SYS.select` and the interpreter's selection both refuse a
+ * tuple condition) — so both count as non-collection branches; a top-typed
+ * branch is "nothing is known", not a collection signal, and counts as
+ * neither. A union whose branches are ALL indexed collections is provably
+ * array-shaped and is the provable tests' job (`isIndexedCollectionOperand`),
+ * not this one's.
+ *
+ * A NOMINAL value is atomic whatever its representation (ruled 2026-08-12,
+ * `isNominalAtomicType`): a sugar-declared sum such as `type json = jnull |
+ * … | jarr(list<json>)` resolves, under the erased policy, to a union with
+ * a list branch, but the interpreter binds a `json` value whole and never
+ * maps over it. Its reference is refused before it is resolved — as the
+ * whole type, and as a BRANCH: `integer | Bag` with an opaque `type Bag =
+ * list<number>` would otherwise resolve the branch to the erased list and
+ * broadcast over a value the interpreter leaves whole.
+ */
+export function unionAdmitsIndexedCollection(t: Type): boolean {
+  if (BaseCompiler.isNominalAtomicType(t)) return false;
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  let collection = false;
+  let other = false;
+  for (const branch of r.types) {
+    if (BaseCompiler.isNominalAtomicType(branch)) return false;
+    const b = resolveTypeForCompilation(branch);
+    if (b === 'unknown' || b === 'any' || b === 'value' || b === 'never')
+      continue;
+    if (b === 'string' || isTupleShapedType(b)) other = true;
+    else if (isSubtype(b, INDEXED_COLLECTION_SHAPE_TYPE)) collection = true;
+    else if (!isSubtype(b, COLLECTION_SHAPE_TYPE)) other = true;
+  }
+  return collection && other;
+}
+
 function isBoundPossiblyCollectionTyped(a: Expression): boolean {
-  if (!isPossiblyCollectionTyped(a)) return false;
+  // A declared scalar-or-collection union is reliable on any node, bound or
+  // not — see `unionAdmitsIndexedCollection`. The RAW type is passed: the
+  // helper refuses a nominal reference before resolving it, and
+  // `compilationType` would already have resolved a sum alias to its body.
+  if (unionAdmitsIndexedCollection(a.type.type)) return true;
   const t = compilationType(a);
+  if (!isPossiblyCollectionTyped(a)) return false;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return true;
   return a.isCanonical || a.isStructural;
 }
@@ -15613,7 +15675,13 @@ export class BaseCompiler {
    * declaration record and never on an applied reference.
    */
   private static isNominalAtomicArg(a: Expression): boolean {
-    const t = a.type.type;
+    return BaseCompiler.isNominalAtomicType(a.type.type);
+  }
+
+  /** The type-level half of {@link isNominalAtomicArg}: an opaque nominal
+   * reference, or a transparent alias reference that is a sugar-declared sum
+   * (its declaration record carries `_sumVariants`). */
+  static isNominalAtomicType(t: Type): boolean {
     if (typeof t === 'string' || t.kind !== 'reference') return false;
     if (t.alias !== true) return true;
     return declarationOf(t)._sumVariants !== undefined;

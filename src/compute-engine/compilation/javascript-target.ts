@@ -160,6 +160,7 @@ import {
   isProvablyTupleParticipant,
   pointHasBroadcastComponent,
   unfaithfulComparisonAggregate,
+  unionAdmitsIndexedCollection,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { compileDiagnosticOf } from './diagnostics.js';
@@ -1128,12 +1129,22 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
         !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
     );
   }
+  // A scalar-or-collection union (`integer | vector<integer^2>`) is a scalar
+  // OR a JS array at run time, and code generation has no per-branch path,
+  // so the scalar codegen paths must not claim it either. This disjunct is
+  // the ONE deliberate divergence from the typing-side twin
+  // `isPossiblyCollectionTyped` (`collection-utils.ts`), which types such a
+  // union per branch instead — see `unionAdmitsIndexedCollection`
+  // (`base-compiler.ts`), shared with `isBoundPossiblyCollectionTyped` so
+  // the two compile-side predicates agree.
+  if (unionAdmitsIndexedCollection(e.type.type)) return true;
   // A `broadcastable<…>` branch INSIDE a union counts exactly like a bare
   // `broadcastable<…>` type: the operand may hold the collection half of the
   // lift at runtime (`b: number | broadcastable<number>`), so the scalar
   // codegen paths must not claim it. This mirrors the same union arm in
   // `isPossiblyCollectionTyped` (`collection-utils.ts`) — the two predicates
-  // are deliberate twins and must gain disjuncts together.
+  // are deliberate twins and, apart from the scalar-or-collection union
+  // above, must gain disjuncts together.
   const broadcastableKind =
     typeof t !== 'string' &&
     (t.kind === 'broadcastable' ||
@@ -8543,9 +8554,11 @@ function compileSumProduct(
     // canonicalize to. Reduce over the elements. A statically indexed
     // collection lowers to a bare `.reduce`; a possibly-collection operand (a
     // `broadcastable<T>` node or a top-typed application such as `h(x)`, e.g. a
-    // Tycho document helper typed `(number) -> unknown`) may be a scalar OR an
-    // array at run time, so it reduces under an `Array.isArray` guard (a runtime
-    // scalar returns itself, matching the interpreter's `Sum(scalar) = scalar`).
+    // Tycho document helper typed `(number) -> unknown`, or an operand whose
+    // static type is a scalar-or-collection UNION such as the `Which` returning
+    // a 2-element list or `-1`, Tycho item 249) may be a scalar OR an array at
+    // run time, so it reduces under an `Array.isArray` guard (a runtime scalar
+    // returns itself, matching the interpreter's `Sum(scalar) = scalar`).
     // A dictionary/string/statically-scalar operand fails closed (D6), matching
     // `Length`/`At`/`Reduce`.
     if (isIndexedCollectionOperand(args[0]))

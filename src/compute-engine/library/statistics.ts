@@ -614,7 +614,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       description: 'Median of a collection of numbers.',
-      examples: ['Mode([1, 2, 2, 3])  // Returns 2'],
+      examples: ['Median([3, 1, 4, 2])  // 5/2'],
       evaluate: (ops, { engine, numericApproximation }) => {
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
@@ -982,6 +982,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Mode: {
+      examples: ['Mode([1, 2, 2, 3])  // 2'],
       description: 'Most frequently occurring value in a collection.',
       complexity: 1200,
       broadcastable: false,
