@@ -109,30 +109,43 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ## Remaining work
 
 - **Standing audit — value-scaled library loops guarded only by `checkDeadline`
-  (OPEN; from the constant-fold determinism ruling of 2026-08-30).** Since the
-  wall-clock backstop on the compile-time constant fold was removed (user-ruled
-  2026-08-30), `foldCostEstimate` alone decides whether a fold runs, and a
-  library loop whose bound derives from an operand VALUE, with only
-  `checkDeadline` inside, is a compile-time stall the estimate cannot see on a
-  no-deadline route. Four such loops in `library/number-theory.ts` got
-  deterministic step backstops in that round (`NthPrime`/`NextPrime`,
-  `LucasL`/`CatalanNumber`) and combinatorics was already digit-capped, but no
-  one has swept EVERY file in `src/compute-engine/library/` for the pattern the
-  `number-theory.ts` header documents. The audit is a grep-shaped pass; run it
-  before trusting the fold path with untrusted input, and add either a step
-  backstop or a fold-estimate arm for each hit.
+  (DONE 2026-09-04; from the constant-fold determinism ruling of 2026-08-30).**
+  Every `checkDeadline` site under `src/compute-engine/library/`, and every
+  `for` loop there whose bound is not a collection size, was classified. Loops
+  bounded by a collection size, a digit count, a prime gap, or an existing cap
+  (`MAX_RANDOM_ELEMENT_COUNT`, `MAX_EXACT_COMBINATORICS_DIGITS`,
+  `MAX_GAMMA_Q_SERIES_ORDER`, the Beta product's 100 factors, Pollard rho's own
+  iteration cap in `numerics/primes.ts`) need nothing. Fixed in the same
+  round: the `Eulerian` and `Stirling` recurrences were EXPONENTIAL (no memo)
+  and, memoized, exhausted the heap under the step budget (`Stirling(4000,
+  2000)`: millions of ten-thousand-digit memo entries) — `Eulerian`,
+  `Stirling`, `StirlingS1` and `NPartition` are now bottom-up walks keeping
+  one row, gated by an estimate of states × result digits
+  (`MAX_EXACT_RECURRENCE_WORK`, `library/number-theory.ts`) that keeps a call
+  too large to materialize symbolic, and `BernoulliB` takes the same gate;
+  `IsAbundant`, `divisorsAscending` and the Bernoulli recurrence got the step
+  backstop (`valueScaledStep`, the `NextPrime`/`PrimePi` convention);
+  `MatrixPower` multiplies by squaring under an exponent cap instead of
+  |n| − 1 times; `ComplexRoots`, `Colormap` (resampling), `Chunk` and the
+  `D(f, {x, n})` order stay symbolic past a result-count cap. The review of
+  the round added: the JavaScript target shares the `Chunk`, `Colormap` and
+  `MatrixPower` caps (`numerics/value-scaled-caps.ts` — a literal past a cap
+  fails closed, a run-time operand past it answers NaN, and `_SYS.matpow`
+  squares too); the `canEnumerate`/`elementCount` promises of `Chunk`,
+  `ComplexRoots` and `Divisors` decline what evaluate now declines; the
+  constant columns (`Stirling(n, 0)`, `Stirling(n, n)`, `Eulerian(n, 0)`, …)
+  are answered before the work estimate; and the estimate counts the exact
+  states of the one-row walk and treats an operand too large for a `number`
+  as too large. Pinned in
+  `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 - **Tycho item 236 residue — the two "what still declines" pins no longer
-  decline (OPEN 2026-09-03).** The item-236 fix (2026-08-30) admitted
-  complex-typed branches to the element-wise `Which` lowering and kept two
-  declines: a complex-valued CONDITION (the complex numbers are unordered) and
-  scalar arithmetic over a list-valued selection. Both pins in
-  `test/compute-engine/compile-which-complex-selection.test.ts` no longer throw
-  `Fail closed` — `compile(..., { fallback: false })` succeeds — on a clean
-  checkout of 8f47a863 and of c2124c9d alike, so the change that admitted them
-  is an earlier commit in the compile lane, not the type-handler retirement
-  (measured by running the file on both checkouts). Either the admission is now
-  intended and the pins must move, or the decline regressed; settle it in
-  `base-compiler.ts`.
+  decline (CLOSED 2026-09-04).** Settled by the Tycho item 251 round (commit
+  aaed579e): a complex-valued CONDITION takes the element-wise runtime rule
+  (the roots are projected onto the real lane, a complex root projects to NaN)
+  and scalar arithmetic over a list-valued selection broadcasts through the
+  shape-dispatching `_SYS.sadd`; both tests in
+  `test/compute-engine/compile-which-complex-selection.test.ts` pin the current
+  values.
 - **`interval-js` target: four heads confirmed with no lowering** (Tycho item
   237, filed 2026-08-30, the item-220 batch mold): `Choose`, `Apply` (the `f'`
   prime-derivative spelling lowers to `Apply(Function(…), x)`),

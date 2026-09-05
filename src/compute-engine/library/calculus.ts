@@ -90,6 +90,14 @@ import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { CancellationError } from '../../common/interruptible.js';
 
+/**
+ * The highest order the `D(f, {x, n})` spelling expands into `n` repeated
+ * variables. Each order is one differentiation pass, so the work scales
+ * with the VALUE of `n`; a larger order stays inert. A dedicated per-file
+ * constant, as for the other value-scaled caps.
+ */
+const MAX_DERIVATIVE_ORDER = 1000;
+
 //
 // ── Improper-integral endpoint limits (conditional-values Phase 3a) ──────
 //
@@ -1514,7 +1522,15 @@ volumes
           for (const o of ops.slice(1)) {
             if (isFunction(o, 'Set') && o.nops === 2 && isSymbol(o.op1)) {
               const n = o.op2.canonical.re;
-              if (n !== undefined && Number.isInteger(n) && n >= 1) {
+              // The expansion, and the differentiation it asks for, scale
+              // with the VALUE of `n`; past the cap the pair is left as it
+              // is, so the derivative stays inert rather than unbounded.
+              if (
+                n !== undefined &&
+                Number.isInteger(n) &&
+                n >= 1 &&
+                n <= MAX_DERIVATIVE_ORDER
+              ) {
                 for (let k = 0; k < n; k++) expanded.push(o.op1);
                 continue;
               }

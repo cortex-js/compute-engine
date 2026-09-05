@@ -51,6 +51,7 @@ import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
+import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -1886,13 +1887,24 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (n === 0)
           return ce.function('IdentityMatrix', [ce.number(size)]).evaluate();
 
-        // Compute the positive power A^|n| by repeated multiplication, always
-        // multiplying by the original matrix `A` (a clean `matrix` operand).
-        // Exponents are small in practice; the loop keeps results exact for
-        // symbolic/rational entries.
-        let result: Expression = A;
-        for (let i = 1; i < Math.abs(n); i++)
-          result = ce.function('MatrixMultiply', [result, A]).evaluate();
+        // The positive power A^|n| by exponentiation by squaring: O(log |n|)
+        // matrix products, each through `MatrixMultiply`, so the result
+        // stays exact for symbolic and rational entries and the loop does
+        // not scale with the operand VALUE. The exponent cap bounds the
+        // growth of the exact entries (`[[2]]^n` has n·log₁₀2 digits); past
+        // it the power stays symbolic.
+        if (Math.abs(n) > MAX_MATRIX_POWER_EXPONENT) return undefined;
+        const times = (x: Expression, y: Expression): Expression =>
+          ce.function('MatrixMultiply', [x, y]).evaluate();
+        // `n` is a nonzero integer here, so its lowest set bit assigns
+        // `result` on the first pass through the loop.
+        let result: Expression | undefined;
+        let base: Expression = A;
+        for (let e = Math.abs(n); e > 0; e = Math.floor(e / 2)) {
+          if (e % 2 === 1) result = result === undefined ? base : times(result, base);
+          if (e > 1) base = times(base, base);
+        }
+        result = result!;
 
         // Negative exponent: A^{-n} = (A^n)^{-1}. Inverting the final result
         // (rather than threading the inverse back through MatrixMultiply, whose

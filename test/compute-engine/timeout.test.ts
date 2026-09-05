@@ -155,10 +155,14 @@ describe('TIMEOUT', () => {
       expect(result.symbol).toBe('False');
     });
 
-    it('exponential Eulerian recursion throws CancellationError', () => {
-      expect(() =>
-        limited(() => ce.expr(['Eulerian', 60, 30]).evaluate())
-      ).toThrow(CancellationError);
+    it('Eulerian is a bottom-up walk: (60, 30) computes under the limit', () => {
+      // The bare recurrence was exponential and threw here via the deadline;
+      // the walk is O(n·m) and answers at once.
+      expect(
+        limited(() => ce.expr(['Eulerian', 60, 30]).evaluate()).toString()
+      ).toBe(
+        '1433390608671821228969675919258773164493394050515364070292771746922431378457940792'
+      );
     });
 
     it('huge PrimePi throws CancellationError', () => {

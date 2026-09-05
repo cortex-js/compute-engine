@@ -39,6 +39,67 @@ import {
 const MAX_VALUE_SCALED_ITERATIONS = 1e7;
 
 /**
+ * The step backstop of a loop whose length scales with an operand VALUE.
+ * Call it once per iteration with the running step count: every 1024 steps
+ * it polls the deadline, and past `MAX_VALUE_SCALED_ITERATIONS` it throws
+ * `iteration-limit-exceeded` — the same answer `NextPrime` and `PrimePi`
+ * give inline. Without it such a loop is bounded only by the deadline, and a
+ * call made with no deadline armed (the compile-time constant fold, a plain
+ * `evaluate()`) runs unbounded.
+ */
+function valueScaledStep(
+  head: string,
+  steps: number,
+  deadline: number | DeadlineFrame | undefined
+): void {
+  if ((steps & 0x3ff) !== 0) return;
+  checkDeadline(deadline);
+  if (steps > MAX_VALUE_SCALED_ITERATIONS)
+    throw new CancellationError({
+      message: `${head}: exceeded ${MAX_VALUE_SCALED_ITERATIONS} iterations`,
+      cause: 'iteration-limit-exceeded',
+    });
+}
+
+/**
+ * Above this much estimated work — recurrence states times result digits —
+ * an exact recurrence value (`Eulerian`, `Stirling`, `StirlingS1`,
+ * `NPartition`, `BernoulliB`) stays symbolic. Each state is one big-integer
+ * operation on a value of up to the result's size, so the product is the
+ * running time; a step cap alone is not enough, because the work per step
+ * grows with the operands (`Stirling(4000, 2000)` is a few million steps on
+ * integers of ten thousand digits). Measured: `BernoulliB(800)` is 6·10⁸
+ * digit-steps in 0.28 s and `Stirling(1000, 500)` is 7·10⁸ in 0.04 s, so
+ * 10⁹ digit-steps is under a second. A dedicated per-file constant, as for
+ * `MAX_VALUE_SCALED_ITERATIONS`.
+ */
+const MAX_EXACT_RECURRENCE_WORK = 1e9;
+
+/** An upper bound on the decimal digits of `n!` (Stirling's formula). */
+function log10Factorial(n: number): number {
+  if (n < 2) return 1;
+  return n * Math.log10(n / Math.E) + 0.5 * Math.log10(2 * Math.PI * n) + 1;
+}
+
+/** Does a recurrence over `states` states, each on an integer of at most
+ * `digits` decimal digits, exceed `MAX_EXACT_RECURRENCE_WORK`? A non-finite
+ * count — an operand too large for a `number` — is too large. */
+function exactRecurrenceTooLarge(states: number, digits: number): boolean {
+  if (!Number.isFinite(states) || !Number.isFinite(digits)) return true;
+  return states * Math.max(digits, 1) > MAX_EXACT_RECURRENCE_WORK;
+}
+
+/**
+ * The number of states a one-row-at-a-time walk over a triangle visits: row
+ * `r` has `min(r, m)` cells, so the total over `n` rows is the full
+ * triangle up to row `m` plus a band of width `m` below it.
+ */
+function triangleWalkStates(n: number, m: number): number {
+  if (m >= n) return (n * (n + 1)) / 2;
+  return (m * (m + 1)) / 2 + (n - m) * m;
+}
+
+/**
  * Above this many decimal digits, an exact sequence value (`LucasL`,
  * `CatalanNumber`) is impractical to materialize — the loop's bigint
  * operands grow with every iteration, so a STEP cap cannot bound the work.
@@ -73,6 +134,24 @@ const MAX_DIGIT_ITERATION_DIGITS = 1_000_000;
 function nonzeroIntegerGround(g: Expression): boolean {
   const k = toBigint(g);
   return k !== null && k !== 0n;
+}
+
+/**
+ * Is the divisor scan of `m` (O(√m) steps, `divisorsAscending`) within
+ * `MAX_VALUE_SCALED_ITERATIONS`? Decided from the cheap bit length: √m fits
+ * the budget when m has at most twice the budget's bits (10⁷ ≈ 2²³·², so
+ * m < 2⁴⁸ passes and m ≥ 2⁵² does not; the band between is admitted, which
+ * costs at most 2⁶ times the budget in the worst case before the backstop).
+ */
+function withinDivisorScanBudget(m: bigint): boolean {
+  return approximateBitLength(m) <= 2 * Math.log2(MAX_VALUE_SCALED_ITERATIONS) + 4;
+}
+
+/** A nonzero integer whose divisor scan is within the step budget — the
+ * `Divisors` evaluate guard, for its `canEnumerate` promise. */
+function divisorScanGround(g: Expression): boolean {
+  const k = toBigint(g);
+  return k !== null && k !== 0n && withinDivisorScanBudget(k < 0n ? -k : k);
 }
 
 /**
@@ -291,7 +370,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // see `canEnumerate` (types-definitions.ts).
       canEnumerate: (expr) =>
         isFunction(expr)
-          ? canEnumerateOperand(expr.op1, nonzeroIntegerGround)
+          ? canEnumerateOperand(expr.op1, divisorScanGround)
           : undefined,
       evaluate: ([n], { engine: ce }) => {
         const k = toBigint(n);
@@ -299,6 +378,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // 0 has infinitely many divisors; leave it unevaluated.
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined;
+        // The scan is O(√n) steps; past the step budget it would abort, so
+        // an operand that large stays symbolic instead (and `canEnumerate`
+        // declines it through the same predicate).
+        if (!withinDivisorScanBudget(m)) return undefined;
         return ce.function(
           'List',
           divisorsAscending(m, ce._deadlineFrame).map((d) => ce.number(d))
@@ -982,7 +1065,12 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === 0n) return ce.number(1);
         if (k === 1n) return ce.number(-1).div(ce.number(2));
         if (k % 2n === 1n) return ce.number(0);
-        const [num, den] = bernoulliNumber(Number(k), ce._deadline);
+        // The recurrence is O(n²) rational steps on integers of about
+        // log₁₀(n!) digits: past the work estimate the value stays symbolic.
+        const N = Number(k);
+        if (exactRecurrenceTooLarge((N * N) / 2, log10Factorial(N)))
+          return undefined;
+        const [num, den] = bernoulliNumber(N, ce._deadline);
         return den === 1n ? ce.number(num) : ce.number(num).div(ce.number(den));
       },
     },
@@ -1225,14 +1313,40 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n || mm >= nn)
           return undefined;
+        // Bottom-up over the rows of the Euler triangle, keeping only the
+        // last row: A(r, j) = (j+1)·A(r−1, j) + (r−j)·A(r−1, j−1), with
+        // A(r, 0) = 1 and A(r, j) = 0 for j ≥ r. The bare recurrence
+        // revisits each (r, j) exponentially many times and recurses `n`
+        // deep; this walk is O(n·m) steps on integers of at most log₁₀(n!)
+        // digits, and the work estimate keeps a call too large to
+        // materialize symbolic.
+        // A(n, 0) = 1 for every n ≥ 1: a constant, answered before the
+        // work estimate so that a large `n` does not hide it.
+        if (mm === 0n) return ce.number(1);
+        const N = Number(nn);
+        const M = Number(mm);
+        if (
+          exactRecurrenceTooLarge(
+            triangleWalkStates(N - 1, M),
+            log10Factorial(N)
+          )
+        )
+          return undefined;
+        let prev: bigint[] = [1n]; // row 1
         let steps = 0;
-        const A = (n: bigint, k: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
-          if (k === 0n) return 1n;
-          if (k >= n) return 0n;
-          return (k + 1n) * A(n - 1n, k) + (n - k) * A(n - 1n, k - 1n);
-        };
-        return ce.number(A(nn, mm));
+        for (let r = 2; r <= N; r++) {
+          const width = Math.min(r - 1, M);
+          const cur: bigint[] = new Array(width + 1);
+          cur[0] = 1n;
+          for (let j = 1; j <= width; j++) {
+            valueScaledStep('Eulerian', ++steps, ce._deadlineFrame);
+            const above = prev[j] ?? 0n;
+            const left = prev[j - 1] ?? 0n;
+            cur[j] = BigInt(j + 1) * above + BigInt(r - j) * left;
+          }
+          prev = cur;
+        }
+        return ce.number(prev[M] ?? 0n);
       },
     },
 
@@ -1245,14 +1359,43 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
           return undefined;
+        // Bottom-up over the rows of the triangle, keeping only the last
+        // row: S(r, j) = j·S(r−1, j) + S(r−1, j−1), with S(0, 0) = 1 and
+        // S(r, 0) = S(0, j) = 0 otherwise. The bare recurrence revisits each
+        // (r, j) exponentially many times and recurses `n` deep; this walk is
+        // O(n·m) steps on integers of at most n·log₁₀(m) digits
+        // (S(n, m) ≤ mⁿ), and the work estimate keeps a call too large to
+        // materialize symbolic.
+        // The constant columns, answered before the work estimate so that a
+        // large `n` does not hide them: S(0, 0) = 1, S(n, 0) = 0 for n ≥ 1,
+        // and S(n, 1) = S(n, n) = 1.
+        if (nn === 0n) return ce.number(1);
+        if (mm === 0n) return ce.number(0);
+        if (mm === 1n || mm === nn) return ce.number(1);
+        const N = Number(nn);
+        const M = Number(mm);
+        if (
+          exactRecurrenceTooLarge(
+            triangleWalkStates(N, M),
+            N * Math.log10(Math.max(M, 2))
+          )
+        )
+          return undefined;
+        let prev: bigint[] = [1n]; // row 0
         let steps = 0;
-        const S = (n: bigint, k: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
-          if (n === 0n && k === 0n) return 1n;
-          if (n === 0n || k === 0n) return 0n;
-          return S(n - 1n, k - 1n) + k * S(n - 1n, k);
-        };
-        return ce.number(S(nn, mm));
+        for (let r = 1; r <= N; r++) {
+          const width = Math.min(r, M);
+          const cur: bigint[] = new Array(width + 1);
+          cur[0] = 0n;
+          for (let j = 1; j <= width; j++) {
+            valueScaledStep('Stirling', ++steps, ce._deadlineFrame);
+            const above = prev[j] ?? 0n;
+            const left = prev[j - 1] ?? 0n;
+            cur[j] = BigInt(j) * above + left;
+          }
+          prev = cur;
+        }
+        return ce.number(prev[M] ?? 0n);
       },
     },
 
@@ -1266,21 +1409,37 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n || mm > nn)
           return undefined;
-        const memo = new Map<string, bigint>();
+        // Bottom-up over the rows of the triangle, keeping only the last
+        // row: s(r, j) = s(r−1, j−1) − (r−1)·s(r−1, j), with s(0, 0) = 1 and
+        // s(r, 0) = s(0, j) = 0 otherwise. The memoized recursion recursed
+        // `n` deep; this walk is O(n·m) steps on integers of at most
+        // log₁₀(n!) digits (|s(n, m)| ≤ n!), and the work estimate keeps a
+        // call too large to materialize symbolic.
+        // The constant columns, answered before the work estimate so that a
+        // large `n` does not hide them: s(0, 0) = 1, s(n, 0) = 0 for n ≥ 1,
+        // and s(n, n) = 1.
+        if (nn === 0n) return ce.number(1);
+        if (mm === 0n) return ce.number(0);
+        if (mm === nn) return ce.number(1);
+        const N = Number(nn);
+        const M = Number(mm);
+        if (exactRecurrenceTooLarge(triangleWalkStates(N, M), log10Factorial(N)))
+          return undefined;
+        let prev: bigint[] = [1n]; // row 0
         let steps = 0;
-        const s = (n: bigint, k: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
-          if (n === 0n && k === 0n) return 1n;
-          if (n === 0n || k === 0n) return 0n;
-          const key = `${n},${k}`;
-          const cached = memo.get(key);
-          if (cached !== undefined) return cached;
-          // s(n, k) = s(n−1, k−1) − (n−1)·s(n−1, k)
-          const v = s(n - 1n, k - 1n) - (n - 1n) * s(n - 1n, k);
-          memo.set(key, v);
-          return v;
-        };
-        return ce.number(s(nn, mm));
+        for (let r = 1; r <= N; r++) {
+          const width = Math.min(r, M);
+          const cur: bigint[] = new Array(width + 1);
+          cur[0] = 0n;
+          for (let j = 1; j <= width; j++) {
+            valueScaledStep('StirlingS1', ++steps, ce._deadlineFrame);
+            const above = prev[j] ?? 0n;
+            const left = prev[j - 1] ?? 0n;
+            cur[j] = left - BigInt(r - 1) * above;
+          }
+          prev = cur;
+        }
+        return ce.number(prev[M] ?? 0n);
       },
     },
 
@@ -1290,25 +1449,33 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine: ce }) => {
         const nn = toBigint(n);
         if (nn === null || nn < 0n) return undefined;
-        const memo = new Map<bigint, bigint>();
+        // Euler's pentagonal recurrence, bottom-up:
+        // p(m) = Σ_{k≥1} (−1)^{k+1} (p(m − k(3k−1)/2) + p(m − k(3k+1)/2)),
+        // with p(0) = 1 and p(j) = 0 for j < 0. The memoized recursion
+        // recursed `n` deep; this walk is O(n√n) steps on integers of about
+        // π√(2n/3)/ln 10 digits (the Hardy–Ramanujan size of p(n)), and the
+        // work estimate keeps a call too large to materialize symbolic.
+        const N = Number(nn);
+        const digits = (Math.PI * Math.sqrt((2 * N) / 3)) / Math.LN10 + 1;
+        if (exactRecurrenceTooLarge(N * (2 * Math.sqrt(N) + 2), digits))
+          return undefined;
+        const P: bigint[] = new Array(N + 1);
+        P[0] = 1n;
         let steps = 0;
-        const P = (n: bigint): bigint => {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
-          if (n === 0n) return 1n;
-          if (n < 0n) return 0n;
-          if (memo.has(n)) return memo.get(n)!;
+        for (let m = 1; m <= N; m++) {
           let total = 0n;
-          for (let k = 1n; ; k++) {
-            const pent1 = (k * (3n * k - 1n)) / 2n;
-            const pent2 = (k * (3n * k + 1n)) / 2n;
-            if (pent1 > n && pent2 > n) break;
-            const sign = k % 2n === 0n ? -1n : 1n;
-            total += sign * (P(n - pent1) + P(n - pent2));
+          for (let k = 1; ; k++) {
+            valueScaledStep('NPartition', ++steps, ce._deadlineFrame);
+            const pent1 = (k * (3 * k - 1)) / 2;
+            const pent2 = (k * (3 * k + 1)) / 2;
+            if (pent1 > m) break;
+            const sign = k % 2 === 0 ? -1n : 1n;
+            total += sign * P[m - pent1];
+            if (pent2 <= m) total += sign * P[m - pent2];
           }
-          memo.set(n, total);
-          return total;
-        };
-        return ce.number(P(nn));
+          P[m] = total;
+        }
+        return ce.number(P[N]);
       },
     },
 
@@ -1403,8 +1570,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (k === null || k < 1n) return ce.False;
         let sum = 1n;
         let steps = 0;
+        // O(√n) in the operand VALUE: a 40-digit `n` is 10²⁰ steps.
         for (let i = 2n; i * i <= k; i++) {
-          if ((++steps & 0xfff) === 0) checkDeadline(ce._deadlineFrame);
+          valueScaledStep('IsAbundant', ++steps, ce._deadlineFrame);
           if (k % i === 0n) {
             sum += i;
             const j = k / i;
@@ -1505,8 +1673,10 @@ function divisorsAscending(
   const small: bigint[] = [];
   const large: bigint[] = [];
   let steps = 0;
+  // O(√m) in the operand VALUE: bounded by the step budget, not only by the
+  // deadline, so a call with no deadline armed cannot run unbounded.
   for (let i = 1n; i * i <= m; i++) {
-    if ((++steps & 0xfff) === 0) checkDeadline(deadline);
+    valueScaledStep('Divisors', ++steps, deadline);
     if (m % i === 0n) {
       small.push(i);
       const j = m / i;
@@ -1632,12 +1802,15 @@ function bernoulliNumber(
   deadline: number | undefined
 ): [bigint, bigint] {
   const B: [bigint, bigint][] = [[1n, 1n]]; // B₀ = 1
+  // O(n²) rational steps in the operand VALUE, each on growing bigints:
+  // bounded by the step budget, not only by the deadline.
+  let steps = 0;
   for (let m = 1; m <= n; m++) {
-    checkDeadline(deadline);
     let sNum = 0n;
     let sDen = 1n;
     let c = 1n; // binomial C(m+1, k), starting at k = 0
     for (let k = 0; k < m; k++) {
+      valueScaledStep('BernoulliB', ++steps, deadline);
       const tNum = c * B[k][0];
       const tDen = B[k][1];
       const g = gcd(sDen, tDen);

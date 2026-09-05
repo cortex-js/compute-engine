@@ -168,6 +168,11 @@ import {
   quadratureBeatsMonteCarlo,
 } from '../numerics/gauss-kronrod.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import {
+  MAX_CHUNK_COUNT,
+  MAX_COLORMAP_SAMPLES,
+  MAX_MATRIX_POWER_EXPONENT,
+} from '../numerics/value-scaled-caps.js';
 import { interval } from '../numerics/interval.js';
 import { withRandomSeedFrame } from '../boxed-expression/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
@@ -3318,7 +3323,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Chunk: a statically non-positive chunk count (${kConst}) is inert ` +
           `in the interpreter. Fail closed (D6).`
       );
-    return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(args[1])})`;
+    // A literal count past the cap stays symbolic in the interpreter, so it
+    // fails closed here; a run-time count past it answers NaN, the compiled
+    // spelling for "no value".
+    if (kConst !== undefined && Math.round(kConst) > MAX_CHUNK_COUNT)
+      throw new Error(
+        `Chunk: a chunk count past ${MAX_CHUNK_COUNT} stays symbolic in the ` +
+          `interpreter. Fail closed (D6).`
+      );
+    return `((_l, _k) => { _k = Math.round(_k); if (!(Number.isFinite(_k) && _k > 0)) return []; if (_k > ${MAX_CHUNK_COUNT}) return NaN; const _sz = Math.ceil(_l.length / _k); return Array.from({ length: _k }, (_, _i) => _l.slice(_i * _sz, (_i + 1) * _sz)); })(${coll}, ${compile(args[1])})`;
   },
   // Integer form yields chunks of SIZE n (trailing chunk may be shorter);
   // with a step, complete sliding windows only — mirroring the interpreter.
@@ -3739,6 +3752,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         'MatrixPower: an exponent that is not statically an integer may be ' +
           'the principal matrix square root in the interpreter, which ' +
           '`_SYS.matpow` does not compute. Fail closed (D6).'
+      );
+    // A literal exponent past the cap stays symbolic in the interpreter, so
+    // it fails closed here; a run-time exponent past it answers NaN in
+    // `_SYS.matpow`.
+    const pConst = tryGetConstant(args[1]);
+    if (pConst !== undefined && Math.abs(pConst) > MAX_MATRIX_POWER_EXPONENT)
+      throw new Error(
+        `MatrixPower: an exponent past ${MAX_MATRIX_POWER_EXPONENT} stays ` +
+          'symbolic in the interpreter. Fail closed (D6).'
       );
     return `_SYS.matpow(${collArg('MatrixPower', args[0], compile)}, ${compile(
       args[1]
@@ -4774,8 +4796,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Colormap: (args, compile) => {
     if (args.length === 0) throw new Error('Colormap: no argument');
-    if (args.length >= 2)
+    if (args.length >= 2) {
+      // A literal sample count past the cap stays symbolic in the
+      // interpreter, so it fails closed here; a run-time count past it
+      // answers NaN in `_SYS.colormap`.
+      const nConst = tryGetConstant(args[1]);
+      if (nConst !== undefined && nConst > MAX_COLORMAP_SAMPLES)
+        throw new Error(
+          `Colormap: a sample count past ${MAX_COLORMAP_SAMPLES} stays ` +
+            'symbolic in the interpreter. Fail closed (D6).'
+        );
       return `_SYS.colormap(${compile(args[0])}, ${compile(args[1])})`;
+    }
     return `_SYS.colormap(${compile(args[0])})`;
   },
 
@@ -5283,7 +5315,7 @@ const colorHelpers = {
     if (alpha !== undefined) result.push(alpha);
     return result;
   },
-  colormap(name: string, arg?: number): number[] | number[][] {
+  colormap(name: string, arg?: number): number[] | number[][] | number {
     const allPalettes = {
       ...SEQUENTIAL_PALETTES,
       ...CATEGORICAL_PALETTES,
@@ -5301,9 +5333,11 @@ const colorHelpers = {
     // No second arg → return full palette
     if (arg === undefined) return colors;
 
-    // Integer n >= 2 → resample to n evenly spaced colors
+    // Integer n >= 2 → resample to n evenly spaced colors. Past the cap the
+    // interpreter stays symbolic; the compiled spelling for that is NaN.
     if (Number.isInteger(arg) && arg >= 2) {
       const n = arg;
+      if (n > MAX_COLORMAP_SAMPLES) return NaN;
       const result: number[][] = [];
       for (let i = 0; i < n; i++) {
         const t = n === 1 ? 0 : i / (n - 1);
@@ -6015,16 +6049,20 @@ function diagonal(m: any): any {
 }
 
 /**
- * Integer matrix power, mirroring the interpreter: `M^0` is the identity, `M^n`
- * folds `n` matrix products, and a negative power inverts first (`M^-n =
- * (M^-1)^n`). A non-square matrix, a singular matrix under a negative power, or
- * a non-integer exponent yields NaN (the interpreter errors / stays inert).
+ * Integer matrix power, mirroring the interpreter: `M^0` is the identity,
+ * `M^n` is computed by exponentiation by squaring (O(log n) products, as
+ * the interpreter does), and a negative power inverts first (`M^-n =
+ * (M^-1)^n`). A non-square matrix, a singular matrix under a negative power,
+ * or a non-integer exponent yields NaN (the interpreter errors / stays
+ * inert), and so does an exponent past `MAX_MATRIX_POWER_EXPONENT`, where
+ * the interpreter stays symbolic.
  */
 function matpow(m: number[][], p: number): number[][] | number {
   if (!Array.isArray(m) || !Array.isArray(m[0])) return NaN;
   const n = m.length;
   if (m.some((r) => !Array.isArray(r) || r.length !== n)) return NaN;
   if (!Number.isInteger(p)) return NaN;
+  if (Math.abs(p) > MAX_MATRIX_POWER_EXPONENT) return NaN;
   let base: number[][] = m.map((r) => r.slice());
   let e = p;
   if (e < 0) {
@@ -6036,7 +6074,10 @@ function matpow(m: number[][], p: number): number[][] | number {
   let result: number[][] = Array.from({ length: n }, (_, i) =>
     Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))
   );
-  for (let k = 0; k < e; k++) result = matmul(result, base) as number[][];
+  for (; e > 0; e = Math.floor(e / 2)) {
+    if (e % 2 === 1) result = matmul(result, base) as number[][];
+    if (e > 1) base = matmul(base, base) as number[][];
+  }
   return result;
 }
 

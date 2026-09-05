@@ -101,6 +101,7 @@ import {
 import { contextualSlotSignature } from '../boxed-expression/generic-instantiation.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
+import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import {
   CancellationError,
   checkDeadline,
@@ -10346,7 +10347,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isFunction(expr)) return undefined;
       const k = canEnumerateOperand(expr.ops[1], (g) => {
         const i = toInteger(g);
-        return i !== null && i > 0;
+        // The count cap is part of the evaluate guard: past it the
+        // chunking stays symbolic, so the promise must decline too.
+        return i !== null && i > 0 && i <= MAX_CHUNK_COUNT;
       });
       if (k === false) return false;
       return canEnumerateFiniteSource(expr);
@@ -10361,12 +10364,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isFunction(expr)) return undefined;
       if (expr.op1.isFiniteCollection !== true) return undefined;
       const k = toInteger(expr.op2);
-      if (k === null || k <= 0) return undefined;
+      // Mirrors the evaluate guard, cap included: a count evaluation declines
+      // must not be promised here.
+      if (k === null || k <= 0 || k > MAX_CHUNK_COUNT) return undefined;
       return k;
     },
     evaluate: ([xs, n], { engine: ce }) => {
       const k = toInteger(n);
       if (!xs.isFiniteCollection || k === null || k <= 0) return undefined;
+      // One (possibly empty) group per requested chunk: the loop scales with
+      // the VALUE of `k`, not with the source, so past the cap the chunking
+      // stays symbolic.
+      if (k > MAX_CHUNK_COUNT) return undefined;
 
       const all = Array.from(xs.each()) as Expression[];
       const result: Expression[] = [];

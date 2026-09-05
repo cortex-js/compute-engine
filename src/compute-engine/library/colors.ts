@@ -26,6 +26,7 @@ import {
   isNumber,
   isString,
 } from '../boxed-expression/type-guards.js';
+import { MAX_COLORMAP_SAMPLES } from '../numerics/value-scaled-caps.js';
 
 /**
  * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
@@ -440,6 +441,9 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       // Variant 2: integer >= 2 -> resample to n colors
       if (Number.isInteger(val) && val >= 2) {
         const n = val;
+        // One sample per requested color: the loop scales with the operand
+        // VALUE, so past the cap the resampling stays symbolic.
+        if (n > MAX_COLORMAP_SAMPLES) return undefined;
         const colors: any[] = [];
         for (let i = 0; i < n; i++) {
           colors.push(samplePalette(ce, palette, i / (n - 1)));

@@ -39,6 +39,13 @@ import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
 
 /**
+ * The most roots `ComplexRoots(z, n)` materializes: one element per root, so
+ * the work scales with the VALUE of `n`; a larger order stays symbolic.
+ * A dedicated per-file constant, as for the other value-scaled caps.
+ */
+const MAX_COMPLEX_ROOTS = 10_000;
+
+/**
  * Assumption-based sign fallback for the part extractors
  * (`Real`, `Imaginary`, `Argument` — and `Abs` in the arithmetic library):
  * when the operand is a symbol with no value, look up assumed bounds for the
@@ -530,13 +537,18 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (nOp === null) return false;
         if (nOp.isCollection) return undefined;
         const n = nOp.re;
-        return Number.isInteger(n) && n > 0;
+        // The root-count cap is part of the evaluate guard: past it the
+        // roots stay symbolic, so the promise must decline too.
+        return Number.isInteger(n) && n > 0 && n <= MAX_COMPLEX_ROOTS;
       },
       evaluate: (ops, { engine: ce }) => {
         const re = ops[0].re;
         if (isNaN(re)) return undefined;
         const n = ops[1].re;
         if (!Number.isInteger(n) || n <= 0) return undefined;
+        // The result has `n` elements, so the loop scales with the operand
+        // VALUE: past the cap the roots stay symbolic.
+        if (n > MAX_COMPLEX_ROOTS) return undefined;
 
         const roots: [number, number][] = [];
 

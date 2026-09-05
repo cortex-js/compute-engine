@@ -20,6 +20,24 @@
 
 ### Resolved Issues
 
+- **Library loops that scale with an operand value are bounded on every
+  route.** A call made with no deadline armed — a plain `evaluate()`, the
+  compile-time constant fold — could run unbounded in a loop whose length is
+  an operand VALUE: `Eulerian(n, m)` and `Stirling(n, m)` recomputed their
+  recurrence exponentially many times, and memoized they exhausted the heap
+  (`Stirling(4000, 2000)`); `NPartition`, `StirlingS1`, `BernoulliB`,
+  `IsAbundant` and the divisor scan polled the deadline only; `MatrixPower`
+  multiplied |n| − 1 times; `ComplexRoots`, `Colormap` resampling, `Chunk` and
+  the `D(f, {x, n})` derivative order materialized one element per unit of
+  the operand. The four recurrences are now bottom-up walks keeping one row,
+  and they, with `BernoulliB`, stay symbolic past an estimate of the work
+  (states × result digits); the scans stop with `iteration-limit-exceeded`
+  past the number-theory step budget; `MatrixPower` multiplies by squaring;
+  and the four materializing heads stay symbolic past a result-count cap. The
+  compiled JavaScript lane shares the `Chunk`, `Colormap` and `MatrixPower`
+  caps: a literal past a cap fails closed, a run-time operand past it answers
+  NaN, and the compiled matrix power squares too. Small values are unchanged,
+  and `Eulerian(60, 30)` answers at once where it used to time out.
 - **A collection of non-numbers at a numeric elementwise operator is refused
   at boxing, on every route.** `Ln(["a", "b"])`, `Sqrt(["a", "b"])`,
   `Abs(["a", "b"])` and `Add(["a"], 1)` were valid calls that failed in every
