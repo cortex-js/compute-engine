@@ -229,6 +229,18 @@ export function canonicalInvisibleOperator(
       return ce.function(lhsCanon.symbol, args);
     }
 
+    // A parenthesized function literal applied to an argument list:
+    // `(x \mapsto 2x)(3)`, `((x, y) \mapsto x + y)(2, 3)`. The literal is a
+    // function value, and its juxtaposition with a delimited argument list
+    // is an application (`Apply`), exactly as it is for a function symbol
+    // above — never a product of the literal with the arguments. A power or
+    // a factorial that the parser attached to the argument list
+    // (`(x \mapsto 2x)(3)^2`) applies to the application.
+    if (isFunction(lhsCanon, 'Function')) {
+      const applied = applyLiteralThroughPostfix(ce, lhsCanon, rhs);
+      if (applied !== undefined) return applied;
+    }
+
     // Is is an index operation, i.e. "v[1,2]"?
     if (
       isSymbol(lhsCanon) &&
@@ -437,9 +449,72 @@ function flattenInvisibleOperator(
   return ys;
 }
 
+/** The arguments a delimited argument list holds: none for `()`, the
+ * sequence's operands for `(a, b)`, the one operand otherwise. */
+function delimitedArguments(delim: Expression): ReadonlyArray<Expression> {
+  if (!isFunction(delim, 'Delimiter') || delim.nops === 0) return [];
+  const inner = delim.op1;
+  return flatten(isFunction(inner, 'Sequence') ? inner.ops : [inner]);
+}
+
+/** Is this delimiter an index bracket (`v[1, 2]`), not an argument list? */
+function isIndexDelimiter(delim: Expression): boolean {
+  return (
+    isFunction(delim, 'Delimiter') &&
+    isString(delim.op2) &&
+    (delim.op2.string === '[,]' || delim.op2.string === '[;]')
+  );
+}
+
+/**
+ * The application of a function literal to a delimited argument list,
+ * `Apply(literal, ...args)`, or `undefined` when `rhs` is not one. An index
+ * bracket (`[…]`) is not an argument list. A power or a factorial that the
+ * parser attached to the argument list (`(x \mapsto 2x)(3)^2`,
+ * `(x \mapsto 2x)(3)!`) binds tighter than the juxtaposition, so it is
+ * rebuilt around the application: `Power(Apply(literal, 3), 2)`.
+ */
+function applyLiteralThroughPostfix(
+  ce: ComputeEngine,
+  literal: Expression,
+  rhs: Expression
+): Expression | undefined {
+  if (isFunction(rhs, 'Delimiter')) {
+    if (isIndexDelimiter(rhs)) return undefined;
+    return ce.function('Apply', [literal, ...delimitedArguments(rhs)]);
+  }
+  if (
+    (isFunction(rhs, 'Power') || isFunction(rhs, 'Factorial')) &&
+    isFunction(rhs.op1, 'Delimiter') &&
+    !isIndexDelimiter(rhs.op1)
+  ) {
+    const application = ce.function('Apply', [
+      literal,
+      ...delimitedArguments(rhs.op1),
+    ]);
+    return ce.function(rhs.operator, [application, ...rhs.ops.slice(1)]);
+  }
+  return undefined;
+}
+
+/** A function literal, bare or parenthesized at any depth
+ * (`((x \mapsto 2x))`), or `undefined`. The parenthesized form is read
+ * through its canonical body, which unwraps every redundant delimiter, as
+ * the two-operand path does through `lhs.canonical`. */
+function functionLiteralOf(op: Expression): Expression | undefined {
+  if (isFunction(op, 'Function')) return op;
+  if (isFunction(op, 'Delimiter') && op.nops === 1) {
+    const inner = op.op1.canonical;
+    if (isFunction(inner, 'Function')) return inner;
+  }
+  return undefined;
+}
+
 /**
  * Scan for adjacent (symbol, Delimiter) pairs where the symbol is a known
- * function, and combine them into function applications.
+ * function, and combine them into function applications. An adjacent
+ * (function literal, Delimiter) pair is an application too:
+ * `2(x \mapsto 2x)(3)` is `2 · Apply(x \mapsto 2x, 3)`.
  *
  * For example, [2, f, Delimiter(x)] → [2, f(x)] when f is declared as
  * a function.  This handles cases like `2f \left(x\right)` where a
@@ -454,6 +529,16 @@ function combineFunctionApplications(
   let i = 0;
   while (i < ops.length) {
     const op = ops[i];
+    const literal = i < ops.length - 1 ? functionLiteralOf(op) : undefined;
+    const applied =
+      literal === undefined
+        ? undefined
+        : applyLiteralThroughPostfix(ce, literal.canonical, ops[i + 1]);
+    if (applied !== undefined) {
+      result.push(applied);
+      i += 2;
+      continue;
+    }
     if (
       i < ops.length - 1 &&
       isSymbol(op) &&

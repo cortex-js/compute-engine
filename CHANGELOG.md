@@ -11,6 +11,10 @@
   `(i\colon integer)\mapsto 2i`, so a typed lambda round-trips through LaTeX
   instead of losing its annotations. A colon that is not followed by `\mapsto`
   — a set-builder, a compact piecewise, `f: A \to B` — reads exactly as before.
+- **A lambda can be applied inline.** `(x \mapsto 2x)(3)` and
+  `((x, y) \mapsto x + y)(2, 3)` now parse as applications and evaluate to
+  `6` and `5`; they used to parse as a product of the lambda with its
+  arguments. The application serializes back as `(x\mapsto 2x)(3)`.
 - **`epsil check --effects` reports the effects inferred for each top-level
   function.** One line per `function` statement or `let`/`const` lambda —
   `f (line 1): console`, `g (line 2): pure (declared)`, `k (line 3): random` —

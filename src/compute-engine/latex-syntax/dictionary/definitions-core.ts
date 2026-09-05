@@ -1658,6 +1658,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         );
       }
 
+      // A function literal applied inline is written the way it is read:
+      // the parenthesized literal followed by its parenthesized argument
+      // list, `(x\mapsto 2x)(3)` (see `canonicalInvisibleOperator`). Both
+      // pairs of parentheses are the notation itself, so the
+      // `applyFunctionStyle` option does not apply here: without them the
+      // text would read as a product.
+      if (h === 'Function') {
+        const args = operands(expr).slice(1) as MathJsonExpression[];
+        return joinLatex([
+          serializer.wrapString(serializer.serialize(lhs), 'normal'),
+          serializer.wrapString(
+            args.map((x) => serializer.serialize(x)).join(', '),
+            'normal'
+          ),
+        ]);
+      }
+
       // If no argument, or the body is a single symbol, display as a regular function
       const rhs = operand(expr, 2); // The first argument
       if (typeof lhs === 'string' || !rhs) {

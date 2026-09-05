@@ -193,14 +193,29 @@ fixed in that change. One item remains.
   (`(i\\colon integer)\\mapsto 2i`, the symbol-form `Typed` included), so
   typed lambdas round-trip. Pinned in
   `test/compute-engine/latex-syntax/typed-lambda-parameters.test.ts`.
-- **A parenthesized lambda applied inline parses as a product (OPEN, parser —
-  found 2026-09-04 while adding the annotated-parameter route).**
-  `(i \\mapsto 2i)(3)` parses to
-  `InvisibleOperator(Delimiter(Function(…)), Delimiter(3))` and evaluates to
-  `3(i) => 2i`, a product of the lambda and 3, where the application `2·3 = 6`
-  is meant; the typed spelling `((i: integer) \\mapsto 2i)(3)` does the same.
-  The juxtaposition parser would need to apply a parenthesized `Function`
-  literal to the argument list that follows it, the way it applies a symbol.
+- **A parenthesized lambda applied inline parses as a product (FIXED
+  2026-09-04 — found 2026-09-04 while adding the annotated-parameter route).**
+  `(i \\mapsto 2i)(3)` parsed to
+  `InvisibleOperator(Delimiter(Function(…)), Delimiter(3))` and evaluated to
+  `3(i) => 2i`, a product of the lambda and 3. The invisible-operator
+  canonicalization (`boxed-expression/invisible-operator.ts`) now applies a
+  function literal to the delimited argument list that follows it, the way it
+  applies a function symbol — in the two-operand case and in the
+  adjacent-pair combiner (`2(i \\mapsto 2i)(3)` is `2 · Apply(…)`) — and the
+  `Apply` serializer writes such an application back as `(i\\mapsto 2i)(3)`.
+  An index bracket after a literal is not an argument list, and a power or
+  factorial the parser attached to the argument list applies to the
+  application (`(x \mapsto 2x)(3)^2` is 36). Pinned in
+  `test/compute-engine/latex-syntax/inline-lambda-application.test.ts`.
+- **A parenthesized function SYMBOL applied inline does not take a postfix
+  power (OPEN, parser — found 2026-09-04 by the review of the inline lambda
+  application).** `f(3)^2` is 36 for `f := x \mapsto 2x`, but `(f)(3)^2`
+  canonicalizes to `9f`: the power attaches to the argument list before the
+  juxtaposition is read, and the symbol branch of `canonicalInvisibleOperator`
+  only recognizes a bare `Delimiter`. Unlike the literal case, this spelling
+  is ambiguous — `(x)(3)^2` with a number `x` IS `9x` — so the symbol branch
+  would have to decide by the symbol's definition before rebuilding the power
+  around the application.
 
 ### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
 
