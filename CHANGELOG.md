@@ -14,7 +14,11 @@
 - **A lambda can be applied inline.** `(x \mapsto 2x)(3)` and
   `((x, y) \mapsto x + y)(2, 3)` now parse as applications and evaluate to
   `6` and `5`; they used to parse as a product of the lambda with its
-  arguments. The application serializes back as `(x\mapsto 2x)(3)`.
+  arguments. The application serializes back as `(x\mapsto 2x)(3)`. A power
+  or factorial on the argument list applies to the application,
+  `(x \mapsto 2x)(3)^2` is 36 — and so it does for a parenthesized function
+  symbol: `(f)(3)^2` and `(\sin)(x)^2` read as `f(3)^2` and `\sin(x)^2`,
+  where they used to read as products.
 - **`epsil check --effects` reports the effects inferred for each top-level
   function.** One line per `function` statement or `let`/`const` lambda —
   `f (line 1): console`, `g (line 2): pure (declared)`, `k (line 3): random` —

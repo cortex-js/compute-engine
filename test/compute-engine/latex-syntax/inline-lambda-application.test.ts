@@ -79,3 +79,59 @@ describe('a parenthesized lambda applied inline', () => {
     ]);
   });
 });
+
+describe('a parenthesized function symbol with a postfix on its argument list', () => {
+  test('a declared function applies through the power or factorial', () => {
+    const local = new ComputeEngine();
+    local.assign('f', local.parse('x \\mapsto 2x'));
+    local.declare('h', '(number) -> number');
+    expect(local.parse('(f)(3)^2').json).toEqual(['Power', ['f', 3], 2]);
+    expect(local.parse('(f)(3)^2').evaluate().toString()).toBe('36');
+    expect(local.parse('(f)(3)!').evaluate().toString()).toBe('720');
+    expect(local.parse('2(f)(3)^2').evaluate().toString()).toBe('72');
+    expect(local.parse('2(f)(3)').evaluate().toString()).toBe('12');
+    expect(local.parse('2f (3)^2').evaluate().toString()).toBe('72');
+    // A chain of postfix operators is walked down to the argument list.
+    expect(local.parse('(f)(3)!^2').json).toEqual([
+      'Power',
+      ['Factorial', ['f', 3]],
+      2,
+    ]);
+    expect(local.parse('(x \\mapsto 2x)(3)!^2').evaluate().toString()).toBe(
+      '518400'
+    );
+    expect(local.parse('(h)(3)^2').json).toEqual(['Power', ['h', 3], 2]);
+    expect(local.parse('(\\sin)(x)^2').json).toEqual([
+      'Power',
+      ['Sin', 'x'],
+      2,
+    ]);
+  });
+
+  test('a number or an undeclared symbol keeps the product', () => {
+    const local = new ComputeEngine();
+    local.assign('x', 5);
+    expect(local.parse('(x)(3)^2').evaluate().toString()).toBe('45');
+    expect(local.parse('(g)(3)^2').json).toEqual(['Multiply', 9, 'g']);
+  });
+});
+
+describe('what the notation does not cover', () => {
+  test('a second argument list is a factor, not a curried application', () => {
+    // `(f)(3)(4)` read as `f(3) · 4` before the postfix rule and still does:
+    // a curried application has no juxtaposition notation.
+    const local = new ComputeEngine();
+    local.assign('f', local.parse('x \\mapsto 2x'));
+    expect(local.parse('(f)(3)(4)').json).toEqual(['Multiply', 4, ['f', 3]]);
+  });
+
+  test('a symbol defined after the expression repairs the product reading', () => {
+    // The product reading of `(g)(t)^2` rests on `g` having no definition
+    // yet; once `g` becomes a function, a later use of the body reads the
+    // application. The bare-list spelling has always done this.
+    const local = new ComputeEngine();
+    local.assign('k', local.parse('t \\mapsto (g)(t)^2'));
+    local.assign('g', local.parse('x \\mapsto 2x'));
+    expect(local.parse('k(3)').evaluate().toString()).toBe('36');
+  });
+});

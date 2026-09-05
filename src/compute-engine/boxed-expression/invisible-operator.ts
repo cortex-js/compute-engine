@@ -98,6 +98,29 @@ export function canonicalInvisibleOperator(
     // Note: lhs might be a Subscript (e.g., f_\text{a}) which canonicalizes
     // to a symbol (f_a). Canonicalize first to handle this case.
     const lhsCanon = lhs.canonical;
+
+    // A DECLARED function symbol applied to an argument list that carries a
+    // power or a factorial: `(f)(3)^2`, `(\sin)(x)^2`. The postfix binds to
+    // the argument list before the juxtaposition is read, so it is rebuilt
+    // around the application — `Power(f(3), 2)`, as `f(3)^2` reads. Only a
+    // symbol known to be a function qualifies: for a number or an
+    // undeclared symbol, `(x)(3)^2` is the product `9x`.
+    if (isSymbol(lhsCanon) && isDeclaredFunction(ce, lhsCanon.symbol)) {
+      const applied = applySymbolThroughPostfix(ce, lhsCanon.symbol, rhs);
+      if (applied !== undefined) return applied;
+    } else if (
+      isSymbol(lhsCanon) &&
+      !isFunction(rhs, 'Delimiter') &&
+      isPostfixOverArgumentList(rhs) &&
+      couldBecomeFunction(ce.lookupDefinition(lhsCanon.symbol))
+    ) {
+      // The product reading below rests on the symbol having no function
+      // definition YET: record the application so the expression can be
+      // re-derived if the symbol later gains one (`provisional-application.ts`),
+      // as the bare-argument-list branch records its own.
+      noteProvisionalApplication(lhsCanon.symbol);
+    }
+
     if (isSymbol(lhsCanon) && isFunction(rhs, 'Delimiter')) {
       // We have encountered something like `f(a+b)`, where `f` is not
       // defined. But it also could be `x(x+1)` where `x` is a number.
@@ -141,7 +164,7 @@ export function canonicalInvisibleOperator(
       const def = ce.lookupDefinition(lhsCanon.symbol);
 
       // Explicitly declared as function/operator → function call
-      if (def && (isOperatorDef(def) || def.value?.type?.matches('function'))) {
+      if (isDeclaredFunction(ce, lhsCanon.symbol)) {
         return ce.function(lhsCanon.symbol, args);
       }
 
@@ -467,34 +490,96 @@ function isIndexDelimiter(delim: Expression): boolean {
 }
 
 /**
+ * Rebuild the postfix operators the parser attached to a delimited argument
+ * list around the application `build(args)` of that list: for
+ * `Power(Factorial(Delimiter(3)), 2)` — the right side of `(f)(3)!^2` — the
+ * result is `Power(Factorial(build([3])), 2)`. A bare argument list is the
+ * application itself. An index bracket (`[…]`), or anything that is not a
+ * power or factorial over a delimited list, answers `undefined`.
+ */
+function applyThroughPostfix(
+  ce: ComputeEngine,
+  rhs: Expression,
+  build: (args: ReadonlyArray<Expression>) => Expression
+): Expression | undefined {
+  if (isFunction(rhs, 'Delimiter')) {
+    if (isIndexDelimiter(rhs)) return undefined;
+    return build(delimitedArguments(rhs));
+  }
+  if (isFunction(rhs, 'Power') || isFunction(rhs, 'Factorial')) {
+    const inner = applyThroughPostfix(ce, rhs.op1, build);
+    if (inner === undefined) return undefined;
+    return ce.function(rhs.operator, [inner, ...rhs.ops.slice(1)]);
+  }
+  return undefined;
+}
+
+/** Is `rhs` a power or a factorial — possibly a chain of them — over a
+ * delimited argument list that is not an index bracket? */
+function isPostfixOverArgumentList(rhs: Expression): boolean {
+  if (isFunction(rhs, 'Delimiter')) return !isIndexDelimiter(rhs);
+  if (isFunction(rhs, 'Power') || isFunction(rhs, 'Factorial'))
+    return isPostfixOverArgumentList(rhs.op1);
+  return false;
+}
+
+/**
  * The application of a function literal to a delimited argument list,
- * `Apply(literal, ...args)`, or `undefined` when `rhs` is not one. An index
- * bracket (`[…]`) is not an argument list. A power or a factorial that the
- * parser attached to the argument list (`(x \mapsto 2x)(3)^2`,
- * `(x \mapsto 2x)(3)!`) binds tighter than the juxtaposition, so it is
- * rebuilt around the application: `Power(Apply(literal, 3), 2)`.
+ * `Apply(literal, ...args)`, or `undefined` when `rhs` is not one. A power
+ * or a factorial that the parser attached to the argument list
+ * (`(x \mapsto 2x)(3)^2`, `(x \mapsto 2x)(3)!^2`) binds tighter than the
+ * juxtaposition, so it is rebuilt around the application.
  */
 function applyLiteralThroughPostfix(
   ce: ComputeEngine,
   literal: Expression,
   rhs: Expression
 ): Expression | undefined {
-  if (isFunction(rhs, 'Delimiter')) {
-    if (isIndexDelimiter(rhs)) return undefined;
-    return ce.function('Apply', [literal, ...delimitedArguments(rhs)]);
-  }
-  if (
-    (isFunction(rhs, 'Power') || isFunction(rhs, 'Factorial')) &&
-    isFunction(rhs.op1, 'Delimiter') &&
-    !isIndexDelimiter(rhs.op1)
-  ) {
-    const application = ce.function('Apply', [
-      literal,
-      ...delimitedArguments(rhs.op1),
-    ]);
-    return ce.function(rhs.operator, [application, ...rhs.ops.slice(1)]);
-  }
-  return undefined;
+  return applyThroughPostfix(ce, rhs, (args) =>
+    ce.function('Apply', [literal, ...args])
+  );
+}
+
+/** Is `name` declared as a function — an operator, or a value whose type is
+ * a function type? The test the adjacent-pair combiner applies before it
+ * reads `f (x)` as a call. */
+function isDeclaredFunction(ce: ComputeEngine, name: string): boolean {
+  const def = ce.lookupDefinition(name);
+  return (
+    def !== undefined &&
+    (isOperatorDef(def) || def.value?.type?.matches('function') === true)
+  );
+}
+
+/**
+ * The application of a declared function symbol through a power or a
+ * factorial the parser attached to its argument list — `(f)(3)^2` is
+ * `Power(f(3), 2)`, `(f)(3)!^2` is `Power(Factorial(f(3)), 2)` — or
+ * `undefined` when `rhs` is not such a postfix over a delimited argument
+ * list. With `bareList`, a bare argument list is the application too;
+ * without it the bare list is left to the symbol branch, which owns the
+ * declaration-dependent reading of `f(x)`.
+ */
+function applySymbolThroughPostfix(
+  ce: ComputeEngine,
+  name: string,
+  rhs: Expression,
+  bareList = false
+): Expression | undefined {
+  if (!bareList && isFunction(rhs, 'Delimiter')) return undefined;
+  return applyThroughPostfix(ce, rhs, (args) => ce.function(name, args));
+}
+
+/** The name of a function symbol written bare (`f`) or parenthesized
+ * (`(f)`), or `undefined`. */
+function functionSymbolOf(
+  ce: ComputeEngine,
+  op: Expression
+): string | undefined {
+  const sym =
+    isFunction(op, 'Delimiter') && op.nops === 1 ? op.op1.canonical : op;
+  if (!isSymbol(sym) || !isDeclaredFunction(ce, sym.symbol)) return undefined;
+  return sym.symbol;
 }
 
 /** A function literal, bare or parenthesized at any depth
@@ -539,6 +624,37 @@ function combineFunctionApplications(
       i += 2;
       continue;
     }
+    // A declared function symbol, bare or parenthesized, applied to an
+    // argument list that carries a power or a factorial (`2f(3)^2` after a
+    // space, `2(f)(3)^2`), or a PARENTHESIZED one applied to a bare
+    // argument list (`2(f)(3)`): the application, as on the two-operand
+    // path. A bare symbol before a bare argument list is the arm below,
+    // which owns the declaration-dependent reading.
+    const fnName = i < ops.length - 1 ? functionSymbolOf(ce, op) : undefined;
+    if (fnName !== undefined) {
+      const applied = applySymbolThroughPostfix(
+        ce,
+        fnName,
+        ops[i + 1],
+        isFunction(op, 'Delimiter')
+      );
+      if (applied !== undefined) {
+        result.push(applied);
+        i += 2;
+        continue;
+      }
+    } else if (
+      i < ops.length - 1 &&
+      isSymbol(op) &&
+      !isFunction(ops[i + 1], 'Delimiter') &&
+      isPostfixOverArgumentList(ops[i + 1]) &&
+      couldBecomeFunction(ce.lookupDefinition(op.symbol))
+    ) {
+      // The postfix pair stays two multiplication operands only because the
+      // symbol has no function definition YET — record it, as for a bare
+      // argument list below.
+      noteProvisionalApplication(op.symbol);
+    }
     if (
       i < ops.length - 1 &&
       isSymbol(op) &&
@@ -552,7 +668,7 @@ function combineFunctionApplications(
       };
 
       // Already declared as function/operator → function call
-      if (def && (isOperatorDef(def) || def.value?.type?.matches('function'))) {
+      if (isDeclaredFunction(ce, symName)) {
         let args: ReadonlyArray<Expression> = delim.op1
           ? isFunction(delim.op1, 'Sequence')
             ? delim.op1.ops

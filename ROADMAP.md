@@ -208,17 +208,21 @@ fixed in that change. One item remains.
   application (`(x \mapsto 2x)(3)^2` is 36). Pinned in
   `test/compute-engine/latex-syntax/inline-lambda-application.test.ts`.
 - **A parenthesized function SYMBOL applied inline does not take a postfix
-  power (OPEN, parser — found 2026-09-04 by the review of the inline lambda
-  application).** `f(3)^2` is 36 for `f := x \mapsto 2x`, but `(f)(3)^2`
-  canonicalizes to `9f`: the power attaches to the argument list before the
-  juxtaposition is read, and the symbol branch of `canonicalInvisibleOperator`
-  only recognizes a bare `Delimiter`. Unlike the literal case, this spelling
-  is ambiguous — `(x)(3)^2` with a number `x` IS `9x` — so the symbol branch
-  would have to decide by the symbol's definition before rebuilding the power
-  around the application.
-
-### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
-
+  power (FIXED 2026-09-04 — found 2026-09-04 by the review of the inline
+  lambda application).** `f(3)^2` was 36 for `f := x \mapsto 2x`, but
+  `(f)(3)^2` canonicalized to `9f` and `(\sin)(x)^2` to `25 sin`: the power
+  attaches to the argument list before the juxtaposition is read, and the
+  symbol branch of `canonicalInvisibleOperator` only recognized a bare
+  `Delimiter`. For a symbol DECLARED as a function (an operator, or a value of
+  function type) the power or factorial is now rebuilt around the application
+  (`applySymbolThroughPostfix`), on the two-operand path and in the
+  adjacent-pair combiner. An undeclared symbol or a number keeps the product:
+  `(x)(3)^2` with `x := 5` is `45`; an undeclared symbol records a provisional
+  application, so a definition made later repairs the reading, as for a bare
+  argument list. A chain of postfixes is walked (`(f)(3)!^2`). A second
+  argument list, `(f)(3)(4)`, stays the factor reading `f(3) · 4`: a curried
+  application has no juxtaposition notation. Pinned in
+  `test/compute-engine/latex-syntax/inline-lambda-application.test.ts`.
 - **The discrete pmf/CDF guards at a SYMBOLIC point use the tolerant relations,
   where the literal route is exact at the support boundary (OPEN, ruling — found
   2026-09-04 while guarding the symbolic forms).**
