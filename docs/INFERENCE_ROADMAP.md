@@ -4,7 +4,10 @@ _Drafted 2026-08-18, immediately after the bare-type synonym ruling shipped
 (bare `list` ≡ `list<unknown>`; `any` strictly above `unknown` — see the
 "Bare collection constructors: RULED AND IMPLEMENTED 2026-08-17" entry in
 `ROADMAP.md` and `doc/08-guide-types.md` §"`unknown` vs `any`, and What a
-Bare Type Means"). Status: **design roadmap — nothing below is implemented.**_
+Bare Type Means"). Status, updated 2026-09-05: **the Phase 0 guard, Phase 1
+and Phase 2 are SHIPPED (2026-08-18). The row 4 question (union parameters)
+is CLOSED with no change needed (§4). Phase 3 (use-driven reverse
+propagation) and the full Phase 0 bounds are OPEN.**_
 
 ## 1. The design intent this roadmap serves
 
@@ -37,16 +40,18 @@ Same pair, same semantics, one level down.
 
 ## 2. Current behavior — the measured gap matrix
 
-Probed 2026-08-18 on the post-synonym-ruling tree. Element types flow **out**
-of collections (synthesis and extraction) but never **in** (inference):
+Probed 2026-08-18 on the post-synonym-ruling tree; re-probed 2026-09-05
+(the "Today" column). When the roadmap was drafted, element types flowed
+**out** of collections (synthesis and extraction) but never **in**
+(inference). Rows 1 and 5 now flow in; rows 2 and 3 still do not.
 
-| # | Program | Today | Under this roadmap |
-|---|---|---|---|
-| 1 | `f: (list<number>) -> number`; `f([a, b])` with undeclared `a`, `b` | `a`, `b` stay `unknown` — the constraint dies at the literal's boundary | `a`, `b` infer `number` (Phase 2) |
-| 2 | `xs` undeclared; `xs[1] + 1` | `xs` narrows to `dictionary<any> \| indexed_collection<any>` — element slot stays `any`, the numeric evidence is computed and discarded | element refines: `… \| indexed_collection<number>`-shaped (Phase 3) |
-| 3 | `(v) => v[1] + 1` | `(v: dictionary<any> \| indexed_collection<any>) -> broadcastable<number>` — the result type PROVES the engine derived the numeric flow, and never wrote it back | element-typed param (falls out of Phase 3) |
-| 4 | `ys` undeclared; `Sum(ys)` | `ys` stays `unknown` (union parameter ⇒ no inference write at all) | at least `collection<any> \| number` whole-type evidence (Phase 2 decision) |
-| 5 | `a: list` (declared); `a = [1, 2, 3]` | `a`'s type stays `list` — the whole declared type is frozen, element slot included | element slot refines from the value (Phase 1) |
+| # | Program | 2026-08-18 | Today (2026-09-05) | Status |
+|---|---|---|---|---|
+| 1 | `f: (list<number>) -> number`; `f([a, b])` with undeclared `a`, `b` | `a`, `b` stay `unknown` — the constraint dies at the literal's boundary | `a`, `b` infer `number` | SHIPPED (Phase 2) |
+| 2 | `xs` undeclared; `xs[1] + 1` | `xs` narrows to `dictionary<any> \| indexed_collection<any>` — element slot stays `any`, the numeric evidence is computed and discarded | unchanged | OPEN (Phase 3): element should refine to `… \| indexed_collection<number>`-shaped |
+| 3 | `(v) => v[1] + 1` | `(v: dictionary<any> \| indexed_collection<any>) -> broadcastable<number>` — the result type PROVES the engine derived the numeric flow, and never wrote it back | unchanged | OPEN (falls out of Phase 3) |
+| 4 | `ys` undeclared; `Mean(ys)` (the draft used `Sum(ys)`; see §4 for why that example was wrong) | reported as "`ys` stays `unknown` — union parameter ⇒ no inference write at all" | `Mean(ys)` writes `collection<any> \| distribution \| number` onto `ys`; `Sum(ys)` stays `unknown` because the summand parameter of `Sum` is `any`, not a union | CLOSED 2026-09-05, no change needed (§4) |
+| 5 | `a: list` (declared); `a = [1, 2, 3]` | `a`'s type stays `list` — the whole declared type is frozen, element slot included | `a` reports `list<integer>`; a later `a = ["x"]` re-refines to `list<string>` | SHIPPED (Phase 1) |
 
 What already works and must not regress:
 
@@ -279,7 +284,60 @@ spelling by definition.
 session with a plan doc, route-parity tests (box, parse, Epsil `let`), and
 pins for R1/R2/R3 as ruled.
 
-## 4. Phase 2 — downward distribution into literals
+## 4. Phase 2 — downward distribution into literals — **SHIPPED 2026-08-18**; row 4 **CLOSED 2026-09-05**
+
+The literal distribution shipped with Phase 1 (see §3,
+`distributeLiteralElementInference`). The union-parameter question (row 4)
+is closed below. The original design follows.
+
+### Row 4 — union parameters: CLOSED 2026-09-05, no change needed
+
+The row as drafted mis-diagnosed its own example. Two facts, measured on
+the 2026-09-05 tree (`npx tsx` probes against `src/compute-engine`):
+
+- **A union-typed parameter already writes the union onto an undeclared
+  symbol operand, as whole-type evidence.** With
+  `g: (collection<any> | number) -> number`, the call `g(zs)` leaves
+  `zs: collection<any> | number`; `Mean(ms)` leaves
+  `ms: collection<any> | distribution | number`. This is exactly the option
+  the draft recommended ("write the union — it is what the parameter
+  states"), and it is the live behavior. The write takes the ordinary
+  path: `inferenceTypeAt` in `boxed-expression/validate.ts` hands the
+  parameter (for an overload set, the join over the viable arms) to
+  `BoxedSymbol._infer`, which narrows the symbol's `unknown` to the union.
+  There is no union-specific decline anywhere on that path. Whether the
+  2026-08-18 probe ran against a tree that behaved differently was not
+  re-established; what is established is that the union is not the cause
+  today.
+- **`Sum(ys)` stays `unknown` because the summand parameter of `Sum` is
+  `any`.** Its signature is `(any, tuple*) -> number` (unchanged since
+  before the draft): the summand may be an arbitrary body expression when
+  an indexing set follows, so the slot cannot name a collection. Narrowing
+  `unknown` by `any` yields `unknown`, and `_inferWithoutFacts`
+  (`boxed-expression/boxed-symbol.ts`) deliberately skips a write of
+  `unknown` — such a write would reset a held value through the type
+  setter. This is correct: `any` is the contract spelling and carries no
+  evidence (§1).
+
+**Decision:** nothing to build. The mechanism the draft asked for exists;
+the example moves from `Sum` to `Mean`. Making `Sum(ys)` (no indexing set)
+infer `collection<any> | number` would need the `Sum` canonical handler to
+write collection evidence when the summand is a bare symbol with no
+indexing set. That is a `Sum`-specific rule, not an inference-model one,
+and it is not scheduled.
+
+**Observed limit, recorded as intended behavior, not as a defect:** a
+union written as evidence is not narrowed further by a later threadable
+use. After `g(zs)`, the expression `zs + 1` leaves `zs` at
+`collection<any> | number`: `Add` is threadable, and the threadable
+exclusion (`couldBeUnkeyedCollectionOperand`, same file) declines to write
+`number` onto an operand that could still be a collection, because that
+write would decide the broadcast question by inference. The same holds for
+`ws[1]` after `h(ws)` with `h: (list<number> | number) -> number`: `ws`
+stays `list<number> | number`. Sharpening a union from a later use is the
+Phase 3 shape (use-driven reverse propagation) and belongs to that round.
+
+### Original Phase 2 design (for reference)
 
 **Feature:** when argument validation's final inference pass
 (`validateArguments`, `boxed-expression/validate.ts` — the `_infer(t)` loops
@@ -333,7 +391,17 @@ Building blocks and gaps:
   binding symbol's type after body canonicalization and picks up whatever
   Phase 3 wrote.
 
-**Why Phase 3 is worth its risk:** the payoff concentrates in three places —
+**Design round opened 2026-09-05:** the mechanism was measured and the plan
+written in `docs/plans/2026-09-05-use-driven-element-inference.md`, which
+also re-assesses the payoff below: two of the three places named here have
+since been served by other means (the `<any>` union already excludes every
+scalar, so broadcast decisions are already right; both compile targets
+already compile `xs[1] + 1` over an untyped collection), and the third
+(Tycho's classification) needs a tuple element type that no arithmetic use
+produces. What remains is precise static types. The plan asks for a go/no-go
+and three rulings (guess semantics, boolean uses, declared placeholders).
+
+**Why Phase 3 was expected to be worth its risk (as drafted 2026-08-18):** the payoff concentrates in three places —
 broadcast decisions (`paramsAreScalar` reads the lambda's param slots), the
 compile fail-closed gates (D6: numeric indexing over a declared-but-unassigned
 collection currently cannot compile for lack of element evidence), and
@@ -367,11 +435,72 @@ palliative).
    2026-08-18.** Full Phase 0 bounds remain deferred — contingent on
    Phase 3 being scheduled or on field demand, with the notebook-epoch UX
    ruled first.
-1. **Phase 1** after R1–R3 are ruled — self-contained, completes the
-   placeholder-ruling symmetry, immediately makes `let a: list` behave per
-   the stated intent.
-2. **Phase 2** next — small, makes `f([a,b])` behave like `f(a)` already
-   does; settle the union-parameter question in the same change.
-3. **Phase 3** as its own design round with a written plan
+1. **Phase 1** — **SHIPPED 2026-08-18** with R1–R3 ruled as recommended
+   (§3).
+2. **Phase 2** — **SHIPPED 2026-08-18** with Phase 1. The union-parameter
+   question (row 4) was **CLOSED 2026-09-05** with no change needed (§4).
+3. **Phase 3** — the only open element phase — design round OPENED
+   2026-09-05 (`docs/plans/2026-09-05-use-driven-element-inference.md`);
+   as its own design round with a written plan
    (`docs/plans/…`), the participation list, the guess-semantics ruling,
    and route-parity tests — the binder-mechanism treatment.
+
+## 8. What is left, in plain language (2026-09-05)
+
+Two items are open. Everything else in this document is shipped or closed.
+
+### 8.1 Phase 3 — use-driven element inference
+
+Today `xs[1] + 1` proves that an element of `xs` is numeric, but the engine
+never writes that back onto `xs`: the element slot stays `any`. The design
+round for this phase opened on 2026-09-05; its plan is
+`docs/plans/2026-09-05-use-driven-element-inference.md`. The plan measured
+the mechanism, found that the payoff is smaller than this document expected
+in August (see the note in §5), and asks for a go/no-go decision and three
+rulings before any code is written.
+
+### 8.2 The full Phase 0 bounds — what "bounds" means
+
+Today a symbol's inferred type is ONE mutable cell. Two different kinds of
+information write into it:
+
+- **Evidence**, from assignments: what the symbol is known to HOLD. With
+  `g: () -> number`, the statement `x = g()` proves that `x` holds a
+  `number`.
+- **Requirements**, from uses: what a call NEEDS the symbol to fit. With
+  `k: (integer) -> integer`, the call `k(x)` requires `x` to be an
+  `integer`.
+
+Because both write the same cell, a use could rewrite assignment history.
+In the program of §2b, `x = g()` stored `number`, then `k(x)` narrowed the
+cell back to `integer`. The stored type then contradicted the held value,
+and the error appeared only at evaluation.
+
+The "bounds" design keeps the two directions in separate slots:
+
+- a **value bound** (the lower bound), set by an assignment and replaced by
+  each re-assignment;
+- a **use bound** (the upper bound), the meet of every requirement from an
+  argument position.
+
+The invariant is: the value bound must be a subtype of the use bound. It is
+checked whenever either slot moves, so the conflict above is caught at the
+call, statically, and the diagnostic can name both sides: "x was assigned a
+`number` (from `g()`); `k` requires `integer`". A re-assignment resets the
+use bound, so `x = f(); k(x); x = g()` stays legal. A symbol that was never
+assigned reports its use bound, which preserves the CAS behavior where
+`k(n)` declares `n` to be an integer. An assigned symbol reports its value
+bound.
+
+**Why it was deferred.** A cheaper guard captured most of the value and
+shipped on 2026-08-18 (§2b): a use of an ASSIGNED symbol now checks the
+held value's type instead of narrowing the cell, and the Epsil static pass
+reports the conflict before anything runs. What the full design adds beyond
+that guard is modest: two-sided error messages, order-independence of
+inference within one assignment epoch, and a proper landing slot for
+Phase 3 writes (which are requirements too). The costs are concentrated:
+the second slot must thread through rollback, state events, notebook
+re-run, and speculative-parse confinement, and the two personas become
+user-visible semantics, where the same call `k(x)` is a declaration or a
+check depending on prior state. It stays deferred unless Phase 3 is built
+and needs the slot, or field reports ask for the two-sided diagnostics.
