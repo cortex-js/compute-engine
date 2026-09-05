@@ -237,7 +237,11 @@ describe('G3 lift — a collection bound reaches the BODY', () => {
       1,
     ]);
     const r = build(ce, ['g', LIST]);
-    expect(r?.preamble).toContain('const _fn_g = (xs) => _SYS.at(xs, 1);');
+    // The numeric element read of a parameter checks its run-time shape
+    // (`_SYS.atNumeric`, ruled 2026-09-05).
+    expect(r?.preamble).toContain(
+      'const _fn_g = (xs) => _SYS.atNumeric(xs, 1, "number");'
+    );
     expect(r?.run?.({})).toBe(4);
     expect(ce.box(['g', LIST] as any).evaluate().re).toBe(4);
   });
@@ -352,11 +356,7 @@ describe('G3 lift — the bound reading agrees with the ground declaration', () 
     const call = (sig: string) => {
       const ce = overList(sig, ['Length', 'xs']);
       return compile(
-        ce.box([
-          'Map',
-          'g',
-          ['List', ['List', 1, 2], ['List', 3]],
-        ] as any),
+        ce.box(['Map', 'g', ['List', ['List', 1, 2], ['List', 3]]] as any),
         { constantFold: false, fallback: false } as any
       );
     };
@@ -455,8 +455,7 @@ describe('G3 lift — route parity', () => {
     expect(rp?.preamble).toBe(rb?.preamble);
     expect(rf?.code).toBe(rb?.code);
     expect(rf?.preamble).toBe(rb?.preamble);
-    for (const r of [rb, rp, rf])
-      expect(r?.run?.({ zs: [4, 5, 4] })).toBe(3);
+    for (const r of [rb, rp, rf]) expect(r?.run?.({ zs: [4, 5, 4] })).toBe(3);
   });
 });
 
@@ -502,7 +501,10 @@ describe('G3 lift — a BLOCK-LOCAL generic reads the same bounds', () => {
     expect(r.code).toContain('let gd = ((x) => 2 * x)');
     expect(r.run?.({})).toBe(10);
     // The engine-level spelling of the same function.
-    const engineLevel = build(doubler('(x: T) -> T where T: number'), ['gd', 5]);
+    const engineLevel = build(doubler('(x: T) -> T where T: number'), [
+      'gd',
+      5,
+    ]);
     expect(engineLevel?.run?.({})).toBe(10);
   });
 
@@ -565,7 +567,6 @@ describe('G3 lift — a BLOCK-LOCAL generic declines where the engine route decl
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/GENERIC/);
   });
-
 });
 
 describe('G3 lift — a BLOCK-LOCAL generic honours a NON-REAL NUMBER bound', () => {
@@ -616,7 +617,11 @@ describe('G3 lift — a BLOCK-LOCAL generic honours a NON-REAL NUMBER bound', ()
     const source = () =>
       fresh().box([
         'Map',
-        ['Function', ['Multiply', 2, 'x'], { str: '(x: T) -> T where T: complex' }],
+        [
+          'Function',
+          ['Multiply', 2, 'x'],
+          { str: '(x: T) -> T where T: complex' },
+        ],
         ['List', 1, 2, 3],
       ] as any);
     expect(source().evaluate().toString()).toBe('[2,4,6]');

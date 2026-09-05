@@ -143,6 +143,22 @@
 
 ### Resolved Issues
 
+- **A compiled kernel handed a matrix where it expected a list of numbers
+  returned a string.** With `h := (v) => v[1] + 1` the compiled `h` run on
+  `[[1, 2], [3, 4]]` returned `"1,21"` — the scalar `+` the compiler emits for
+  a numeric element concatenated the row — where the interpreter returns
+  `[2, 3]`. The same happened for a declared `(v: indexed_collection<number>)`
+  parameter. A scalar element read whose static element type is numeric now
+  checks the run-time value and throws a clear error when it is a list,
+  naming the static type and the remedy (declare the collection with its
+  nested element type, such as `list<list<number>>` or `matrix`, or evaluate
+  with the interpreter). A closed base — a literal list, a constant-folded
+  `Map` over a `Range` — is not checked, since its cells are fixed at compile
+  time, and neither is a tuple base, whose slots are positional. The check
+  reads the run-time index shape, so a gather through an index typed
+  `integer | list<integer>` keeps its list result and is checked element by
+  element.
+
 - **`interval-js` target: `Arctan2` over a box that straddles its branch cut
   answers a finite jump.** On the negative x-axis the angle jumps from `+π` to
   `−π`, so `Arctan2(y, x) - 3` over `x ∈ [-1.2, -0.8], y ∈ [-0.1, 0.1]` has

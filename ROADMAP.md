@@ -108,35 +108,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A compiled lambda whose collection-typed parameter is fed a nested list emits scalar arithmetic on a row (OPEN, ruling — found 2026-09-05 implementing use-driven element inference)
-
-With `h := (v) => v[1] + 1` the interpreter applied to a matrix returns the
-first row plus one (`h([[1, 2], [3, 4]])` is `[2, 3]`), and so does the
-compiled lambda when the parameter's element type is open
-(`indexed_collection<any>`, the type the parameter had before use-driven
-element inference). With the element type `number` — DECLARED, as in
-`(v: indexed_collection<number>) => v[1] + 1`, which already behaved this
-way, or INFERRED, as `(v) => v[1] + 1` now types — the compiled body emits a
-scalar `+` for `v[1] + 1`, and run on a matrix it returns the JavaScript
-string `"1,21"`. The compiler trusts the static element type; the interpreter
-broadcasts. The 2026-08-30 ruling on compiled user-function calls added a
-run-time `Array.isArray` guard at the CALL SITE for a scalar parameter fed a
-list; this is the same divergence one level down, and a call-site guard
-cannot answer it because a matrix and a list are both arrays. A global
-`xs[1] + 1` compiled and run on a matrix is not affected: it still
-broadcasts.
-
-Options for the ruling: (1) a run-time check at the compiled `At` read when
-the static element type is a scalar — an array element throws a clear error
-instead of producing a string (loud, one `typeof` per read on that path);
-(2) accept that the compiler trusts element types, document that a matrix
-argument needs an annotation (`(m: matrix) => …`), and leave the
-declared-type behavior as it is today; (3) emit the broadcast-aware add
-whenever an operand is an element read of an INFERRED collection type — not
-expressible, since a type does not carry its provenance. Pins of the
-interpreter behavior and of the compiled agreement on a flat list:
-`test/compute-engine/use-driven-element-inference.test.ts`.
-
 - **Standing audit — value-scaled library loops guarded only by `checkDeadline`
   (DONE 2026-09-04; from the constant-fold determinism ruling of 2026-08-30).**
   Every `checkDeadline` site under `src/compute-engine/library/`, and every
@@ -528,6 +499,33 @@ unknown component and the wildcard `_` are left as declared; a pattern whose
 arity the tuple type does not match, and a name the pattern binds twice, are
 errors at canonicalization, as the runtime destructuring would fail on every
 value. Pinned in the same test file.
+
+### A typed scalar user function applied to a VALUELESS collection-typed symbol is an error, not a held call (OPEN, evaluation — found 2026-09-05 while fixing the multi-clause broadcast flag)
+
+With `xs: list<integer>` declared but not assigned, `g(n) = n + 1; g(xs)` is
+held as `xs + 1` and evaluates to `[2, 3]` once `xs = [1, 2]`. The same call
+against a TYPED scalar parameter is an error value instead: `g(n: integer) =
+n + 1; g(xs)` is `incompatible-type: expected integer, got list<integer>`
+(refused by argument validation at the call, `validateArguments` in
+`box.ts`), and the multi-clause spelling `g(0) = 0; g(n: integer) = n + 1;
+g(xs)` is `no-matching-clause` (validation admits the operand because the
+definition is now `broadcastable`, and clause dispatch in `multi-clause.ts`
+then refutes `list<integer>` against `integer`). Both answers are committed
+too early: the argument will map element-wise as soon as it has a value, so
+the honest answer is the held application, as the untyped routes give. A
+FRESH call after the assignment is correct on every route (`[2, 3]`); only a
+call boxed before the assignment is affected.
+
+- The fix belongs in the seam and the selector together: a collection-typed
+  operand with no value at a threadable scalar slot should be HELD, the way
+  step 2b of `_computeValue` (`boxed-function.ts`) already holds a valueless
+  collection-typed operand when a sibling operand is a finite collection
+  (`hasUnresolvedCollectionOperand`), and `triStateSelect` should answer
+  `blocked` rather than `none` for such an operand.
+- Measure the blast radius first: no test pins the valueless-symbol case today
+  (checked 2026-09-05), but `test/compute-engine/broadcastable-param-declaration.test.ts`
+  pins `incompatible-type` for a collection whose ELEMENTS violate the
+  parameter type, and that answer must survive.
 
 ### Open items from the undecided-condition ruling (2026-09-02)
 

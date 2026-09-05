@@ -411,16 +411,23 @@ general refusal to record `never` on a symbol was tried and withdrawn: a
 serialization pin deliberately records `never` for a corpus row that reads
 `f` both as a number and as a function, and locks that in.)
 
-**One residual, recorded in `ROADMAP.md` for a ruling.** The compiler trusts
-a static element type, declared or inferred: a compiled lambda with
-parameter `v: indexed_collection<number>` fed a matrix emits scalar `+` over
-a row and returns a concatenated string, while the interpreter returns the
-row plus one. Before this phase the inferred parameter type was
-`indexed_collection<any>` and the compiled lambda broadcast correctly; a
-DECLARED `(v: indexed_collection<number>)` already produced the string on
-the tree of 2026-09-05. The refinement extends an existing compile-route
-divergence to inferred parameter types; a global `xs[1] + 1` compiled and
-run on a matrix is not affected (it still broadcasts).
+**One residual, RULED AND FIXED the same day.** The compiler trusts a
+static element type, declared or inferred: a compiled lambda with parameter
+`v: indexed_collection<number>` fed a matrix emitted scalar `+` over a row
+and returned a concatenated string, while the interpreter returns the row
+plus one. Before this phase the inferred parameter type was
+`indexed_collection<any>` and the compiled lambda broadcast; a DECLARED
+`(v: indexed_collection<number>)` already produced the string. Ruled
+(option 1 of three): the JavaScript target's scalar element read now checks
+the run-time value when the static element type is numeric and the base
+reads a value from outside the kernel (a free symbol or a parameter), and
+throws a clear error naming the static type and the remedy
+(`_SYS.atNumeric`, `compilation/javascript-target.ts`; the check dispatches on the run-time index shape, so a gather is checked element by element). A closed base
+(a literal, a constant-folded collection) and a tuple base (positional
+slots; the destructuring lowering reads a tuple-valued call through `At` on
+a compiler temporary) are not checked. The top-level
+`xs[1] + 1` over an inferred `xs`, which broadcast by accident of
+type-computation order, now fails loudly too when handed a matrix.
 
 ### Original Phase 3 design (for reference)
 

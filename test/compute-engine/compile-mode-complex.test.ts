@@ -183,7 +183,7 @@ describe('complex mode — one emission per user function, lift at use (design �
       ...CX,
       constantFold: false,
     });
-    expect(at.code).toContain('_SYS.cplx(_SYS.at(');
+    expect(at.code).toContain('_SYS.cplx(_SYS.atNumeric(');
     expect(at.run!({ N: [1, 2], z: { re: 1, im: 1 } })).toEqual({
       re: 2,
       im: 1,
@@ -439,8 +439,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
         const r = compile(body, { mode, fallback: false });
         expect(r.success).toBe(true);
         expect(r.run!(at)).toBeCloseTo(ref, 12);
-        if (mode !== 'strict')
-          expect(r.code).toContain('_SYS.crealElements(');
+        if (mode !== 'strict') expect(r.code).toContain('_SYS.crealElements(');
       }
     });
 
@@ -485,7 +484,7 @@ describe('complex mode — D2/D6 runtime rules', () => {
       expect(floor.run!({ Z: [1.5, { re: 2, im: 1 }] })).toEqual([1, NaN]);
     });
 
-    it('a complex scalar beside an array operand keeps the head\'s shape', () => {
+    it("a complex scalar beside an array operand keeps the head's shape", () => {
       // The whole-value guard would answer a scalar `false`/NaN for the
       // list-shaped result; the element-wise form projects the scalar too, so
       // the broadcast keeps one value per element.

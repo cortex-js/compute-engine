@@ -2209,16 +2209,43 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const scalarIndex =
       !isIndexedCollectionOperand(index) &&
       !index.type.matches('collection<any>');
+    const numericElement =
+      eltT !== undefined &&
+      isSubtype(
+        stripMissingFromType(resolveTypeForCompilation(eltT)),
+        'number'
+      );
     const objectDomain =
       eltT !== undefined &&
       eltT !== 'unknown' &&
       eltT !== 'any' &&
-      !isSubtype(
-        stripMissingFromType(resolveTypeForCompilation(eltT)),
-        'number'
-      );
+      !numericElement;
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
+    // A NUMERIC element type is trusted by every consumer of this read: the
+    // arithmetic around `xs[1]` is emitted as scalar JavaScript. When the
+    // value handed to the kernel contradicts that type — a matrix where a
+    // list of numbers was declared or inferred — the scalar `+` on the row
+    // would silently produce a concatenated string (`"1,21"`), where the
+    // interpreter broadcasts and returns the row plus one. The read checks
+    // the run-time shape and fails loudly instead (ruled 2026-09-05; see the
+    // `inferOperandTypes` contract in `types-definitions.ts` for why an
+    // inferred element type can be numeric). Only a base that reads a value
+    // from OUTSIDE the kernel — a free symbol (a `run()` argument) or a
+    // function parameter — can contradict its static type; a closed base
+    // (`[1, 4, 9][k]`, a constant-folded `Map` over a `Range`) is computed
+    // by the engine itself, and its cells are what the type says. A TUPLE
+    // base is not checked either: its slots are positional, not a broadcast
+    // shape, and the destructuring lowering reads a tuple-valued call result
+    // back through `At` on a compiler temporary. The check runs on the
+    // RUN-TIME index shape (`_SYS.atNumeric`), not on the static one: an
+    // index typed `integer | list<integer>` may be a gather at run time,
+    // whose array result is legitimate — what must not be an array is a
+    // scalar read's value, or any element of a gathered list.
+    const baseType = resolveTypeForCompilation(jsType(coll));
+    const tupleBase = typeof baseType !== 'string' && baseType.kind === 'tuple';
+    if (numericElement && !tupleBase && coll.unknowns.length > 0)
+      return `_SYS.atNumeric(${stringBase ? `_SYS.chars(${compile(coll)})` : compile(coll)}, ${compile(index)}, ${JSON.stringify(typeToString(eltT!))})`;
     return base;
   },
   // Fold a collection. CE `Reduce` canonicalizes `\sum_{i=d}^{d} d` to
@@ -7202,6 +7229,33 @@ const SYS_HELPERS = {
     const idx = iv > 0 ? iv - 1 : n + iv;
     if (i === 0 || idx < 0 || idx >= n) return NaN;
     return arr[idx] as number;
+  },
+  // `at` for a base whose STATIC element type is numeric and whose value
+  // comes from outside the kernel (a `run()` argument, a function
+  // parameter). Every consumer of the read was compiled for a number, so a
+  // row where a number was expected — a matrix handed to a kernel compiled
+  // for a list of numbers — would make the scalar `+` concatenate strings.
+  // The check dispatches on the run-time index shape: a scalar read must not
+  // yield an array, and a gather or mask must not yield a list with an array
+  // in it. Throw with the remedy: declare the collection with its nested
+  // element type, or evaluate with the interpreter, which broadcasts.
+  atNumeric: (
+    arr: unknown,
+    i: number | unknown[],
+    elementType: string
+  ): number | unknown[] => {
+    const v = SYS_HELPERS.at(arr, i);
+    const nested = Array.isArray(i)
+      ? Array.isArray(v) && v.some((x) => Array.isArray(x))
+      : Array.isArray(v);
+    if (!nested) return v;
+    throw new Error(
+      `At: the element read is a list at run time, but its static element ` +
+        `type is \`${elementType}\`, so the compiled code treats it as a ` +
+        `number. Declare the collection with its nested element type ` +
+        `(for example \`list<list<number>>\` or \`matrix\`), or evaluate ` +
+        `with the interpreter.`
+    );
   },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
   // machine precision on smooth integrands, µs-scale. On non-convergence
