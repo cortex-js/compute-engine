@@ -440,19 +440,24 @@ change) or the block compiler fails closed on a `Declare` whose name is in
 `target.boundVars` (`compileBlock` and `compileLoopBody`,
 `compilation/base-compiler.ts`). Not specific to `match`: every binder has it.
 
-### A destructuring comprehension binder has no binding-site type (OPEN, typing — found 2026-09-03 while fixing Tycho item 245)
+### A destructuring comprehension binder has no binding-site type (FIXED 2026-09-04 — found 2026-09-03 while fixing Tycho item 245)
 
 The binder-authority rule (ruled 2026-09-03: a binding-site type is
 authoritative over the body's inference, and a use that contradicts it is a type
 error, pinned in
-`test/compute-engine/point-list-lift-and-binder-authority.test.ts`) is enforced
-for a SYMBOL binder only. `[p + q for (p, q) in pairs]` declares its leaves `p`
-and `q` as `unknown` and never narrows them from the source's element type — the
-element-type write in `canonicalLoopLike` runs for a symbol binder only — so the
-leaves are typed by use and the fresh-matrix repair can still retype them. The
-rule has nothing to enforce there until the leaves take their component types
-from the source's tuple element type; that is a typing improvement to make, with
-the same fresh-set removal.
+`test/compute-engine/point-list-lift-and-binder-authority.test.ts`) was
+enforced for a SYMBOL binder only: `[p + q for (p, q) in pairs]` declared its
+leaves `p` and `q` as `unknown` and never narrowed them from the source's
+element type, so the leaves were typed by use and the fresh-matrix repair could
+retype them. `canonicalLoopLike` (`library/control-structures.ts`) now binds
+each leaf of a destructuring pattern to its component of the element's TUPLE
+type — the only element type the runtime destructuring accepts — recursively
+for a nested pattern, with the same authoritative write and fresh-set removal as
+the symbol binder (an alias or nominal component is resolved first); an
+unknown component and the wildcard `_` are left as declared; a pattern whose
+arity the tuple type does not match, and a name the pattern binds twice, are
+errors at canonicalization, as the runtime destructuring would fail on every
+value. Pinned in the same test file.
 
 ### Open items from the undecided-condition ruling (2026-09-02)
 

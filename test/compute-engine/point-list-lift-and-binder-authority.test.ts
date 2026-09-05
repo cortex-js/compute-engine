@@ -232,3 +232,126 @@ describe('a comprehension binder is typed by its binding site, authoritatively',
     expect(e.isValid).toBe(true);
   });
 });
+
+describe('a destructuring comprehension binder is typed by its binding site too', () => {
+  const ce = new ComputeEngine();
+  ce.declare('P', 'list<tuple<number, number>>');
+  ce.declare('N', 'list<tuple<integer, tuple<real, real>>>');
+  ce.declare('L', 'list<number>');
+
+  test('each leaf takes its component of the element tuple type', () => {
+    const e = ce.box([
+      'Comprehension',
+      ['Add', 'p', 'q'],
+      ['Element', ['Tuple', 'p', 'q'], 'P'],
+    ] as never);
+    expect(e.isValid).toBe(true);
+    const pattern = e.ops![1].ops![0];
+    expect(pattern.ops!.map((x) => x.type.toString())).toEqual([
+      'number',
+      'number',
+    ]);
+  });
+
+  test('a body use that contradicts a leaf type is a type error', () => {
+    const e = ce.box([
+      'Comprehension',
+      ['Add', ['PointX', 'p'], 1],
+      ['Element', ['Tuple', 'p', 'q'], 'P'],
+    ] as never);
+    expect(e.isValid).toBe(false);
+  });
+
+  test('a nested pattern binds through the nested tuple type', () => {
+    const e = ce.box([
+      'Comprehension',
+      ['Add', 'k', 'a'],
+      ['Element', ['Tuple', 'k', ['Tuple', 'a', 'b']], 'N'],
+    ] as never);
+    const pattern = e.ops![1].ops![0];
+    expect(pattern.ops![0].type.toString()).toBe('integer');
+    expect(pattern.ops![1].ops!.map((x) => x.type.toString())).toEqual([
+      'real',
+      'real',
+    ]);
+  });
+
+  test('an alias or nominal tuple component binds through its definition', () => {
+    const local = new ComputeEngine();
+    local.declareType('pt', 'tuple<real, real>', { alias: true });
+    local.declareType('Pt', 'tuple<real, real>');
+    for (const inner of ['pt', 'Pt']) {
+      local.declare(`S_${inner}`, `list<tuple<integer, ${inner}>>`);
+      const e = local.box([
+        'Comprehension',
+        ['Add', 'k', 'a'],
+        ['Element', ['Tuple', 'k', ['Tuple', 'a', 'b']], `S_${inner}`],
+      ] as never);
+      const pattern = e.ops![1].ops![0];
+      expect(pattern.ops![1].ops!.map((x) => x.type.toString())).toEqual([
+        'real',
+        'real',
+      ]);
+    }
+  });
+
+  test('an element type that is not a matching tuple leaves the leaves as declared', () => {
+    const e = ce.box([
+      'Comprehension',
+      'p',
+      ['Element', ['Tuple', 'p', 'q'], 'L'],
+    ] as never);
+    const pattern = e.ops![1].ops![0];
+    expect(pattern.ops!.map((x) => x.type.toString())).toEqual([
+      'unknown',
+      'unknown',
+    ]);
+  });
+
+  test('a pattern whose arity the element tuple does not match is an error', () => {
+    const local = new ComputeEngine();
+    local.declare('T3', 'list<tuple<number, number, number>>');
+    const e = local.box([
+      'Comprehension',
+      'p',
+      ['Element', ['Tuple', 'p', 'q'], 'T3'],
+    ] as never);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('incompatible-type');
+  });
+
+  test('a name bound twice by the pattern is an error', () => {
+    const local = new ComputeEngine();
+    local.declare('P', 'list<tuple<number, number>>');
+    const e = local.box([
+      'Comprehension',
+      'p',
+      ['Element', ['Tuple', 'p', 'p'], 'P'],
+    ] as never);
+    expect(e.isValid).toBe(false);
+    expect(e.toString()).toContain('duplicate name');
+  });
+
+  test('the wildcard binds nothing', () => {
+    const e = ce.box([
+      'Comprehension',
+      'p',
+      ['Element', ['Tuple', 'p', '_'], 'P'],
+    ] as never);
+    expect(e.ops![1].ops![0].ops![0].type.toString()).toBe('number');
+  });
+
+  test('the evaluated form agrees', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('Q', ce2.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    expect(
+      ce2
+        .box([
+          'Comprehension',
+          ['Add', 'p', 'q'],
+          ['Element', ['Tuple', 'p', 'q'], 'Q'],
+        ] as never)
+        .evaluate({ materialization: true }).json
+    ).toEqual(['List', 3, 7]);
+  });
+});

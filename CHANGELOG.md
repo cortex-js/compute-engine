@@ -45,6 +45,14 @@
 
 ### Resolved Issues
 
+- **A destructuring comprehension binder is typed by its binding site.**
+  `[p + q for (p, q) in pairs]` over `pairs: list<tuple<number, number>>`
+  now types `p` and `q` as `number` from the element tuple, nested patterns
+  included, so a body use that contradicts the component type is a type error
+  — as it already was for a symbol binder. The leaves used to be declared
+  `unknown` and typed by use. A pattern whose arity the element tuple does not
+  fit, and a name bound twice in one pattern, are now errors at
+  canonicalization instead of failures at run time or compile time.
 - **A `for` loop over a `Range` with a symbolic bound compiles to Python
   faithfully for every numeric bound.** The Python target lowers
   `for k in Range(n, 1) { … }` to a native `range` whose direction is read at

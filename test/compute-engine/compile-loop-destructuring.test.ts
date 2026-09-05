@@ -120,10 +120,13 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
         epsil('let s = 0\nfor (i, j) in [[1, 4], [2, 5]] { s = s + i * j }\ns')
       )
     ).toThrow(/not a tuple/);
-    // Arity mismatch.
+    // Arity mismatch: refused at canonicalization (`canonicalLoopLike`
+    // binds the pattern's leaves from the element tuple type and reports a
+    // pattern the tuple does not fit), so the compiler never sees a valid
+    // expression.
     expect(() =>
       js(epsil('let s = 0\nfor (i, j) in [(1, 2, 3)] { s = s + i }\ns'))
-    ).toThrow(/2 positions but the elements are tuples of 3/);
+    ).toThrow(/Cannot compile invalid expression/);
     // Unknown element type.
     expect(() =>
       js(epsil('let s = 0\nfor (i, j) in xs { s = s + i }\ns'))
@@ -285,9 +288,11 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
   });
 
   it('a name bound twice in one pattern declines', () => {
+    // Refused at canonicalization (a duplicate name in a destructuring
+    // pattern is an error there), so both targets see an invalid expression.
     const program = loopOver(['Tuple', 'a', 'a'], ['List', ['Tuple', 1, 2]]);
-    expect(() => js(program)).toThrow(/more than once/);
-    expect(() => py(program)).toThrow(/more than once/);
+    expect(() => js(program)).toThrow(/Cannot compile invalid expression/);
+    expect(() => py(program)).toThrow(/Cannot compile invalid expression/);
   });
 
   it('a one-position Python pattern keeps its trailing comma', () => {

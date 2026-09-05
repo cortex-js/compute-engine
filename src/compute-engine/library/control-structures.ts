@@ -1939,43 +1939,96 @@ function canonicalLoopLike(
     // The element type is read fact-blind: the collection's EFFECTIVE type can
     // be narrowed by an assumption, and the index binding this write creates is
     // a contract that must not carry a fact the next statement can retract.
+    let patternError: Expression | undefined;
     ce._withoutFacts(() => {
-      if (isSymbol(idxCanonical)) {
-        const elt = collectionElementType(
-          resolveTypeForCompilation(collCanonical.type.type)
-        );
-        if (elt !== undefined && elt !== 'any' && elt !== 'unknown') {
-          idxCanonical._infer(() => elt, 'narrow');
-          // The binding site is AUTHORITATIVE for the index's type (ruled
-          // 2026-09-03): the element type is evidence from the collection,
-          // not a guess. The write above lands in the fresh-inference set,
-          // which exists for one repair — `repairFreshMatrixInference`
-          // (`validate.ts`) rewrites a symbol the scalar fast path guessed
-          // `real` for to `matrix` when a later operand slot wants a
-          // collection. Left in the set, the binder took that repair:
-          // `[q.x + 1 for q in L]` over `L: list<number>` boxed VALID with
-          // `q: matrix`, while `PointX(q)` over a `number`-typed `q` is a
-          // type error anywhere else. Removing the binding from the set
-          // makes a body use that contradicts the element type an error, as
-          // it is for a `Sum` index. Membership of that set is journaled
-          // state: an open rollback frame (the Epsil static-checking pass
-          // wraps a whole canonicalization in one) must be able to undo
-          // this removal exactly as it undoes the repair's own add, so the
-          // undo re-adds the definition. A destructuring binder (`(p, q)`
-          // over a list of pairs) takes no element type here — its leaves
-          // are declared `unknown` and typed by use — so the rule has no
-          // binding-site type to enforce for it yet (see `ROADMAP.md`).
-          const def = idxCanonical.valueDefinition;
-          const fresh = ce._freshlyInferred;
-          if (def !== undefined && fresh?.has(def)) {
-            const frame = activeRollbackFrame(ce);
-            if (frame !== undefined)
-              frame.record({ undo: () => void fresh.add(def) });
-            fresh.delete(def);
-          }
+      const elt = collectionElementType(
+        resolveTypeForCompilation(collCanonical.type.type)
+      );
+      if (elt === undefined || elt === 'any' || elt === 'unknown') return;
+      // The binding site is AUTHORITATIVE for the index's type: the element
+      // type is evidence from the collection, not a guess. The write lands in the fresh-inference set, which exists
+      // for one repair — `repairFreshMatrixInference` (`validate.ts`)
+      // rewrites a symbol the scalar fast path guessed `real` for to
+      // `matrix` when a later operand slot wants a collection. Left in the
+      // set, the binder took that repair: `[q.x + 1 for q in L]` over
+      // `L: list<number>` boxed VALID with `q: matrix`, while `PointX(q)`
+      // over a `number`-typed `q` is a type error anywhere else. Removing
+      // the binding from the set makes a body use that contradicts the
+      // element type an error, as it is for a `Sum` index. Membership of
+      // that set is journaled state: an open rollback frame (the Epsil
+      // static-checking pass wraps a whole canonicalization in one) must be
+      // able to undo this removal exactly as it undoes the repair's own add,
+      // so the undo re-adds the definition.
+      const bindAuthoritatively = (binding: Expression, type: Type): void => {
+        binding._infer(() => type, 'narrow');
+        const def = binding.valueDefinition;
+        const fresh = ce._freshlyInferred;
+        if (def !== undefined && fresh?.has(def)) {
+          const frame = activeRollbackFrame(ce);
+          if (frame !== undefined)
+            frame.record({ undo: () => void fresh.add(def) });
+          fresh.delete(def);
         }
+      };
+      if (isSymbol(idxCanonical)) {
+        bindAuthoritatively(idxCanonical, elt);
+        return;
       }
+      // A destructuring pattern (`for (p, q) in pairs`) binds each leaf to
+      // the matching component of the element's TUPLE type — the only
+      // element type the runtime destructuring accepts (`collectTuplePattern`
+      // refuses anything but a `Tuple` value) — recursively for a nested
+      // pattern. A leaf whose component type is not known, an element type
+      // that is not a tuple, and the wildcard `_` are left as declared,
+      // `unknown`, to be typed by use. A tuple type whose arity the pattern
+      // does not match, and a name the pattern binds twice, are errors here:
+      // the first would fail on every value at run time (the same check
+      // `collectTuplePattern` makes), the second would write two
+      // authoritative types onto one binding.
+      const bound = new Set<string>();
+      const bindPattern = (pattern: Expression, elementType: Type): void => {
+        if (patternError !== undefined) return;
+        // A component may be an alias or a nominal type of a tuple
+        // (`list<tuple<integer, pt>>`): resolve it before reading its shape,
+        // as the collection type itself was resolved above.
+        const type = resolveTypeForCompilation(elementType);
+        if (typeof type === 'string' || type.kind !== 'tuple') return;
+        if (!isFunction(pattern, 'Tuple')) return;
+        if (pattern.nops !== type.elements.length) {
+          patternError = ce.typeError(
+            parseType(
+              `tuple<${Array(pattern.nops).fill('unknown').join(', ')}>`
+            ),
+            type,
+            pattern
+          );
+          return;
+        }
+        pattern.ops.forEach((leaf, i) => {
+          const component = type.elements[i].type;
+          if (isFunction(leaf, 'Tuple')) {
+            bindPattern(leaf, component);
+            return;
+          }
+          const name = sym(leaf);
+          if (name === undefined || name === '_') return;
+          if (bound.has(name)) {
+            patternError = ce.error(
+              'unexpected-argument',
+              `duplicate name in destructuring pattern: ${name}`
+            );
+            return;
+          }
+          bound.add(name);
+          if (component === 'any' || component === 'unknown') return;
+          const binding = ce._bindingSymbol(name, ce.context.lexicalScope);
+          if (binding !== undefined) bindAuthoritatively(binding, component);
+        });
+      };
+      bindPattern(idxCanonical, elt);
     });
+    if (patternError !== undefined)
+      return ce._fn('Element', [patternError, collCanonical]);
     return ce._fn('Element', [idxCanonical, collCanonical]);
   });
   const canonicalBody: Expression = canonicalStatement(ce, body);
