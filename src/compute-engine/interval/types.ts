@@ -36,7 +36,16 @@ export interface Interval {
  *     refining, while a consumer that draws the curve still sees the break.
  *   `at` locates the first discontinuity in the input's coordinate and
  *   `continuity` says which side the value at `at` belongs to. Both are
- *   given when the operation knows them.
+ *   given when the operation knows them. For a head with more than one
+ *   operand, `at` is in the coordinate of the operand across which the jump
+ *   is crossed, named in that kernel's comment (`atan2(y, x)` jumps across
+ *   its branch cut at `y = 0`, so `at` is a `y` value). When jumps from
+ *   different operands combine (`floor(x) + atan2(y, x)`), the propagated
+ *   `at` is the smallest of the operands' `at` values compared as plain
+ *   numbers (`earliestJump`, `util.ts`); it locates the break only when
+ *   every contributing jump is in the same coordinate. The result carries no
+ *   axis tag, so a consumer that subdivides along `at` must know from the
+ *   expression which coordinate the jumps are in.
  *   Every operation propagates a jump: `floor(x) - 3` over `[0.5, 1.5]` is
  *   `singular` with `value: [-3, -2]`, still carrying floor's `at`.
  * - `partial`: Valid interval with domain clipping info

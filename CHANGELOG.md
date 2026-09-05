@@ -143,6 +143,19 @@
 
 ### Resolved Issues
 
+- **`interval-js` target: `Arctan2` over a box that straddles its branch cut
+  answers a finite jump.** On the negative x-axis the angle jumps from `+π` to
+  `−π`, so `Arctan2(y, x) - 3` over `x ∈ [-1.2, -0.8], y ∈ [-0.1, 0.1]` has
+  opposite signs at the ends of the box and no zero inside it; the kernel
+  answered a bounded `interval` of `[-6.14, 0.14]`, which a consumer reads as
+  a continuous cell with a crossing. It now answers `singular` with the
+  enclosure `[-π, π]`, located at `y = 0` (`at: 0`, in the first operand's
+  coordinate) with the value at the cut on the upper side
+  (`continuity: "right"`), the contract every jump has followed since the
+  step functions; the operations above it propagate it. A box that touches
+  `y = 0` from below contains the jump; one that touches it from above is
+  continuous. (Tycho item 255.)
+
 - **An Epsil number literal keeps every digit it was written with.** A
   decimal literal was converted through a machine float, so
   `12345678901234567890.5` parsed as `12345678901234570000`, `2.0000000000000001`

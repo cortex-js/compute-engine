@@ -11,6 +11,7 @@ import {
   containsZero,
   unwrapOrPropagate,
   liftJump,
+  jump,
 } from './util.js';
 import { div } from './arithmetic.js';
 import {
@@ -328,12 +329,21 @@ function atan2Raw(
   angles.push(Math.atan2(yVal.hi, xVal.lo));
   angles.push(Math.atan2(yVal.hi, xVal.hi));
 
-  // Check for discontinuity at negative x-axis
-  if (xVal.lo < 0 && yVal.lo < 0 && yVal.hi > 0) {
-    // The interval crosses the negative x-axis where atan2 jumps from pi to -pi
-    // Return entire range
-    return ok({ lo: -PI, hi: PI });
-  }
+  // The branch cut is the negative x-axis. There the angle jumps from +π
+  // to −π. The value at y = 0 is +π, the limit from y > 0. The limit from
+  // y < 0 is −π. A box contains a point of the cut when it has some x < 0
+  // and its y range reaches 0 from below. Such a box is a finite JUMP and
+  // is reported as every jump is (the item-239 contract): `singular` with
+  // the enclosure [−π, π], which bounds every value the function takes on
+  // the box. `at` is the location of the jump in the FIRST operand's
+  // coordinate, y = 0. `continuity: 'right'` says that the value at the
+  // cut belongs to the upper side. A box that only touches y = 0 from
+  // above is continuous there, because the angle runs up to π, and it
+  // takes the corner evaluation below. A plain bounded `interval` on the
+  // cut let an implicit-curve classifier read the sign change of
+  // `atan2(y, x) − 3` across the cut as a crossing (Tycho item 255).
+  if (xVal.lo < 0 && yVal.lo < 0 && yVal.hi >= 0)
+    return jump(0, 'right', { lo: -PI, hi: PI });
 
   return ok({ lo: Math.min(...angles), hi: Math.max(...angles) });
 }
