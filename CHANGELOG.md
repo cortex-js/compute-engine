@@ -29,6 +29,19 @@
 
 ### New Features
 
+- **Epsil source output has a Unicode notation mode.** The serializer's
+  `fancySymbols` option — reachable from the command line as
+  `epsil --epsil --fancy-symbols` — now writes roots and integer exponents in
+  the notation the parser reads: `Sqrt(x)` as `√x`, `Root(x, 3)` and
+  `Root(x, 4)` as `∛x` and `∜x`, and `Power(x, 2)` as `x²` (`x⁻¹`, `x¹⁰`), next
+  to the `×`, `÷`, `−`, `≠`, `⩽`, `⩾`, `∈` and `⇒` it already wrote. An
+  operand that would not read back as the whole radicand or base is
+  parenthesized (`√(x + 1)`, `(−x)²`, `(√x)²`, `(x²)³`); a symbolic exponent
+  keeps `^` and a `Subscript` keeps its call form. The default output is
+  unchanged: ASCII, so `Sqrt(x)` and `x ^ 2`. The `--epsil` output of the
+  command line (and of the MCP `evaluate` tool) now writes a square as `x ^ 2`
+  where it wrote `Square(x)`, the display head the MathJSON export prettifies
+  a square into.
 - **The Epsil standard library has lowercase spellings.** Every library
   function and constant can be written with an initial lowercase letter:
   `sin(x)`, `map(f, xs)`, `isPrime(7)`, `gcd(12, 18)`, `pi`, `nothing`,
@@ -111,6 +124,24 @@
 
 ### Resolved Issues
 
+- **An Epsil number literal keeps every digit it was written with.** A
+  decimal literal was converted through a machine float, so
+  `12345678901234567890.5` parsed as `12345678901234570000`, `2.0000000000000001`
+  as `2`, and `1e400` as `Infinity`; a hexadecimal or binary integer beyond
+  2^53 rounded the same way. A literal the float cannot hold exactly — more
+  than 15 significant digits, or beyond the float range — now keeps its exact
+  text, and a hexadecimal or binary integer is converted exactly. Ordinary
+  literals keep their normalized spelling (`1.2000` is still `1.2`).
+- **Serialized Epsil re-parses to the same tree for a negative base and for
+  nested same-precedence operators.** `Power(-2, 2)` serialized as `-2 ^ 2`,
+  which reads back as `-(2 ^ 2)`; `Power(Power(x, 2), 3)` as `x ^ 2 ^ 3`,
+  which reads back as `x ^ (2 ^ 3)`; `Subtract(a, Subtract(b, c))` as
+  `a - b - c` and `Subtract(a, Add(b, c))` as `a - b + c`, both of which read
+  back left to right; and `Factorial(-2)` as `-2!`. The serializer now
+  parenthesizes a negative literal under an operator tighter than the prefix
+  minus, and an equal-precedence operand on the side its associativity does
+  not protect: `(-2) ^ 2`, `(x ^ 2) ^ 3`, `a - (b - c)`, `a - (b + c)`,
+  `(-2)!`. The associative operators keep their flat output (`x * y * a * b`).
 - **`q + 1` accepted a `q: boolean | missing` that `Sin(q)` refused.** The
   numeric operators' short validation path admitted any operand whose type
   carried a `missing` arm without checking the carrier type, so `q + 1`,

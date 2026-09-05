@@ -23,7 +23,8 @@ const JSON_MATERIALIZATION_CAP = 10_000;
 
 export function formatValue(
   result: EvaluationResult,
-  mode: OutputMode
+  mode: OutputMode,
+  options?: { fancySymbols?: boolean }
 ): string {
   if (result.source.trim() === '') return '';
 
@@ -49,9 +50,17 @@ export function formatValue(
       2
     );
   }
+  // The MathJSON export prettifies `Power(x, 2)` into `Square(x)`, a head
+  // meant for LaTeX display: Epsil source spells a square `x ^ 2` (or `x²` in
+  // fancy-symbol mode), so that one rewrite is excluded here. The other
+  // prettifier rewrites produce ordinary Epsil (`1 / x`, `Exp(x)`) and stay.
   if (mode === 'epsil')
     return serializeEpsil(
-      result.value.toMathJson({ fractionalDigits: 'auto' })
+      result.value.toMathJson({
+        fractionalDigits: 'auto',
+        exclude: ['Square'],
+      }),
+      { fancySymbols: options?.fancySymbols === true }
     );
   // A `Nothing` result is not echoed in the human-facing mode: a program
   // whose last statement is a `print(…)` (or a declaration, or a loop)

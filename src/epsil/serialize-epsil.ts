@@ -13,6 +13,7 @@ import {
   matchesString,
 } from '../math-json/utils.js';
 import { splitGraphemes } from '../common/grapheme-splitter.js';
+import { SUPERSCRIPT_UNICODE } from './characters.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
 import { parseType } from '../common/type/parse.js';
 import type { Type, TypeResolver } from '../common/type/types.js';
@@ -104,12 +105,23 @@ const PERMISSIVE_TYPE_RESOLVER: TypeResolver = {
  * Serialize a MathJSON expression to Epsil.
  *
  * @param options.fancySymbols - If true, some operators are replaced
- * with an equivalent Unicode character, for example: `*` -> `×`.
+ * with an equivalent Unicode character, for example: `*` -> `×`, and the
+ * Unicode notations of roots and integer exponents are used: `Sqrt(x)` ->
+ * `√x`, `Root(x, 3)` -> `∛x`, `Power(x, 2)` -> `x²`. Every fancy spelling is
+ * one the parser reads back to the same expression.
  *
  */
+/** The superscript form of each ASCII digit and of `-`, read off the lexer's
+ * table so the serializer writes exactly what the parser reads. */
+const SUPERSCRIPT_OF = new Map<string, string>(
+  [...SUPERSCRIPT_UNICODE]
+    .filter(([, ascii]) => /^[0-9-]$/.test(ascii))
+    .map(([code, ascii]) => [ascii, String.fromCodePoint(code)])
+);
+
 export function serializeEpsil(
   expr: MathJsonExpression,
-  options?: FormattingOptions & {
+  options?: Partial<FormattingOptions> & {
     fancySymbols?: boolean;
   }
 ): string {
@@ -248,6 +260,8 @@ export function serializeEpsil(
     symbol: string;
     fancySymbol?: string;
     precedence: number;
+    /** Infix only; `left` when the shared table does not say. */
+    assoc: 'left' | 'right';
     unary?: boolean;
     postfix?: boolean;
     relational?: boolean;
@@ -269,6 +283,7 @@ export function serializeEpsil(
       symbol: def.symbol,
       fancySymbol: def.fancySymbol,
       precedence: def.precedence,
+      assoc: def.assoc ?? 'left',
       unary: def.kind === 'prefix',
       postfix: def.kind === 'postfix',
       relational: def.relational,
@@ -290,7 +305,11 @@ export function serializeEpsil(
   // never `1 if c else 2 + 3` (which re-parses as `If(c, 1, 2 + 3)`). Its own
   // spelling comes from the `If` entry in `FUNCTIONS`, which runs first, so
   // this row is only ever read as an *operand's* precedence.
-  OPERATORS['If'] = { symbol: 'if', precedence: CONDITIONAL_PRECEDENCE };
+  OPERATORS['If'] = {
+    symbol: 'if',
+    precedence: CONDITIONAL_PRECEDENCE,
+    assoc: 'left',
+  };
 
   // Is `expr` a number literal (a plain number, a `{num}` object, or a numeric
   // string)? Used by the `Negate`/`Multiply` serializers below.
@@ -300,12 +319,207 @@ export function serializeEpsil(
       isNumberObject(x) ||
       (typeof x === 'string' && matchesNumber(x)));
 
+  // A negative number literal prints with a leading `-`, which the parser
+  // reads as the prefix minus (precedence 90) and folds back into the literal
+  // only when nothing tighter claims the digits first. Under an operator that
+  // binds tighter than the prefix minus, the literal must be parenthesized:
+  // `Power(-2, 2)` is `(-2) ^ 2`, since `-2 ^ 2` re-parses as `-(2 ^ 2)`, and
+  // `Factorial(-2)` is `(-2)!`.
+  const isNegativeNumberLiteral = (x: MathJsonExpression | null): boolean => {
+    if (!isNumberLiteral(x)) return false;
+    const v = machineValue(x);
+    return v !== null && v < 0;
+  };
+  const PREFIX_MINUS_PRECEDENCE = SHARED_OPERATORS.find(
+    (def) => def.name === 'Negate'
+  )!.precedence;
+
+  // The operators for which an equal-precedence operand of the SAME head may
+  // stay unparenthesized on either side. They are associative, so
+  // `Multiply(Multiply(x, y), Multiply(a, b))` prints `x * y * a * b`: it
+  // re-parses to a different tree of the same value, which is accepted output
+  // (and canonicalization flattens both). The relational operators are NOT
+  // in the set: `Less(a, Less(b, c))` compares `a` to a boolean, while the
+  // flat `a < b < c` the parser would read back is the chain `Less(a, b, c)`
+  // — a different value — so the nested one prints `a < (b < c)`. (A chain
+  // is a single n-ary node and never reaches this rule.)
+  const ASSOCIATIVE_HEADS = new Set(['Add', 'Multiply', 'And', 'Or']);
+
+  /**
+   * Whether `arg`, the operand at `side` of the infix operator `op` (named
+   * `opName`), must be parenthesized for the output to re-parse as the same
+   * tree.
+   *
+   * - A looser operator always is: `(x + 1) * 2`.
+   * - An equal-precedence operator is when it sits on the side the
+   *   associativity does not protect: `a - (b - c)` and `a - (b + c)` for the
+   *   left-associative `-`, `(x ^ 2) ^ 3` for the right-associative `^`.
+   *   Without the parentheses `a - b - c` re-parses as `(a - b) - c` and
+   *   `x ^ 2 ^ 3` as `x ^ (2 ^ 3)`. The associative heads above are exempt
+   *   when the operand has the same head.
+   * - A radical (`√x`) is, under a postfix operator: `√x!` re-parses as
+   *   `Sqrt(x!)`, so `Factorial(Sqrt(x))` prints `(√x)!`.
+   * - A negative number literal is, as the LEFT operand of an operator tighter
+   *   than the prefix minus (see `isNegativeNumberLiteral`). As a right
+   *   operand it reads back whole (`x ^ -2` is `Power(x, -2)`).
+   */
+  function needsOperandParens(
+    arg: MathJsonExpression | null,
+    op: OperatorInfo,
+    opName: string,
+    side: 'left' | 'right'
+  ): boolean {
+    if (arg === null) return false;
+    const argHead = operator(arg);
+    const argOp = OPERATORS[argHead];
+    if (argOp) {
+      if (argOp.precedence < op.precedence) return true;
+      if (argOp.precedence === op.precedence) {
+        if (argHead === opName && ASSOCIATIVE_HEADS.has(opName)) return false;
+        return side !== op.assoc;
+      }
+      return false;
+    }
+    return (
+      side === 'left' &&
+      op.precedence > PREFIX_MINUS_PRECEDENCE &&
+      isNegativeNumberLiteral(arg)
+    );
+  }
+
+  /**
+   * Whether `x` can follow a radical sign, or carry a superscript exponent,
+   * WITHOUT parentheses so that the result re-parses as the same tree.
+   *
+   * - A symbol, a plain function call (`f(x)`, a head with no operator or
+   *   special serializer), or a non-negative number literal always can.
+   * - A negative number literal is parenthesized in both positions. `-2²`
+   *   re-parses as `Negate(Power(2, 2))`; and although `√-2` alone re-parses
+   *   as `Sqrt(-2)`, the prefix minus inside the radicand takes an operator
+   *   that follows the radical (`√-2 ^ y` is `Sqrt(-(2 ^ y))`), so the
+   *   radicand is fenced: `√(-2)`.
+   * - Under a radical sign, another radical and a superscript power can too:
+   *   the parser reads `√√2` as `Sqrt(Sqrt(2))` and `√x²` as `Sqrt(x^2)`.
+   *   Under an exponent they cannot: `√x²` is not `Power(Sqrt(x), 2)`, and
+   *   `x²³` is `x^23`, so those bases are parenthesized (`(√x)²`, `(x²)³`).
+   * - Everything else — an infix or prefix operator, a collection literal, an
+   *   invisible product `2x` — is parenthesized.
+   */
+  function isTightOperand(
+    x: MathJsonExpression | null,
+    position: 'radicand' | 'base'
+  ): boolean {
+    if (x === null) return false;
+    if (symbol(x) !== null) return true;
+    if (isNumberLiteral(x)) {
+      const v = machineValue(x);
+      return v !== null && !Number.isNaN(v) && v >= 0;
+    }
+    // `operator()` answers the empty string, not `null`, for a value that is
+    // not a function: a `{dict: …}` or `{str: …}` object literal. Those are
+    // parenthesized like the other collection literals.
+    const h = operator(x);
+    if (!h) return false;
+    if (position === 'radicand') {
+      if (radicalSign(x) !== null) return true;
+      if (h === 'Power' && superscriptExponent(x) !== null) return true;
+    }
+    return !(h in OPERATORS) && !(h in FUNCTIONS);
+  }
+
+  /**
+   * The integer a number literal denotes EXACTLY, or `null`. The decision is
+   * made on the literal's text, not on `machineValue()`: that reads a `{num}`
+   * string with `parseFloat`, so `{num: "2.0000000000000001"}` would round to
+   * `2` and a superscript `²` would silently change the value. Only a plain
+   * digit string (with an optional sign) within the safe-integer range
+   * qualifies.
+   */
+  function exactSmallInteger(x: MathJsonExpression | null): number | null {
+    if (x === null) return null;
+    if (typeof x === 'number') return Number.isSafeInteger(x) ? x : null;
+    const text = isNumberObject(x) ? x.num : typeof x === 'string' ? x : null;
+    if (text === null || !/^[+-]?\d+$/.test(text)) return null;
+    const v = Number(text);
+    return Number.isSafeInteger(v) ? v : null;
+  }
+
+  /**
+   * The exponent of a `Power` written as superscript digits (`2` → `²`,
+   * `-1` → `⁻¹`, `10` → `¹⁰`), or `null` when the exponent is not an integer
+   * literal — a symbolic or fractional exponent keeps the `^` spelling, since
+   * only a few letters have a superscript form. Fancy-symbol mode only.
+   */
+  function superscriptExponent(expr: MathJsonExpression): string | null {
+    if (!options?.fancySymbols) return null;
+    if (nops(expr) !== 2) return null;
+    const v = exactSmallInteger(operand(expr, 2));
+    if (v === null) return null;
+    return [...String(v)].map((c) => SUPERSCRIPT_OF.get(c) ?? c).join('');
+  }
+
+  /** The radical sign a `Sqrt` or `Root` node is written with in fancy-symbol
+   * mode, or `null` when it keeps its call form. */
+  function radicalSign(expr: MathJsonExpression | null): string | null {
+    if (!options?.fancySymbols || expr === null) return null;
+    const h = operator(expr);
+    if (h === 'Sqrt' && nops(expr) === 1) return '√';
+    if (h === 'Root' && nops(expr) === 2) {
+      const degree = exactSmallInteger(operand(expr, 2));
+      if (degree === 3) return '∛';
+      if (degree === 4) return '∜';
+    }
+    return null;
+  }
+
+  /** A radical sign (`√`, `∛`, `∜`) over `radicand`, parenthesized when the
+   * operand would not re-parse as the whole radicand. */
+  function serializeRadical(
+    sign: string,
+    radicand: MathJsonExpression | null
+  ): FormattingBlock {
+    if (isTightOperand(radicand, 'radicand'))
+      return fmt.line(sign, serializeExpression(radicand));
+    return fmt.line(sign, '(', serializeExpression(radicand), ')');
+  }
+
   //
   // Functions with a custom serializer: BaseForm, String, List, Set
   //
   const FUNCTIONS: {
     [key: string]: (exp: MathJsonExpression) => FormattingBlock;
   } = {
+    //
+    // Sqrt, Root, Power — the Unicode notations of fancy-symbol mode
+    //
+    // The default output stays ASCII (`Sqrt(x)`, `Root(x, 3)`, `x ^ 2`).
+    // Under `fancySymbols`, a square, cube or fourth root is written with its
+    // radical sign (`√x`, `∛x`, `∜x`) and an integer-literal exponent as a
+    // superscript (`x²`, `x⁻¹`); both are input notations the parser reads
+    // back to the same tree. A root of another degree, and a `Power` whose
+    // exponent is not an integer literal, keep their ASCII spelling.
+    //
+    Sqrt: (expr: MathJsonExpression): FormattingBlock => {
+      const sign = radicalSign(expr);
+      if (sign !== null) return serializeRadical(sign, operand(expr, 1));
+      return serializeGenericFunction(expr);
+    },
+    Root: (expr: MathJsonExpression): FormattingBlock => {
+      const sign = radicalSign(expr);
+      if (sign !== null) return serializeRadical(sign, operand(expr, 1));
+      return serializeGenericFunction(expr);
+    },
+    Power: (expr: MathJsonExpression): FormattingBlock => {
+      const script = superscriptExponent(expr);
+      if (script !== null) {
+        const base = operand(expr, 1);
+        if (isTightOperand(base, 'base'))
+          return fmt.line(serializeExpression(base), script);
+        return fmt.line('(', serializeExpression(base), ')', script);
+      }
+      return serializeOperator(expr) ?? serializeGenericFunction(expr);
+    },
+
     //
     // BaseForm
     //
@@ -2413,28 +2627,31 @@ export function serializeEpsil(
       // `Factorial(Factorial(n))` must serialize `(n!)!`, never `n!!` (which
       // classically means double factorial), and `Factorial(Power(x, 2))`
       // must serialize `(x^2)!`, not `x^2!` (= `x^(2!)`).
-      if (argOp && argOp.precedence <= op.precedence) {
+      if (
+        (argOp && argOp.precedence <= op.precedence) ||
+        isNegativeNumberLiteral(arg) ||
+        radicalSign(arg) !== null
+      ) {
         return fmt.line('(', serializeExpression(arg), ')', opSymbol);
       }
       return fmt.line(serializeExpression(arg), opSymbol);
     }
 
-    const operands = mapArgs<FormattingBlock>(expr, (arg) => {
-      const argHead = operator(arg);
-      const argOp = OPERATORS[argHead];
-      if (argOp && argOp.precedence < op.precedence) {
+    // The first operand is the LEFT operand; every later one is a right
+    // operand (a variadic `Add(a, b, c)` chains as `(a + b) + c`).
+    const operandBlocks = operands(expr).map((arg, index) => {
+      if (needsOperandParens(arg, op, opName, index === 0 ? 'left' : 'right'))
         return fmt.line('(', serializeExpression(arg), ')');
-      }
       return serializeExpression(arg);
     });
 
-    if (!operands) return null;
+    if (operandBlocks.length === 0) return null;
 
     return fmt.list(
       op.relational
         ? fmt.relationalOperator(opSymbol)
         : fmt.infixOperator(opSymbol),
-      operands
+      operandBlocks
     );
   }
 

@@ -85,8 +85,12 @@ this table — they are handled directly by the parser rather than through the
 operator table, since they are not spelled with an operator symbol.
 
 The three Unicode-only rows — the radical signs, and the superscript and
-subscript runs — have no ASCII spelling and are input forms only: the
-serializer writes `Sqrt(x)`, `x^2` and `Subscript(x, k + 1)`. See
+subscript runs — have no ASCII spelling. By default the serializer writes the
+ASCII forms `Sqrt(x)`, `x ^ 2` and `Subscript(x, k + 1)`. In its
+fancy-symbol mode (the `fancySymbols` option of `serializeEpsil`, or
+`epsil --epsil --fancy-symbols`) it writes `√x`, `∛x`, `∜x`, and an
+integer-literal exponent as a superscript (`x²`, `x⁻¹`); a symbolic exponent
+keeps `^`, and a subscript expression keeps `Subscript(…)`. See
 [Radical signs](#radical-signs) and
 [Superscripts and subscripts](#scripts).
 

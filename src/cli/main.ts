@@ -43,7 +43,9 @@ Arguments:
 Options:
   -e, --eval <source>     evaluate source text
       --json              print the result as MathJSON
-      --epsil            print the result as Epsil source
+      --epsil             print the result as Epsil source
+      --fancy-symbols     with --epsil, write the Unicode notations
+                          (√x, x², ×, ⩽, …) instead of the ASCII spellings
       --diagnostics <fmt> print diagnostics as "text" (default) or "json"
       --time-limit <ms>   evaluation deadline; 0 disables it (default: 10000)
       --transport <type>  MCP transport: "stdio" (default) or
@@ -104,6 +106,7 @@ export async function main(
     return runRepl(session, {
       color: options.color && Boolean(io.stdout.isTTY),
       outputMode: options.outputMode,
+      fancySymbols: options.fancySymbols,
       input: io.stdin,
       output: io.stdout,
     });
@@ -142,7 +145,9 @@ export async function main(
           : '';
       if (errorReport) io.stderr.write(`${errorReport}\n`);
       else {
-        const value = formatValue(result, options.outputMode);
+        const value = formatValue(result, options.outputMode, {
+          fancySymbols: options.fancySymbols,
+        });
         if (value) io.stdout.write(`${value}\n`);
       }
     }

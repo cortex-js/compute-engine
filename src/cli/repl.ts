@@ -20,6 +20,9 @@ import type { EpsilSession, EvaluationResult, OutputMode } from './types.js';
 export interface ReplOptions {
   color: boolean;
   outputMode: OutputMode;
+  /** See `CliOptions.fancySymbols`. Applies whenever the output mode is
+   * `epsil`, including after `.ast` has toggled JSON output on and off. */
+  fancySymbols?: boolean;
   historyPath?: string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
@@ -73,6 +76,7 @@ export function runRepl(
       return formatReplResult(
         value.result,
         outputMode,
+        options.fancySymbols === true,
         options.color,
         showTime
       );
@@ -106,7 +110,15 @@ export function runRepl(
   server.defineCommand('load', {
     help: 'load and execute an Epsil source file',
     action(filename) {
-      loadFile(this, session, filename, outputMode, options.color, showTime);
+      loadFile(
+        this,
+        session,
+        filename,
+        outputMode,
+        options.fancySymbols === true,
+        options.color,
+        showTime
+      );
     },
   });
 
@@ -122,6 +134,7 @@ function loadFile(
   session: EpsilSession,
   filename: string,
   outputMode: OutputMode,
+  fancySymbols: boolean,
   color: boolean,
   showTime: boolean
 ): void {
@@ -129,7 +142,7 @@ function loadFile(
   try {
     const result = session.evaluate(readFileSync(path, 'utf8'), path);
     server.output.write(
-      `${formatReplResult(result, outputMode, color, showTime)}\n`
+      `${formatReplResult(result, outputMode, fancySymbols, color, showTime)}\n`
     );
   } catch (error) {
     server.output.write(
@@ -142,6 +155,7 @@ function loadFile(
 function formatReplResult(
   result: EvaluationResult,
   outputMode: OutputMode,
+  fancySymbols: boolean,
   color: boolean,
   showTime: boolean
 ): string {
@@ -155,8 +169,8 @@ function formatReplResult(
     ? ''
     : outputMode === 'value'
       ? formatRuntimeError(result, undefined, color) ||
-        formatValue(result, outputMode)
-      : formatValue(result, outputMode);
+        formatValue(result, outputMode, { fancySymbols })
+      : formatValue(result, outputMode, { fancySymbols });
   const timing = showTime ? `(${result.elapsedMs.toFixed(1)} ms)` : '';
   return [diagnostics, value, timing].filter(Boolean).join('\n');
 }

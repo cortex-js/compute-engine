@@ -78,14 +78,23 @@ Pi * radius^2
 | `-e`, `--eval <source>` | Evaluate Epsil source supplied on the command line. |
 | `--json` | Write the result as formatted [MathJSON](/epsil/implementation/), the representation Epsil programs are evaluated in. Finite lazy collections (`Range`, `Map` results, …) are materialized into their elements, up to 10,000. |
 | `--epsil` | Write the result as serialized Epsil source. |
+| `--fancy-symbols` | With `--epsil`, write the Unicode notations instead of the ASCII spellings: `√x` for `Sqrt(x)`, `∛x` and `∜x` for cube and fourth roots, `x²` for `x ^ 2`, and `×`, `÷`, `−`, `≠`, `⩽`, `⩾`, `∈`, `⇒` for the operators. Every notation reads back to the same expression. |
 | `--diagnostics <fmt>` | Write diagnostics as `text` (the default) or as a `json` array. |
 | `--time-limit <ms>` | Set the evaluation deadline in milliseconds. The default is `10000`; `0` disables it. |
 | `--no-color` | Disable color in diagnostics. The [`NO_COLOR`](https://no-color.org/) environment variable is also honored. |
 | `-h`, `--help` | Display command help. |
 | `-v`, `--version` | Display the package version. |
 
-`--json` and `--epsil` are mutually exclusive. With neither option, results
-use the ordinary textual representation of a value.
+`--json` and `--epsil` are mutually exclusive, and `--fancy-symbols` requires
+`--epsil`. With neither output option, results use the ordinary textual
+representation of a value.
+
+```bash
+$ npx epsil --epsil -e 'Sqrt(2) * x^2'
+Sqrt(2) * x ^ 2
+$ npx epsil --epsil --fancy-symbols -e 'Sqrt(2) * x^2'
+√2 × x²
+```
 
 ## Checking a Program Without Evaluating It
 

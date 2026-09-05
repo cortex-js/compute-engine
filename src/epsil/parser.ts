@@ -9034,6 +9034,14 @@ function applySign(s: string, negative: boolean): string {
 function numberPayload(text: string, negative: boolean): string {
   const t = text.replace(/_/g, '');
 
+  // A hexadecimal or binary INTEGER (no fraction, no exponent) is converted
+  // exactly: a machine float holds only 53 bits, so `0xFFFFFFFFFFFFFFFF`
+  // through `hexValue` would come out as 18446744073709552000.
+  if (/^0[bB][01]+$/.test(t) || /^0[xX][0-9a-fA-F]+$/.test(t)) {
+    const v = BigInt(t);
+    if (negative) return v === 0n ? '0' : '-' + v.toString();
+    return v.toString();
+  }
   if (/^0[bB]/.test(t)) {
     let v = binaryValue(t);
     if (negative) v = -v;
@@ -9054,7 +9062,44 @@ function numberPayload(text: string, negative: boolean): string {
 
   let v = decimalValue(t);
   if (negative) v = -v;
+  // A decimal a machine float holds exactly — at most 15 significant digits
+  // and a finite magnitude — takes the float's shortest spelling, which is
+  // the normalized form (`1.2000` → `1.2`, `1.5e3` → `1500`). Any other
+  // decimal keeps its own digits: `12345678901234567890.5` would otherwise
+  // round to `12345678901234570000`, and `1e400` to `Infinity`. The `{num}`
+  // payload is an exact decimal string, so every digit written survives.
+  const exact = exactDecimalText(t);
+  if (exact !== null && (!Number.isFinite(v) || exact.digits > 15))
+    return (negative ? '-' : '') + exact.text;
   return v.toString();
+}
+
+/**
+ * The exact decimal a literal spells, as a normalized `{num}` payload —
+ * `0001.2000e+5` → `1.2e5` — with its count of significant digits. `null` for
+ * a spelling this normalization does not cover: a binary (`p`) exponent on a
+ * decimal literal, which stays on the float path.
+ */
+function exactDecimalText(t: string): { text: string; digits: number } | null {
+  // Fullwidth digits are valid in a literal; map them to ASCII.
+  const ascii = [...t]
+    .map((ch) => {
+      const d = DIGITS.get(ch.codePointAt(0)!);
+      return d === undefined ? ch : String(d);
+    })
+    .join('');
+  const m = /^([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]+))?$/.exec(ascii);
+  if (m === null) return null;
+  const int = (m[1] ?? '').replace(/^0+(?=[0-9])/, '') || '0';
+  const frac = (m[2] ?? '').replace(/0+$/, '');
+  const significant = (int === '0' ? '' : int) + frac;
+  const digits = significant.replace(/^0+/, '').length;
+  let text = frac === '' ? int : `${int}.${frac}`;
+  if (m[3] !== undefined) {
+    const exponent = Number.parseInt(m[3], 10);
+    if (exponent !== 0) text += `e${exponent}`;
+  }
+  return { text, digits };
 }
 
 function decimalValue(t: string): number {

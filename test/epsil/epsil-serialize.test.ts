@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
+import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 describe('EPSIL SERIALIZING', () => {
   test('Numbers', () => {
@@ -216,9 +217,7 @@ describe('EPSIL SERIALIZING FUNCTIONS', () => {
     expect(serializeEpsil(['foo', 'x', 1, 0])).toMatchInlineSnapshot(
       `"foo(x, 1, 0)"`
     );
-    expect(serializeEpsil(['Divide', 'n', 4])).toMatchInlineSnapshot(
-      `"n / 4"`
-    );
+    expect(serializeEpsil(['Divide', 'n', 4])).toMatchInlineSnapshot(`"n / 4"`);
   });
 });
 
@@ -318,13 +317,7 @@ describe('EPSIL SERIALIZING COLLECTIONS', () => {
       serializeEpsil(['Tuple', 5, 'x', 7, ['Add', 'x', 3, 'y']])
     ).toMatchInlineSnapshot(`"(5, x, 7, x + 3 + y)"`);
     expect(
-      serializeEpsil([
-        'Tuple',
-        5,
-        'x',
-        ['Tuple', 11, 13],
-        ['Add', 'x', 3, 'y'],
-      ])
+      serializeEpsil(['Tuple', 5, 'x', ['Tuple', 11, 13], ['Add', 'x', 3, 'y']])
     ).toMatchInlineSnapshot(`"(5, x, (11, 13), x + 3 + y)"`);
   });
 });
@@ -391,6 +384,159 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
       `"2 * x * y"`
     );
   });
+  test('Operators re-parse to the same tree', () => {
+    // A negative literal under an operator tighter than the prefix minus, and
+    // an equal-precedence operand on the side its associativity does not
+    // protect, are parenthesized: without the parentheses `-2 ^ 2` reads as
+    // `-(2 ^ 2)`, `x ^ 2 ^ 3` as `x ^ (2 ^ 3)` and `a - b - c` as `(a - b) - c`.
+    expect(serializeEpsil(['Power', -2, 2])).toBe('(-2) ^ 2');
+    expect(serializeEpsil(['Power', -2, 'n'])).toBe('(-2) ^ n');
+    expect(serializeEpsil(['Factorial', -2])).toBe('(-2)!');
+    expect(serializeEpsil(['Power', ['Power', 'x', 2], 3])).toBe('(x ^ 2) ^ 3');
+    expect(serializeEpsil(['Power', 'x', ['Power', 2, 3]])).toBe('x ^ 2 ^ 3');
+    expect(serializeEpsil(['Subtract', 'a', ['Subtract', 'b', 'c']])).toBe(
+      'a - (b - c)'
+    );
+    expect(serializeEpsil(['Subtract', ['Subtract', 'a', 'b'], 'c'])).toBe(
+      'a - b - c'
+    );
+    expect(serializeEpsil(['Subtract', 'a', ['Add', 'b', 'c']])).toBe(
+      'a - (b + c)'
+    );
+    expect(serializeEpsil(['Divide', 'a', ['Divide', 'b', 'c']])).toBe(
+      'a / (b / c)'
+    );
+    // The associative heads keep their flat output.
+    expect(serializeEpsil(['Add', ['Add', 'a', 'b'], ['Add', 'c', 'd']])).toBe(
+      'a + b + c + d'
+    );
+    expect(serializeEpsil(['And', 'a', ['And', 'b', 'c']])).toBe('a && b && c');
+    // A nested comparison is NOT a chain: `a < b < c` would read back as the
+    // n-ary `Less(a, b, c)`, a different value.
+    expect(serializeEpsil(['Less', 'a', ['Less', 'b', 'c']])).toBe(
+      'a < (b < c)'
+    );
+    expect(serializeEpsil(['Less', 'a', 'b', 'c'])).toBe('a < b < c');
+    // A negative literal under a looser operator needs none.
+    expect(serializeEpsil(['Multiply', -2, 'x'])).toBe('-2 * x');
+    // A negative literal as a RIGHT operand reads back whole.
+    expect(serializeEpsil(['Power', 'x', -2])).toBe('x ^ -2');
+    expect(serializeEpsil(['Add', 'a', -1])).toBe('a + -1');
+  });
+
+  test('Fancy symbols: roots and integer exponents', () => {
+    // Fancy-symbol mode also spaces operators with U+205F / U+2005 and
+    // separators with U+2009; fold those to ASCII spaces so the expectations
+    // below read plainly. The re-parse test keeps the real output.
+    const fancy = (e: Parameters<typeof serializeEpsil>[0]) =>
+      serializeEpsil(e, { fancySymbols: true }).replace(
+        /[\u2005\u2009\u205f]/g,
+        ' '
+      );
+    // Radical signs; the operand is parenthesized unless the parser reads it
+    // whole (a symbol, a number, a call, another radical, a superscript power).
+    expect(fancy(['Sqrt', 2])).toBe('√2');
+    expect(fancy(['Sqrt', 'x'])).toBe('√x');
+    // A negative radicand is fenced: bare, `√-2 ^ y` would read as
+    // `Sqrt(-(2 ^ y))`.
+    expect(fancy(['Sqrt', -2])).toBe('√(-2)');
+    expect(fancy(['Power', ['Sqrt', -2], 'y'])).toBe('√(-2) ^ y');
+    expect(fancy(['Sqrt', ['f', 'x']])).toBe('√f(x)');
+    expect(fancy(['Sqrt', ['Sqrt', 2]])).toBe('√√2');
+    expect(fancy(['Sqrt', ['Power', 'x', 2]])).toBe('√x²');
+    expect(fancy(['Sqrt', ['Add', 'x', 1]])).toBe('√(x + 1)');
+    expect(fancy(['Sqrt', ['Multiply', 2, 'x']])).toBe('√(2x)');
+    expect(fancy(['Sqrt', ['Power', 'x', 'y']])).toBe('√(x ^ y)');
+    expect(fancy(['Root', 'x', 3])).toBe('∛x');
+    expect(fancy(['Root', 'x', 4])).toBe('∜x');
+    expect(fancy(['Root', 'x', 5])).toBe('Root(x, 5)');
+    // Superscript exponents for integer literals only.
+    expect(fancy(['Power', 'x', 2])).toBe('x²');
+    expect(fancy(['Power', 'x', 10])).toBe('x¹⁰');
+    expect(fancy(['Power', 'x', -1])).toBe('x⁻¹');
+    expect(fancy(['Power', 'x', 0])).toBe('x⁰');
+    expect(fancy(['Power', 2, 2])).toBe('2²');
+    expect(fancy(['Power', 'x_n', 2])).toBe('x_n²');
+    expect(fancy(['Power', ['f', 'x'], 2])).toBe('f(x)²');
+    expect(fancy(['Power', 'x', ['Add', 'n', 1]])).toBe('x ^ (n + 1)');
+    expect(fancy(['Power', 'x', ['Rational', 1, 2]])).toBe('x ^ (1 ÷ 2)');
+    // A base that would not read back whole is parenthesized.
+    expect(fancy(['Power', ['Add', 'x', 1], 2])).toBe('(x + 1)²');
+    expect(fancy(['Power', -2, 2])).toBe('(-2)²');
+    expect(fancy(['Power', ['Negate', 'x'], 2])).toBe('(−x)²');
+    expect(fancy(['Power', ['Sqrt', 'x'], 2])).toBe('(√x)²');
+    expect(fancy(['Power', ['Power', 'x', 2], 3])).toBe('(x²)³');
+    // The script binds tighter than every operator, as in the parser.
+    expect(fancy(['Negate', ['Power', 'x', 2]])).toBe('−x²');
+    expect(fancy(['Add', ['Power', 'x', 2], 1])).toBe('x² + 1');
+    expect(fancy(['Multiply', 2, ['Power', 'x', 2]])).toBe('2 × x²');
+    expect(fancy(['Multiply', ['Sqrt', 2], 'x'])).toBe('√2 × x');
+    expect(fancy(['Factorial', ['Power', 'x', 2]])).toBe('(x²)!');
+    expect(fancy(['Factorial', ['Sqrt', 'x']])).toBe('(√x)!');
+    expect(fancy(['Factorial', ['Root', 'x', 3]])).toBe('(∛x)!');
+    // An exponent or a degree is read from the literal's text: a value that
+    // only ROUNDS to an integer keeps the ASCII spelling.
+    expect(fancy(['Power', 'x', { num: '2.0000000000000001' }])).toBe(
+      'x ^ 2.000_000_000_000_000_1'
+    );
+    expect(fancy(['Root', 'x', { num: '3.0000000000000001' }])).toBe(
+      'Root(x, 3.000_000_000_000_000_1)'
+    );
+    expect(fancy(['Power', 'x', { num: '12' }])).toBe('x¹²');
+    expect(fancy(['Power', 'x', { num: '100000000000000000000' }])).toBe(
+      'x ^ 100_000_000_000_000_000_000'
+    );
+    // A dictionary literal base is parenthesized like the other collections.
+    expect(fancy(['Power', { dict: { a: 1 } }, 2])).toBe('({"a" -> 1})²');
+    // Subscripts and the big operators stay in their call form.
+    expect(fancy(['Subscript', 'x', ['Add', 'k', 1]])).toBe(
+      'Subscript(x, k + 1)'
+    );
+    expect(fancy(['Integrate', ['Divide', 1, 'x'], 'x'])).toBe(
+      'Integrate(1 ÷ x, x)'
+    );
+    // The default output is unchanged.
+    expect(serializeEpsil(['Sqrt', 2])).toBe('Sqrt(2)');
+    expect(serializeEpsil(['Power', 'x', 2])).toBe('x ^ 2');
+  });
+
+  test('Fancy symbols re-parse to the same tree', () => {
+    const cases: Parameters<typeof serializeEpsil>[0][] = [
+      ['Sqrt', 2],
+      ['Sqrt', ['Add', 'x', 1]],
+      ['Sqrt', ['Sqrt', 2]],
+      ['Sqrt', ['Power', 'x', 2]],
+      ['Sqrt', -2],
+      ['Root', 'x', 3],
+      ['Root', 'x', 4],
+      ['Power', 'x', 10],
+      ['Power', 'x', -1],
+      ['Power', ['Add', 'x', 1], 2],
+      ['Power', -2, 2],
+      ['Power', ['Power', 'x', 2], 3],
+      ['Power', ['Sqrt', 'x'], 2],
+      ['Power', ['Negate', 'x'], 2],
+      ['Negate', ['Power', 'x', 2]],
+      ['Multiply', 2, ['Sqrt', 3]],
+      ['Multiply', ['Sqrt', 2], 'x'],
+      ['Factorial', ['Power', 'x', 2]],
+      ['Factorial', ['Sqrt', 'x']],
+      ['Power', ['Sqrt', -2], 'y'],
+      ['Power', 'x', { num: '2.0000000000000001' }],
+    ];
+    const ce = new ComputeEngine();
+    for (const c of cases) {
+      const fancy = serializeEpsil(c, { fancySymbols: true });
+      const [expr, diagnostics] = parseEpsil(fancy);
+      expect({ fancy, diagnostics }).toEqual({ fancy, diagnostics: [] });
+      // Compare as canonical boxed expressions, since a parsed number is a
+      // `{num}` object and the input a plain number.
+      expect(
+        ce.box(expr, { form: 'raw' }).isSame(ce.box(c, { form: 'raw' }))
+      ).toBe(true);
+    }
+  });
+
   test('Element', () => {
     expect(serializeEpsil(['Element', 'x', 'S'])).toMatchInlineSnapshot(
       `"x in S"`
@@ -438,9 +584,7 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
   // normalization). Mixed-number / invisible-plus rendering (`2½`) is out of
   // scope for v0 — the serializer never merges an `Add` into a mixed number.
   test('Plus', () => {
-    expect(serializeEpsil(['Add', 2, ['Rational', 1, 2]])).toMatch(
-      '2 + 1 / 2'
-    );
+    expect(serializeEpsil(['Add', 2, ['Rational', 1, 2]])).toMatch('2 + 1 / 2');
     expect(serializeEpsil(['Add', 'x', ['Rational', 1, 2]])).toMatch(
       'x + 1 / 2'
     );
@@ -483,9 +627,9 @@ describe('EPSIL SERIALIZING OPERATORS', () => {
     expect(serializeEpsil(['Factorial', 5])).toMatchInlineSnapshot(`"5!"`);
     expect(serializeEpsil(['Factorial', 'n'])).toMatchInlineSnapshot(`"n!"`);
     // A call operand needs no parens (`f(x)!` re-parses as Factorial(f(x))).
-    expect(
-      serializeEpsil(['Factorial', ['f', 'x']])
-    ).toMatchInlineSnapshot(`"f(x)!"`);
+    expect(serializeEpsil(['Factorial', ['f', 'x']])).toMatchInlineSnapshot(
+      `"f(x)!"`
+    );
     // An operator operand at or below `!`'s precedence parenthesizes.
     expect(
       serializeEpsil(['Factorial', ['Add', 'a', 'b']])
@@ -649,7 +793,10 @@ describe('EPSIL SERIALIZING DECLARATIONS', () => {
       serializeEpsil([
         'Declare',
         'x',
-        ['Dictionary', ['KeyValuePair', { sym: 'holdUntil' }, { str: 'never' }]],
+        [
+          'Dictionary',
+          ['KeyValuePair', { sym: 'holdUntil' }, { str: 'never' }],
+        ],
       ] as any)
     ).toBe('Declare(x, {holdUntil -> "never"})');
   });
@@ -717,8 +864,16 @@ describe('EPSIL SERIALIZING DECLARATIONS', () => {
   // form, where the value position holds a `MathJsonExpression`.
   test('the `constant`/`alias` flag is read in every encoding', () => {
     const constantBags = [
-      ['Dictionary', ['KeyValuePair', { str: 'constant' }, 'True'], ['KeyValuePair', { str: 'value' }, 5]],
-      ['Dictionary', ['KeyValuePair', { str: 'constant' }, { str: 'True' }], ['KeyValuePair', { str: 'value' }, 5]],
+      [
+        'Dictionary',
+        ['KeyValuePair', { str: 'constant' }, 'True'],
+        ['KeyValuePair', { str: 'value' }, 5],
+      ],
+      [
+        'Dictionary',
+        ['KeyValuePair', { str: 'constant' }, { str: 'True' }],
+        ['KeyValuePair', { str: 'value' }, 5],
+      ],
       { dict: { constant: 'True', value: 5 } },
       { dict: { constant: true, value: 5 } },
     ];

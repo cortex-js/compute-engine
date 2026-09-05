@@ -47,6 +47,21 @@ describe('Epsil CLI arguments', () => {
     });
   });
 
+  test('parses the fancy-symbols output option', () => {
+    expect(
+      parseCliArguments(['--epsil', '--fancy-symbols', '-e', '1'], {})
+    ).toMatchObject({ outputMode: 'epsil', fancySymbols: true });
+    expect(parseCliArguments(['--epsil'], {}).fancySymbols).toBe(false);
+    // The notations belong to the Epsil source output; the value and JSON
+    // modes cannot honor the flag, so it is refused rather than ignored.
+    expect(() => parseCliArguments(['--fancy-symbols'], {})).toThrow(
+      CliUsageError
+    );
+    expect(() => parseCliArguments(['--json', '--fancy-symbols'], {})).toThrow(
+      CliUsageError
+    );
+  });
+
   test('accepts zero as no time limit', () => {
     expect(parseCliArguments(['--time-limit', '0'], {}).timeLimit).toBe(0);
   });
@@ -89,6 +104,23 @@ describe('Epsil CLI arguments', () => {
     expect(() => parseDocArguments(['Sin', '--limit', '0'])).toThrow(
       CliUsageError
     );
+  });
+});
+
+describe('Epsil CLI fancy symbols', () => {
+  test('--fancy-symbols writes the Unicode notations', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(['--epsil', '--fancy-symbols', '-e', 'Sqrt(3) + x^2'], io)
+    ).toBe(0);
+    // Fancy-symbol mode spaces infix operators with U+205F.
+    expect(stdout()).toBe('x²\u205f+\u205f√3\n');
+  });
+
+  test('--epsil alone writes the ASCII spellings', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['--epsil', '-e', 'Sqrt(3) + x^2'], io)).toBe(0);
+    expect(stdout()).toBe('x ^ 2 + Sqrt(3)\n');
   });
 });
 
@@ -233,9 +265,7 @@ describe('Epsil CLI check --effects', () => {
     ).toBe(0);
     // `(number) -> number` states a type, not an effect contract: the
     // effects stay inferred (an unstated specifier is "unstated", not "pure").
-    expect(stdout()).toBe(
-      'f (line 1): random (declared)\ng (line 2): pure\n'
-    );
+    expect(stdout()).toBe('f (line 1): random (declared)\ng (line 2): pure\n');
   });
 
   test("a grouped return type is not the function's own contract", async () => {
@@ -518,9 +548,7 @@ describe('Epsil CLI runtime error reporting', () => {
 
   test('anchors the report on the statement that produced the value', async () => {
     const { io, stderr } = makeIo();
-    expect(
-      await main(['-e', 'let s: string = "hi"\nLn(s, 2)'], io)
-    ).toBe(1);
+    expect(await main(['-e', 'let s: string = "hi"\nLn(s, 2)'], io)).toBe(1);
     // Since the static pre-pass applies declaration type effects
     // (`applyAssignmentTypeEffect`, 2026-08-18), `s: string` is known BEFORE
     // anything runs and the mismatch is a STATIC type error — it used to

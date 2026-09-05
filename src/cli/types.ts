@@ -14,6 +14,9 @@ export interface CliOptions {
   help: boolean;
   version: boolean;
   outputMode: OutputMode;
+  /** With `outputMode: 'epsil'`, write the Unicode notations (`√x`, `x²`,
+   * `×`, `⩽`, …) instead of the ASCII spellings. */
+  fancySymbols: boolean;
   diagnosticsFormat: DiagnosticsFormat;
   color: boolean;
   timeLimit: number;

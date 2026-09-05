@@ -203,6 +203,39 @@ describe('EPSIL PARSING NUMBERS', () => {
     expect(validEpsil('62_73_7547.38383e-2')).toBe(627375.4738383);
     expect(validEpsil('62_73_7547.38383')).toBe(62737547.38383);
   });
+  test('A literal the machine float cannot hold keeps its digits', () => {
+    // A decimal with more than 15 significant digits, or beyond the float
+    // range, is passed through as its exact text (a `{num}` payload is an
+    // exact decimal string); a hexadecimal or binary integer beyond 2^53 is
+    // converted with BigInt. Ordinary literals keep the normalized float
+    // spelling asserted above.
+    const num = (s: string) => parseEpsil(s)[0];
+    expect(num('2.0000000000000001')).toMatchObject({
+      num: '2.0000000000000001',
+    });
+    expect(num('2.000_000_000_000_000_1')).toMatchObject({
+      num: '2.0000000000000001',
+    });
+    expect(num('12345678901234567890.5')).toMatchObject({
+      num: '12345678901234567890.5',
+    });
+    expect(num('-12345678901234567890.5')).toMatchObject({
+      num: '-12345678901234567890.5',
+    });
+    expect(num('1e400')).toMatchObject({ num: '1e400' });
+    expect(num('0001.2000e+5')).toMatchObject({ num: '120000' });
+    expect(num('1.234567890123456789e-300')).toMatchObject({
+      num: '1.234567890123456789e-300',
+    });
+    expect(num('0xFFFFFFFFFFFFFFFF')).toMatchObject({
+      num: '18446744073709551615',
+    });
+    expect(num('0b' + '1'.repeat(64))).toMatchObject({
+      num: '18446744073709551615',
+    });
+    expect(num('-0x10')).toMatchObject({ num: '-16' });
+  });
+
   test('Signed Floating-point number', () => {
     expect(validEpsil('+1.2')).toBe(1.2);
     expect(validEpsil('-62_73_7547.38383e-13')).toBe(-0.000006273754738383);
@@ -916,8 +949,7 @@ describe('EPSIL PARSING SINGLE-LINE STRINGS', () => {
         ],
       ]
     `);
-    expect(invalidEpsil('"invalid \\u23ghjik escape "'))
-      .toMatchInlineSnapshot(`
+    expect(invalidEpsil('"invalid \\u23ghjik escape "')).toMatchInlineSnapshot(`
       [
         Error,
         [
@@ -1102,8 +1134,7 @@ describe('EPSIL PARSING MULTILINE STRINGS', () => {
       ]
     `);
 
-    expect(invalidEpsil('"""\nhello\nworld\n boo  """'))
-      .toMatchInlineSnapshot(`
+    expect(invalidEpsil('"""\nhello\nworld\n boo  """')).toMatchInlineSnapshot(`
       [
         Error,
         [
@@ -1856,11 +1887,7 @@ describe('EPSIL PARSING OPERATORS', () => {
   test('Power', () => {
     expect(validEpsil('x^2')).toStrictEqual(['Power', 'x', 2]);
     // `^` binds tighter than `/`, so `x^1/2` is `(x^1)/2`.
-    expect(validEpsil('x^1/2')).toStrictEqual([
-      'Divide',
-      ['Power', 'x', 1],
-      2,
-    ]);
+    expect(validEpsil('x^1/2')).toStrictEqual(['Divide', ['Power', 'x', 1], 2]);
     expect(validEpsil('x ^ 1 / 2')).toStrictEqual([
       'Divide',
       ['Power', 'x', 1],
@@ -1966,11 +1993,7 @@ describe('EPSIL PARSING BOOLEAN LITERALS', () => {
   test('`true`/`false` are input aliases for `True`/`False`', () => {
     expect(validEpsil('true')).toStrictEqual('True');
     expect(validEpsil('false')).toStrictEqual('False');
-    expect(validEpsil('true && false')).toStrictEqual([
-      'And',
-      'True',
-      'False',
-    ]);
+    expect(validEpsil('true && false')).toStrictEqual(['And', 'True', 'False']);
     expect(validEpsil('!true')).toStrictEqual(['Not', 'True']);
     expect(validEpsil('let x = true')).toStrictEqual([
       'Declare',
@@ -2390,11 +2413,7 @@ describe('EPSIL PARSING LIST SPREAD', () => {
   });
 
   test('brace spread: a `->`-free brace is a set-spread', () => {
-    expect(validEpsil('{1, ...s}')).toStrictEqual([
-      'Set',
-      1,
-      ['Spread', 's'],
-    ]);
+    expect(validEpsil('{1, ...s}')).toStrictEqual(['Set', 1, ['Spread', 's']]);
     expect(validEpsil('{...a, ...b}')).toStrictEqual([
       'Set',
       ['Spread', 'a'],

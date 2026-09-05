@@ -33,6 +33,7 @@ export function parseCliArguments(
         'version': { type: 'boolean', short: 'v' },
         'json': { type: 'boolean' },
         'epsil': { type: 'boolean' },
+        'fancy-symbols': { type: 'boolean' },
         'diagnostics': { type: 'string' },
         'no-color': { type: 'boolean' },
         'time-limit': { type: 'string' },
@@ -57,6 +58,12 @@ export function parseCliArguments(
 
   const outputMode: OutputMode =
     values.json === true ? 'json' : values.epsil === true ? 'epsil' : 'value';
+  // The Unicode notations are a property of the Epsil source output: the
+  // value mode prints the engine's own textual form and the JSON mode is
+  // MathJSON, so the flag has no effect there and is refused rather than
+  // silently ignored.
+  if (values['fancy-symbols'] === true && values.epsil !== true)
+    throw new CliUsageError('The --fancy-symbols option requires --epsil.');
 
   return {
     eval: evalSource,
@@ -64,6 +71,7 @@ export function parseCliArguments(
     help: values.help === true,
     version: values.version === true,
     outputMode,
+    fancySymbols: values['fancy-symbols'] === true,
     diagnosticsFormat: parseDiagnosticsFormat(values.diagnostics),
     color: values['no-color'] !== true && env.NO_COLOR === undefined,
     timeLimit: parseTimeLimit(timeLimit),
