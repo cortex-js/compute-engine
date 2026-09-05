@@ -480,8 +480,9 @@ describe('EPSIL PARSING SYMBOLS', () => {
   });
 });
 
-// Unsupported: these Unicode operator aliases currently parse as unexpected
-// symbols rather than their ASCII/operator equivalents.
+// Unicode aliases: operator glyphs translate to their ASCII operator, glyph
+// constants to their library symbol, radical signs to `Sqrt`/`Root`,
+// superscripts to `Power`, and subscripts to a `_` symbol or `Subscript`.
 describe('EPSIL PARSING FANCY SYMBOLS', () => {
   test('Fancy symbols', () => {
     // ∧ → &&, ¬ → !, ⋁ → ||
@@ -504,6 +505,248 @@ describe('EPSIL PARSING FANCY SYMBOLS', () => {
       'Element',
       3.1,
       'RealNumbers',
+    ]);
+  });
+
+  test('Big operators name their library function', () => {
+    // `∫` → Integrate, `∑` → Sum, `∏` → Product: the call form reads as the
+    // library call, so `∫(1/x, x)` is `Integrate(1/x, x)`.
+    expect(validEpsil('∫(1/x)')).toStrictEqual([
+      'Integrate',
+      ['Divide', 1, 'x'],
+    ]);
+    expect(validEpsil('∫(1/x, x)')).toStrictEqual([
+      'Integrate',
+      ['Divide', 1, 'x'],
+      'x',
+    ]);
+    expect(validEpsil('∑(k, k, 1, 10)')).toStrictEqual([
+      'Sum',
+      'k',
+      'k',
+      1,
+      10,
+    ]);
+    expect(validEpsil('∏(k, k, 1, 5)')).toStrictEqual([
+      'Product',
+      'k',
+      'k',
+      1,
+      5,
+    ]);
+  });
+
+  test('Double-struck letters are type names in a type annotation', () => {
+    // `ℝ` is `real`, `ℤ` `integer`, `ℚ` `rational`, `ℂ` `complex` and `ℕ`
+    // `integer<0..>`. The annotation keeps the glyph as written; the type
+    // parser (`common/type`) reads it wherever the type string is parsed.
+    expect(validEpsil('c : ℝ')).toStrictEqual(['Declare', 'c', { str: 'ℝ' }]);
+    expect(validEpsil('let c : ℝ = 3')).toStrictEqual([
+      'Declare',
+      'c',
+      { str: 'ℝ' },
+      ['Dictionary', ['KeyValuePair', 'value', 3]],
+    ]);
+    expect(validEpsil('function f(x: ℤ) -> ℕ { x }')).toStrictEqual([
+      'DefineFunction',
+      'f',
+      [
+        'Function',
+        ['Typed', ['Block', 'x'], { str: 'ℕ' }],
+        ['Typed', 'x', { str: 'ℤ' }],
+      ],
+    ]);
+    expect(validEpsil('let z: ℂ = 1')).toStrictEqual([
+      'Declare',
+      'z',
+      { str: 'ℂ' },
+      ['Dictionary', ['KeyValuePair', 'value', 1]],
+    ]);
+    expect(validEpsil('let q: ℚ = 1')).toStrictEqual([
+      'Declare',
+      'q',
+      { str: 'ℚ' },
+      ['Dictionary', ['KeyValuePair', 'value', 1]],
+    ]);
+    // In EXPRESSION position the glyph is still the set constant.
+    expect(validEpsil('ℝ')).toStrictEqual('RealNumbers');
+    // A glyph names a type only at an identifier boundary: `ℝfoo` is not
+    // `real` with a stray `foo` (the annotation used to read `real` and
+    // drop `foo` silently).
+    expect(invalidEpsil('let x: ℝfoo = 3')).toStrictEqual([
+      'Error',
+      ['String', ['type-annotation-error', 'Expected a type']],
+    ]);
+    expect(invalidEpsil('let x: ℝ2 = 3')).toStrictEqual([
+      'Error',
+      ['String', ['type-annotation-error', 'Expected a type']],
+    ]);
+  });
+
+  test('Radical signs are prefix operators', () => {
+    expect(validEpsil('√3')).toStrictEqual(['Sqrt', 3]);
+    expect(validEpsil('√x')).toStrictEqual(['Sqrt', 'x']);
+    expect(validEpsil('√(x+1)')).toStrictEqual(['Sqrt', ['Add', 'x', 1]]);
+    expect(validEpsil('∛8')).toStrictEqual(['Root', 8, 3]);
+    expect(validEpsil('∜16')).toStrictEqual(['Root', 16, 4]);
+    // A radical sign has no infix reading, so whitespace before its operand
+    // is allowed (unlike `- x`).
+    expect(validEpsil('√ 2')).toStrictEqual(['Sqrt', 2]);
+    // Nested signs and a signed operand.
+    expect(validEpsil('√√2')).toStrictEqual(['Sqrt', ['Sqrt', 2]]);
+    expect(validEpsil('√∛2')).toStrictEqual(['Sqrt', ['Root', 2, 3]]);
+    expect(validEpsil('-√2')).toStrictEqual(['Negate', ['Sqrt', 2]]);
+    expect(validEpsil('√-2')).toStrictEqual(['Sqrt', -2]);
+    // A radical sign is its own token, so a Unicode operand or a Unicode
+    // sign after it is read (`√∞` and `√−2` used to lex as one error token).
+    expect(validEpsil('√∞')).toStrictEqual(['Sqrt', 'PositiveInfinity']);
+    expect(validEpsil('√−2')).toStrictEqual(['Sqrt', -2]);
+    expect(validEpsil('√¬a')).toStrictEqual(['Sqrt', ['Not', 'a']]);
+    // The operand is what a function call would take: postfix clauses and
+    // scripts belong to it, an infix operator does not. `√x^2` is `(√x)^2`
+    // (as in Lean), `√x²` is `√(x²)`, `√f(x)` is `√(f(x))`.
+    expect(validEpsil('√x^2')).toStrictEqual(['Power', ['Sqrt', 'x'], 2]);
+    expect(validEpsil('√x²')).toStrictEqual(['Sqrt', ['Power', 'x', 2]]);
+    expect(validEpsil('√f(x)')).toStrictEqual(['Sqrt', ['f', 'x']]);
+    expect(validEpsil('√x + 1')).toStrictEqual(['Add', ['Sqrt', 'x'], 1]);
+    // A missing operand is a diagnostic, not a crash.
+    expect(invalidEpsil('√')).toStrictEqual([
+      'Error',
+      ['String', ['expression-expected']],
+    ]);
+  });
+
+  test('A number coefficient multiplies a radical', () => {
+    // Invisible multiplication: a number literal before a radical sign
+    // (`2√3`), and a radical over a number literal before a primary (`√2x`
+    // is `√2 · x`, the LaTeX `\\sqrt2x` reading), or a superscript power of a
+    // literal (`2²x`).
+    expect(validEpsil('2√3')).toStrictEqual(['Multiply', 2, ['Sqrt', 3]]);
+    expect(validEpsil('√2x')).toStrictEqual(['Multiply', ['Sqrt', 2], 'x']);
+    expect(validEpsil('√2(x+1)')).toStrictEqual([
+      'Multiply',
+      ['Sqrt', 2],
+      ['Add', 'x', 1],
+    ]);
+    expect(validEpsil('2²x')).toStrictEqual(['Multiply', ['Power', 2, 2], 'x']);
+    expect(validEpsil('3√2 + 1')).toStrictEqual([
+      'Add',
+      ['Multiply', 3, ['Sqrt', 2]],
+      1,
+    ]);
+    // The chain continues through a glyph coefficient (`2√3x`), and a signed
+    // coefficient is still one (`-√2x`, as `-2x`).
+    expect(validEpsil('2√3x')).toStrictEqual([
+      'Multiply',
+      ['Multiply', 2, ['Sqrt', 3]],
+      'x',
+    ]);
+    expect(validEpsil('-√2x')).toStrictEqual([
+      'Multiply',
+      ['Negate', ['Sqrt', 2]],
+      'x',
+    ]);
+    expect(validEpsil('-2²x')).toStrictEqual([
+      'Multiply',
+      ['Negate', ['Power', 2, 2]],
+      'x',
+    ]);
+    // Whitespace still ends the expression, as it does for `2 x`.
+    expect(invalidEpsil('√2 x')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', 'x']],
+    ]);
+  });
+
+  test('Superscripts are exponents', () => {
+    expect(validEpsil('x²')).toStrictEqual(['Power', 'x', 2]);
+    expect(validEpsil('x¹⁰')).toStrictEqual(['Power', 'x', 10]);
+    expect(validEpsil('x⁻¹')).toStrictEqual(['Power', 'x', -1]);
+    expect(validEpsil('xⁿ⁺¹')).toStrictEqual(['Power', 'x', ['Add', 'n', 1]]);
+    expect(validEpsil('x⁽ⁿ⁺¹⁾')).toStrictEqual(['Power', 'x', ['Add', 'n', 1]]);
+    expect(validEpsil('xʸ')).toStrictEqual(['Power', 'x', 'y']);
+    // Any operand: a literal, a parenthesized expression, a call.
+    expect(validEpsil('2²')).toStrictEqual(['Power', 2, 2]);
+    expect(validEpsil('(x+1)²')).toStrictEqual(['Power', ['Add', 'x', 1], 2]);
+    expect(validEpsil('f(x)²')).toStrictEqual(['Power', ['f', 'x'], 2]);
+    // A script binds like the postfix factorial: tighter than `^` and than
+    // the prefix minus, and it composes with `!` in written order.
+    expect(validEpsil('2x²')).toStrictEqual(['Multiply', 2, ['Power', 'x', 2]]);
+    expect(validEpsil('-x²')).toStrictEqual(['Negate', ['Power', 'x', 2]]);
+    expect(validEpsil('2^x²')).toStrictEqual(['Power', 2, ['Power', 'x', 2]]);
+    expect(validEpsil('x²^3')).toStrictEqual(['Power', ['Power', 'x', 2], 3]);
+    expect(validEpsil('x²!')).toStrictEqual(['Factorial', ['Power', 'x', 2]]);
+    expect(validEpsil('3!²')).toStrictEqual(['Power', ['Factorial', 3], 2]);
+    // A script must abut its operand, and a run that is not an expression
+    // is diagnosed at the run.
+    expect(invalidEpsil('x ²')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '²']],
+    ]);
+    expect(invalidEpsil('x⁺')).toStrictEqual([
+      'Error',
+      ['String', ['expression-expected']],
+    ]);
+  });
+
+  test('Subscripts name a symbol or build a Subscript', () => {
+    // A run of letters and digits joins the symbol with an underscore — the
+    // name the LaTeX `x_n`, `a_{12}` produce — so it works in every symbol
+    // position, a binding included.
+    expect(validEpsil('xₙ')).toStrictEqual('x_n');
+    expect(validEpsil('x₁')).toStrictEqual('x_1');
+    expect(validEpsil('a₁₂')).toStrictEqual('a_12');
+    expect(validEpsil('xᵢⱼ')).toStrictEqual('x_ij');
+    expect(validEpsil('a₁ + a₂')).toStrictEqual(['Add', 'a_1', 'a_2']);
+    expect(validEpsil('let xₙ = 3')).toStrictEqual([
+      'Declare',
+      'x_n',
+      ['Dictionary', ['KeyValuePair', 'value', 3]],
+    ]);
+    // A glyph constant keeps its alias as the base name.
+    expect(validEpsil('πₙ')).toStrictEqual('Pi_n');
+    // A run with a sign or a parenthesis is an expression, not a name.
+    expect(validEpsil('xₖ₊₁')).toStrictEqual([
+      'Subscript',
+      'x',
+      ['Add', 'k', 1],
+    ]);
+    expect(validEpsil('aₖ₊₁ = 2aₖ')).toStrictEqual([
+      'Equal',
+      ['Subscript', 'a', ['Add', 'k', 1]],
+      ['Multiply', 2, 'a_k'],
+    ]);
+    // After a non-symbol operand the run is always a `Subscript`.
+    expect(validEpsil('(a+b)ₖ')).toStrictEqual([
+      'Subscript',
+      ['Add', 'a', 'b'],
+      'k',
+    ]);
+    // Subscript, then superscript: `xₙ²` is `(x_n)^2`.
+    expect(validEpsil('xₙ²')).toStrictEqual(['Power', 'x_n', 2]);
+  });
+
+  test('Radical signs in match patterns', () => {
+    // A radical sign is a prefix operator in a pattern too (`√4` matches the
+    // value `Sqrt(4)`, `∛p` binds `p` to the radicand). A pattern written
+    // with an unknown glyph is diagnosed; the case used to vanish silently.
+    expect(validEpsil('match x { √4 => 1 }')).toStrictEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['Sqrt', 4], 1],
+    ]);
+    expect(validEpsil('match x { ∛p => p }')).toStrictEqual([
+      'Match',
+      'x',
+      ['MatchCase', ['Root', '_p', 3], 'p'],
+    ]);
+    expect(invalidEpsil('match x { ⊕ => 1 }')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '⊕']],
+    ]);
+    expect(invalidEpsil('if let ⊕ = x { 1 }')).toStrictEqual([
+      'Error',
+      ['String', ['unexpected-symbol', '⊕']],
     ]);
   });
 });

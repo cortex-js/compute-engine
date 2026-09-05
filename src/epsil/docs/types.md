@@ -212,6 +212,30 @@ u: integer | boolean
 A `:` that does not follow a declaration target is not an annotation at all, so
 this rule never reaches into the rest of your program.
 
+### Glyph type names {#glyph-type-names}
+
+The double-struck letters spell the primitive number types, as they do in
+Lean:
+
+| Glyph | Type            |
+| :---- | :-------------- |
+| `ℝ`   | `real`          |
+| `ℤ`   | `integer`       |
+| `ℚ`   | `rational`      |
+| `ℂ`   | `complex`       |
+| `ℕ`   | `integer<0..>`  |
+
+```epsil
+c: ℝ = 3
+function f(x: ℝ, n: ℕ) -> ℂ { x^n }
+xs: list<ℤ>
+```
+
+A glyph is an input spelling only: the type is the primitive it names, and
+serializes as such (`ℝ<0..1>` is `real<0..1>`). `ℕ` is already a range and
+takes no range of its own. In expression position the same glyphs are the set
+constants (`3.1 ∈ ℝ`); see [Naming](/epsil/naming/#glyph-aliases).
+
 Named functions may also declare their **effects**, between the parameter list
 and the return type:
 

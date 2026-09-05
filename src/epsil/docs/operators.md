@@ -75,11 +75,20 @@ precedence (for example `+` and `-`, or `*` and `/`).
 | 90   | Not                   | `!`    | `¬`   | prefix  |               |
 | 100  | Power                 | `^`    |       | infix   | right         |
 | 100  | Power                 | `**`   |       | infix   | right         |
+| 101  | Sqrt, Root            |        | `√` `∛` `∜` | prefix |          |
 | 110  | Factorial             | `!`    |       | postfix |               |
+| 110  | Power                 |        | `x²` `xⁿ⁺¹` | postfix |        |
+| 110  | Subscript             |        | `xₖ₊₁` | postfix |              |
 
 Postfix calls and indexing (`f(x)`, `xs[i]`) bind tighter than every entry in
 this table — they are handled directly by the parser rather than through the
 operator table, since they are not spelled with an operator symbol.
+
+The three Unicode-only rows — the radical signs, and the superscript and
+subscript runs — have no ASCII spelling and are input forms only: the
+serializer writes `Sqrt(x)`, `x^2` and `Subscript(x, k + 1)`. See
+[Radical signs](#radical-signs) and
+[Superscripts and subscripts](#scripts).
 
 The conditional expression `a if c else b` is not an operator row either, but
 it has a place in this order: between `KeyValuePair` (30) and `Or` (40), so it
@@ -511,6 +520,74 @@ Because `Power` binds tighter than `Multiply`/`Divide`:
 x^1/2     // (x^1)/2, not x^(1/2)
 ```
 
+## Radical signs: `√`, `∛`, `∜` {#radical-signs}
+
+A radical sign is a prefix operator: `√x` is `Sqrt(x)`, `∛x` is `Root(x, 3)`,
+`∜x` is `Root(x, 4)`. Its operand is what a function call would take — a
+primary with its postfix clauses and scripts, or another prefix operator — but
+not an infix operator:
+
+```epsil
+√3          // Sqrt(3)
+√(x + 1)    // Sqrt(x + 1)
+√x²         // Sqrt(x^2) — the script belongs to the operand
+√f(x)       // Sqrt(f(x))
+√√2         // Sqrt(Sqrt(2))
+-√2         // Negate(Sqrt(2))
+√x^2        // Sqrt(x)^2 — `^` does not
+√x + 1      // Sqrt(x) + 1
+```
+
+This is how Lean reads `√`, and it keeps `√2x` the "√2 times x" every reader
+expects (see [Invisible multiplication](#invisible-multiplication)). Unlike `-`
+and `!`, a radical sign may be separated from its operand by whitespace
+(`√ 2`): it has no infix reading, so there is nothing for the whitespace to
+disambiguate.
+
+## Superscripts and subscripts {#scripts}
+
+A run of superscript characters written against an operand is its exponent:
+
+```epsil
+x²          // x^2
+x¹⁰         // x^10
+x⁻¹         // x^(-1)
+xⁿ⁺¹        // x^(n + 1)
+xʸ          // x^y
+(x + 1)²    // (x + 1)^2
+f(x)²       // f(x)^2
+2²          // 2^2
+```
+
+The exponent may use the superscript digits `⁰`–`⁹`, the signs `⁺` `⁻`, the
+parentheses `⁽` `⁾`, and the superscript Latin letters (`ⁱ`, `ⁿ`, `ˣ`, `ʸ`,
+…). A script binds like the postfix factorial — tighter than `^` and than the
+prefix minus — and composes with `!` in written order:
+
+```epsil
+-x²         // -(x^2)
+2x²         // 2·(x^2)
+2^x²        // 2^(x^2)
+x²^3        // (x^2)^3
+x²!         // (x^2)!
+3!²         // (3!)^2
+```
+
+A subscript run of letters and digits directly after a name is part of the
+name (`xₙ` is the symbol `x_n`; see [Naming](/epsil/naming/#subscripts)). Any
+other subscript run — one holding a sign or a parenthesis, or one written
+after a non-symbol operand — is a `Subscript`:
+
+```epsil
+xₖ₊₁        // Subscript(x, k + 1)
+(a + b)ₖ    // Subscript(a + b, k)
+xₙ²         // (x_n)^2
+```
+
+Like the factorial, a script must **abut** its operand: `x ²` ends the
+expression at `x`, and the stray `²` is a diagnostic. A run that is not an
+expression (`x⁺`) is diagnosed at the run.
+
 ## Modulo: `%` {#modulo}
 
 `%` is `Mod`, an infix operator at the multiplicative tier (the same
@@ -570,6 +647,20 @@ or an opening parenthesis is read as an implicit `Multiply`:
 2i        // 2 * i, where `i` is the imaginary unit
 2(2 + 1)  // 2 * (2 + 1)
 ```
+
+A number literal under radical signs and superscript exponents is a numeric
+coefficient too, so it leads (and continues) an invisible multiplication
+exactly as a bare literal does, and a radical sign may follow a literal:
+
+```epsil
+2√3       // 2 * Sqrt(3)
+√2x       // Sqrt(2) * x
+√2(x + 1) // Sqrt(2) * (x + 1)
+2²x       // 2^2 * x
+2√3x      // 2 * Sqrt(3) * x
+```
+
+Only the glyph spellings qualify: `Sqrt(2)x` and `2^2x` are still diagnostics.
 
 Note that a **symbol** immediately followed by `(` is a **function call**, not
 an invisible multiplication: `x(2+1)` calls `x`, and `(a+b)(2+1)` calls the

@@ -41,15 +41,42 @@ and serialization emits the canonical name:
 | `ℚ`   | `RationalNumbers` |
 | `ℕ`   | `NonNegativeIntegers` |
 | `ℂ`   | `ComplexNumbers`  |
+| `∫`   | `Integrate`       |
+| `∑`   | `Sum`             |
+| `∏`   | `Product`         |
 
 ```epsil
 3.1 ∈ ℝ
 // ➔ True
+∫(1/x, x)
+// ➔ Integrate(1/x, x)
 ```
 
 Note the doublestruck `ⅈ`/`ⅇ` (U+2148/U+2147), not the ordinary letters:
 `i` and `e` remain plain user symbols. To name a raw symbol that happens to
 be a glyph, use the verbatim form (`` `π` ``).
+
+In a **type annotation** the number-set glyphs name the type, not the set
+constant: `c: ℝ` is `c: real`, `n: ℕ` is `n: integer<0..>`. See
+[Types](/epsil/types/#glyph-type-names).
+
+## Subscripts
+
+A run of subscript letters and digits directly after a name is part of the
+name, spelled with an underscore — the same name the LaTeX `x_n` produces:
+
+| Written | Symbol  |
+| :------ | :------ |
+| `xₙ`    | `x_n`   |
+| `a₁`    | `a_1`   |
+| `a₁₂`   | `a_12`  |
+| `xᵢⱼ`   | `x_ij`  |
+
+So `xₙ` can be declared, assigned, matched and passed exactly like `x_n`,
+and `let xₙ = 3` followed by `x_n` reads the same binding. A subscript that
+holds a sign or a parenthesis is not a name: `xₖ₊₁` is the expression
+`Subscript(x, k + 1)`. Superscripts never join a name — `x²` is `x^2`; see
+[Superscripts and subscripts](/epsil/operators/#scripts).
 
 This is a **convention with no enforced semantics** — nothing in the parser
 or the engine requires a capitalized name to be an operator or a lowercase

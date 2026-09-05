@@ -78,6 +78,33 @@ const RETIRED_NUMERIC_ALIASES: Readonly<Record<string, string>> = Object.assign(
 );
 
 /**
+ * The double-struck letters accepted as spellings of the primitive number
+ * types: `c: ℝ` is `c: real`. The lexer emits each glyph as an `IDENTIFIER`
+ * whose value is the glyph (see `isDoubleStruckTypeGlyph`); the name is
+ * normalized here, before it is tested against `PRIMITIVE_TYPES_SET`, so a
+ * glyph never reaches a `Type` node and serializes back as the ASCII name.
+ * `ℕ` is not in this table: it spells the RANGED type `integer<0..>`, which
+ * `parseNumericType` builds directly.
+ *
+ * Null prototype, for the same reason as `RETIRED_NUMERIC_ALIASES`.
+ */
+const GLYPH_TYPE_ALIASES: Readonly<Record<string, string>> = Object.assign(
+  Object.create(null),
+  {
+    ℝ: 'real',
+    ℤ: 'integer',
+    ℚ: 'rational',
+    ℂ: 'complex',
+  }
+);
+
+/** The primitive name an identifier token spells, after the glyph and the
+ * retired-alias normalizations. */
+function normalizedTypeName(value: string): string {
+  return GLYPH_TYPE_ALIASES[value] ?? RETIRED_NUMERIC_ALIASES[value] ?? value;
+}
+
+/**
  * BNF grammar for the type parser:
  *
 <type> ::= <constrained_type>
@@ -2129,8 +2156,20 @@ export class Parser {
     if (this.current.type === 'IDENTIFIER') {
       const numericTypes = ['real', 'rational', 'integer'];
 
-      const spelling =
-        RETIRED_NUMERIC_ALIASES[this.current.value] ?? this.current.value;
+      // `ℕ` spells the non-negative integers, the ranged type `integer<0..>`.
+      // It takes no range of its own (`ℕ<1..>` is not a type).
+      if (this.current.value === 'ℕ') {
+        this.advance();
+        return this.createNode<NumericTypeNode>('numeric', {
+          baseType: 'integer',
+          lowerBound: this.createNode<ValueNode>('value', {
+            value: 0,
+            valueType: 'number',
+          }),
+        });
+      }
+
+      const spelling = normalizedTypeName(this.current.value);
       if (numericTypes.includes(spelling)) {
         this.advance();
         const baseType = spelling;
@@ -2244,8 +2283,7 @@ export class Parser {
 
   private parsePrimitiveType(): PrimitiveTypeNode | undefined {
     if (this.current.type === 'IDENTIFIER') {
-      const name =
-        RETIRED_NUMERIC_ALIASES[this.current.value] ?? this.current.value;
+      const name = normalizedTypeName(this.current.value);
       if (PRIMITIVE_TYPES_SET.has(name as any)) {
         // `type` is both a primitive (the type of a reified type value) and,
         // before an identifier, the forward-reference marker of the reference

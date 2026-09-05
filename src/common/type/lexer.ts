@@ -56,6 +56,18 @@ export interface LexerError {
   column: number;
 }
 
+/**
+ * The double-struck letters the type grammar admits as spellings of a
+ * primitive number type: `ℝ` (real), `ℤ` (integer), `ℚ` (rational), `ℂ`
+ * (complex) and `ℕ` (the non-negative integers, `integer<0..>`). Each is one
+ * UTF-16 unit, so the lexer can test a single character.
+ */
+export function isDoubleStruckTypeGlyph(char: string): boolean {
+  return (
+    char === 'ℝ' || char === 'ℤ' || char === 'ℚ' || char === 'ℂ' || char === 'ℕ'
+  );
+}
+
 export class Lexer {
   input: string;
   private pos: number = 0;
@@ -400,6 +412,25 @@ export class Lexer {
         'MINUS_INFINITY',
         this.input.slice(start, this.pos)
       );
+    }
+
+    // A double-struck letter that names a number set is an IDENTIFIER whose
+    // value is the glyph itself; the parser maps it to the primitive it spells
+    // (`ℝ` → `real`, see `GLYPH_TYPE_ALIASES` in `parser.ts`). The value is
+    // kept as the one-character glyph, not the primitive's name, because a
+    // token's `value.length` is the number of source characters it covers —
+    // `endOffset` and every error position are computed from it.
+    //
+    // The glyph names a type only at an identifier boundary: `ℝfoo` and `ℝ2`
+    // are not `real` followed by `foo` or `2`. Without the check, a prefix
+    // parse of `ℝfoo = 3` ends after one character, and the Epsil parser,
+    // which resumes just past the type, skips the rest of its `ℝfoo` token
+    // without a diagnostic — the annotation silently reads `real`. Left
+    // untaken, the glyph falls through to the unexpected-character path, so
+    // the type is diagnosed (or, in tolerant mode, ends) at the glyph.
+    if (isDoubleStruckTypeGlyph(char) && !/[a-zA-Z0-9_]/.test(this.peek(1))) {
+      this.advance();
+      return this.createToken('IDENTIFIER', char);
     }
 
     // Identifiers and keywords (check this before single character tokens)

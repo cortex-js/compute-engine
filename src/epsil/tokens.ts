@@ -18,6 +18,8 @@ export type TokenType =
   | 'SHEBANG' // `#!...` on the first line only
   // Operators & punctuation
   | 'OPERATOR' // Maximal munch of operator characters (e.g. `===`, `->`)
+  | 'SUPERSCRIPT' // A run of superscript characters (`¹⁰`, `ⁿ⁺¹`); see `value`
+  | 'SUBSCRIPT' // A run of subscript characters (`ₖ₊₁`); see `value`
   | 'OPEN_PAREN'
   | 'CLOSE_PAREN'
   | 'OPEN_BRACKET'
@@ -113,6 +115,13 @@ export interface Token {
   /**
    * For `VERBATIM_SYMBOL` tokens: the cooked symbol name (backticks removed,
    * escape sequences resolved).
+   *
+   * For `SUPERSCRIPT` and `SUBSCRIPT` tokens: the run translated to the ASCII
+   * characters it stands for (`ⁿ⁺¹` → `n+1`). Every script character is one
+   * UTF-16 unit that translates to one ASCII unit, so `value` has the same
+   * length as `text` and an offset into `value` is an offset into the source.
+   * The parser parses `value` as an expression — the exponent of a `Power`,
+   * or the index of a `Subscript`.
    */
   value?: string;
 

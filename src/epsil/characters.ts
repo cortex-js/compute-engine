@@ -345,50 +345,113 @@ export const DIGITS = new Map<number, number>([
   [0xff19, 9],
 ]);
 
+// The superscript and subscript code points the Epsil lexer reads as
+// scripts, each mapped to the ASCII character it stands for. A run of
+// superscript characters after an operand is an exponent (`x¹⁰` is `x^10`,
+// `xⁿ⁺¹` is `x^(n+1)`); a run of subscript characters after a symbol is a
+// subscript (`xₙ` is the symbol `x_n`, `xₖ₊₁` is `Subscript(x, k + 1)`). Both
+// tables hold only characters whose Unicode decomposition is a plain ASCII
+// character, so each entry translates one UTF-16 unit to one ASCII unit and
+// source offsets stay unchanged after translation. The superscript letters
+// come from three blocks (Latin-1, Spacing Modifier Letters, Phonetic
+// Extensions); `q` has no superscript form and is absent.
+//
+// `⁼` (U+207C) and `₌` (U+208C) are deliberately NOT here: an equal sign has
+// no meaning inside an exponent or a subscript, so they stay ordinary
+// identifier characters.
 export const SUPERSCRIPT_UNICODE = new Map<number, string>([
-  //   0x00bb: '>>',
-  [0x2070, '0'], // Superscript
-  [0x00b9, '1'], // Superscript
-  [0x00b2, '2'], // Superscript
-  [0x00b3, '3'], // Superscript
-  [0x2074, '4'], // Superscript
-  [0x2075, '5'], // Superscript
-  [0x2076, '6'], // Superscript
-  [0x2077, '7'], // Superscript
-  [0x2078, '8'], // Superscript
-  [0x2079, '9'], // Superscript
-  [0x207a, '+'], // Superscript
-  [0x207b, '-'], // Superscript
-  [0x207d, '('], // Superscript
-  [0x207e, ')'], // Superscript
-  [0x2071, 'i'], // Superscript
-  [0x207f, 'n'], // Superscript
+  [0x2070, '0'], // ⁰
+  [0x00b9, '1'], // ¹
+  [0x00b2, '2'], // ²
+  [0x00b3, '3'], // ³
+  [0x2074, '4'], // ⁴
+  [0x2075, '5'], // ⁵
+  [0x2076, '6'], // ⁶
+  [0x2077, '7'], // ⁷
+  [0x2078, '8'], // ⁸
+  [0x2079, '9'], // ⁹
+  [0x207a, '+'], // ⁺
+  [0x207b, '-'], // ⁻
+  [0x207d, '('], // ⁽
+  [0x207e, ')'], // ⁾
+  [0x1d43, 'a'], // ᵃ
+  [0x1d47, 'b'], // ᵇ
+  [0x1d9c, 'c'], // ᶜ
+  [0x1d48, 'd'], // ᵈ
+  [0x1d49, 'e'], // ᵉ
+  [0x1da0, 'f'], // ᶠ
+  [0x1d4d, 'g'], // ᵍ
+  [0x02b0, 'h'], // ʰ
+  [0x2071, 'i'], // ⁱ
+  [0x02b2, 'j'], // ʲ
+  [0x1d4f, 'k'], // ᵏ
+  [0x02e1, 'l'], // ˡ
+  [0x1d50, 'm'], // ᵐ
+  [0x207f, 'n'], // ⁿ
+  [0x1d52, 'o'], // ᵒ
+  [0x1d56, 'p'], // ᵖ
+  [0x02b3, 'r'], // ʳ
+  [0x02e2, 's'], // ˢ
+  [0x1d57, 't'], // ᵗ
+  [0x1d58, 'u'], // ᵘ
+  [0x1d5b, 'v'], // ᵛ
+  [0x02b7, 'w'], // ʷ
+  [0x02e3, 'x'], // ˣ
+  [0x02b8, 'y'], // ʸ
+  [0x1dbb, 'z'], // ᶻ
 ]);
+
 export const SUBSCRIPT_UNICODE = new Map<number, string>([
-  [0x1d62, 'i'], // Subscript
-  [0x2080, '0'], // Subscript
-  [0x0081, '1'], // Subscript
-  [0x0082, '2'], // Subscript
-  [0x0083, '3'], // Subscript
-  [0x2084, '4'], // Subscript
-  [0x2085, '5'], // Subscript
-  [0x2086, '6'], // Subscript
-  [0x2087, '7'], // Subscript
-  [0x2088, '8'], // Subscript
-  [0x2089, '9'], // Subscript
-  [0x208a, '+'], // Subscript
-  [0x208b, '-'], // Subscript
-  [0x208d, '('], // Subscript
-  [0x208e, ')'], // Subscript
-  [0x2090, 'a'], // Subscript
-  [0x2091, 'e'], // Subscript
-  [0x2092, 'o'], // Subscript
-  [0x2093, 'x'], // Subscript
-  [0x2097, 'k'], // Subscript
-  [0x2098, 'm'], // Subscript
-  [0x2099, 'n'], // Subscript
-  [0x209c, 't'], // Subscript
-  [0x2c7c, 'j'], // Subscript
+  [0x2080, '0'], // ₀
+  [0x2081, '1'], // ₁
+  [0x2082, '2'], // ₂
+  [0x2083, '3'], // ₃
+  [0x2084, '4'], // ₄
+  [0x2085, '5'], // ₅
+  [0x2086, '6'], // ₆
+  [0x2087, '7'], // ₇
+  [0x2088, '8'], // ₈
+  [0x2089, '9'], // ₉
+  [0x208a, '+'], // ₊
+  [0x208b, '-'], // ₋
+  [0x208d, '('], // ₍
+  [0x208e, ')'], // ₎
+  [0x2090, 'a'], // ₐ
+  [0x2091, 'e'], // ₑ
+  [0x2095, 'h'], // ₕ
+  [0x1d62, 'i'], // ᵢ
+  [0x2c7c, 'j'], // ⱼ
+  [0x2096, 'k'], // ₖ
+  [0x2097, 'l'], // ₗ
+  [0x2098, 'm'], // ₘ
+  [0x2099, 'n'], // ₙ
+  [0x2092, 'o'], // ₒ
+  [0x209a, 'p'], // ₚ
+  [0x1d63, 'r'], // ᵣ
+  [0x209b, 's'], // ₛ
+  [0x209c, 't'], // ₜ
+  [0x1d64, 'u'], // ᵤ
+  [0x1d65, 'v'], // ᵥ
+  [0x2093, 'x'], // ₓ
+]);
+
+/** `true` for a code point in {@link SUPERSCRIPT_UNICODE}. */
+export function isSuperscript(c: number): boolean {
+  return SUPERSCRIPT_UNICODE.has(c);
+}
+
+/** `true` for a code point in {@link SUBSCRIPT_UNICODE}. */
+export function isSubscript(c: number): boolean {
+  return SUBSCRIPT_UNICODE.has(c);
+}
+
+// The radical signs, each mapped to the degree of the root it spells. The
+// Epsil parser reads them as prefix operators: `√x` is `Sqrt(x)`, `∛x` is
+// `Root(x, 3)`, `∜x` is `Root(x, 4)`.
+export const ROOT_SIGN_UNICODE = new Map<number, number>([
+  [0x221a, 2], // √ SQUARE ROOT
+  [0x221b, 3], // ∛ CUBE ROOT
+  [0x221c, 4], // ∜ FOURTH ROOT
 ]);
 
 export const VULGAR_FRACTIONS_UNICODE = new Map<number, string>([
@@ -470,6 +533,12 @@ export const FANCY_UNICODE = new Map<number, string>([
   [0x21d4, '<=>'],
 
   [0x2205, 'EmptySet'], // ∅ EMPTY SET
+  // The big operators name the library functions they stand for, so the
+  // call forms `∫(f, x)`, `∑(f, n, 1, 10)` and `∏(f, n, 1, 10)` read as
+  // `Integrate(f, x)`, `Sum(f, n, 1, 10)` and `Product(f, n, 1, 10)`.
+  [0x222b, 'Integrate'], // ∫ INTEGRAL
+  [0x2211, 'Sum'], // ∑ N-ARY SUMMATION
+  [0x220f, 'Product'], // ∏ N-ARY PRODUCT
   [0x221e, 'Infinity'], // ∞ INFINITY
   [0x29dd, 'ComplexInfinity'], // ⧝ TIE OVER INFINITY
 

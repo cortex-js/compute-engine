@@ -19,6 +19,24 @@
 
 ### New Features
 
+- **Epsil reads the common mathematical Unicode notations, as Lean does.** The
+  double-struck letters are type names in an annotation — `c: ℝ` is `c: real`,
+  and `ℤ`, `ℚ`, `ℂ` and `ℕ` (`integer<0..>`) work the same way, in every place a
+  type string is parsed (`ce.declare('x', 'ℝ')` included). The radical signs are
+  prefix operators: `√3` is `Sqrt(3)`, `√(x+1)` is `Sqrt(x + 1)`, `∛8` is
+  `Root(8, 3)`, `∜16` is `Root(16, 4)`; the operand is what a function call
+  would take, so `√x^2` is `Sqrt(x)^2` and `√2x` is `Sqrt(2)·x`, and a literal
+  may multiply a radical (`2√3`). A superscript run is an exponent: `x²` is
+  `x^2`, `x¹⁰` is `x^10`, `x⁻¹` is `x^(-1)`, `xⁿ⁺¹` is `x^(n+1)`, `(x+1)²` is
+  `(x+1)^2`; it binds like the postfix factorial (`-x²` is `-(x^2)`, `2x²` is
+  `2·x^2`). A subscript run of letters and digits joins the name with an
+  underscore — `xₙ` is the symbol `x_n`, the same name LaTeX `x_n` produces, so
+  it can be declared and assigned — and any other subscript run is a `Subscript`
+  (`xₖ₊₁` is `Subscript(x, k + 1)`). The big operators name their library
+  function: `∫(1/x, x)` is `Integrate(1/x, x)`, `∑` is `Sum`, `∏` is `Product`.
+  Before, an annotation `c: ℝ` was a type error, `√`, `∛`, `∜` and `∫` were
+  unexpected symbols, and `x²` was a symbol named `x²` (an invalid MathJSON
+  symbol name).
 - **Typed lambda parameters have a LaTeX notation.** `(i: integer) \mapsto 2i`,
   `(x: real, y: real) \mapsto x + y`, `(x: list<integer>) \mapsto x` and
   `(f: (real) -> real) \mapsto f(1)` parse to `Function` literals with `Typed`

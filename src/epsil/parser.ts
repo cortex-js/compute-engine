@@ -26,7 +26,12 @@ import {
   stringValue,
   symbol,
 } from '../math-json/utils.js';
-import { DIGITS, FANCY_UNICODE, HEX_DIGITS } from './characters.js';
+import {
+  DIGITS,
+  FANCY_UNICODE,
+  HEX_DIGITS,
+  ROOT_SIGN_UNICODE,
+} from './characters.js';
 import {
   DiagnosticMessage,
   FatalParsingError,
@@ -52,6 +57,21 @@ const PREFIX_PRECEDENCE = prefixOperatorForSymbol('!')!.precedence;
 /** Precedence of `Multiply`, used for invisible multiplication (`2x`). Read
  * from the shared table so it stays in sync. */
 const MULTIPLY_PRECEDENCE = infixOperatorForSymbol('*')!.precedence;
+
+/** Precedence of a superscript exponent (`x²`) and of a subscript (`xₖ₊₁`).
+ * A script is written against its operand, so it binds like the postfix
+ * factorial — tighter than every infix operator, `^` included: `2^x²` is
+ * `2^(x^2)` and `-x²` is `-(x^2)`, as the written form reads. Read from the
+ * shared table so it stays in sync with the other postfix operator. */
+const SCRIPT_PRECEDENCE = postfixOperatorForSymbol('!')!.precedence;
+
+/** The minimum precedence at which a radical sign (`√`, `∛`, `∜`) parses its
+ * operand. The operand is what a function call would take: postfix clauses
+ * and scripts (`√x²` is `Sqrt(x^2)`, `√f(x)` is `Sqrt(f(x))`), another
+ * prefix operator (`√-x`, `√√2`), but not an infix operator — `√x^2` is
+ * `Sqrt(x)^2` and `√2x` is `Sqrt(2)·x`. This is how Lean reads `√`, and it
+ * keeps `√2x` the "√2 times x" every reader expects. */
+const ROOT_OPERAND_PRECEDENCE = infixOperatorForSymbol('^')!.precedence + 1;
 
 /** Bound recursive expression descent before the JavaScript stack becomes
  * the language's accidental resource limit. */
@@ -619,6 +639,16 @@ export class Parser {
    * an exact answer where a text scan would have to guess about nested types,
    * shadowing, and names such as `T` versus `Tx`. */
   private typeParamHits: Set<string> | null = null;
+
+  /**
+   * The nodes a radical sign or a superscript exponent built over a numeric
+   * coefficient — `√2`, `2²`, `√√2`, `2⁻¹`. Such a node may lead an invisible
+   * multiplication exactly as a bare number literal does (`√2x` is
+   * `Sqrt(2)·x`, `2²x` is `2^2·x`, as `2x` is `2·x`). Membership is by node
+   * identity, so only the GLYPH spellings qualify: the call `Sqrt(2)x` and
+   * the infix `2^2x` are not in the set and keep their existing readings.
+   */
+  private glyphCoefficients = new Set<MathJsonExpression>();
 
   constructor(
     source: string,
@@ -3091,12 +3121,7 @@ export class Parser {
       this.matchTypeGuards = outerTypeGuards;
     }
     if (pattern === null) {
-      if (!(this.current.diagnostics && this.current.diagnostics.length))
-        this.error(
-          ['expression-expected'],
-          this.current.start,
-          this.current.end
-        );
+      this.diagnoseMissingPattern();
       return null;
     }
     this.checkRangePatterns(pattern);
@@ -3678,12 +3703,7 @@ export class Parser {
       if (pattern !== null) this.checkRangePatterns(pattern);
     }
     if (pattern === null) {
-      if (!(this.current.diagnostics && this.current.diagnostics.length))
-        this.error(
-          ['expression-expected'],
-          this.current.start,
-          this.current.end
-        );
+      this.diagnoseMissingPattern();
       return null;
     }
     const typeGuards = this.matchTypeGuards;
@@ -3745,6 +3765,21 @@ export class Parser {
     if (parts.length === 0) return null;
     if (parts.length === 1) return parts[0];
     return this.wrap(['And', ...parts] as MathJsonExpression[], start, end);
+  }
+
+  /**
+   * Report a pattern position that produced no pattern. When the token there
+   * is an `ERROR` token (an unknown glyph such as `⊕`), its own lexical
+   * diagnostic is reported; otherwise the position gets `expression-expected`.
+   * The lexical diagnostic must be reported HERE: the token's `diagnostics`
+   * are harvested only when the token is consumed as part of a construct, and
+   * the case that fails here is discarded whole, so a case written with an
+   * unknown glyph used to vanish without any diagnostic.
+   */
+  private diagnoseMissingPattern(): void {
+    const tok = this.current;
+    if (tok.diagnostics && tok.diagnostics.length > 0) this.harvest(tok);
+    else this.error(['expression-expected'], tok.start, tok.end);
   }
 
   /** Parse a case pattern, including top-level or-alternatives
@@ -3973,6 +4008,22 @@ export class Parser {
    * (`-2`, `+n`) and `!` are folded first. */
   private parsePatternPostfix(): MathJsonExpression | null {
     const token = this.current;
+
+    // A radical sign (`√4`, `∛p`) — a prefix operator over a pattern operand,
+    // lowered exactly as in expression position (`Sqrt(4)`, `Root(_p, 3)`).
+    const rootDegree = this.rootSignDegree(token);
+    if (rootDegree !== null) {
+      const signTok = this.advance();
+      const operand = this.parsePatternPostfix();
+      if (operand === null) {
+        this.error(['expression-expected'], signTok.start, signTok.end);
+        return null;
+      }
+      const end = this.localEnd(operand) ?? this.previousEnd();
+      return rootDegree === 2
+        ? this.wrap(['Sqrt', operand], signTok.start, end)
+        : this.wrap(['Root', operand, rootDegree], signTok.start, end);
+    }
 
     // Prefix sign/negation run (`-2` folds into the literal; `!p` → Not).
     const sigils = this.prefixSigils(token);
@@ -6201,6 +6252,41 @@ export class Parser {
         continue;
       }
 
+      // A superscript run is the operand's exponent (`x¹⁰` → `["Power", x,
+      // 10]`, `xⁿ⁺¹` → `["Power", x, ["Add", n, 1]]`); a subscript run that
+      // did not join a symbol (see the lexer: `xₙ` IS the symbol `x_n`) is
+      // its subscript (`xₖ₊₁` → `["Subscript", x, ["Add", k, 1]]`). Like
+      // the factorial, a script must abut its operand; `x ²` ends the
+      // expression at `x`, and the stray script is diagnosed as a statement
+      // that begins with nothing.
+      if (
+        (this.current.type === 'SUPERSCRIPT' ||
+          this.current.type === 'SUBSCRIPT') &&
+        !this.current.precededByWhitespace &&
+        SCRIPT_PRECEDENCE >= minPrecedence
+      ) {
+        const scriptTok = this.advance();
+        const script = this.parseScript(scriptTok);
+        if (script === null) break;
+        const start = this.localStart(left) ?? scriptTok.start;
+        const base = left;
+        left = this.wrap(
+          [
+            scriptTok.type === 'SUPERSCRIPT' ? 'Power' : 'Subscript',
+            base,
+            script,
+          ] as MathJsonExpression[],
+          start,
+          scriptTok.end
+        );
+        if (
+          scriptTok.type === 'SUPERSCRIPT' &&
+          (isNumberNode(base) || this.glyphCoefficients.has(base))
+        )
+          this.glyphCoefficients.add(left);
+        continue;
+      }
+
       // Conditional expression: `a if cond else b` → `["If", cond, a, b]`.
       // A word-spelled TERNARY, so it is recognized here rather than through
       // the shared operator table (`peekInfix` never claims `if`).
@@ -6283,6 +6369,11 @@ export class Parser {
             start,
             end
           );
+          // A product whose right factor is a glyph coefficient is itself
+          // one, so the chain continues: `2√3x` is `2·√3·x`. A bare number
+          // right factor does not qualify — `2(3)x` keeps its diagnostic.
+          if (this.glyphCoefficients.has(right))
+            this.glyphCoefficients.add(left);
           continue;
         }
         break;
@@ -6637,6 +6728,8 @@ export class Parser {
   /** A prefix-operator run followed by its operand, or a primary. */
   private parseUnary(): MathJsonExpression | null {
     const token = this.current;
+    const rootDegree = this.rootSignDegree(token);
+    if (rootDegree !== null) return this.parseRoot(rootDegree);
     const sigils = this.prefixSigils(token);
     if (sigils === null) return this.parsePostfix();
 
@@ -6656,6 +6749,44 @@ export class Parser {
       return null;
     }
     return this.applyPrefix(sigils, operand, start);
+  }
+
+  /**
+   * The degree of the root a radical-sign token spells (`√` → 2, `∛` → 3,
+   * `∜` → 4), or `null` if the token is not a radical sign. A radical sign is
+   * a Pattern_Syntax character the lexer does not know, so it arrives as a
+   * single-glyph `ERROR` token — the same way `¬` and `−` do.
+   */
+  private rootSignDegree(token: Token): number | null {
+    if (token.type !== 'ERROR') return null;
+    if ([...token.text].length !== 1) return null;
+    return ROOT_SIGN_UNICODE.get(token.text.codePointAt(0)!) ?? null;
+  }
+
+  /**
+   * A radical sign applied to the operand that follows it: `√x` →
+   * `["Sqrt", x]`, `∛x` → `["Root", x, 3]`, `∜x` → `["Root", x, 4]`.
+   *
+   * Unlike `-` and `!`, the sign may be separated from its operand by
+   * whitespace (`√ 2`): a radical sign has no infix reading, so there is
+   * nothing for the whitespace to disambiguate. The operand extends as far as
+   * a function call's callee would — see `ROOT_OPERAND_PRECEDENCE`.
+   */
+  private parseRoot(degree: number): MathJsonExpression | null {
+    const signTok = this.advance(); // the radical sign
+    const operand = this.parseExpression(ROOT_OPERAND_PRECEDENCE);
+    if (operand === null) {
+      this.error(['expression-expected'], signTok.start, signTok.end);
+      return null;
+    }
+    const end = this.localEnd(operand) ?? this.previousEnd();
+    const node =
+      degree === 2
+        ? this.wrap(['Sqrt', operand], signTok.start, end)
+        : this.wrap(['Root', operand, degree], signTok.start, end);
+    if (isNumberNode(operand) || this.glyphCoefficients.has(operand))
+      this.glyphCoefficients.add(node);
+    return node;
   }
 
   /**
@@ -6686,6 +6817,10 @@ export class Parser {
     start: number
   ): MathJsonExpression {
     const end = this.localEnd(operand) ?? this.previousEnd();
+    // A signed glyph coefficient is still a coefficient: `-√2x` and `-2²x`
+    // multiply as `-2x` does. Membership is copied onto every wrapper the
+    // loop below builds around a member.
+    const coefficient = this.glyphCoefficients.has(operand);
     let result = operand;
     for (let i = sigils.length - 1; i >= 0; i--) {
       const s = sigils[i];
@@ -6704,6 +6839,7 @@ export class Parser {
         // instead of comparing).
         else result = this.wrap(result, start, end);
       }
+      if (coefficient) this.glyphCoefficients.add(result);
     }
     return result;
   }
@@ -7648,19 +7784,25 @@ export class Parser {
   }
 
   /** Whether `left` can be the left operand of an invisible multiplication: a
-   * bare number literal immediately followed (no whitespace) by a token that
-   * begins a primary. */
+   * numeric coefficient immediately followed (no whitespace) by a token that
+   * begins a primary. The coefficient is a bare number literal, or a number
+   * literal under radical signs and superscript exponents (see
+   * `glyphCoefficients`) — `√2x` is `Sqrt(2)·x` and `2²x` is `2^2·x`,
+   * exactly as `2x` is `2·x`. A symbol never leads one: `xy` is the symbol
+   * `xy`, so `x²y` stops at `y`. */
   private startsInvisibleMultiply(left: MathJsonExpression): boolean {
-    if (!isNumberNode(left)) return false;
+    if (!isNumberNode(left) && !this.glyphCoefficients.has(left)) return false;
     const t = this.current;
     if (t.precededByWhitespace) return false;
     return this.startsPrimary(t);
   }
 
   /** Whether a token can begin a primary expression (number, symbol, string,
-   * `(`, `{`, `[`, pragma). Operator/word-operator tokens are handled by
-   * `peekInfix` before this is consulted. */
+   * `(`, `{`, `[`, pragma) or a radical sign (`2√3` is `2·Sqrt(3)`).
+   * Operator/word-operator tokens are handled by `peekInfix` before this is
+   * consulted. */
   private startsPrimary(token: Token): boolean {
+    if (this.rootSignDegree(token) !== null) return true;
     switch (token.type) {
       case 'NUMBER':
       case 'SYMBOL':
@@ -7904,6 +8046,34 @@ export class Parser {
     });
     const value = sub.parseProgram();
     for (const d of sub.diagnostics) this.diagnostics.push(d);
+    return value;
+  }
+
+  /**
+   * Parse the ASCII translation of a script token (`token.value`, see
+   * `tokens.ts`) as an expression: the exponent of `xⁿ⁺¹` is the parse of
+   * `n+1`. Every script character translates to one ASCII character of the
+   * same UTF-16 length, so the sub-parser is offset by the token's start and
+   * its diagnostics and `sourceOffsets` point into the original source.
+   * Returns `null`, after a diagnostic, for a run that is not an expression
+   * (`x⁺`).
+   */
+  private parseScript(token: Token): MathJsonExpression | null {
+    const sub = new Parser(token.value ?? '', {
+      url: this.url,
+      offset: this.baseOffset + token.start,
+      parseLatex: this.parseLatex,
+      allowHostPragmas: this.allowHostPragmas,
+      deadline: this.deadline,
+      nestingDepth: this.expressionNesting,
+    });
+    const value = sub.parseProgram();
+    for (const d of sub.diagnostics) this.diagnostics.push(d);
+    if (value === null) {
+      if (sub.diagnostics.length === 0)
+        this.error(['expression-expected'], token.start, token.end);
+      return null;
+    }
     return value;
   }
 

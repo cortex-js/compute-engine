@@ -3,6 +3,11 @@ import {
   FANCY_UNICODE,
   HEX_DIGITS,
   REVERSED_ESCAPED_CHARS,
+  ROOT_SIGN_UNICODE,
+  SUBSCRIPT_UNICODE,
+  SUPERSCRIPT_UNICODE,
+  isSubscript,
+  isSuperscript,
   isWhitespace,
   isLinebreak,
   isBreak,
@@ -356,6 +361,10 @@ export class Lexer {
     if (c === QUOTE) return this.scanString();
     if (DIGITS.has(c)) return this.scanNumber();
     if (OPERATOR_CHARS.has(c)) return this.scanOperator();
+    // Script characters are tested before the symbol scanner: none of them is
+    // a break character, so the symbol scanner would otherwise take them.
+    if (isSuperscript(c)) return this.scanScript('SUPERSCRIPT');
+    if (isSubscript(c)) return this.scanScript('SUBSCRIPT');
     if (this.canStartSymbol(c)) return this.scanSymbol();
 
     return this.scanError();
@@ -369,6 +378,12 @@ export class Lexer {
   private canStartToken(c: number): boolean {
     if (c < 0) return false;
     if (DIGITS.has(c) || OPERATOR_CHARS.has(c)) return true;
+    if (isSuperscript(c) || isSubscript(c)) return true;
+    // A radical sign is not a token of its own — it stays a single-glyph
+    // `ERROR` token that the parser reads as a prefix operator — but it must
+    // END the unrecognized run before it, so `√√2` lexes as two signs and not
+    // as one two-glyph error.
+    if (ROOT_SIGN_UNICODE.has(c)) return true;
     switch (c) {
       case LPAREN:
       case RPAREN:
@@ -414,6 +429,18 @@ export class Lexer {
     const alias = fancySymbolAlias(this.source.slice(start, this.pos));
     if (alias !== undefined)
       return this.makeToken('SYMBOL', start, { text: alias });
+    // A radical sign is a single-glyph token: the parser reads it as a
+    // prefix operator (`parseRoot`), and only a one-glyph token qualifies.
+    // It must not absorb the glyph after it, which may be its operand
+    // (`√∞`) or a prefix operator on its operand (`√−2`). The token keeps
+    // the `unexpected-symbol` diagnostic every `ERROR` token carries; the
+    // diagnostic is reported only where the parser cannot use the token.
+    if (ROOT_SIGN_UNICODE.has(this.source.codePointAt(start)!))
+      return this.makeToken('ERROR', start, {
+        diagnostics: [
+          ['unexpected-symbol', this.source.slice(start, this.pos)],
+        ],
+      });
     while (!this.atEnd()) {
       const c = this.cp();
       if (isWhitespace(c) || this.canStartToken(c)) break;
@@ -434,16 +461,56 @@ export class Lexer {
     while (!this.atEnd()) {
       const c = this.cp();
       if (isBreak(c) || isIdentifierContinueProhibited(c)) break;
+      // A superscript ends the symbol: it is an exponent (`x²` is `x^2`),
+      // never part of the name. A subscript ends the name scan too; whether
+      // it joins the symbol is decided below.
+      if (isSuperscript(c) || isSubscript(c)) break;
       this.pos += codePointLength(c);
     }
     // A glyph alias (`π` → `Pi`, `ⅈ` → `ImaginaryUnit`, `ℝ` →
     // `RealNumbers`) canonicalizes to its ASCII symbol — see
     // `fancySymbolAlias`. Source offsets are untouched, so diagnostics
     // still point at the glyph the author wrote.
-    const alias = fancySymbolAlias(this.source.slice(start, this.pos));
-    if (alias !== undefined)
-      return this.makeToken('SYMBOL', start, { text: alias });
-    return this.makeToken('SYMBOL', start);
+    let text =
+      fancySymbolAlias(this.source.slice(start, this.pos)) ??
+      this.source.slice(start, this.pos);
+
+    // A subscript run of letters and digits directly after the name is part
+    // of the SYMBOL, spelled with an underscore: `xₙ` is the symbol `x_n` and
+    // `a₁₂` is `a_12`, the same names the LaTeX `x_n` and `a_{12}` produce.
+    // A run that holds a sign or a parenthesis (`xₖ₊₁`) is not a name; it is
+    // left for `scanScript`, and the parser builds `Subscript(x, k + 1)`.
+    if (isSubscript(this.cp())) {
+      const runStart = this.pos;
+      let subscript = '';
+      while (isSubscript(this.cp())) {
+        subscript += SUBSCRIPT_UNICODE.get(this.cp())!;
+        this.pos += 1;
+      }
+      if (/^[a-z0-9]+$/i.test(subscript)) text += '_' + subscript;
+      else this.pos = runStart;
+    }
+    if (text === this.source.slice(start, this.pos))
+      return this.makeToken('SYMBOL', start);
+    return this.makeToken('SYMBOL', start, { text });
+  }
+
+  /**
+   * A maximal run of superscript (or subscript) characters, as one token whose
+   * `value` is the run translated to ASCII (`ⁿ⁺¹` → `n+1`). The parser reads a
+   * superscript run after an operand as its exponent and a subscript run as
+   * its subscript; a run in any other position is diagnosed there.
+   */
+  private scanScript(type: 'SUPERSCRIPT' | 'SUBSCRIPT'): Token {
+    const table =
+      type === 'SUPERSCRIPT' ? SUPERSCRIPT_UNICODE : SUBSCRIPT_UNICODE;
+    const start = this.pos;
+    let value = '';
+    while (table.has(this.cp())) {
+      value += table.get(this.cp())!;
+      this.pos += 1;
+    }
+    return this.makeToken(type, start, { value });
   }
 
   /**
