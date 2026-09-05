@@ -97,6 +97,32 @@ function expectInterval(result, expectedLo, expectedHi, tolerance = 1e-10) {
   }
 }
 
+// Tycho item 254: an operation over a `partial` operand answers `partial`
+// (clip side `'both'`, the conservative marker), never a clean `interval`.
+describe('partial propagation through operations', () => {
+  const clipped = sqrt({ lo: -1, hi: 4 });
+  test('sqrt of a straddling interval is partial', () => {
+    expect(clipped.kind).toBe('partial');
+  });
+  test('add, sub, mul, negate over a partial operand stay partial', () => {
+    for (const r of [
+      add({ lo: 1, hi: 2 }, clipped),
+      sub(clipped, { lo: 1, hi: 2 }),
+      mul({ lo: 2, hi: 3 }, clipped),
+      negate(clipped),
+    ]) {
+      expect(r.kind).toBe('partial');
+      if (r.kind === 'partial') expect(r.domainClipped).toBe('both');
+    }
+  });
+  test('an operation over clean operands stays a clean interval', () => {
+    expect(add({ lo: 1, hi: 2 }, sqrt({ lo: 1, hi: 4 })).kind).toBe('interval');
+  });
+  test('an empty or entire answer is not re-tagged', () => {
+    expect(div(clipped, { lo: 0, hi: 0 }).kind).not.toBe('partial');
+  });
+});
+
 function expectPartial(
   result,
   expectedLo,

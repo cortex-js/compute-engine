@@ -111,6 +111,58 @@
 
 ### Resolved Issues
 
+- **`q + 1` accepted a `q: boolean | missing` that `Sin(q)` refused.** The
+  numeric operators' short validation path admitted any operand whose type
+  carried a `missing` arm without checking the carrier type, so `q + 1`,
+  `-q` and `√q` were valid where the definition route (`Sin(q)`) reported
+  `incompatible-type`. The carrier is now checked behind the absence arm on
+  both routes: `boolean | missing` and `string | missing` are refused, while
+  `unknown | missing`, `list<number> | missing`, a numeric tuple with an
+  absence arm, and a bare `missing` are admitted as before. Found because a
+  boolean element read (`And(b[1], B)`) then used numerically (`b[1] + 1`)
+  recorded the impossible type `never` on `b` instead of reporting the
+  error.
+
+- **`javascript` target: a `Sum` whose index is named `i` no longer joins
+  complex-lane terms with the real `+`.** In the default and `auto` modes,
+  `\sum_{i=1}^{3}\cos(i(|x|-\sqrt{9.81/k[i]}\,t))` with `k` a bound list
+  returned the string `"[object Object][object Object][object Object]"` (the
+  loop form, `NaN`), while the same body with the index renamed `j` was
+  correct. The emitter analyzed the body before the index was bound, so the
+  analysis resolved `i` through the engine, where `i` is the imaginary unit:
+  the constant fold evaluated `k[i]` to `NaN`, a plain real, and the radical
+  was reported real while each term was emitted complex. The body is now
+  analyzed with every index bound, as the enclosing expression already did.
+  Under `mode: "complex"` both spellings read a wrong value (`−0.27674` for
+  `−0.79169`): a quotient whose operands are all real-shaped was reported
+  complex by the wide-type rule while its emitter wrote the real division, so
+  `_SYS.csqrt` received a plain number. A head whose emitter lowers from its
+  operands' shapes (`Add`, `Subtract`, `Multiply`, `Divide`, `Negate`, `Sign`)
+  now answers from the operands alone. (Tycho item 252.)
+- **`javascript` target: `Abs` over a parameter typed with a point-or-point-list
+  union, or left untyped, dispatches on the run-time shape.** With
+  `g(P) := |P - (4, 0)|` and `P` declared `list<tuple<number, number>> |
+  tuple<number, number>` (or `unknown`), `g((5, 1))` compiled to the
+  element-wise `[1, 1]` (or `null`) where `evaluate()` answers `√2`: the
+  operand is neither provably a point nor provably a point list, so neither
+  static rewrite to `Norm` applied and the broadcast lowering mapped
+  `Math.abs` over the components. The compiled `Abs` now decides at run time
+  (`_SYS.absShape`): a number is `Math.abs`, an array of numbers a point (its
+  norm), an array of arrays a point list (one norm per point). A flat numeric
+  array is read as a point, the only reading such a union admits. The point
+  ADDED to such a parameter is lifted the same way: `P - (4, 0)` over a list
+  of points subtracts the point from every element, where it zipped the list
+  against the point's components. (Tycho item 253.)
+- **`interval-js` target: the domain-clip marker survives the operations above
+  the clipped head.** `x + \sqrt{x^2 - 0.01}` over `x ∈ [-0.3, 0.3]` answered a
+  bounded `interval` although the field is undefined on `|x| < 0.1`, so a box
+  with a domain GAP between two defined ends was indistinguishable from a
+  continuous cell; `\sqrt{x^2 - 0.01}` alone already answered `partial`. Every
+  interval operation now answers `partial` (clip side `both`) when any operand
+  is `partial` and it would otherwise answer an `interval`; `y - \ln x` over a
+  box straddling `x = 0` is `partial` with an infinite bound. `empty`, `entire`
+  and `singular` answers are unchanged. (Tycho item 254.)
+
 - **A `match` case whose pattern began with an unknown glyph vanished
   silently.** `match x { ⊕ => 1 }` parsed to a `Match` with no cases and no
   diagnostic: the case was discarded, and the glyph's `unexpected-symbol`

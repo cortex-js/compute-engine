@@ -452,6 +452,33 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
     expect(result.domainClipped).toBe('lo');
   });
 
+  // Tycho item 254: the domain-clip marker survives the operations ABOVE the
+  // clipped head. A box whose ends are in the domain of `sqrt` but whose
+  // interior is not answered a bounded `interval` for `x + sqrt(x² − 0.01)`,
+  // indistinguishable from a continuous cell.
+  test('an operation over a partial operand stays partial', () => {
+    const fn = compile(ce.parse('x+\\sqrt{x^2-0.01}'), { to: 'interval-js' });
+    const gap = fn.run!({ x: { lo: -0.3, hi: 0.3 } });
+    expect(gap.kind).toBe('partial');
+    expect(gap.value.lo).toBeCloseTo(-0.3, 12);
+    expect(gap.value.hi).toBeCloseTo(0.3 + Math.sqrt(0.08), 12);
+    expect(gap.domainClipped).toBe('both');
+    // Entirely inside the domain: a clean interval.
+    expect(fn.run!({ x: { lo: 0.11, hi: 0.3 } }).kind).toBe('interval');
+    // Entirely outside: empty.
+    expect(fn.run!({ x: { lo: -0.05, hi: 0.05 } }).kind).toBe('empty');
+  });
+
+  test('a partial with an infinite bound stays partial through negate and add', () => {
+    const fn = compile(ce.parse('y-\\ln x'), { to: 'interval-js' });
+    const r = fn.run!({ x: { lo: -0.3, hi: 0.3 }, y: { lo: 0, hi: 1 } });
+    expect(r.kind).toBe('partial');
+    expect(r.value.hi).toBe(Infinity);
+    expect(fn.run!({ x: { lo: 0.11, hi: 0.3 }, y: { lo: 0, hi: 1 } }).kind).toBe(
+      'interval'
+    );
+  });
+
   test('tan near PI/2 is singular', () => {
     const expr = ce.parse('\\tan(x)');
     const fn = compile(expr, { to: 'interval-js' });

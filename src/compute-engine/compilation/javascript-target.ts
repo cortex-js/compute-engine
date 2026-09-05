@@ -6878,6 +6878,40 @@ const SYS_HELPERS = {
           a[0] * b[1] - a[1] * b[0],
         ]
       : NaN,
+  // `Abs` over a value whose static type admits BOTH a point and a point
+  // list (the `list<tuple<…>> | tuple<…>` union a point-consuming document
+  // function declares): the shape is only known at run time, so dispatch on
+  // it here the way `evaluate()` dispatches on the operand's kind — a number
+  // is `Math.abs`, a complex object its modulus, an array of numbers a POINT
+  // (its norm), and an array of arrays a point list (one norm per point). An
+  // EMPTY array is an empty point LIST — the interpreter answers the empty
+  // list for it, not the norm of no components (which is 0).
+  //
+  // A compiled array carries no tuple-versus-list tag, so a flat numeric
+  // array is read as a point. That is the only reading the operands which
+  // reach this helper admit: the compiler sends an operand here only when
+  // its type has no flat-numeric-list arm, or when it is a point SUM, for
+  // which the interpreter refuses a flat list of numbers. A NESTED array is
+  // read as a point list, never as a matrix, for the same reason: the
+  // operand types that reach this helper have no legitimate matrix value —
+  // a point-list union refuses a matrix at the call gate, and where the
+  // declaration does accept one the point subtraction errors at every
+  // element (Tycho item 253).
+  absShape: (x: unknown): unknown => {
+    if (typeof x === 'number') return Math.abs(x);
+    if (Array.isArray(x)) {
+      if (x.length === 0) return [];
+      if (x.every((v) => typeof v === 'number')) return SYS_HELPERS.norm(x);
+      return x.map((v) => SYS_HELPERS.absShape(v));
+    }
+    if (
+      typeof x === 'object' &&
+      x !== null &&
+      typeof (x as { re?: unknown }).re === 'number'
+    )
+      return SYS_HELPERS.cabs(x as ComplexResult);
+    return NaN;
+  },
   // Norm: |x| for a scalar; the 2-norm (Frobenius for a matrix) by default.
   // With an explicit p: for a vector the p-norm (Σ|xᵢ|^p)^(1/p), p =
   // Infinity → max |xᵢ|; for a matrix the operator norms the interpreter
@@ -9875,11 +9909,14 @@ function emitCollectionReduce(
  * `{re, im}` object reaching `+` — same class as complex values in compiled
  * scalar comparisons, tracked in ROADMAP).
  */
-function isElementwiseBigOpBody(body: Expression): boolean {
+function isElementwiseBigOpBody(
+  body: Expression,
+  indices: ReadonlyArray<string>
+): boolean {
   if (isFunction(body, 'Tuple')) return false;
   const tt = jsType(body);
   if (typeof tt !== 'string' && tt.kind === 'tuple') return false;
-  if (BaseCompiler.isComplexValued(body)) return false;
+  if (BaseCompiler.isComplexValuedUnderIndices(body, indices)) return false;
   // A STRING body is NOT element-wise. It matches `indexed_collection` in the
   // lattice (its elements are its grapheme clusters) but lowers to a JS
   // string, so the `_SYS.bcast` fold would concatenate rather than accumulate
@@ -9908,7 +9945,18 @@ function emitSumProduct(
   // identity (0 / 1), matching the interpreter; a BARE collection body never
   // reaches here (it canonicalizes to the `Reduce` collection-reduce form).
   // Everything else keeps the fail-closed assert (Tycho item 45).
-  const elementwiseBody = isElementwiseBigOpBody(body);
+  // The body is analyzed with every clause's index bound (Tycho item 252):
+  // this emitter runs before the index is bound in the compile target, and
+  // an unmasked analysis resolves an index named `i` through the ENGINE,
+  // where `i` is the imaginary unit. The constant fold then evaluated
+  // `k[i]` to `NaN`, a plain real, and the fold-before-shape override
+  // reported the radical `√(9.81 / k[i])` real — so the terms were emitted
+  // complex (each term is compiled with the index bound) and joined with
+  // the real `+`, which string-concatenates `{re, im}` objects. The same
+  // mask is what `isComplexValued` applies to the whole `Sum`, so the
+  // emitter and the enclosing expression agree on the accumulator's shape.
+  const indices = clauses.map((c) => extractLimits(c).index);
+  const elementwiseBody = isElementwiseBigOpBody(body, indices);
   if (!elementwiseBody) BaseCompiler.assertScalarBigOpBody(kind, body);
 
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
@@ -9928,7 +9976,7 @@ function emitSumProduct(
   const identity = isSum ? '0' : '1';
   // Complexity is a property of the innermost body — a nested inner sum of a
   // complex body is itself complex, so this stays consistent at every level.
-  const bodyIsComplex = BaseCompiler.isComplexValued(body);
+  const bodyIsComplex = BaseCompiler.isComplexValuedUnderIndices(body, indices);
 
   // Compile the term this clause accumulates, under a target that binds this
   // clause's index. For the last clause that's the body; otherwise it's the

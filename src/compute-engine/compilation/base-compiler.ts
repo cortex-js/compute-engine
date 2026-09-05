@@ -1052,6 +1052,85 @@ export function unionAdmitsIndexedCollection(t: Type): boolean {
   return collection && other;
 }
 
+/**
+ * Is `a` an operand that MAY be a point, or a list of points, with the
+ * decision left to run time? True for a union type with a tuple-shaped arm
+ * (a point) beside an arm of another shape: a collection arm
+ * (`list<tuple<…>> | tuple<…>`, the shape the point-consuming document
+ * functions declare for their parameter) or a scalar arm
+ * (`number | tuple<integer, integer>`, which is what `P − (4, 0)` is typed
+ * when `P` is declared `unknown`). A provably scalar, provably point or
+ * provably collection operand keeps its static lowering. A TOP type
+ * (`unknown`, `any`, `value`) is FALSE: it says nothing at all about the
+ * shape, so a run-time array could as well be a plain list of numbers, or a
+ * matrix, that the interpreter reads element-wise. Read by the `Abs`
+ * run-time shape dispatch (`_SYS.absShape`) and by the run-time point-list
+ * lift of `Add` in `tryCompileBroadcast` (Tycho item 253).
+ *
+ * A NOMINAL value is atomic whatever its representation, as the whole type
+ * and as a BRANCH — the interpreter binds it whole and never maps over it.
+ * The guard mirrors `unionAdmitsIndexedCollection` above.
+ */
+function isRuntimePointShaped(a: Expression): boolean {
+  const raw = a.type.type;
+  if (BaseCompiler.isNominalAtomicType(raw)) return false;
+  const r = resolveTypeForCompilation(raw);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  let tuple = false;
+  let other = false;
+  for (const branch of r.types) {
+    if (BaseCompiler.isNominalAtomicType(branch)) return false;
+    const b = resolveTypeForCompilation(branch);
+    if (b === 'never') continue;
+    if (isTupleShapedType(b)) tuple = true;
+    else other = true;
+  }
+  return tuple && other;
+}
+
+/**
+ * Does a point-or-other union (`isRuntimePointShaped` above) also admit a
+ * FLAT NUMERIC LIST — a run-time array of plain numbers that is NOT a point?
+ * True when one of its non-tuple arms is a collection whose element type is
+ * not itself tuple-shaped: `list<number> | tuple<…>` admits `[3, −4]` as a
+ * list the interpreter reads element-wise, and
+ * `indexed_collection<number | tuple<…>> | …` admits it too, because its
+ * element type has a scalar member. An unknown element type (no element type
+ * at all, or a top one) counts as admitting it, since nothing rules it out.
+ *
+ * A compiled array carries no tuple-versus-list tag, so for such an operand
+ * a flat array of numbers is ambiguous at run time, and reading it as a
+ * point would answer the norm where the interpreter answers the element-wise
+ * result. The `Abs` run-time shape dispatch therefore refuses these operands
+ * unless the operand is a point SUM, which the interpreter refuses for a
+ * flat list (Tycho item 253).
+ */
+function unionAdmitsFlatNumericList(a: Expression): boolean {
+  const r = resolveTypeForCompilation(a.type.type);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  for (const branch of r.types) {
+    const b = resolveTypeForCompilation(branch);
+    if (b === 'never' || isTupleShapedType(b)) continue;
+    if (!isSubtype(b, COLLECTION_SHAPE_TYPE)) continue;
+    const elt = collectionElementType(b);
+    if (elt === undefined) return true;
+    if (!isTupleShapedType(elt)) return true;
+  }
+  return false;
+}
+
+/**
+ * Is `a` a sum with a provable POINT among its operands? Such a sum can
+ * never hold a flat list of numbers at run time: adding a point to a number
+ * is the interpreter's `incompatible-type` error, and over a list of numbers
+ * that error is answered at every element. The `Abs` run-time shape dispatch
+ * uses this to admit an operand whose type would otherwise also admit a flat
+ * numeric list (Tycho item 253).
+ */
+function isPointSumOperand(a: Expression): boolean {
+  return isFunction(a, 'Add') && a.ops.some((o) => isNumericTuple(o));
+}
+
 function isBoundPossiblyCollectionTyped(a: Expression): boolean {
   // A declared scalar-or-collection union is reliable on any node, bound or
   // not — see `unionAdmitsIndexedCollection`. The RAW type is passed: the
@@ -5201,6 +5280,40 @@ export class BaseCompiler {
       return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
     }
 
+    // `|P|` over an operand whose static type admits both a point and a
+    // point list — the `list<tuple<…>> | tuple<…>` union a point-consuming
+    // document function declares for its parameter: neither rewrite above
+    // applies (the operand is not provably a point nor provably a point
+    // list), and the broadcast lowering below would map `Math.abs` over the
+    // components of whatever array arrives, so `|P − (4, 0)|` at a point
+    // answered `[|dx|, |dy|]` where `evaluate()` answers the norm (Tycho
+    // item 253). The shape is decided at run time instead
+    // (`_SYS.absShape`), the way the interpreter dispatches on the operand's
+    // kind. JavaScript only: the shader targets have no run-time shape.
+    //
+    // A compiled array carries no tuple-versus-list tag, so this dispatch is
+    // only sound when a flat array of numbers can ONLY be a point. That
+    // holds when the type admits no flat numeric list at all
+    // (`unionAdmitsFlatNumericList`), and it holds again when the operand is
+    // a point SUM: a provable point is added to it, and the interpreter
+    // answers an `incompatible-type` error at every element for
+    // `number − point`, so a flat list of numbers is not a value this
+    // operand can legitimately take. A top-typed operand is excluded by
+    // `isRuntimePointShaped`, so a NESTED array reaching `_SYS.absShape` can
+    // only be a point list: a MATRIX has no legitimate value here either —
+    // the point-list union refuses one at the call gate
+    // (`incompatible-type`, measured), and where the declaration does accept
+    // it the point subtraction errors at every element.
+    if (
+      h === 'Abs' &&
+      args.length === 1 &&
+      target.language === 'javascript' &&
+      isRuntimePointShaped(args[0]) &&
+      (!unionAdmitsFlatNumericList(args[0]) || isPointSumOperand(args[0]))
+    ) {
+      return `_SYS.absShape(${BaseCompiler.compile(args[0], target)})`;
+    }
+
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
     // math) over one or more list-valued operands, for the JavaScript target.
     // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
@@ -7585,7 +7698,9 @@ export class BaseCompiler {
     // Set with `atomicTuple` when the OTHER operand is a list of POINTS (the
     // `Add` point-list shape below): the outer level must then map exactly
     // one level deep, where `_SYS.bcast` would descend into each point.
-    let atomicTupleOverPoints = false;
+    let atomicTupleOverPoints: false | 'static' | 'runtime' = false;
+    // The operand whose shape the `'runtime'` lift tests when emitting.
+    let runtimePointOperand: Expression | undefined;
     if (h === 'Multiply') {
       const isArrayish = (a: Expression): boolean =>
         // A string matches `indexed_collection` but is not array-shaped — see
@@ -7787,7 +7902,44 @@ export class BaseCompiler {
     if (h === 'Divide' && args.length === 2 && isPointListShaped(args[1]))
       return null;
 
-    if (h === 'Add' || h === 'Divide') {
+    // A point ADDED to an operand whose shape is only known at run time — a
+    // parameter declared with the point-or-point-list union — is the `Add`
+    // point-list shape below when the operand turns out to be a list of
+    // points (the point is added to EVERY element) and a plain point sum
+    // when it is a point. Neither is provable here, and
+    // the flat `_SYS.bcast` zipped a list of points against the point's
+    // components (`[(5,1),(4,2)] − (4,0)` gave `[(1,−3),(4,2)]`). The outer
+    // level is therefore decided at run time (see the emission at the end
+    // of this method): an array of arrays maps, anything else zips. Every
+    // OTHER operand must be tuple-valued — one or more of them, since
+    // canonicalization flattens a chain of point subtractions into ONE
+    // n-ary `Add` (`P − (4, 0) − 2(H(i+.2), H(i+.4))` is a three-operand
+    // sum) — so that the closure applied per element is the point sum in
+    // both cases (Tycho item 253).
+    if (h === 'Add' && atomicTuple === undefined) {
+      const provable = args.filter((a) => isNumericTuple(a));
+      const runtime = args.filter(
+        (a) => !isNumericTuple(a) && isRuntimePointShaped(a)
+      );
+      if (
+        provable.length >= 1 &&
+        runtime.length === 1 &&
+        args.every((a) => a === runtime[0] || couldBeNumericTuple(a))
+      ) {
+        atomicTuple = provable[0];
+        atomicTupleOverPoints = 'runtime';
+        runtimePointOperand = runtime[0];
+      }
+    }
+
+    // The run-time lift above has already chosen the emission for this node.
+    // The static point-list plan below can `return null` (it declines every
+    // shape it does not prove), which would throw that plan away and fail
+    // the form closed, so it must not run once the run-time plan is set.
+    if (
+      atomicTupleOverPoints !== 'runtime' &&
+      (h === 'Add' || h === 'Divide')
+    ) {
       const tuples = args.filter((a) => couldBeNumericTuple(a));
       const lists = args.filter(
         (a) => !couldBeNumericTuple(a) && isArrayOperand(a)
@@ -7828,7 +7980,7 @@ export class BaseCompiler {
         )
           return null;
         atomicTuple = tuples[0];
-        atomicTupleOverPoints = true;
+        atomicTupleOverPoints = 'static';
       }
     }
 
@@ -7963,6 +8115,24 @@ export class BaseCompiler {
     // point's array against the list, the very shape this emission avoids.
     if (atomicTuple !== undefined) {
       const bound = args.map(() => BaseCompiler.tempVar(target));
+      if (atomicTupleOverPoints === 'runtime') {
+        const m = args.indexOf(runtimePointOperand!);
+        const src = bound[m];
+        const p = BaseCompiler.tempVar(target);
+        const inner = bound.map((b, i) => (i === m ? p : b));
+        // An EMPTY array takes the point-list branch and maps to the empty
+        // list, the answer the provable point-list lane below also gives:
+        // a point of the declared arity is never an empty array at run
+        // time, so an empty array can only be an empty list of points.
+        return (
+          `((${bound.join(', ')}) => ` +
+          `(Array.isArray(${src}) && ` +
+          `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
+          `${src}.map((${p}) => _SYS.bcast(${closure}, ${inner.join(', ')})) : ` +
+          `_SYS.bcast(${closure}, ${bound.join(', ')})))` +
+          `(${compiledArgs.join(', ')})`
+        );
+      }
       const outerParams: string[] = [];
       const outerSources: string[] = [];
       const innerArgs = args.map((a, i) => {
@@ -7981,7 +8151,7 @@ export class BaseCompiler {
       // for the element `(0, 0)`). Exactly one list source reaches here
       // (the decision above declines more). A non-array source is the
       // interpreter's inert result, projected to NaN as `_SYS.bcast` does.
-      if (atomicTupleOverPoints) {
+      if (atomicTupleOverPoints === 'static') {
         return (
           `((${bound.join(', ')}) => ` +
           `(Array.isArray(${outerSources[0]}) ? ` +
@@ -11362,6 +11532,26 @@ export class BaseCompiler {
    * from the declared type on re-entry. */
   private static readonly _complexValueInProgress = new Set<string>();
 
+  /**
+   * `isComplexValued` of a binder BODY with the binder's integer indices
+   * bound — the analysis a `Sum`/`Product` emitter must run before it
+   * chooses its accumulator's shape. Each index is masked real (a loop
+   * counter) and shielded from the engine-value fallback and from the
+   * constant fold, exactly as `binderParts` masks it when the whole binder
+   * is analyzed; the two analyses therefore agree, and an index named `i`
+   * is never resolved to the engine's imaginary unit (Tycho item 252).
+   */
+  static isComplexValuedUnderIndices(
+    body: Expression,
+    indices: ReadonlyArray<string>
+  ): boolean {
+    if (indices.length === 0) return BaseCompiler.isComplexValued(body);
+    return BaseCompiler.withBinderMask(
+      { real: [...indices], shielded: [...indices] },
+      () => BaseCompiler.isComplexValued(body)
+    );
+  }
+
   static isComplexValued(expr: Expression): boolean {
     // An operand the D2/D6 runtime rule has projected onto the real lane
     // (`realOperandGuard`): while its override is active, the code emitted
@@ -11691,6 +11881,15 @@ export class BaseCompiler {
       return BaseCompiler.isBlockValueComplexValued(expr);
 
     if (expr.ops.some((arg) => BaseCompiler.isComplexValued(arg))) return true;
+    // A head whose emitter chooses its lowering from the OPERANDS' shapes
+    // (`COMPLEX_PROPAGATING_HEADS`) produces a real value when every operand
+    // is real-shaped, whatever the node's type says: `9.81 / k[i]` types the
+    // wide `number` (the element read carries a `nan` arm) and is emitted
+    // as the real `9.81 / _SYS.at(k, i)`. Under the complex discipline the
+    // wide-type rule below would report it complex, and `√(9.81 / k[i])`
+    // then handed that plain number to `_SYS.csqrt`, which reads `.re`/`.im`
+    // (Tycho item 252, `mode: "complex"`).
+    if (BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(expr.operator)) return false;
     // COMPLEX discipline: a wide-typed result whose operands are all real can
     // still be a complex value at run time (a user function returning its
     // parameter, an element read of a `list<number>`), and the value it

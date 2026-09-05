@@ -313,6 +313,55 @@ function earliestJump(
   return r;
 }
 
+/** Is `x` a domain-clipped (`partial`) interval result? */
+function isPartial(
+  x: unknown
+): x is { kind: 'partial'; value: Interval; domainClipped: 'lo' | 'hi' | 'both' } {
+  return (
+    typeof x === 'object' &&
+    x !== null &&
+    (x as { kind?: unknown }).kind === 'partial'
+  );
+}
+
+/**
+ * Make an operation's answer keep the domain-clip marker of its operands.
+ *
+ * `unwrapOrPropagate` hands an operation the VALUE of a `partial` operand,
+ * so the operation answers a plain `interval` computed over that value — a
+ * sound enclosure of the defined part, but one that has forgotten that the
+ * input box is only partly inside the domain. Composed over an expression
+ * tree the marker was therefore lost one level up: `√(x² − 0.01)` over
+ * `x ∈ [−0.3, 0.3]` is `partial` (the radicand is negative on
+ * `|x| < 0.1`), but `x + √(x² − 0.01)` answered a bounded `interval`, and a
+ * consumer that reads a bounded `interval` as "defined and continuous on
+ * the whole box" — an implicit-curve cell classifier — could not tell a
+ * domain GAP between two defined ends from a continuous cell (Tycho item
+ * 254). When any operand is `partial` and the operation answered an
+ * `interval` (or a bare `{ lo, hi }`), the answer is re-tagged `partial`.
+ * The clip side is reported as `'both'`, the conservative "some clipping
+ * occurred" the `When` restriction also reports: which end of the RESULT
+ * the domain edge maps to is not derivable through an arbitrary operation
+ * (a negation swaps the ends). `empty`, `entire` and `singular` answers are
+ * returned as they are — they were computed over the defined part and
+ * already say what they say — and so is an absent-element marker (a bare
+ * interval with `NaN` bounds, see `collections.ts`).
+ */
+function propagatePartial(args: unknown[], result: unknown): unknown {
+  if (!args.some(isPartial)) return result;
+  if (typeof result !== 'object' || result === null) return result;
+  const r = result as Partial<Interval> & { kind?: string; value?: Interval };
+  const bound: Interval | undefined =
+    r.kind === undefined
+      ? (r as Interval)
+      : r.kind === 'interval'
+        ? r.value
+        : undefined;
+  if (bound === undefined) return result;
+  if (Number.isNaN(bound.lo) || Number.isNaN(bound.hi)) return result;
+  return { kind: 'partial', value: bound, domainClipped: 'both' };
+}
+
 /**
  * Make an interval operation propagate a finite jump.
  *
@@ -347,7 +396,7 @@ export function liftJump<F extends (...args: never[]) => unknown>(fn: F): F {
   const raw = fn as unknown as (...a: unknown[]) => unknown;
   const lifted = (...args: unknown[]) => {
     const jumps = args.filter(isJump);
-    const result = raw(...args);
+    const result = propagatePartial(args, raw(...args));
     if (jumps.length === 0) return result;
     if (typeof result !== 'object' || result === null) return result;
     // A bare `{ lo, hi }` (the collection accessors answer one) or an
