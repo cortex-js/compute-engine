@@ -247,8 +247,9 @@ function rawStringValue(x: ExpressionInput | undefined): string | undefined {
 
 /** The `(base, member)` names of a raw callee spelled as a
  * `Field(⟨symbol⟩, ⟨string⟩)` application — the shape a QUALIFIED protocol
- * call `P.m(…)` parses to, since `Comparable.compare(x, y)` is
- * `Apply(Field(Comparable, "compare"), x, y)`. Purely syntactic, over the
+ * call `P.m(…)` takes once its `MemberCall` parse canonicalizes, since
+ * `Comparable.compare(x, y)` becomes `Apply(Field(Comparable, "compare"),
+ * x, y)`. Purely syntactic, over the
  * same input spellings as {@link isCarrier}, because it runs before any
  * operand is boxed. Whether `base` actually names a protocol is the
  * registry's question (`qualifiedMemberRequirementShape`,

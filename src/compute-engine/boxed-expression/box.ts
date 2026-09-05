@@ -1826,8 +1826,9 @@ function makeCanonicalFunctionCore(
   // ARE knowable here: a qualified protocol member (next comment) and an
   // inline function literal (below it).
   //
-  // The carve-out is the QUALIFIED protocol-member call, which parses as
-  // `Apply(Field(Protocol, "member"), …)` (and can be written directly as
+  // The carve-out is the QUALIFIED protocol-member call, which reaches this
+  // seam as `Apply(Field(Protocol, "member"), …)` — the shape its
+  // `MemberCall` parse canonicalizes to — (and can be written directly as
   // `ProtocolMember(Protocol, "member", …)` on the box route). Unlike an
   // inline literal, its parameter names are STATICALLY known — the
   // requirement of the named protocol declares them — so the call is

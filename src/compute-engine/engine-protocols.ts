@@ -4488,8 +4488,10 @@ function boxHostResult(ce: IComputeEngine, value: unknown): Expression {
 //
 // ── Qualified calls (P14) ────────────────────────────────────────────────────
 //
-// `Comparable.compare(x, y)` parses as `Apply(Field(Comparable, "compare"), x,
-// y)` with no parser change at all. `Field` recognizes a base symbol that
+// `Comparable.compare(x, y)` reaches the engine as `Apply(Field(Comparable,
+// "compare"), x, y)`: the parse is a `MemberCall` on the protocol name, and
+// its canonical handler (`library/collections.ts`) produces this shape
+// whenever the receiver names a protocol. `Field` recognizes a base symbol that
 // names a protocol and hands back a FUNCTION VALUE — a literal whose body is
 // the `ProtocolMember` application that dispatches inside that one protocol.
 // So the qualified name is also a first-class value (`[a, b] |> Map(…)`), and

@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 674 functions and constants of the standard library, by category.
+The 675 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -27,7 +27,7 @@ To search the library by concept rather than by name, use
 - [Core](#core) — 112 definitions
 - [Control structures](#control-structures) — 14 definitions
 - [Logic](#logic) — 27 definitions
-- [Collections](#collections) — 120 definitions
+- [Collections](#collections) — 121 definitions
 - [Colors](#colors) — 19 definitions
 - [Regular expressions](#regular-expressions) — 4 definitions
 - [Fractals](#fractals) — 2 definitions
@@ -110,7 +110,7 @@ To search the library by concept rather than by name, use
 | `Polygon` | `(any+) -> expression` | Polygon primitive — opaque typed head. |
 | `Prime` | `(T, integer?) -> T where T` | Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs. |
 | `Print` | `(any*) console -> nothing` | Print the operands to the host console, separated by spaces and followed by a newline. |
-| `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, which parses as `Apply(Field(Comparable, "compare"), x, y)`). |
+| `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `Apply(Field(Comparable, "compare"), x, y)`). |
 | `ProtocolProperty` | `(protocol: string, property: string, receiver: any, value: any?) -> unknown` | Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). |
 | `Quadrilateral` | `(any+) -> expression` | Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated. |
 | `Random` | `((collection<any> \| set<real>)?) random -> any` | Random(): non-deterministic real in [0, 1) |
@@ -273,6 +273,7 @@ To search the library by concept rather than by name, use
 | `ListFrom` | `(value*) -> list` | Create a list from the elements of a collection. |
 | `Map` | `(mapping: (T) any -> U, collection<T>+) -> indexed_collection where T, U` | Return the collection where each element has been transformed by the mapping function. |
 | `MaxBy` | `(collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that maximizes the given key function. |
+| `MemberCall` | `(receiver: any, member: string, arguments: any*) -> unknown` | Call the member `name` of a value with the value as its first argument: `c.area(2)` in Epsil. |
 | `MinBy` | `(collection<T>, key: (T) any -> unknown) -> value where T` | Return the element of the collection that minimizes the given key function. |
 | `Most` | `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)` | Return the collection without the last element. |
 | `NegativeIntegers` | constant `set<integer>` | The set of all negative integers. |

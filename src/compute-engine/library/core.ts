@@ -5129,7 +5129,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     ProtocolMember: {
       description:
         'Invoke a protocol member on a value — the lowering of a QUALIFIED ' +
-        'protocol call (`Comparable.compare(x, y)` in Epsil, which parses as ' +
+        'protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a ' +
+        '`MemberCall` on the protocol name, canonicalizes to ' +
         '`Apply(Field(Comparable, "compare"), x, y)`). The first two operands ' +
         'name the protocol and the member; the rest are the call arguments. ' +
         'Dispatch is dynamic and restricted to the named protocol: the most ' +

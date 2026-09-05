@@ -6669,7 +6669,7 @@ export class BaseCompiler {
     }
 
     // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
-    // and STAYS `Apply(Field(Comparable, "compare"), x, y)` (the
+    // to `Apply(Field(Comparable, "compare"), x, y)` and STAYS that (the
     // `ProtocolMember` node only appears when the `Field` EVALUATE handler's
     // wrapper literal beta-reduces). Intercept it BEFORE the target's `Apply`
     // mapping, which would otherwise compile the protocol-naming `Field`

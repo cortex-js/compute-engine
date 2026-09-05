@@ -42,6 +42,7 @@ There is no `print`. A program's value is the value of its **last statement**.
 | `def f(x: float) -> float:` | `f(x: real) -> real = x^2` |
 | `return` | *(no `return`)* — the last expression is the value |
 | `math.floor(x)`, `np.mean(xs)` | `Floor(x)`, `Mean(xs)` — no modules, no imports |
+| `obj.method(a)` | `c.area(a)` only when `area` is a [protocol](/epsil/protocols/#dot-call) function; otherwise `f(c, a)` or `c \|> f` — `xs.Sort()` is an error |
 
 Naming convention: `Capitalized` names are library operators, `lowercase`
 names are yours. Calling an unknown function is not an error — the call stays

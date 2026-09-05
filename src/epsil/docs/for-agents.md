@@ -326,6 +326,10 @@ Sort([3, 1, 4, 1, 5], (a, b) => a > b)
 - **`match` binds bare names**: `match x { Pi => … }` does not compare with π
   — it binds a new variable named `Pi`. Pin values with `==`:
   `match x { == Pi => … }`.
+- **The dot calls protocol functions only**: `c.area()` is `area(c)` when
+  `area` is a `protocol` function the type of `c` conforms to. A library
+  function is not reached that way — `xs.Sort()` is the error
+  `dot-call-not-a-protocol-function`; write `Sort(xs)` or `xs |> Sort`.
 
 For the full reference start at [Epsil](/epsil/), the complete grammar in
 [Syntax](/epsil/syntax/), and ~70 more verified programs in

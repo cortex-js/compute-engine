@@ -173,8 +173,12 @@ _field-clause_ → **`.`** _symbol_
 &nbsp;&nbsp;&nbsp;&nbsp;— the `.` must abut the base; not after a number
 literal
 
-_postfix-expression_ → _primary_ (_call-clause_ | _index-clause_ |
-_field-clause_ | **`!`**)\*
+_member-call-clause_ → _field-clause_ _call-clause_
+&nbsp;&nbsp;&nbsp;&nbsp;— the `(` must abut the member name; a protocol
+function called on the base, `c.area(2)`
+
+_postfix-expression_ → _primary_ (_member-call-clause_ | _call-clause_ |
+_index-clause_ | _field-clause_ | **`!`**)\*
 
 _expression_ → _primary_ | _prefix-expression_ | _infix-expression_ |
 _postfix-expression_
