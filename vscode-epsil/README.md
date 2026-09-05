@@ -3,32 +3,64 @@
 Language support for [Epsil](https://epsil.dev), a programming language for
 scientific computing.
 
+Epsil is a statically typed, functional language with a small core and a
+powerful standard library. It is designed for scientific computing, with
+built-in support for units, symbolic computation, LaTeX islands and code
+generation to JavaScript, Python (NumPy), and GLSL. Type inference makes most
+type annotations optional. Effects are tracked in the type system, so pure
+functions can be reasoned about and optimized, while functions with side effects
+are clearly marked.
+
+## Multi-clause function definitions, numeric ranges, and chained operations
+
 ```epsil
 // Fibonacci
-
-// Multi-clause function definition
 fib(0) = 0
 fib(1) = 1
+fib(n) = fib(n - 1) + fib(n - 2)
 
-// Type inference makes most type annotations optional
-fib(n: integer) = fib(n - 1) + fib(n - 2)
-
-// Numeric range, and pipe operators to chain operations
-5..10 |> Map(_, fib) |> Sum
+5..10 |> fib |> sum // -> 55
 ```
+
+## Data Modelling with the Type System
+
+```epsil
+type json = number | string | boolean | missing | list<json> | dictionary<json>
+
+let doc: json = {"tags" -> ["math", "computing"]}
+let bad: json = x |-> x  // rejected before it runs
+```
+
+## Protocols and Objects
+
+```epsil
+protocol Shape {
+  area: (self: Self) -> real
+}
+
+type Circle = object{radius: number} is Shape {
+  function area(self: Circle) -> number { Pi * self.radius^2 }
+}
+
+const c = Circle(radius: 1/2)
+print(c.area())  // -> 0.7853981633974483
+```
+
+## Symbolic Computation
+
+```epsil
+simplify(sin(x)^2 + cos(x)^2)  // -> 1
+
+solve(x^2 - 2, x) |> N()  // -> [1.4142135623730951, -1.4142135623730951]
+```
+
+## VSCode Integration
 
 - **Syntax highlighting** for `.epsil` files, plus bracket matching, comment
   toggling and folding.
-- **Live diagnostics** as you type: parse errors, lints, and the static type
-  errors the engine catches when it canonicalizes a program. This is exactly
-  what `epsil check` reports — nothing is evaluated, so checking a program has
-  no side effects and never runs a long computation. A call that does not match
-  the function's signature explains itself: the diagnostic headline says which
-  argument was at fault, and hovering it shows the callee's signature and the
-  declaration it points at, syntax-highlighted. A diagnostic's code (like
-  `static-type-error`) is a link when an extended explanation exists — click
-  it to open that code's section of the error reference at
-  [epsil.dev/errors](https://epsil.dev/errors/).
+- **Live diagnostics** as you type: parse errors, lints, and static type errors.
+  This is exactly what `epsil check` reports — nothing is evaluated, so checking
+  a program has no side effects and never runs a long computation.
 - **Hover** over a name to see what it is: for a library function or constant,
   its signature (or type and value) and description — the same entry
   `epsil doc <name>` prints; for a name your file declares, the declaration as
@@ -36,21 +68,14 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
   it (`pure`, `console`, `random`, …, the same report `epsil check --effects`
   prints). Hovering a word inside a string or a comment shows nothing, so prose
   is never mistaken for code.
-- **Navigation and rename** — Go to Definition, Find All References,
-  occurrence highlighting, an Outline (with breadcrumbs and _Go to Symbol_),
-  and Rename Symbol (<kbd>F2</kbd>). All of it is scope-aware: a lambda
-  parameter `x` and a top-level `x` are different symbols, a use above a
-  shadowing `let` resolves to the outer binding, and the clauses of a
-  multi-clause function count as one definition. Rename refuses to make a
-  change it cannot make correctly — a name that collides with one already in
-  scope, a library builtin, a type name — rather than corrupting the program.
-- **Epsil: Show Representation** (`epsil.showRepresentation`, the `{}` button
-  in the editor title bar) — opens a read-only pane beside your file showing
-  what the engine makes of it: the **MathJSON** it parses to, its **canonical
-  form**, or the program as compiled by one of the engine's code-generation
-  targets — **JavaScript**, **Python** (NumPy), or **GLSL**. The pane tracks
-  the buffer as you type. Nothing is saved and nothing is evaluated —
-  rendering a view never runs your program.
+- **Navigation and rename** — Go to Definition, Find All References, occurrence
+  highlighting, an Outline (with breadcrumbs and _Go to Symbol_), and Rename
+  Symbol (<kbd>F2</kbd>).
+- **Epsil: Show Representation** (the `{}` button in the editor title bar) —
+  opens a read-only pane beside your file showing what the engine makes of it:
+  the **MathJSON** it parses to, its **canonical form**, or the program as
+  compiled by one of the engine's code-generation targets — **JavaScript**,
+  **Python** (NumPy), or **GLSL**.
 - **Epsil: Run File** (`epsil.runFile`) — saves the active file and runs it in
   an integrated terminal named _Epsil_. By default it runs the Epsil CLI bundled
   with the extension — the same engine build used for diagnostics, inline
