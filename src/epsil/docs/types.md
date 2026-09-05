@@ -32,11 +32,11 @@ annotation. This page is about using them.
 ## Every value already has a type
 
 You never have to introduce types into a program: they are there from the
-start. `Type` reports the one a value has. For a number literal that is the
+start. `type` reports the one a value has. For a number literal that is the
 most precise claim there is — the value itself:
 
 ```epsil-live
-(Type(42), Type(2.5), Type("hi"), Type(True))
+(type(42), type(2.5), type("hi"), type(True))
 // ➔ (TypeFrom("42"), TypeFrom("2.5"), TypeFrom("string"), TypeFrom("boolean"))
 ```
 
@@ -44,8 +44,8 @@ A literal type sits inside its numeric tier — `42` is an `integer`, `2.5` a
 `real` — so a literal is accepted anywhere its tier is. An exact value no
 machine number holds — `1/3`, `√2`, an astronomically large integer — has no
 literal type to report, so it is typed by the narrowest safe claim instead:
-its tier, narrowed by a range that encloses the value. `Type(1/3)` reports
-`rational<0.33..0.34>` and `Type(Sqrt(2))` reports `real<1.4..1.5>` — bounds
+its tier, narrowed by a range that encloses the value. `type(1/3)` reports
+`rational<0.33..0.34>` and `type(sqrt(2))` reports `real<1.4..1.5>` — bounds
 wide enough to be certainly true, which is also what fixes the sign. And
 anything *stored* carries the tier: `let n = 42` declares `n: integer`, and
 the `radius` example below infers `real`.
@@ -53,7 +53,7 @@ the `radius` example below infers `real`.
 Collections carry the type of what is in them, and how many:
 
 ```epsil-live
-(Type([1, 2, 3]), Type({1, 2}), Type((1, "a")), Type({x -> 1}))
+(type([1, 2, 3]), type({1, 2}), type((1, "a")), type({x -> 1}))
 // ➔ (TypeFrom("vector<integer^3>"), TypeFrom("set<integer>"), TypeFrom("tuple<integer, string>"), TypeFrom("record{x: integer}"))
 ```
 
@@ -77,8 +77,8 @@ would have written:
 
 ```epsil-live
 let radius = 2.5
-let area = Pi * radius^2
-Type(area)
+let area = pi * radius^2
+type(area)
 // ➔ TypeFrom("real")
 ```
 
@@ -103,7 +103,7 @@ at the call site. Without the annotation the string would have flowed into the
 division and come back as something symbolic and mystifying.
 
 A **return** annotation (`-> real`) is a different kind of thing: it is
-recorded in the function's signature and shown by `About`, but the current
+recorded in the function's signature and shown by `about`, but the current
 runtime does not reject a returned value for disagreeing with it. Write it for
 the reader; don't rely on it as a check.
 
@@ -144,7 +144,7 @@ starts at the bottom of the lattice:
 
 ```epsil-live
 let xs = []
-Type(xs)
+type(xs)
 // ➔ TypeFrom("list<never>")
 ```
 
@@ -152,7 +152,7 @@ Say what you mean instead:
 
 ```epsil-live
 let xs: list<integer> = []
-Type(xs)
+type(xs)
 // ➔ TypeFrom("list<integer>")
 ```
 
@@ -240,7 +240,7 @@ Named functions may also declare their **effects**, between the parameter list
 and the return type:
 
 ```epsil
-function roll(n: integer) random -> integer { Random(n) }
+function roll(n: integer) random -> integer { random(n) }
 ```
 
 Effect labels are part of the function type. See
@@ -284,7 +284,7 @@ order you write your statements in does not change what the program means.
 **Annotated types are not.** What you write is a commitment; only guesses move.
 
 One inherited behavior can surprise you: evaluating a bare symbol as a boolean
-operand (`And`/`Or`/`Xor`/`Not`) infers that symbol `boolean` for the lifetime
+operand (`And`/`Or`/`xor`/`Not`) infers that symbol `boolean` for the lifetime
 of the engine, and a later numeric use of the same name then errors. The
 convention is to keep boolean-only names distinct — uppercase `A`, `B`, `C` is
 the usual choice.
@@ -414,7 +414,7 @@ A value built this way carries its type with it, wherever it goes:
 ```epsil-live
 type point = tuple<x: number, y: number>
 let ps = [point(1, 2), point(3, 4)]
-Type(ps)
+type(ps)
 // ➔ TypeFrom("list<point^2>")
 ```
 
@@ -445,7 +445,7 @@ the type. This is how a `record`-bodied type gets its constructor:
 ```epsil-live
 type circle = record{x: number, y: number, r: number}
 function circle(x, y, r) { {x -> x, y -> y, r -> r} }
-Type(circle(1, 2, 3))
+type(circle(1, 2, 3))
 // ➔ TypeFrom("circle")
 ```
 
@@ -457,7 +457,7 @@ existence, so validation or normalization written there cannot be bypassed:
 ```epsil-live
 type frac = record{n: integer, d: integer}
 function frac(n: integer, d: integer) {
-  {n -> n / GCD(n, d), d -> d / GCD(n, d)}
+  {n -> n / gcd(n, d), d -> d / gcd(n, d)}
 }
 frac(2, 4) == frac(1, 2)
 // ➔ True
@@ -494,7 +494,7 @@ that take a tuple apart do not reach inside one:
 type point = tuple<x: number, y: number>
 let q: point = (1, 2)   // error: a tuple is not a point
 let p = point(1, 2)
-First(p)                // error
+first(p)                // error
 let (a, b) = p          // error
 ```
 
@@ -528,7 +528,7 @@ p.x + p.y
 
 On a dictionary, `d.x` is exactly `d["x"]`, absent-key behavior included.
 The accessor reads one named field through the type's definition; it does
-not make the value a collection — `First(p)`, `p["x"]` and destructuring
+not make the value a collection — `first(p)`, `p["x"]` and destructuring
 keep rejecting. (The dot must touch the value it reads: `p.x` is a field
 access, `p .x` is not; and a number never takes a field — `2.x` is a
 multiplication.)
@@ -631,7 +631,7 @@ error. Unlike a plain alias, a generic one declares **no**
 namespace: a `function` of the same name is an ordinary function,
 declared before or after. A dependent alias **snapshots** the
 definitions it was built from: re-running the `type` statement for
-`Keyed` leaves `Table` as it was until `Table`'s own statement is re-run
+`Keyed` leaves `table` as it was until `table`'s own statement is re-run
 too — which re-running the cell does.
 
 A parameterized **nominal** type takes a clause the same way. The difference is
@@ -641,7 +641,7 @@ never expanded — which is exactly what lets its body mention itself:
 ```epsil-live
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t = tree(1, [tree(2, [])])
-Type(t)
+type(t)
 // ➔ TypeFrom("tree<integer>")
 ```
 
@@ -657,7 +657,7 @@ arguments**, so it comes back at the type the application supplied, not at
 ```epsil-live
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t: tree<number> = tree(1, [])
-Type(t.value)
+type(t.value)
 // ➔ TypeFrom("number")
 ```
 
@@ -668,7 +668,7 @@ the annotation's:
 ```epsil-live
 type tree<T> = tuple<value: T, children: list<tree<T>>>
 let t: tree<number> = tree(1, [])
-match t { tree(v, cs) => Type(v) }
+match t { tree(v, cs) => type(v) }
 // ➔ TypeFrom("integer")
 ```
 
@@ -721,7 +721,7 @@ optional payload expressible:
 ```epsil-live
 type opt<T> = T | missing
 let a = opt(1)
-Type(a)
+type(a)
 // ➔ TypeFrom("opt<integer>")
 ```
 
@@ -731,8 +731,8 @@ family, and (under `out`) a subtype of every other:
 
 ```epsil-live
 type opt<T> = T | missing
-let b = opt(Missing)
-Type(b)
+let b = opt(missing)
+type(b)
 // ➔ TypeFrom("opt<never>")
 ```
 
@@ -785,27 +785,27 @@ implicit "for all `T`".
 
 Epsil distinguishes three related kinds of absence:
 
-- `Nothing` means “no value here” and is removed from function arguments and
+- `nothing` means “no value here” and is removed from function arguments and
   collection literals.
-- `Missing` is a position-preserving missing value. Its type is `missing`.
+- `missing` is a position-preserving missing value. Its type is `missing`.
 - `NaN` is the numeric form of an absent or undefined result. Its type is
   `nan`, which sits outside `real` and `complex` and inside `number`. Numeric
   operations and missing numeric fields generally normalize absence to `NaN`.
 
-`IsMissing(x)` recognizes both `Missing` and `NaN`, regardless of how the
+`isMissing(x)` recognizes both `missing` and `NaN`, regardless of how the
 value arose. `Coalesce(a, b, ...)` evaluates from left to right and returns the
 first value that is not missing; if every argument is missing, it returns the
 last one unchanged.
 
 ```epsil-live
-(Length([1, Missing, 3]), IsMissing(Missing), IsMissing(NaN),
-  Coalesce(Missing, 0), Missing + 1)
+(length([1, missing, 3]), isMissing(missing), isMissing(NaN),
+  Coalesce(missing, 0), missing + 1)
 // ➔ (3, True, True, 0, NaN)
 ```
 
 A missing dictionary field follows the expected value domain: a numeric field
-produces `NaN`, while a string or other nonnumeric field produces `Missing`.
-Use `IsMissing` when the distinction between those representations is not
+produces `NaN`, while a string or other nonnumeric field produces `missing`.
+Use `isMissing` when the distinction between those representations is not
 important, and [`??`](/epsil/operators/#absence-coalescing) — the operator form
 of `Coalesce` — to supply a fallback.
 
@@ -873,7 +873,7 @@ signature.
 Subtyping also quietly absorbs a classic use of polymorphism: the empty
 list needs no "for all" type — it is simply `list<never>`, and since
 `never` is the bottom of the lattice (joining it with anything gives the
-other type back), `Join([], [1, 2])` comes out as `list<integer>`
+other type back), `join([], [1, 2])` comes out as `list<integer>`
 with no quantifier anywhere.
 
 For the representation a type declaration lowers to, see

@@ -28,7 +28,7 @@ later manipulation:
 
 ```epsil
 let share = 1 / 3
-Simplify(share + share + share)
+simplify(share + share + share)
 // ➔ 1
 ```
 
@@ -38,12 +38,14 @@ point where a decimal is actually useful — for presentation, plotting, or a
 numerical algorithm:
 
 ```epsil
-N(Sqrt(2))
+N(sqrt(2))
 // ➔ 1.4142135623730950488
 ```
 
-Capitalized names such as `Simplify`, `Sqrt`, and `N` are Compute Engine
-operators. Lowercase names are normally the names you introduce.
+Names such as `simplify`, `sqrt`, and `N` are Compute Engine operators; a
+library name also answers to its capitalized MathJSON spelling (`Simplify`,
+`sqrt`). The names you introduce are lowercase too, and a name you declare
+shadows a library name in its scope. See [Naming](/epsil/naming/).
 
 ## Names describe values
 
@@ -64,7 +66,7 @@ whether to bind it to a new name or replace an old binding.
 
 ```epsil
 let readings = [3, 1, 2]
-let sorted = Sort(readings)
+let sorted = sort(readings)
 (readings, sorted)
 // ➔ ([3, 1, 2], [1, 2, 3])
 ```
@@ -79,7 +81,7 @@ For a one-line mathematical definition, put parameters in parentheses and the
 formula after `=`:
 
 ```epsil
-circleArea(r) = Pi * r^2
+circleArea(r) = pi * r^2
 circleArea(3)
 // ➔ 9pi
 ```
@@ -90,7 +92,7 @@ expression is the result, so there is no `return` ceremony:
 ```epsil
 function hypotenuse(a, b) {
   let squared = a^2 + b^2
-  Sqrt(squared)
+  sqrt(squared)
 }
 hypotenuse(3, 4)
 // ➔ 5
@@ -100,7 +102,7 @@ Anonymous functions use `=>`. They are especially useful for a small
 transformation passed to a collection operator:
 
 ```epsil
-Map(n => n^2, 1..5)
+map(n => n^2, 1..5)
 // ➔ [1, 4, 9, 16, 25]
 ```
 
@@ -141,15 +143,15 @@ endpoints. Use a pipeline when data goes through several transformations:
 
 ```epsil
 1..10
-  |> Filter(n => n % 2 == 0)
+  |> filter(n => n % 2 == 0)
   |> n => n^2                         // Map(n => n^2, _)
-  |> Sum
+  |> sum
 // ➔ 220
 ```
 
 Pipelines read from input to result, rather than inside out. The `_` marks the
-argument position filled by the piped value, which matters when `Map` or
-`Filter` has another argument as well.
+argument position filled by the piped value, which matters when `map` or
+`filter` has another argument as well.
 
 For work whose purpose is changing a binding — an accumulator, for example —
 use a loop:
@@ -161,7 +163,7 @@ total
 // ➔ 5050
 ```
 
-Use `Map`, `Filter`, and `Reduce` for value-producing iteration; use `for` and
+Use `map`, `filter`, and `reduce` for value-producing iteration; use `for` and
 `while` when performing a sequence of updates is the clearest model.
 
 ## Types document important boundaries

@@ -13,7 +13,7 @@ the documentation test suite and its `// ➔` output verified, so nothing here
 can drift from the implementation.
 
 **What carries over.** The shape of a program: sequential statements,
-lexically scoped functions, closures, first-class lambdas, `Map`/`Filter`, a
+lexically scoped functions, closures, first-class lambdas, `map`/`filter`, a
 `for x in collection` loop, the conditional expression `a if c else b`,
 arbitrary-precision integers, `%` with Python's sign convention, negative
 indices, chained comparisons, and `**` for exponentiation.
@@ -22,7 +22,7 @@ indices, chained comparisons, and `**` for exponentiation.
 
 1. **Indexing is 1-based.** `xs[1]` is the first element.
 2. **Arithmetic is exact and symbolic by default.** `1/3` is the rational one
-   third, `Ln(2)` stays `ln(2)`. Floats happen only when you ask, with `N(…)`.
+   third, `ln(2)` stays `ln(2)`. Floats happen only when you ask, with `N(…)`.
 3. **`//` is a comment, not floor division**, and `=` assigns only as a whole statement — inside an expression it is `Equal`, never
    equality. Both fail *quietly* — see [Traps](#traps).
 
@@ -41,12 +41,12 @@ There is no `print`. A program's value is the value of its **last statement**.
 | `lambda: 42` | `() => 42` |
 | `def f(x: float) -> float:` | `f(x: real) -> real = x^2` |
 | `return` | *(no `return`)* — the last expression is the value |
-| `math.floor(x)`, `np.mean(xs)` | `Floor(x)`, `Mean(xs)` — no modules, no imports |
+| `math.floor(x)`, `np.mean(xs)` | `floor(x)`, `mean(xs)` — no modules, no imports |
 | `obj.method(a)` | `c.area(a)` only when `area` is a [protocol](/epsil/protocols/#dot-call) function; otherwise `f(c, a)` or `c \|> f` — `xs.Sort()` is an error |
 
 Naming convention: library operators are lowercase, as in Python (`sin`,
 `map`, `max`, `len` is `length`), and also answer to their MathJSON names
-(`Sin`, `Map`, `Max`, `Length`). Your names are lowercase too and shadow a
+(`sin`, `map`, `max`, `length`). Your names are lowercase too and shadow a
 library name by scope, as a Python assignment to `sum` does. Calling an
 unknown function is not an error — the call stays symbolic, with a
 did-you-mean warning when a close library name exists (`len` suggests
@@ -72,18 +72,18 @@ let double = x => 2x
 | `xs[-1]` | `xs[-1]` |
 | `xs[1:3]` | `xs[2..3]` — 1-based, **inclusive** on both ends |
 | `range(1, 6)` | `1..5` or `Range(1, 5)` — **inclusive** of the end |
-| `len(xs)` | `Length(xs)` |
-| `sorted(xs)` / `sorted(xs, reverse=True)` | `Sort(xs)` / `Sort(xs, (a, b) => a > b)` |
-| `sum`, `min`, `max`, `any`, `all` | `Sum`, `Min`, `Max`, `Any`, `All` |
-| `reversed(xs)` | `Reverse(xs)` |
-| `zip(a, b)` | `Zip(a, b)` |
-| `enumerate(xs)` | `Zip(1..Length(xs), xs)` |
-| `xs.index(v)` | `IndexOf(xs, v)` |
-| `xs + ys`, `xs.append(v)` | `Join(xs, ys)`, `Append(xs, v)` — both return a **new** collection |
-| `xs[2] = 9` | *(no element assignment)* — rebuild with `Map`/`Join` |
-| `d.keys()`, `d.values()` | `Keys(d)`, `Values(d)` |
-| `dict(zip(ks, vs))` | `DictionaryFrom(Zip(ks, vs))` |
-| `collections.Counter(xs)` | `Tally(xs)` → a `(values, counts)` pair |
+| `len(xs)` | `length(xs)` |
+| `sorted(xs)` / `sorted(xs, reverse=True)` | `sort(xs)` / `sort(xs, (a, b) => a > b)` |
+| `sum`, `min`, `max`, `any`, `all` | `sum`, `min`, `max`, `any`, `all` |
+| `reversed(xs)` | `reverse(xs)` |
+| `zip(a, b)` | `zip(a, b)` |
+| `enumerate(xs)` | `zip(1..length(xs), xs)` |
+| `xs.index(v)` | `indexOf(xs, v)` |
+| `xs + ys`, `xs.append(v)` | `join(xs, ys)`, `append(xs, v)` — both return a **new** collection |
+| `xs[2] = 9` | *(no element assignment)* — rebuild with `map`/`join` |
+| `d.keys()`, `d.values()` | `keys(d)`, `values(d)` |
+| `dict(zip(ks, vs))` | `dictionaryFrom(zip(ks, vs))` |
+| `collections.Counter(xs)` | `tally(xs)` → a `(values, counts)` pair |
 
 Collections are **immutable values**. There is no in-place mutation: build a
 new collection and rebind the name. The values-are-immutable, bindings-are-not
@@ -93,40 +93,40 @@ explains why a closure sees a later reassignment and why a function cannot
 modify its caller's variable.
 
 ```epsil
-let counts = DictionaryFrom(Zip(["apples", "figs"], [3, 1]))
-(counts["apples"], Keys(counts), counts["pears"])
+let counts = dictionaryFrom(zip(["apples", "figs"], [3, 1]))
+(counts["apples"], keys(counts), counts["pears"])
 // ➔ (3, ["apples","figs"], NaN)
 ```
 
 A missing numeric dictionary field yields `NaN` rather than raising
-`KeyError`; a missing nonnumeric field remains `Missing`. `IsMissing`
+`KeyError`; a missing nonnumeric field remains `missing`. `isMissing`
 recognizes either representation, and `Coalesce(value, fallback)` supplies a
 default. See [Traps](#traps).
 
 ### Comprehensions
 
 Epsil has no comprehension syntax. Use the pipeline operator `|>` with
-`Filter`/`Map`; `_` is the placeholder for the piped value.
+`filter`/`map`; `_` is the placeholder for the piped value.
 
 ```python
 sum(n**2 for n in range(1, 11) if n % 2 == 1)
 ```
 
 ```epsil
-1..10 |> Filter(_, n => n % 2 == 1) |> Map(n => n^2, _) |> Sum
+1..10 |> filter(_, n => n % 2 == 1) |> map(n => n^2, _) |> sum
 // ➔ 165
 ```
 
-`Range`, `Map`, `Filter`, `Take`, `Drop` and `Join` are **generators**, like
+`Range`, `map`, `filter`, `take`, `drop` and `join` are **generators**, like
 Python's — they enumerate only when materialized (indexed, aggregated, or
 iterated). A deferred mapping function reads variables at *materialization*
 time, so the same "late binding in a closure" surprise applies:
 
 ```epsil
 let n = 1
-let m = Map(k => k * n, 1..3)
+let m = map(k => k * n, 1..3)
 n = 10
-Sum(m)
+sum(m)
 // ➔ 60
 ```
 
@@ -145,8 +145,8 @@ Sum(m)
 | `try/except` | *(none)* — errors are ordinary values |
 | `# comment` | `// comment` or `/* … */` |
 
-Loops run **for effect**: their value is `Nothing`. Accumulate into a variable
-declared outside the loop, or use `Map`/`Filter`/`Reduce`/`Fold` when you want
+Loops run **for effect**: their value is `nothing`. Accumulate into a variable
+declared outside the loop, or use `map`/`filter`/`reduce`/`fold` when you want
 a value.
 
 ```epsil
@@ -176,12 +176,12 @@ classify(n) = match n {
   k if k > 0 => "positive"
   _ => "negative"
 }
-Map(classify, [-2, 0, 5])
+map(classify, [-2, 0, 5])
 // ➔ ["negative", "zero", "positive"]
 ```
 
 Because a bare name binds, `match x { Pi => … }` does *not* test for π — it
-binds a fresh variable named `Pi`. Write `match x { == Pi => … }`. This is the
+binds a fresh variable named `pi`. Write `match x { == Pi => … }`. This is the
 same rule as Python's (where a bare `case FOO:` is a capture pattern), but it
 bites more often because Epsil's constants are ordinary names.
 
@@ -190,19 +190,19 @@ bites more often because Epsil's constants are ordinary names.
 | Python | Epsil |
 |:--|:--|
 | `7 / 2` → `3.5` | `7 / 2` → the exact rational `7/2`; `N(7 / 2)` → `3.5` |
-| `7 // 2` → `3` | `Floor(7 / 2)` — **`//` starts a comment in Epsil** |
+| `7 // 2` → `3` | `floor(7 / 2)` — **`//` starts a comment in Epsil** |
 | `7 % 2`, `-7 % 3` → `2` | `7 % 2`, `-7 % 3` → `2` — same sign convention |
 | `x ** 2`, `pow(x, 2)` | `x^2` or `x**2` |
-| `math.sqrt(x)` | `Sqrt(x)` — exact: `Sqrt(9)` is `3`, `Sqrt(2)` stays `√2` |
-| `math.pi`, `math.e` | `Pi`, `e` |
-| `math.log(x)`, `math.log10(x)` | `Ln(x)`, `Log(x)`; `Log(x, b)` for base *b* |
-| `abs`, `round`, `math.floor`, `math.ceil` | `Abs`, `Round`, `Floor`, `Ceil` (not `Ceiling`) |
+| `math.sqrt(x)` | `sqrt(x)` — exact: `sqrt(9)` is `3`, `sqrt(2)` stays `√2` |
+| `math.pi`, `math.e` | `pi`, `e` |
+| `math.log(x)`, `math.log10(x)` | `ln(x)`, `log(x)`; `log(x, b)` for base *b* |
+| `abs`, `round`, `math.floor`, `math.ceil` | `abs`, `round`, `floor`, `ceil` (not `Ceiling`) |
 | `float(expr)` | `N(expr)`, or `N(expr, digits)` for a precision |
 | `10 ** 100` (bigint) | `10^100` — same unbounded integers |
 | `complex(2, 3)` | `2 + 3i` |
-| `statistics.mean/median` | `Mean`, `Median`, `Variance`, `StandardDeviation` |
-| `math.gcd`, `math.factorial` | `GCD`, `LCM`, `n!` |
-| *(SymPy territory)* | `Simplify`, `Solve`, `D`, `Integrate`, `Limit`, `Series` are built in |
+| `statistics.mean/median` | `mean`, `median`, `variance`, `standardDeviation` |
+| `math.gcd`, `math.factorial` | `gcd`, `lcm`, `n!` |
+| *(SymPy territory)* | `simplify`, `solve`, `D`, `integrate`, `limit`, `series` are built in |
 
 Exactness is the default, and comparison is tolerant, so the classic
 floating-point gotcha does not appear:
@@ -214,11 +214,11 @@ let approx = N(1/3 + 1/6)
 // ➔ (1/2, 0.5, True)
 ```
 
-`Round` rounds halves **away from zero**; Python rounds halves to even. This
+`round` rounds halves **away from zero**; Python rounds halves to even. This
 is the one numeric answer that differs on values you are likely to type:
 
 ```epsil
-(Round(0.5), Round(2.5), Round(-0.5))
+(round(0.5), round(2.5), round(-0.5))
 // ➔ (1, 3, -1)
 ```
 
@@ -227,7 +227,7 @@ is the one numeric answer that differs on values you are likely to type:
 Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 
 ```epsil
-([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], Sum(Map(k => k^2, 1..4)))
+([1, 2, 3] + 1, [1, 2, 3] * [4, 5, 6], sum(map(k => k^2, 1..4)))
 // ➔ ([2,3,4], [4,10,18], 30)
 ```
 
@@ -236,47 +236,47 @@ Arithmetic broadcasts over a list elementwise, without anything like NumPy:
 | Python | Epsil |
 |:--|:--|
 | `f"x is {x}"` | `"x is \(x)"` — works in any string literal |
-| `"a" + "b"` | `Join("a", "b")` — `+` on strings is a **type error** |
-| `len(s)` | `Length(s)` — a string is a collection of its characters (grapheme clusters, not code points) |
+| `"a" + "b"` | `join("a", "b")` — `+` on strings is a **type error** |
+| `len(s)` | `length(s)` — a string is a collection of its characters (grapheme clusters, not code points) |
 | `s[0]` | `s[1]` — 1-based; each element is a `character` |
 | `c in s` | `c in s` — character membership; substring search is a separate operation |
-| `"ab" in s` | `ContainsSequence(s, "ab")` — `in` never means substring |
-| `s.split()` / `s.split(",")` | `StringSplit(s)` / `StringSplit(s, ",")` |
-| `"".join(parts)` / `sep.join(parts)` | `StringJoin(parts)` / `StringJoin(parts, sep)` |
+| `"ab" in s` | `containsSequence(s, "ab")` — `in` never means substring |
+| `s.split()` / `s.split(",")` | `stringSplit(s)` / `stringSplit(s, ",")` |
+| `"".join(parts)` / `sep.join(parts)` | `stringJoin(parts)` / `stringJoin(parts, sep)` |
 | `str(x)` | `String(x)` |
 | `"""…"""` | `"""…"""` — multi-line strings, same delimiter |
 | `r"raw\string"` | `#"raw\string"#` — extended string literal |
 
 ```epsil
 let name = "world"
-let parts = StringSplit("a b c")
-("hello \(name)", Join("a", "b"), Length(name), parts[2])
+let parts = stringSplit("a b c")
+("hello \(name)", join("a", "b"), length(name), parts[2])
 // ➔ ("hello world", "ab", 5, "b")
 ```
 
-`.upper()`, `.lower()`, `.replace()` and `.strip()` are `ToUpperCase`,
-`ToLowerCase`, `StringReplace(s, target, replacement)` and
-`Trim`/`TrimStart`/`TrimEnd`; `.zfill()`/`.rjust()` are `PadStart`/`PadEnd`,
-`s * n` is `StringRepeat(s, n)` and `float(s)`/`int(s)` are `NumberFrom(s)`
+`.upper()`, `.lower()`, `.replace()` and `.strip()` are `toUpperCase`,
+`toLowerCase`, `stringReplace(s, target, replacement)` and
+`trim`/`trimStart`/`trimEnd`; `.zfill()`/`.rjust()` are `padStart`/`padEnd`,
+`s * n` is `stringRepeat(s, n)` and `float(s)`/`int(s)` are `numberFrom(s)`
 (which answers an error value, never NaN, on text that is not a numeral).
-`.find()`/`.index()` is `RangeOf(s, needle)`, which answers the *span* of the
-first occurrence (a `range`) or `Nothing` — feed it straight to `Slice`;
-`needle in s` (substring) is `ContainsSequence(s, needle)`, and
-`.startswith()`/`.endswith()` are `StartsWith`/`EndsWith`. Note that Epsil's
+`.find()`/`.index()` is `rangeOf(s, needle)`, which answers the *span* of the
+first occurrence (a `range`) or `nothing` — feed it straight to `slice`;
+`needle in s` (substring) is `containsSequence(s, needle)`, and
+`.startswith()`/`.endswith()` are `startsWith`/`endsWith`. Note that Epsil's
 `c in s` is **character** membership, not substring search.
 
-`.casefold()` is `CaseFold(s)`, and `StringCompare(a, b)` gives the `-1/0/1`
+`.casefold()` is `caseFold(s)`, and `stringCompare(a, b)` gives the `-1/0/1`
 code-point ordering that `<` on two multi-character strings does not (it
 compares UTF-16 code units, which sorts the astral characters below
 U+E000–U+FFFF).
 
 A string is an indexed collection of `character`
-values, so the generic collection operators apply directly (`Length`,
-`Reverse`, `Filter`, `Sort`, `Contains`, `IndexOf`, `Map` — the
-element-preserving ones return a string, `Map` returns a list; rejoin with
-`String(...)`). For a specific decomposition use `Characters`,
-`UnicodeScalars`, `Utf8`/`Utf16`; `StringSplit`, `StringJoin`, `Join`,
-`StringFrom` and `String` round out the library.
+values, so the generic collection operators apply directly (`length`,
+`reverse`, `filter`, `sort`, `contains`, `indexOf`, `map` — the
+element-preserving ones return a string, `map` returns a list; rejoin with
+`String(...)`). For a specific decomposition use `characters`,
+`unicodeScalars`, `utf8`/`utf16`; `stringSplit`, `stringJoin`, `join`,
+`stringFrom` and `String` round out the library.
 
 ## Errors
 
@@ -285,11 +285,11 @@ There are no exceptions. A runtime problem becomes an ordinary
 not abort the rest of the work:
 
 ```epsil
-Map(x => Sqrt(x), [16, -4, "banana", 81])
+map(x => sqrt(x), [16, -4, "banana", 81])
 // ➔ [4, 2i, NaN, 9]
 ```
 
-Note also `Sqrt(-4)` → `2i` rather than a `ValueError`: the engine works over
+Note also `sqrt(-4)` → `2i` rather than a `ValueError`: the engine works over
 the complex numbers. Malformed *source* is different — it produces
 **diagnostics** with source positions, reported separately from the value.
 
@@ -321,21 +321,21 @@ still returns a plausible-looking value.
 
 | You write | What actually happens | Write instead |
 |:--|:--|:--|
-| `7 // 2` | `//` starts a comment, so the statement is just `7` | `Floor(7 / 2)` |
+| `7 // 2` | `//` starts a comment, so the statement is just `7` | `floor(7 / 2)` |
 | `xs[0]` | Silently `NaN` — indexing is 1-based | `xs[1]` |
 | `f(a = 1)` as a keyword argument | There are no keyword arguments; inside an expression `=` is `Equal`, so this passes the boolean `a == 1` | pass positionally |
-| `d["missing"]` | An absence value, not a `KeyError` (`NaN` for a numeric field, otherwise `Missing`) | `Coalesce(d["missing"], fallback)` or test with `IsMissing` |
+| `d["missing"]` | An absence value, not a `KeyError` (`NaN` for a numeric field, otherwise `missing`) | `Coalesce(d["missing"], fallback)` or test with `isMissing` |
 | `xs[1:3]` | Python's half-open slice; `xs[2..3]` is 1-based and inclusive | check both ends |
-| `x^1/2` | `(x^1)/2` — `^` binds tighter than `/` | `Sqrt(x)` or `x^(1/2)` |
+| `x^1/2` | `(x^1)/2` — `^` binds tighter than `/` | `sqrt(x)` or `x^(1/2)` |
 | `x = 5` inside an expression | Compares, rather than assigning — only a whole statement assigns | `:=` to assign in place, `==` to be explicit |
 | `print(x)` | Inert, nothing is printed | the program's value is its last statement |
-| `Round(2.5)` | `3` (half away from zero), not Python's `2` | *(intentional)* |
+| `round(2.5)` | `3` (half away from zero), not Python's `2` | *(intentional)* |
 | `3!^2` | Diagnostic — the lexer reads `!^` as one token | `3! ^ 2` |
 | `a +b` | Diagnostic — an infix operator needs spaces on both sides or neither | `a + b` or `a+b` |
 | `"\(xs)"` with a list `xs` | Broadcasts into a *list of strings* | interpolate scalars only |
 | `x && y` on fresh symbols | Types those symbols `boolean` for the engine's lifetime | use distinct names for boolean work |
 
-One more, specific to a symbolic language: a `Take(xs, 3)` (or any lazy
+One more, specific to a symbolic language: a `take(xs, 3)` (or any lazy
 operator) stored inside a **tuple** stays unevaluated, because a tuple does
 not materialize its operands. Aggregate or index where you stand if you need
 the work done now.

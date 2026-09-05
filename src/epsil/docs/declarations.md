@@ -40,7 +40,7 @@ reassignment (see below).
 A `let` or `const` may bind the components of a **tuple** in one statement:
 
 ```epsil
-divmod(a, b) = (Floor(a / b), a % b)
+divmod(a, b) = (floor(a / b), a % b)
 let (q, r) = divmod(17, 5)
 (q, r)
 // ➔ (3, 2)

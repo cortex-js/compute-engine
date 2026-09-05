@@ -33,7 +33,7 @@ parameter's type from its use, so an annotation should say something the
 code does not.
 
 ```epsil
-function area(r: real) -> real { Pi * r^2 }
+function area(r: real) -> real { pi * r^2 }
 let side = 3
 N(area(side), 8)
 // ➔ 28.274334
@@ -45,7 +45,7 @@ right side first, so it swaps. A bare `=` at statement level assigns only to
 a plain name; anywhere else it compares.
 
 ```epsil
-let (q, r) = (Floor(17 / 5), 17 % 5)
+let (q, r) = (floor(17 / 5), 17 % 5)
 (q, r) := (r, q)
 (q, r)
 // ➔ (2, 3)
@@ -100,25 +100,25 @@ See [Functions](/epsil/control-flow/#functions).
 
 ## Collections and pipelines
 
-**Produce values with `Map`, `Filter`, `Fold`; loop for effect.** A `for`
+**Produce values with `map`, `filter`, `fold`; loop for effect.** A `for`
 loop evaluates to nothing and exists to update state. A value that is a
 transformation of a collection is a pipeline.
 
 ```epsil
-1..10 |> Filter(_, k => k % 3 == 0) |> Map(k => k^2, _)
+1..10 |> filter(_, k => k % 3 == 0) |> map(k => k^2, _)
 // ➔ [9, 36, 81]
 ```
 
 ```epsil
-Fold((acc, k) => acc + 1/k, 0, 1..10)
+fold((acc, k) => acc + 1/k, 0, 1..10)
 // ➔ 7381/2520
 ```
 
 **Mark the piped slot with `_`.** `xs |> f` passes the value as the only
 argument; when the function takes several, `_` says which.
 
-**Pipelines are lazy; materialize where you stand.** `Range`, `Map`,
-`Filter`, `Take`, `Drop`, and `Join` are generators that enumerate when they
+**Pipelines are lazy; materialize where you stand.** `Range`, `map`,
+`filter`, `take`, `drop`, and `join` are generators that enumerate when they
 are indexed, aggregated, or iterated, and a deferred mapping reads its
 variables at that moment. A collection literal snapshots its elements at
 once. When a later step will change a variable the pipeline reads, aggregate
@@ -130,22 +130,22 @@ See [Pipelines](/epsil/control-flow/#pipelines) and
 ## Building a list one element at a time
 
 **Prefer a pipeline when the list has a formula.** A list whose element `k`
-depends only on `k` is a `Map`; a running value is a `Fold` whose accumulator
-is a scalar; a filtered selection is a `Filter`. These build the list once,
+depends only on `k` is a `map`; a running value is a `fold` whose accumulator
+is a scalar; a filtered selection is a `filter`. These build the list once,
 and their cost does not grow with the length in any way that matters.
 
 ```epsil
-Map(k => k^2, 1..5)
+map(k => k^2, 1..5)
 // ➔ [1, 4, 9, 16, 25]
 ```
 
 ```epsil
-Fold((acc, k) => acc + 1/k, 0, 1..10)
+fold((acc, k) => acc + 1/k, 0, 1..10)
 // ➔ 7381/2520
 ```
 
 **Growing a list in a loop is fine for lists of a few thousand elements.**
-`Join(xs, [k])`, `Append(xs, k)` and the spread literal `[...xs, k]` all
+`join(xs, [k])`, `append(xs, k)` and the spread literal `[...xs, k]` all
 produce a plain list literal when `xs` holds one: the engine folds a join of
 list literals into one literal. Each turn copies the current list, so the
 whole loop costs the square of its length — a thousand turns take under a
@@ -155,7 +155,7 @@ thousand elements, write the pipeline instead.
 ```epsil
 let seen = []
 for word in ["a", "b", "a"] {
-  if !(word in seen) { seen = Join(seen, [word]) }
+  if !(word in seen) { seen = join(seen, [word]) }
 }
 seen
 // ➔ ["a", "b"]
@@ -170,12 +170,12 @@ behind these figures is in the
 ## Indexing
 
 **Indexing is 1-based, and a slice is a range.** `xs[1]` is the first
-element and `xs[n]` the n-th; `xs[2..3]` is a slice; `First`, `Last`,
-`Take`, and `Drop` name the common cases.
+element and `xs[n]` the n-th; `xs[2..3]` is a slice; `first`, `last`,
+`take`, and `drop` name the common cases.
 
 ```epsil
 let xs = [10, 20, 30, 40]
-(xs[1], xs[2..3], Last(xs), First(Drop(xs, 1)))
+(xs[1], xs[2..3], last(xs), first(drop(xs, 1)))
 // ➔ (10, [20,30], 40, 20)
 ```
 
@@ -220,8 +220,8 @@ effect labels (`random`, `console`, `state`, …); a function whose body
 performs none is pure by inference.
 
 ```epsil
-roll(n) = Random(1..n)
-Type(roll)
+roll(n) = random(1..n)
+type(roll)
 // ➔ TypeFrom("(unknown) random -> number")
 ```
 
@@ -234,7 +234,7 @@ later edit that adds an effect is caught at the definition instead of
 surprising a caller; leave inference to the rest.
 
 ```epsil
-function roll(n: integer) random -> integer { Random(1..n) }
+function roll(n: integer) random -> integer { random(1..n) }
 let r = roll(6)
 1 <= r <= 6
 // ➔ True
@@ -244,7 +244,7 @@ let r = roll(6)
 in a pipeline, and safe to evaluate lazily; put the randomness, the input,
 and the printing in the function that needs them, not in a helper called
 from everywhere. For a reproducible simulation, wrap the effectful part in
-`WithRandomSeed`.
+`withRandomSeed`.
 
 See [Effect specifiers](/epsil/control-flow/#effect-specifiers) for the
 labels, subtyping, and callback checks.
@@ -252,16 +252,16 @@ labels, subtyping, and callback checks.
 ## Pattern matching
 
 **A bare name binds; pin a value with `==`.** `match x { Pi => … }` binds a
-new variable named `Pi`. To compare against a value, pin it.
+new variable named `pi`. To compare against a value, pin it.
 
 ```epsil
 classify(x) = match x {
-  == Pi => "pi"
+  == pi => "pi"
   0 => "zero"
   n if n > 0 => "positive"
   _ => "other"
 }
-[classify(Pi), classify(0), classify(3), classify(-1)]
+[classify(pi), classify(0), classify(3), classify(-1)]
 // ➔ ["pi","zero","positive","other"]
 ```
 
@@ -312,7 +312,7 @@ The figures in [Building a list one element at a time](#building-a-list-one-elem
 come from this measurement, taken on one machine with the interpreter
 (a compiled program copies a native array per turn and is faster still):
 
-| Turns / elements | `Map(k => k, 1..n)` | `xs = Join(xs, [k])` in a loop | `xs = [...xs, k]` in a loop | `xs = ListFrom(Join(xs, [k]))` in a loop |
+| Turns / elements | `map(k => k, 1..n)` | `xs = join(xs, [k])` in a loop | `xs = [...xs, k]` in a loop | `xs = listFrom(join(xs, [k]))` in a loop |
 |:-----------------|--------------------:|-------------------------------:|----------------------------:|-----------------------------------------:|
 | 250 | 15 ms | 127 ms | 125 ms | 165 ms |
 | 500 | 8 ms | 276 ms | 272 ms | 370 ms |
@@ -322,6 +322,6 @@ The pipeline does not grow with `n` in any way that matters; every
 element-per-turn form grows by a factor of about three per doubling, the
 cost of copying a list that is twice as long twice as often. Before the
 engine folded a join of list literals into one literal (2026-09-04), the
-same loop kept a lazy `Join` view with one operand per turn and re-checked
+same loop kept a lazy `join` view with one operand per turn and re-checked
 all of them on every turn: 4.7 s at 250 turns and 16.6 s at 500 on the same
 kind of machine.

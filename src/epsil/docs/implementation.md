@@ -436,7 +436,7 @@ An effect specifier is folded into a full function-type string carried by a
 `Typed` node around the body:
 
 ```epsil
-function roll(n) random -> integer { Random(n) }
+function roll(n) random -> integer { random(n) }
 ```
 
 ```json
@@ -627,7 +627,7 @@ structurally:
 
 ```epsil
 match x {
-  == Pi => "is-pi"
+  == pi => "is-pi"
   _ => "no"
 }
 ```

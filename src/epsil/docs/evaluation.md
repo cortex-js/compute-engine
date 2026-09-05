@@ -29,16 +29,16 @@ Values stay **exact** unless you ask otherwise. A transcendental of an exact
 argument stays symbolic —
 
 ```epsil
-Ln(2)
+ln(2)
 ```
 
-evaluates to the symbolic `Ln(2)` (`ln(2)`), not a decimal approximation.
+evaluates to the symbolic `ln(2)` (`ln(2)`), not a decimal approximation.
 
 **Numeric approximation is explicit**, via `N(expr)` — it is a function
 call, not a language mode:
 
 ```epsil
-N(Ln(2))
+N(ln(2))
 ```
 
 evaluates to `0.6931471805599453…`.
@@ -68,17 +68,17 @@ Build the value you want and rebind the name:
 
 ```epsil
 let xs = [1, 2, 3]
-xs = Join([xs[1]], [9], [xs[3]])
+xs = join([xs[1]], [9], [xs[3]])
 xs
 // ➔ [1, 9, 3]
 ```
 
-Operators never modify what you hand them — `Append`, `Sort`, `Join`,
-`Map`, `Filter` all return a **new** collection:
+Operators never modify what you hand them — `append`, `sort`, `join`,
+`map`, `filter` all return a **new** collection:
 
 ```epsil
 let xs = [3, 1, 2]
-let ys = Sort(xs)
+let ys = sort(xs)
 (xs, ys)
 // ➔ ([3, 1, 2], [1, 2, 3])
 ```
@@ -171,12 +171,12 @@ A call evaluates its arguments first and hands the function their values:
 with `let a = 3`, `f(a + 1)` receives `4`. A function declared with the
 `hold` prefix instead receives each argument **as written** — canonicalized
 and bound in the caller's scope, but not evaluated — and evaluates it only
-where its body reads it, so it can inspect the expression (`Head(e)`),
+where its body reads it, so it can inspect the expression (`head(e)`),
 transform it, or decide whether to evaluate it at all:
 
 ```epsil
 let a = 3
-hold f(e) = Head(e)
+hold f(e) = head(e)
 f(a + 1)
 // ➔ Add
 ```
@@ -201,11 +201,11 @@ xs
 ```
 
 (A spread inside a literal, `[...xs, k]`, is the exception: it is the lazy
-`Join` described next, not a snapshot — see the
+`join` described next, not a snapshot — see the
 [Style Guide](/epsil/style/#building-a-list-one-element-at-a-time) before
 growing a list in a loop.)
 
-Lazy collection **operators** — `Range`, `Map`, `Filter`, `Take`, `Join` —
+Lazy collection **operators** — `Range`, `map`, `filter`, `take`, `join` —
 are *generators*: their operands (bounds, sources, functions) are evaluated
 when the expression is, but enumeration is deferred until the collection is
 materialized (displayed, indexed, aggregated, or iterated). A deferred
@@ -264,7 +264,7 @@ program*, `RuntimeError` is a failure *produced by running it*.
 command-line tools, the developer console in a browser — separated by
 spaces and followed by a newline. Strings print their content, without the
 quotes; every other value prints its ordinary textual form. It evaluates to
-`Nothing`:
+`nothing`:
 
 ```epsil
 let x = 6
@@ -276,7 +276,7 @@ print("x is", x * 7)
 trailing newline. An optional operand is a prompt, displayed before
 reading. In a terminal it reads from the terminal (piped standard input
 works too); in a browser it opens the `prompt()` dialog. At end-of-input —
-or when the dialog is canceled — it evaluates to `Nothing`; on a host with
+or when the dialog is canceled — it evaluates to `nothing`; on a host with
 no interactive input at all, the call stays symbolic.
 
 ```text
@@ -287,7 +287,7 @@ Hello, Arno
 ```
 
 `print` and `input` are the lowercase spellings of the `Print` and `Input`
-operators, like `sin` for `Sin` — not keywords — so a local declaration of
+operators, like `sin` for `sin` — not keywords — so a local declaration of
 `print` shadows the command like any other library name. See
 [Naming](/epsil/naming/).
 
@@ -304,7 +304,7 @@ in an unfamiliar environment, both are **gated off by default**:
 ```
 
 by default produces a `host-pragma-disabled` diagnostic and no host read — the
-pragma evaluates to `Nothing`. A host can opt back in and let `#env`/
+pragma evaluates to `nothing`. A host can opt back in and let `#env`/
 `#navigator` read as documented in [Pragmas](/epsil/pragmas/).
 
 The benign pragmas — `#line`, `#column`, `#url`, `#filename`, `#date`,

@@ -89,10 +89,10 @@ statement:
 protocol Area { function area(self: Self) -> number }
 
 type Circle = tuple<radius: number> is Area {
-  function area(self: Circle) -> number { Pi * self.radius^2 }
+  function area(self: Circle) -> number { pi * self.radius^2 }
 }
 
-area(Circle(1)) == Pi
+area(Circle(1)) == pi
 // ➔ True
 ```
 
@@ -166,7 +166,7 @@ function is expected:
 protocol Negatable { function negated(self: Self) -> Self }
 type number is Negatable { function negated(self) -> number { -self } }
 
-Map(Negatable.negated, [1, 2, 3])
+map(Negatable.negated, [1, 2, 3])
 // ➔ [-1, -2, -3]
 ```
 
@@ -190,7 +190,7 @@ protocol Shape {
   function scale(self: Self, k: number) -> Self
 }
 type Circle = tuple<r: number> is Shape {
-  function area(self: Circle) -> number { Pi * self.r^2 }
+  function area(self: Circle) -> number { pi * self.r^2 }
   function scale(self: Circle, k: number) -> Circle { Circle(self.r * k) }
 }
 
@@ -205,8 +205,8 @@ the `protocol-function-not-a-field` error; `c.area` is never a function
 value that remembers `c`. And the dot reaches **members** only: a field, a
 property, or a protocol function. A library function or a plain function is
 not a member of anything, so `xs.Sort()` is the error
-`dot-call-not-a-protocol-function`; write `Sort(xs)`, or chain such calls
-with the [pipe](/epsil/operators/#pipe), `xs |> Sort |> Reverse`.
+`dot-call-not-a-protocol-function`; write `sort(xs)`, or chain such calls
+with the [pipe](/epsil/operators/#pipe), `xs |> sort |> reverse`.
 
 Two details follow from the rest of the language. A field the receiver's
 type declares wins over a protocol function of the same name, so on a
@@ -317,7 +317,7 @@ type integer is Summable { function total(self) -> number { self } }
 
 type list<T> is Summable where T is Summable {
   function total(self: list<T>) -> number {
-    Reduce(self, (acc, x) => acc + total(x), 0)
+    reduce(self, (acc, x) => acc + total(x), 0)
   }
 }
 
@@ -340,7 +340,7 @@ inferred from its body instead:
 protocol Summable { function total(self: Self) -> number }
 
 type list<T> is Summable where T: number {
-  function total(self: Self) pure -> number { Sum(self) }
+  function total(self: Self) pure -> number { sum(self) }
 }
 ```
 

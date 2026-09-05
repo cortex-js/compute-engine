@@ -45,9 +45,10 @@ Reinstall the `.vsix` after pulling changes to the extension.
 ## Editing
 
 Opening a file with the `.epsil` extension activates the language support.
-Highlighting follows the conventions of the language: capitalized identifiers
-(`Sin`, `Simplify`) are library operators, lowercase identifiers are user
-symbols, and merely-reserved words are not highlighted as keywords.
+Highlighting marks the keywords, the literal words, the type names, the
+operators and the big-operator glyphs (`∫`, `∑`, `∏`). Identifiers are not
+colored — a library name (`sin`, `simplify`) and a name you declare look the
+same — and merely-reserved words are not highlighted as keywords.
 
 Diagnostics appear inline (squiggles) and in the Problems panel. They are the
 same diagnostics `epsil check` reports: syntax errors, lints such as
@@ -57,7 +58,7 @@ long-running computation in a file does not affect editing.
 
 ```epsil
 let radius = 1/2
-let area = Pi * radius^2
+let area = pi * radius^2
 N(area)
 ```
 

@@ -36,7 +36,7 @@ markdown**, use `///` for single line comments and `/** */` for block comments.
 
 A documentation comment written **immediately before a function definition**
 is attached to it as the function's **description** — markers stripped, 
-`///` lines joined, the ` * ` gutter of a block removed. It is what `About(f)` 
+`///` lines joined, the ` * ` gutter of a block removed. It is what `about(f)` 
 prints, what an editor hover shows. Markdown is the intended format.
 
 ```epsil

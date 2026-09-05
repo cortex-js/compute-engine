@@ -39,14 +39,14 @@ Some common environment variables include:
 
 `#env()` reads host state and is therefore disabled by default: without
 opting in, it produces a `host-pragma-disabled` diagnostic and the value
-`Nothing`. A trusted host can enable it.
+`nothing`. A trusted host can enable it.
 
 ### Navigator Properties
 
 Navigator properties are available when parsing takes place in a browser.
 
 Use `#navigator()` to read a property of the browser's `navigator` object. Like
-`#env()`, it is disabled unless the host opts in. It returns `Nothing` when the
+`#env()`, it is disabled unless the host opts in. It returns `nothing` when the
 browser property is
 not available.
 
@@ -79,9 +79,9 @@ The following pragmas are replaced with the indicated value:
 
 - `#line`: the current source line number. The first line is line 1.
 - `#column`: the current column number. The first column is column 1.
-- `#url`: the source URL the host supplied for the program, or `Nothing` when
+- `#url`: the source URL the host supplied for the program, or `nothing` when
   none was.
-- `#filename`: the final path component of the source URL, or `Nothing` when no
+- `#filename`: the final path component of the source URL, or `nothing` when no
   URL was supplied.
 - `#date`: the current date in the `YYYY-MM-DD` format.
 - `#time`: the current time in the `HH:MM:SS` format.

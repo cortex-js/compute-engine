@@ -53,7 +53,7 @@ Save this program as `squares.epsil`:
 
 ```epsil
 square(x) = x^2
-Map(square, 1..5)
+map(square, 1..5)
 ```
 
 Run it:
@@ -75,13 +75,13 @@ The conventional file extension is `.epsil`.
 Expressions remain exact and symbolic by default:
 
 ```epsil-live
-Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
+simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
 ```
 
 Use `N()` when you want a numeric approximation:
 
 ```epsil-live
-N(Sqrt(2))
+N(sqrt(2))
 ```
 
 ## Embed Epsil in JavaScript

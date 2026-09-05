@@ -18,15 +18,15 @@ A few idioms these programs rely on (the [Style Guide](/epsil/style/)
 collects them all, with the reasons):
 
 - Loops (`for`, `while`) are evaluated **for effect** — accumulate into a
-  variable (a number, or a list built up with `Join`/`Append`), or use
-  `Map`/`Filter`/`Reduce` for value-producing iteration.
+  variable (a number, or a list built up with `join`/`append`), or use
+  `map`/`filter`/`reduce` for value-producing iteration.
 - `1..n` is the **inclusive** range from 1 to n, and `x |> f` pipes a value
   into a function — when the function takes several arguments, `_` marks the
-  piped value's slot (`xs |> Map(f, _)`).
+  piped value's slot (`xs |> map(f, _)`).
 - `a if c else b` is the conditional expression — the same `If` as
   `if c { a } else { b }`, without the braces.
 - Collection **literals** evaluate their elements; lazy **operators**
-  (`Range`, `Map`, `Filter`) are generators that enumerate on demand (see
+  (`Range`, `map`, `filter`) are generators that enumerate on demand (see
   [Evaluation](/epsil/evaluation/)).
 - `a % b` is the remainder (`Mod`), and a postfix `!` is the factorial. The
   `!` must directly follow its operand (`n!`; `x != y` is still ≠).
@@ -50,7 +50,7 @@ total
 ```
 
 **FizzBuzz, as a value.** `if`/`else` is an expression, so the whole program
-is a single `Map` — no printing, no mutation:
+is a single `map` — no printing, no mutation:
 
 ```epsil
 1..15 |> k =>
@@ -91,7 +91,7 @@ a
 
 **Collecting values in a loop.** A list grows by spreading the old one into
 a new literal; each literal snapshots the loop variable's current value. (A
-`Join(xs, [k])` on every turn would nest a lazy recipe once per turn and
+`join(xs, [k])` on every turn would nest a lazy recipe once per turn and
 slow to a crawl by a thousand elements — see the
 [Style Guide](/epsil/style/#building-a-list-one-element-at-a-time).)
 
@@ -161,7 +161,7 @@ let y = 5
 // ➔ (True, False)
 ```
 
-**A truth table**, as a `Map` over the four boolean pairs:
+**A truth table**, as a `map` over the four boolean pairs:
 
 ```epsil
 [(True, True), (True, False), (False, True), (False, False)] 
@@ -176,7 +176,7 @@ ONE parameter taking a pair, rather than two parameters:
 
 ```epsil
 [(True, True), (True, False), (False, True), (False, False)]
-  |> Map(((p, q)) => p && q, _)
+  |> map(((p, q)) => p && q, _)
 // ➔ [True, False, False, False]
 ```
 
@@ -193,7 +193,7 @@ Fermat's little theorem 7¹² ≡ 1 (mod 13), and 222 = 18·12 + 6, so:
 **gcd/lcm, factorization and divisors** of a number:
 
 ```epsil
-(GCD(48, 36), LCM(48, 36), FactorInteger(360), Divisors(28))
+(gcd(48, 36), lcm(48, 36), factorInteger(360), divisors(28))
 // ➔ (12, 144, [(2, 3), (3, 2), (5, 1)], [1, 2, 4, 7, 14, 28])
 ```
 
@@ -201,7 +201,7 @@ Fermat's little theorem 7¹² ≡ 1 (mod 13), and 222 = 18·12 + 6, so:
 declaration unpacks it into names in one statement:
 
 ```epsil
-divmod(a: integer, b: integer) = (Floor(a / b), a % b)
+divmod(a: integer, b: integer) = (floor(a / b), a % b)
 let (q, r) = divmod(2026, 7)
 (q, r)
 // ➔ (289, 3)
@@ -212,7 +212,7 @@ pair carried in a two-element list literal, stays exact all the way to F(200)
 — far past the 2⁵³ limit of floating point:
 
 ```epsil
-Fold((p, _) => [p[2], p[1] + p[2]], [0, 1], 1..200)[1]
+fold((p, _) => [p[2], p[1] + p[2]], [0, 1], 1..200)[1]
 // ➔ 280571172992510140037611932413038677189525
 ```
 
@@ -238,7 +238,7 @@ fact(10)
 fib(0) = 0
 fib(1) = 1
 fib(n: integer) = fib(n - 1) + fib(n - 2)
-Map(fib, 1..10)
+map(fib, 1..10)
 // ➔ [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
 ```
 
@@ -355,28 +355,28 @@ N(area * h)
 // ➔ 0.33335
 ```
 
-**Monte Carlo estimate of π.** `Random()` returns a uniform value in [0, 1):
+**Monte Carlo estimate of π.** `random()` returns a uniform value in [0, 1):
 
 ```epsil
 let inside = 0
 let total = 500
 for k in 1..total {
-  let px = Random()
-  let py = Random()
+  let px = random()
+  let py = random()
   if px^2 + py^2 < 1 { inside = inside + 1 }
 }
 N(4 * inside / total)
 // ➔ ≈ 3.14 (varies by run)
 ```
 
-**Reproducible simulations.** `WithRandomSeed(seed, body)` evaluates `body`
+**Reproducible simulations.** `withRandomSeed(seed, body)` evaluates `body`
 with a seeded random frame. The block replays exactly, while repeated draws
 *inside* it still differ (the n-th draw of a frame is `hash(seed, n)`). Frames
 nest, and the innermost one wins. Outside any frame, draws are live:
 
 ```epsil
-let a = WithRandomSeed(7, [Random(1..100), Random(1..100)])
-let b = WithRandomSeed(7, [Random(1..100), Random(1..100)])
+let a = withRandomSeed(7, [random(1..100), random(1..100)])
+let b = withRandomSeed(7, [random(1..100), random(1..100)])
 a == b
 // ➔ True
 ```
@@ -389,14 +389,14 @@ The calculus operators work symbolically, keeping parameters exact.
 a displacement `d` is `∫₀ᵈ kx dx`:
 
 ```epsil
-Integrate(k*x, (x, 0, d))
+integrate(k*x, (x, 0, d))
 // ➔ 1/2 * k * d^2
 ```
 
 A definite integral with numeric bounds evaluates exactly:
 
 ```epsil
-Integrate(Sin(x), (x, 0, Pi))
+integrate(sin(x), (x, 0, pi))
 // ➔ 2
 ```
 
@@ -404,15 +404,15 @@ Integrate(Sin(x), (x, 0, Pi))
 `sin x ≈ x` is governed by a limit at 0:
 
 ```epsil
-Limit((Sin(x) - x)/x^3, x, 0)
+limit((sin(x) - x)/x^3, x, 0)
 // ➔ -1/6
 ```
 
-**Series.** The Maclaurin expansion of sine, with a `BigO` tail marking the
+**Series.** The Maclaurin expansion of sine, with a `bigO` tail marking the
 first dropped term:
 
 ```epsil
-Series(Sin(x), x, 0)
+series(sin(x), x, 0)
 // ➔ x - 1/6 * x^3 + 1/120 * x^5 + BigO(x^7)
 ```
 
@@ -428,25 +428,25 @@ N(UnitConvert($30\,\mathrm{km/h}$, $\mathrm{m/s}$))
 // ➔ 8.333333333333334 m/s
 ```
 
-**Uncertainty propagation.** `Measurement(value, error)` carries an absolute
+**Uncertainty propagation.** `measurement(value, error)` carries an absolute
 uncertainty that `*` propagates in quadrature. For a plot measured
 L = 10 ± 0.1 m by W = 20 ± 0.2 m, the area error is
 √(20²·0.1² + 10²·0.2²) = √8 ≈ 2.83:
 
 ```epsil
-let L = Measurement(10, 0.1)
-let W = Measurement(20, 0.2)
+let L = measurement(10, 0.1)
+let W = measurement(20, 0.2)
 N(L * W)
 // ➔ 200.0 ± 2.8
 ```
 
 ## Complex Numbers
 
-The imaginary unit is `i`; complex arithmetic, `Conjugate` and `Abs` (the
+The imaginary unit is `i`; complex arithmetic, `conjugate` and `abs` (the
 modulus) all work:
 
 ```epsil
-((2 + 3i) * (1 - i), Conjugate(2 + 3i), Abs(3 + 4i))
+((2 + 3i) * (1 - i), conjugate(2 + 3i), abs(3 + 4i))
 // ➔ ((5 + i), (2 - 3i), 5)
 ```
 
@@ -462,7 +462,7 @@ $e^{i\pi/3}$
 imaginary part: (1+i)(2+i)(3+i) = 10i:
 
 ```epsil
-Product(Map(k => k + i, Range(1, 3)))
+product(map(k => k + i, Range(1, 3)))
 // ➔ 10i
 ```
 
@@ -486,8 +486,8 @@ h
 π²/6 — the difference is the tail of the series, ≈ 1/100:
 
 ```epsil
-let s = Sum(1/k^2, (k, 1, 100))
-N(Pi^2 / 6 - s)
+let s = sum(1/k^2, (k, 1, 100))
+N(pi^2 / 6 - s)
 // ➔ 0.00995016666333…
 ```
 
@@ -503,7 +503,7 @@ D(f(t), t)
 the polynomial:
 
 ```epsil
-let roots = Solve(x^2 - 5x + 6 == 0, x)
+let roots = solve(x^2 - 5x + 6 == 0, x)
 roots |> r => r^2 - 5r + 6
 // ➔ [0, 0]
 ```
@@ -534,7 +534,7 @@ N(Abs(x - phi))
 let n = 100
 let p = 5
 let z = 0
-while p <= n { z = z + Floor(n / p); p = p * 5 }
+while p <= n { z = z + floor(n / p); p = p * 5 }
 z
 // ➔ 24
 ```
@@ -553,7 +553,7 @@ count
 pentagon on the unit circle; their vector sum is exactly zero:
 
 ```epsil
-Sum(Exp(2*Pi*i*k/5), (k, 0, 4))
+sum(exp(2*pi*i*k/5), (k, 0, 4))
 // ➔ 0
 ```
 
@@ -563,7 +563,7 @@ Sum(Exp(2*Pi*i*k/5), (k, 0, 4))
 an exact rational — the 10th harmonic number:
 
 ```epsil
-Fold((a, k) => a + 1/k, 0, 1..10)
+fold((a, k) => a + 1/k, 0, 1..10)
 // ➔ 7381/2520
 ```
 
@@ -582,7 +582,7 @@ symbolic values, never floats:
 // ➔ (sqrt(3)/2, 1/4 * pi, 1/6 * pi, 1)
 ```
 
-**Solving equations exactly.** `Solve` returns the exact solution set — for a
+**Solving equations exactly.** `solve` returns the exact solution set — for a
 cubic, an absolute-value equation and an exponential equation:
 
 ```epsil
@@ -597,19 +597,19 @@ into a string:
 
 ```epsil
 let x = 2^11 - 1
-"\(x) has type \(Type(x))"
+"\(x) has type \(type(x))"
 // ➔ "2047 has type integer"
 ```
 
 **A formatted table.** `\t` and `\n` escapes in a string literal are real
 control characters. Build a table of `n`, `n²`, `n³` — one interpolated row
-per value, folded onto the header with `Join` in a pipeline (`Join` is the
-two-string concatenation; `StringJoin` joins one collection and would read the
+per value, folded onto the header with `join` in a pipeline (`join` is the
+two-string concatenation; `stringJoin` joins one collection and would read the
 accumulator as its characters):
 
 ```epsil
 let header = "n\tn^2\tn^3\n"
-1..5 |> n => "\(n)\t\(n^2)\t\(n^3)\n" |> Fold(Join, header)
+1..5 |> n => "\(n)\t\(n^2)\t\(n^3)\n" |> fold(join, header)
 ```
 
 produces (tabs aligned, newline-separated rows):
@@ -623,31 +623,31 @@ n	n^2	n^3
 5	25	125
 ```
 
-**Character frequencies.** `Characters` splits a string into user-perceived
-characters (grapheme clusters); `Tally` counts them:
+**Character frequencies.** `characters` splits a string into user-perceived
+characters (grapheme clusters); `tally` counts them:
 
 ```epsil
-let freq = "mississippi" |> Characters |> Tally
-let d = DictionaryFrom(Zip(freq[1], freq[2]))
+let freq = "mississippi" |> characters |> tally
+let d = dictionaryFrom(zip(freq[1], freq[2]))
 (d["m"], d["i"], d["s"], d["p"])
 // ➔ (1, 4, 4, 2)
 ```
 
-**Word counts.** `StringSplit` with no separator splits on runs of
+**Word counts.** `stringSplit` with no separator splits on runs of
 whitespace (with a separator string, it splits on each occurrence):
 
 ```epsil
-let words = StringSplit("the quick brown fox the lazy dog the")
-(Length(words), Tally(words)[2])
+let words = stringSplit("the quick brown fox the lazy dog the")
+(length(words), tally(words)[2])
 // ➔ (8, [3, 1, 1, 1, 1, 1])
 ```
 
-**A Caesar cipher.** A three-stage pipeline: `UnicodeScalars` turns a string
-into its code points, `Map` shifts each, and `StringFrom(…, "unicode-scalars")`
+**A Caesar cipher.** A three-stage pipeline: `unicodeScalars` turns a string
+into its code points, `map` shifts each, and `StringFrom(…, "unicode-scalars")`
 rebuilds the string. Shifting back decodes, so the cipher round-trips:
 
 ```epsil
-shift(s, k) = s |> UnicodeScalars |> c => c + k |> StringFrom(_, "unicode-scalars")
+shift(s, k) = s |> unicodeScalars |> c => c + k |> stringFrom(_, "unicode-scalars")
 (shift("hello", 3), shift(shift("hello", 3), -3))
 // ➔ ("khoor", "hello")
 ```
@@ -657,9 +657,9 @@ characters agree; a word is a palindrome when its characters equal their
 reverse:
 
 ```epsil
-let anagram = Sort(Characters("listen")) == Sort(Characters("silent"))
+let anagram = sort(characters("listen")) == sort(characters("silent"))
 let s = "racecar"
-let palindrome = Characters(s) == Reverse(Characters(s))
+let palindrome = characters(s) == reverse(characters(s))
 (anagram, palindrome)
 // ➔ (True, True)
 ```
@@ -671,8 +671,8 @@ let palindrome = Characters(s) == Reverse(Characters(s))
 
 ```epsil
 let m = [[2, 1], [1, 3]]
-let d = Determinant(m)
-let t = Transpose(m)
+let d = determinant(m)
+let t = transpose(m)
 (d, t[1, 2], t[2, 1])
 // ➔ (5, 1, 1)
 ```
@@ -681,7 +681,7 @@ let t = Transpose(m)
 
 ```epsil
 let xs = [4, 8, 15, 16, 23, 42]
-(Mean(xs), Median(xs), Max(xs), Variance(xs))
+(mean(xs), median(xs), max(xs), variance(xs))
 // ➔ (18, 31/2, 42, 182)
 ```
 
@@ -689,7 +689,7 @@ let xs = [4, 8, 15, 16, 23, 42]
 `_` is the piped value:
 
 ```epsil
-1..10 |> Filter(n => n % 2 == 0) |> Reduce((acc, n) => acc + n)
+1..10 |> filter(n => n % 2 == 0) |> reduce((acc, n) => acc + n)
 // ➔ 30
 ```
 
@@ -704,7 +704,7 @@ let m = [[1, 2], [3, 4]]
 **Pipelines.** `x |> f` applies `f` to `x`:
 
 ```epsil
-[4, 8, 15, 16, 23, 42] |> Mean
+[4, 8, 15, 16, 23, 42] |> mean
 // ➔ 18
 ```
 
@@ -712,14 +712,14 @@ When a stage takes several arguments, `_` marks the slot the piped value
 fills. The primes below 100, counted:
 
 ```epsil
-1..100 |> Filter(_, IsPrime) |> Length
+1..100 |> filter(_, isPrime) |> length
 // ➔ 25
 ```
 
 If the slot can be inferred based on the type of the previous argument, it can be left out:
 
 ```epsil
-1..100 |> Filter(IsPrime) |> Length
+1..100 |> filter(isPrime) |> length
 // ➔ 25
 ```
 
@@ -729,7 +729,7 @@ And a lambda is automatically converted to a map:
 1..100 |> x => x^2
 
 // Shorthand for:
-1..100 |> Map(x => x^2, _)
+1..100 |> map(x => x^2, _)
 ```
 
 
@@ -748,17 +748,17 @@ dot(...p, ...q)
 explicit initial value:
 
 ```epsil
-Fold((acc, n) => acc + n^2, 0, 1..5)
+fold((acc, n) => acc + n^2, 0, 1..5)
 // ➔ 55
 ```
 
-**Solve a linear system.** `LinearSolve(A, b)` solves `A·x = b`, exactly for
+**Solve a linear system.** `linearSolve(A, b)` solves `A·x = b`, exactly for
 exact input. Here `2x + y = 5`, `x + 3y = 10`:
 
 ```epsil
 let A = [[2, 1], [1, 3]]
 let b = [5, 10]
-LinearSolve(A, b)
+linearSolve(A, b)
 // ➔ [1, 3]
 ```
 
@@ -767,17 +767,17 @@ each solution as a tuple of values in the order of the variable list —
 nonlinear systems may return several tuples:
 
 ```epsil
-Solve([x^2 + y^2 == 25, x + y == 7], [x, y])
+solve([x^2 + y^2 == 25, x + y == 7], [x, y])
 // ➔ [(3, 4), (4, 3)]
 ```
 
 **Errors are values.** A type-incompatible element does not abort the
 computation — it surfaces as `NaN` while the valid inputs still compute. Here
-`Sqrt` is mapped over a list containing a string:
+`sqrt` is mapped over a list containing a string:
 
 ```epsil
 let inputs = [16, -4, "banana", 81]
-inputs |> x => Sqrt(x)
+inputs |> x => sqrt(x)
 // ➔ [4, 2i, NaN, 9]
 ```
 
@@ -789,15 +789,15 @@ has complex ones:
 ```epsil
 let A = [[2, 1], [1, 2]]
 let B = [[0, -1], [1, 0]]
-(Eigenvalues(A), Eigenvalues(B))
+(eigenvalues(A), eigenvalues(B))
 // ➔ ([3, 1], [i, -i])
 ```
 
-**Vector products.** `Cross` is the 3-D cross product; `Dot` the inner
+**Vector products.** `cross` is the 3-D cross product; `dot` the inner
 product:
 
 ```epsil
-(Cross([1, 0, 0], [0, 1, 0]), Dot([1, 2, 3], [4, 5, 6]))
+(cross([1, 0, 0], [0, 1, 0]), dot([1, 2, 3], [4, 5, 6]))
 // ➔ ([0, 0, 1], 32)
 ```
 
@@ -811,7 +811,7 @@ symbol-value table and the subtractive rule:
 ```epsil
 let value = {"I" -> 1, "V" -> 5, "X" -> 10, "L" -> 50, "C" -> 100, "D" -> 500, "M" -> 1000}
 let s = ["M","C","M","X","C","I","V"]
-let n = Length(s)
+let n = length(s)
 let total = 0
 for i in 1..n {
   let cur = value[s[i]]
@@ -821,23 +821,23 @@ total
 // ➔ 1994
 ```
 
-**A frequency table.** `Tally` returns `(values, counts)`; `Zip` pairs them and
-`DictionaryFrom` builds the dictionary. This is the idiomatic build-then-read
+**A frequency table.** `tally` returns `(values, counts)`; `zip` pairs them and
+`dictionaryFrom` builds the dictionary. This is the idiomatic build-then-read
 pattern (there is no in-place `d[k] = v` update):
 
 ```epsil
 let words = ["red","blue","red","green","blue","red","blue"]
-let t = Tally(words)
-let freq = DictionaryFrom(Zip(t[1], t[2]))
+let t = tally(words)
+let freq = dictionaryFrom(zip(t[1], t[2]))
 (freq["red"], freq["blue"], freq["green"])
 // ➔ (3, 3, 1)
 ```
 
-**Enumerating a dictionary** with `Keys` and `Values`:
+**Enumerating a dictionary** with `keys` and `values`:
 
 ```epsil
 let scores = {"alice" -> 90, "bob" -> 85, "carol" -> 95}
-(Keys(scores), Max(Values(scores)))
+(keys(scores), max(values(scores)))
 // ➔ (["alice", "bob", "carol"], 95)
 ```
 
@@ -847,33 +847,33 @@ usable directly in an expression — here summing the values over the keys:
 ```epsil
 let d = {"a" -> 1, "b" -> 2, "c" -> 3}
 let s = 0
-for k in Keys(d) { s = s + d[k] }
+for k in keys(d) { s = s + d[k] }
 s
 // ➔ 6
 ```
 
 ## Sets
 
-`Intersection`, `Union` and set equality work on sets. Passing lists to
-`Intersection` deduplicates and returns a `Set`. The common divisors of 48 and
+`intersection`, `union` and set equality work on sets. Passing lists to
+`intersection` deduplicates and returns a `Set`. The common divisors of 48 and
 36 are the intersection of their divisor lists (equivalently, the divisors of
 gcd(48, 36) = 12):
 
 ```epsil
 let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
 let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
-Intersection(d48, d36)
+intersection(d48, d36)
 // ➔ Set(1, 2, 3, 4, 6, 12)
 ```
 
 Set equality compares by membership, not by how the set was produced: a
-computed set (an `Intersection` result, a filtered set…) equals a set literal
+computed set (an `intersection` result, a filtered set…) equals a set literal
 with the same elements.
 
 ```epsil
 let d48 = [1, 2, 3, 4, 6, 8, 12, 16, 24, 48]
 let d36 = [1, 2, 3, 4, 6, 9, 12, 18, 36]
-Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
+intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
 // ➔ True
 ```
 
@@ -881,7 +881,7 @@ Intersection(d48, d36) == {1, 2, 3, 4, 6, 12}
 
 A recursive-descent JSON parser, in about a hundred lines. JSON maps onto
 Epsil data directly — objects become dictionaries, arrays become lists,
-`null` becomes `Missing` — and numbers come out **exact**: `2.5e-1` parses to
+`null` becomes `missing` — and numbers come out **exact**: `2.5e-1` parses to
 the rational `1/4`, not a float.
 
 The program pulls together most of the language:
@@ -900,14 +900,14 @@ The program pulls together most of the language:
 ```epsil
 type alias json = number | string | boolean | missing | list<json> | dictionary
 
-let digits = Characters("0123456789")
+let digits = characters("0123456789")
 isDigit(c: character | missing) = c in digits
 isWs(c: character | missing) = c == " " || c == "\n" || c == "\t" || c == "\r"
 
 // Index of the first non-whitespace character at or after i
 function skipWs(cs: list<character>, i: integer) -> integer {
   let j = i
-  while j <= Length(cs) && isWs(cs[j]) { j = j + 1 }
+  while j <= length(cs) && isWs(cs[j]) { j = j + 1 }
   j
 }
 
@@ -915,8 +915,8 @@ function skipWs(cs: list<character>, i: integer) -> integer {
 function parseDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {
   let j = i
   let n = 0
-  while j <= Length(cs) && isDigit(cs[j]) {
-    n = 10 * n + IndexOf(digits, cs[j]) - 1
+  while j <= length(cs) && isDigit(cs[j]) {
+    n = 10 * n + indexOf(digits, cs[j]) - 1
     j = j + 1
   }
   (n, j)
@@ -965,14 +965,14 @@ function scanString(cs: list<character>, i: integer) -> tuple<string, integer> {
         "r" => "\r"
         e => e // covers \" \\ \/
       }
-      out = Join(out, [c])
+      out = join(out, [c])
       j = j + 2
     } else {
-      out = Join(out, [cs[j]])
+      out = join(out, [cs[j]])
       j = j + 1
     }
   }
-  (StringJoin(ListFrom(out)), j + 1)
+  (stringJoin(listFrom(out)), j + 1)
 }
 
 // String: cs[i] is the opening quote
@@ -988,14 +988,14 @@ function parseArray(cs: list<character>, i: integer) -> tuple<json, integer> {
     while more {
       let v = 0
       (v, j) := parseValue(cs, j)
-      out = Join(out, [v])
+      out = join(out, [v])
       j = skipWs(cs, j)
       if cs[j] == "," { j = skipWs(cs, j + 1) }
       else { more = false } // at "]"
     }
     j = j + 1
   }
-  (ListFrom(out), j)
+  (listFrom(out), j)
 }
 
 // Object: cs[i] is "{" — key-value pairs become a dictionary
@@ -1012,15 +1012,15 @@ function parseObject(cs: list<character>, i: integer) -> tuple<json, integer> {
       j = skipWs(cs, skipWs(cs, j) + 1) // skip ":"
       let v = 0
       (v, j) := parseValue(cs, j)
-      keys = Join(keys, [k])
-      vals = Join(vals, [v])
+      keys = join(keys, [k])
+      vals = join(vals, [v])
       j = skipWs(cs, j)
       if cs[j] == "," { j = skipWs(cs, j + 1) }
       else { more = false } // at "}"
     }
     j = j + 1
   }
-  (DictionaryFrom(Zip(ListFrom(keys), ListFrom(vals))), j)
+  (dictionaryFrom(zip(listFrom(keys), listFrom(vals))), j)
 }
 
 // Any JSON value, dispatched on its first character
@@ -1032,13 +1032,13 @@ function parseValue(cs: list<character>, i: integer) -> tuple<json, integer> {
     "{" => parseObject(cs, j)
     "t" => (True, j + 4) // true
     "f" => (False, j + 5) // false
-    "n" => (Missing, j + 4) // null
+    "n" => (missing, j + 4) // null
     _ => parseNumber(cs, j)
   }
 }
 
 function jsonParse(s: string) -> json {
-  let (v, _) = parseValue(Characters(s), 1)
+  let (v, _) = parseValue(characters(s), 1)
   v
 }
 
@@ -1054,13 +1054,13 @@ let src = """
 }
 """
 let doc = jsonParse(src)
-(doc.name, doc.tags[2], doc.born + 1, doc.ratio, doc.active, IsMissing(doc.note))
+(doc.name, doc.tags[2], doc.born + 1, doc.ratio, doc.active, isMissing(doc.note))
 // ➔ ("Ada Lovelace", "computing", 1816, 1/4, "True", "True")
 ```
 
 Some details worth noticing: the exponent `2.5e-1` came back as the exact
 rational `1/4`, and adding 1 to `doc.born` is ordinary arithmetic on the
-parsed value. An absent key would read back as `Missing` — the same value a
+parsed value. An absent key would read back as `missing` — the same value a
 JSON `null` parses to — and `IsMissing` recognizes both. The parser is about
 as fast as you would expect an interpreted recursive-descent parser to be;
 it is a language showcase, not a replacement for a native JSON reader.

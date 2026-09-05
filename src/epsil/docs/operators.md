@@ -86,7 +86,7 @@ operator table, since they are not spelled with an operator symbol.
 
 The three Unicode-only rows — the radical signs, and the superscript and
 subscript runs — have no ASCII spelling. By default the serializer writes the
-ASCII forms `Sqrt(x)`, `x ^ 2` and `Subscript(x, k + 1)`. In its
+ASCII forms `sqrt(x)`, `x ^ 2` and `Subscript(x, k + 1)`. In its
 fancy-symbol mode (the `fancySymbols` option of `serializeEpsil`, or
 `epsil --epsil --fancy-symbols`) it writes `√x`, `∛x`, `∜x`, and an
 integer-literal exponent as a superscript (`x²`, `x⁻¹`); a symbolic exponent
@@ -140,7 +140,7 @@ more useful to the author than silently ending the statement.
 the order they happen instead of inside-out:
 
 ```epsil-live
-[3, 1, 2] |> Sort |> Reverse
+[3, 1, 2] |> sort |> reverse
 // ➔ [3, 2, 1]
 ```
 
@@ -148,14 +148,14 @@ A stage that takes more than one argument is written as a call, with `_` in the
 slot the piped value fills:
 
 ```epsil-live
-1..10 |> Filter(_, n => n % 2 == 1) |> Map(n => n^2, _) |> Sum
+1..10 |> filter(_, n => n % 2 == 1) |> map(n => n^2, _) |> sum
 // ➔ 165
 ```
 
 The `_` may be left out: a call stage that is missing required arguments
 receives the piped value in the first slot its type fits, so
-`xs |> Take(10)` means `xs |> Take(_, 10)` and `xs |> Map(f)` means
-`xs |> Map(f, _)` (the mapping function is `Map`'s first argument). This
+`xs |> take(10)` means `xs |> take(_, 10)` and `xs |> map(f)` means
+`xs |> map(f, _)` (the mapping function is `map`'s first argument). This
 only fills a hole — a call that is already complete keeps its ordinary
 meaning, and an explicit `_` anywhere in the call says exactly where the
 piped value goes.
@@ -163,25 +163,25 @@ piped value goes.
 A stage may also be a **lambda**, written inline without parentheses — after
 `|>` the arrow binds tighter than the pipe, and the lambda's body ends at the
 next `|>`. When the piped value is a collection, a one-parameter lambda stage
-is applied **to each element** (an implicit `Map`); `_^2` is shorthand for
+is applied **to each element** (an implicit `map`); `_^2` is shorthand for
 such a lambda. The following three pipelines are equivalent:
 
 ```epsil-live
-1..oo |> Take(_, 10) |> Map(_^2, _) |> Sum
+1..oo |> take(_, 10) |> map(_^2, _) |> sum
 // ➔ 385
 ```
 
 ```epsil
-1..oo |> Take(10) |> x => x^2 |> Sum
-1..oo |> Take(10) |> _^2 |> Sum
+1..oo |> take(10) |> x => x^2 |> sum
+1..oo |> take(10) |> _^2 |> sum
 ```
 
 Note the two readings of `_`: in a **call** stage it is the piped value
-(`Take(_, 10)`); in an **operator-written** stage (`_^2`, `_ + 1`) it is the
+(`take(_, 10)`); in an **operator-written** stage (`_^2`, `_ + 1`) it is the
 element of the implicit lambda. A **named** function stage always receives
-the whole value — `xs |> Sum` sums the collection, it does not map — as does
+the whole value — `xs |> sum` sums the collection, it does not map — as does
 a lambda whose annotated parameter accepts it
-(`xs |> (l: list<number>) => Length(l)`).
+(`xs |> (l: list<number>) => length(l)`).
 
 A pipe hands its stage exactly **one** value, so a stage that declares more
 than one parameter is a `pipe-stage-arity` error rather than a partial
@@ -194,7 +194,7 @@ produce:
 ```
 
 The fix is the **call** form above, with `_` marking the piped value's slot
-(`xs |> Fold(f, 0, _)`). The same applies to a named stage: `xs |> add` on a
+(`xs |> fold(f, 0, _)`). The same applies to a named stage: `xs |> add` on a
 two-parameter `add` is this error, not a partially applied `add`.
 
 When the piped value is a collection whose elements are tuples and you want to
@@ -224,7 +224,7 @@ intermediate reads better.
 ## Absence coalescing: `??` {#absence-coalescing}
 
 `a ?? b` is `Coalesce(a, b)`: the value of `a` unless `a` is **absent**
-(`Missing` or `NaN`), in which case the value of `b`. It is lazy — `b` is not
+(`missing` or `NaN`), in which case the value of `b`. It is lazy — `b` is not
 evaluated when `a` is present.
 
 ```epsil
@@ -306,7 +306,7 @@ parentheses. It is still ONE parameter — it takes one argument, a tuple, and
 binds a name to each component:
 
 ```epsil
-[(True, True), (True, False)] |> Map(((p, q)) => p && q, _)
+[(True, True), (True, False)] |> map(((p, q)) => p && q, _)
 // ➔ [True, False]
 ```
 
@@ -333,21 +333,21 @@ emit code that binds the wrong names.
 **Callbacks and arity.** An ordinary call with too few arguments partially
 applies the function — `f(1)` on a two-parameter `f` is a function awaiting
 the second argument. Inside a collection operator that never happens: the
-operator decides how many arguments the callback receives (`Map` supplies
-one element per source collection, `Filter`/`Any`/`All`/`Count`/`TakeWhile`
-supply one, `Reduce`/`Fold` supply the accumulator and the element), and a
+operator decides how many arguments the callback receives (`map` supplies
+one element per source collection, `filter`/`any`/`all`/`count`/`takeWhile`
+supply one, `reduce`/`fold` supply the accumulator and the element), and a
 lambda whose parameter count cannot match is a `callback-arity` error at
 parse/canonicalization time rather than a list of leftover closures. The
 message names both sides and, for the pair case, the fix:
 
 ```epsil
-Map((p, q) => p + q, [(1, 2), (3, 4)])
+map((p, q) => p + q, [(1, 2), (3, 4)])
 // error: Map calls its callback with 1 argument (each element of the
 // collection); `(p, q) => p + q` declares 2 parameters. To take a pair
 // apart, use a tuple pattern parameter: ((p, q)) => …
 ```
 
-`Sort` (a key or a comparator) and `Iterate` (`f(previous)` or
+`sort` (a key or a comparator) and `iterate` (`f(previous)` or
 `f(index, previous)`) accept either of their two arities; a `() => …`
 literal is a constant and fits any slot. A callback whose arity is not
 statically known — a value typed `function` or `callback<…>`, a generic
@@ -416,7 +416,7 @@ arguments: the tuple's elements become ordinary positional arguments.
 f(...t)          // t's elements become f's arguments
 f(1, ...t, q)    // splices between positional arguments
 g(...p, ...q)    // several spreads splice in order
-Max(...t)        // variadic built-ins accept spreads
+max(...t)        // variadic built-ins accept spreads
 ```
 
 In a call, only **tuples** spread — argument lists are tuple-shaped, so a
@@ -442,7 +442,7 @@ let s = {2, 3}
 
 The splice happens at canonicalization: literal collections splice
 immediately, and a symbolic or lazy segment lowers to the equivalent
-`Join` expression — a lone spread `[...xs]` is `Join(xs)`, the list
+`join` expression — a lone spread `[...xs]` is `join(xs)`, the list
 materialization of `xs`, and an infinite segment stays lazy
 (`[...(1..oo), 5] |> Take(3)` is `[1, 2, 3]`). Set literals deduplicate as
 usual.
@@ -526,8 +526,8 @@ x^1/2     // (x^1)/2, not x^(1/2)
 
 ## Radical signs: `√`, `∛`, `∜` {#radical-signs}
 
-A radical sign is a prefix operator: `√x` is `Sqrt(x)`, `∛x` is `Root(x, 3)`,
-`∜x` is `Root(x, 4)`. Its operand is what a function call would take — a
+A radical sign is a prefix operator: `√x` is `sqrt(x)`, `∛x` is `root(x, 3)`,
+`∜x` is `root(x, 4)`. Its operand is what a function call would take — a
 primary with its postfix clauses and scripts, or another prefix operator — but
 not an infix operator:
 
@@ -587,6 +587,11 @@ xₖ₊₁        // Subscript(x, k + 1)
 (a + b)ₖ    // Subscript(a + b, k)
 xₙ²         // (x_n)^2
 ```
+
+A `Subscript` whose index evaluates to an integer or a symbol names the same
+symbol the folded spelling names: with `k = 3`, `xₖ₊₁` evaluates to `x_4`, and
+to the value of `x_4` if it has one. An index that stays unknown, or is not an
+integer, keeps the expression symbolic.
 
 Like the factorial, a script must **abut** its operand: `x ²` ends the
 expression at `x`, and the stray `²` is a diagnostic. A run that is not an
@@ -721,7 +726,7 @@ Three spellings, two meanings:
 - **`==` always compares** (and `===` is `Same`, structural identity).
   A third comparison tier asks the prover whether the two sides are equal
   for **every** value of their free variables:
-  `IdenticallyEqual(Sin(t)^2 + Cos(t)^2, 1)` is `True`, where `==` leaves
+  `identicallyEqual(sin(t)^2 + cos(t)^2, 1)` is `True`, where `==` leaves
   the equation as an inert condition. It is deliberately spelled as a call,
   never as an operator — the equivalence glyphs `≡`, `≢`, and `≣` are
   rejected outright, because their bar counts cross the `=`-run lengths
@@ -742,7 +747,7 @@ count = count + 1
 a reader of mathematics expects:
 
 ```epsil
-Solve(x^2 = 4, x)        // Equal — the equation, not an assignment
+solve(x^2 = 4, x)        // Equal — the equation, not an assignment
 if a = true { 1 } else { 2 }
 [a = 1, b = 2]
 ```

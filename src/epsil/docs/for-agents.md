@@ -17,7 +17,7 @@ output verified — the examples cannot drift from the implementation. Epsil is
 
 Epsil is a programming language for scientific computing built on the Compute
 Engine. It is **symbolic and exact by default**: `1/3` is the rational one
-third, not `0.333…`, and `Ln(2)` or `Sqrt(2)` stay symbolic. Ask for a decimal
+third, not `0.333…`, and `ln(2)` or `sqrt(2)` stay symbolic. Ask for a decimal
 explicitly with `N(expr)`. A program is a sequence of statements (separated by
 newlines or `;`); its result is the **value of the last statement**. There is
 no `print` — produce the value you want as the final statement. Runtime
@@ -36,7 +36,7 @@ diagnostics. Embed via `executeEpsil(ce, source)` from
 
 **Naming convention**: library operators are written in lowercase (`sin`,
 `map`, `simplify`, `pi`) and also answer to their MathJSON names (`Sin`,
-`Map`, `Simplify`, `Pi`). Your variables and functions are lowercase too and
+`map`, `simplify`, `pi`). Your variables and functions are lowercase too and
 shadow a library name by scope (`let sum = 0` makes `sum` a variable).
 Operators with their own syntax have no lowercase spelling (`Add` is `+`,
 `If` is `if`, `List` is `[…]`). Calling an unknown function is not an
@@ -56,8 +56,8 @@ function g(n) {           // function definition, block style
   let t = n + 1           // blocks are lexically scoped
   t * 2                   // a block's value is its last expression
 }
-hold h(e) = Head(e)       // hold: arguments arrive UNEVALUATED (h(x + 1) ➔ Add)
-hold mySum(body, bind i, n) = Sum(body, (i, 1, n))  // bind: a bound-variable slot; mySum(k^2, k, 3) ➔ 14
+hold h(e) = head(e)       // hold: arguments arrive UNEVALUATED (h(x + 1) ➔ Add)
+hold mySum(body, bind i, n) = sum(body, (i, 1, n))  // bind: a bound-variable slot; mySum(k^2, k, 3) ➔ 14
 function op(a, b) commutative associative -> number { a + b }  // algebraic words in the specifier slot
 /// A doc comment right before a definition is its description (About, hover)
 let parity = "even" if x % 2 == 0 else "odd"  // conditional expression; if is also an expression: if c { a } else { b }
@@ -82,7 +82,7 @@ g(x) + f(2)
   component); a matrix (list of lists)
   indexes as `m[2, 1]` or `m[2][1]`.
 - **Spread**: in a call argument list, `...t` splices a **tuple**'s elements
-  in as positional arguments (`f(...p)`, `Max(...t)`, `g(1, ...p, ...q)`).
+  in as positional arguments (`f(...p)`, `max(...t)`, `g(1, ...p, ...q)`).
   Tuples only — spreading a list is an `incompatible-type` error — and `...`
   is valid nowhere else.
 - **Destructuring**: `let (q, r) = divmod(17, 5)` binds a tuple's components
@@ -113,8 +113,8 @@ actually happens → write instead:**
 | Reflex | What happens in Epsil | Write instead |
 |:--|:--|:--|
 | `xs[0]` for first element | **Silently** yields `NaN` — indexing is **1-based** | `xs[1]`; negative indices work: `xs[-1]` is the last element |
-| `7 // 2` floor division | **Silent wrong value**: `//` starts a comment, so this is just `7` | `Floor(7 / 2)` |
-| `7 / 2` integer division | Exact rational `7/2`, not `3` or `3.5` | `Floor(7 / 2)` for `3`; `N(7 / 2)` for `3.5` |
+| `7 // 2` floor division | **Silent wrong value**: `//` starts a comment, so this is just `7` | `floor(7 / 2)` |
+| `7 / 2` integer division | Exact rational `7/2`, not `3` or `3.5` | `floor(7 / 2)` for `3`; `N(7 / 2)` for `3.5` |
 | `range(1, 5)` excludes end | Inert call + did-you-mean; `Range(1, 5)` **includes** 5: `[1,2,3,4,5]` | `Range(1, n)` or `1..n` for 1…n inclusive |
 | `x = 5` at top level | Assigns — `=` assigns only as a whole statement with a name on the left | `x == 5` for the equation |
 | `# comment` | Diagnostic (`#` introduces pragmas) | `// comment` or `/* … */` |
@@ -124,14 +124,14 @@ actually happens → write instead:**
 | `return` | Reserved word, **not implemented** | A block's value is its last expression |
 | `break` / `continue` | Work as expected inside a `while`/`for` body; the loop context resets at every function and lambda boundary | *(nothing to change)* |
 | `print(x)` | Inert unknown call; nothing prints | The program's value is its **last statement** |
-| `len(xs)` | Inert + did-you-mean | `Length(xs)` |
-| `s[0]` / `len(s)` on a string | Works — a string is a collection of its characters (grapheme clusters), 1-based | `s[1]`, `Length(s)` |
-| `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `Join(a, b)` |
-| `xs[2] = 9` | Runtime error value — no element assignment; collections are immutable values | Rebuild: `Map`; in a loop, `ListFrom(Join(xs, [v]))` |
+| `len(xs)` | Inert + did-you-mean | `length(xs)` |
+| `s[0]` / `len(s)` on a string | Works — a string is a collection of its characters (grapheme clusters), 1-based | `s[1]`, `length(s)` |
+| `"a" + "b"` | Error values inside an `Add` | `"\(a) and \(b)"` interpolation, or `join(a, b)` |
+| `xs[2] = 9` | Runtime error value — no element assignment; collections are immutable values | Rebuild: `map`; in a loop, `listFrom(join(xs, [v]))` |
 | `and` / `or` / `not` | Parse diagnostics (reserved words) | `&&`, `\|\|`, `!` |
-| `x**0.5` habits: `x^1/2` | Parses as `(x^1)/2` — precedence, not a root | `Sqrt(x)` or `x^(1/2)` |
-| `math.floor`, `np.mean` | No modules/namespaces | Everything is global: `Floor`, `Mean`, `Sin`, … |
-| `for` loop building a value | Loops are for **effect**; their value is `Nothing` | Accumulate into a `let`, or use `Map`/`Filter`/`Reduce` |
+| `x**0.5` habits: `x^1/2` | Parses as `(x^1)/2` — precedence, not a root | `sqrt(x)` or `x^(1/2)` |
+| `math.floor`, `np.mean` | No modules/namespaces | Everything is global: `floor`, `mean`, `sin`, … |
+| `for` loop building a value | Loops are for **effect**; their value is `nothing` | Accumulate into a `let`, or use `map`/`filter`/`reduce` |
 | f-strings / template literals | Backtick is the verbatim-symbol quote; `${}` invalid | `"x is \(x)"` works in any string |
 
 Comfortable habits that **do** transfer: `**` is an accepted alias of `^`
@@ -150,8 +150,8 @@ Exactness and numeric approximation:
 
 ```epsil
 let exact = 1/3 + 1/6      // stays the exact rational 1/2
-let sym = Sqrt(2) * Sqrt(2) // symbolic radicals reduce exactly
-"\(exact), \(sym), \(N(Pi, 10))"
+let sym = sqrt(2) * sqrt(2) // symbolic radicals reduce exactly
+"\(exact), \(sym), \(N(pi, 10))"
 // ➔ "1/2, 2, 3.141592654"
 ```
 
@@ -166,16 +166,16 @@ add10(fact(5))
 // ➔ 130
 ```
 
-Collections pipeline — `Map`/`Filter`/`Reduce` for value-producing iteration,
+Collections pipeline — `map`/`filter`/`reduce` for value-producing iteration,
 `|>` to chain; `1..n` is an inclusive range:
 
 ```epsil
-1..10 |> Filter(_, k => k % 2 == 0) |> Map(k => k^2, _)
+1..10 |> filter(_, k => k % 2 == 0) |> map(k => k^2, _)
 // ➔ [4, 16, 36, 64, 100]
 ```
 
 ```epsil
-Reduce([1, 2, 3, 4], (acc, x) => acc + x, 0) + Sum(1..100)
+reduce([1, 2, 3, 4], (acc, x) => acc + x, 0) + sum(1..100)
 // ➔ 5060
 ```
 
@@ -194,7 +194,7 @@ a
 ```
 
 Building a list in a loop — spread the old list into a new literal (each
-literal snapshots the current value); never `Join(xs, [k])` on every turn,
+literal snapshots the current value); never `join(xs, [k])` on every turn,
 which nests a lazy recipe per turn and takes seconds by a thousand elements:
 
 ```epsil
@@ -220,10 +220,10 @@ classify(-5)
 Symbolic computation:
 
 ```epsil
-let poly = Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
-let roots = Solve(x^2 + x - 6 == 0, x)
+let poly = simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
+let roots = solve(x^2 + x - 6 == 0, x)
 let deriv = D(x^3 + x, x)
-let area = Integrate(Sin(x), (x, 0, Pi))
+let area = integrate(sin(x), (x, 0, pi))
 (poly, roots, deriv, area)
 // ➔ (4x^3 + 2x^2 + 3, [2,-3], 3x^2 + 1, 2)
 ```
@@ -232,7 +232,7 @@ Lists, slices, and common operators (all indexing is 1-based):
 
 ```epsil
 let xs = [10, 20, 30, 40]
-(xs[1..2], First(xs), Last(xs), Sort([3, 1, 2]), IndexOf(xs, 30))
+(xs[1..2], first(xs), last(xs), sort([3, 1, 2]), indexOf(xs, 30))
 // ➔ ([10,20], 10, 40, [1,2,3], 3)
 ```
 
@@ -241,12 +241,12 @@ keys):
 
 ```epsil
 let d = {one -> 1, two -> 2}
-(d.two, d["two"], IsMissing(d.missing), Coalesce(d.missing, 0))
+(d.two, d["two"], isMissing(d.missing), Coalesce(d.missing, 0))
 // ➔ (2, 2, True, 0)
 ```
 
 An absent numeric field evaluates to `NaN`; an absent nonnumeric field remains
-`Missing`. `IsMissing` recognizes both forms.
+`missing`. `isMissing` recognizes both forms.
 
 ## Library Quick Roster
 
@@ -254,53 +254,53 @@ Verified operator names, so you don't have to guess. The complete index, by
 category with signatures, is the [Standard Library](/epsil/library/) page;
 search by concept with `epsil doc <keywords>`.
 
-- **Numbers**: `Abs`, `Floor`, `Ceil` (not `Ceiling`), `Round`, `Sqrt`,
-  `Max`, `Min` (each takes a list or varargs), `Mod`, `GCD`, `LCM`,
-  `IsPrime`, `Random(a..b)`.
-- **Lists**: `Length`, `First`, `Last`, `Rest`, `Take`, `Drop`, `Reverse`,
-  `Sort` (optional comparator — see below), `IndexOf`, `Join`, `Append`,
-  `Sum`, `Mean`, `StandardDeviation` (sample, n−1), `Map`, `Filter`,
-  `Count(xs)` / `Count(xs, v)` / `Count(xs, pred)`,
-  `Reduce(list, f, init)`, `Range(a, b)` inclusive, `Range(a, b, step)`.
-- **Strings**: `Characters`, `StringSplit(s)` (splits on whitespace by
-  default), `String(x)`, `Join(a, b)` to concatenate strings,
+- **Numbers**: `abs`, `floor`, `ceil` (not `Ceiling`), `round`, `sqrt`,
+  `max`, `min` (each takes a list or varargs), `Mod`, `gcd`, `lcm`,
+  `isPrime`, `random(a..b)`.
+- **Lists**: `length`, `first`, `last`, `rest`, `take`, `drop`, `reverse`,
+  `sort` (optional comparator — see below), `indexOf`, `join`, `append`,
+  `sum`, `mean`, `standardDeviation` (sample, n−1), `map`, `filter`,
+  `count(xs)` / `count(xs, v)` / `count(xs, pred)`,
+  `reduce(list, f, init)`, `Range(a, b)` inclusive, `Range(a, b, step)`.
+- **Strings**: `characters`, `stringSplit(s)` (splits on whitespace by
+  default), `String(x)`, `join(a, b)` to concatenate strings,
   `StringJoin(xs, sep?)` to join ONE collection with an optional separator
-  (a string subject means its characters, so `StringJoin("ab", "cd")` is
-  `"acdb"`, not `"abcd"` — use `Join` or `"\(a)\(b)"` to concatenate).
-  Substring search is `RangeOf(s, needle)` (a span, or `Nothing`),
-  `ContainsSequence`, `StartsWith`, `EndsWith` — `c in s` is *character*
+  (a string subject means its characters, so `stringJoin("ab", "cd")` is
+  `"acdb"`, not `"abcd"` — use `join` or `"\(a)\(b)"` to concatenate).
+  Substring search is `rangeOf(s, needle)` (a span, or `nothing`),
+  `containsSequence`, `startsWith`, `endsWith` — `c in s` is *character*
   membership. Also `StringReplace(s, target, replacement, count?)`,
-  `Trim`/`TrimStart`/`TrimEnd`, `StringRepeat`, `PadStart`/`PadEnd`,
-  `ToUpperCase`/`ToLowerCase`/`CaseFold`, `StringCompare(a, b)` (`-1/0/1`,
+  `trim`/`trimStart`/`trimEnd`, `stringRepeat`, `padStart`/`padEnd`,
+  `toUpperCase`/`toLowerCase`/`caseFold`, `stringCompare(a, b)` (`-1/0/1`,
   code-point order) and `NumberFrom(s, base?)`.
-- **Dictionaries**: `Keys`, `Values`.
-- **Absence**: `Missing` preserves a missing position; `Nothing` is omitted
-  from arguments and collections; `IsMissing`, `Coalesce`.
-- **Symbolic**: `Simplify`, `HoldValues(body)` (evaluate `body` with its
-  assigned symbols kept symbolic), `Solve(eq == v, x)`, `D(expr, x)`,
-  `Derivative(f)`, `Integrate`, `N`, `Type`, `IsError(x)` (true for an error
+- **Dictionaries**: `keys`, `values`.
+- **Absence**: `missing` preserves a missing position; `nothing` is omitted
+  from arguments and collections; `isMissing`, `Coalesce`.
+- **Symbolic**: `simplify`, `HoldValues(body)` (evaluate `body` with its
+  assigned symbols kept symbolic), `solve(eq == v, x)`, `D(expr, x)`,
+  `derivative(f)`, `integrate`, `N`, `type`, `isError(x)` (true for an error
   value, or an expression carrying one).
 
-Caution: `Head` and `Tail` exist but are **structural** operators
-(`Head([1,2,3])` is the *operator name* `"List"`, not the first element) —
-for elements use `First`/`Rest`.
+Caution: `head` and `tail` exist but are **structural** operators
+(`head([1,2,3])` is the *operator name* `"List"`, not the first element) —
+for elements use `first`/`rest`.
 
 ```epsil
-Sort([3, 1, 4, 1, 5], (a, b) => a > b)
+sort([3, 1, 4, 1, 5], (a, b) => a > b)
 // ➔ [5,4,3,1,1]
 ```
 
 ## Watch Out For
 
-- **Laziness**: `Range`, `Map`, `Filter`, `Take`, `Drop`, `Join` are
+- **Laziness**: `Range`, `map`, `filter`, `take`, `drop`, `join` are
   generators — they enumerate when materialized (indexed, aggregated, or
-  iterated; e.g. a `Take(xs, 3)` stored inside a tuple stays an unevaluated
+  iterated; e.g. a `take(xs, 3)` stored inside a tuple stays an unevaluated
   `Take(...)`), and a deferred mapping function reads variables **at
   materialization time**. Collection *literals* snapshot their element values
   immediately. To force work now, aggregate or index where you stand.
 - **Output is the engine's textual form**: strings and booleans print
   *quoted* (`"True"`, `"florb"`) — that quoted `"True"` is a boolean, not a
-  string. Derived collections (`Range`, `Map`/`Filter` results, loop-built
+  string. Derived collections (`Range`, `map`/`filter` results, loop-built
   lists) preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is
   complete — the CLI's `--json` output materializes the full elements (up to
   10,000). Literals print in full.
@@ -310,7 +310,7 @@ Sort([3, 1, 4, 1, 5], (a, b) => a > b)
   (call-by-name: `hold twice(e) = e + e` evaluates `e` twice; `let v = e`
   once). Every parameter of a hold function is held; there is no
   per-parameter form.
-- **Binder variables stay symbolic**: `D(expr, x)` and `Integrate(expr, x)`
+- **Binder variables stay symbolic**: `D(expr, x)` and `integrate(expr, x)`
   treat `x` symbolically even if `x` has an assigned value; the *result*
   then evaluates with the value. So `let x = 2` followed by
   `N(D(x^3 + x, x))` is `13` — the derivative is taken first.
@@ -327,12 +327,12 @@ Sort([3, 1, 4, 1, 5], (a, b) => a > b)
 - **`3!^2` is a diagnostic** — the lexer reads `!^` as one operator token.
   Space it: `3! ^ 2`.
 - **`match` binds bare names**: `match x { Pi => … }` does not compare with π
-  — it binds a new variable named `Pi`. Pin values with `==`:
+  — it binds a new variable named `pi`. Pin values with `==`:
   `match x { == Pi => … }`.
 - **The dot calls protocol functions only**: `c.area()` is `area(c)` when
   `area` is a `protocol` function the type of `c` conforms to. A library
   function is not reached that way — `xs.Sort()` is the error
-  `dot-call-not-a-protocol-function`; write `Sort(xs)` or `xs |> Sort`.
+  `dot-call-not-a-protocol-function`; write `sort(xs)` or `xs |> sort`.
 
 For the full reference start at [Epsil](/epsil/), the complete grammar in
 [Syntax](/epsil/syntax/), and ~70 more verified programs in

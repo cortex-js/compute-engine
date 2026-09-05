@@ -161,7 +161,7 @@ mention Epsil if it doesn't reach for the tools on its own:
 - _"Use Epsil to compute the exact value of the sum of 1/k² for k from 1
   to 100."_
 - _"Solve x³ − 6x² + 11x − 6 = 0 exactly with Epsil."_
-- _"What does the Epsil function `Reduce` do?"_
+- _"What does the Epsil function `reduce` do?"_
 
 The assistant writes a small Epsil program, runs it with the `evaluate`
 tool, and reports the result — exact fractions, radicals, and symbolic

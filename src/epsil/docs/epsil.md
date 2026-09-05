@@ -41,14 +41,14 @@ Epsil is **symbolic by default**: expressions stay exact unless you ask for a
 numeric approximation with `N()`.
 
 ```epsil-live
-Simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
+simplify(2 + 3x^3 + 2x^2 + x^3 + 1)
 ```
 
 Values have a type, and strings support `\(…)` interpolation:
 
 ```epsil-live
 let x = 2^11 - 1
-"\(x) has type \(Type(x))"
+"\(x) has type \(type(x))"
 ```
 
 Errors are ordinary values, so a program never throws to its host — a problem
