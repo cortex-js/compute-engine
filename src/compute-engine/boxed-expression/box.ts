@@ -2883,6 +2883,16 @@ function canonicalizeBinder(
             inferred: site.type === undefined,
           });
       }
+      // Record every name this binder declares — the later clauses' too,
+      // whichever phase declares them — so a `Declare` statement in the
+      // binder's direct body that re-declares one of them is refused
+      // (`canonicalBlock`, `library/control-structures.ts`).
+      const binderNames = new Set(scope.binderNames ?? []);
+      for (const site of preSites) {
+        const sym = symbolAtSite(xs, site.path);
+        if (sym !== undefined) binderNames.add(sym.symbol);
+      }
+      if (binderNames.size > 0) scope.binderNames = binderNames;
       result = applyOperatorDefinition(
         ce,
         name,

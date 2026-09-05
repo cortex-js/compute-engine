@@ -451,7 +451,23 @@ application inside the body of a big operator or the statements of a `Block`,
 which those operators evaluate themselves in their own order; that needs an
 asynchronous reduction of their own. Pinned in `test/compute-engine/async-only-held-operand.test.ts`.
 
-### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (OPEN, compile — found 2026-09-03 reviewing the `while let` compile work)
+### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (RULED 2026-09-05, FIXED 2026-09-05 — found 2026-09-03 reviewing the `while let` compile work)
+
+**Ruling (2026-09-05):** a `let`/`const` may not re-declare a name its own scope
+already declares — an earlier `let` of the same block or program, a parameter
+of the function whose body the block is, or the index of the loop whose body
+the block is. The statement is the `variable-redeclaration` error on every
+route: `canonicalBlock` canonicalizes it to the error value, the Epsil static
+pass reports it before the program runs (and, at the top level of one program,
+`executeEpsil` evaluates the repeat to the error value), and the compiler
+refuses the invalid block. Shadowing a name bound in an OUTER scope — a nested
+block, a closure body, an `if` inside a loop body — stays legal, and the
+shadowing `let`'s initializer now reads the outer name on every re-entry of the
+block (it used to read its own previous value: `let t = 1; for k in 1..3 { let
+t = t * 2 }` collected 2, 4, 8). Across programs a top-level `let` re-declares
+legally (the notebook re-run gesture). Pinned in
+`test/epsil/redefinition-discipline.test.ts` and `test/compute-engine/scope.test.ts`.
+The original report, kept for the mechanism:
 
 `match xs { [h, ...t] => do { let t = 7; Length([t]) } }` and
 `((t) => do { let t = 7; t })(1)` both evaluate to the error

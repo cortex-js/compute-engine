@@ -372,6 +372,15 @@ export type Scope<Binding = unknown> = {
   bindings: Map<string, Binding>;
   /** When true, auto-declarations during canonicalization are promoted to parent scope. */
   noAutoDeclare?: boolean;
+  /** The names a binder operator declares in this scope — a loop or
+   * comprehension index (pattern leaves included), a `Sum` index, a `D`
+   * variable. Recorded by `canonicalizeBinder` (`boxed-expression/box.ts`).
+   * The binder's body block gets a scope of its own UNDER this one, and a
+   * `Declare` statement there that re-declares one of these names is refused
+   * (`canonicalBlock`, `library/control-structures.ts`). A function
+   * literal's parameters are not recorded here: they are declared in the
+   * body block's own scope and known through the shadowed-parameter stack. */
+  binderNames?: ReadonlySet<string>;
 };
 
 /**

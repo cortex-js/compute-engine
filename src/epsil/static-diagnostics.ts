@@ -127,6 +127,13 @@ const SNIPPET_LENGTH = 60;
  * attributable to an `Error` the source itself authored (see `authoredErrors`).
  */
 const CANONICALIZATION_ERROR_CODES = new Set([
+  // A `let`/`const` that re-declares a name its own scope already declares —
+  // a parameter, a loop index, an earlier `let` of the block — is refused by
+  // `canonicalBlock` (`library/control-structures.ts`, user ruling
+  // 2026-09-05), so it is a canonicalization error and belongs on the static
+  // route. The top level has no block: `variableRedeclarationDiagnostic`
+  // reports it there.
+  'variable-redeclaration',
   // A SECOND implementation block for one (type, protocol) pair in this batch
   // (ruling P47). The pre-pass registers conformances from the canonical
   // handler, so it is the pass that sees the collision first — and, unlike the
@@ -803,6 +810,16 @@ function canonicalizationDiagnostics(
   // redefinition.
   const clausesInThisUnit = new Map<string, ClauseSite[]>();
 
+  // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05), top level: the range of
+  // the first `let`/`const` of each name this unit declared, so a second one
+  // in the SAME program is reported (`variable-redeclaration`). Across units
+  // — a re-run notebook cell, a later REPL line — a `let` re-declares
+  // legally, so the collector is pass-local, like `declaredInThisUnit`.
+  // Inside a block the same rule is enforced by `canonicalBlock`
+  // (`library/control-structures.ts`), whose error node this pass reports
+  // like any other canonicalization error.
+  const variablesInThisUnit = new Map<string, [number, number]>();
+
   // The names `applyAssignmentTypeEffect` itself declared into the pass
   // scope (so their definitions die with it) — the only definitions the
   // effect may REFINE in place (placeholder-skeleton refinement); an outer
@@ -821,6 +838,13 @@ function canonicalizationDiagnostics(
       declaredInThisUnit
     );
     if (redefinition !== undefined) diagnostics.push(redefinition);
+    const variableRedeclaration = variableRedeclarationDiagnostic(
+      statement,
+      source,
+      variablesInThisUnit
+    );
+    if (variableRedeclaration !== undefined)
+      diagnostics.push(variableRedeclaration);
 
     // Provenance: the `Error` nodes the statement already carries *before*
     // canonicalization are source-authored values, not static problems.
@@ -1302,6 +1326,74 @@ function redefinitionDiagnostic(
   }
 
   return undefined;
+}
+
+/**
+ * SAME-SCOPE RE-DECLARATION, top level: is `statement` a `let`/`const` of a
+ * name an earlier `let`/`const` of this unit already declared? `declared` maps
+ * each declared name to the range of its first declaration; this function
+ * fills it for a statement it accepts and consults it for the rest. A
+ * destructuring `let (p, q) = t` declares each pattern leaf (`_` declares
+ * nothing). The FIRST colliding name wins and the statement yields one
+ * diagnostic. Assignment (`x = …`) is not a declaration and is never reported.
+ */
+function variableRedeclarationDiagnostic(
+  statement: MathJsonExpression,
+  source: string,
+  declared: Map<string, [number, number]>
+): ParsingDiagnostic | undefined {
+  const names = declaredVariableNames(statement);
+  if (names.length === 0) return undefined;
+  const range = statementRange(statement, source);
+  // The statement is accepted or refused WHOLE (as `canonicalBlock` does
+  // inside a block): a refused destructuring `let` declares none of its
+  // leaves, so they stay free for a later `let`.
+  const collision = names.find((name) => declared.has(name));
+  if (collision === undefined) {
+    for (const name of names) declared.set(name, range);
+    return undefined;
+  }
+  return {
+    severity: 'error',
+    message: ['variable-redeclaration', collision],
+    range: [range[0], range[1], range[0]],
+    notes: [
+      {
+        message: `\`${collision}\` is first declared here`,
+        range: declared.get(collision)!,
+      },
+    ],
+  };
+}
+
+/**
+ * The names a `Declare` statement declares, read from the raw AST: the symbol
+ * target, or each leaf of a destructuring tuple pattern (`let (p, q) = t`).
+ * `_` discards a component and `Nothing` is the erasure marker; neither
+ * declares. Empty for any other statement — assignment (`x = …`) is not a
+ * declaration. Shared by the static pass and the runtime tier of
+ * `executeEpsil`, so the two describe the same statement.
+ */
+export function declaredVariableNames(statement: MathJsonExpression): string[] {
+  if (operator(statement) !== 'Declare') return [];
+  const names: string[] = [];
+  const collect = (node: MathJsonExpression | null): void => {
+    if (node === null) return;
+    if (operator(node) === 'Tuple') {
+      for (const el of operands(node)) collect(el);
+      return;
+    }
+    const name = symbol(node);
+    if (
+      name !== null &&
+      name !== undefined &&
+      name !== '_' &&
+      name !== 'Nothing'
+    )
+      names.push(name);
+  };
+  collect(operand(statement, 1));
+  return names;
 }
 
 /** REDEFINITION DISCIPLINE, static tier: one clause this unit defined — its

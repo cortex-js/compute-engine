@@ -36,6 +36,7 @@ import {
   frameOrderOf,
   isDeclarationStatement,
   staticDiagnostics,
+  declaredVariableNames,
 } from './static-diagnostics.js';
 
 export interface ExecuteEpsilOptions {
@@ -203,7 +204,10 @@ function executeEpsilBatch(
   // program then evaluates exactly as it otherwise would: the same mistake
   // may surface a second time as a `runtime-error` diagnostic or as an error
   // value, and that duplication is accepted (a static diagnostic never
-  // suppresses evaluation). Skipped when parsing produced errors: the AST of
+  // suppresses evaluation). One exception: a top-level `let` that re-declares
+  // a name of this program is reported once, by the pass, since the loop
+  // below refuses the statement itself (`declaredAtTopLevel`) and knows the
+  // report exists. Skipped when parsing produced errors: the AST of
   // an unparseable program is a guess, and canonicalizing it sprays noise.
   //
   // Cost: the pass boxes each statement, and the loop below boxes it again.
@@ -259,6 +263,17 @@ function executeEpsilBatch(
   // name per program run, not per occurrence.
   const reportedUnknowns = new Set<string>();
 
+  // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05), the top level's runtime
+  // tier: a `let`/`const` of a name an earlier top-level `let`/`const` of
+  // THIS program declared evaluates to the `variable-redeclaration` error
+  // value instead of re-declaring — the value the same statement has inside
+  // a block (`canonicalBlock`, `library/control-structures.ts`) — and the
+  // later statements keep reading the first binding. The set is per program:
+  // a later program on the same engine (a re-run notebook cell, a REPL line)
+  // re-declares legally. The static pass reports the same statement
+  // (`variableRedeclarationDiagnostic`); this is the behavior it describes.
+  const declaredAtTopLevel = new Set<string>();
+
   for (let i = 0; i < statements.length; i++) {
     const stmt = statements[i];
     // "Errors are values": a runtime problem becomes an `["Error", …]` value.
@@ -268,6 +283,9 @@ function executeEpsilBatch(
     // `iterationLimit`/`recursionLimit`, which throw a `CancellationError`).
     let cancellation: CancellationCause | undefined;
     valueRange = statementRange(stmt, source);
+    // The name a top-level `let` of this statement re-declares, if any (see
+    // `declaredAtTopLevel`).
+    let redeclared: string | undefined;
 
     // Run BEFORE the statement is boxed: this scan reads the RAW ast and needs
     // no value, and boxing an application INFERS a function signature for an
@@ -311,7 +329,11 @@ function executeEpsilBatch(
       // completion no matter how far past its deadline it is: the check
       // between statements bounds the overrun to one statement.
       checkDeadline(ce._deadlineFrame);
-      value = ce.box(stmt).evaluate();
+      redeclared = topLevelRedeclaration(stmt, declaredAtTopLevel);
+      value =
+        redeclared === undefined
+          ? ce.box(stmt).evaluate()
+          : ce.error(['variable-redeclaration', redeclared]);
       // An error value narrows the anchor to its breadcrumb's innermost
       // source-mapped frame, so a host that reports the error points at the
       // offending subexpression, not the whole statement.
@@ -341,7 +363,18 @@ function executeEpsilBatch(
     // `evaluation-canceled` diagnostic carrying the cause; other runtime
     // problems become a `runtime-error` diagnostic. The final statement's
     // problems stay in `value`, per the errors-are-values contract.
-    if (i < statements.length - 1) {
+    // A top-level re-declaration the static pass already reported (with the
+    // first declaration's site as a note) is not reported a second time as a
+    // `runtime-error`: it is one problem, and the value carries it.
+    const reportedStatically =
+      redeclared !== undefined &&
+      diagnostics.some(
+        (d) =>
+          Array.isArray(d.message) &&
+          d.message[0] === 'variable-redeclaration' &&
+          d.message[1] === redeclared
+      );
+    if (i < statements.length - 1 && !reportedStatically) {
       const errors = value.errors;
       if (errors.length > 0) {
         // An error that BUBBLED out of a subexpression carries a breadcrumb
@@ -486,6 +519,24 @@ function executeEpsilBatch(
  * collection argument, and a failure inside one element is unreadable without
  * saying so.
  */
+/**
+ * The first name a top-level `Declare` statement declares that `declared`
+ * already holds, or `undefined` after adding every name the statement
+ * declares to `declared` (`declaredVariableNames`, shared with the static
+ * pass). The statement is accepted or refused whole: a refused destructuring
+ * `let` adds none of its leaves.
+ */
+function topLevelRedeclaration(
+  statement: MathJsonExpression,
+  declared: Set<string>
+): string | undefined {
+  const names = declaredVariableNames(statement);
+  const repeated = names.find((name) => declared.has(name));
+  if (repeated !== undefined) return repeated;
+  for (const name of names) declared.add(name);
+  return undefined;
+}
+
 export function errorFrameChain(error: MathJsonExpression): string {
   const ops = [...operands(error)];
   const trace = ops[ops.length - 1];

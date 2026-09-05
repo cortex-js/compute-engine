@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A `let`/`const` may not re-declare a name its own scope already declares.**
+  An earlier `let` of the same block or program, a parameter of the function
+  whose body the block is, or the index of the loop whose body the block is:
+  `function f(x) { let x = x + 1; x }` is now the `variable-redeclaration`
+  error, reported by `epsil check` before the program runs, and the compiler
+  refuses the block. The interpreter used to accept a second `let` of a block
+  local and of a loop index and overwrite the binding, while it refused a
+  parameter only at call time and the compiled JavaScript accepted it — so the
+  same program answered differently on the two routes. Shadowing a name from an
+  OUTER scope in a nested block stays legal, and the shadowing `let` now reads
+  the outer name on every turn of a loop: `let t = 1; for k in 1..3 { let t = t
+  * 2; xs = Append(xs, t) }` collects `[2, 2, 2]` where it collected
+  `[2, 4, 8]`. Across programs on one engine — a re-run notebook cell — a
+  top-level `let` re-declares as before. To update a binding, assign to it.
+
 ### New Features
 
 - **Typed lambda parameters have a LaTeX notation.** `(i: integer) \mapsto 2i`,

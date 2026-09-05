@@ -358,15 +358,23 @@ describe('SPEC: named-parameter rebind', () => {
     // `sym(ops[0].evaluate())` then reads the argument's VALUE instead of the
     // name — so the declaration silently vanishes and the conflict with the
     // parameter goes unreported.
+    //
+    // The conflict is reported at canonicalization (ruled 2026-09-05): the
+    // `Declare` statement is the `variable-redeclaration` error node in the
+    // canonical literal — so the declaration did not vanish into a reference
+    // — and the literal is invalid before any application.
     const ce = engine();
     const f = ce.box([
       'Function',
       ['Block', ['Declare', 'x'], ['Multiply', 'x', 2]],
       'x',
     ]);
-    expect(() => ce.box(['Apply', f, 15]).evaluate()).toThrow(
-      /already declared/
-    );
+    expect(f.op1.ops![0].json).toEqual([
+      'Error',
+      ['ErrorCode', "'variable-redeclaration'", "'x'"],
+    ]);
+    expect(f.isValid).toBe(false);
+    expect(ce.box(['Apply', f, 15]).evaluate().isValid).toBe(false);
   });
 });
 

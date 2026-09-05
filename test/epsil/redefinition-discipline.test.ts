@@ -1,6 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { checkSource, parseSource } from '../../src/cli/check';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 import type { ParsingDiagnostic } from '../../src/epsil/diagnostics';
 import { typeToString } from '../../src/common/type/serialize';
@@ -42,6 +44,174 @@ function staticCheck(ce: ComputeEngine, source: string): ParsingDiagnostic[] {
   expect(diagnostics.filter((d) => d.severity === 'error')).toHaveLength(0);
   return staticDiagnostics(ce, ast!, source);
 }
+
+describe('SAME-SCOPE RE-DECLARATION — `let`/`const` (ruled 2026-09-05)', () => {
+  // A `let`/`const` may not re-declare a name its own scope already declares:
+  // an earlier `let` of the block or program, a parameter of the enclosing
+  // function, or the index of the enclosing loop. Shadowing a name from an
+  // OUTER scope in a nested block stays legal, and the shadowing `let`'s
+  // initializer reads the outer name.
+  const run = (source: string, ce = new ComputeEngine()) => {
+    const r = executeEpsil(ce, source);
+    return { value: r.value.json, codes: r.diagnostics.map((d) => d.message) };
+  };
+  const staticCodeOf = (message: unknown) =>
+    Array.isArray(message)
+      ? message[0] === 'static-type-error'
+        ? message[3]
+        : message[0]
+      : message;
+
+  test('a second top-level `let` of one program is reported, with the first site', () => {
+    const source = 'let a = 1\nlet a = 2\na';
+    const { diagnostics } = checkSource(source);
+    expect(codes(diagnostics)).toEqual(['variable-redeclaration']);
+    const [d] = diagnostics;
+    expect(d.message).toEqual(['variable-redeclaration', 'a']);
+    expect(source.slice(d.range[0], d.range[1])).toBe('let a = 2');
+    expect(d.notes).toHaveLength(1);
+    expect(source.slice(d.notes![0].range[0], d.notes![0].range[1])).toBe(
+      'let a = 1'
+    );
+    // Runtime tier: the second statement is the error value, and the
+    // program keeps reading the FIRST binding.
+    const r = run(source);
+    expect(r.value).toBe(1);
+    expect(r.codes).toEqual([['variable-redeclaration', 'a']]);
+  });
+
+  test('a destructuring `let` counts each pattern leaf', () => {
+    expect(
+      codes(checkSource('let (p, q) = (1, 2)\nlet p = 3').diagnostics)
+    ).toEqual(['variable-redeclaration']);
+    expect(
+      codes(checkSource('let p = 3\nlet (p, q) = (1, 2)').diagnostics)
+    ).toEqual(['variable-redeclaration']);
+    // `_` declares nothing.
+    expect(
+      codes(checkSource('let (_, q) = (1, 2)\nlet (_, r) = (3, 4)').diagnostics)
+    ).toEqual([]);
+  });
+
+  test('across programs on one engine a top-level `let` re-declares legally', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let a = 1');
+    const r = run('let a = 2\na', ce);
+    expect(r.value).toBe(2);
+    expect(r.codes).toEqual([]);
+  });
+
+  test('a `let` re-declaring a parameter, in the function body itself', () => {
+    for (const source of [
+      'function f(x) { let x = x + 1\n x }\nf(1)',
+      'function f(x) { let x = 10\n x }\nf(1)',
+    ]) {
+      const { diagnostics } = checkSource(source);
+      expect([source, codes(diagnostics)]).toEqual([
+        source,
+        ['static-type-error'],
+      ]);
+      expect(staticCodeOf(diagnostics[0].message)).toBe(
+        'variable-redeclaration'
+      );
+    }
+  });
+
+  test('a `let` re-declaring a loop index, in the loop body itself', () => {
+    const { diagnostics } = checkSource(
+      'let xs = []\nfor k in 1..3 { let k = k * 2\n xs = Append(xs, k) }\nxs'
+    );
+    expect(codes(diagnostics)).toEqual(['static-type-error']);
+    expect(staticCodeOf(diagnostics[0].message)).toBe('variable-redeclaration');
+    // A destructuring loop variable counts each leaf.
+    const leaf = checkSource(
+      'let s = 0\nfor (p, q) in [(1, 2)] { let p = 7\n s = s + p + q }\ns'
+    );
+    expect(staticCodeOf(leaf.diagnostics[0]?.message)).toBe(
+      'variable-redeclaration'
+    );
+  });
+
+  test('a second `let` of one block', () => {
+    for (const source of [
+      'function h() { let a = 1\n let a = 2\n a }\nh()',
+      'function h() { let a = 1\n let (a, b) = (2, 3)\n a }\nh()',
+    ]) {
+      const { diagnostics } = checkSource(source);
+      expect([source, staticCodeOf(diagnostics[0]?.message)]).toEqual([
+        source,
+        'variable-redeclaration',
+      ]);
+    }
+  });
+
+  test('shadowing an OUTER name in a nested block stays legal', () => {
+    // A parameter, shadowed from an `if` block inside the body.
+    expect(run('function f(x) { if true { let x = 10\n x } }\nf(1)')).toEqual({
+      value: 10,
+      codes: [],
+    });
+    // A captured outer variable, shadowed in a closure body; the earlier
+    // statement reads the outer value.
+    expect(
+      run('let y = 5\nfunction g() { let z = y\n let y = 1\n y + z }\ng()')
+    ).toEqual({ value: 6, codes: [] });
+    // A loop index, shadowed from an `if` block inside the body: every turn
+    // reads the loop's fresh value, not the previous turn's shadow.
+    expect(
+      run(
+        'let xs = []\nfor k in 1..3 { if true { let k = k * 2\n xs = Append(xs, k) } }\nxs'
+      )
+    ).toEqual({ value: ['List', 2, 4, 6], codes: [] });
+  });
+
+  test('a shadowing `let` in a re-entered block reads the OUTER name every turn', () => {
+    // Used to collect 2, 4, 8: the binding the statement created on the
+    // previous turn shadowed the outer `t` while its own initializer ran.
+    expect(
+      run(
+        'let t = 1\nlet xs = []\nfor k in 1..3 { let t = t * 2\n xs = Append(xs, t) }\n(t, xs)'
+      )
+    ).toEqual({ value: ['Tuple', 1, ['List', 2, 2, 2]], codes: [] });
+  });
+
+  test('a refused destructuring `let` declares none of its leaves', () => {
+    // `let (a, b)` collides on `a`, so the statement is refused whole and `b`
+    // stays free: the later `let b` is a first declaration, not a repeat.
+    const source = 'let a = 1\nlet (a, b) = (2, 3)\nlet b = 4\nb';
+    const { diagnostics } = checkSource(source);
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      ['variable-redeclaration', 'a'],
+    ]);
+    expect(run(source).value).toBe(4);
+    // The same, inside a block.
+    const block = checkSource(
+      'function h() { let a = 1\n let (a, b) = (2, 3)\n let b = 4\n b }'
+    );
+    expect(block.diagnostics).toHaveLength(1);
+    expect(staticCodeOf(block.diagnostics[0].message)).toBe(
+      'variable-redeclaration'
+    );
+  });
+
+  test('a re-run `let` that fails keeps the previous bindings', () => {
+    // The previous bindings are hidden only while the initializer runs; a
+    // destructuring shape mismatch is reported without discarding them.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let (a, b) = (1, 2)');
+    const r = executeEpsil(ce, 'let (a, b) = 3');
+    expect(r.value.operator).toBe('Error');
+    expect(run('(a, b)', ce).value).toEqual(['Tuple', 1, 2]);
+  });
+
+  test('the compiler refuses a block that re-declares its parameter', () => {
+    const ce = new ComputeEngine();
+    const [ast] = parseEpsil('function f(x) { let x = 10\n x }\nf(1)');
+    expect(() => compile(ce.box(ast), { fallback: false })).toThrow(
+      /variable-redeclaration/
+    );
+  });
+});
 
 describe('REDEFINITION — static tier', () => {
   test('a second `type` declaration in one program errors, with both ranges', () => {

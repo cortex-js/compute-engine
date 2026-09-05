@@ -153,6 +153,11 @@ A spread is an override boundary: \`{"a" -> 1, ...d, "a" -> 2}\` is legal, and t
 
 Rename one side so the two agree — the quick fix renames the annotation's parameters to match the lambda's — or leave the annotation's parameters unnamed (\`(number) -> number\`): an annotation's parameter names are optional documentation, while the lambda's are the real binding.`,
 
+  'variable-redeclaration': `A \`let\` or \`const\` declares a name that the same scope already declares: an earlier \`let\`/\`const\` of the same block or program, a parameter of the function whose body this is, or the index of the loop whose body this is. In \`function f(x) { let x = x + 1 … }\` the second \`x\` is such a re-declaration.
+
+A second declaration in one scope is a mistake in practice — a \`let\` where an assignment was meant, or a copied line — and the language cannot tell it from a legitimate second run of the same statement (a loop body on its next turn), so it used to overwrite the binding without a word. To update a binding, assign to it: \`x = x + 1\`. To hold a second value, choose another name.
+
+A \`let\` in a NESTED block is not a re-declaration: \`for k in xs { if c { let k = 1 … } }\` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing \`let\` reads the OUTER name. Across programs — a re-run notebook cell, a later REPL line — a top-level \`let\` re-declares legally; only a repeat within one program is reported.`,
   'function-redefinition': `Two clauses of one function in a single program have the same dispatch domain, so the second would silently replace the first — \`f(x) = x\` followed by \`f(x) = 2 * x\`. Parameter NAMES are not part of a clause's identity: \`g(n) = n\` then \`g(m) = 2 * m\` collides all the same, so renaming a parameter never resolves this error.
 
 Only replacement is refused. Clauses that dispatch on genuinely different domains accumulate — a different arity (\`k(x)\` and \`k(x, y)\`), different parameter types (\`h(x: integer)\` and \`h(x: string)\`), or a literal pattern (\`g(0) = 99\` alongside \`g(x) = x\`). That is what multi-clause definitions are for.

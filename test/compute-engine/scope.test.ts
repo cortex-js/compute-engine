@@ -373,28 +373,23 @@ describe('FUNCTIONS WITH RETURN STATEMENT', () => {
 });
 
 describe('FUNCTIONS WITH CONFLICTING ARGUMENTS AND LOCAL VARIABLES', () => {
-  beforeAll(() => {
-    ce.pushScope();
-    ce.declare('f', { type: '(number) -> number' });
-    ce.declare('x', { type: 'number', value: 5 });
-    ce.assign(
-      'f',
-      ce.expr([
-        'Function',
-        ['Block', ['Declare', 'x'], ['Multiply', 'x', 2]],
-        'x',
-      ])
-    );
-  });
-  afterAll(() => {
-    ce.popScope();
-  });
-  test('Calling function with conflicting arguments', () => {
-    expect(() =>
-      ce.expr(['f', 15]).evaluate()
-    ).toThrowErrorMatchingInlineSnapshot(
-      `The symbol "x" is already declared in this scope`
-    );
+  test('a body local that re-declares the parameter is refused at canonicalization', () => {
+    // Ruled 2026-09-05: `Declare(x)` in the body of `(x) => …` re-declares the
+    // parameter. It used to be refused only when the function was CALLED (a
+    // thrown "already declared in this scope"); the statement is now the
+    // `variable-redeclaration` error value in the canonical literal, so the
+    // literal is invalid before any call, and a typed assignment of it
+    // (`f: (number) -> number`) is refused as well.
+    const f = ce.expr([
+      'Function',
+      ['Block', ['Declare', 'x'], ['Multiply', 'x', 2]],
+      'x',
+    ]);
+    expect(f.op1.ops![0].json).toEqual([
+      'Error',
+      ['ErrorCode', "'variable-redeclaration'", "'x'"],
+    ]);
+    expect(f.isValid).toBe(false);
   });
 });
 
@@ -968,6 +963,43 @@ describe('BLOCK EVALUATION', () => {
     expect(block.isScoped).toBe(true);
     expect(block.type.toString()).toBe('nothing');
     expect(block.evaluate().json).toBe('Nothing');
+  });
+
+  test('a Declare that re-declares a name of the same scope is an error value', () => {
+    // Ruled 2026-09-05: an earlier Declare of the block, a parameter of the
+    // function literal whose body the block is, or the index of the binder
+    // whose body the block is. The statement canonicalizes to the error and
+    // the rest of the block still canonicalizes.
+    const engine = new ComputeEngine();
+    const dup = engine.box([
+      'Block',
+      ['Declare', 'a', { dict: { value: 1 } }],
+      ['Declare', 'a', { dict: { value: 2 } }],
+      'a',
+    ]);
+    expect(dup.ops![1].json).toEqual([
+      'Error',
+      ['ErrorCode', "'variable-redeclaration'", "'a'"],
+    ]);
+    const param = engine.box([
+      'Function',
+      ['Block', ['Declare', 'x', { dict: { value: 10 } }], 'x'],
+      'x',
+    ]);
+    expect(param.op1.ops![0].operator).toBe('Error');
+    const loop = engine.box([
+      'Loop',
+      ['Block', ['Declare', 'k', { dict: { value: 1 } }]],
+      ['Element', 'k', ['Range', 1, 3]],
+    ]);
+    expect(loop.op1.ops![0].operator).toBe('Error');
+    // A nested block shadows the loop index legally.
+    const nested = engine.box([
+      'Loop',
+      ['Block', ['Block', ['Declare', 'k', { dict: { value: 1 } }]]],
+      ['Element', 'k', ['Range', 1, 3]],
+    ]);
+    expect(nested.op1.ops![0].ops![0].operator).toBe('Declare');
   });
 
   test('If with an EMPTY Block arm evaluates the arm to Nothing', () => {

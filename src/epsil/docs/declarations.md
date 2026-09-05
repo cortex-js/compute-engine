@@ -217,6 +217,37 @@ introduced by `if`/`else`/`while`/`for`, or a function body, pushes its own
 lexical scope, so a `let`/`const` inside a block does not leak into the
 enclosing scope.
 
+A name is declared **once per scope**. A `let`/`const` of a name that the same
+scope already declares — an earlier `let`/`const` of the same block or
+program, a parameter of the function whose body this is, or the index of the
+loop whose body this is — is the `variable-redeclaration` error, reported
+before the program runs:
+
+```epsil
+function f(x) {
+  let x = x + 1   // error: x is a parameter of f
+  x
+}
+```
+
+To update a binding, assign to it (`x = x + 1`); to hold a second value,
+choose another name. A `let` in a **nested** block is not a re-declaration:
+it shadows the outer name for that block, and its initializer reads the outer
+value.
+
+```epsil
+let t = 1
+for k in 1..3 {
+  if k > 1 {
+    let t = t * 2   // shadows the outer t; reads 1, so t is 2 here
+    t
+  }
+}
+```
+
+Across programs — a re-run notebook cell, a later REPL line — a top-level
+`let` re-declares legally; only a repeat within one program is reported.
+
 [Type declarations](/epsil/types/) are the exception: types (and their
 constructors) are **global** — a `type` statement is only allowed at the top
 level of a program, and the declared name means the same thing everywhere on

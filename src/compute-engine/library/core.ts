@@ -18,7 +18,10 @@ import {
   checkArity,
   expectsCharacterNotString,
 } from '../boxed-expression/validate.js';
-import { collectTuplePattern } from '../boxed-expression/tuple-pattern.js';
+import {
+  collectTuplePattern,
+  tuplePatternNames,
+} from '../boxed-expression/tuple-pattern.js';
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
 import {
@@ -4656,6 +4659,44 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           effectsDeclared = signatureEffects(parsed) !== undefined;
         }
 
+        // A binding this statement created on a PREVIOUS run of its block —
+        // a loop body on its second turn, a re-run program — is HIDDEN while
+        // the initializer is evaluated, so `let t = t * 2` reads the OUTER
+        // `t`, as it did on the first run, and not its own stale value
+        // (measured: `let t = 1; for k in 1..3 { let t = t * 2; xs =
+        // Append(xs, t) }` collected 2, 4, 8 where every turn computes 2).
+        // The binding is put back once the initializer has a value, and the
+        // statement-redeclare path of `declareOne` below replaces it only
+        // when the declaration succeeds: a declaration that then fails — a
+        // destructuring shape mismatch, a declared-type mismatch — leaves the
+        // previous binding in place, as it did before. Both map writes are
+        // journaled for `checkpoint()`/`restore()`.
+        const currentScopeBindings = ce.context.lexicalScope.bindings;
+        type Binding = NonNullable<ReturnType<typeof currentScopeBindings.get>>;
+        const hiddenStatementBindings: [string, Binding][] = [];
+        const hideStaleStatementBinding = (symbolName: string): void => {
+          const existing = currentScopeBindings.get(symbolName);
+          if (
+            existing === undefined ||
+            (existing as { _declaredByStatement?: boolean })
+              ._declaredByStatement !== true
+          )
+            return;
+          journalCheckpointMapEntry(
+            ce,
+            currentScopeBindings,
+            symbolName,
+            symbolName,
+            'declare'
+          );
+          currentScopeBindings.delete(symbolName);
+          hiddenStatementBindings.push([symbolName, existing]);
+        };
+        if (isFunction(ops[0], 'Tuple'))
+          for (const leaf of tuplePatternNames(ops[0]))
+            hideStaleStatementBinding(leaf);
+        else if (isSymbol(ops[0])) hideStaleStatementBinding(ops[0].symbol);
+
         // Resolve the effective value: a positional value wins over the
         // attributes `value`.
         const valueSource = valueOp ?? attrs?.get('value');
@@ -4663,9 +4704,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `let c: character = "a"` — see `narrowDeclaredCharacter`. The
         // narrowed character IS the declared value, so it replaces the
         // evaluation of the operand rather than being applied after it.
-        const value =
-          narrowDeclaredCharacter(ce, type, valueSource) ??
-          (hasValue ? valueSource!.evaluate() : undefined);
+        let value: Expression | undefined;
+        try {
+          value =
+            narrowDeclaredCharacter(ce, type, valueSource) ??
+            (hasValue ? valueSource!.evaluate() : undefined);
+        } finally {
+          for (const [symbolName, def] of hiddenStatementBindings) {
+            journalCheckpointMapEntry(
+              ce,
+              currentScopeBindings,
+              symbolName,
+              symbolName,
+              'declare'
+            );
+            currentScopeBindings.set(symbolName, def);
+          }
+        }
 
         // Resolve the remaining attributes. Both flags are read in EITHER
         // encoding, as `declareTypeStatement` reads `alias`: the `{dict: …}`

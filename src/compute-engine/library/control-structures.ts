@@ -1750,6 +1750,60 @@ function canonicalBlock(
     }
   }
 
+  // SAME-SCOPE RE-DECLARATION (ruled 2026-09-05): a `Declare` may not
+  // re-declare a name this scope already binds — an earlier `Declare` of this
+  // block, a parameter of the function literal whose body this block is, or
+  // an index of the loop, comprehension or big operator whose body this block
+  // is. Such a statement is a mistake in practice (a second `let` where an
+  // assignment was meant), and the runtime cannot tell it from a re-run of
+  // the same statement (a loop body on its second turn), so it silently
+  // overwrote the binding. The statement canonicalizes to an error value
+  // instead: the Epsil static pass reports it before the program runs, and
+  // the compiler refuses the invalid block. Shadowing a name bound in an
+  // OUTER scope — a nested block, a closure body, an `if` inside a loop body
+  // — is ordinary lexical scoping and stays allowed.
+  //
+  // A function literal's parameters are known through the shadowed-parameter
+  // stack: the literal pushes them before its body is canonicalized, with
+  // the scope the literal is written in as the boundary, so this block is
+  // the literal's own body exactly when its parent scope is that boundary. A
+  // framework binder (`canonicalizeBinder`, `boxed-expression/box.ts`)
+  // records its names on its own scope, which is the parent of its body
+  // block's scope. A statement is accepted or refused WHOLE: a destructuring
+  // `Declare((a, b), …)` with one colliding leaf declares nothing, so its
+  // other leaves stay free for a later `Declare`. Only the names of accepted
+  // statements are hoisted and shadowed below, so a read of a refused name
+  // later in the block still reaches the binder's variable — while a name
+  // whose FIRST declaration was accepted keeps its hoist even when a later
+  // duplicate of it is refused.
+  const refused = new Map<Expression, Expression>();
+  const accepted = new Set<string>();
+  {
+    const parentBinderNames = scope?.parent?.binderNames;
+    const redeclares = (name: string): boolean =>
+      accepted.has(name) ||
+      (ce._isShadowedParameter(name) &&
+        scope !== undefined &&
+        ce._shadowedParameterBoundary(name) === scope.parent) ||
+      parentBinderNames?.has(name) === true;
+    for (const op of ops) {
+      if (!isFunction(op, 'Declare')) continue;
+      const target = op.ops[0];
+      const names = (
+        isSymbol(target)
+          ? [target.symbol]
+          : isFunction(target, 'Tuple')
+            ? tuplePatternNames(target)
+            : []
+      ).filter((name) => name !== 'Nothing');
+      const collision = names.find(redeclares);
+      if (collision !== undefined)
+        refused.set(op, ce.error(['variable-redeclaration', collision]));
+      else for (const name of names) accepted.add(name);
+    }
+  }
+  const hoistedNames = declaredNames.filter((name) => accepted.has(name));
+
   // Hoist the block's own locals into the block scope BEFORE canonicalizing
   // the statements. `Declare`/`Assign` only register their symbol at
   // *evaluation* time, so without this a reference to a block-local from a
@@ -1775,7 +1829,7 @@ function canonicalBlock(
   // in the block, and the compiler's operand type gates, see the type the
   // program declared.
   if (scope) {
-    for (const name of declaredNames) {
+    for (const name of hoistedNames) {
       if (name !== 'Nothing' && !scope.bindings.has(name))
         ce._declareSymbolValue(
           name,
@@ -1841,12 +1895,13 @@ function canonicalBlock(
     }
   }
 
-  ce._pushShadowedParameters(declaredNames);
+  ce._pushShadowedParameters(hoistedNames);
   let statements: Expression[];
   try {
-    // We canonicalize the statements in the local scope
+    // We canonicalize the statements in the local scope. A refused
+    // re-declaration stands as its error value.
     statements = ce._inScope(scope, () =>
-      ops.map((op) => canonicalStatement(ce, op))
+      ops.map((op) => refused.get(op) ?? canonicalStatement(ce, op))
     );
   } finally {
     ce._popShadowedParameters();
