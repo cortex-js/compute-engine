@@ -1442,7 +1442,35 @@ function nameOrSmallInteger(
 ): string | undefined {
   const s = d?.structureOf?.();
   if (s?.kind === 'symbol') return s.name;
-  return smallIntegerOperandValue(d)?.toString();
+  return compoundIndexDigits(smallIntegerOperandValue(d));
+}
+
+/**
+ * The digits a small-integer subscript contributes to a compound symbol name,
+ * or `undefined` for a negative one: `x_{-2}` cannot fold, because `x_-2` is
+ * not a valid symbol name (the `-` is refused), and folding it produced an
+ * `Error` node where a symbolic `Subscript(x, -2)` is the right answer.
+ */
+function compoundIndexDigits(n: number | null | undefined): string | undefined {
+  if (n === null || n === undefined || n < 0) return undefined;
+  return n.toString();
+}
+
+/**
+ * The name a symbol contributes to a compound symbol, as it is WRITTEN: the
+ * canonical symbols `ExponentialE` and `ImaginaryUnit` are spelled `e` and
+ * `i`, so that `e_{k+1}` with `k := 3` resolves to `e_4` — the symbol the
+ * literal `e_4` canonicalizes to (its canonical handler keeps the raw base
+ * name for exactly this reason) — and not to `ExponentialE_4`. Every other
+ * symbol contributes its own name.
+ */
+function writtenSymbolName(
+  expr: Parameters<typeof sym>[0]
+): string | undefined {
+  const name = sym(expr);
+  if (name === 'ExponentialE') return 'e';
+  if (name === 'ImaginaryUnit') return 'i';
+  return name;
 }
 
 /** The text a subscript operand contributes to a compound symbol name: a
@@ -6554,7 +6582,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const subStr =
             (isString(op2) ? op2.string : undefined) ??
             sym(op2) ??
-            asSmallInteger(op2)?.toString();
+            compoundIndexDigits(asSmallInteger(op2));
 
           if (subStr) return ce.symbol(rawName + '_' + subStr);
 
@@ -6564,7 +6592,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // Use parentheses for expressions: `A_{(CD)}` remains as subscript expression.
           if (isFunction(op2, 'InvisibleOperator')) {
             const parts = op2.ops.map(
-              (x) => sym(x) ?? asSmallInteger(x)?.toString()
+              (x) => sym(x) ?? compoundIndexDigits(asSmallInteger(x))
             );
             if (parts.every((p) => p !== undefined && p !== null)) {
               return ce.symbol(rawName + '_' + parts.join(''));
@@ -6596,9 +6624,37 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               numericApproximation,
             });
 
-            // If handler returned a result, use it
-            if (result !== undefined) return result;
+            // If handler returned a result, use it. A handler that declines
+            // keeps the expression symbolic: the base's indices are the
+            // handler's to define, so none of them is a compound symbol.
+            return result;
           }
+
+          // A compound subscript on a plain symbol — `x_{k+1}`, kept as a
+          // `Subscript` at canonicalization because its index is an
+          // expression — names the same family of symbols the simple form
+          // names: once the index is known, `x_{k+1}` with `k := 3` IS the
+          // symbol `x_4`, exactly as the written `x_4` would have
+          // canonicalized. So the index is evaluated, and an index that
+          // comes out as a string, a symbol or a non-negative small integer
+          // (the three spellings the canonical handler folds into a compound
+          // name) resolves to that compound symbol, which then evaluates to
+          // its value if one is assigned. The base and a symbol index use
+          // their WRITTEN names (`writtenSymbolName`). Any other index keeps
+          // the expression symbolic, with the evaluated index:
+          // `Subscript(x, 3.5)` for `k := 2.5`, `Subscript(x, -2)` for
+          // `k := -3`.
+          const evaluated = subscript.evaluate({ numericApproximation });
+          const part =
+            (isString(evaluated) ? evaluated.string : undefined) ??
+            writtenSymbolName(evaluated) ??
+            compoundIndexDigits(asSmallInteger(evaluated));
+          if (part !== undefined && part !== '')
+            return ce
+              .symbol(`${writtenSymbolName(base)}_${part}`)
+              .evaluate({ numericApproximation });
+          if (!evaluated.isSame(subscript))
+            return ce._fn('Subscript', [base, evaluated]);
         }
 
         // Fallback: return undefined to keep expression symbolic

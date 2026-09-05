@@ -163,6 +163,108 @@ describe('SUBSCRIPT EVALUATE HANDLER', () => {
     });
   });
 
+  describe('Compound subscript on a plain symbol', () => {
+    // `x_{k+1}` is kept as a `Subscript` at canonicalization because its
+    // index is an expression. Once the index is known it names the compound
+    // symbol the written form would have canonicalized to: with `k := 3`,
+    // `x_{k+1}` evaluates to `x_4`, and to the value of `x_4` if it has one.
+    test('an integer index resolves to the compound symbol', () => {
+      const ce = new ComputeEngine();
+      ce.assign('k', 3);
+      expect(ce.parse('x_{k+1}').evaluate().symbol).toBe('x_4');
+      expect(ce.parse('x_{k-1}').evaluate().symbol).toBe('x_2');
+      expect(ce.parse('x_{k+1} + 1').evaluate().json).toEqual([
+        'Add',
+        'x_4',
+        1,
+      ]);
+    });
+
+    test('the compound symbol evaluates to its value', () => {
+      const ce = new ComputeEngine();
+      ce.assign('k', 3);
+      ce.assign('x_4', 7);
+      expect(ce.parse('x_{k+1}').evaluate().re).toBe(7);
+      expect(ce.parse('x_{k+1} + 1').evaluate().re).toBe(8);
+      expect(ce.parse('x_{k+1}').N().re).toBe(7);
+    });
+
+    test('a symbol index resolves to the compound symbol too', () => {
+      const ce = new ComputeEngine();
+      ce.assign('k', 'm');
+      expect(ce.parse('x_{k+0}').evaluate().symbol).toBe('x_m');
+    });
+
+    test('a string index resolves like a literal string subscript', () => {
+      const ce = new ComputeEngine();
+      ce.assign('x_max', 9);
+      // The index is an expression (a symbol index would already have been
+      // folded at canonicalization), and evaluates to the string `max`.
+      expect(
+        ce
+          .box([
+            'Subscript',
+            'x',
+            ['StringJoin', ['List', { str: 'ma' }, { str: 'x' }]],
+          ])
+          .evaluate().re
+      ).toBe(9);
+    });
+
+    test('the base and the index use their written names', () => {
+      const ce = new ComputeEngine();
+      ce.assign('k', 3);
+      // `e` canonicalizes to `ExponentialE`, but the literal `e_4` is the
+      // symbol `e_4`, so the computed index must reach the same symbol.
+      ce.assign('e_4', 5);
+      expect(ce.parse('e_{k+1}').evaluate().re).toBe(5);
+      // An index that evaluates to `e` spells `e` as well.
+      ce.assign('j', ce.symbol('e'));
+      expect(ce.parse('x_{j+0}').evaluate().symbol).toBe('x_e');
+    });
+
+    test('a negative index stays symbolic instead of an invalid name', () => {
+      const ce = new ComputeEngine();
+      ce.assign('k', 3);
+      expect(ce.parse('x_{k-5}').evaluate().json).toEqual([
+        'Subscript',
+        'x',
+        -2,
+      ]);
+      // The literal spelling stays a `Subscript` too (it used to be an
+      // `Error` node with an `invalid-symbol` code).
+      expect(ce.parse('x_{-2}').operator).toBe('Subscript');
+      expect(ce.parse('x_{-2}').evaluate().json).toEqual([
+        'Subscript',
+        'x',
+        -2,
+      ]);
+    });
+
+    test('an unknown or non-integer index stays symbolic', () => {
+      const ce = new ComputeEngine();
+      expect(ce.parse('a_{n+1}').evaluate().json).toEqual([
+        'Subscript',
+        'a',
+        ['Add', 'n', 1],
+      ]);
+      ce.assign('k', 2.5);
+      // The index is still evaluated.
+      expect(ce.parse('x_{k+1}').evaluate().json).toEqual([
+        'Subscript',
+        'x',
+        3.5,
+      ]);
+    });
+
+    test('a base with a subscriptEvaluate handler is never folded', () => {
+      const ce = new ComputeEngine();
+      ce.declare('X', { subscriptEvaluate: () => undefined });
+      ce.assign('k', 3);
+      expect(ce.parse('X_{k+1}').evaluate().operator).toBe('Subscript');
+    });
+  });
+
   describe('Arithmetic with Subscripted Expressions', () => {
     test('Arithmetic operations on evaluated subscripts', () => {
       const ce = new ComputeEngine();

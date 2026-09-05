@@ -143,6 +143,16 @@
 
 ### Resolved Issues
 
+- **A subscript with a computed index now evaluates.** `x_{k+1}` (LaTeX) and
+  `xₖ₊₁` (Epsil) are kept as `Subscript(x, k + 1)` because the index is an
+  expression, and evaluation left them as they were even once `k` had a value.
+  With `k := 3` the expression now evaluates to the compound symbol `x_4` —
+  the symbol the written `x_4` canonicalizes to — and on to its value when
+  `x_4` is assigned; an index that evaluates to a symbol folds the same way
+  (`x_m`). An index that stays unknown, or is not an integer, keeps the
+  expression symbolic with the evaluated index (`Subscript(x, 3.5)`). A base
+  that defines a `subscriptEvaluate` handler is unchanged: its indices are the
+  handler's to define.
 - **A compiled kernel handed a matrix where it expected a list of numbers
   returned a string.** With `h := (v) => v[1] + 1` the compiled `h` run on
   `[[1, 2], [3, 4]]` returned `"1,21"` — the scalar `+` the compiler emits for
