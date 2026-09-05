@@ -28,6 +28,18 @@
 
 ### Resolved Issues
 
+- **A `for` loop over a `Range` with a symbolic bound compiles to Python
+  faithfully for every numeric bound.** The Python target lowers
+  `for k in Range(n, 1) { … }` to a native `range` whose direction is read at
+  run time from the sign of `1 - n`, but a Python `range` needs `int` arguments,
+  and the `Range` signature types a bound `number`: a call with `n = 2.5` raised
+  `TypeError` where the interpreter walks 2.5, 1.5. The header now reads the
+  bounds at run time as well — an integral value takes the native `range` as an
+  int, a fractional value walks the range from the start bound in unit steps, as
+  the interpreter does. A fractional LITERAL bound (`Range(5.5, 1)`) went
+  through the `Sum`/`Product` bound helper, which floors a literal, so the loop
+  read 5, 4, 3, 2, 1 for the interpreter's 5.5, 4.5, 3.5, 2.5, 1.5; it now takes
+  the value lowering, which walks the range in floats.
 - **A function that returns a lambda no longer inherits the lambda's effects
   through its return-type ascription.** The parser puts a return marker on the
   body's last statement, and the `Typed` ascription declared no `invokes`

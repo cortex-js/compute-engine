@@ -47,9 +47,20 @@ function js(expr: MathJsonExpression) {
   return compile(ce.box(expr), { fallback: false, constantFold: false });
 }
 
-/** The interpreter's answer for the same program. */
-function interpreted(expr: MathJsonExpression): string {
-  return new ComputeEngine().box(expr).evaluate().toString();
+/** The interpreter's answer for the same program, with each of `params`
+ * assigned the matching value of `args` before the program is boxed. */
+function interpreted(
+  expr: MathJsonExpression,
+  params: string[] = [],
+  args: number[] = []
+): string {
+  if (params.length !== args.length)
+    throw new Error(
+      `interpreted(): ${params.length} params but ${args.length} args`
+    );
+  const engine = new ComputeEngine();
+  params.forEach((p, i) => engine.assign(p, args[i] as number));
+  return engine.box(expr).evaluate().toString();
 }
 
 describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
@@ -311,9 +322,28 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
       undefined,
       { constantFold: false }
     );
+    // Integral run-time values take a native `range` in the direction of
+    // `b - a`; a fractional value walks the range in unit steps from the
+    // start bound, as the interpreter does (`range(2.5, …)` would raise).
     expect(src).toContain(
-      'range(_a, _b + 1) if _b >= _a else range(_a, _b - 1, -1)'
+      'range(int(_a), int(_b) + 1) if _b >= _a else range(int(_a), int(_b) - 1, -1)'
     );
+    expect(src).toContain(
+      'if float(_a).is_integer() and float(_b).is_integer() else'
+    );
+    expect(src).toContain(
+      '[_a + (1 if _b >= _a else -1) * _i for _i in range(int(abs(_b - _a)) + 1)]'
+    );
+  });
+
+  it('a fractional literal Range bound takes the value lowering on Python', () => {
+    // `Range(5.5, 1)` is 5.5, 4.5, 3.5, 2.5, 1.5 in the interpreter. The
+    // `Sum`/`Product` bound helper floors a literal, so the run-time
+    // direction header read it as `range(5, 0, -1)`.
+    const src = py(epsil('let s = 0\nfor k in Range(5.5, 1) { s = s + k }\ns'));
+    expect(src).not.toContain('range(5,');
+    expect(src).toContain('float(_a + (1 if _b >= _a else -1) * _i)');
+    expect(src).toContain('(5.5, 1)');
   });
 
   it('a statement-shaped comprehension body declines on Python', () => {
@@ -387,6 +417,10 @@ describeVenv(
       name: string;
       expr: MathJsonExpression;
       expected: unknown;
+      /** The compiled function's parameters, and the arguments of its one
+       * call (the interpreter runs with the same assignments). */
+      params?: string[];
+      args?: number[];
     }> = [
       {
         name: 'nested loops',
@@ -417,16 +451,49 @@ describeVenv(
         ],
         expected: [1, 2, 2, 4, 3, 6],
       },
+      {
+        name: 'symbolic descending range',
+        expr: epsil('let s = 0\nfor k in Range(n, 1) { s = s + k }\ns'),
+        params: ['n'],
+        args: [5],
+        expected: 15,
+      },
+      {
+        name: 'symbolic descending range, fractional start bound',
+        expr: epsil('let s = 0\nfor k in Range(n, 1) { s = s + k }\ns'),
+        params: ['n'],
+        args: [2.5],
+        expected: 4,
+      },
+      {
+        name: 'symbolic ascending range, fractional stop bound',
+        expr: epsil('let s = 0\nfor k in Range(1, n) { s = s + k }\ns'),
+        params: ['n'],
+        args: [2.5],
+        expected: 3,
+      },
+      {
+        name: 'symbolic range, both bounds symbolic and descending',
+        expr: epsil('let s = 0\nfor k in Range(a, b) { s = s + k }\ns'),
+        params: ['a', 'b'],
+        args: [10, 7],
+        expected: 34,
+      },
+      {
+        name: 'fractional literal descending range',
+        expr: epsil('let s = 0\nfor k in Range(5.5, 1) { s = s + k }\ns'),
+        expected: 17.5,
+      },
     ];
 
     it('the emitted Python evaluates to the interpreter value', () => {
       let program = 'import cmath, math, json\n\n';
       CASES.forEach((c, i) => {
-        program += `${python.compileFunction(ce.box(c.expr), `fn_${i}`, [])}\n`;
+        program += `${python.compileFunction(ce.box(c.expr), `fn_${i}`, c.params ?? [])}\n`;
       });
       program += 'results = []\n';
-      CASES.forEach((_c, i) => {
-        program += `results.append(fn_${i}())\n`;
+      CASES.forEach((c, i) => {
+        program += `results.append(fn_${i}(${(c.args ?? []).join(', ')}))\n`;
       });
       program += 'print(json.dumps(results))\n';
 
@@ -441,7 +508,7 @@ describeVenv(
       const actual = JSON.parse(out) as unknown[];
       CASES.forEach((c, i) => {
         expect([c.name, actual[i]]).toEqual([c.name, c.expected]);
-        expect(interpreted(c.expr)).toBe(
+        expect(interpreted(c.expr, c.params, c.args)).toBe(
           Array.isArray(c.expected)
             ? `[${c.expected.join(',')}]`
             : String(c.expected)

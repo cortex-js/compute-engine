@@ -690,13 +690,17 @@ function compilePythonStatements(
  * upper bound mapped to Python's exclusive one in the step's direction:
  * `Range(1, 10)` → `range(1, 11)`, `Range(10, 1)` → `range(10, 0, -1)`,
  * `Range(1, 10, 3)` → `range(1, 11, 3)`, `Range(10, 1, -3)` →
- * `range(10, 0, -3)`. A two-bound `Range` whose bounds are not literals
- * picks its direction at run time from the sign of `hi - lo`, as the
- * interpreter does. Any other `Range` — a fractional bound, a symbolic step
- * — and any other collection compile as a VALUE, and the loop iterates the
- * materialized list, whose elements then carry the value lowering's float
- * representation. A string, or a collection of characters, declines: its
- * elements are grapheme clusters this target cannot produce.
+ * `range(10, 0, -3)`. A two-bound `Range` with a symbolic bound picks its
+ * direction at run time from the sign of `hi - lo`, as the interpreter does,
+ * and reads its bounds at run time too: the `Range` signature types a bound
+ * `number`, so a Python caller may pass a float where the interpreter walks
+ * the range from the start bound in unit steps (`Range(2.5, 1)` is 2.5, 1.5)
+ * — a native `range` would raise `TypeError`. Any other `Range` — a
+ * fractional literal bound, a symbolic step — and any other collection
+ * compile as a VALUE, and the loop iterates the materialized list, whose
+ * elements then carry the value lowering's float representation. A string,
+ * or a collection of characters, declines: its elements are grapheme
+ * clusters this target cannot produce.
  */
 function pythonElementSource(
   coll: Expression,
@@ -725,13 +729,30 @@ function pythonElementSource(
         ? `range(${l}, ${h + 1}, ${s})`
         : `range(${l}, ${h - 1}, ${s})`;
     }
-    if (step === undefined) {
+    // A bound is fit for the run-time header below when it is a safe integer
+    // literal (`l`/`h` above) or not a literal at all. A number literal that
+    // `literalInteger` declines — a fractional bound, a magnitude past 2^53,
+    // a complex literal — takes the value lowering below, which walks the
+    // range in floats as the interpreter does. `compilePythonBound` FLOORS a
+    // literal (it serves `Sum`/`Product`, whose limits are integral), so
+    // routing `Range(5.5, 1)` through the run-time header read 5, 4, 3, 2, 1
+    // where the interpreter has 5.5, 4.5, 3.5, 2.5, 1.5.
+    const runTimeBound = (x: Expression, literal: number | undefined) =>
+      literal !== undefined || !isNumber(x);
+    if (step === undefined && runTimeBound(lo, l) && runTimeBound(hi, h)) {
       // The direction is the run-time sign of `hi - lo`, as the interpreter
       // reads it; the bounds are bound once so an impure bound is evaluated
-      // once.
+      // once. A Python `range` needs `int` arguments, and a symbolic bound
+      // may hold a float at run time. An integral value (`5.0`) takes the
+      // native `range` as an int — the interpreter has no integral float, so
+      // `Range(5.0, 1)` is 5, 4, 3, 2, 1. A fractional value walks the range
+      // from the start bound in unit steps, in the direction of the stop
+      // bound, as the interpreter does (`Range(2.5, 1)` is 2.5, 1.5;
+      // `Range(1, 2.5)` is 1, 2); `int(abs(_b - _a))` is the floor of a
+      // non-negative float, so no `math` import is needed.
       const l = compilePythonBound(lo, target);
       const h = compilePythonBound(hi, target);
-      return `(lambda _a, _b: range(_a, _b + 1) if _b >= _a else range(_a, _b - 1, -1))(${l}, ${h})`;
+      return `(lambda _a, _b: (range(int(_a), int(_b) + 1) if _b >= _a else range(int(_a), int(_b) - 1, -1)) if float(_a).is_integer() and float(_b).is_integer() else [_a + (1 if _b >= _a else -1) * _i for _i in range(int(abs(_b - _a)) + 1)])(${l}, ${h})`;
     }
   }
   // A STRING iterates its grapheme clusters in the interpreter, and a

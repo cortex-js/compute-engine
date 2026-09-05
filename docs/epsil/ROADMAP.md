@@ -31,10 +31,12 @@ Items are demand-gated unless another roadmap gives them higher priority.
   proves tuples of the pattern's arity (the interpreter refuses any other
   element with an error value, which compiled code cannot reproduce): a
   `Zip`, a literal list of tuples, or a `list<tuple<…>>` annotation
-  qualifies; a bare `list` declines. Still failing closed: a `match` on the
-  Python target, a symbolic descending `Range` in a Python `for` header (it
-  reads ascending), and a `Comprehension` whose body is several statements
-  on Python. A `match` on the JavaScript target compiles natively in
+  qualifies; a bare `list` declines. A two-bound `Range` with a symbolic
+  bound in a Python `for` header picks its direction, and whether a bound is
+  integral, at run time (`Range(n, 1)` is a descending native `range` for
+  `n = 5`, and 2.5, 1.5 for `n = 2.5`, as in the interpreter). Still failing
+  closed: a `match` on the Python target, and a `Comprehension` whose body
+  is several statements on Python. A `match` on the JavaScript target compiles natively in
   statement position (a `while let`, or a `match` arm that `break`s a
   `for`) and in value position, and a typed binding compiles when its type
   has a faithful test on the JS value model (machine types, value types,
