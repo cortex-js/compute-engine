@@ -15,19 +15,24 @@ Items are demand-gated unless another roadmap gives them higher priority.
 
 ## Standard library
 
-The Epsil standard library mirrors the Compute Engine standard library.
+The lowercase spellings of the standard library (`sum` for `Sum`, `print`
+for `Print`, `pi` for `Pi`) shipped on 2026-09-05 as a property of the
+language: the resolution pass `src/epsil/resolve-library-names.ts` rewrites
+free occurrences before a program is boxed, and the spelling table with its
+exclusions is `src/epsil/library-names.ts`. Design, audit, and the decisions
+taken: `docs/plans/2026-09-05-epsil-standard-library-lowercase-aliases.md`.
 
-The signature of each Compute Engine operator is identical in Epsil, but
-the name is an initial lowercase letter instead of an initial uppercase letter. 
-For example `sum` is the Epsil operator corresponding to the Compute Engine operator `Sum`,
-and `print` to `Print`. All the MathJSON operators are also available
-in their MathJSON names, e.g. `Sum` and `Print`. However, not all MathJSON operators
-have a lowercase spelling: the "low-level" operators that have an alternate
-syntax in Epsil do not have a lowercase spelling:
-- `Add`, `Subtract`, `Multiply`, `Divide`, `Power`, `Factorial`, `Negate`, `Abs`,
-- `And`, `Or`, `Not`
-- `If`, `For`, `While`, `Match`, `Range`
-- `Assign`, `Declare`, `Block`, `Return`, `Break`, `Continue`, etc...
+Remaining work:
+
+- **Serializer output.** The Epsil serializer still prints the MathJSON
+  names (`Sin(x)`). Printing the lowercase spelling needs the reverse scope
+  check (a program with `let sin = 3` in scope must not get `Sin(x)` printed
+  as `sin(x)`) and touches every Epsil snapshot and documentation example.
+- **Expanded library reference.** One page per library category in Epsil
+  syntax, mirroring `doc/*-reference-*.md`: a generated part per entry (both
+  spellings, the full description, executed examples) and a hand-written
+  introduction per category spliced in by the generator. Section 8.2 of the
+  plan above has the shape; the generator comes first.
 
 
 ## Runtime and representation

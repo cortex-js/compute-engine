@@ -21,6 +21,9 @@ import { tokenize } from './lexer.js';
 // backtick-quoted verbatim form). Synthesized names never spell their span.
 //
 
+/** A variable a call binds, and the operands (by index) it is visible in. */
+export type BinderSite = { name: string; operands: 'all' | readonly number[] };
+
 /** How one occurrence uses its symbol. */
 export type OccurrenceRole = 'definition' | 'write' | 'read';
 
@@ -108,7 +111,25 @@ const ROLE_RANK: Record<OccurrenceRole, number> = {
  */
 export function documentBindings(
   ast: MathJsonExpression | null,
-  text: string
+  text: string,
+  options?: {
+    /**
+     * The variables a CALL binds among its operands, for an operator that is
+     * a binder (`Integrate(x^2, x)` binds `x`; `Sum(k^2, k)` binds `k`). Each
+     * entry names one variable and says in which operands (by index) it is
+     * visible — `'all'` for the whole call, a list of indices for an
+     * iterator clause whose binding is visible only from its own clause
+     * onward and in the body. A same-named occurrence in a visible operand
+     * resolves to the call, not to an outer binding. Answers `undefined` for
+     * a call that binds nothing. The caller supplies this from the engine's
+     * binding-site selectors (see `resolve-library-names.ts`); without it, a
+     * binder's variable reads as an ordinary use of the enclosing scope,
+     * which is the language server's default.
+     */
+    binderSites?: (
+      node: MathJsonExpression
+    ) => readonly BinderSite[] | undefined;
+  }
 ): BindingGroup[] {
   const groups: BindingGroup[] = [];
   const freeGroups = new Map<string, BindingGroup>();
@@ -528,6 +549,51 @@ export function documentBindings(
         // be an EXPRESSION (`(f)(x)`), which is walked like any operand.
         if (typeof head === 'string') useHead(node, head, scope);
         else walk(head as MathJsonExpression, scope);
+        // A binder call (`integrate(x^2, x)`) binds its variables for the
+        // whole call, in a scope of its own — but only when the callee is not
+        // a name this program binds: a user function that happens to share
+        // a binder's name is an ordinary call. The names are read before any
+        // operand is walked, since the bound variable may appear before the
+        // operand that declares it.
+        const span = spanOf(node);
+        const bound =
+          typeof head === 'string' &&
+          options?.binderSites !== undefined &&
+          visibleBinding(scope, head, span?.[0] ?? scope.span[0]) === undefined
+            ? options.binderSites(node)
+            : undefined;
+        if (bound !== undefined && bound.length > 0) {
+          // One group per variable, shared by every operand scope it is
+          // visible in, so a rename edits all of its occurrences together.
+          const shared = new Map<string, BindingGroup>();
+          [...operands(node)].forEach((op, i) => {
+            const visible = bound.filter(
+              (site) => site.operands === 'all' || site.operands.includes(i)
+            );
+            if (visible.length === 0) {
+              walk(op, scope);
+              return;
+            }
+            const inner = childScope(span, scope);
+            for (const site of visible) {
+              const group = shared.get(site.name);
+              if (group === undefined)
+                shared.set(
+                  site.name,
+                  ensureBinding(
+                    inner,
+                    site.name,
+                    'parameter',
+                    undefined,
+                    inner.span[0]
+                  )
+                );
+              else inner.bindings.set(site.name, group);
+            }
+            walk(op, inner);
+          });
+          return;
+        }
         for (const op of operands(node)) walk(op, scope);
         return;
       }

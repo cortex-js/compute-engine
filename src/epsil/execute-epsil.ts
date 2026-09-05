@@ -26,6 +26,8 @@ import {
   ParsingDiagnostic,
 } from './diagnostics.js';
 import { parseEpsil } from './parse-epsil.js';
+import { resolveLibraryNames } from './resolve-library-names.js';
+import { epsilNameOf } from './library-names.js';
 import { definitionSites } from './definition-sites.js';
 import { narrowToFrames, traceFrames } from './error-location.js';
 import { signatureNotes } from './signature-notes.js';
@@ -161,7 +163,12 @@ function executeEpsilBatch(
       // Parsing and lexing consume the same host budget as execution.
       deadline: ce._deadlineFrame,
     });
-    ast = parsed;
+    // The Epsil spellings of the library (`sin`, `pi`) become the library
+    // names (`Sin`, `Pi`) here, before anything reads the tree — the static
+    // pass, the advisory scans, and the evaluation loop all see `Sin`. The
+    // raw tree the parser produced is not kept: the diagnostics index the
+    // SOURCE, and every node keeps its offsets through the rewrite.
+    ast = resolveLibraryNames(parsed, source, ce);
     diagnostics.push(...parseDiagnostics);
   } catch (e) {
     // A `#error` pragma throws a `FatalParsingError`. A cell must NOT throw to
@@ -843,11 +850,11 @@ function statementRange(
   return sourceOffsetsOf(stmt) ?? [0, source.length];
 }
 
-// Unresolved print-like ALIASES that get a did-you-mean toward the real
-// `print` (which EXISTS since the Print/Input feature, 2026-08-18, and is
-// deliberately NOT in this set: it normally resolves before the
-// unknown-head scan, and a user binding that shadows it -- `let print` --
-// must not produce the self-contradictory "no print; did you mean print?").
+// Unresolved print-like names that get a did-you-mean toward the real
+// `print` (the Epsil spelling of `Print`, resolved by `resolveLibraryNames`
+// before this scan runs, and deliberately NOT in this set: a user binding
+// that shadows it -- `let print` -- must not produce the self-contradictory
+// "no print; did you mean print?").
 const PRINT_LIKE = new Set(['println', 'printf', 'puts', 'echo']);
 
 /**
@@ -962,10 +969,19 @@ function scanUnknownFunctions(
       });
     } else {
       const suggestion = ce.suggestOperatorName(head);
-      if (suggestion !== undefined) {
+      // The engine suggests the library name; the author reads Epsil, so the
+      // suggestion is its Epsil spelling when it has one (`sinn` → `sin`, not
+      // `Sin`). A head that IS that spelling and still did not resolve was
+      // written on purpose — the verbatim `` `sin` `` names the raw symbol —
+      // and "no sin; did you mean sin?" would contradict itself.
+      const spelled =
+        suggestion === undefined
+          ? undefined
+          : (epsilNameOf(suggestion) ?? suggestion);
+      if (spelled !== undefined && spelled !== head) {
         diagnostics.push({
           severity: 'warning',
-          message: ['unknown-function', head, suggestion],
+          message: ['unknown-function', head, spelled],
           range: statementRange(stmt, source),
         });
       }

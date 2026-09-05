@@ -44,10 +44,13 @@ There is no `print`. A program's value is the value of its **last statement**.
 | `math.floor(x)`, `np.mean(xs)` | `Floor(x)`, `Mean(xs)` — no modules, no imports |
 | `obj.method(a)` | `c.area(a)` only when `area` is a [protocol](/epsil/protocols/#dot-call) function; otherwise `f(c, a)` or `c \|> f` — `xs.Sort()` is an error |
 
-Naming convention: `Capitalized` names are library operators, `lowercase`
-names are yours. Calling an unknown function is not an error — the call stays
-symbolic, with a did-you-mean warning when a close library name exists
-(`len` suggests `Length`).
+Naming convention: library operators are lowercase, as in Python (`sin`,
+`map`, `max`, `len` is `length`), and also answer to their MathJSON names
+(`Sin`, `Map`, `Max`, `Length`). Your names are lowercase too and shadow a
+library name by scope, as a Python assignment to `sum` does. Calling an
+unknown function is not an error — the call stays symbolic, with a
+did-you-mean warning when a close library name exists (`len` suggests
+`length`).
 
 ```epsil
 fact(n) = 1 if n <= 1 else n * fact(n - 1)

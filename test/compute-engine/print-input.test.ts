@@ -1,8 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 //
-// `Print` and `Input` — host console I/O (with the Epsil-facing lowercase
-// aliases `print`/`input`, which canonicalize to the capitalized operators).
+// `Print` and `Input` — host console I/O. Epsil writes them `print` and
+// `input`, but that spelling is a property of the Epsil language (resolved
+// by `resolveLibraryNames` before a program is boxed); the engine itself has
+// no `print`/`input` binding, which the tests below pin.
 //
 // `Input` is exercised through the browser `prompt()` path only: its Node
 // path does a BLOCKING synchronous read of stdin, which in a jest worker
@@ -51,11 +53,13 @@ describe('Print', () => {
     expect(expr.effects).toContain('console');
   });
 
-  test('lowercase alias canonicalizes to Print', () => {
-    const expr = ce.box(['print', { str: 'hi' }]);
-    expect(expr.operator).toBe('Print');
-    expr.evaluate();
-    expect(logged).toEqual(['hi']);
+  test('the Epsil spelling `print` is not an engine name', () => {
+    // The lowercase spelling belongs to the Epsil language (resolved by
+    // `resolveLibraryNames` before a program is boxed); MathJSON writes
+    // `Print`. A bare `["print", …]` is an unknown function, as any other
+    // undeclared lowercase head is.
+    expect(ce.operatorInfo('print')).toBeUndefined();
+    expect(ce.box(['print', { str: 'hi' }]).operator).toBe('print');
   });
 });
 
@@ -102,7 +106,7 @@ describe('Input', () => {
     expect(expr.effects).toContain('console');
   });
 
-  test('lowercase alias canonicalizes to Input', () => {
-    expect(ce.box(['input', { str: '? ' }]).operator).toBe('Input');
+  test('the Epsil spelling `input` is not an engine name', () => {
+    expect(ce.operatorInfo('input')).toBeUndefined();
   });
 });

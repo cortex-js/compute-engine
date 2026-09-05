@@ -299,10 +299,11 @@ See [Strings](/epsil/literals/#strings).
 
 ## Naming
 
-A capitalized identifier is a library or engine operator (`Map`, `Pi`);
-a lowercase one is a user-defined variable, function, or type (`total`,
+Library operators and constants are written in lowercase (`map`, `pi`,
+`print`); their MathJSON names (`Map`, `Pi`, `Print`) work too. A
+user-defined variable, function, or type is lowercase as well (`total`,
 `area`, `type point = …`), and a sum's variants are its constructors
-(`red()`). Commands are lowercase too (`print`). See
+(`red()`). A user name shadows a library name by scope. See
 [Naming](/epsil/naming/).
 
 ## Loop accumulation, measured {#loop-accumulation-measured}

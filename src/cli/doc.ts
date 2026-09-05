@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../epsil.js';
+import { canonicalLibraryName, epsilNameOf } from '../epsil/library-names.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseDocArguments } from './arguments.js';
@@ -10,6 +11,9 @@ import type { CliIo } from './io.js';
  */
 export interface DocEntry {
   id: string;
+  /** The Epsil spelling of a standard-library name (`sin` for `Sin`), when
+   * it has one. See `src/epsil/library-names.ts`. */
+  epsilName?: string;
   kind: 'function' | 'opaque' | 'constant' | 'variable';
   signature?: string;
   type?: string;
@@ -135,9 +139,26 @@ export function describeName(
   name: string
 ): DocEntry | undefined {
   const def = engine.lookupDefinition(name);
-  if (!def) return undefined;
+  if (!def) {
+    // An Epsil spelling (`sin`) with no engine binding of its own describes
+    // the library name it stands for (`Sin`).
+    const canonical = canonicalLibraryName(name);
+    return canonical === undefined
+      ? undefined
+      : describeName(engine, canonical);
+  }
 
   const entry: DocEntry = { id: name, kind: 'variable' };
+  // The spelling belongs to the STANDARD library's definition: a user
+  // binding that shadows a library name (`let Sin = 5` on a shared engine)
+  // is described as what it is, with no spelling.
+  const epsilName = epsilNameOf(name);
+  if (
+    epsilName !== undefined &&
+    canonicalLibraryName(epsilName) === name &&
+    engine.contextStack[0]?.lexicalScope.bindings.get(name) === def
+  )
+    entry.epsilName = epsilName;
 
   const base = 'operator' in def ? def.operator : def.value;
   if (base.description !== undefined)
@@ -175,6 +196,7 @@ export function describeName(
 
 function formatEntry(entry: DocEntry): string {
   const lines: string[] = [formatEntryLine(entry)];
+  if (entry.epsilName !== undefined) lines.push(`  epsil: ${entry.epsilName}`);
   if (entry.value !== undefined) lines.push(`  value: ${entry.value}`);
   if (entry.keywords) lines.push(`  keywords: ${entry.keywords.join(', ')}`);
   if (entry.url) lines.push(`  ${entry.url}`);

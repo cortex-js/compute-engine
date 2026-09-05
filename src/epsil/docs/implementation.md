@@ -53,6 +53,14 @@ The parser recovers from most syntax errors and returns a partial expression
 alongside its diagnostics. Every parsed node also carries source offsets so a
 host can associate a diagnostic or expression with the original text.
 
+The tree is exactly what was written: the lowercase spelling of a library
+name (`sin`, `pi`) is still `sin` and `pi` at this point. A host that boxes
+or evaluates the tree itself must first run `resolveLibraryNames(expression,
+source, ce)`, which rewrites every free occurrence of a spelling to the
+library name it stands for (`Sin`, `Pi`) while leaving names the program or
+the engine binds alone — `executeEpsil` does this itself. See
+[Naming](/epsil/naming/).
+
 ### Execution
 
 `executeEpsil(ce, source, options?)` parses a program and evaluates its

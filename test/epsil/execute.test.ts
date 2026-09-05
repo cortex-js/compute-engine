@@ -743,7 +743,9 @@ describe('EPSIL EXECUTE — did-you-mean for unknown functions', () => {
   // `["Quartile", …]` value). When the unknown name is close to a known
   // operator, a `warning`-severity `unknown-function` diagnostic surfaces the
   // suggestion; the returned value is unchanged. A name with no near match is
-  // never nagged.
+  // never nagged. The suggestion is the operator's Epsil spelling
+  // (`quartiles`, not `Quartiles`) when it has one — see
+  // `src/epsil/library-names.ts`.
 
   test('a plural typo suggests the known operator', () => {
     const { value, diagnostics } = run('Quartile([1, 2, 3, 4, 5])');
@@ -752,7 +754,7 @@ describe('EPSIL EXECUTE — did-you-mean for unknown functions', () => {
     expect(diagnostics[0].message).toEqual([
       'unknown-function',
       'Quartile',
-      'Quartiles',
+      'quartiles',
     ]);
     // The value is still the inert symbolic form.
     expect(value.operator).toBe('Quartile');
@@ -764,7 +766,7 @@ describe('EPSIL EXECUTE — did-you-mean for unknown functions', () => {
     expect(diagnostics[0].message).toEqual([
       'unknown-function',
       'Argmuent',
-      'Argument',
+      'argument',
     ]);
   });
 

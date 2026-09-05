@@ -34,11 +34,14 @@ deviation"`. Add `--diagnostics json` to a run for machine-readable runtime
 diagnostics. Embed via `executeEpsil(ce, source)` from
 `@cortex-js/compute-engine/epsil`. See [CLI](/epsil/cli/).
 
-**Naming convention**: `Capitalized` names are library operators (`Sin`,
-`Map`, `Simplify`); `lowercase` names are your variables and functions.
-Calling an unknown function is not an error — the call stays symbolic (a
-warning diagnostic with a did-you-mean suggestion fires when a close library
-name exists, e.g. `len` → `Length`).
+**Naming convention**: library operators are written in lowercase (`sin`,
+`map`, `simplify`, `pi`) and also answer to their MathJSON names (`Sin`,
+`Map`, `Simplify`, `Pi`). Your variables and functions are lowercase too and
+shadow a library name by scope (`let sum = 0` makes `sum` a variable).
+Operators with their own syntax have no lowercase spelling (`Add` is `+`,
+`If` is `if`, `List` is `[…]`). Calling an unknown function is not an
+error — the call stays symbolic (a warning diagnostic with a did-you-mean
+suggestion fires when a close library name exists, e.g. `len` → `length`).
 
 ## Core Syntax
 

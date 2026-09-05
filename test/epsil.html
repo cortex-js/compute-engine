@@ -102,6 +102,7 @@
       import {
         ComputeEngine,
         parseEpsil,
+        resolveLibraryNames,
         serializeEpsil,
       } from "../dist/epsil.esm.js";
 
@@ -156,7 +157,10 @@
           document.getElementById("error").classList.remove("visible");
           let errorMsg = "";
           try {
-            const [expr, warnings] = parseEpsil(epsil);
+            const [raw, warnings] = parseEpsil(epsil);
+            // The Epsil spellings of the library (`sin`) become the library
+            // names (`Sin`) before the tree is evaluated.
+            const expr = raw ? resolveLibraryNames(raw, epsil, engine) : raw;
             errorMsg += warningsToString(warnings ?? []);
             if (expr) {
               setTimeout(() => {

@@ -16,6 +16,12 @@ export { ComputeEngine } from './compute-engine.js';
 export { parseEpsil } from './epsil/parse-epsil.js';
 export { serializeEpsil } from './epsil/serialize-epsil.js';
 export { executeEpsil } from './epsil/execute-epsil.js';
+export { resolveLibraryNames } from './epsil/resolve-library-names.js';
+export {
+  canonicalLibraryName,
+  epsilLibraryNames,
+  epsilNameOf,
+} from './epsil/library-names.js';
 export type {
   ExecuteEpsilOptions,
   ExecuteEpsilResult,

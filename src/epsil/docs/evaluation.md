@@ -286,10 +286,10 @@ Who? Arno
 Hello, Arno
 ```
 
-`print` and `input` follow the lowercase command convention. They are
-ordinary library aliases for the `Print` and `Input` operators — not
-keywords — so a local declaration of `print` shadows the command like any
-other library name.
+`print` and `input` are the lowercase spellings of the `Print` and `Input`
+operators, like `sin` for `Sin` — not keywords — so a local declaration of
+`print` shadows the command like any other library name. See
+[Naming](/epsil/naming/).
 
 ## Pragma security
 

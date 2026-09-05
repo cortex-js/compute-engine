@@ -6,6 +6,7 @@ import {
   staticDiagnostics,
   type EffectSummary,
 } from '../epsil/static-diagnostics.js';
+import { resolveLibraryNames } from '../epsil/resolve-library-names.js';
 
 import { CliUsageError, parseCheckArguments } from './arguments.js';
 import {
@@ -89,6 +90,9 @@ export function checkSource(
   const effects: EffectSummary[] | undefined = options?.effects
     ? []
     : undefined;
+  // The library spellings (`sin`) become library names (`Sin`) before the
+  // canonicalization pass reads the tree, as `executeEpsil` does.
+  resolveLibraryNames(ast, source, engine);
   return {
     ast,
     diagnostics: [

@@ -2,6 +2,16 @@
 
 ### Breaking Changes
 
+- **A bare lowercase library name in an Epsil program is the library
+  definition.** With the lowercase spellings (see New Features), `mean`,
+  `sum`, `count`, `pi` and every other spelling now resolve to the library
+  when nothing in the program or the engine binds them: `mean + 1` is a type
+  error (`Mean` is a function), where it used to be a sum with an unknown
+  number `mean`. Declare the variable (`let mean = 5`) and it shadows the
+  library name as before. MathJSON is not affected: `["Add", "mean", 1]`
+  still names an unknown symbol, and the hand-written engine aliases `print`
+  and `input` are gone — MathJSON writes `Print` and `Input`.
+
 - **A `let`/`const` may not re-declare a name its own scope already declares.**
   An earlier `let` of the same block or program, a parameter of the function
   whose body the block is, or the index of the loop whose body the block is:
@@ -18,6 +28,24 @@
   top-level `let` re-declares as before. To update a binding, assign to it.
 
 ### New Features
+
+- **The Epsil standard library has lowercase spellings.** Every library
+  function and constant can be written with an initial lowercase letter:
+  `sin(x)`, `map(f, xs)`, `isPrime(7)`, `gcd(12, 18)`, `pi`, `nothing`,
+  `print("hi")`. The MathJSON names (`Sin`, `Map`, `IsPrime`, `GCD`, `Pi`)
+  keep working. Names with a dedicated syntax have no lowercase spelling
+  (`Add` is `+`, `If` is `if`, `List` is `[…]`, `D` and `N` stay single
+  letters), and the LaTeX relation glyphs (`Approx`, `Tilde`, `Precedes`, …)
+  and engine-internal heads are excluded. The spelling is a property of the
+  language, not of the engine: the parse tree keeps what was written, a
+  resolution pass rewrites free occurrences to the library names before the
+  program is boxed, and a user binding of any form (`let`, a parameter, a
+  loop variable, a `match` pattern, a `function`) shadows the spelling by
+  scope. `epsil doc sin` and the hover describe `Sin` and show the spelling;
+  a did-you-mean suggestion is now spelled in lowercase (`sinn` → `sin`).
+  Hosts that parse with `parseEpsil` and box the tree themselves call the new
+  `resolveLibraryNames(tree, source, ce)` first. See the Naming page of the
+  Epsil documentation.
 
 - **Epsil reads the common mathematical Unicode notations, as Lean does.** The
   double-struck letters are type names in an annotation — `c: ℝ` is `c: real`,

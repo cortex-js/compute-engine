@@ -170,9 +170,9 @@ describe('zero-index lint', () => {
 
 describe('print hint', () => {
   test('print-like ALIASES get a dedicated hint, once per name; `print` itself resolves', () => {
-    // `print` is a real function since the Print/Input feature (2026-08-18),
-    // so calling it produces output, not a hint. The hint remains as a
-    // did-you-mean net for the unresolved aliases.
+    // `print` is the Epsil spelling of `Print` (resolved before this scan
+    // runs), so calling it produces output, not a hint. The hint remains as
+    // a did-you-mean net for the print-like names that resolve to nothing.
     expect(execDiagnostics('print("hi")\nprint("again")')).toEqual([]);
     expect(execDiagnostics('puts(42)\nputs(43)')).toEqual([
       ['print-not-available', 'puts'],
@@ -183,18 +183,19 @@ describe('print hint', () => {
   });
 
   test('a user binding that shadows `print` never gets the self-contradictory hint', () => {
-    // `print` is deliberately NOT in the PRINT_LIKE alias set: a `let print`
-    // shadowing the builtin must fall through to the ordinary did-you-mean
-    // path, never to "There is no print; did you mean print?".
-    expect(execDiagnostics('let print\nprint("x")')).toEqual([
-      ['unknown-function', 'print', 'Print'],
-    ]);
+    // `print` is deliberately NOT in the PRINT_LIKE set: a `let print`
+    // shadowing the library name falls through to the ordinary did-you-mean
+    // path — where the suggestion for `print` would be its own Epsil
+    // spelling, `print`, so nothing is suggested at all. Never "There is no
+    // print; did you mean print?".
+    expect(execDiagnostics('let print\nprint("x")')).toEqual([]);
   });
 
   test('other unknown calls keep the did-you-mean path', () => {
     expect(execDiagnostics('f(2)')).toEqual([]);
+    // The suggestion is the Epsil spelling of the operator.
     expect(execDiagnostics('len([1, 2])')).toEqual([
-      ['unknown-function', 'len', 'Length'],
+      ['unknown-function', 'len', 'length'],
     ]);
   });
 });
@@ -211,12 +212,12 @@ describe('curated did-you-mean synonyms', () => {
     expect(ce.suggestOperatorName('every')).toBe('All');
   });
 
-  test('the suggestion reaches the Epsil boundary diagnostic', () => {
+  test('the suggestion reaches the Epsil boundary diagnostic, in the Epsil spelling', () => {
     expect(execDiagnostics('Split("a b", " ")')).toEqual([
-      ['unknown-function', 'Split', 'StringSplit'],
+      ['unknown-function', 'Split', 'stringSplit'],
     ]);
     expect(execDiagnostics('Ceiling(2.1)')).toEqual([
-      ['unknown-function', 'Ceiling', 'Ceil'],
+      ['unknown-function', 'Ceiling', 'ceil'],
     ]);
   });
 });
@@ -238,15 +239,15 @@ describe('curated did-you-mean synonyms — Wolfram Language names', () => {
     expect(ce.suggestOperatorName('NestList')).toBe('Iterate');
   });
 
-  test('the suggestions reach the Epsil boundary diagnostic', () => {
+  test('the suggestions reach the Epsil boundary diagnostic, in the Epsil spelling', () => {
     expect(execDiagnostics('Total([1, 2, 3])')).toEqual([
-      ['unknown-function', 'Total', 'Sum'],
+      ['unknown-function', 'Total', 'sum'],
     ]);
     expect(execDiagnostics('Select([1, 2, 3], x => x > 1)')).toEqual([
-      ['unknown-function', 'Select', 'Filter'],
+      ['unknown-function', 'Select', 'filter'],
     ]);
     expect(execDiagnostics('MemberQ([1, 2], 1)')).toEqual([
-      ['unknown-function', 'MemberQ', 'Contains'],
+      ['unknown-function', 'MemberQ', 'contains'],
     ]);
   });
 

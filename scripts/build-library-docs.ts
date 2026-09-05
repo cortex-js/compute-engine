@@ -24,7 +24,16 @@ import { ComputeEngine } from '../src/compute-engine/index.js';
 import { STANDARD_LIBRARIES } from '../src/compute-engine/library/library.js';
 import { describeName, type DocEntry } from '../src/cli/doc.js';
 import { executeEpsil } from '../src/epsil/execute-epsil.js';
+import {
+  canonicalLibraryName,
+  epsilNameOf,
+} from '../src/epsil/library-names.js';
+import { documentBindings, isNameVisibleAt } from '../src/epsil/occurrences.js';
 import { parseEpsil } from '../src/epsil/parse-epsil.js';
+import {
+  binderSitesOf,
+  resolveLibraryNames,
+} from '../src/epsil/resolve-library-names.js';
 
 /** The page title of each library, in the engine's loading order. A library
  * missing here still renders, under its identifier. */
@@ -119,6 +128,53 @@ function exampleSource(example: string): string {
 }
 
 /**
+ * The example in the Epsil style: every FREE occurrence of a library name
+ * that has a lowercase spelling is written with the spelling (`Sin(1)` →
+ * `sin(1)`, `Pi` → `pi`). A name the example binds itself (`let Total = …`)
+ * and a verbatim name (`` `Sin` ``) are left as written, and so is a name
+ * whose spelling the example binds at that point (`let pi = 3; Pi` keeps
+ * `Pi`: written `pi`, it would read the local). A glyph (`π`, read as
+ * `Pi`) stays a glyph: its source text is not the library name. A variable
+ * a library call binds (`Sum(k^2, k in 1..n)`) is classified the way the
+ * resolution pass classifies it, so it is never mistaken for a free library
+ * name. The definitions write their examples with the MathJSON names; the
+ * page shows the language's own spelling, and the program means the same
+ * thing on both spellings, so the `// ➔` annotation is unchanged.
+ */
+function epsilSpelling(source: string): string {
+  const [ast, diagnostics] = parseEpsil(source);
+  if (diagnostics.some((d) => d.severity === 'error')) return source;
+  const edits: { start: number; end: number; text: string }[] = [];
+  const groups = documentBindings(ast, source, {
+    binderSites: (node) => binderSitesOf(engine, node, source),
+  });
+  for (const group of groups) {
+    if (group.kind !== 'free') continue;
+    // The spelling must round-trip to this very name: a free `Total` that
+    // fits the naming pattern but is no library member keeps its spelling.
+    const spelling = epsilNameOf(group.name);
+    if (spelling === undefined || canonicalLibraryName(spelling) !== group.name)
+      continue;
+    for (const occurrence of group.occurrences) {
+      // A verbatim name's span includes its backticks, and a glyph's span is
+      // the glyph: neither spells the plain name, so neither is rewritten.
+      if (source.slice(occurrence.start, occurrence.end) !== group.name)
+        continue;
+      if (isNameVisibleAt(groups, spelling, occurrence.start)) continue;
+      edits.push({
+        start: occurrence.start,
+        end: occurrence.end,
+        text: spelling,
+      });
+    }
+  }
+  let result = source;
+  for (const edit of edits.sort((a, b) => b.start - a.start))
+    result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
+  return result;
+}
+
+/**
  * What an example evaluates to: `{ value }` for the `// ➔` annotation, or
  * `{ impure: true }` when no annotation may be written because the program
  * is impure (a random draw — two runs need not agree, and one lucky
@@ -142,7 +198,9 @@ function evaluateExample(
     return broken(
       `does not parse (${JSON.stringify(parseDiagnostics.map((d) => d.message))})`
     );
-  if (!new ComputeEngine().box(ast).isPure) return { impure: true };
+  const purity = new ComputeEngine();
+  if (!purity.box(resolveLibraryNames(ast, source, purity)).isPure)
+    return { impure: true };
   const result = executeEpsil(new ComputeEngine(), source);
   const errors = result.diagnostics.filter((d) => d.severity === 'error');
   if (errors.length > 0)
@@ -217,17 +275,17 @@ const contents = sections
 const body = sections
   .map((s) => {
     const table = [
-      '| Name | Signature | Summary |',
-      '|:-----|:----------|:--------|',
+      '| Epsil | MathJSON | Signature | Summary |',
+      '|:------|:---------|:----------|:--------|',
       ...s.rows.map(
         (r) =>
-          `| \`${r.entry.id}\` | ${assertBalancedBackticks(mdx(shape(r.entry)), r.entry.id)} | ${assertBalancedBackticks(mdx(summary(r.entry)), r.entry.id)} |`
+          `| ${r.entry.epsilName === undefined ? '—' : `\`${r.entry.epsilName}\``} | \`${r.entry.id}\` | ${assertBalancedBackticks(mdx(shape(r.entry)), r.entry.id)} | ${assertBalancedBackticks(mdx(summary(r.entry)), r.entry.id)} |`
       ),
     ].join('\n');
     const examples = s.rows
       .flatMap((r) =>
         r.examples.map((example) => {
-          const source = exampleSource(example);
+          const source = epsilSpelling(exampleSource(example));
           const outcome = evaluateExample(source, r.entry.id);
           exampleCount += 1;
           return 'impure' in outcome

@@ -7751,14 +7751,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
   },
 
   // ---------------------------------------------------------------------------
-  // Host console I/O — `Print` and `Input`, with the Epsil-facing lowercase
-  // aliases `print` and `input` (Epsil spells commands in lowercase; the
-  // aliases canonicalize to the capitalized operators, so scope shadowing
-  // works the same as for any library name). Both carry the `console` effect
-  // label. When the capability registry of `docs/EFFECTS-MODEL.md` (Stage 4)
-  // lands they should route through `ce.effects.console`; until then they
-  // reach the host console directly and degrade gracefully where the host
-  // has none.
+  // Host console I/O — `Print` and `Input`. Epsil writes them `print` and
+  // `input`, like every library name with a lowercase spelling; that spelling
+  // is a property of the Epsil language (`src/epsil/library-names.ts`),
+  // resolved before a program is boxed, and the engine has no binding for it.
+  // Both carry the `console` effect label. When the capability registry of
+  // `docs/EFFECTS-MODEL.md` (Stage 4) lands they should route through
+  // `ce.effects.console`; until then they reach the host console directly and
+  // degrade gracefully where the host has none.
   // ---------------------------------------------------------------------------
   {
     Print: {
@@ -7808,27 +7808,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (line === null) return ce.Nothing;
         return ce.string(line);
       },
-    },
-
-    // The aliases restate their target's signature — including the
-    // `console` label, which is what the type of the SYMBOL `print` (e.g.
-    // passed as a callback value) is read from before canonicalization.
-    // Keep each alias signature identical to its capitalized operator's
-    // signature above.
-    print: {
-      description:
-        'Lowercase alias for `Print` (the Epsil command spelling); ' +
-        'canonicalizes to `Print`.',
-      signature: '(any*) console -> nothing',
-      canonical: (args, { engine: ce }) => ce.function('Print', args),
-    },
-
-    input: {
-      description:
-        'Lowercase alias for `Input` (the Epsil command spelling); ' +
-        'canonicalizes to `Input`.',
-      signature: '(prompt: string?) console -> string | nothing',
-      canonical: (args, { engine: ce }) => ce.function('Input', args),
     },
   },
 
