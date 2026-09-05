@@ -7,8 +7,12 @@ Category: scientific
 
 Grammar validation
 ------------------
-Last validated: 2026-08-06 against the Epsil grammar shipped in
-`src/epsil/`. The first pass that day narrowed the keyword table to the words
+Last validated: 2026-09-05 against the Epsil grammar shipped in
+`src/epsil/`. That day added the Unicode notations the lexer learned:
+superscripts end a symbol and are styled as operators (`x²`), the subscript
+signs `₊₋₍₎` likewise while subscript letters and digits stay in the name
+(`xₙ`), the glyph constants (π ℝ …) are literals, and `∫ ∑ ∏` are built-ins
+rather than operators. The 2026-08-06 first pass narrowed the keyword table to the words
 the grammar actually claims (the reserved-word relaxation), added
 `break`/`continue`, the contextual `type`/`alias`/`is`, and the non-finite
 literals. A second pass replaced the identifier character class with the actual
@@ -31,7 +35,11 @@ Tables cross-checked against source:
                      `` `…` `` verbatim symbols, `$…$` LaTeX islands, `#…`
                      pragmas, and line + nested block comments.
   - characters.ts  — `isBreak` / `isIdentifierContinueProhibited`, the tables
-                     the identifier and Unicode-operator classes mirror.
+                     the identifier and Unicode-operator classes mirror, plus
+                     `SUPERSCRIPT_UNICODE` / `SUBSCRIPT_UNICODE` (the `SCRIPT`
+                     matcher and the identifier-class exclusions) and the
+                     `FANCY_UNICODE` symbol aliases (glyph constants and the
+                     `∫ ∑ ∏` built-ins).
   - reserved-words.ts — `ACTIVE_WORDS` (highlighted as keywords) and
                      `LITERAL_WORDS` (highlighted as constants). The merely
                      RESERVED words are ordinary identifiers and are NOT
@@ -150,6 +158,18 @@ const BUILT_IN = {
   match: concat(/\b/, either(...BUILT_INS_LIST), /(?=\()/),
 };
 
+const IDENTIFIER_CHARACTER =
+  /[^\u0000-\u002F\u003A-\u0040\u005B-\u005E\u0060\u007B-\u00A7\u00A9\u00AB-\u00AC\u00AE\u00B0-\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u1680\u180E\u2000-\u200A\u200E-\u200F\u2010-\u203E\u2041-\u2053\u205F\u2190-\u2775\u2794-\u2E7F\u3000-\u3003\u3008-\u3020\u3030\uFD3E-\uFD3F\uFE45-\uFE46\uFFFE-\uFFFF\u00B2-\u00B3\u00B9\u02B0\u02B2-\u02B3\u02B7-\u02B8\u02E1-\u02E3\u1D43\u1D47-\u1D49\u1D4D\u1D4F-\u1D50\u1D52\u1D56-\u1D58\u1D5B\u1D62-\u1D65\u1D9C\u1DA0\u1DBB\u2070-\u2071\u2074-\u207B\u207D-\u208B\u208D-\u208E\u2090-\u2093\u2095-\u209C\u2C7C]/;
+// The name-boundary class: an identifier character OR a subscript letter or
+// digit. A keyword or constant word ends only where the lexer would end a
+// symbol: `ifₙ` is the symbol `if_n`, not the keyword `if`.
+const NAME_BOUNDARY_CHARACTER =
+  /[^\u0000-\u002F\u003A-\u0040\u005B-\u005E\u0060\u007B-\u00A7\u00A9\u00AB-\u00AC\u00AE\u00B0-\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u1680\u180E\u2000-\u200A\u200E-\u200F\u2010-\u203E\u2041-\u2053\u205F\u2190-\u2775\u2794-\u2C7B\u2C7D-\u2E7F\u3000-\u3003\u3008-\u3020\u3030\uFD3E-\uFD3F\uFE45-\uFE46\uFFFE-\uFFFF\u00B2-\u00B3\u00B9\u02B0\u02B2-\u02B3\u02B7-\u02B8\u02E1-\u02E3\u1D43\u1D47-\u1D49\u1D4D\u1D4F-\u1D50\u1D52\u1D56-\u1D58\u1D5B\u1D9C\u1DA0\u1DBB\u2070-\u2071\u2074-\u207B\u207D-\u207F\u208A-\u208B\u208D-\u208E]/;
+// A pragma name (`scanHash`) stops at `isBreak`/`isIdentifierContinueProhibited`
+// only — it does NOT stop at a script character, so `#simplify²` is one pragma.
+const PRAGMA_CHARACTER =
+  /[^\u0000-\u002F\u003A-\u0040\u005B-\u005E\u0060\u007B-\u00A7\u00A9\u00AB-\u00AC\u00AE\u00B0-\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u1680\u180E\u2000-\u200A\u200E-\u200F\u2010-\u203E\u2041-\u2053\u205F\u2190-\u2775\u2794-\u2E7F\u3000-\u3003\u3008-\u3020\u3030\uFD3E-\uFD3F\uFE45-\uFE46\uFFFE-\uFFFF]/;
+
 // Literal constants. `true`/`false` are the lowercase input aliases for the
 // `True`/`False` symbols (ratified 2026-07-11).
 export const CONSTANTS_LIST = [
@@ -168,7 +188,47 @@ export const CONSTANTS_LIST = [
 ];
 const CONSTANT = {
   className: 'literal',
-  match: concat(/\b/, either(...CONSTANTS_LIST), /\b/),
+  variants: [
+    { match: concat(/\b/, either(...CONSTANTS_LIST), /\b/) },
+    // The glyph aliases of library constants (`FANCY_UNICODE` in
+    // `characters.ts`). They lex as SYMBOL tokens for `Pi`,
+    // `ComplexNumbers`, …, so they are styled as constants. The letter-like
+    // glyphs π ℂ ℕ ℚ ℝ ℤ ⅇ ⅈ are identifier characters, and the lexer
+    // resolves the alias only when the glyph is the WHOLE symbol: `πvalue`
+    // is an ordinary name, so the match requires a name boundary after the
+    // glyph. ∅ ∞ ⧝ are Pattern_Syntax and always stand alone.
+    {
+      match: concat(
+        /[\u03C0\u2102\u2115\u211A\u211D\u2124\u2147-\u2148]/,
+        '(?!',
+        NAME_BOUNDARY_CHARACTER,
+        ')'
+      ),
+    },
+    { match: /[\u2205\u221E\u29DD]/ },
+  ],
+};
+
+// The glyph aliases of library FUNCTIONS: `∫` (Integrate), `∑` (Sum), `∏`
+// (Product). They fall inside the Unicode operator class, so this matcher
+// must come before `OPERATOR`.
+const BIG_OPERATOR = {
+  className: 'built_in',
+  match: /[\u222B\u2211\u220F]/,
+};
+
+// A run of script characters: a superscript exponent (`x²`, `xⁿ⁺¹`) or a
+// subscript that is an expression rather than a name (`xₖ₊₁`, `(a+b)ₖ`). The
+// lexer makes the run one `SUPERSCRIPT`/`SUBSCRIPT` token and the parser
+// reads it as a postfix `Power`/`Subscript`, so it is styled with the
+// operators. The matcher covers every script character: a subscript run of
+// letters and digits that FOLLOWS a name never reaches it, because
+// `IDENTIFIER_CHARACTERS` has already taken it as part of the name.
+const SCRIPT = {
+  className: 'operator',
+  relevance: 0,
+  match:
+    /[\u00B2-\u00B3\u00B9\u02B0\u02B2-\u02B3\u02B7-\u02B8\u02E1-\u02E3\u1D43\u1D47-\u1D49\u1D4D\u1D4F-\u1D50\u1D52\u1D56-\u1D58\u1D5B\u1D62-\u1D65\u1D9C\u1DA0\u1DBB\u2070-\u2071\u2074-\u207B\u207D-\u208B\u208D-\u208E\u2090-\u2093\u2095-\u209C\u2C7C]+/,
 };
 
 const decimalDigits = '([0-9]_*)+';
@@ -284,22 +344,38 @@ const LATEX_ISLAND = {
 // °± | ¶ | » | ¿ | × | ÷ | OGHAM SPACE | MONGOLIAN VOWEL SEPARATOR | the
 // U+2000 spaces | LRM and RLM | U+2010‥U+203E | U+2041‥U+2053 | MEDIUM
 // MATHEMATICAL SPACE | the arrow, math and dingbat blocks | CJK punctuation |
-// U+FD3E‥U+FD3F | U+FE45‥U+FE46 | the non-characters.
-const IDENTIFIER_CHARACTER =
-  /[^\u0000-\u002F\u003A-\u0040\u005B-\u005E\u0060\u007B-\u00A7\u00A9\u00AB\u00AC\u00AE\u00B0\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u1680\u180E\u2000-\u200A\u200E\u200F\u2010-\u203E\u2041-\u2053\u205F\u2190-\u2775\u2794-\u2E7F\u3000-\u3003\u3008-\u3020\u3030\uFD3E\uFD3F\uFE45\uFE46\uFFFE\uFFFF]/;
+// U+FD3E‥U+FD3F | U+FE45‥U+FE46 | the non-characters | then every SCRIPT
+// character (`SUPERSCRIPT_UNICODE` and `SUBSCRIPT_UNICODE`), which
+// `scanSymbol` stops at. Whether a subscript run then JOINS the name is
+// decided per run, by `IDENTIFIER_CHARACTERS` below.
+// A symbol: identifier characters, then optionally a subscript run — which
+// joins the name ONLY when the whole maximal run is letters and digits
+// (`xₙ` → `x_n`, `a₁₂` → `a_12`). A run that holds a sign anywhere is rolled
+// back whole by `scanSymbol` and re-lexed as one SUBSCRIPT token, so
+// `xₖ₊₁` is the name `x` followed by the script `ₖ₊₁`: the lookahead refuses
+// a letter/digit run that a subscript sign follows, and the backtracking
+// then refuses every shorter prefix of it too.
 const IDENTIFIER_CHARACTERS = concat(
   IDENTIFIER_CHARACTER,
   IDENTIFIER_CHARACTER,
-  '*'
+  '*',
+  '(?:[',
+  '\u1D62-\u1D65\u2080-\u2089\u2090-\u2093\u2095-\u209C\u2C7C',
+  ']+(?![',
+  '\u1D62-\u1D65\u2080-\u208B\u208D-\u208E\u2090-\u2093\u2095-\u209C\u2C7C',
+  ']))?'
 );
 
-// A pragma is `#` followed by identifier characters (`scanHash` reuses the
-// same break rule as `scanSymbol`), so `#simplify+1` is the pragma `#simplify`
-// followed by an operator, not one long pragma. `#!` on the first line is a
-// shebang.
+// A pragma is `#` followed by pragma characters (`scanHash` stops at the
+// lexer's break rule, not at a script character — see `PRAGMA_CHARACTER`), so
+// `#simplify+1` is the pragma `#simplify` followed by an operator, not one
+// long pragma. `#!` on the first line is a shebang.
 const META = {
   className: 'meta',
-  variants: [{ match: /^#!.*/ }, { match: concat(/#/, IDENTIFIER_CHARACTERS) }],
+  variants: [
+    { match: /^#!.*/ },
+    { match: concat(/#/, PRAGMA_CHARACTER, PRAGMA_CHARACTER, '*') },
+  ],
 };
 
 const COMMENT_MODES = (hljs) => [
@@ -342,7 +418,7 @@ const OPERATOR = {
     { begin: /[+\-*/^=<>!&|~:?%.]+/ },
     {
       begin:
-        /[\u00A1-\u00A7\u00A9\u00AB\u00AC\u00AE\u00B0\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u2010-\u203E\u2041-\u2053\u2190-\u2775\u2794-\u2E7F\u3001-\u3003\u3008-\u3020\u3030\uFD3E\uFD3F\uFE45\uFE46]/,
+        /[\u00A1-\u00A7\u00A9\u00AB\u00AC\u00AE\u00B0\u00B1\u00B6\u00BB\u00BF\u00D7\u00F7\u2010-\u203E\u2041-\u2053\u2190-\u2775\u2794-\u2C7B\u2C7D-\u2E7F\u3001-\u3003\u3008-\u3020\u3030\uFD3E\uFD3F\uFE45\uFE46]/,
     },
   ],
 };
@@ -380,6 +456,8 @@ export default function (hljs) {
       CONSTANT,
       TYPE,
       BUILT_IN,
+      BIG_OPERATOR,
+      SCRIPT,
       OPERATOR,
       BRACE,
       ...SYMBOLS,

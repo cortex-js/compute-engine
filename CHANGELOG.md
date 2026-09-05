@@ -64,7 +64,10 @@
   function: `∫(1/x, x)` is `Integrate(1/x, x)`, `∑` is `Sum`, `∏` is `Product`.
   Before, an annotation `c: ℝ` was a type error, `√`, `∛`, `∜` and `∫` were
   unexpected symbols, and `x²` was a symbol named `x²` (an invalid MathJSON
-  symbol name).
+  symbol name). The Epsil highlighter (`highlight-js-mode.js`) and the VS Code
+  grammar know the new notations: a superscript is styled as an operator, a
+  subscript letter or digit stays part of the name, the glyph constants are
+  literals, and `∫ ∑ ∏` are built-in functions.
 - **Typed lambda parameters have a LaTeX notation.** `(i: integer) \mapsto 2i`,
   `(x: real, y: real) \mapsto x + y`, `(x: list<integer>) \mapsto x` and
   `(f: (real) -> real) \mapsto f(1)` parse to `Function` literals with `Typed`
