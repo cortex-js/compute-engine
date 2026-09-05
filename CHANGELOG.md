@@ -143,6 +143,18 @@
 
 ### Resolved Issues
 
+- **A multi-clause function with a typed scalar parameter now maps over a
+  collection argument.** With `fib(0) = 0`, `fib(1) = 1` and
+  `fib(n: integer) = fib(n - 1) + fib(n - 2)`, the program
+  `5..10 |> fib |> Sum` failed with `incompatible-type: expected integer, got
+  range`, while the same program with an untyped `fib(n)` returned `136`. The
+  clause installer never marked the definition as broadcastable, so argument
+  validation at the call refused the range before the element-wise mapping
+  could run. A clause set whose parameters are all scalar now maps over a
+  list or range like a single typed function does; a clause that binds a
+  collection whole (`len(xs: list<number>)`) still receives it whole, and a
+  hold function is unchanged.
+
 - **A subscript with a computed index now evaluates.** `x_{k+1}` (LaTeX) and
   `xₖ₊₁` (Epsil) are kept as `Subscript(x, k + 1)` because the index is an
   expression, and evaluation left them as they were even once `k` had a value.

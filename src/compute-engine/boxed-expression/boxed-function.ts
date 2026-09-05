@@ -3918,14 +3918,16 @@ export class BoxedFunction
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       const operatorBroadcast =
         def.broadcastable &&
-        // A user function literal has its OWN broadcast arm (step 2b) and takes
-        // it even when the definition is `broadcastable` — an annotated literal
-        // assigned bare now derives that flag from `paramsAreScalar`
-        // (`engine-declarations.ts`). The two arms agree except on the empty
-        // source, where this one answers `Nothing` and step 2b answers `[]` —
-        // and `[]` is what the declare-then-assign VALUE route answers, so a
-        // lambda must not be captured here.
-        !isLambdaDef(def) &&
+        // A user function — a function literal, or a multi-clause definition
+        // — has its OWN broadcast arm (step 2b) and takes it even when the
+        // definition is `broadcastable`: an annotated literal assigned bare
+        // derives that flag from `paramsAreScalar` (`engine-declarations.ts`),
+        // and a clause set derives it the same way (`multi-clause.ts`). The
+        // two arms agree except on the empty source, where this one answers
+        // `Nothing` and step 2b answers `[]` — and `[]` is what the
+        // declare-then-assign VALUE route answers, so a user function must
+        // not be captured here.
+        !isUserFunctionDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         !skipBroadcastForVectorOps(def, hasTensors, this.ops!) &&
@@ -4753,8 +4755,9 @@ export class BoxedFunction
         this.ops!.some((x) => isFunction(x) && !isFiniteIndexedCollection(x));
       const operatorBroadcast =
         def?.broadcastable &&
-        // Mirrors the sync path: a lambda takes its own step-2b arm.
-        !isLambdaDef(def) &&
+        // Mirrors the sync path: a user function (a function literal or a
+        // multi-clause definition) takes its own step-2b arm.
+        !isUserFunctionDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         !skipBroadcastForVectorOps(def, hasTensors, this.ops!) &&

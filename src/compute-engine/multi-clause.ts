@@ -62,6 +62,7 @@ import {
   inferFunctionLiteralEffects,
 } from './boxed-expression/effects-inference.js';
 import { apply, lookup } from './function-utils.js';
+import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import { isMintedConstructor } from './type-constructors.js';
 import { isProtocolDispatcher } from './engine-protocols.js';
 import {
@@ -1251,6 +1252,23 @@ function installClauseList(
       : {}),
     ...flags,
     signature,
+    // A collection argument at a SCALAR parameter maps the function over the
+    // collection (`5..10 |> fib`, with `fib(n: integer) = …`): the evaluate
+    // route broadcasts element-wise (`boxed-function.ts`, steps 2b and 4b).
+    // Argument validation at the CALL runs first, and it admits a collection
+    // at a scalar slot only when the definition is `broadcastable` — left at
+    // its `false` default, a typed clause set REJECTED the range with
+    // `incompatible-type` before the broadcast could run, while the same
+    // clause set with an untyped parameter (which admits anything) mapped
+    // fine. Derive the flag as the single-function assign route does
+    // (`engine-declarations.ts`), from the same predicate the broadcast arms
+    // read: every arm's parameters scalar (a clause that binds a collection
+    // WHOLE keeps the flag false). A hold or binder definition never
+    // broadcasts (`isUserFunctionDefinition` is false for it), so it must not
+    // claim the flag either — validation would then admit a collection that
+    // no clause can consume.
+    broadcastable:
+      !hold && bindPositions.length === 0 && paramsAreScalar(signature),
     evaluate: (ops, options) =>
       selectAndApply(ce, id, frozen, ops, options, hold, attrs),
   };

@@ -550,6 +550,67 @@ fib([5, 6])`);
     expect(text).toBe('[5,8]');
   });
 
+  test('a typed scalar clause still maps over a range through the pipe', () => {
+    // Argument validation at the call admits a collection at a scalar slot
+    // only when the definition is `broadcastable`. The clause installer left
+    // the flag at its default, so `n: integer` turned the auto-mapping into
+    // `incompatible-type: expected integer, got range` while the untyped
+    // clause set above mapped fine.
+    const { text, diagnostics } = run(`
+fib(0) = 0
+fib(1) = 1
+fib(n: integer) = fib(n - 1) + fib(n - 2)
+5..10 |> fib |> Sum
+`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('136');
+  });
+
+  test('a typed scalar clause maps over a list argument', () => {
+    const { text, diagnostics } = run(`
+h(0) = 0
+h(n: integer) = n + 1
+h([5, 6])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[6,7]');
+  });
+
+  test('a typed scalar clause still refuses a non-numeric element', () => {
+    // The flag admits the collection at the call; the contract is checked per
+    // element, where the elements exist: the numeric cell maps, the string
+    // cell is refused by clause selection.
+    const { text, diagnostics } = run(`
+h(0) = 0
+h(n: integer) = n + 1
+h([5, "a"])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe(
+      '[6,Error("no-matching-clause", h("a"), "while applying \'h\' element-wise over 2 elements (element 2)")]'
+    );
+  });
+
+  test('a typed scalar clause set maps an empty list to an empty list', () => {
+    // The generic operator broadcast (step 2 of `_computeValue`) answers
+    // `Nothing` for a zero-element source; the user-function arm (step 2b)
+    // answers `[]`. A `broadcastable` clause set must take the user-function
+    // arm, like a function literal does.
+    const { text, diagnostics } = run(`
+h(0) = 0
+h(n: integer) = n + 1
+h([])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[]');
+  });
+
+  test('an untyped clause set maps an empty list to an empty list', () => {
+    const { text, diagnostics } = run(`
+h(0) = 0
+h(n) = n + 1
+h([])`);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[]');
+  });
+
   test('a clause taking a list binds it whole (no broadcast)', () => {
     const { text, diagnostics } = run(`
 len(0) = 0
