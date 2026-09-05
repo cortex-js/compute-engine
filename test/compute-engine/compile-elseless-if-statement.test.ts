@@ -28,6 +28,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -184,6 +185,67 @@ describe('an else-less If as a block statement', () => {
 // widening has to confront the evidence.
 // -----------------------------------------------------------------------------
 
+describe('an EMPTY block — effect position compiles, value position declines', () => {
+  // An empty `Block` is canonical and evaluates to `Nothing`, the erasure
+  // marker, which has no compiled representation. Where the block's value is
+  // discarded it is an empty statement; where it is consumed the shape
+  // declines (D6) instead of splicing `''` into a template (`(x) => `).
+  const ce = new ComputeEngine();
+
+  test('an empty else-less `if` arm and an empty loop body compile', () => {
+    const [ast] = parseEpsil(
+      'let s = 0\nif s < 1 { }\nwhile false { }\nfor k in 1..3 { }\ns'
+    );
+    const r = compile(ce.box(ast), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(0);
+  });
+
+  test('an empty block as a non-final statement is an empty statement', () => {
+    const expr = ce.box([
+      'Block',
+      ['Declare', 's', ['Dictionary', ['KeyValuePair', 'value', 0]]],
+      ['Block'],
+      's',
+    ]);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(0);
+  });
+
+  test('a shader loop body that is, or ends with, an empty block compiles', () => {
+    // The GPU targets compile a loop body through the statement-list route
+    // with its value discarded; a nested empty block there is an empty
+    // statement, whether it is the sole statement or the last one.
+    for (const body of [
+      ['Block', ['Block']],
+      ['Block', ['Assign', 's', 1], ['Block']],
+    ]) {
+      const expr = ce.box([
+        'Block',
+        ['Declare', 's', ['Dictionary', ['KeyValuePair', 'value', 0]]],
+        ['Loop', body, ['Element', 'i', ['Range', 1, 3]]],
+        's',
+      ]);
+      for (const to of ['glsl', 'wgsl'] as const) {
+        const r = compile(expr, { to, fallback: false });
+        expect([to, r.success]).toEqual([to, true]);
+        expect(r.code).toContain('for (');
+      }
+    }
+  });
+
+  test('an empty function body declines instead of emitting `(x) => `', () => {
+    const expr = ce.box(['Function', ['Block'], 'x']);
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /empty block evaluates to `Nothing`/
+    );
+    expect(() => compile(ce.box(['Block']), { fallback: false })).toThrow(
+      /empty block evaluates to `Nothing`/
+    );
+  });
+});
+
 describe('the admission is plain-JavaScript only', () => {
   /** `{ let s = 1; if x > 0 { s = -1 }; s }` — the shape fixed above. */
   function elselessBlock(engine: ComputeEngine): BoxedExpression {
@@ -303,7 +365,11 @@ describe('a statement-form If takes no branch on an undecided condition', () => 
 
   test('an else-less assignment in a Loop is skipped, and the loop completes', () => {
     ce.declare('x', 'number');
-    const expr = loopOver(ce, ['If', ['Greater', 'x', 0], ['Assign', 's', ['Add', 's', 1]]]);
+    const expr = loopOver(ce, [
+      'If',
+      ['Greater', 'x', 0],
+      ['Assign', 's', ['Add', 's', 1]],
+    ]);
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     // Decided: the assignment runs on each of the three iterations, or none.

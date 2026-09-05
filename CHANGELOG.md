@@ -53,6 +53,17 @@
   `unknown` and typed by use. A pattern whose arity the element tuple does not
   fit, and a name bound twice in one pattern, are now errors at
   canonicalization instead of failures at run time or compile time.
+- **An empty block evaluates to `Nothing`.** `if 1 < 2 { }` evaluated to the
+  inert empty block itself, printed `{}`, with type `unknown`, where the
+  language documents `Nothing` as an empty block's value. The empty `Block`
+  was declined by canonicalization, so it stayed unbound and neither its type
+  handler nor its evaluate handler ran. It is now canonical: its type is
+  `nothing`, and it evaluates to `Nothing` on every route (`if`, a function
+  body, a `while` body). The compiled lane keeps the same value: an empty
+  block whose value is discarded (a loop body, an else-less `if` arm, a
+  non-final statement) compiles to an empty statement, and one whose value is
+  consumed (an empty function body) declines instead of emitting an
+  arrow function with no body.
 - **A `for` loop over a `Range` with a symbolic bound compiles to Python
   faithfully for every numeric bound.** The Python target lowers
   `for k in Range(n, 1) { … }` to a native `range` whose direction is read at

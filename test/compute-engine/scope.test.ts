@@ -958,6 +958,25 @@ describe('BLOCK EVALUATION', () => {
     const result = ce.expr(['Block', 1, 2, 3]).evaluate();
     expect(result.valueOf()).toEqual(3);
   });
+
+  test('an EMPTY Block is canonical, typed `nothing`, and evaluates to Nothing', () => {
+    // `canonicalBlock` used to decline zero operands, which left the node
+    // non-canonical and unbound: neither its type handler nor its evaluate
+    // handler ran, so the block evaluated to itself (printed `{}`).
+    const block = ce.box(['Block']);
+    expect(block.isCanonical).toBe(true);
+    expect(block.isScoped).toBe(true);
+    expect(block.type.toString()).toBe('nothing');
+    expect(block.evaluate().json).toBe('Nothing');
+  });
+
+  test('If with an EMPTY Block arm evaluates the arm to Nothing', () => {
+    const taken = ce.box(['If', ['Less', 1, 2], ['Block']]).evaluate();
+    expect(taken.json).toBe('Nothing');
+    // The not-taken arm with no `else` keeps the no-selection convention.
+    const skipped = ce.box(['If', ['Greater', 1, 2], ['Block']]).evaluate();
+    expect(skipped.json).toBe('Missing');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────

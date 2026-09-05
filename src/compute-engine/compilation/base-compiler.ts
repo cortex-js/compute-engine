@@ -9389,6 +9389,19 @@ export class BaseCompiler {
       }
     }
 
+    // A lone EMPTY block in a statement list evaluated for effect (a shader
+    // loop body reaching `compileStatementList`) is an empty statement.
+    // The unwrap below would recompile it through `compileOp`, which treats
+    // every operand as a used value, and the empty-list exit further down
+    // would then decline it.
+    if (
+      !valueUsed &&
+      args.length === 1 &&
+      isFunction(args[0], 'Block') &&
+      args[0].nops === 0
+    )
+      return '';
+
     if (args.length === 1 && locals.length === 0) {
       // The single-statement block is UNWRAPPED here, but harvest still saw
       // the `Block` — so both its statement-list region and the statement's
@@ -9683,6 +9696,18 @@ export class BaseCompiler {
               }
               return [decl];
             }
+            // An EMPTY block in effect position — not the last statement,
+            // or any statement of a list whose own value is discarded — is
+            // an empty statement with nothing to emit. (The last statement of
+            // a value-carrying list is the list's value; an empty block there
+            // declines through `compileOp`, since `Nothing` has no compiled
+            // representation.)
+            if (
+              isFunction(arg, 'Block') &&
+              arg.nops === 0 &&
+              (!valueUsed || i < stmts.length - 1)
+            )
+              return [];
             // A bare expression statement is its own bindable region, keyed
             // `(statement, -1)`; every other statement head reaches its own
             // value edges from `compileExpr` (Assign RHS, Return value, …).
@@ -9691,7 +9716,20 @@ export class BaseCompiler {
           .filter((s) => s !== '')
       );
 
-      if (result.length === 0) return '';
+      // An empty statement list evaluates to `Nothing`, the erasure marker,
+      // which has no compiled representation. In VALUE position — a function
+      // body, a block spliced into an operand — the block declines (D6): a
+      // bare `''` spliced into the arrow-function template emitted `(x) => `,
+      // a syntax error. In EFFECT position — a loop body, an else-less `if`
+      // arm — an empty statement is exactly what `''` is.
+      if (result.length === 0) {
+        if (valueUsed)
+          throw new Error(
+            'Block: an empty block evaluates to `Nothing`, the erasure ' +
+              'marker, which has no compiled representation. Fail closed (D6).'
+          );
+        return '';
+      }
 
       // A statement list evaluated FOR EFFECT — a loop body — has no value,
       // so it is neither wrapped nor returned from: it is just its statements.

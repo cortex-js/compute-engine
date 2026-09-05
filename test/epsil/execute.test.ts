@@ -234,6 +234,24 @@ describe('EPSIL EXECUTE — errors are values', () => {
   });
 });
 
+describe('EPSIL EXECUTE — empty block', () => {
+  test('an empty block evaluates to Nothing, as documented', () => {
+    // The empty `Block` used to be declined by canonicalization, so it stayed
+    // unbound and evaluated to itself (printed `{}`, type `unknown`).
+    for (const src of [
+      'if 1 < 2 { }',
+      'function f() { }\nf()',
+      'while false { }',
+    ]) {
+      const { value, diagnostics } = run(src);
+      expect([src, diagnostics]).toEqual([src, []]);
+      expect([src, value.json]).toEqual([src, 'Nothing']);
+    }
+    // A skipped arm with no `else` keeps the no-selection convention.
+    expect(run('if 1 > 2 { }').value.json).toBe('Missing');
+  });
+});
+
 describe('EPSIL EXECUTE — while', () => {
   test('a while loop runs to completion (lowered to Loop + Break)', () => {
     // Count `c` down from 3 to 0; the loop value is Nothing (for-effect).
@@ -1138,7 +1156,7 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
 
   test('an empty dictionary prints as `{->}` and round-trips', () => {
     // `{->}` is the spelling that parses back as an empty dictionary (a bare
-    // `{}` is an empty block), so the printed form must be exactly that.
+    // `{}` is the empty set), so the printed form must be exactly that.
     expect(run('{->}').value.toString()).toBe('{->}');
     // Escaping round-trip: a key/value with a quote, backslash, and newline
     // reparses to the same dictionary.

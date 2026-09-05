@@ -619,15 +619,9 @@ export function canonicalFunctionLiteralArguments(
         // containing an `Error` node) and returns it unbound — and therefore
         // unscoped. Rebuild it from its statements so `Block`
         // canonicalization runs and creates the scope the parameter
-        // declarations below rely on. An EMPTY statement list stays unscoped
-        // through the rebuild too (`canonicalBlock` declines zero operands),
-        // so it takes the annotated branch's convention: the body is
-        // `Nothing`.
-        if (!block.isScoped)
-          block = ce.function(
-            'Block',
-            bodyOp.nops === 0 ? [ce.Nothing] : [...bodyOp.ops]
-          );
+        // declarations below rely on. An EMPTY block is canonical and scoped
+        // as it is (`canonicalBlock`), so it never reaches this rebuild.
+        if (!block.isScoped) block = ce.function('Block', [...bodyOp.ops]);
       } else block = ce.function('Block', [bodyOp]);
     } else {
       // Wrap the body Block's last statement in the return-type ascription.

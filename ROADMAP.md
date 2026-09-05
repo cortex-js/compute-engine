@@ -507,7 +507,10 @@ here.
   answers `1` and compiled `x > 0` answers `true`, where the interpreter leaves
   both unevaluated — both previously threw; whether those two divergences are
   acceptable is undecided.
-- **An Epsil effects violation is swallowed with zero diagnostics.** A function
+- **An Epsil effects violation is swallowed with zero diagnostics (FIXED
+  2026-09-03, commit 71ce3dfa: the error value now leaves the function body
+  through `bodyResultValue` and the Epsil route reports it as a
+  `runtime-error` diagnostic).** A function
   whose body writes to a binding of the ENCLOSING call needs the `scope` effect
   declared. When it is missing, the inner `DefineFunction` evaluates to
   `Error(ErrorCode("incompatible-type", "non-scope effects (writes outside a function requires a declared `scope` effect)", "scope effects"))`
@@ -523,7 +526,10 @@ here.
   evaluates to itself. The swallow point is `function-utils.ts:2583`; the error
   should reach the user. (This is what broke the `counter()` closure example in
   `src/epsil/docs/evaluation.md`, now fixed there by declaring the effect.)
-- **`if cond { }` with an EMPTY block yields an inert `Block`, not `Nothing`.**
+- **`if cond { }` with an EMPTY block yields an inert `Block`, not `Nothing`
+  (FIXED 2026-09-04: `canonicalBlock` no longer declines zero operands, so the
+  empty block is canonical and its handlers run; pinned in
+  `test/compute-engine/scope.test.ts` and `test/epsil/execute.test.ts`).**
   `if 1 < 2 { }` parses to `["If", ["Less", 1, 2], ["Block"]]` and evaluates to
   `["Block"]` — rendered `{}` — with type `unknown`, where
   `src/epsil/docs/control-flow.md:906` says an empty block's value is `Nothing`.
@@ -536,8 +542,8 @@ here.
   (`src/compute-engine/ types-definitions.ts:824`), so the node stays
   non-canonical and unbound and neither its `type` handler (`'nothing'` at zero
   args, `control-structures.ts:98`) nor its `evaluate` handler (`ce.Nothing` at
-  zero args, `control-structures.ts:1309`) ever runs. Fix = stop declining in
-  `canonicalBlock` for the zero-operand case.
+  zero args, `control-structures.ts:1309`) ever ran. The fix stops the decline
+  in `canonicalBlock` for the zero-operand case.
 - **`.value =` does not infer a symbol's type, while `ce.assign()` does.**
   `doc/04-guide-symbols.md:19-27` promises inference and uses `n.value = 5` as
   its live example. Measured: after `ce.expr('n')` then `n.value = 5`, the type

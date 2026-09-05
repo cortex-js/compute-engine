@@ -1592,8 +1592,12 @@ function canonicalBlock(
   options: { engine: ComputeEngine; scope: Scope | undefined }
 ): Expression | null {
   const { engine: ce, scope } = options;
-  // Empty block?
-  if (ops.length === 0) return null;
+  // An empty block is canonical as it is: its type handler answers `nothing`
+  // and its evaluate handler answers `Nothing`. Declining here (`null`) left
+  // the node non-canonical and unbound, so neither handler ever ran and
+  // `If(True, Block())` evaluated to the inert `Block()` itself, printed
+  // `{}`, where the language documents `Nothing` as an empty block's value.
+  if (ops.length === 0) return ce._fn('Block', [], { scope });
 
   // A `Declare(name, …)` introduces a block-local `name` that shadows any
   // same-named constant (`i`, `e`, `Pi`, …) for the rest of the block. Push

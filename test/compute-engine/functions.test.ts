@@ -1234,9 +1234,9 @@ describe('INVALID EXPLICIT-BLOCK BODY STILL GETS A SCOPED BLOCK', () => {
   });
 
   test('an EMPTY Block body takes the Nothing convention', () => {
-    // `canonicalBlock` declines zero operands, so the rebuilt block stayed
-    // unscoped through a plain rebuild; an empty statement list follows the
-    // annotated branch's convention instead: the body is `Nothing`.
+    // An empty `Block` is canonical and scoped as it is (`canonicalBlock`
+    // no longer declines zero operands), so the literal's body keeps its own
+    // scope and evaluates to `Nothing`.
     const expr = engine.box(['Function', ['Block'], 'W']);
     expect(expr.isCanonical).toBe(true);
     expect(expr.isValid).toBe(true);
