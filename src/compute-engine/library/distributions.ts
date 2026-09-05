@@ -1,8 +1,11 @@
 import {
   bigBetaRegularized,
   bigGammaQ,
+  bigGammaQNegativeOrder,
+  gamma,
   betaRegularized,
   gammaQ,
+  incompleteGammaUpper,
 } from '../numerics/special-functions.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
@@ -280,6 +283,20 @@ function isProvablyFinite(x: Expression): boolean {
  * - `~oo` in either slot, an anonymous infinity such as `∞ + i`, or two
  *   infinite operands: `NaN`.
  */
+/**
+ * Is Γ(a) positive at a NEGATIVE NON-INTEGER real literal `a`? Γ alternates
+ * sign between consecutive poles: it is negative on (−1, 0), positive on
+ * (−2, −1), negative on (−3, −2), … — positive exactly when ⌊−a⌋ is odd.
+ * Read from the sign rule, not from the machine `gamma(a)`, which underflows
+ * to 0 past a ≈ −171 and would then report the wrong sign.
+ */
+function gammaIsPositiveAt(a: Expression): boolean {
+  const big = a.bignumRe;
+  const k =
+    big !== undefined ? big.neg().floor().toNumber() : Math.floor(-a.re);
+  return k % 2 === 1;
+}
+
 function gammaRegularizedValueAtInfinity(
   a: Expression,
   z: Expression,
@@ -489,6 +506,14 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         if (isNumber(z) && z.isSame(0)) {
           if (isProvablyPositiveFinite(a)) return ce.One;
           if (isNonPositiveIntegerLiteral(a)) return ce.NaN;
+          // At a negative non-integer a the integral ∫₀^∞ t^{a−1}e^{−t} dt
+          // diverges at 0 towards +∞ (a positive integrand), and Γ(a) is a
+          // finite number of either sign, so Q(a, 0) is sign(Γ(a))·∞ — an
+          // exact point, answered on both routes like the other infinities.
+          if (isRealLiteral(a) && a.isNegative === true && a.isInteger !== true)
+            return gammaIsPositiveAt(a)
+              ? ce.PositiveInfinity
+              : ce.NegativeInfinity;
           return undefined;
         }
 
@@ -514,11 +539,45 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
 
         if (!isNumber(a) || !isNumber(z)) return undefined;
         if (a.im !== 0 || z.im !== 0) return undefined; // complex → symbolic
-        // The kernels are the series/continued-fraction pair for a > 0,
-        // z > 0. Outside that region the value exists but this head does not
-        // compute it (`Q(−0.5, 2) = −0.0085`, `Q(0.5, −1) = 1 − 1.65i`) — a
-        // capability gap stays SYMBOLIC; answering the kernel's `NaN` would
-        // report a defined value as indeterminate.
+
+        // A negative non-integer a with z > 0: Q(a, z) = Γ(a, z)/Γ(a), both
+        // finite — Γ(a) off its poles, and the upper incomplete gamma
+        // converges for every z > 0 whatever the order. The machine kernel is
+        // the Tricomi series and Legendre continued fraction of `Γ(a, z)`
+        // over `Γ(a)`; the bignum kernel is `bigGammaQNegativeOrder`. Both
+        // were checked against a direct quadrature of ∫_z^∞ t^{a−1}e^{−t} dt
+        // (small orders to twelve digits; orders down to −200 in log space).
+        // The machine quotient overflows past the double range and is 0/0
+        // when both factors underflow: such a value is not representable at
+        // machine precision, so the call stays symbolic there rather than
+        // report an infinity or a NaN at an interior point.
+        if (
+          a.isNegative === true &&
+          a.isInteger !== true &&
+          z.isPositive === true
+        ) {
+          if (!shouldNumericize(numericApproximation, a, z)) return undefined;
+          const q = apply2(
+            a,
+            z,
+            (a, z) => incompleteGammaUpper(a, z) / gamma(a),
+            (a, z) => bigGammaQNegativeOrder(ce, a, z)
+          );
+          if (
+            q !== undefined &&
+            isNumber(q) &&
+            q.bignumRe === undefined &&
+            !Number.isFinite(q.re)
+          )
+            return undefined;
+          return q;
+        }
+
+        // The regularized kernels are the series/continued-fraction pair for
+        // a > 0, z > 0. A negative z is outside them: the value is complex
+        // (`Q(0.5, −1) = 1 − 1.65i`) and there is no complex kernel, so it
+        // stays SYMBOLIC; answering the kernel's `NaN` would report a defined
+        // value as indeterminate.
         if (a.isPositive !== true || z.isPositive !== true) return undefined;
         if (!shouldNumericize(numericApproximation, a, z)) return undefined;
         return apply2(

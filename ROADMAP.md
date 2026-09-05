@@ -234,11 +234,23 @@ fixed in that change. One item remains.
   exactly and answers 0. Options: make the symbolic guard exact (a
   tolerance-free relation the guard can name), or accept the tolerant reading as
   the symbolic route's contract and pin the boundary.
-- **`GammaRegularized(a, 0)` for a negative non-integer `a`** is a decided
-  divergence (`sign(Γ(a))·∞`, verified) left symbolic for uniformity with the
-  surrounding `a < 0` capability gap (the kernel computes `Q(a, z)` for
-  `a > 0, z ≥ 0` only; `Q(-1/2, 2)` is a finite negative real the engine cannot
-  produce). A downward recurrence from a positive `a` would close the gap.
+- **`GammaRegularized(a, z)` for a negative non-integer `a` (FIXED
+  2026-09-04).** `Q(-1/2, 2)` stayed symbolic because the regularized kernel
+  computes `Q(a, z)` for `a > 0` only, and `Q(a, 0)` there — a decided
+  divergence, `sign(Γ(a))·∞` — was left symbolic for uniformity. For `z > 0`
+  the head now answers `Γ(a, z)/Γ(a)`: at machine precision through the upper
+  incomplete gamma kernel (`incompleteGammaUpper`, whose Tricomi series and
+  Legendre continued fraction hold for any real order), and at every higher
+  precision through the new bignum kernel `bigGammaQNegativeOrder`
+  (`numerics/special-functions.ts`: the same series and continued-fraction
+  loops as `bigGammaQ`, with the signed prefactor `xᵃe⁻ˣ/Γ(a)`). Checked
+  against a quadrature of ∫_z^∞ t^{a−1}e^{−t} dt in log space at orders down
+  to −200 (nine to twelve digits). `Q(a, 0)` answers the signed infinity on
+  both routes, the sign read from the position between poles (the machine Γ
+  underflows past −171). At machine precision a value outside the double
+  range — the quotient overflows, or both factors underflow to 0/0 — stays
+  symbolic rather than report an infinity or a NaN at an interior point. The
+  complex half (`z < 0`) still stays symbolic.
 - **Past the exact-expansion caps a few Γ-ratio points stay symbolic**:
   `Pochhammer(a, k)` with both `Γ(a)` and `Γ(a + k)` on a pole and `|k| > 20`
   (`SYMBOLIC_EXPANSION_CAP`), and `GammaRegularized(n, z)` for `z < 0` and

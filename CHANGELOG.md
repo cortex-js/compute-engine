@@ -45,6 +45,12 @@
 
 ### Resolved Issues
 
+- **`GammaRegularized(a, z)` answers at a negative non-integer order.**
+  `GammaRegularized(-1/2, 2)` stayed symbolic; it is now `−0.00849…`,
+  computed as `Γ(a, z)/Γ(a)` for `z > 0` at every precision, and
+  `GammaRegularized(-1/2, 0)` answers `−∞` (the sign follows `Γ(a)`). At
+  machine precision a value outside the double range stays symbolic. A
+  negative `z`, where the value is complex, still stays symbolic.
 - **A destructuring comprehension binder is typed by its binding site.**
   `[p + q for (p, q) in pairs]` over `pairs: list<tuple<number, number>>`
   now types `p` and `q` as `number` from the element tuple, nested patterns

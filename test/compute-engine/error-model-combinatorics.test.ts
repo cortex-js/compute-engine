@@ -500,13 +500,31 @@ describe('GammaRegularized', () => {
     // with no value. This used to fold to 1.
     bothRoutes(ce, ['GammaRegularized', -1, 0], isNaNv);
     bothRoutes(ce, ['GammaRegularized', 0, 0], isNaNv);
-    // A negative non-integer a diverges there (Q(−0.5, 10⁻⁶) = −563, growing
-    // like sign(Γ(a))·z^a). The whole a < 0 region is a capability gap in
-    // this head, so it stays symbolic rather than answer at this one point.
+    // A negative non-integer a diverges there towards sign(Γ(a))·∞
+    // (Q(−0.5, 10⁻⁶) = −563, growing like sign(Γ(a))·z^a): an exact point,
+    // answered on both routes like the other infinities. Γ(−0.5) < 0 and
+    // Γ(−1.5) > 0.
     bothRoutes(
       ce,
       ['GammaRegularized', -0.5, 0],
-      isSymbolic('GammaRegularized')
+      isValue(ce.NegativeInfinity)
+    );
+    bothRoutes(
+      ce,
+      ['GammaRegularized', -1.5, 0],
+      isValue(ce.PositiveInfinity)
+    );
+    // Past a ≈ −171 the machine Γ underflows to 0; the sign comes from the
+    // position between poles, so it is still right.
+    bothRoutes(
+      ce,
+      ['GammaRegularized', -171.5, 0],
+      isValue(ce.PositiveInfinity)
+    );
+    bothRoutes(
+      ce,
+      ['GammaRegularized', -172.5, 0],
+      isValue(ce.NegativeInfinity)
     );
     // An unproven symbolic a no longer folds either.
     expect(
@@ -548,15 +566,75 @@ describe('GammaRegularized', () => {
     );
   });
 
-  test('a region the kernel does not cover stays SYMBOLIC, never NaN', () => {
-    // Q(−0.5, 2) = −0.0085, a perfectly good finite real the real kernel
-    // (which needs a > 0) cannot compute; it used to answer NaN on both
-    // routes. Q(0.5, −1) = 1 − 1.65i is complex; there is no complex kernel.
-    bothRoutes(
-      ce,
-      ['GammaRegularized', -0.5, 2],
-      isSymbolic('GammaRegularized')
+  test('a negative non-integer order is Γ(a, z)/Γ(a) for z > 0', () => {
+    // Q(−0.5, 2) = −0.0085 used to stay symbolic (the regularized kernel
+    // needs a > 0); the upper incomplete gamma kernel holds for any real
+    // order, and Γ(a) is finite off its poles. Reference values from a
+    // direct quadrature of ∫_z^∞ t^{a−1}e^{−t} dt.
+    for (const [a, z, expected] of [
+      [-0.5, 2, -0.00849070261683],
+      [-1.5, 1, 0.0535223326951],
+      [-0.5, 0.1, -0.959621412698],
+      [-2.5, 3, -0.000560063415294],
+      [-0.5, 10, -3.55694525045e-7],
+    ] as const) {
+      expect(ce.box(['GammaRegularized', a, z]).N().re).toBeCloseTo(
+        expected,
+        Math.abs(expected) < 1e-3 ? 15 : 11
+      );
+      expect(ce.box(['GammaRegularized', a, z]).evaluate().re).toBeCloseTo(
+        expected,
+        Math.abs(expected) < 1e-3 ? 15 : 11
+      );
+    }
+    // An exact order stays exact on `evaluate()` and numericizes on `.N()`.
+    const exact = ce.box(['GammaRegularized', ['Rational', -1, 2], 2]);
+    expect(exact.evaluate().operator).toBe('GammaRegularized');
+    expect(exact.N().re).toBeCloseTo(-0.00849070261683, 11);
+  });
+
+  test('large negative orders at the default precision (bignum kernel)', () => {
+    // References from a quadrature in log space with t = z·e^u, nine to ten
+    // digits; the engine's default precision is 21 digits, above the machine
+    // range, so the bignum kernel answers. A value beyond the double range
+    // is compared as the bignum it is.
+    for (const [a, z, ref, tol] of [
+      [-50.5, 0.001, '-4.3143086475e214', 1e-8],
+      [-100.5, 0.001, '-9.3728627398e457', 1e-8],
+      [-20.5, 5, '-4.33707859213563', 1e-8],
+      [-171.5, 2, '9.5392695383e254', 1e-8],
+      [-0.5, 1e-10, '-5.641795836e4', 1e-8],
+      // Two quadratures agree only to seven digits at this point; the kernel
+      // matches the uniform-grid one to nine.
+      [-200.5, 400, '-2.1940749815e-323', 1e-6],
+    ] as const) {
+      const v = ce.box(['GammaRegularized', a, z]).N();
+      const big = v.bignumRe;
+      expect(big).toBeDefined();
+      expect(big!.div(ce.bignum(ref)).sub(1).abs().lt(tol)).toBe(true);
+    }
+  });
+
+  test('at machine precision a value outside the double range stays symbolic', () => {
+    // The machine quotient Γ(a, z)/Γ(a) overflows past a ≈ −171 and is 0/0
+    // when both factors underflow: neither an infinity nor a NaN is the
+    // value, so the call stays symbolic there.
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(machine.box(['GammaRegularized', -171.5, 2]).N().operator).toBe(
+      'GammaRegularized'
     );
+    expect(machine.box(['GammaRegularized', -200.5, 400]).N().operator).toBe(
+      'GammaRegularized'
+    );
+    expect(machine.box(['GammaRegularized', -20.5, 5]).N().re).toBeCloseTo(
+      -4.33707859213563,
+      12
+    );
+  });
+
+  test('a region the kernel does not cover stays SYMBOLIC, never NaN', () => {
+    // Q(0.5, −1) = 1 − 1.65i is complex; there is no complex kernel.
     bothRoutes(
       ce,
       ['GammaRegularized', 0.5, -1],

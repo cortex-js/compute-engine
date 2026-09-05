@@ -1100,7 +1100,10 @@ export function bigBeta(ce: ComputeEngine, a: BigNum, b: BigNum): BigNum {
 
 /** Lower regularized gamma P(a,x) via the power series, in BigDecimal. Must be
  *  called inside the guard-digit context with a > 0, 0 < x < a+1. */
-function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+/** The power series Σ xⁿ / (a(a+1)…(a+n)) of the lower incomplete gamma,
+ *  without its prefactor: γ(a, x) = xᵃ e⁻ˣ · (this sum). Converges for every
+ *  real `a` that is not a non-positive integer and every x ≥ 0. */
+function bigGammaPSeriesSum(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   const p = BigDecimal.precision;
   const tol = new BigDecimal(10).pow(-p);
   let ap = a;
@@ -1114,14 +1117,30 @@ function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
     sum = sum.add(del);
     if (del.abs().lt(sum.abs().mul(tol))) break;
   }
+  return sum;
+}
+
+function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
-  return sum.mul(prefactor);
+  return bigGammaPSeriesSum(ce, a, x).mul(prefactor);
 }
 
 /** Upper regularized gamma Q(a,x) via the Legendre continued fraction (Lentz),
  *  in BigDecimal. Must be called inside the guard-digit context with a > 0,
  *  x ≥ a+1. */
 function bigGammaQContinuedFraction(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum
+): BigNum {
+  const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
+  return prefactor.mul(bigGammaQContinuedFractionValue(ce, a, x));
+}
+
+/** The Legendre continued fraction of the upper incomplete gamma (Lentz),
+ *  without its prefactor: Γ(a, x) = xᵃ e⁻ˣ · (this value). Converges for
+ *  every real `a` and every x > 0. */
+function bigGammaQContinuedFractionValue(
   ce: ComputeEngine,
   a: BigNum,
   x: BigNum
@@ -1147,8 +1166,35 @@ function bigGammaQContinuedFraction(
     h = h.mul(del);
     if (del.sub(BigDecimal.ONE).abs().lt(tol)) break;
   }
-  const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
-  return prefactor.mul(h);
+  return h;
+}
+
+/**
+ * Bignum upper regularized incomplete gamma Q(a, x) = Γ(a, x)/Γ(a) for a
+ * NEGATIVE NON-INTEGER order `a` and x > 0, where Γ(a) is finite and of
+ * either sign, so the prefactor is `xᵃ e⁻ˣ / Γ(a)` with Γ(a) itself rather
+ * than `exp(−ln Γ(a))`. The series and the continued fraction are the same
+ * loops as for a positive order: the series converges for every order that
+ * is not a pole, the continued fraction for every x > 0. Below x = 2a + 2
+ * (a band that exists only for a > −1) Q is 1 − P through the series;
+ * elsewhere it is the continued fraction. Precision scales with
+ * `BigDecimal.precision`. Returns NaN outside that domain.
+ */
+export function bigGammaQNegativeOrder(
+  ce: ComputeEngine,
+  a: BigNum,
+  x: BigNum
+): BigNum {
+  if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
+  if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
+  if (!a.isNegative() || a.isInteger()) return BigDecimal.NAN;
+  if (!x.isPositive()) return BigDecimal.NAN;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const prefactor = a.mul(x.ln()).sub(x).exp().div(bigGamma(ce, a));
+    return x.lt(a.mul(2).add(BigDecimal.TWO))
+      ? BigDecimal.ONE.sub(bigGammaPSeriesSum(ce, a, x).mul(prefactor))
+      : bigGammaQContinuedFractionValue(ce, a, x).mul(prefactor);
+  });
 }
 
 /**
