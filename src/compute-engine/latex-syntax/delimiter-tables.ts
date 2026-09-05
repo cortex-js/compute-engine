@@ -70,4 +70,3 @@ export const OPEN_DELIMITER_PREFIX: Record<string, string> = {
 export const CLOSE_DELIMITER_PREFIX = new Set<string>(
   Object.values(OPEN_DELIMITER_PREFIX)
 );
-

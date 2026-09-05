@@ -1901,7 +1901,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         let result: Expression | undefined;
         let base: Expression = A;
         for (let e = Math.abs(n); e > 0; e = Math.floor(e / 2)) {
-          if (e % 2 === 1) result = result === undefined ? base : times(result, base);
+          if (e % 2 === 1)
+            result = result === undefined ? base : times(result, base);
           if (e > 1) base = times(base, base);
         }
         result = result!;

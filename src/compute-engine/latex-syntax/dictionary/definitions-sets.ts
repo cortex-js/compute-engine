@@ -1164,7 +1164,9 @@ export const DEFINITIONS_SETS: LatexDictionary = [
               builderBody,
               [
                 'Condition',
-                conditions.length === 1 ? conditions[0] : ['And', ...conditions],
+                conditions.length === 1
+                  ? conditions[0]
+                  : ['And', ...conditions],
               ],
             ];
           }

@@ -144,7 +144,9 @@ function nonzeroIntegerGround(g: Expression): boolean {
  * costs at most 2⁶ times the budget in the worst case before the backstop).
  */
 function withinDivisorScanBudget(m: bigint): boolean {
-  return approximateBitLength(m) <= 2 * Math.log2(MAX_VALUE_SCALED_ITERATIONS) + 4;
+  return (
+    approximateBitLength(m) <= 2 * Math.log2(MAX_VALUE_SCALED_ITERATIONS) + 4
+  );
 }
 
 /** A nonzero integer whose divisor scan is within the step budget — the
@@ -1423,7 +1425,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (mm === nn) return ce.number(1);
         const N = Number(nn);
         const M = Number(mm);
-        if (exactRecurrenceTooLarge(triangleWalkStates(N, M), log10Factorial(N)))
+        if (
+          exactRecurrenceTooLarge(triangleWalkStates(N, M), log10Factorial(N))
+        )
           return undefined;
         let prev: bigint[] = [1n]; // row 0
         let steps = 0;

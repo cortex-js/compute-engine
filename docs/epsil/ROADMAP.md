@@ -13,6 +13,23 @@ Items are demand-gated unless another roadmap gives them higher priority.
   `Quantity(value, unit)`. Native unit notation needs a grammar and
   round-trip decision before implementation.
 
+## Standard library
+
+The Epsil standard library mirrors the Compute Engine standard library.
+
+The signature of each Compute Engine operator is identical in Epsil, but
+the name is an initial lowercase letter instead of an initial uppercase letter. 
+For example `sum` is the Epsil operator corresponding to the Compute Engine operator `Sum`,
+and `print` to `Print`. All the MathJSON operators are also available
+in their MathJSON names, e.g. `Sum` and `Print`. However, not all MathJSON operators
+have a lowercase spelling: the "low-level" operators that have an alternate
+syntax in Epsil do not have a lowercase spelling:
+- `Add`, `Subtract`, `Multiply`, `Divide`, `Power`, `Factorial`, `Negate`, `Abs`,
+- `And`, `Or`, `Not`
+- `If`, `For`, `While`, `Match`, `Range`
+- `Assign`, `Declare`, `Block`, `Return`, `Break`, `Continue`, etc...
+
+
 ## Runtime and representation
 
 - **Comment fidelity.** Parsing discards comments and serialization can emit
