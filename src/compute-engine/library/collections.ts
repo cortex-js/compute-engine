@@ -1827,6 +1827,89 @@ function componentResultTypeD(xs: OperandDescriptor, position: number): Type {
 }
 
 /**
+ * Use-driven element inference for the element accessors — the
+ * `inferOperandTypes` contract on `OperatorDefinition`. A requirement `r` on
+ * the ELEMENT an accessor returns is a requirement on the elements of the
+ * collection it reads: `First(xs) + 1` requires `number` of `First(xs)`,
+ * so `xs` learns `indexed_collection<number>`.
+ *
+ * The scalar reading is written on purpose: `xs[1] + 1` requires `number`
+ * of the element even though the sum would also accept a nested numeric
+ * list, exactly as `x + 1` infers a bare symbol `x` as `number` and not as
+ * `broadcastable<number>` (a `broadcastable` element type would also make
+ * the `interval-js` compile target decline the read). The write is
+ * inference (ruling R1, `docs/INFERENCE_ROADMAP.md` §5): a later
+ * assignment replaces it, a declared type never takes it, and an inferred
+ * lambda signature is not enforced at application, so a matrix-row program
+ * keeps working.
+ */
+function elementRequirementOfAccessor(
+  r: Type
+): ReadonlyArray<Type | undefined> {
+  return [{ kind: 'indexed_collection', elements: r }];
+}
+
+/**
+ * `At`'s side of the same contract. The base learns `indexed_collection<r>`
+ * under a numeric index, `dictionary<r>` under a string index, and the
+ * two-arm shape its validation already wrote (`dictionary<r> |
+ * indexed_collection<r>`) when the index kind is open; each is a subtype of
+ * the incumbent two-arm type, so the meet keeps the selected arm and drops
+ * the other. Declined, so nothing is written:
+ *
+ * - a multi-index access `At(m, i, j)`: the chained single-index form
+ *   `m[i][j]` reaches `m` through the engine's forwarding, one level at a
+ *   time, and needs no handler support;
+ * - a ring constant base (`\mathbb{Z}[x]` is adjunction, not indexing);
+ * - a COLLECTION-typed requirement under an index whose kind is open. A
+ *   gather or mask index selects a LIST of elements, so a scalar requirement
+ *   still names the elements (the consumer broadcasts over the list,
+ *   `xs[[1, 2]] + 1`), but a collection requirement is ambiguous between
+ *   "the elements are collections" (scalar index) and "the selected list is
+ *   the collection" (gather), and is written only under a provably scalar
+ *   index — a number or a string key. (A string is itself an indexed
+ *   collection of characters, so the kind test must run before any
+ *   "could be a collection" test on the index.)
+ *
+ * A provable gather or mask (a collection-typed index) writes the
+ * `indexed_collection` arm alone: the `evaluate` handler declines a
+ * collection-shaped index on a dictionary, and the type handler's gather
+ * branch reports a `list` result only for a base that is provably an indexed
+ * collection — a two-arm union would make `xs[[1, 2]]` type as a scalar.
+ */
+function elementRequirementOfAt(
+  ops: ReadonlyArray<Expression>,
+  r: Type
+): ReadonlyArray<Type | undefined> | undefined {
+  if (ops.length !== 2) return undefined;
+  const [xs, index] = ops;
+  if (isRingConstant(xs)) return undefined;
+  const indexType = index.type.type;
+  // The index kind selects the arm when it is provable: a numeric index or a
+  // gather/mask reads an indexed collection, a string key reads a keyed one.
+  // Otherwise (a symbolic index whose kind is still open) both arms are
+  // kept, which is the shape the validation wrote.
+  if (isSubtype(indexType, 'string'))
+    return [{ kind: 'dictionary', values: r }, undefined];
+  if (
+    isSubtype(indexType, 'number') ||
+    isSubtype(indexType, INDEXED_COLLECTION_SHAPE_TYPE)
+  )
+    return [{ kind: 'indexed_collection', elements: r }, undefined];
+  if (typeCouldBeCollection(r)) return undefined;
+  return [
+    {
+      kind: 'union',
+      types: [
+        { kind: 'dictionary', values: r },
+        { kind: 'indexed_collection', elements: r },
+      ],
+    },
+    undefined,
+  ];
+}
+
+/**
  * The operand type a `handle` accessor's `'types'` handler works from: the
  * present-value arm of an operand that may be absent.
  *
@@ -7422,6 +7505,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // machinery (§3.B) now admits a `Missing`/`T | missing` base or index.
     missingBehavior: 'handle',
     missingStrip: 'all',
+    inferOperandTypes: elementRequirementOfAt,
     // An integer GATHER knows its own length without evaluating: the gather is
     // position-preserving (an out-of-range index contributes the absence
     // marker rather than being dropped — see the `evaluate` handler), so the
@@ -7487,6 +7571,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const elementType = (): Type => {
         const xs = ops[0];
         const t = xs.type;
+        // A base inferred from its uses carries the two-arm shape `At`'s own
+        // validation writes (`dictionary<T> | indexed_collection<T>`), and
+        // `collectionElementType` answers nothing for a union. Read each arm
+        // — the dictionary's VALUE type, the other arms' element type — and
+        // widen across them; a union with an arm that has no element type (a
+        // scalar arm from a broadcast-aware inference such as `integer |
+        // vector<3>`) keeps the fallback below. A record arm reads like the
+        // record case below — the widen of its field types — because
+        // `collectionElementType` reports a record's ITERATION pair
+        // `tuple<string, T>`, which is not what an access returns.
+        if (typeof t !== 'string' && t.kind === 'union') {
+          const arms = t.types.map((arm) =>
+            typeof arm === 'string'
+              ? collectionElementType(arm)
+              : arm.kind === 'dictionary'
+                ? arm.values
+                : arm.kind === 'record'
+                  ? (widen(...Object.values(arm.elements)) as Type)
+                  : collectionElementType(arm)
+          );
+          if (arms.every((arm) => arm !== undefined))
+            return widen(...(arms as Type[])) as Type;
+        }
         // A dictionary/record is a keyed collection whose `At` returns the
         // VALUE, not the iteration pair `tuple<string, T>` that
         // `collectionElementType` reports (that is correct for iteration, but
@@ -8133,6 +8240,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs]) => componentResultTypeD(presentArmOf(xs), 1),
+    inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
   },
 
@@ -8142,6 +8250,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs]) => componentResultTypeD(presentArmOf(xs), 2),
+    inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
   },
 
@@ -8151,6 +8260,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs]) => componentResultTypeD(presentArmOf(xs), 3),
+    inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
   },
 
@@ -8238,6 +8348,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
     type: ([xs]) => componentResultTypeD(presentArmOf(xs), -1),
+    inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
   },
 

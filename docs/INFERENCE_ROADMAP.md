@@ -6,8 +6,9 @@ _Drafted 2026-08-18, immediately after the bare-type synonym ruling shipped
 `ROADMAP.md` and `doc/08-guide-types.md` §"`unknown` vs `any`, and What a
 Bare Type Means"). Status, updated 2026-09-05: **the Phase 0 guard, Phase 1
 and Phase 2 are SHIPPED (2026-08-18). The row 4 question (union parameters)
-is CLOSED with no change needed (§4). Phase 3 (use-driven reverse
-propagation) and the full Phase 0 bounds are OPEN.**_
+is CLOSED with no change needed (§4). Phase 3 (use-driven element
+inference) is IMPLEMENTED (2026-09-05, §5). Only the full Phase 0 bounds
+remain OPEN, and they stay deferred (§8.2).**_
 
 ## 1. The design intent this roadmap serves
 
@@ -48,8 +49,8 @@ Probed 2026-08-18 on the post-synonym-ruling tree; re-probed 2026-09-05
 | # | Program | 2026-08-18 | Today (2026-09-05) | Status |
 |---|---|---|---|---|
 | 1 | `f: (list<number>) -> number`; `f([a, b])` with undeclared `a`, `b` | `a`, `b` stay `unknown` — the constraint dies at the literal's boundary | `a`, `b` infer `number` | SHIPPED (Phase 2) |
-| 2 | `xs` undeclared; `xs[1] + 1` | `xs` narrows to `dictionary<any> \| indexed_collection<any>` — element slot stays `any`, the numeric evidence is computed and discarded | unchanged | OPEN (Phase 3): element should refine to `… \| indexed_collection<number>`-shaped |
-| 3 | `(v) => v[1] + 1` | `(v: dictionary<any> \| indexed_collection<any>) -> broadcastable<number>` — the result type PROVES the engine derived the numeric flow, and never wrote it back | unchanged | OPEN (falls out of Phase 3) |
+| 2 | `xs` undeclared; `xs[1] + 1` | `xs` narrows to `dictionary<any> \| indexed_collection<any>` — element slot stays `any`, the numeric evidence is computed and discarded | `xs: indexed_collection<number>`, and `xs[1]` then types `number` | IMPLEMENTED (Phase 3, 2026-09-05) |
+| 3 | `(v) => v[1] + 1` | `(v: dictionary<any> \| indexed_collection<any>) -> broadcastable<number>` — the result type PROVES the engine derived the numeric flow, and never wrote it back | `(v: indexed_collection<number>) -> broadcastable<number>` | IMPLEMENTED (Phase 3, 2026-09-05) |
 | 4 | `ys` undeclared; `Mean(ys)` (the draft used `Sum(ys)`; see §4 for why that example was wrong) | reported as "`ys` stays `unknown` — union parameter ⇒ no inference write at all" | `Mean(ys)` writes `collection<any> \| distribution \| number` onto `ys`; `Sum(ys)` stays `unknown` because the summand parameter of `Sum` is `any`, not a union | CLOSED 2026-09-05, no change needed (§4) |
 | 5 | `a: list` (declared); `a = [1, 2, 3]` | `a`'s type stays `list` — the whole declared type is frozen, element slot included | `a` reports `list<integer>`; a later `a = ["x"]` re-refines to `list<string>` | SHIPPED (Phase 1) |
 
@@ -358,7 +359,70 @@ elements: `f: (list<number>) -> number`, `f([a, b])` ⇒ `a._infer('number')`,
   it is exactly what the parameter states, and the whole-type write is the
   established, revisable kind._
 
-## 5. Phase 3 — use-driven reverse propagation (the hard one)
+## 5. Phase 3 — use-driven element inference — **IMPLEMENTED 2026-09-05**
+
+**What shipped (rulings R1 option A, R2 the scalar rule, R3 deferred — all
+as recommended).** A requirement on the element an accessor returns is a
+requirement on the elements of the collection it reads. The mechanism is
+one optional handler on an operator definition, `inferOperandTypes(ops,
+requirement)` (contract on `OperatorDefinition`, `types-definitions.ts`),
+and one branch in `BoxedFunction._infer` (`boxed-expression/boxed-function.ts`):
+when a requirement (`narrow` mode) reaches an application whose operator
+has the handler, the handler answers the type each operand must have, and
+each answer is written onto the operand through its own `_infer`. A symbol
+takes the write when its type is inferred or unknown, never when declared
+(so a declared `list<any>` and the bare placeholder `list` stay put —
+R3); a nested application forwards to its own handler, so `m[1][2] + 1`
+reaches `m`. Handlers: `At` (`indexed_collection<r>` under a numeric index or a
+gather/mask, `dictionary<r>` under a string key, the two-arm union when the
+index kind is open; declined for a multi-index access, a ring-constant
+base, and a collection-typed requirement under an index of open kind), and
+`First`/`Second`/`Third`/`Last` (`indexed_collection<r>`). The dual review
+of the delivery (Claude + Codex) added the gather and string-key arm rules,
+a record-arm read in the `At` type handler's union branch, and a
+fall-through to inferred-signature narrowing when no operand takes a
+write. The `At` type handler now reads the element
+type out of a two-arm union base, so the refined element is what later
+canonicalizations see (`xs[1]^2` types `number`). Rollback, hidden
+assumptions, resolve-only regions, speculative-parse confinement and the
+assignment-evidence guard are inherited from the symbol write. Pins:
+`test/compute-engine/use-driven-element-inference.test.ts`.
+
+**Facts measured during the design round (2026-09-05).** The scalar reading
+a bare symbol gets from `x + 1` is `number` on today's tree (the guide's
+older `real` is out of date), so the element write is `number` too. An
+inferred lambda signature is not enforced at application, so a matrix-row
+program `(m) => m[1] + 1` applied to a matrix still evaluates. Both compile
+targets already compiled `xs[1] + 1` over an untyped collection before this
+phase, and a `broadcastable<real>` element type makes the `interval-js`
+target decline, which is why option B (write what the broadcast proves) was
+rejected. The three payoffs named in the August draft below had all been
+realized by other means or did not apply; what this phase delivers is
+precise static types (`typeof`, lambda arrows, the Epsil hover and `epsil
+check` report).
+
+**Two defects found and fixed on the way.** The numeric short path
+(`checkNumericArgs`, `boxed-expression/validate.ts`) admitted any
+`T | missing` operand without checking the carrier, so `q + 1` with
+`q: boolean | missing` was valid while `Sin(q)` was an error, and a boolean
+element read then used numerically wrote `never` onto its collection. The
+carrier is now validated behind the absence arm on the short path too. (A
+general refusal to record `never` on a symbol was tried and withdrawn: a
+serialization pin deliberately records `never` for a corpus row that reads
+`f` both as a number and as a function, and locks that in.)
+
+**One residual, recorded in `ROADMAP.md` for a ruling.** The compiler trusts
+a static element type, declared or inferred: a compiled lambda with
+parameter `v: indexed_collection<number>` fed a matrix emits scalar `+` over
+a row and returns a concatenated string, while the interpreter returns the
+row plus one. Before this phase the inferred parameter type was
+`indexed_collection<any>` and the compiled lambda broadcast correctly; a
+DECLARED `(v: indexed_collection<number>)` already produced the string on
+the tree of 2026-09-05. The refinement extends an existing compile-route
+divergence to inferred parameter types; a global `xs[1] + 1` compiled and
+run on a matrix is not affected (it still broadcasts).
+
+### Original Phase 3 design (for reference)
 
 **Feature:** rows 2–3. When an application *result* is narrowed —
 `BoxedFunction._infer(t)` (`boxed-function.ts`) already fires when `xs[1]`
@@ -392,8 +456,9 @@ Building blocks and gaps:
   Phase 3 wrote.
 
 **Design round opened 2026-09-05:** the mechanism was measured and the plan
-written in `docs/plans/2026-09-05-use-driven-element-inference.md`, which
-also re-assesses the payoff below: two of the three places named here have
+written in a plan document (removed with the landing, as `docs/plans/README.md`
+requires; its record is this section), which also re-assessed the payoff
+below: two of the three places named here have
 since been served by other means (the `<any>` union already excludes every
 scalar, so broadcast decisions are already right; both compile targets
 already compile `xs[1] + 1` over an untyped collection), and the third
@@ -439,25 +504,24 @@ palliative).
    (§3).
 2. **Phase 2** — **SHIPPED 2026-08-18** with Phase 1. The union-parameter
    question (row 4) was **CLOSED 2026-09-05** with no change needed (§4).
-3. **Phase 3** — the only open element phase — design round OPENED
-   2026-09-05 (`docs/plans/2026-09-05-use-driven-element-inference.md`);
-   as its own design round with a written plan
+3. **Phase 3** — **IMPLEMENTED 2026-09-05** after a same-day design round
+   (§5); the plan document is removed with the landing, as
+   `docs/plans/README.md` requires. As drafted: as its own design round with a written plan
    (`docs/plans/…`), the participation list, the guess-semantics ruling,
    and route-parity tests — the binder-mechanism treatment.
 
 ## 8. What is left, in plain language (2026-09-05)
 
-Two items are open. Everything else in this document is shipped or closed.
+One item is open, and deferred. Everything else in this document is shipped
+or closed.
 
-### 8.1 Phase 3 — use-driven element inference
+### 8.1 Phase 3 — use-driven element inference — IMPLEMENTED 2026-09-05
 
-Today `xs[1] + 1` proves that an element of `xs` is numeric, but the engine
-never writes that back onto `xs`: the element slot stays `any`. The design
-round for this phase opened on 2026-09-05; its plan is
-`docs/plans/2026-09-05-use-driven-element-inference.md`. The plan measured
-the mechanism, found that the payoff is smaller than this document expected
-in August (see the note in §5), and asks for a go/no-go decision and three
-rulings before any code is written.
+`xs[1] + 1` now writes `indexed_collection<number>` onto an undeclared
+`xs` (§5). The design round and the implementation happened the same day,
+under the rulings recorded in §5. One residual went to `ROADMAP.md`: the
+compile-route divergence for a collection-typed lambda parameter fed a
+nested list.
 
 ### 8.2 The full Phase 0 bounds — what "bounds" means
 

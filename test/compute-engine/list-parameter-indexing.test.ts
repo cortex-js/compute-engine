@@ -142,7 +142,7 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
 
     // The parameter slot is no longer `unknown`, so `paramsAreScalar` is false.
     expect(ce.box('h').type.toString()).toBe(
-      '(dictionary<any> | indexed_collection<any>) -> broadcastable<number>'
+      '(indexed_collection<number>) -> broadcastable<number>'
     );
     // Before the fix this was `[h(3),h(4)]`.
     expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');

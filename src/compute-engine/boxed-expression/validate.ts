@@ -477,10 +477,28 @@ export function checkNumericArgs(
     } else if (typeContainsMissing(op.type.type)) {
       // An absent (`Missing`) or possibly-absent (`T | missing`) operand in a
       // numeric position. Every numeric operator resolves to `propagate`
-      // (§3.A), so admit it here — the runtime gate produces `NaN` in the
-      // result cell (strip-before-validate, §3.B). Keeps the short path in
-      // lockstep with the definition route for `Add`/`Multiply`/`Negate`/…
-      xs.push(op);
+      // (§3.A), so the ABSENCE is admitted — the runtime gate produces `NaN`
+      // in the result cell (strip-before-validate, §3.B). The carrier `T`
+      // still has to satisfy the numeric position: a carrier that is
+      // provably disjoint from `number` and cannot be a numeric collection
+      // or tuple (`boolean | missing`, `string | missing`, an element read
+      // out of a `list<boolean>`) is refused, the way the definition route
+      // (`Sin(q)` with `q: boolean | missing`) already refuses it. Without
+      // this the short path admitted `q + 1` while `Sin(q)` was an error,
+      // and a boolean element read then numerically used wrote `never` onto
+      // its collection instead of erroring. A carrier that could still be
+      // numeric — `unknown`, `number | list`, a bare `missing` (carrier
+      // `never`) — is admitted as before.
+      const carrier = stripMissingFromType(op.type.type);
+      if (
+        carrier !== 'never' &&
+        provablyDisjoint(carrier, 'number') &&
+        !typeCouldBeNumericCollection(carrier) &&
+        !typeCouldBeNumericTuple(carrier)
+      ) {
+        isValid = false;
+        xs.push(ce.typeError('number', op.type, op));
+      } else xs.push(op);
     } else if (typeCouldBeNumericCollection(op.type.type)) {
       // The argument's type could be a numeric collection at runtime
       // (e.g. `list`, `number | list`). Since numeric functions are

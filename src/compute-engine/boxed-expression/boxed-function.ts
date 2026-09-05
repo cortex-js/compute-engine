@@ -639,12 +639,48 @@ export class BoxedFunction
     inferenceMode?: 'narrow' | 'widen' | 'replace'
   ): boolean {
     const def = this.operatorDefinition;
-    if (!def || !def.inferredSignature) return false;
+    if (!def) return false;
 
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
     // serialization) a read must not write inference onto a definition —
     // every call site is fire-and-forget, so declining is safe.
     if (this.engine._resolveOnlyDepth > 0) return false;
+
+    // Use-driven element inference. A requirement on this application's
+    // RESULT (`xs[1] + 1` requires `number` of `xs[1]`) tells the operator's
+    // `inferOperandTypes` handler what each operand must be, and each answer
+    // is written onto that operand through its own `_infer`: a symbol takes
+    // the write when its type is inferred or still unknown (never a declared
+    // one), and a nested application forwards to its own handler, so
+    // `m[1][2] + 1` reaches `m`. Only a requirement qualifies — `narrow`, the
+    // default mode; a `widen` carries a result possibility, not a constraint
+    // on the operands. The requirement is computed with the assumptions
+    // hidden, like every other inference write: what lands on a definition
+    // must stay true after a `forget()`. When no operand takes a write, the
+    // call falls through to the inferred-signature narrowing below, so an
+    // operator that has both mechanisms loses neither.
+    const inferOperandTypes = def.inferOperandTypes;
+    if (
+      inferOperandTypes !== undefined &&
+      (inferenceMode ?? 'narrow') === 'narrow'
+    ) {
+      const written = this.engine._withoutFacts(() => {
+        const requirement = operandRequirement(t());
+        if (requirement === undefined) return false;
+        const writes = inferOperandTypes(this._ops, requirement);
+        if (writes === undefined) return false;
+        let any = false;
+        writes.forEach((w, i) => {
+          const op = this._ops[i];
+          if (w !== undefined && op !== undefined && op._infer(() => w))
+            any = true;
+        });
+        return any;
+      });
+      if (written) return true;
+    }
+
+    if (!def.inferredSignature) return false;
 
     // The caller's type computation, the incumbent signature read and the
     // narrow/widen all run with the assumptions hidden: the result is stored
@@ -7152,6 +7188,29 @@ function resolvedArm(
  * harness to catch the break).
  * @internal
  */
+/**
+ * The value requirement an `inferOperandTypes` handler receives for a result
+ * requirement `t`, or `undefined` when `t` says nothing an operand could
+ * learn: the loose types (`any`, `unknown`, `value`), the absence types
+ * (`nothing`, and a requirement that is only `missing`), and a function type
+ * (a result that must be callable says nothing about a collection element).
+ * An absence arm is stripped first: a `handle` operator's parameter
+ * `number | missing` requires `number` of the present value.
+ */
+function operandRequirement(t: Type): Type | undefined {
+  const r = stripMissingFromType(t);
+  if (
+    r === 'never' ||
+    r === 'any' ||
+    r === 'unknown' ||
+    r === 'value' ||
+    r === 'nothing'
+  )
+    return undefined;
+  if (isSubtype(r, 'function')) return undefined;
+  return r;
+}
+
 export function paramsAreScalar(
   source: BoxedOperatorDefinition | Type
 ): boolean {

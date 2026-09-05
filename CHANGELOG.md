@@ -42,6 +42,25 @@
   command line (and of the MCP `evaluate` tool) now writes a square as `x ^ 2`
   where it wrote `Square(x)`, the display head the MathJSON export prettifies
   a square into.
+- **A use of an element refines the collection's element type.** `xs[1] + 1`
+  makes an undeclared `xs` an `indexed_collection<number>` (it was
+  `dictionary<any> | indexed_collection<any>`), `xs["a"] + 1` a
+  `dictionary<number>`, `First(xs) + 1` an `indexed_collection<number>`, and
+  `k(xs[1])` with `k: (integer) -> integer` an `indexed_collection<integer>`.
+  A chained access reaches the outer collection (`m[1][2] + 1` makes `m` an
+  `indexed_collection<indexed_collection<number>>`), and a lambda parameter
+  shows the refinement on its arrow: `(v) => v[1] + 1` now types
+  `(v: indexed_collection<number>) -> broadcastable<number>`, so the element
+  read `v[1]` types `number` inside the body. The element written is the
+  scalar reading, exactly as `x + 1` infers a bare `x` as `number`, and a
+  boolean use commits `boolean` the same way, so a later numeric use of that
+  element is an `incompatible-type` error, as it is for a scalar after
+  `And(x, B)`. The write is inference: a later assignment replaces it, and a
+  declared type (`list<any>`, or the bare placeholder `list`) is never moved
+  by a use. Operators taking part: `At`, `First`, `Second`, `Third`, `Last`;
+  an operator definition declares its own rule with the new
+  `inferOperandTypes` handler.
+
 - **The Epsil standard library has lowercase spellings.** Every library
   function and constant can be written with an initial lowercase letter:
   `sin(x)`, `map(f, xs)`, `isPrime(7)`, `gcd(12, 18)`, `pi`, `nothing`,

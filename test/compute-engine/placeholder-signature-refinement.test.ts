@@ -32,10 +32,14 @@ const BODY = 'P \\mapsto \\sqrt{P[1]^2+P[2]^2}';
 // parameters are contravariant, so an UNREFINED `(unknown) -> …` signature is
 // a subtype of this one and would pass a bare `.matches(CONCRETE)`. Only the
 // result tier may refine (`broadcastable<number>` still passes).
-const PARAMS = '(dictionary<any> | indexed_collection<any>)';
+// The body indexes its parameter and adds 1 to the element, so the
+// parameter's element refines to `number` (use-driven element inference).
+const PARAMS = '(indexed_collection<number>)';
 const CONCRETE = `${PARAMS} -> broadcastable<number>`;
 function expectRefinedSignature(expr: { readonly type: BoxedType }): void {
-  expect(expr.type.toString().slice(0, PARAMS.length + 4)).toBe(`${PARAMS} -> `);
+  expect(expr.type.toString().slice(0, PARAMS.length + 4)).toBe(
+    `${PARAMS} -> `
+  );
   expectTypeBetween(expr, { atMost: CONCRETE });
 }
 
@@ -168,9 +172,7 @@ describe('`any` stays a contract', () => {
   test('parse route surfaces the refusal as an error value, not silence', () => {
     const ce = freshEngine();
     ce.declare('h', { signature: '(any) -> any' });
-    const def = ce
-      .parse(`h\\coloneq ${BODY}`, { strict: false })
-      .evaluate();
+    const def = ce.parse(`h\\coloneq ${BODY}`, { strict: false }).evaluate();
     expect(def.toString()).toMatch(/Error|incompatible/);
     // and nothing was installed — the symbol still evaluates to itself
     expect(ce.box('h').evaluate().toString()).toEqual('h');
