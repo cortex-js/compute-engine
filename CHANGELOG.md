@@ -20,6 +20,18 @@
 
 ### Resolved Issues
 
+- **The variance and covariance kernels no longer cancel, and `Correlation`
+  declares `real<-1..1>`.** `Variance([10⁸+1, 10⁸+2, 10⁸+3])` answered `0` at
+  machine precision instead of `1`, and a two-point `Correlation` overshot ±1
+  by 7·10⁻¹³: the kernels used the one-pass `Σx² − (Σx)²/n` form, which
+  subtracts two nearly equal numbers when the data sit far from zero. The
+  variance kernels now use Welford's single-pass update, the covariance and
+  correlation kernels two-pass centered sums, and the correlation also scales
+  each column so that data of machine range no longer overflows
+  (`Correlation([1.5e200, 2.5e200, 3.5e200], [1, 2, 3])` is `1`, not `NaN`)
+  and clips its rounding residue to [−1, 1]. The `Correlation` operator's
+  declared result carries the range. The compiled JavaScript lane uses the
+  same kernels.
 - **Library loops that scale with an operand value are bounded on every
   route.** A call made with no deadline armed — a plain `evaluate()`, the
   compile-time constant fold — could run unbounded in a loop whose length is

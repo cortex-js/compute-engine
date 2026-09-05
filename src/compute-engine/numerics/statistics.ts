@@ -44,62 +44,80 @@ export function bigMedian(values: Iterable<BigDecimal>): BigDecimal {
   return sorted[mid];
 }
 
-export function variance(values: Iterable<number>): number {
-  let sum = 0;
-  let sum2 = 0;
-  let count = 0;
-  for (const op of values) {
-    sum += op;
-    sum2 += op * op;
-    count++;
+//
+// Variance is accumulated with Welford's update — one pass, constant memory,
+// numerically stable: each value updates the running mean and the running
+// sum of squared deviations `M2` through its deviation from the mean BEFORE
+// and AFTER the update, so no two nearly equal quantities are ever
+// subtracted. The former one-pass form `Σx² − (Σx)²/n` did exactly that when
+// the data sit far from zero (`[10⁸ + 1, 10⁸ + 2, 10⁸ + 3]` has variance 1
+// and sums near 3·10¹⁶, and answered 0 at machine precision). The stream is
+// consumed once, so a lazy iterable is never buffered. Same shape for the
+// `BigDecimal` twin, so the two precisions agree on which inputs they can
+// resolve.
+//
+
+/** Welford's running mean and sum of squared deviations over a stream. */
+function welford(values: Iterable<number>): { n: number; m2: number } {
+  let n = 0;
+  let mean = 0;
+  let m2 = 0;
+  for (const x of values) {
+    n += 1;
+    const before = x - mean;
+    mean += before / n;
+    m2 += before * (x - mean);
   }
-  if (count === 0) return NaN;
-  return (sum2 - (sum * sum) / count) / (count - 1);
+  return { n, m2 };
+}
+
+function bigWelford(values: Iterable<BigDecimal>): {
+  n: number;
+  m2: BigDecimal;
+} {
+  let n = 0;
+  let mean = BigDecimal.ZERO;
+  let m2 = BigDecimal.ZERO;
+  for (const x of values) {
+    n += 1;
+    const before = x.sub(mean);
+    mean = mean.add(before.div(new BigDecimal(n)));
+    m2 = m2.add(before.mul(x.sub(mean)));
+  }
+  return { n, m2 };
+}
+
+function varImpl(values: Iterable<number>, population: boolean): number {
+  const { n, m2 } = welford(values);
+  if (n === 0) return NaN;
+  return m2 / (population ? n : n - 1);
+}
+
+function bigVarImpl(
+  values: Iterable<BigDecimal>,
+  population: boolean
+): BigDecimal {
+  const { n, m2 } = bigWelford(values);
+  if (n === 0) return BigDecimal.NAN;
+  return m2.div(new BigDecimal(population ? n : n - 1));
+}
+
+export function variance(values: Iterable<number>): number {
+  return varImpl(values, false);
 }
 
 export function bigVariance(values: Iterable<BigDecimal>): BigDecimal {
-  let sum = BigDecimal.ZERO;
-  let sum2 = BigDecimal.ZERO;
-  let count = 0;
-  for (const op of values) {
-    sum = sum.add(op);
-    sum2 = sum2.add(op.mul(op));
-    count++;
-  }
-  if (count === 0) return BigDecimal.NAN;
-  return sum2
-    .sub(sum.mul(sum).div(new BigDecimal(count)))
-    .div(new BigDecimal(count - 1));
+  return bigVarImpl(values, false);
 }
 
 export function populationVariance(values: Iterable<number>): number {
-  let sum = 0;
-  let sum2 = 0;
-  let count = 0;
-  for (const op of values) {
-    sum += op;
-    sum2 += op * op;
-    count++;
-  }
-  if (count === 0) return NaN;
-  return (sum2 - (sum * sum) / count) / count;
+  return varImpl(values, true);
 }
 
 export function bigPopulationVariance(
   values: Iterable<BigDecimal>
 ): BigDecimal {
-  let sum = BigDecimal.ZERO;
-  let sum2 = BigDecimal.ZERO;
-  let count = 0;
-  for (const op of values) {
-    sum = sum.add(op);
-    sum2 = sum2.add(op.mul(op));
-    count++;
-  }
-  if (count === 0) return BigDecimal.NAN;
-  return sum2
-    .sub(sum.mul(sum).div(new BigDecimal(count)))
-    .div(new BigDecimal(count));
+  return bigVarImpl(values, true);
 }
 
 export function standardDeviation(values: Iterable<number>): number {
@@ -314,7 +332,108 @@ export function bigQuartiles(
 // Pearson's `correlation` is denominator-independent (the factor cancels), so
 // there is no population variant. A length mismatch or n < 2 yields `NaN`
 // (the library validates and turns these into error nodes before calling).
+// The paired samples are materialized (a length check needs both), then
+// summed in two passes: the means first, then the centered cross sum
+// `Σ dx·dy` and the centered squares, with the compensation terms
+// `(Σdx)(Σdy)/n` and `(Σd)²/n` that absorb the rounding of the means. The
+// one-pass form `Σxy − ΣxΣy/n` pushed a two-point sample's r past ±1 by
+// 7·10⁻¹³ at machine precision.
 //
+
+/**
+ * The centered sums of two paired samples: `Σdx`, `Σdy`, `Σdx·dy`, `Σdx²`
+ * and `Σdy²`, with `dx = x − mean(x)` and `dy = y − mean(y)`.
+ *
+ * With `scaled`, each column's deviations are divided by a POWER OF TWO
+ * near the column's largest absolute deviation first, so every centered
+ * value lies in [−2, 2] and the squares cannot overflow or underflow for
+ * data of machine range (`[10²⁰⁰, 2·10²⁰⁰, 3·10²⁰⁰]`, `[10⁻¹⁵⁰, …]`). A
+ * power of two is exact to divide by, so the scaling adds no rounding of
+ * its own (a two-point sample keeps r = ±1 exactly). Pearson's r is
+ * invariant under that scaling, so `correlation` asks for it; a covariance
+ * is not, so the covariance kernels take the unscaled sums.
+ */
+function pairedCenteredSums(
+  xs: readonly number[],
+  ys: readonly number[],
+  scaled = false
+): { dx: number; dy: number; dxy: number; dx2: number; dy2: number } {
+  const n = xs.length;
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < n; i++) {
+    mx += xs[i];
+    my += ys[i];
+  }
+  mx /= n;
+  my /= n;
+  let sx = 1;
+  let sy = 1;
+  if (scaled) {
+    let ax = 0;
+    let ay = 0;
+    for (let i = 0; i < n; i++) {
+      ax = Math.max(ax, Math.abs(xs[i] - mx));
+      ay = Math.max(ay, Math.abs(ys[i] - my));
+    }
+    // A constant column (all deviations 0) keeps the scale 1: its sums are
+    // 0 either way, and the caller reports the zero variance.
+    if (ax > 0 && Number.isFinite(ax)) sx = 2 ** Math.floor(Math.log2(ax));
+    if (ay > 0 && Number.isFinite(ay)) sy = 2 ** Math.floor(Math.log2(ay));
+  }
+  let dx = 0;
+  let dy = 0;
+  let dxy = 0;
+  let dx2 = 0;
+  let dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const a = (xs[i] - mx) / sx;
+    const b = (ys[i] - my) / sy;
+    dx += a;
+    dy += b;
+    dxy += a * b;
+    dx2 += a * a;
+    dy2 += b * b;
+  }
+  return { dx, dy, dxy, dx2, dy2 };
+}
+
+function bigPairedCenteredSums(
+  xs: readonly BigDecimal[],
+  ys: readonly BigDecimal[]
+): {
+  dx: BigDecimal;
+  dy: BigDecimal;
+  dxy: BigDecimal;
+  dx2: BigDecimal;
+  dy2: BigDecimal;
+} {
+  const n = xs.length;
+  let mx = BigDecimal.ZERO;
+  let my = BigDecimal.ZERO;
+  for (let i = 0; i < n; i++) {
+    mx = mx.add(xs[i]);
+    my = my.add(ys[i]);
+  }
+  const bn = new BigDecimal(n);
+  mx = mx.div(bn);
+  my = my.div(bn);
+  let dx = BigDecimal.ZERO;
+  let dy = BigDecimal.ZERO;
+  let dxy = BigDecimal.ZERO;
+  let dx2 = BigDecimal.ZERO;
+  let dy2 = BigDecimal.ZERO;
+  for (let i = 0; i < n; i++) {
+    const a = xs[i].sub(mx);
+    const b = ys[i].sub(my);
+    dx = dx.add(a);
+    dy = dy.add(b);
+    dxy = dxy.add(a.mul(b));
+    dx2 = dx2.add(a.mul(a));
+    dy2 = dy2.add(b.mul(b));
+  }
+  return { dx, dy, dxy, dx2, dy2 };
+}
 
 function covImpl(
   xsI: Iterable<number>,
@@ -325,15 +444,8 @@ function covImpl(
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return NaN;
-  let sx = 0;
-  let sy = 0;
-  let sxy = 0;
-  for (let i = 0; i < n; i++) {
-    sx += xs[i];
-    sy += ys[i];
-    sxy += xs[i] * ys[i];
-  }
-  return (sxy - (sx * sy) / n) / (population ? n : n - 1);
+  const { dx, dy, dxy } = pairedCenteredSums(xs, ys);
+  return (dxy - (dx * dy) / n) / (population ? n : n - 1);
 }
 
 function bigCovImpl(
@@ -345,16 +457,10 @@ function bigCovImpl(
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return BigDecimal.NAN;
-  let sx = BigDecimal.ZERO;
-  let sy = BigDecimal.ZERO;
-  let sxy = BigDecimal.ZERO;
-  for (let i = 0; i < n; i++) {
-    sx = sx.add(xs[i]);
-    sy = sy.add(ys[i]);
-    sxy = sxy.add(xs[i].mul(ys[i]));
-  }
-  return sxy
-    .sub(sx.mul(sy).div(new BigDecimal(n)))
+  const { dx, dy, dxy } = bigPairedCenteredSums(xs, ys);
+  const bn = new BigDecimal(n);
+  return dxy
+    .sub(dx.mul(dy).div(bn))
     .div(new BigDecimal(population ? n : n - 1));
 }
 
@@ -383,6 +489,20 @@ export function bigPopulationCovariance(
   return bigCovImpl(xs, ys, true);
 }
 
+/**
+ * Pearson's r, in [−1, 1]. The centered sums, scaled per column, keep the
+ * rounding of `r` at a few ulps and survive data of machine range; the
+ * final clip removes what is left: by the Cauchy–Schwarz inequality
+ * |Σdx·dy| ≤ √(Σdx²·Σdy²) holds exactly, so any excess over 1 is rounding,
+ * never data — the same remedy NumPy's `corrcoef` applies. This is what lets
+ * the `Correlation` operator declare `real<-1..1>`. The denominator is
+ * `√(vx·vy)`, which is exact for proportional data (`[1, 2, 3]` against
+ * itself gives √4), where `√vx · √vy` rounds one ulp under. A column whose
+ * centered squares are not positive — zero, or a tiny negative left by
+ * rounding — is a constant column, and the answer is NaN, never a spurious
+ * real number from a product of two negatives. The scaled sums keep the
+ * product within the machine range.
+ */
 export function correlation(
   xsI: Iterable<number>,
   ysI: Iterable<number>
@@ -391,24 +511,12 @@ export function correlation(
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return NaN;
-  let sx = 0;
-  let sy = 0;
-  let sxy = 0;
-  let sx2 = 0;
-  let sy2 = 0;
-  for (let i = 0; i < n; i++) {
-    sx += xs[i];
-    sy += ys[i];
-    sxy += xs[i] * ys[i];
-    sx2 += xs[i] * xs[i];
-    sy2 += ys[i] * ys[i];
-  }
-  const cov = sxy - (sx * sy) / n;
-  const vx = sx2 - (sx * sx) / n;
-  const vy = sy2 - (sy * sy) / n;
-  const d = Math.sqrt(vx * vy);
-  if (d === 0) return NaN; // zero variance → correlation undefined
-  return cov / d;
+  const { dx, dy, dxy, dx2, dy2 } = pairedCenteredSums(xs, ys, true);
+  const cov = dxy - (dx * dy) / n;
+  const vx = dx2 - (dx * dx) / n;
+  const vy = dy2 - (dy * dy) / n;
+  if (!(vx > 0) || !(vy > 0)) return NaN; // zero variance → undefined
+  return Math.min(1, Math.max(-1, cov / Math.sqrt(vx * vy)));
 }
 
 export function bigCorrelation(
@@ -419,25 +527,17 @@ export function bigCorrelation(
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return BigDecimal.NAN;
-  let sx = BigDecimal.ZERO;
-  let sy = BigDecimal.ZERO;
-  let sxy = BigDecimal.ZERO;
-  let sx2 = BigDecimal.ZERO;
-  let sy2 = BigDecimal.ZERO;
-  for (let i = 0; i < n; i++) {
-    sx = sx.add(xs[i]);
-    sy = sy.add(ys[i]);
-    sxy = sxy.add(xs[i].mul(ys[i]));
-    sx2 = sx2.add(xs[i].mul(xs[i]));
-    sy2 = sy2.add(ys[i].mul(ys[i]));
-  }
+  const { dx, dy, dxy, dx2, dy2 } = bigPairedCenteredSums(xs, ys);
   const bn = new BigDecimal(n);
-  const cov = sxy.sub(sx.mul(sy).div(bn));
-  const vx = sx2.sub(sx.mul(sx).div(bn));
-  const vy = sy2.sub(sy.mul(sy).div(bn));
-  const d = vx.mul(vy).sqrt();
-  if (d.isZero()) return BigDecimal.NAN;
-  return cov.div(d);
+  const cov = dxy.sub(dx.mul(dy).div(bn));
+  const vx = dx2.sub(dx.mul(dx).div(bn));
+  const vy = dy2.sub(dy.mul(dy).div(bn));
+  // As in `correlation`: a non-positive centered square is a constant column.
+  if (!vx.gt(BigDecimal.ZERO) || !vy.gt(BigDecimal.ZERO)) return BigDecimal.NAN;
+  const r = cov.div(vx.mul(vy).sqrt());
+  if (r.gt(BigDecimal.ONE)) return BigDecimal.ONE;
+  if (r.lt(BigDecimal.ONE.neg())) return BigDecimal.ONE.neg();
+  return r;
 }
 
 export function interquartileRange(values: Iterable<number>): number {

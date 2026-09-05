@@ -305,11 +305,12 @@ describe('Bivariate statistics reject non-real data', () => {
     }
   });
 
-  test('a kernel NaN from overflow is not reported as a zero variance', () => {
-    // The machine kernel sums squares, which overflow to `Infinity` for data
-    // around `1e200`; `Infinity - Infinity` then makes the variance `NaN` even
-    // though the data is perfectly correlated and not constant at all. Only a
-    // column that is actually constant earns the zero-variance diagnosis.
+  test('data of machine range is correlated, not a zero variance', () => {
+    // The machine kernel used to sum raw squares, which overflow to
+    // `Infinity` for data around `1e200` and made the answer `NaN`; the
+    // kernel now scales each column's deviations first, so the perfectly
+    // correlated data answers 1. Only a column that is actually constant
+    // earns the zero-variance diagnosis.
     const precision = ce.precision;
     try {
       ce.precision = 'machine';
@@ -320,8 +321,8 @@ describe('Bivariate statistics reject non-real data', () => {
             L([1.5e200, 2.5e200, 3.5e200]),
             L([1.0, 2.0, 3.0]),
           ])
-          .N().isNaN
-      ).toBe(true);
+          .N().re
+      ).toBeCloseTo(1, 15);
       const constant = ce
         .box(['Correlation', L([2.0, 2.0, 2.0]), L([1.0, 5.0, 9.0])])
         .N();
@@ -1271,5 +1272,93 @@ describe('LinearRegression/PolynomialFit propagate NaN for non-finite data', () 
       expect(r.isValid).toBe(false);
       expect(r.toString()).toMatch(/degree must be an integer in \[0, 12\]/);
     }
+  });
+});
+
+describe('two-pass kernels: no cancellation on data far from zero', () => {
+  // The one-pass form `Σx² − (Σx)²/n` subtracts two nearly equal numbers
+  // when the data sit far from zero; the centered two-pass form does not.
+  const machine = new ComputeEngine();
+  machine.precision = 'machine';
+  const big = (k: number) => 1e8 + k;
+
+  test('Variance and StandardDeviation of [10⁸+1, 10⁸+2, 10⁸+3]', () => {
+    expect(
+      machine.box(['Variance', ['List', big(1), big(2), big(3)]]).N().re
+    ).toBe(1);
+    expect(
+      machine.box(['PopulationVariance', ['List', big(1), big(2), big(3)]]).N()
+        .re
+    ).toBeCloseTo(2 / 3, 15);
+    expect(
+      machine.box(['StandardDeviation', ['List', big(1), big(2), big(3)]]).N()
+        .re
+    ).toBe(1);
+  });
+
+  test('Covariance of shifted paired data', () => {
+    expect(
+      machine
+        .box([
+          'Covariance',
+          ['List', big(1), big(2), big(3), big(4)],
+          ['List', big(2), big(4), big(6), big(8)],
+        ])
+        .N().re
+    ).toBeCloseTo(10 / 3, 12);
+  });
+
+  test('a two-point correlation is exactly ±1 at machine precision', () => {
+    // A fixed sample that overshot the bound with the one-pass kernel.
+    expect(
+      machine
+        .box([
+          'Correlation',
+          ['List', 419268.9657211304, 428655.5051803589],
+          ['List', 819708.2281112671, 172726.51195526123],
+        ])
+        .N().re
+    ).toBe(-1);
+    expect(
+      machine
+        .box(['Correlation', ['List', big(1), big(7)], ['List', big(3), big(5)]])
+        .N().re
+    ).toBe(1);
+  });
+
+  test('a correlation of data at the edges of the machine range', () => {
+    // Unscaled squares overflow (10⁴⁰⁰) or underflow (10⁻³⁰⁰) here; the
+    // per-column scaling keeps r = 1.
+    expect(
+      machine
+        .box([
+          'Correlation',
+          ['List', 1e200, 2e200, 3e200],
+          ['List', 1e-150, 2e-150, 3e-150],
+        ])
+        .N().re
+    ).toBe(1);
+    expect(
+      machine
+        .box(['Correlation', ['List', 1e200, 2e200, 3e200], ['List', 3, 2, 1]])
+        .N().re
+    ).toBeCloseTo(-1, 15);
+  });
+
+  test('a lazy source is consumed once by the variance', () => {
+    expect(
+      machine.box(['Variance', ['Range', 1, 100000]]).N().re
+    ).toBeCloseTo((100000 * (100000 + 1)) / 12, 6);
+  });
+
+  test('the exact route agrees', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Variance', ['List', big(1), big(2), big(3)]]).evaluate().toString()
+    ).toBe('1');
+    // r = Σdx·dy / √(Σdx²·Σdy²) = 5 / √(2 · 114/9) = 15 / √228.
+    expect(
+      ce.box(['Correlation', ['List', 1, 2, 3], ['List', 2, 4, 7]]).N().re
+    ).toBeCloseTo(15 / Math.sqrt(228), 14);
   });
 });

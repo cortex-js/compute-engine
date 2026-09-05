@@ -202,14 +202,24 @@ fixed in that change. One item remains.
   `n > 20` (`MAX_GAMMA_Q_SERIES_ORDER`). Honest gaps, never `NaN`.
 
 - **`Correlation` cannot declare `real<-1..1>` until the paired kernels stop
-  cancelling.** A fuzz of 3000 random samples at machine precision measured
-  `max |r| = 1.0000000000063`: the `Σxy − ΣxΣy/n` form of the covariance kernels
-  loses digits on a two-point sample with ordinary magnitudes. `Correlation`
-  declares `real | nan`, and the pin in `error-model-statistics.test.ts`
-  re-derives the overshoot so it fails the day the kernel is accurate. A
-  two-pass or Welford accumulation would fix it and would also settle whether
-  those kernels should scale their sums (the paired-statistics typing item
-  below).
+  cancelling (FIXED 2026-09-04).** A fuzz of 3000 random samples at machine
+  precision had measured `max |r| = 1.0000000000063`: the `Σxy − ΣxΣy/n` form
+  of the covariance kernels lost digits on a two-point sample with ordinary
+  magnitudes, and the `Σx² − (Σx)²/n` variance kernels lost them on data far
+  from zero (`Variance([10⁸+1, 10⁸+2, 10⁸+3])`). The variance kernels in
+  `numerics/statistics.ts` (sample and population, machine and `BigDecimal`)
+  now use Welford's single-pass update, so a lazy source is consumed once;
+  the covariance and correlation kernels use two-pass centered sums with the
+  `(Σd)²/n` compensation terms; `correlation` scales each column's deviations
+  by a power of two near its largest deviation (exact, and it keeps data of
+  machine range from overflowing — the correlation half of item 4 of the
+  type-system sweep below; the covariance half stays open, since a covariance
+  is not scale-invariant) and clips its rounding residue to [−1, 1]
+  (Cauchy–Schwarz makes any excess rounding, never data; NumPy's `corrcoef`
+  does the same). `Correlation` declares `real<-1..1> | nan` and its type
+  handler answers the range; the compiled JavaScript lane bakes the same
+  kernels. Pinned in `error-model-statistics.test.ts` and
+  `statistics.test.ts`.
 - **`validateArguments` admits a collection with provably non-numeric cells for
   a threadable numeric parameter (FIXED 2026-09-04 — found 2026-09-04 by the
   boxing validation seam).** `Ln(["a", "b"])` and `Sqrt(["a", "b"])` were valid
@@ -1135,6 +1145,11 @@ and out-of-machine-range arguments:
    sums of squares in a way that survives machine-range data (scaling the data,
    or routing through the bignum lane the way the default precision already
    does), so that finite data gets a finite answer at machine precision too.
+   The `Correlation` half is closed (2026-09-04): its kernel scales each
+   column's deviations by a power of two, and r is invariant under that, so
+   `Correlation([1.5e200, 2.5e200, 3.5e200], [1, 2, 3])` answers `1` at machine
+   precision. A covariance is NOT scale-invariant, so the two covariance heads
+   still overflow there; only the bignum route would close that half.
 5. Assumption bounds are recorded with direction-blind machine rounding.
    `boundsFromNormalizedInequality` (`constraint-subject.ts`) accumulates an
    inequality's constant terms in a JavaScript number, so an exact bound the

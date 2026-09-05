@@ -261,6 +261,10 @@ const FINITE_REAL_PAIRS = parseType('collection<tuple<real, real>>')!;
  * narrowed either, so a handler that answers `number` is what the application
  * reports.
  *
+ * `result` is the type answered for proven finite real data: `real` by
+ * default, and `real<-1..1>` for `Correlation`, whose value is bounded and
+ * whose kernel keeps the bound.
+ *
  * That claim describes the numeric answer only. An input the operator rejects
  * — fewer than two data points, two collections of different lengths, a
  * complex or non-numeric data value, or (for `Correlation`) zero variance —
@@ -280,17 +284,23 @@ const FINITE_REAL_PAIRS = parseType('collection<tuple<real, real>>')!;
  * sums so machine-range data gets a finite answer at machine precision too.
  */
 function pairedStatisticType(
-  ops: ReadonlyArray<OperandDescriptor>
+  ops: ReadonlyArray<OperandDescriptor>,
+  result: Type = 'real'
 ): Type | undefined {
   const [xs, ys] = ops;
   if (xs === undefined) return undefined;
   if (ys === undefined)
-    return typeFact(xs.type, FINITE_REAL_PAIRS) === true ? 'real' : undefined;
+    return typeFact(xs.type, FINITE_REAL_PAIRS) === true ? result : undefined;
   return typeFact(xs.type, FINITE_REAL_DATA) === true &&
     typeFact(ys.type, FINITE_REAL_DATA) === true
-    ? 'real'
+    ? result
     : undefined;
 }
+
+/** Pearson's r over finite real data lies in [−1, 1]: the kernel's clip
+ * makes the bound hold at every precision (`correlation`,
+ * `numerics/statistics.ts`). */
+const CORRELATION_RANGE = parseType('real<-1..1>')!;
 
 /**
  * Is this operand PROVABLY NaN, as far as an operand descriptor can tell?
@@ -1360,12 +1370,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'equal-length collections or one collection of (x, y) pairs.',
       complexity: 1200,
       broadcastable: false,
-      signature: '(collection<any>, collection<any>?) -> real | nan',
-      // Pearson's r lies in [−1, 1] mathematically, and the range is
-      // deliberately NOT declared: at `ce.precision = 'machine'` the kernel's
-      // cancellation exceeds it on ORDINARY data — a random two-point sample,
-      // whose r is exactly ±1, measured 1.0000000000063 — so a declared
-      // `real<-1..1>` would be a bound the head's own values break.
+      signature: '(collection<any>, collection<any>?) -> real<-1..1> | nan',
+      // Pearson's r lies in [−1, 1], and the kernel keeps it there at every
+      // precision: two-pass centered sums, then a clip of the rounding
+      // residue (`correlation`, `numerics/statistics.ts`). The one-pass
+      // kernel used to overshoot the bound on an ordinary two-point sample
+      // (1.0000000000063 at machine precision), which is why the range was
+      // not declared before.
       // A data-consuming aggregate (§3.C). The `nan` arm is the codomain
       // vocabulary the `handle` policies need: a `NaN` or an infinite datum,
       // an absent (`Missing`) datum, and empty input all make the answer
@@ -1380,7 +1391,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      type: (ops) => pairedStatisticType(ops),
+      type: (ops) => pairedStatisticType(ops, CORRELATION_RANGE),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCorrelation(ce, ops, !!numericApproximation),
     },

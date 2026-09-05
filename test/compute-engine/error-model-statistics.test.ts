@@ -457,8 +457,11 @@ describe('the bivariate statistics', () => {
   test('declaration', () => {
     const ce = new ComputeEngine();
     for (const h of HEADS) {
+      // Pearson's r is bounded, and its kernel keeps the bound at every
+      // precision, so `Correlation` alone declares the range.
+      const real = h === 'Correlation' ? 'real<-1..1>' : 'real';
       expect(`${h}: ${signatureOf(ce, h)}`).toBe(
-        `${h}: (collection<any>, collection<any>?) -> nan | real`
+        `${h}: (collection<any>, collection<any>?) -> nan | ${real}`
       );
       // The DERIVED policies here are `reject` (a `collection` slot) and
       // `pass-through`; neither describes a head that answers `NaN` for a
@@ -474,16 +477,17 @@ describe('the bivariate statistics', () => {
     // `real | nan`: a type-handler answer is never widened.
     const ce = new ComputeEngine();
     for (const h of HEADS) {
+      const real = h === 'Correlation' ? 'real<-1..1>' : 'real';
       expect(
         `${h}: ${appliedType(ce, [h, ['List', 1, 2, 3], ['List', 2, 4, 7]])}`
-      ).toBe(`${h}: real`);
+      ).toBe(`${h}: ${real}`);
       expect(
         `${h}: ${appliedType(ce, [
           h,
           ['List', 1, { num: 'NaN' }],
           ['List', 2, 3],
         ])}`
-      ).toBe(`${h}: nan | real`);
+      ).toBe(`${h}: nan | ${real}`);
     }
   });
 
@@ -540,24 +544,20 @@ describe('the bivariate statistics', () => {
     );
   });
 
-  test('Correlation declares no [-1, 1] range, because its kernel breaks it', () => {
+  test('Correlation declares real<-1..1>, and its kernel keeps the bound', () => {
     // Pearson's r lies in [−1, 1] mathematically, and a two-point sample has
-    // r = ±1 exactly. At machine precision the kernel's cancellation
-    // overshoots that bound on such a sample, so a declared `real<-1..1>`
-    // would be a bound the head's own values contradict. The exact path is
-    // unaffected.
+    // r = ±1 exactly. The one-pass kernel used to overshoot the bound at
+    // machine precision on such a sample (these two points gave
+    // r = −1.000000000000704), which kept the range out of the declaration.
+    // The two-pass kernel with its final clip keeps |r| ≤ 1 at every
+    // precision, so the declaration carries the range.
     const ce = new ComputeEngine();
     expect(evaluated(ce, ['Correlation', ['List', 1, 2], ['List', 2, 4]])).toBe(
       '1'
     );
-    // A FIXED counterexample, not a random search: floating point is
-    // deterministic, so one sample that overshoots always overshoots. These
-    // two points give r = −1.000000000000704, about 7e-13 past the bound.
-    //
-    // This assertion FAILS the day the kernel becomes accurate enough to keep
-    // |r| ≤ 1 here, and that is the intent: it is the evidence for the missing
-    // range in the declaration, so it must be revisited — together with the
-    // declaration — rather than survive a fix it no longer describes.
+    expect(
+      ce.box(['Correlation', ['List', 1, 2, 3], ['List', 2, 4, 7]]).type.toString()
+    ).toBe('real<-1..1>');
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     const r = machine
@@ -567,7 +567,7 @@ describe('the bivariate statistics', () => {
         ['List', 819708.2281112671, 172726.51195526123],
       ] as any)
       .N();
-    expect(typeof r.re === 'number' && Math.abs(r.re) > 1).toBe(true);
+    expect(r.re).toBe(-1);
   });
 
   test('constant data reports zero variance, which is outside every numeric arm', () => {

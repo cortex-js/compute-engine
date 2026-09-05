@@ -434,11 +434,13 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // never widened, so `number` was what the application reported.
     const NAN = { num: 'NaN' };
     for (const op of ['Covariance', 'PopulationCovariance', 'Correlation']) {
+      // Pearson's r is bounded: its handler answers the declared range.
+      const real = op === 'Correlation' ? 'real<-1..1>' : 'real';
       expect(
         `${op}=${ce
           .box([op, ['List', 1, 2, 3], ['List', 2, 4, 7]] as any)
           .type.toString()}`
-      ).toBe(`${op}=real`);
+      ).toBe(`${op}=${real}`);
       expect(
         `${op}(pairs)=${ce
           .box([
@@ -446,12 +448,12 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
             ['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 7]],
           ] as any)
           .type.toString()}`
-      ).toBe(`${op}(pairs)=real`);
+      ).toBe(`${op}(pairs)=${real}`);
       expect(
         `${op}(NaN)=${ce
           .box([op, ['List', 1, NAN], ['List', 2, 3]] as any)
           .type.toString()}`
-      ).toBe(`${op}(NaN)=nan | real`);
+      ).toBe(`${op}(NaN)=nan | ${real}`);
     }
     expect(
       ce
