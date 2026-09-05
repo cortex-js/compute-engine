@@ -147,12 +147,12 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   `test/compute-engine/compile-which-complex-selection.test.ts` pin the current
   values.
 - **`interval-js` target: four heads confirmed with no lowering** (Tycho item
-  237, filed 2026-08-30, the item-220 batch mold): `Choose`, `Apply` (the `f'`
-  prime-derivative spelling lowers to `Apply(Function(…), x)`),
-  `WithRandomSeed`, and index-less `Sum` over a collection body. A decline WITH
-  a by-design ruling is an acceptable answer for heads outside the
-  scalar-interval-domain contract. Repro: tycho
-  `scripts/repros/2026-08-30-ce-interval-lowering-batch-probe.mts`.
+  237, filed 2026-08-30 — CLOSED 2026-09-05: fixed 2026-08-30 and committed;
+  `Choose`, `Apply` of a function literal, `WithRandomSeed` with a literal seed
+  and the index-less `Sum` lower on `compilation/interval-javascript-target.ts`,
+  pinned in `test/compute-engine/tycho-item-237-interval-lowering-batch.test.ts`;
+  `Random()` lowers to its support enclosure `[0, 1]`, a seeded sequence being
+  unsound on the interval lane).
 
 ### Open items from the finite-by-default flip (Phase 1, 2026-08-27)
 
@@ -425,18 +425,31 @@ spelling the comma parselet records (`hasTrailingEmptySegment`), never from
 the value being `Nothing`, so an authored `\mathrm{Nothing}` default survives. Pinned in
 `test/compute-engine/set-comprehension.test.ts` and `a2-restrictions.test.ts`.
 
-### An asynchronous-only operator inside a held operand is not awaited (OPEN, async — found 2026-09-04 by the review of the growing-list round)
+### An asynchronous-only operator inside a held operand is not awaited (FIXED 2026-09-05 — found 2026-09-04 by the review of the growing-list round)
 
-`Less(15, AsyncOnly(2)).evaluateAsync()` answers `15 < AsyncOnly(2)` for an
+`Less(15, AsyncOnly(2)).evaluateAsync()` answered `15 < AsyncOnly(2)` for an
 `AsyncOnly` declared with only an `evaluateAsync` handler: a comparison holds
 its operands and evaluates them synchronously inside its own handler, and the
-asynchronous route has no hook to await a held operand before the handler runs.
-The same holds for every `lazy` operator that evaluates its operands itself.
-`List` and `Set` literals got an `evaluateAsync` handler for this reason on
-2026-09-04; the comparison and logic operators, `Which`, `If` and the big
-operators have none. A general fix is an asynchronous pre-pass that awaits the
-asynchronous-only descendants of a held operand, so a handler that evaluates its
-operands synchronously finds them already evaluated.
+asynchronous route had no hook to await a held operand before the handler ran.
+The asynchronous route now runs a pre-pass before the synchronous handler of a
+lazy operator that DEMANDS every held operand — a relation, `Element`, an
+arithmetic fold (`awaitAsyncOnlyDescendants`,
+`boxed-expression/async-only-descendants.ts`): every asynchronous-only
+application inside a held operand is awaited, in operand order, and the operand
+is rebuilt with the values in place. An operator that selects among its held
+operands (`selectsOperands`: `If`, `Which`, the short-circuit connectives),
+scopes them (`Block`, a big operator) or quotes them is kept away from the
+pass, since it would run an unreachable arm, break a short circuit, reorder a
+block or evaluate quoted data; nested inside a held operand, a selecting node
+is awaited WHOLE through its own asynchronous handler, which honors the
+selection. `If` and `Which` got asynchronous twins that await the condition
+and the selected arm through the asynchronous route (`And`/`Or` already had
+theirs). An engine that never defined an asynchronous-only operator skips the
+walk (`_hasAsyncOnlyOperator`, set when such a definition is created). Still
+uncovered: an asynchronous-only
+application inside the body of a big operator or the statements of a `Block`,
+which those operators evaluate themselves in their own order; that needs an
+asynchronous reduction of their own. Pinned in `test/compute-engine/async-only-held-operand.test.ts`.
 
 ### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (OPEN, compile — found 2026-09-03 reviewing the `while let` compile work)
 

@@ -171,6 +171,7 @@ import type { ErrorFrame } from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
 import { holdMap, holdMapAsync } from './hold.js';
+import { awaitAsyncOnlyDescendants } from './async-only-descendants.js';
 import {
   positiveSign,
   nonNegativeSign,
@@ -5322,8 +5323,27 @@ export class BoxedFunction
         // spelling of all, since global `i` is `ImaginaryUnit`. Holding the
         // context across the await is what makes the async lane's scoping
         // match the sync lane's.
+        // A lazy operator's SYNCHRONOUS handler evaluates its held operands
+        // itself, and cannot run an asynchronous-only descendant: await those
+        // first and hand the handler the operands with the values in place
+        // (`awaitAsyncOnlyDescendants`). Only an operator that DEMANDS every
+        // held operand qualifies — a relation, `Element`, an arithmetic
+        // fold. One that SELECTS among them (`If`, `Which`, a short-circuit
+        // connective: `selectsOperands`) would have an unreachable arm run;
+        // one that SCOPES them (`Block`, a big operator) orders and binds
+        // their evaluation itself; one that QUOTES them holds data. An
+        // `evaluateAsync` handler awaits its own operands.
+        const handlerOps =
+          this.engine._hasAsyncOnlyOperator &&
+          def.lazy === true &&
+          def.evaluateAsync === undefined &&
+          !def.selectsOperands &&
+          !def.scoped &&
+          def.holdClass !== 'quote'
+            ? await awaitAsyncOnlyDescendants(tail, options)
+            : tail;
         value = await (def.evaluateAsync?.(tail, opts) ??
-          def.evaluate?.(tail, opts));
+          def.evaluate?.(handlerOps, opts));
       } catch (e) {
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
       } finally {

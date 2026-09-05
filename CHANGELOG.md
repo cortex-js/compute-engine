@@ -45,6 +45,16 @@
 
 ### Resolved Issues
 
+- **An asynchronous-only operator inside a held operand is awaited.** For an
+  operator declared with only an `evaluateAsync` handler,
+  `Less(15, AsyncOnly(2)).evaluateAsync()` answered `15 < AsyncOnly(2)`: a
+  comparison evaluates its held operands synchronously, which cannot run an
+  asynchronous handler. The asynchronous route now awaits such applications
+  inside the held operands of a comparison before it compares, and `If` and
+  `Which` await their condition and the selected arm asynchronously, without
+  running an unselected arm. The body of a big operator or of a block is still
+  evaluated by that operator in its own order, so an asynchronous-only
+  application there stays unevaluated.
 - **`GammaRegularized(a, z)` answers at a negative non-integer order.**
   `GammaRegularized(-1/2, 2)` stayed symbolic; it is now `−0.00849…`,
   computed as `Γ(a, z)/Γ(a)` for `z > 0` at every precision, and

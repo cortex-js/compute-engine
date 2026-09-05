@@ -208,81 +208,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               : canonicalStatement(engine, op)
           )
         ),
-      evaluate: (ops, options) => {
-        const [cond, ifTrue, ifFalse] = ops;
-        const engine = options.engine;
-        const { value: evaluated, undecided } = evaluateCondition(cond);
-        // The condition is the one operand `If` ALWAYS demands, so an error
-        // in it propagates — the dual obligation of the demanded-operands
-        // rule (`docs/ERROR-MODEL.md` §3), which this handler owns because a
-        // lazy operator is not pre-absorbed. Answering here also keeps the
-        // error a value: a lazy operator's handler faults are re-thrown
-        // rather than converted to an `Error` expression, so an error condition
-        // that reached the typo throw at the end of this handler would escape
-        // as a host exception.
-        const condError = errorValue(evaluated);
-        if (condError !== undefined) return condError;
-        // A condition decided by a NaN operand (`evaluateCondition`) selects
-        // no arm: the value is `Missing`, the position-preserving absent
-        // datum that an else-less `If` and a `Which` with no selected clause
-        // already answer (no-selection ruling 2026-08-27). The compiled
-        // lanes answer their numeric spelling of the same marker, `NaN`.
-        // Unlike a free-variable condition this can never resolve, so the
-        // node is not held inert; unlike an absent condition it is not a
-        // program defect, so it is not an error.
-        if (undecided) return engine.Missing;
-        const evaluatedCond = sym(evaluated);
-        if (evaluatedCond === 'True')
-          return ifTrue?.evaluate() ?? engine.Missing;
-        if (evaluatedCond === 'False')
-          return ifFalse?.evaluate() ?? engine.Missing;
-        // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
-        // data state, not a program defect: it is Kleene-undecidable, so
-        // branching is an error — but a catchable error EXPRESSION (R's
-        // `if (NA)` stance), never the typo throw below. Discharge with
-        // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
-        // 2026-07-24.)
-        if (evaluatedCond === 'Missing') return absentConditionError(engine);
-        // A LIST-VALUED condition selects element-wise: `If(c, a, b)` is the
-        // two-clause `Which(c, a, True, b)` (see
-        // `evaluateElementwiseSelection`). Without an else branch the
-        // unselected positions are the no-match cell (`NaN`), not `Nothing`:
-        // an element-wise result preserves positions (R4).
-        const cells = conditionCells(evaluated);
-        if (cells !== undefined && ifTrue !== undefined) {
-          const clauses = [{ cond, arm: ifTrue }];
-          if (ifFalse !== undefined)
-            clauses.push({ cond: engine.True, arm: ifFalse });
-          return evaluateElementwiseSelection(
-            engine,
-            clauses,
-            { cond: evaluated, cells },
-            options
-          );
-        }
-        // Every other condition leaves the `If` UNEVALUATED. That covers an
-        // undecided boolean — a relation with free variables (`x = 4` stays
-        // symbolic under evaluate()), a symbol with no value — and equally a
-        // condition that is not a boolean at all (the number 10, a misspelled
-        // symbol, a list of numbers). An undecidable conditional is a symbolic
-        // expression, not a program defect: it may become decidable once its
-        // variables are bound, and a host exception thrown from here escapes
-        // past every caller that only asked for a value. (User ruling
-        // 2026-08-31, shared with `evaluateWhich` so the two cannot diverge.)
-        //
-        // The node is rebuilt around the EVALUATED condition (the held arms
-        // untouched): `If` is `lazy`, and a lazy handler that returns
-        // `undefined` hands the framework the ORIGINAL node, discarding the
-        // condition's evaluation — `If(C = U[1], …)` kept `U[1]` where its
-        // condition had already read `10`, and inside a big operator's loop
-        // the condition kept the INDEX symbol rather than the value the loop
-        // had assigned (see `evaluateBigOpTerm`, `library/utils.ts`). The
-        // `isSame` guard keeps this a fixpoint: an unchanged condition returns
-        // `undefined` as before, so the rebuilt node evaluates to itself.
-        return evaluated.isSame(cond)
-          ? undefined
-          : engine._fn('If', [evaluated, ...ops.slice(1)]);
-      },
+      evaluate: (ops, options) => evaluateIf(ops, options),
+      evaluateAsync: (ops, options) => evaluateIfAsync(ops, options),
     },
 
     Loop: {
@@ -661,6 +588,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: (ops, options) => evaluateWhich(ops, options),
+      evaluateAsync: (ops, options) => evaluateWhichAsync(ops, options),
     },
 
     // Structural pattern matching (Epsil `match`). See
@@ -1434,6 +1362,158 @@ function elementwiseResultType(
   return shaped
     ? { kind: 'list', elements, dimensions: [length!] }
     : { kind: 'list', elements };
+}
+
+/** Evaluate an `If` expression. */
+function evaluateIf(
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+): Expression | undefined {
+      const [cond, ifTrue, ifFalse] = ops;
+      const engine = options.engine;
+      const { value: evaluated, undecided } = evaluateCondition(cond);
+      // The condition is the one operand `If` ALWAYS demands, so an error
+      // in it propagates — the dual obligation of the demanded-operands
+      // rule (`docs/ERROR-MODEL.md` §3), which this handler owns because a
+      // lazy operator is not pre-absorbed. Answering here also keeps the
+      // error a value: a lazy operator's handler faults are re-thrown
+      // rather than converted to an `Error` expression, so an error condition
+      // that reached the typo throw at the end of this handler would escape
+      // as a host exception.
+      const condError = errorValue(evaluated);
+      if (condError !== undefined) return condError;
+      // A condition decided by a NaN operand (`evaluateCondition`) selects
+      // no arm: the value is `Missing`, the position-preserving absent
+      // datum that an else-less `If` and a `Which` with no selected clause
+      // already answer (no-selection ruling 2026-08-27). The compiled
+      // lanes answer their numeric spelling of the same marker, `NaN`.
+      // Unlike a free-variable condition this can never resolve, so the
+      // node is not held inert; unlike an absent condition it is not a
+      // program defect, so it is not an error.
+      if (undecided) return engine.Missing;
+      const evaluatedCond = sym(evaluated);
+      if (evaluatedCond === 'True')
+        return ifTrue?.evaluate() ?? engine.Missing;
+      if (evaluatedCond === 'False')
+        return ifFalse?.evaluate() ?? engine.Missing;
+      // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
+      // data state, not a program defect: it is Kleene-undecidable, so
+      // branching is an error — but a catchable error EXPRESSION (R's
+      // `if (NA)` stance), never the typo throw below. Discharge with
+      // `Coalesce`/`IsMissing` before branching. (§3.D residual, resolved
+      // 2026-07-24.)
+      if (evaluatedCond === 'Missing') return absentConditionError(engine);
+      // A LIST-VALUED condition selects element-wise: `If(c, a, b)` is the
+      // two-clause `Which(c, a, True, b)` (see
+      // `evaluateElementwiseSelection`). Without an else branch the
+      // unselected positions are the no-match cell (`NaN`), not `Nothing`:
+      // an element-wise result preserves positions (R4).
+      const cells = conditionCells(evaluated);
+      if (cells !== undefined && ifTrue !== undefined) {
+        const clauses = [{ cond, arm: ifTrue }];
+        if (ifFalse !== undefined)
+          clauses.push({ cond: engine.True, arm: ifFalse });
+        return evaluateElementwiseSelection(
+          engine,
+          clauses,
+          { cond: evaluated, cells },
+          options
+        );
+      }
+      // Every other condition leaves the `If` UNEVALUATED. That covers an
+      // undecided boolean — a relation with free variables (`x = 4` stays
+      // symbolic under evaluate()), a symbol with no value — and equally a
+      // condition that is not a boolean at all (the number 10, a misspelled
+      // symbol, a list of numbers). An undecidable conditional is a symbolic
+      // expression, not a program defect: it may become decidable once its
+      // variables are bound, and a host exception thrown from here escapes
+      // past every caller that only asked for a value. (User ruling
+      // 2026-08-31, shared with `evaluateWhich` so the two cannot diverge.)
+      //
+      // The node is rebuilt around the EVALUATED condition (the held arms
+      // untouched): `If` is `lazy`, and a lazy handler that returns
+      // `undefined` hands the framework the ORIGINAL node, discarding the
+      // condition's evaluation — `If(C = U[1], …)` kept `U[1]` where its
+      // condition had already read `10`, and inside a big operator's loop
+      // the condition kept the INDEX symbol rather than the value the loop
+      // had assigned (see `evaluateBigOpTerm`, `library/utils.ts`). The
+      // `isSame` guard keeps this a fixpoint: an unchanged condition returns
+      // `undefined` as before, so the rebuilt node evaluates to itself.
+      return evaluated.isSame(cond)
+        ? undefined
+        : engine._fn('If', [evaluated, ...ops.slice(1)]);
+}
+
+/**
+ * The asynchronous twin of `evaluateIf`. The condition is awaited through
+ * the asynchronous route — where a relation awaits an asynchronous-only
+ * operand of its own before it compares — and the selected arm is awaited
+ * the same way, so an operator with only an `evaluateAsync` handler works in
+ * either position. Everything else — the error, `NaN` and absent-condition
+ * verdicts, the element-wise selection, the hold of an undecided condition —
+ * is `evaluateIf` on the evaluated condition, so the two cannot diverge.
+ */
+async function evaluateIfAsync(
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+): Promise<Expression | undefined> {
+  const [cond, ifTrue, ifFalse] = ops;
+  const engine = options.engine;
+  const evalOptions = {
+    numericApproximation: options.numericApproximation,
+    materialization: options.materialization,
+    signal: options.signal,
+  };
+  const evaluated = cond === undefined ? undefined : await cond.evaluateAsync(evalOptions);
+  if (evaluated === undefined) return evaluateIf(ops, options);
+  const { value, undecided } = evaluateCondition(evaluated);
+  if (errorValue(value) === undefined && !undecided) {
+    const decided = sym(value);
+    if (decided === 'True')
+      return ifTrue === undefined
+        ? engine.Missing
+        : ifTrue.evaluateAsync(evalOptions);
+    if (decided === 'False')
+      return ifFalse === undefined
+        ? engine.Missing
+        : ifFalse.evaluateAsync(evalOptions);
+  }
+  return evaluateIf([evaluated, ...ops.slice(1)], options);
+}
+
+/**
+ * The asynchronous twin of `evaluateWhich`: each guard is awaited through the
+ * asynchronous route, in order, and a selected arm is awaited the same way;
+ * a guard that is not a plain `True`/`False` hands the remaining clauses to
+ * `evaluateWhich` with the evaluated guard in place, which owns every other
+ * verdict.
+ */
+async function evaluateWhichAsync(
+  args: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+): Promise<Expression | undefined> {
+  const engine = options.engine;
+  const evalOptions = {
+    numericApproximation: options.numericApproximation,
+    materialization: options.materialization,
+    signal: options.signal,
+  };
+  let i = 0;
+  while (i < args.length - 1) {
+    const evaluated = await args[i].evaluateAsync(evalOptions);
+    const { value, undecided } = evaluateCondition(evaluated);
+    if (errorValue(value) !== undefined || undecided)
+      return evaluateWhich([...args.slice(0, i), evaluated, ...args.slice(i + 1)], options);
+    const guard = sym(value);
+    if (guard === 'True') {
+      if (!args[i + 1]) return engine.Missing;
+      return args[i + 1].evaluateAsync(evalOptions);
+    }
+    if (guard !== 'False' && guard !== 'Undefined')
+      return evaluateWhich([...args.slice(0, i), evaluated, ...args.slice(i + 1)], options);
+    i += 2;
+  }
+  return evaluateWhich(args, options);
 }
 
 function evaluateWhich(

@@ -1818,6 +1818,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     }
 
     this.evaluate = evaluate;
+    // An asynchronous-only operator is what the asynchronous route's held-
+    // operand walk looks for; the engine records that one exists so that an
+    // engine without any skips the walk. Both handlers are assigned by now.
+    if (this.evaluateAsync !== undefined && this.evaluate === undefined)
+      this.engine._hasAsyncOnlyOperator = true;
 
     // Attach the resolved effect set to the (possibly just-rebuilt) signature.
     // Re-stamping the retained set is what keeps a signature-only update from

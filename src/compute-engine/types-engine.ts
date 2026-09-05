@@ -997,6 +997,13 @@ export interface IComputeEngine {
    * @internal */
   _inferenceTxDepth: number;
 
+  /** Set once an operator with only an `evaluateAsync` handler has been
+   * defined on this engine. Until then the asynchronous route has no
+   * asynchronous-only application to await inside a held operand and skips
+   * that walk (`awaitAsyncOnlyDescendants`, `boxed-function.ts`).
+   * @internal */
+  _hasAsyncOnlyOperator: boolean;
+
   /** Monotonically increasing count of OUTERMOST boxing operations —
    * incremented when `_inferenceTxDepth` transitions 0 → 1, constant for
    * the duration of that pass. Stamped onto provenance entries

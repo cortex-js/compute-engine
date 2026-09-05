@@ -1216,6 +1216,7 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _inferenceTxDepth = 0;
+  _hasAsyncOnlyOperator = false;
 
   /** Outermost-boxing counter — see `IComputeEngine._boxingEpoch`.
    * @internal
