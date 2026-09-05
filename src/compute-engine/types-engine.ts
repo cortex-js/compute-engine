@@ -580,39 +580,68 @@ export interface IComputeEngine {
 
   /**
    * Results of applying a PURE user-function literal to number-literal
-   * arguments WITHIN ONE TOP-LEVEL EVALUATION, keyed by the literal and the
-   * arguments (`function-utils.ts`, `makeLambda`); cleared when a top-level
-   * evaluation begins (`BoxedFunction.evaluate`, at `_evaluationDepth` 0),
-   * so it never outgrows one evaluation's distinct applications. A
-   * recursive definition such as `R(i,x,y) = R(i-1,x,y) + S(x,y,R(i-1,x,y))`
-   * applies itself twice per level, so an evaluation at depth 20 ran the
-   * body 2^20 times where 20 distinct applications exist; the memo answers
-   * the repeats.
+   * arguments, keyed by the literal and the arguments (`function-utils.ts`,
+   * `makeLambda`). A recursive definition such as
+   * `R(i,x,y) = R(i-1,x,y) + S(x,y,R(i-1,x,y))` applies itself twice per
+   * level, so an evaluation at depth 20 ran the body 2^20 times where 20
+   * distinct applications exist; the memo answers the repeats.
    *
-   * Within the evaluation an entry is valid only while `_semanticVersion`
+   * The memo lives for the ENGINE's lifetime, not one top-level
+   * evaluation's: the elements of a lazy collection are pulled by later,
+   * separate top-level evaluations, and `[P(i) for i in 0..n]` over a
+   * self-recursive `P` must find `P(i-1)` computed by the previous
+   * element's pull, or every element re-runs the recursion from the bottom
+   * (n(n+1)/2 step calls where n suffice — Tycho's D-264 point chain). Each
+   * literal's result map is bounded (`MAX_APPLICATION_MEMO_RESULTS`,
+   * emptied when full), and the literal keys a `WeakMap`, so the memo never
+   * outgrows the live literals. A numerically requested application also
+   * stores its exact result under the exact key: a recursive body applies
+   * itself through the exact route, so that is the entry the next element
+   * looks up. A handler-backed function (`ce.declare` with an `evaluate`
+   * handler) that reads host state outside the engine MUST declare an
+   * effect in its signature, or a body that calls it is memoized as pure.
+   *
+   * This memo takes no part in the object-dependency channel of
+   * `object-deps.ts` (no per-entry object dependencies, no merge into open
+   * collectors on a hit, no `containsObject` refusal at the store), and
+   * that rests on two refusals made elsewhere: the dependency snapshot
+   * answers `undefined` for a literal that can reach an object
+   * (`snapshotMemoDeps`), so a body that reads a field is never stored
+   * here and re-reads the field inside every enclosing cache-backed
+   * computation; and constructing an object is a `state` effect, so a body
+   * that returns a fresh object is impure and never memoized. Relaxing
+   * either refusal requires wiring this memo into that channel first, or an
+   * enclosing cache entry would serve a stale field-derived value after a
+   * store (`recursive-application-memo-across-evaluations.test.ts` pins
+   * both).
+   *
+   * An entry is valid only while `_worldVersion`
    * and `_objectStoreEpoch` are both unchanged AND the literal's dependency
    * snapshot still validates (`snapshotMemoDeps` / `memoDepsStillValid`,
    * `collection-element-memo.ts` — one `_writeVersion` per value definition
-   * the body reads, plus the re-resolution of every free name). A pure body
-   * may read an assigned free symbol, an object field, or the INDEX of an
-   * enclosing binder: `Σ_i` applying `n ↦ i·n` writes `i` ephemerally, which
-   * bumps that definition's `_writeVersion` and no engine-wide axis, and
-   * without the snapshot iteration 1's results were served to every later
-   * iteration. The SEMANTIC axis, not the `any` axis: every nested call
-   * binds its parameters through a `declare` event, which advances `any`
-   * (the type caches' guard) but not `semantic`, so an `any` stamp was
-   * defeated by the very recursion the memo exists for. Assignments,
-   * redefinitions, assumptions, configuration changes and assumption-dirty
-   * scope pops all advance `semantic` (`axisMaskOf`,
-   * `engine-configuration-lifecycle.ts`). `deps` is the element memo's
-   * `MemoDeps`, typed opaquely here to keep this interface free of that
-   * module.
+   * the body reads, plus the re-resolution of every free name). The WORLD
+   * axis is the right engine-wide guard here: it moves on a redefinition, an
+   * assumption, a configuration change and a signature inference, and never
+   * on a plain value write (`axisMaskOf`,
+   * `engine-configuration-lifecycle.ts`). Value writes are caught per
+   * definition by the snapshot's `_writeVersion` check instead, which is
+   * what an entry needs: a pure body may read an assigned free symbol or the
+   * INDEX of an enclosing binder, and `Σ_i` applying `n ↦ i·n` writes `i`
+   * ephemerally, so without the snapshot iteration 1's results were served
+   * to every later iteration. A coarser stamp would empty the memo for a
+   * write the entry does not depend on — an assignment made between two
+   * element pulls of a lazy collection restarts the whole recursion. The
+   * memoized body's own parameter bindings advance neither axis, so the
+   * recursion the memo exists for cannot defeat its own stamp. This mirrors
+   * the element memo and `BoxedFunction._memoizedFacet`, which key on the
+   * same axis. `deps` is the element memo's `MemoDeps`, typed opaquely here
+   * to keep this interface free of that module.
    * @internal */
   _applicationMemo:
     | WeakMap<
         Expression,
         {
-          semanticVersion: number;
+          worldVersion: number;
           objectStoreEpoch: number;
           deps: unknown;
           results: Map<string, Expression>;

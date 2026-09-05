@@ -1155,7 +1155,7 @@ export class ComputeEngine implements IComputeEngine {
     | WeakMap<
         Expression,
         {
-          semanticVersion: number;
+          worldVersion: number;
           objectStoreEpoch: number;
           deps: unknown;
           results: Map<string, Expression>;

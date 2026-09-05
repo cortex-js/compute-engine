@@ -827,6 +827,33 @@ serialized type needs a cap the way the ordering key got one. Probe:
 then time `e.type` and `ce.function('Add', [e, ce.symbol('z')])` against
 depth 16.
 
+### The `Function` LaTeX serializer prints an INFERRED parameter type as a written annotation (OPEN, serialization — found 2026-09-05; two suite failures at fc790bf2)
+
+Since the typed-lambda notation landed (`a538cd67`, 2026-09-04), the
+`Function` serializer writes every `Typed` parameter as `(x\colon T)\mapsto …`.
+Two committed tests fail on a clean `HEAD`:
+
+- `test/compute-engine/tycho-item-168-format-totality.test.ts` "the degraded
+  spelling equals the nothing-bound spelling": the user wrote
+  `Z \mapsto 0 < |Z|` with NO annotation; once `C_heckH` is bound, the
+  lambda's parameter is inferred `integer`, that inference is materialized
+  into the literal as `Typed`, and `.latex` prints
+  `(Z\colon integer)\mapsto 0\lt\vert Z\vert` where a bare engine prints
+  `Z\mapsto 0\lt\vert Z\vert`. An annotation the user never wrote is now in
+  the output (the ergonomics rule: an annotation marks a CHOSEN contract).
+- `test/compute-engine/typed-function-literals.test.ts` "serialization drops
+  annotations (§8)": pins the pre-notation contract that `.latex` drops a
+  WRITTEN annotation, which the round-trip design of the notation reversed
+  on purpose (`ROADMAP.md`, typed-lambda entry above). This test is stale if
+  the round-trip stays the ruling.
+
+Ruling needed: should a `Typed` node that INFERENCE inserted be printed?
+Recommended: no — print the annotation only when the literal carried it as
+written (distinguish the two at the point where inference materializes
+`Typed`, or keep inferred types on the definition and out of the literal),
+update the §8 test to the round-trip contract. Repro: the two test files
+above, `-w 1`.
+
 ### A recursive function with a function-typed parameter is rebuilt at every application — exponential time, and a type that overflows the stack (OPEN, evaluation — found 2026-08-22)
 
 `tw(n, v, f) := If(n ≤ 0, v, tw(n-1, f(v), f) + tw(n-1, f(v), f))` applied to

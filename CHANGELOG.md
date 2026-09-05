@@ -62,6 +62,27 @@
 
 ### Resolved Issues
 
+- **A `match` case whose pattern began with an unknown glyph vanished
+  silently.** `match x { ⊕ => 1 }` parsed to a `Match` with no cases and no
+  diagnostic: the case was discarded, and the glyph's `unexpected-symbol`
+  diagnostic was never reported because it is attached to a token that no
+  construct consumed. The same happened to an `if let` pattern. Both positions
+  now report the glyph.
+- **A comprehension over a self-recursive function no longer re-runs the
+  recursion at every element.** `[P(i) for i in 0..n]` with
+  `P(i) = \{ i = 0: (0, 0), s(P(i-1)) \}` hands out its elements lazily, and
+  each element pulled is its own top-level evaluation. The memo that answers a
+  repeated application of a pure function was emptied when a top-level
+  evaluation began, so every element restarted the recursion from `P(0)`:
+  n(n+1)/2 calls of the step function `s` where n suffice (55 for n = 10; 760 ms
+  for a Desmos point chain whose step costs 14 ms). The memo now outlives the
+  evaluation, guarded by the same version stamps that already invalidate it
+  on an assignment, a redefinition, an assumption, a configuration change or a
+  field store, and bounded in size per function literal. A numerically
+  requested application also stores its exact result, which is what the
+  recursive body — it applies itself exactly — looks up: `P(10)` requested
+  numerically after `P(9)` costs one step call. (Tycho, D-264 point chain.)
+
 - **An asynchronous-only operator inside a held operand is awaited.** For an
   operator declared with only an `evaluateAsync` handler,
   `Less(15, AsyncOnly(2)).evaluateAsync()` answered `15 < AsyncOnly(2)`: a

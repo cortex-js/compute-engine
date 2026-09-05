@@ -2198,11 +2198,13 @@ export class BoxedFunction
     // must not strand the count, or the engine would refuse every subsequent
     // checkpoint for the rest of its life.
     const engine = this.engine;
-    // A top-level evaluation starts with an empty pure-application memo:
-    // the memo shares the repeated applications of ONE evaluation (see
-    // `IComputeEngine._applicationMemo`) and must not accumulate every
-    // distinct argument tuple an engine sees in its lifetime.
-    if (engine._evaluationDepth === 0) engine._applicationMemo = undefined;
+    // The pure-application memo (`IComputeEngine._applicationMemo`) is NOT
+    // emptied here: it outlives a top-level evaluation, because the
+    // elements of a lazy collection are pulled by later, separate top-level
+    // evaluations and a self-recursive element function must find the
+    // previous element's result there. Staleness is the memo's own stamps'
+    // job (`function-utils.ts`, `validApplicationMemo`); its size is bounded
+    // per literal (`MAX_APPLICATION_MEMO_RESULTS`).
     engine._evaluationDepth += 1;
     try {
       // A deadline is armed only by an enclosing `withTimeLimit` span; work

@@ -311,10 +311,16 @@ describe('review fixes (2026-08-02)', () => {
     }
     expect(mixed).toEqual([1, 2, 30, 40]); // genuinely mixed
 
-    // The next walk must recompute uniformly, not serve the mixed buffer.
+    // The next walk must recompute uniformly, not serve the mixed buffer
+    // (which would sum to 73). Two of the four `tick` applications are
+    // answered by the pure-application memo (`IComputeEngine._applicationMemo`),
+    // which outlives a top-level evaluation: `f(3)` and `f(4)` were computed
+    // AFTER the assignment, under the current semantic version, so their
+    // entries are current; `f(1)` and `f(2)` were computed before it and
+    // recompute.
     const [v, c] = counting(() => walkSum(m));
     expect(v).toBe(10 * 10);
-    expect(c).toBe(4);
+    expect(c).toBe(2);
   });
 });
 

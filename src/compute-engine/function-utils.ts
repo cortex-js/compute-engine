@@ -3010,26 +3010,19 @@ function makeLambda(
     // value an `assume(x = …)` put in force answers differently inside a
     // fact-blind bracket, and the two answers must not be confused
     // (`docs/plans/2026-08-30-assumptions-memo-inventory.md`).
-    const memoKey =
+    const memoArgs =
       evaluatedArgs.every((a) => isNumber(a)) &&
       isPureComputedEffects(effectsOf(body))
-        ? `${options?.numericApproximation ? 'N' : 'E'}${
-            ce._factsHidden() ? 'H' : ''
-          }|${evaluatedArgs
+        ? `${ce._factsHidden() ? 'H' : ''}|${evaluatedArgs
             .map((a) => (Object.is(a.re, -0) ? '-0' : JSON.stringify(a.json)))
             .join('|')}`
         : undefined;
+    const numeric = options?.numericApproximation === true;
+    const memoKey =
+      memoArgs === undefined ? undefined : `${numeric ? 'N' : 'E'}${memoArgs}`;
     if (memoKey !== undefined) {
-      const memo = ce._applicationMemo?.get(fnExpr);
-      if (
-        memo !== undefined &&
-        memo.semanticVersion === ce._semanticVersion &&
-        memo.objectStoreEpoch === ce._objectStoreEpoch &&
-        memoDepsStillValid(fnExpr, memo.deps as MemoDeps)
-      ) {
-        const hit = memo.results.get(memoKey);
-        if (hit !== undefined) return hit;
-      }
+      const hit = validApplicationMemo(ce, fnExpr)?.results.get(memoKey);
+      if (hit !== undefined) return hit;
     }
 
     // A recursive definition is not unrolled symbolically: a re-entrant
@@ -3095,6 +3088,9 @@ function makeLambda(
     // activation — nested unnamed Block/loop contexts group into it).
     ce.pushScope(freshScope, 'call');
     let result: Expression;
+    // The exact answer of a numerically requested application, kept for
+    // the memo (see the numeric pass below).
+    let exactResult: Expression | undefined = undefined;
     try {
       result = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
 
@@ -3176,44 +3172,127 @@ function makeLambda(
       // occurrence that genuinely refers to a parameter has already been
       // replaced by its value (`bindingKeyedSubs`, above), so what remains
       // means its own binding and is resolved as such.
-      if (options?.numericApproximation)
+      if (numeric) {
+        // The body ran EXACTLY (its statements evaluate with no options),
+        // so the exact answer of this application is in hand before the
+        // numeric pass below and is memoized under the exact key as well.
+        // A recursive body applies itself through the exact route whatever
+        // the outer request was: `P(k)` requested numerically evaluates
+        // `P(k-1)` exactly. Without this entry a run of numeric requests
+        // `P(0)`, `P(1)`, … `P(n)` — the elements of a lazy comprehension
+        // pulled one at a time — never found the previous element's exact
+        // result and re-ran the recursion from the bottom at every element.
+        exactResult = result;
         result = evaluateInOwnBindings(ce, result, {
           numericApproximation: true,
         });
+      }
     } finally {
       ce.popScope();
       bodyScope.parent = savedParent;
       restoreBodyScopeParams(bodyScope, hiddenBindings);
     }
 
-    if (memoKey !== undefined && result.isValid) {
-      ce._applicationMemo ??= new WeakMap();
-      let memo = ce._applicationMemo.get(fnExpr);
-      if (
-        memo === undefined ||
-        memo.semanticVersion !== ce._semanticVersion ||
-        memo.objectStoreEpoch !== ce._objectStoreEpoch ||
-        !memoDepsStillValid(fnExpr, memo.deps as MemoDeps)
-      ) {
-        // A literal whose dependencies cannot be snapshotted (a free name
-        // with no binding at all, resolved dynamically at walk time) is not
-        // memoizable.
-        const deps = snapshotMemoDeps(fnExpr);
-        if (deps === undefined) return result;
-        memo = {
-          semanticVersion: ce._semanticVersion,
-          objectStoreEpoch: ce._objectStoreEpoch,
-          deps,
-          results: new Map(),
-        };
-        ce._applicationMemo.set(fnExpr, memo);
+    if (memoKey !== undefined) {
+      // The exact entry is stored whether or not the numeric pass produced
+      // a valid result: the exact answer is what a recursive body, which
+      // applies itself exactly, looks up.
+      const exactEntry = exactResult?.isValid ? exactResult : undefined;
+      const resultEntry = result.isValid ? result : undefined;
+      if (exactEntry !== undefined || resultEntry !== undefined) {
+        const memo = applicationMemoForStore(ce, fnExpr);
+        if (memo !== undefined) {
+          if (exactEntry !== undefined)
+            memo.results.set(`E${memoArgs}`, exactEntry);
+          if (resultEntry !== undefined) memo.results.set(memoKey, resultEntry);
+        }
       }
-      memo.results.set(memoKey, result);
     }
     return bodyResultValue(result);
   };
 
   return wrapRecursion(ce, guardSymbolicRecursion(fnExpr, invoke));
+}
+
+/**
+ * How many results one function literal's application memo holds before it
+ * is emptied and refilled. The memo lives for the engine's lifetime (see
+ * `IComputeEngine._applicationMemo`), so without a bound it would grow with
+ * every distinct argument tuple the literal is ever applied to. The bound
+ * is per literal: a literal is the key of a `WeakMap`, so its results die
+ * with it. Emptying the whole map, rather than evicting the oldest entry,
+ * keeps a hit at one map read; a recursion that spans an emptying re-runs
+ * at most one memo's worth of applications. One application can add TWO
+ * entries — the exact result and the numerically requested one — so the
+ * emptying leaves room for both.
+ */
+export const MAX_APPLICATION_MEMO_RESULTS = 4096;
+
+type ApplicationMemo = NonNullable<
+  ReturnType<NonNullable<ComputeEngine['_applicationMemo']>['get']>
+>;
+
+/**
+ * The memo record of `fnExpr` when every stamp on it is still current: the
+ * world version, the object-store epoch and the dependency snapshot
+ * (`memoDepsStillValid`). `undefined` when there is no record or a stamp
+ * moved; the record is then stale in its entirety, because every result in
+ * it was computed under the same stamps.
+ *
+ * The WORLD axis, not the semantic one: a plain value write moves `semantic`
+ * but not `world`, and a write the entries do not depend on must not empty
+ * the record — an assignment made between two element pulls of a lazy
+ * collection would otherwise restart the recursion the memo exists for. A
+ * write the entries DO depend on is caught per definition by
+ * `memoDepsStillValid`, which reads one `_writeVersion` per value definition
+ * the body reads (`collection-element-memo.ts`).
+ */
+function validApplicationMemo(
+  ce: ComputeEngine,
+  fnExpr: Expression
+): ApplicationMemo | undefined {
+  const memo = ce._applicationMemo?.get(fnExpr);
+  if (
+    memo !== undefined &&
+    memo.worldVersion === ce._worldVersion &&
+    memo.objectStoreEpoch === ce._objectStoreEpoch &&
+    memoDepsStillValid(fnExpr, memo.deps as MemoDeps)
+  )
+    return memo;
+  return undefined;
+}
+
+/**
+ * The memo record of `fnExpr` to store a result into: the current one when
+ * its stamps are still valid, otherwise a fresh record stamped now. A
+ * record with no room left under `MAX_APPLICATION_MEMO_RESULTS` for the two
+ * entries one call can add is emptied before the store. `undefined` when the
+ * literal is not memoizable — its
+ * dependencies cannot be snapshotted (a free name with no binding at all,
+ * resolved dynamically at walk time).
+ */
+function applicationMemoForStore(
+  ce: ComputeEngine,
+  fnExpr: Expression
+): ApplicationMemo | undefined {
+  ce._applicationMemo ??= new WeakMap();
+  let memo = validApplicationMemo(ce, fnExpr);
+  if (memo === undefined) {
+    const deps = snapshotMemoDeps(fnExpr);
+    if (deps === undefined) return undefined;
+    memo = {
+      worldVersion: ce._worldVersion,
+      objectStoreEpoch: ce._objectStoreEpoch,
+      deps,
+      results: new Map(),
+    };
+    ce._applicationMemo.set(fnExpr, memo);
+  } else if (memo.results.size + 2 > MAX_APPLICATION_MEMO_RESULTS) {
+    // The caller may insert two entries (the exact key and the numeric one),
+    // so the bound is checked with room for both.
+    memo.results.clear();
+  }
+  return memo;
 }
 
 /**
