@@ -544,7 +544,12 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     ]);
     const lx = e.latex;
 
-    expect(lx).toMatchInlineSnapshot(`\\mathrm{Filter}(d, k\\mapsto1\\lt k)`);
+    // The callback's parameter is typed from the collection's element type
+    // at canonicalization, and the LaTeX carries the annotation, so the
+    // round trip below reproduces the typed parameter.
+    expect(lx).toMatchInlineSnapshot(
+      `\\mathrm{Filter}(d, (k\\colon integer)\\mapsto1\\lt k)`
+    );
     expect(ce.parse(lx).json).toEqual(e.json);
     expect(lx.startsWith('\\bigl\\lbrack')).toBe(false);
   });

@@ -172,11 +172,35 @@ fixed in that change. One item remains.
 
 ### Open items from the small-fix release batch (2026-08-31)
 
-- **No LaTeX parse route exists for annotated lambda parameters.**
-  `ce.parse('(i: integer) \\mapsto 2i')` produces `Colon`/ `unexpected-operator`
-  output instead of an annotated parameter — a parser-surface capability gap
-  found 2026-08-31 while fixing the `i`-shield. The raw-MathJSON route and the
-  signature-string sugar route both work.
+- **No LaTeX parse route exists for annotated lambda parameters (FIXED
+  2026-09-04).** `ce.parse('(i: integer) \\mapsto 2i')` produced `Colon` and an
+  `unexpected-operator` error — a parser-surface capability gap found
+  2026-08-31 while fixing the `i`-shield. The `Colon` parselet
+  (`parseParameterTypeAnnotation`, `latex-syntax/dictionary/definitions-core.ts`)
+  now looks ahead for the `\\mapsto` that makes a colon an annotation and reads
+  the type as RAW SOURCE TEXT, validated by the type parser, so
+  `(x: list<integer>) \\mapsto x`, `(f: (real) -> real) \\mapsto f(1)`,
+  `\\mathrm{…}`/`\\text{…}` type names and the `\\left(…\\right)` spelling all
+  parse to `Typed` parameters; every other colon (set-builder, compact
+  piecewise, `f: A \\to B`) reads as before. The scan tracks the angle
+  brackets of the type grammar (`tuple<integer, integer>`), a quoted value
+  type, and every delimiter spelling and sizing prefix the parser knows
+  (`\\lparen`, `\\bigl…\\bigr`, `\\mleft…\\mright`; the tables now live in
+  `latex-syntax/delimiter-tables.ts`, shared with the parser); a plain name
+  the type parser does not know (`Point`) is accepted by its shape and
+  resolved at boxing, where the engine's type resolver is available. The
+  `Function` serializer writes the annotation back
+  (`(i\\colon integer)\\mapsto 2i`, the symbol-form `Typed` included), so
+  typed lambdas round-trip. Pinned in
+  `test/compute-engine/latex-syntax/typed-lambda-parameters.test.ts`.
+- **A parenthesized lambda applied inline parses as a product (OPEN, parser —
+  found 2026-09-04 while adding the annotated-parameter route).**
+  `(i \\mapsto 2i)(3)` parses to
+  `InvisibleOperator(Delimiter(Function(…)), Delimiter(3))` and evaluates to
+  `3(i) => 2i`, a product of the lambda and 3, where the application `2·3 = 6`
+  is meant; the typed spelling `((i: integer) \\mapsto 2i)(3)` does the same.
+  The juxtaposition parser would need to apply a parenthesized `Function`
+  literal to the argument list that follows it, the way it applies a symbol.
 
 ### Open items from the Phase F batches 11, 12, 13 and 14 (2026-09-02)
 

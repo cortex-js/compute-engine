@@ -2,6 +2,15 @@
 
 ### New Features
 
+- **Typed lambda parameters have a LaTeX notation.** `(i: integer) \mapsto 2i`,
+  `(x: real, y: real) \mapsto x + y`, `(x: list<integer>) \mapsto x` and
+  `(f: (real) -> real) \mapsto f(1)` parse to `Function` literals with `Typed`
+  parameters, the same as the MathJSON and signature-string routes; the type is
+  read as source text after the colon, and a type name may be wrapped in
+  `\mathrm{…}` or `\text{…}`. The serializer writes the annotation back as
+  `(i\colon integer)\mapsto 2i`, so a typed lambda round-trips through LaTeX
+  instead of losing its annotations. A colon that is not followed by `\mapsto`
+  — a set-builder, a compact piecewise, `f: A \to B` — reads exactly as before.
 - **`epsil check --effects` reports the effects inferred for each top-level
   function.** One line per `function` statement or `let`/`const` lambda —
   `f (line 1): console`, `g (line 2): pure (declared)`, `k (line 3): random` —

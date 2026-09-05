@@ -35,6 +35,12 @@ import { joinLatex, supsub } from '../tokenizer.js';
 import { latexTemplate } from '../serializer-style.js';
 import { isEquationOperator, isInequalityOperator } from '../utils.js';
 import { BoxedType } from '../../../common/type/boxed-type.js';
+import { parseType } from '../../../common/type/parse.js';
+import {
+  CLOSE_DELIMITER_PREFIX,
+  DELIMITER_SHORTHAND,
+  OPEN_DELIMITER_PREFIX,
+} from '../delimiter-tables.js';
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
 import { absorbSubscripts } from '../parse-symbol.js';
@@ -1276,6 +1282,180 @@ function fenceBlockBody(
     : joinLatex(['\\left(', s, '\\right)']);
 }
 
+/** The precedence of the `Colon` operator: below comparisons (245) and
+ * arrows (270), see the `Colon` entry. */
+const COLON_PRECEDENCE = 240;
+
+// The delimiters `parseParameterTypeAnnotation` tracks while it scans ahead
+// for the end of an annotation and for the `\mapsto` that makes it one: every
+// spelling the parser accepts for `(`, `[`, `{` and `<` (`DELIMITER_SHORTHAND`),
+// the group braces the tokenizer emits, and the angle brackets of the type
+// grammar itself (`tuple<integer, integer>`), whose inner comma must not end
+// the annotation.
+const ANNOTATION_OPENERS = new Set<string>([
+  ...DELIMITER_SHORTHAND['('],
+  ...DELIMITER_SHORTHAND['['],
+  ...DELIMITER_SHORTHAND['{'],
+  ...DELIMITER_SHORTHAND['<'],
+  '<{>',
+]);
+const ANNOTATION_CLOSERS = new Set<string>([
+  ...DELIMITER_SHORTHAND[')'],
+  ...DELIMITER_SHORTHAND[']'],
+  ...DELIMITER_SHORTHAND['}'],
+  ...DELIMITER_SHORTHAND['>'],
+  '<}>',
+]);
+
+// Matches every sizing prefix on a delimiter (`\left`, `\bigl`, `\mright`, …)
+// as a whole command, for stripping it from the type text
+// (`\bigl(real\bigr) -> real` is the type `(real) -> real`).
+const DELIMITER_PREFIX_PATTERN = new RegExp(
+  `(?:${[...Object.keys(OPEN_DELIMITER_PREFIX), ...CLOSE_DELIMITER_PREFIX]
+    .map((c) => c.replace(/\\/g, '\\\\'))
+    .join('|')})(?![a-zA-Z])`,
+  'g'
+);
+
+/**
+ * Is `text` a type the LaTeX parser can hand to the engine as a parameter
+ * annotation? Either the type parser accepts it, or it is a plain name: a
+ * type declared in the engine (`Point`) is unknown to the type parser here —
+ * the LaTeX parser has no type resolver — and is resolved when the function
+ * literal is boxed, so a name passes on its shape alone.
+ */
+function isParameterTypeText(text: string): boolean {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(text)) return true;
+  try {
+    return parseType(text) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the type annotation of an anonymous function's parameter — the
+ * `x: T` of `(x: T) \mapsto …`, `(x: T, y: U) \mapsto …` or `x: T \mapsto …`
+ * — into `["Typed", x, "T"]`, or return `null` when the colon after `lhs` is
+ * not one.
+ *
+ * Called by the `Colon` parselet with the parser just past the colon. The
+ * annotation is read as TEXT rebuilt from the token stream (`parser.latex`),
+ * not as a parsed expression: a type such as `list<integer>` has no
+ * expression reading (`integer` would be a product of six symbols, `<` a
+ * comparison), and the type parser is the authority on the text. The text
+ * runs to the first `,`, closing delimiter or `\mapsto` at the annotation's
+ * own nesting depth, where the angle brackets of the type grammar and a
+ * quoted value type (`"a,b"`) nest too. It is an annotation only when a
+ * `\mapsto` follows: directly, or after the closing delimiter of the
+ * parameter list the annotation sits in. Anything else — a set-builder
+ * `{x : x > 0}`, a compact piecewise `{x < 0 : 1, x}`, a mapping
+ * `f: A \to B` — leaves the parser where it was and answers `null`, so the
+ * ordinary `Colon` reading applies. A `\mathrm{…}`, `\text{…}` or
+ * `\operatorname{…}` wrapper around the type name is unwrapped, so a type
+ * written as a word (`\mathrm{integer}`) reads the same as the bare word.
+ */
+function parseParameterTypeAnnotation(
+  parser: Parser,
+  lhs: MathJsonExpression
+): MathJsonExpression | null {
+  const name = symbol(lhs);
+  if (!name) return null;
+  const start = parser.index;
+
+  // 1. The end of the annotation text, at the annotation's own depth. A
+  //    sizing prefix before the closing delimiter (`\left(x\colon real\right)`)
+  //    belongs to the delimiter: the annotation ends before it, so the
+  //    parser resumes on the prefix and the group closes as usual.
+  let depth = 0;
+  let quoted = false;
+  let end = -1;
+  let lastTok = '';
+  let lastIndex = start;
+  while (!parser.atEnd) {
+    const tok = parser.peek;
+    // The `>` of the type grammar's arrow `->` is not a closing bracket.
+    const isArrowHead = tok === '>' && lastTok === '-';
+    if (tok === '"') quoted = !quoted;
+    else if (!quoted && !isArrowHead) {
+      if (
+        depth === 0 &&
+        (tok === ',' || tok === '\\mapsto' || ANNOTATION_CLOSERS.has(tok))
+      ) {
+        end = CLOSE_DELIMITER_PREFIX.has(lastTok) ? lastIndex : parser.index;
+        break;
+      }
+      if (ANNOTATION_OPENERS.has(tok)) depth += 1;
+      else if (ANNOTATION_CLOSERS.has(tok)) depth -= 1;
+    }
+    lastTok = tok;
+    lastIndex = parser.index;
+    parser.nextToken();
+  }
+  if (end < 0 || end === start) {
+    parser.index = start;
+    return null;
+  }
+
+  // 2. The `\mapsto` that makes it an annotation: right here, or after the
+  //    closing delimiter of the enclosing parameter list.
+  let isAnnotation = parser.peek === '\\mapsto';
+  if (!isAnnotation) {
+    let nested = 0;
+    let previous = '';
+    while (!parser.atEnd) {
+      const tok = parser.nextToken();
+      const arrowHead = tok === '>' && previous === '-';
+      previous = tok;
+      if (arrowHead) continue;
+      if (ANNOTATION_OPENERS.has(tok)) nested += 1;
+      else if (ANNOTATION_CLOSERS.has(tok)) {
+        if (nested === 0) break;
+        nested -= 1;
+      }
+    }
+    parser.skipSpace();
+    isAnnotation = parser.peek === '\\mapsto';
+  }
+  if (!isAnnotation) {
+    parser.index = start;
+    return null;
+  }
+
+  // 3. The type itself. A sizing prefix on a delimiter INSIDE the type
+  //    (`\bigl(real\bigr) -> real`) is not part of the type and is dropped.
+  let text = parser.latex(start, end).replace(DELIMITER_PREFIX_PATTERN, '');
+  text = text.trim();
+  const wrapped = /^\\(?:mathrm|text|operatorname)\{(.*)\}$/s.exec(text);
+  if (wrapped) text = wrapped[1].trim();
+  if (!isParameterTypeText(text)) {
+    parser.index = start;
+    return null;
+  }
+  parser.index = end;
+  return ['Typed', name, { str: text }];
+}
+
+/**
+ * The `Colon` parselet: a parameter type annotation when one is being read
+ * (`parseParameterTypeAnnotation`), else the ordinary right-associative
+ * `Colon(lhs, rhs)` — a missing right side is the `missing` error, as for
+ * every infix operator.
+ */
+function parseColon(
+  parser: Parser,
+  lhs: MathJsonExpression,
+  until: Readonly<Terminator>
+): MathJsonExpression | null {
+  if (lhs === null) return null;
+  const typed = parseParameterTypeAnnotation(parser, lhs);
+  if (typed !== null) return typed;
+  const rhs = missingIfEmpty(
+    parser.parseExpression({ ...until, minPrec: COLON_PRECEDENCE })
+  );
+  return ['Colon', lhs, rhs];
+}
+
 export const DEFINITIONS_CORE: LatexDictionary = [
   //
   // Constants
@@ -1322,9 +1502,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // Functions
   //
 
-  // Type ascription: no LaTeX notation in v1, serialize the expression alone
-  // (drops the annotation — design §8). Covers the return-type marker inside a
-  // `Function` body and any stray `Typed` node.
+  // Type ascription. A `Typed` PARAMETER of a `Function` has a notation —
+  // `(x\colon integer)\mapsto 2x`, read by `parseParameterTypeAnnotation`
+  // and written by the `Function` serializer below. Any other `Typed` node
+  // (the return-type marker inside a `Function` body, a stray ascription)
+  // has none: it serializes as the expression alone, dropping the
+  // annotation.
   {
     name: 'Typed',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
@@ -1342,17 +1525,24 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // `operandDiagnosticCheckpoint` points just before it, so pruning covers
       // both the parameter references and the body below.
       const diagCp = parser.operandDiagnosticCheckpoint;
-      let params: string[] = [];
+      // A parameter is a symbol, or a `Typed(symbol, type)` annotation built
+      // by the `Colon` parselet (`(x\colon integer)\mapsto …`). The names
+      // feed the undeclared-symbol pruning; the parameters themselves,
+      // annotation included, become the `Function`'s operands.
+      const params: MathJsonExpression[] = [];
+      const names: string[] = [];
+      const addParam = (x: MathJsonExpression): boolean => {
+        const name =
+          operator(x) === 'Typed' ? symbol(operand(x, 1)) : symbol(x);
+        if (!name) return false;
+        names.push(name);
+        params.push(operator(x) === 'Typed' ? x : name);
+        return true;
+      };
       if (operator(lhs) === 'Delimiter') lhs = operand(lhs, 1) ?? 'Nothing';
       if (operator(lhs) === 'Sequence') {
-        for (const x of operands(lhs)) {
-          if (!symbol(x)) return null;
-          params.push(symbol(x)!);
-        }
-      } else {
-        if (!symbol(lhs)) return null;
-        params = [symbol(lhs)!];
-      }
+        for (const x of operands(lhs)) if (!addParam(x)) return null;
+      } else if (!addParam(lhs)) return null;
 
       // The body extends as far as possible — through comparisons and logical
       // connectives (`n \mapsto n > 102`, `n \mapsto n > 2 \wedge n < 5`) —
@@ -1380,16 +1570,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (operator(rhs) === 'Sequence')
         rhs = [delimited ? 'Tuple' : 'Block', ...operands(rhs)];
 
-      parser._pruneUndeclared(params, diagCp);
+      parser._pruneUndeclared(names, diagCp);
 
       return ['Function', rhs, ...params] as MathJsonExpression;
     },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const args = operands(expr);
-      // Drop parameter type annotations (`["Typed", x, type]` -> `x`): no
-      // typed-parameter LaTeX notation in v1 (design §8).
-      const unwrapParam = (x: MathJsonExpression): MathJsonExpression =>
-        operator(x) === 'Typed' ? (operand(x, 1) ?? x) : x;
+      // A typed parameter (`["Typed", x, "integer"]`, or the symbol form
+      // `["Typed", x, integer]`) is written as `x\colon integer`, the
+      // notation `parseParameterTypeAnnotation` reads back — only for a type
+      // text that reader accepts (`isParameterTypeText`); any other `Typed`
+      // has no notation and is written as the bare parameter. A typed
+      // parameter list is always parenthesized, so the annotation cannot run
+      // into the body.
+      const typeText = (x: MathJsonExpression): string | null => {
+        if (operator(x) !== 'Typed') return null;
+        const t = operand(x, 2);
+        const text = stringValue(t) ?? symbol(t);
+        return text !== null && isParameterTypeText(text) ? text : null;
+      };
+      const isTyped = (x: MathJsonExpression): boolean => typeText(x) !== null;
+      const serializeParam = (x: MathJsonExpression): string => {
+        if (operator(x) !== 'Typed') return serializer.serialize(x);
+        const name = serializer.serialize(operand(x, 1) ?? 'Nothing');
+        const type = typeText(x);
+        return type === null ? name : joinLatex([name, '\\colon', type]);
+      };
       if (args.length < 1) return '()\\mapsto()';
       if (args.length === 1)
         return joinLatex([
@@ -1398,9 +1604,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           serializer.serialize(operand(expr, 1)),
         ]);
 
-      if (args.length === 2) {
+      if (args.length === 2 && !isTyped(operand(expr, 2)!)) {
         return joinLatex([
-          serializer.serialize(unwrapParam(operand(expr, 2)!)),
+          serializer.serialize(operand(expr, 2)!),
           '\\mapsto',
           serializer.serialize(operand(expr, 1)),
         ]);
@@ -1408,10 +1614,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
 
       return joinLatex([
         serializer.wrapString(
-          operands(expr)
-            ?.slice(1)
-            .map((x) => serializer.serialize(unwrapParam(x)))
-            .join(', '),
+          operands(expr)?.slice(1).map(serializeParam).join(', '),
           'normal'
         ),
         '\\mapsto',
@@ -1674,13 +1877,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   // General colon operator (type annotation, mapping notation, Desmos piecewise)
   // Precedence below comparisons (245) so `cond : val` (Desmos compact piecewise)
   // parses as `Colon(cond, val)`, and below arrows (270) so
-  // `f: A \to B` parses as `Colon(f, To(A, B))`.
+  // `f: A \to B` parses as `Colon(f, To(A, B))`. A colon that annotates the
+  // parameter of an anonymous function (`(x: integer) \mapsto 2x`) is read
+  // by `parseParameterTypeAnnotation` first.
   {
     name: 'Colon',
     latexTrigger: ':',
     kind: 'infix',
     associativity: 'right',
-    precedence: 240,
+    precedence: COLON_PRECEDENCE,
+    parse: parseColon,
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       joinLatex([
         serializer.serialize(operand(expr, 1)),
@@ -1692,8 +1898,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: '\\colon',
     kind: 'infix',
     associativity: 'right',
-    precedence: 240,
-    parse: 'Colon',
+    precedence: COLON_PRECEDENCE,
+    parse: parseColon,
   },
 
   {
