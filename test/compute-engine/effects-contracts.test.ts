@@ -2343,3 +2343,52 @@ describe('The default-`!scope` ceiling: escaping writes are opt-in', () => {
     expect(ce.box(['cl_mbump2', 0]).evaluate().re).toBe(0);
   });
 });
+
+describe('a return-type ascription does not project the returned lambda', () => {
+  // The parser puts the return marker on the body's LAST statement, so a
+  // function returning a lambda canonicalizes to
+  // `Function(Block(Typed(⟨lambda⟩, "…")))`. `Typed` never applies its
+  // operand (`invokes: false`), so the lambda's latent effects stay on the
+  // lambda's own arrow and the enclosing function is pure — exactly as it is
+  // without the ascription. Found 2026-09-04 by `epsil check --effects`.
+  const arrowOf = (source: string, name: string): string => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(ce, source);
+    expect(result.diagnostics).toEqual([]);
+    const def = ce.lookupDefinition(name);
+    expect(def).toBeDefined();
+    const type =
+      def !== undefined && 'operator' in def
+        ? def.operator.signature.type
+        : def?.value.type.type;
+    return typeof type === 'string' ? type : typeToString(type!);
+  };
+
+  test('a grouped effectful return type stays on the returned arrow', () => {
+    expect(
+      arrowOf(
+        'function make() -> ((number) random -> number) { x => Random() * x }',
+        'make'
+      )
+    ).toBe('() -> (number) random -> number');
+    // The same body with no ascription infers the same outer arrow.
+    expect(arrowOf('function mk() { x => Random() * x }', 'mk')).toBe(
+      '() -> (unknown) random -> number'
+    );
+  });
+
+  test('a `pure` contract on a function that returns a drawing lambda holds', () => {
+    expect(arrowOf('function mk() pure { x => Random() * x }', 'mk')).toBe(
+      '() pure -> (unknown) random -> number'
+    );
+  });
+
+  test('the ascription is transparent to the runtime channel too', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      'function make() -> ((number) random -> number) { x => Random() * x }'
+    );
+    expect(effectsOf(ce.box(['make']))).toBeUndefined();
+  });
+});

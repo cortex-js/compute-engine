@@ -2,10 +2,17 @@ import type { MathJsonExpression } from '../math-json/types.js';
 
 import { ComputeEngine, parseEpsil } from '../epsil.js';
 import type { ParsingDiagnostic } from '../epsil/diagnostics.js';
-import { staticDiagnostics } from '../epsil/static-diagnostics.js';
+import {
+  staticDiagnostics,
+  type EffectSummary,
+} from '../epsil/static-diagnostics.js';
 
 import { CliUsageError, parseCheckArguments } from './arguments.js';
-import { diagnosticToJson, formatDiagnostics } from './format.js';
+import {
+  diagnosticToJson,
+  formatDiagnostics,
+  sourceLocation,
+} from './format.js';
 import { readSource, type CliIo } from './io.js';
 
 /**
@@ -62,15 +69,85 @@ export function parseSource(
  */
 export function checkSource(
   source: string,
-  url?: string
-): { ast: MathJsonExpression | null; diagnostics: ParsingDiagnostic[] } {
+  url?: string,
+  options?: { effects?: boolean }
+): {
+  ast: MathJsonExpression | null;
+  diagnostics: ParsingDiagnostic[];
+  /**
+   * With `options.effects`, the effects the engine inferred for each
+   * top-level function the program defines (see {@link EffectSummary}), or
+   * `null` when the parse failed: the canonicalization pass that reads them
+   * is skipped then, so nothing was analyzed. Absent when not requested.
+   */
+  effects?: EffectSummary[] | null;
+} {
   const engine = new ComputeEngine();
   const { ast, diagnostics } = parseSource(source, url, engine);
   if (ast === null || diagnostics.some((x) => x.severity === 'error'))
-    return { ast, diagnostics };
+    return { ast, diagnostics, ...(options?.effects ? { effects: null } : {}) };
+  const effects: EffectSummary[] | undefined = options?.effects
+    ? []
+    : undefined;
   return {
     ast,
-    diagnostics: [...diagnostics, ...staticDiagnostics(engine, ast, source)],
+    diagnostics: [
+      ...diagnostics,
+      ...staticDiagnostics(engine, ast, source, [], { effects }),
+    ],
+    ...(effects === undefined ? {} : { effects }),
+  };
+}
+
+/** One effect summary as `epsil check --effects` prints it: the name, its
+ * line, and the labels — `pure` for none — with `(declared)` when the author
+ * wrote the contract. */
+export function formatEffectSummary(
+  entry: EffectSummary,
+  source: string
+): string {
+  const line = sourceLocation(source, entry.range[0]).line;
+  const labels =
+    entry.effects === undefined
+      ? 'not inferred'
+      : entry.effects === 'any'
+        ? 'any'
+        : entry.effects.length === 0
+          ? 'pure'
+          : entry.effects.join(', ');
+  return `${entry.name} (line ${line}): ${labels}${entry.declared ? ' (declared)' : ''}`;
+}
+
+/** The JSON form of one effect summary, alongside the diagnostics in
+ * `epsil check --effects --json` and the MCP `check` tool. */
+export function effectSummaryToJson(
+  entry: EffectSummary,
+  source: string
+): {
+  name: string;
+  /** The labels; `"any"` for an arrow that admits every effect; `null` when
+   * the engine could not infer them. */
+  effects: string[] | 'any' | null;
+  declared: boolean;
+  start: number;
+  end: number;
+  line: number;
+  column: number;
+} {
+  const { line, column } = sourceLocation(source, entry.range[0]);
+  return {
+    name: entry.name,
+    effects:
+      entry.effects === undefined
+        ? null
+        : entry.effects === 'any'
+          ? 'any'
+          : [...entry.effects],
+    declared: entry.declared,
+    start: entry.range[0],
+    end: entry.range[1],
+    line,
+    column,
   };
 }
 
@@ -109,7 +186,9 @@ export async function runCheck(
     return 1;
   }
 
-  const { diagnostics } = checkSource(source, url);
+  const { diagnostics, effects } = checkSource(source, url, {
+    effects: options.effects,
+  });
   const ok = !diagnostics.some((x) => x.severity === 'error');
 
   if (options.json) {
@@ -118,6 +197,16 @@ export async function runCheck(
         {
           ok,
           diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),
+          // `null` says the analysis did not run (the parse failed); an
+          // empty array says it ran and found no function definitions.
+          ...(effects === undefined
+            ? {}
+            : {
+                effects:
+                  effects === null
+                    ? null
+                    : effects.map((x) => effectSummaryToJson(x, source)),
+              }),
         },
         null,
         2
@@ -131,6 +220,16 @@ export async function runCheck(
       options.color && Boolean(io.stderr.isTTY)
     );
     if (formatted) io.stderr.write(`${formatted}\n`);
+    // The report is the command's OUTPUT, so it goes to standard output;
+    // diagnostics stay on standard error, as without the option. After a
+    // parse failure there is no report: the diagnostic on standard error
+    // already says why.
+    if (effects !== undefined && effects !== null)
+      io.stdout.write(
+        effects.length === 0
+          ? 'No top-level function definitions.\n'
+          : `${effects.map((x) => formatEffectSummary(x, source)).join('\n')}\n`
+      );
   }
 
   return ok ? 0 : 1;

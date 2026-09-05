@@ -28,6 +28,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 // The engine is bundled from source: esbuild resolves the repo's
 // `.js`-suffixed TypeScript imports the same way the repo's own build does.
 import { checkSource, parseSource } from '../../src/cli/check.js';
+import type { EffectSummary } from '../../src/epsil/static-diagnostics.js';
 import { describeName } from '../../src/cli/doc.js';
 import {
   diagnosticToJson,
@@ -103,8 +104,17 @@ type PublishedEntry = {
 };
 /** The entries behind the last publish, per document URI, stamped with the
  * document version they were computed from — a version mismatch means the
- * offsets no longer apply. */
-const published = new Map<string, { version: number; entries: PublishedEntry[] }>();
+ * offsets no longer apply. `effects` maps the source offset of a top-level
+ * function's name to the effects the check inferred for it, read by the
+ * hover of that name. */
+const published = new Map<
+  string,
+  {
+    version: number;
+    entries: PublishedEntry[];
+    effects: Map<number, EffectSummary>;
+  }
+>();
 
 connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasConfigurationCapability =
@@ -186,9 +196,15 @@ connection.onHover(({ textDocument, position }) => {
   // symbol hover below already captions the hovered name's declaration, the
   // diagnostic's own "defined here" quote of that same declaration is elided
   // rather than shown twice.
-  const symbolHover = word === undefined
-    ? undefined
-    : describeSymbol(word.name, text, binding?.group);
+  const symbolHover =
+    word === undefined
+      ? undefined
+      : describeSymbol(
+          word.name,
+          text,
+          binding?.group,
+          effectsFor(textDocument.uri, document.version)
+        );
   const sections = diagnosticHovers(
     textDocument.uri,
     document,
@@ -286,12 +302,16 @@ function validate(uri: string): void {
   const text = document.getText();
 
   let entries: PublishedEntry[];
+  let effects: Map<number, EffectSummary>;
   try {
     // `checkSource()` parses and canonicalizes but never evaluates, and
     // builds a fresh engine per call — canonicalization can retype symbols,
     // so a shared engine would leak state between validations.
-    const result = checkSource(text, uri);
+    const result = checkSource(text, uri, { effects: true });
     entries = result.diagnostics.map((x) => toEntry(x, text, document));
+    effects = new Map(
+      (result.effects ?? []).map((x) => [x.range[0], x] as const)
+    );
   } catch (error) {
     // A check that throws is a bug in the engine, not in the user's program:
     // report it in place of diagnostics rather than going silent.
@@ -305,7 +325,7 @@ function validate(uri: string): void {
   const current = documents.get(uri);
   if (current === undefined || current.version !== version) return;
 
-  published.set(uri, { version, entries });
+  published.set(uri, { version, entries, effects });
   void connection.sendDiagnostics({
     uri,
     version,
@@ -696,9 +716,37 @@ function identifierAt(
 function describeSymbol(
   name: string,
   text: string,
-  group?: BindingGroup
+  group?: BindingGroup,
+  effects?: Map<number, EffectSummary>
 ): string | undefined {
-  return declarationHover(group, text) ?? libraryHover(name);
+  return declarationHover(group, text, effects) ?? libraryHover(name);
+}
+
+/** The effect summaries of the last check of `uri`, keyed by the offset of
+ * each defined name — or `undefined` when that check was of another version
+ * of the document, since its offsets would then point at the wrong text. */
+function effectsFor(
+  uri: string,
+  version: number
+): Map<number, EffectSummary> | undefined {
+  const state = published.get(uri);
+  return state === undefined || state.version !== version
+    ? undefined
+    : state.effects;
+}
+
+/** The hover line for a function's inferred effects: the labels, `pure` when
+ * there are none, and whether the author declared them or the engine read
+ * them off the body. Nothing when the check could not infer them. */
+function effectsLine(entry: EffectSummary | undefined): string | undefined {
+  if (entry === undefined || entry.effects === undefined) return undefined;
+  const labels =
+    entry.effects === 'any'
+      ? '`any`'
+      : entry.effects.length === 0
+        ? '`pure`'
+        : entry.effects.map((x) => `\`${x}\``).join(', ');
+  return `Effects: ${labels} *(${entry.declared ? 'declared' : 'inferred'})*`;
 }
 
 /**
@@ -711,7 +759,8 @@ function describeSymbol(
  */
 function declarationHover(
   group: BindingGroup | undefined,
-  text: string
+  text: string,
+  effects?: Map<number, EffectSummary>
 ): string | undefined {
   if (group === undefined || group.kind === 'free') return undefined;
   const definition = group.occurrences.find((o) => o.role === 'definition');
@@ -731,6 +780,10 @@ function declarationHover(
     `Declaration of \`${group.name}\` (line ${lineNumberAt(text, site.name[0])}):`,
     codeBlock(clip(quoted)),
   ];
+  // The effects the last check inferred for this definition (a top-level
+  // function), keyed by the name's offset — the same key `sitesOf` uses.
+  const effectsNote = effectsLine(effects?.get(definition.start));
+  if (effectsNote !== undefined) sections.push(effectsNote);
   // The doc comment written before the definition (`///` lines or a
   // `/** … *\/` block) — markdown, shown below the quoted header exactly as
   // the library's description is shown below its signature.

@@ -130,6 +130,153 @@ describe('Epsil CLI check command', () => {
   });
 });
 
+describe('Epsil CLI check --effects', () => {
+  const PROGRAM = [
+    'function f(x) { Print(x); x + 1 }',
+    'function g(x) pure { x * 2 }',
+    'function h(x) { f(x) + Random() }',
+    'let k = x => Random() + x',
+    'square(n) = n^2',
+    'const c = 3',
+    'function f(x: string) { x }',
+  ].join('\n');
+
+  test('prints one line per top-level function, on standard output', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['check', '--effects', '-e', PROGRAM], io)).toBe(0);
+    expect(stderr()).toBe('');
+    expect(stdout()).toBe(
+      [
+        // The second clause of `f` (line 7) joins the first: one entry, the
+        // union of both clauses' effects, at the first definition's line.
+        'f (line 1): console',
+        'g (line 2): pure (declared)',
+        'h (line 3): console, random',
+        'k (line 4): random',
+        'square (line 5): pure',
+        '',
+      ].join('\n')
+    );
+  });
+
+  test('a program with no function definitions says so', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(['check', '--effects', '-e', 'let x = 5\nx + 1'], io)
+    ).toBe(0);
+    expect(stdout()).toBe('No top-level function definitions.\n');
+  });
+
+  test('joins the JSON envelope with offsets and the declared flag', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(['check', '--effects', '--json', '-e', PROGRAM], io)
+    ).toBe(0);
+    const envelope = JSON.parse(stdout());
+    expect(envelope.ok).toBe(true);
+    expect(envelope.effects).toHaveLength(5);
+    expect(envelope.effects[0]).toMatchObject({
+      name: 'f',
+      effects: ['console'],
+      declared: false,
+      start: 9,
+      end: 10,
+      line: 1,
+      column: 10,
+    });
+    expect(envelope.effects[1]).toMatchObject({
+      name: 'g',
+      effects: [],
+      declared: true,
+    });
+  });
+
+  test('a call to an unknown function makes the effects `any`', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        ['check', '--effects', '-e', 'function u(x) { Mystery(x) }'],
+        io
+      )
+    ).toBe(0);
+    expect(stdout()).toBe('u (line 1): any\n');
+  });
+
+  test('a parse error skips the report: `null` in JSON, nothing in text', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        ['check', '--effects', '--json', '-e', 'function f(x) { x +'],
+        io
+      )
+    ).toBe(1);
+    expect(JSON.parse(stdout()).effects).toBeNull();
+    const text = makeIo();
+    expect(
+      await main(['check', '--effects', '-e', 'function f(x) { x +'], text.io)
+    ).toBe(1);
+    expect(text.stdout()).toBe('');
+  });
+
+  test('an annotated let: an effect specifier on the annotation is a declared contract; a bare arrow declares none', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        [
+          'check',
+          '--effects',
+          '-e',
+          'let f: (number) random -> number = x => Random() * x\nconst g: (number) -> number = x => x',
+        ],
+        io
+      )
+    ).toBe(0);
+    // `(number) -> number` states a type, not an effect contract: the
+    // effects stay inferred (an unstated specifier is "unstated", not "pure").
+    expect(stdout()).toBe(
+      'f (line 1): random (declared)\ng (line 2): pure\n'
+    );
+  });
+
+  test("a grouped return type is not the function's own contract", async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        [
+          'check',
+          '--effects',
+          '-e',
+          'function make() -> ((number) random -> number) { x => Random() * x }',
+        ],
+        io
+      )
+    ).toBe(0);
+    expect(stdout()).toBe('make (line 1): pure\n');
+  });
+
+  test('a declared contract on one clause marks the whole multi-clause entry', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(
+        [
+          'check',
+          '--effects',
+          '-e',
+          'function p(x: integer) pure { x }\nfunction p(x: string) { x }',
+        ],
+        io
+      )
+    ).toBe(0);
+    expect(stdout()).toBe('p (line 1): pure (declared)\n');
+  });
+
+  test('without the option nothing is reported', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['check', '--json', '-e', PROGRAM], io)).toBe(0);
+    expect(JSON.parse(stdout()).effects).toBeUndefined();
+  });
+});
+
 describe('Epsil CLI check: canonicalization-time type errors', () => {
   test('reports a static type error, anchored to its statement', async () => {
     const { io, stderr } = makeIo();

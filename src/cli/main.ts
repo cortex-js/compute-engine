@@ -26,7 +26,9 @@ Evaluate Epsil programs or start an interactive session.
 
 Commands:
   check                   parse a program and report diagnostics without
-                          evaluating it; "--json" prints them as JSON
+                          evaluating it; "--json" prints them as JSON;
+                          "--effects" also reports the effects inferred for
+                          each top-level function (pure, random, console, …)
   doc                     show documentation for a library symbol, search the
                           library by keyword, or explain a diagnostic code
                           (e.g. "epsil doc zero-index"); "--json" for JSON,

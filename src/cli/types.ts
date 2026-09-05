@@ -23,6 +23,8 @@ export interface CheckOptions {
   eval?: string;
   file?: string;
   json: boolean;
+  /** Report the effects inferred for each top-level function definition. */
+  effects: boolean;
   color: boolean;
 }
 

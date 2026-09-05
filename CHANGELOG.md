@@ -2,6 +2,14 @@
 
 ### New Features
 
+- **`epsil check --effects` reports the effects inferred for each top-level
+  function.** One line per `function` statement or `let`/`const` lambda —
+  `f (line 1): console`, `g (line 2): pure (declared)`, `k (line 3): random` —
+  with `any` for a body that calls an unknown function and `(declared)` for a
+  contract the author wrote. With `--json` the report is the `effects` array of
+  the envelope, with the name's offsets and line; the MCP `check` tool accepts
+  `"effects": true` for the same array. The VS Code extension shows the same
+  line in the hover of a function the file defines.
 - **A protocol function can be called with the dot.** In Epsil, `c.area()` is
   the call `area(c)`, and `c.scale(2)` is `scale(c, 2)`: the value before the
   dot is the first argument, the one the call dispatches on, and any expression
@@ -20,6 +28,16 @@
 
 ### Resolved Issues
 
+- **A function that returns a lambda no longer inherits the lambda's effects
+  through its return-type ascription.** The parser puts a return marker on the
+  body's last statement, and the `Typed` ascription declared no `invokes`
+  metadata, so both effect channels read its operand as an invoking position
+  and projected the returned literal's latent effects onto the enclosing
+  function: `function make() -> ((number) random -> number) { x => Random() *
+  x }` typed `() random -> …`, and the same body under a `pure` contract was
+  rejected with `incompatible-type`. `Typed` is now `invokes: false`, and the
+  outer arrow is pure, as it already was without the ascription. Found by
+  `epsil check --effects`.
 - **The variance and covariance kernels no longer cancel, and `Correlation`
   declares `real<-1..1>`.** `Variance([10⁸+1, 10⁸+2, 10⁸+3])` answered `0` at
   machine precision instead of `1`, and a two-point `Correlation` overshot ±1

@@ -36,6 +36,8 @@ const HOVER_SOURCE = [
   '/// Doubles its argument.',
   '/// Second **line**.',
   'twice(x) = 2 * x',
+  'function noisy(x) { Print(x); x }',
+  'let scaled = x => Random() * x',
 ].join('\n');
 
 await scenario('hover', undefined, async (c) => {
@@ -70,6 +72,25 @@ await scenario('hover', undefined, async (c) => {
       'function foo(x: string, n: integer)'
     ) === true && !foo.contents.value.includes('{'),
     JSON.stringify(foo)
+  );
+
+  check(
+    'a pure function shows its inferred effects',
+    foo?.contents.value.includes('Effects: `pure` *(inferred)*') === true,
+    JSON.stringify(foo)
+  );
+  const noisy = await c.hover(URI, 7, 12);
+  check(
+    'an effectful function shows its inferred effect labels',
+    noisy?.contents.value.includes('function noisy(x)') === true &&
+      noisy.contents.value.includes('Effects: `console` *(inferred)*'),
+    JSON.stringify(noisy)
+  );
+  const scaled = await c.hover(URI, 8, 6);
+  check(
+    'a let-bound lambda shows its inferred effects too',
+    scaled?.contents.value.includes('Effects: `random` *(inferred)*') === true,
+    JSON.stringify(scaled)
   );
 
   const documented = await c.hover(URI, 6, 1);

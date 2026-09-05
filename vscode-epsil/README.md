@@ -32,8 +32,10 @@ fib(n: integer) = fib(n - 1) + fib(n - 2)
 - **Hover** over a name to see what it is: for a library function or constant,
   its signature (or type and value) and description — the same entry
   `epsil doc <name>` prints; for a name your file declares, the declaration as
-  you wrote it. Hovering a word inside a string or a comment shows nothing, so
-  prose is never mistaken for code.
+  you wrote it, and for a top-level function the effects the engine inferred for
+  it (`pure`, `console`, `random`, …, the same report `epsil check --effects`
+  prints). Hovering a word inside a string or a comment shows nothing, so prose
+  is never mistaken for code.
 - **Navigation and rename** — Go to Definition, Find All References,
   occurrence highlighting, an Outline (with breadcrumbs and _Go to Symbol_),
   and Rename Symbol (<kbd>F2</kbd>). All of it is scope-aware: a lambda

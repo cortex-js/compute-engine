@@ -12,11 +12,16 @@ import {
   symbol,
 } from '../math-json/utils.js';
 import type {
+  EffectSet,
   FunctionSignature,
   Type,
   TypeString,
 } from '../common/type/types.js';
-import { isWildcardFunctionType } from '../common/type/utils.js';
+import {
+  isGroupedTypeText,
+  isWildcardFunctionType,
+  signatureEffects,
+} from '../common/type/utils.js';
 import { isSubtype } from '../common/type/subtype.js';
 import { typesOverlap } from '../common/type/reduce.js';
 import { parseType } from '../common/type/parse.js';
@@ -172,6 +177,212 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   'unexpected-operator',
 ]);
 
+/**
+ * Record the effect summary of a top-level function definition, once the
+ * statement has been canonicalized: `function f(…) { … }` (also the `f(x) =
+ * …` and `hold` spellings, which parse to the same `DefineFunction`), or a
+ * `let`/`const` whose value is written as a function literal. Any other
+ * statement defines no function and records nothing.
+ *
+ * The labels come from the arrow type the definition now carries, which the
+ * engine derived from the body (union with a declared contract, when there is
+ * one). A later clause of the same name replaces the earlier entry: the arrow
+ * then covers every clause seen so far, and the name's first definition site
+ * stays the reported position.
+ */
+function recordEffectSummary(
+  ce: ComputeEngine,
+  statement: MathJsonExpression,
+  boxed: ReturnType<ComputeEngine['box']>,
+  into: EffectSummary[]
+): void {
+  const head = operator(statement);
+  let nameNode: MathJsonExpression | null = null;
+  let literal: MathJsonExpression | null = null;
+  if (head === 'DefineFunction') {
+    nameNode = operand(statement, 1);
+    literal = operand(statement, 2);
+  } else if (head === 'Declare') {
+    nameNode = operand(statement, 1);
+    literal = declaredValue(statement);
+  }
+  const name = symbol(nameNode);
+  if (name === null || literal === null || operator(literal) !== 'Function')
+    return;
+
+  const range = sourceRangeOf(nameNode) ?? sourceRangeOf(statement);
+  if (range === undefined) return;
+
+  // A `function` statement installed a definition carrying the arrow; so did
+  // a `let`/`const` WITH a type annotation (the pass declares the contract).
+  // An unannotated `let`/`const` is held unevaluated, so its arrow is read
+  // off the literal itself.
+  const type = definedFunctionType(ce, name) ?? heldLiteralType(boxed);
+  // An arrow — one signature, or the union or intersection of the clauses of
+  // a multi-clause definition — answers with its labels (none means pure);
+  // anything else, a bare `function` or an unresolved definition, claims
+  // nothing.
+  const effects =
+    typeof type === 'object' &&
+    (type.kind === 'signature' ||
+      type.kind === 'union' ||
+      type.kind === 'intersection')
+      ? (signatureEffects(type) ?? [])
+      : undefined;
+
+  const entry: EffectSummary = {
+    name,
+    range,
+    effects,
+    declared:
+      declaresEffects(ce, literal) ||
+      declarationAnnotatesEffects(ce, statement),
+  };
+  // A later clause of the same name keeps the first clause's position, and
+  // the contract flag stays set once any clause declared one: the engine
+  // checks every later clause against that contract.
+  const previous = into.findIndex((x) => x.name === name);
+  if (previous < 0) into.push(entry);
+  else
+    into[previous] = {
+      ...entry,
+      range: into[previous].range,
+      declared: into[previous].declared || entry.declared,
+    };
+}
+
+/** The arrow type the pass installed for `name` — by a `function` statement,
+ * or by an annotated `let`/`const` — read back by name. `undefined` when no
+ * definition is installed, or the installed one is not an arrow. */
+function definedFunctionType(
+  ce: ComputeEngine,
+  name: string
+): Type | undefined {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined) return undefined;
+  const t =
+    'operator' in def ? def.operator.signature.type : def.value.type.type;
+  return typeof t === 'object' &&
+    (t.kind === 'signature' || t.kind === 'union' || t.kind === 'intersection')
+    ? t
+    : undefined;
+}
+
+/** The arrow type of the function literal an unannotated `let`/`const`
+ * statement holds. `Declare` is lazy and the pass never evaluates it, so no
+ * definition carries the literal's type; it is read off the literal itself,
+ * bound but not evaluated (`.canonical` is value-safe), through the same
+ * `.type` accessor every reader of a literal's arrow uses. */
+function heldLiteralType(
+  boxed: ReturnType<ComputeEngine['box']>
+): Type | undefined {
+  if (!isFunction(boxed, 'Declare')) return undefined;
+  const last = boxed.ops[boxed.ops.length - 1];
+  const held =
+    last !== undefined && isDictionary(last) ? last.get('value') : undefined;
+  if (held === undefined || held.operator !== 'Function') return undefined;
+  return held.canonical.type.type;
+}
+
+/** The attributes dictionary of a raw `Declare` statement, wherever it sits:
+ * `["Declare", sym, ⟨attrs⟩]` for `let x = …`, and
+ * `["Declare", sym, ⟨type⟩, ⟨attrs⟩]` for `let x: T = …`. */
+function declareAttributes(
+  statement: MathJsonExpression
+): MathJsonExpression | null {
+  for (const op of operands(statement).slice(1))
+    if (operator(op) === 'Dictionary') return op;
+  return null;
+}
+
+/** The `value` entry of a raw `Declare` statement, or `null` when the
+ * declaration carries no value. */
+function declaredValue(
+  statement: MathJsonExpression
+): MathJsonExpression | null {
+  const attributes = declareAttributes(statement);
+  if (attributes === null) return null;
+  for (const pair of operands(attributes)) {
+    if (operator(pair) !== 'KeyValuePair') continue;
+    const key = operand(pair, 1);
+    if (symbol(key) === 'value' || stringValue(key) === 'value')
+      return operand(pair, 2);
+  }
+  return null;
+}
+
+/** Whether a type string spells an arrow with an effect specifier that is the
+ * function's OWN contract. A fully parenthesized spelling is a grouped type,
+ * an ordinary return-type ascription whose return happens to be an effectful
+ * arrow (`-> ((number) random -> number)`), and declares nothing about the
+ * function itself — the same reading the engine gives a literal's return
+ * marker (`isGroupedTypeText`). */
+function typeTextDeclaresEffects(ce: ComputeEngine, text: string): boolean {
+  if (isGroupedTypeText(text)) return false;
+  try {
+    const t = parseType(text, ce._typeResolver);
+    return (
+      typeof t === 'object' && t.kind === 'signature' && t.effects !== undefined
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a raw function literal carries an effect contract written by the
+ * author: the parser records one as a `Typed` ascription on the body whose
+ * type string spells an effect specifier (`(x: unknown) pure -> unknown`). */
+function declaresEffects(
+  ce: ComputeEngine,
+  literal: MathJsonExpression
+): boolean {
+  const body = operand(literal, 1);
+  if (body === null || operator(body) !== 'Typed') return false;
+  const text = stringValue(operand(body, 2));
+  return text !== null && typeTextDeclaresEffects(ce, text);
+}
+
+/** Whether a raw `Declare` statement's type annotation is an arrow with an
+ * effect contract: `let f: (number) random -> number = …`. The annotation is
+ * the positional string operand, or the `type` entry of the attributes. */
+function declarationAnnotatesEffects(
+  ce: ComputeEngine,
+  statement: MathJsonExpression
+): boolean {
+  if (operator(statement) !== 'Declare') return false;
+  let text: string | null = null;
+  for (const op of operands(statement).slice(1)) {
+    const s = stringValue(op);
+    if (s !== null) text = s;
+  }
+  const attributes = declareAttributes(statement);
+  if (text === null && attributes !== null)
+    for (const pair of operands(attributes)) {
+      if (operator(pair) !== 'KeyValuePair') continue;
+      const key = operand(pair, 1);
+      if (symbol(key) === 'type' || stringValue(key) === 'type')
+        text = stringValue(operand(pair, 2));
+    }
+  return text !== null && typeTextDeclaresEffects(ce, text);
+}
+
+/** The `[start, end)` source offsets the parser stamped on a node, if any. */
+function sourceRangeOf(
+  node: MathJsonExpression | null
+): [number, number] | undefined {
+  if (node === null || typeof node !== 'object' || Array.isArray(node))
+    return undefined;
+  const offsets = (node as { sourceOffsets?: unknown }).sourceOffsets;
+  if (
+    Array.isArray(offsets) &&
+    offsets.length === 2 &&
+    typeof offsets[0] === 'number' &&
+    typeof offsets[1] === 'number'
+  )
+    return [offsets[0], offsets[1]];
+  return undefined;
+}
+
 function isCanonicalizationError(code: string): boolean {
   return CANONICALIZATION_ERROR_CODES.has(code) || code.startsWith('expected-');
 }
@@ -237,11 +448,39 @@ function isCanonicalizationError(code: string): boolean {
  * established before the deadline (a static type error in statement 1 is a
  * fact about the program whether or not statement 400 reached the budget).
  */
+/**
+ * The effects the engine inferred for one function the program defines at
+ * its top level — what `epsil check --effects` prints and what the editor
+ * hover shows next to a definition. Collected while the static pass runs,
+ * because the definitions it reads are rolled back when the pass ends.
+ */
+export type EffectSummary = {
+  /** The defined name. */
+  name: string;
+  /** The source span of the name in its definition, `[start, end)`. */
+  range: [number, number];
+  /**
+   * The effect set of the function's arrow: the labels in canonical order
+   * (an empty list is a pure function), or `'any'` for an arrow that admits
+   * every effect. `undefined` when the engine could not read a signature for
+   * the name (the definition did not canonicalize to a function value), so
+   * nothing is claimed.
+   */
+  effects: EffectSet | undefined;
+  /**
+   * Whether the author wrote an effect contract on the definition (`pure`,
+   * `random`, …). A declared contract is checked, so the labels reported are
+   * what the author promised; an inferred set is what the body does.
+   */
+  declared: boolean;
+};
+
 export function staticDiagnostics(
   ce: ComputeEngine,
   ast: MathJsonExpression,
   source: string,
-  into: ParsingDiagnostic[] = []
+  into: ParsingDiagnostic[] = [],
+  options?: { effects?: EffectSummary[] }
 ): ParsingDiagnostic[] {
   // The frame NAME is load-bearing: the engine's `DeclareType` handler treats
   // 'epsil:static-check' as a top-level surrogate (types are engine-global,
@@ -315,7 +554,7 @@ export function staticDiagnostics(
     // `ce.box()` windows then nest inside it.
     return ce._withBoxingPassWindow(() =>
       ce._withRolledBackInference(() =>
-        canonicalizationDiagnostics(ce, ast, source, into)
+        canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
       )
     );
   } finally {
@@ -527,7 +766,8 @@ function canonicalizationDiagnostics(
   ce: ComputeEngine,
   ast: MathJsonExpression,
   source: string,
-  diagnostics: ParsingDiagnostic[]
+  diagnostics: ParsingDiagnostic[],
+  effects?: EffectSummary[]
 ): ParsingDiagnostic[] {
   // The parser wraps a multi-statement program in `Block` (see
   // `executeEpsil()`); a single statement is not wrapped.
@@ -663,6 +903,17 @@ function canonicalizationDiagnostics(
       clausesInThisUnit
     );
     if (clauseRedefinition !== undefined) diagnostics.push(clauseRedefinition);
+
+    // The effect summary is read now, while the definition the statement
+    // installed is still in the pass scope (the pass rolls it back on exit),
+    // and only for a statement the pass accepted: a redefinition, or a
+    // duplicate clause, was not installed and must not rewrite the entry.
+    if (
+      effects !== undefined &&
+      redefinition === undefined &&
+      clauseRedefinition === undefined
+    )
+      recordEffectSummary(ce, statement, boxed, effects);
 
     // A declaration whose initializer PROVABLY cannot satisfy the annotation
     // is a static problem too, even though `Declare` only enforces it at

@@ -12,7 +12,7 @@ import { isSymbol } from '../compute-engine/boxed-expression/type-guards.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
-import { checkSource, parseSource } from './check.js';
+import { checkSource, effectSummaryToJson, parseSource } from './check.js';
 import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
 import type { CliIo } from './io.js';
@@ -70,11 +70,16 @@ const TOOLS = [
   {
     name: 'check',
     description:
-      'Parse and canonicalize an Epsil program and report diagnostics without evaluating it. This is the fast validation loop: it catches syntax, string and type-annotation errors, and the type errors detected at canonicalization time (e.g. "a" + 1), but not genuinely dynamic problems (an out-of-range index, a match with no matching case).',
+      'Parse and canonicalize an Epsil program and report diagnostics without evaluating it. This is the fast validation loop: it catches syntax, string and type-annotation errors, and the type errors detected at canonicalization time (e.g. "a" + 1), but not genuinely dynamic problems (an out-of-range index, a match with no matching case). With "effects": true, the result also lists the effects inferred for each top-level function definition (an empty list is pure; "declared" marks a contract the author wrote).',
     inputSchema: {
       type: 'object',
       properties: {
         source: { type: 'string', description: 'Epsil source code' },
+        effects: {
+          type: 'boolean',
+          description:
+            'Also report the effects inferred for each top-level function definition',
+        },
       },
       required: ['source'],
     },
@@ -550,10 +555,22 @@ class McpServer {
 
   private static check(args: Record<string, unknown>): unknown {
     const source = requireString(args, 'source');
-    const { diagnostics } = checkSource(source);
+    const wantEffects = args.effects === true;
+    const { diagnostics, effects } = checkSource(source, undefined, {
+      effects: wantEffects,
+    });
     return toolResult({
       ok: !diagnostics.some((x) => x.severity === 'error'),
       diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),
+      // `null` when the parse failed and nothing was analyzed.
+      ...(effects === undefined
+        ? {}
+        : {
+            effects:
+              effects === null
+                ? null
+                : effects.map((x) => effectSummaryToJson(x, source)),
+          }),
     });
   }
 

@@ -2902,6 +2902,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `lazy` so the type operand stays raw (a type-name symbol such as `real`
       // is not auto-declared as a variable).
       lazy: true,
+      // An ascription never applies its operand: `Typed(x => Random(), T)`
+      // only states a type for the literal. Without this flag both effect
+      // channels read the first operand as an invoking position (the default
+      // for an operator that declares nothing) and project the literal's
+      // latent effects onto the enclosing function. The parser puts a return
+      // marker on a body's LAST statement, so every ascribed function whose
+      // result is a lambda was read as having that lambda's effects —
+      // `function make() -> ((number) random -> number) { x => Random() * x }`
+      // typed `() random -> …`, and the same body under a `pure` contract
+      // was rejected.
+      invokes: false,
       signature: '(any, string | symbol) -> unknown',
       // The ascribed type is read from the second operand's inert structure —
       // a string literal's text, or a type-name symbol's name — and resolved

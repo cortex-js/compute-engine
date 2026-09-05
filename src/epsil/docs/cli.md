@@ -135,6 +135,37 @@ are 1-based. A `fixits` entry is a replacement (`value`) for the source range
 `[start, end)`. The same structured form is available during evaluation with
 `--diagnostics json`, which writes the array to standard error.
 
+### Reporting the effects of each function
+
+With `--effects`, `check` also reports what the engine inferred about the
+**effects** of each top-level function the program defines — a `function`
+statement (any of its spellings), or a `let`/`const` whose value is written
+as a lambda. The report goes to standard output, one line per function:
+
+```shell
+$ npx epsil check --effects --eval 'function f(x) { Print(x); x + 1 }
+function g(x) pure { x * 2 }
+let k = x => Random() + x'
+f (line 1): console
+g (line 2): pure (declared)
+k (line 3): random
+```
+
+The labels are the [effect labels](/epsil/control-flow/#effect-specifiers) the body
+reaches (`console`, `random`, `state`, …), `pure` when there are none, and
+`any` when the body calls something the engine does not know, so nothing can
+be ruled out. `(declared)` marks a contract the author wrote on the
+definition (`pure`, `random`, …); the labels are then what the author
+promised, which the check has verified against the body. A multi-clause
+function is one entry, the union of its clauses, at the line of its first
+clause. Functions defined inside a block are not listed.
+
+With `--json`, the same report is the `effects` array of the envelope:
+`name`, `effects` (a list of labels, or `"any"`, or `null` when nothing could
+be inferred), `declared`, and the position of the name (`start`/`end`
+offsets, `line`/`column`). The MCP `check` tool accepts `"effects": true` for
+the same array.
+
 Because `check` does not evaluate, it does not report runtime problems —
 unknown-function suggestions, type mismatches at call sites, or error values.
 Those surface when the program runs.

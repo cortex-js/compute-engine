@@ -83,6 +83,7 @@ export function parseCheckArguments(
       options: {
         'eval': { type: 'string', short: 'e' },
         'json': { type: 'boolean' },
+        'effects': { type: 'boolean' },
         'no-color': { type: 'boolean' },
       },
     });
@@ -101,6 +102,7 @@ export function parseCheckArguments(
     eval: evalSource,
     file: positionals[0],
     json: values.json === true,
+    effects: values.effects === true,
     color: values['no-color'] !== true && env.NO_COLOR === undefined,
   };
 }

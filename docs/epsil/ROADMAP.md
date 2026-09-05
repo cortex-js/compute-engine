@@ -46,9 +46,6 @@ Items are demand-gated unless another roadmap gives them higher priority.
 
 ## Tooling and documentation
 
-- **Effect summaries from `epsil check`.** Static checking enforces declared
-  effect contracts. A separate report mode could expose inferred impurity and
-  nondeterminism for callers without requiring a violated declaration.
 - **Test runner.** Consider `epsil test` with test blocks and assertion
   builtins. Assertions should produce ordinary error values and diagnostics,
   not introduce a new effect label.
