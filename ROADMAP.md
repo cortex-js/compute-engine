@@ -3616,6 +3616,23 @@ derivation of function nodes (`type`/`compute`/`cachedValue`) +12,
   radical value boxes to the same type object) and a descriptor pool would
   cut it.
 
+**Literal types are not the lever (measured 2026-09-06, box load 2.7,
+three interleaved rounds, medians).** Four retreats from the literal-tier
+types were timed against the shipped 0.124.1 build on the same six probes,
+and the fourteen type-related test suites were run under each to count the
+proofs lost: replacing the enclosure of a non-machine-exact literal
+(`real<2.4..2.5>` for `√6`) by the open sign range `real<0<..>` changes NO
+timing (79 / 953 / 6210 µs on box / simplify / solve, identical) and fails 15
+pins; typing such a literal by its bare tier fails 16 pins for 5–10 %;
+keeping value types for integers only fails 27 pins for the same 5–10 %; and
+dropping literal types altogether fails 81 pins for 10–18 %, at most a third
+of the remaining gap to 0.118.2. The capability lost is concrete:
+`arcsin(1/3)` and `artanh(1/3)` type `complex` instead of `real` without the
+enclosure, `arcsin(0.5)` needs the value type of a non-integer, and
+`1/(x + 1/3)` with `x: real<0..1>` loses its bounds. Decision: keep the
+literal-tier types as they are; the residual lies in the derivation of
+function nodes, below.
+
 Reproduce a measurement with `CE_PUBLISHED_BUNDLE=<bundle to compare> node
 benchmarks/runners/run_ce_rubi.mjs`: it times the published bundle and the
 current build (`dist/esm-min/compute-engine.js`, so build first) on the whole
