@@ -13,7 +13,13 @@ import {
   matchesString,
 } from '../math-json/utils.js';
 import { splitGraphemes } from '../common/grapheme-splitter.js';
-import { SUPERSCRIPT_UNICODE } from './characters.js';
+import {
+  SUPERSCRIPT_UNICODE,
+  DIGITS,
+  ESCAPED_CHARS,
+  isBreak,
+  isInvisible,
+} from './characters.js';
 import { isLiteralParamName } from '../math-json/symbols.js';
 import { parseType } from '../common/type/parse.js';
 import type { Type, TypeResolver } from '../common/type/types.js';
@@ -36,7 +42,6 @@ import {
   Formatter,
   FormattingBlock,
 } from './formatter.js';
-import { DIGITS, ESCAPED_CHARS, isBreak, isInvisible } from './characters.js';
 import { HARD_RESERVED_WORDS } from './reserved-words.js';
 import {
   CONDITIONAL_PRECEDENCE,

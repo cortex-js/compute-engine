@@ -1191,9 +1191,7 @@ function gpuSelectionMask(
       );
     const operand = (op: Expression, once: boolean): string => {
       const code = once ? gpuOperandOnce(h, op, compile, target) : compile(op);
-      return gpuComponentCount(op) === undefined
-        ? `${fvec}(${code})`
-        : code;
+      return gpuComponentCount(op) === undefined ? `${fvec}(${code})` : code;
     };
     // A chained ordering `a < m < b` conjoins the successive pairwise masks,
     // splicing each MIDDLE operand (indices 1..n-2) into two of them. An
@@ -2049,9 +2047,8 @@ const gpuDestructuresListOperand = (args: ReadonlyArray<Expression>): boolean =>
  * indexing set? That form destructures its operand into scalar components; the
  * indexed form (body plus `Limits`) does not.
  */
-const gpuIsCollectionReduceForm = (
-  args: ReadonlyArray<Expression>
-): boolean => args.length === 1;
+const gpuIsCollectionReduceForm = (args: ReadonlyArray<Expression>): boolean =>
+  args.length === 1;
 
 /** `{1}` → "in argument 2"; `{1, 2}` → "in arguments 2 and 3". */
 function gpuSlotNames(slots: ReadonlySet<number>): string {
@@ -5556,7 +5553,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // operand's `vecN`/array shape and must not be judged against it. The
   // indexed form's operands (a scalar body and a `Limits`) stay gated.
   Sum: markAggregateConsuming(
-    (args, compile, target) => compileGPUSumProduct('Sum', args, compile, target),
+    (args, compile, target) =>
+      compileGPUSumProduct('Sum', args, compile, target),
     gpuIsCollectionReduceForm
   ),
   Product: markAggregateConsuming(

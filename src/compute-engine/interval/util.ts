@@ -314,9 +314,11 @@ function earliestJump(
 }
 
 /** Is `x` a domain-clipped (`partial`) interval result? */
-function isPartial(
-  x: unknown
-): x is { kind: 'partial'; value: Interval; domainClipped: 'lo' | 'hi' | 'both' } {
+function isPartial(x: unknown): x is {
+  kind: 'partial';
+  value: Interval;
+  domainClipped: 'lo' | 'hi' | 'both';
+} {
   return (
     typeof x === 'object' &&
     x !== null &&

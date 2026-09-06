@@ -940,7 +940,9 @@ export class BoxedFunction
       return [
         this._operator,
         ...ops.map((x, i) =>
-          i > 0 && isInferredTypedParameter(x) && isFunction(x) ? x.op1.json : x.json
+          i > 0 && isInferredTypedParameter(x) && isFunction(x)
+            ? x.op1.json
+            : x.json
         ),
       ];
     return [this._operator, ...ops.map((x) => x.json)];
