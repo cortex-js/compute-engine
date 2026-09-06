@@ -9,6 +9,7 @@ import {
   recordUnfoldOnDescent,
   type AliasDescent,
 } from '../common/type/utils.js';
+import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
 import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
 import { declarationOf } from '../common/type/reference.js';
 import { reduceType } from '../common/type/reduce.js';
@@ -2043,13 +2044,16 @@ export function lazyBroadcastMap(
       } while (avoid.has(name));
       const p = ce.symbol(name, { canonical: false });
       const t = paramTypes?.(k);
-      params.push(
-        t === undefined
-          ? p
-          : ce._fn('Typed', [p, ce.string(typeToString(t))], {
-              canonical: false,
-            })
-      );
+      if (t === undefined) params.push(p);
+      else {
+        // The engine, not an author, wrote this annotation (the element type
+        // of the source at this call), so it is marked as inferred and left
+        // out of the serialized form, exactly as a callback annotation the
+        // element-type inference writes (`annotateFunctionLiteralParams`).
+        const typeOperand = ce.string(typeToString(t));
+        markInferredTypeOperand(typeOperand);
+        params.push(ce._fn('Typed', [p, typeOperand], { canonical: false }));
+      }
       bodyArgs.push(p);
       cols.push(x);
     } else {

@@ -545,11 +545,10 @@ describe('MAP / FILTER - SERIALIZATION (Tycho item 26)', () => {
     const lx = e.latex;
 
     // The callback's parameter is typed from the collection's element type
-    // at canonicalization, and the LaTeX carries the annotation, so the
-    // round trip below reproduces the typed parameter.
-    expect(lx).toMatchInlineSnapshot(
-      `\\mathrm{Filter}(d, (k\\colon integer)\\mapsto1\\lt k)`
-    );
+    // at canonicalization, but that inferred annotation is not part of the
+    // printed form (only a written one is), so the LaTeX is the same as on
+    // an engine where `d` is unbound, and the round trip below re-infers it.
+    expect(lx).toMatchInlineSnapshot(`\\mathrm{Filter}(d, k\\mapsto1\\lt k)`);
     expect(ce.parse(lx).json).toEqual(e.json);
     expect(lx.startsWith('\\bigl\\lbrack')).toBe(false);
   });

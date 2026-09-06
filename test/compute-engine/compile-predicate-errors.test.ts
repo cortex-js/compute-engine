@@ -190,7 +190,8 @@ describe('the retraction repro', () => {
       ['Function', ['Greater', 'n', 0], 'n'],
     ]);
     // The parameter is stamped from the (integer) element type...
-    expect(expr.toMathJson()).toEqual([
+    // The inferred annotation is observed on request; it is not in the default serialization.
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Filter',
       'ds',
       ['Function', ['Less', 0, 'n'], ['Typed', 'n', "'integer'"]],

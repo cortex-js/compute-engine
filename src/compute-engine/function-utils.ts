@@ -58,6 +58,7 @@ import {
   recordEffectsTransition,
 } from './boxed-expression/effects-provenance.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
+import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -387,11 +388,12 @@ export function annotateFunctionLiteralParams(
     if (!isSymbol(param)) return param;
     rewritten = true;
     // The same normalized spelling `normalizeTypedParameter` produces (a
-    // string type operand), so the rebuilt literal is indistinguishable from
-    // the hand-written one.
-    return ce._fn('Typed', [param, ce.string(typeToString(t))], {
-      canonical: false,
-    });
+    // string type operand), so the rebuilt literal behaves exactly like the
+    // hand-written one; the mark is what keeps the two apart when the
+    // literal is printed.
+    const typeOperand = ce.string(typeToString(t));
+    markInferredTypeOperand(typeOperand);
+    return ce._fn('Typed', [param, typeOperand], { canonical: false });
   });
   if (!rewritten) return undefined;
 
@@ -1474,7 +1476,14 @@ function normalizeTypeOperand(
   t: Expression | undefined
 ): Expression {
   if (!t) return ce.string('unknown');
-  const s = isString(t) ? t.string : sym(t);
+  // An operand that is already a string is returned as the SAME node: the
+  // inference mark of a parameter annotation is keyed on it (see
+  // `isInferredTypedParameter`, `boxed-expression/inferred-annotations.ts`).
+  // The node keeps the metadata it carries
+  // (source offsets, verbatim LaTeX); nothing reads a type operand's
+  // metadata, so this changes no behavior.
+  if (isString(t)) return t;
+  const s = sym(t);
   return s !== undefined ? ce.string(s) : t;
 }
 

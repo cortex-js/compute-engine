@@ -511,7 +511,8 @@ describe('E3 — a MONOMORPHIC overload arm stamps its ground arrow slot', () =>
       '(((integer) any -> boolean, number) -> integer) & ((string) -> string)'
     );
     const e = ce.box(['ov', ['Function', ['Greater', 'n', 1], 'n'], 5]);
-    expect(e.op1.toMathJson()).toEqual([
+    // The inferred annotation is observed on request; it is not in the default serialization.
+    expect(e.op1.toMathJson({ inferredAnnotations: true })).toEqual([
       'Function',
       ['Less', 1, 'n'],
       ['Typed', 'n', "'integer'"],

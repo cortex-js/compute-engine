@@ -854,7 +854,30 @@ serialized type needs a cap the way the ordering key got one. Probe:
 then time `e.type` and `ce.function('Add', [e, ce.symbol('z')])` against
 depth 16.
 
-### The `Function` LaTeX serializer prints an INFERRED parameter type as a written annotation (OPEN, serialization — found 2026-09-05; two suite failures at fc790bf2)
+### A function literal with wildcard parameters prints as `()\mapsto …` (OPEN, serialization — found 2026-09-05)
+
+`ce.box(['Function', ['Add', '_1', 1]]).latex` is `()\mapsto\operatorname{\_1}+1`:
+the pretty MathJSON serializer collapses `_1`-style parameters to the
+`["Function", body]` shorthand, and the LaTeX serializer then prints an empty
+parameter list although the body reads `_1`. The canonical MathJSON has the
+parameter (`["Function", ["Block", ["Add", "_1", 1]], "_1"]`). Seen on the
+element function of a lazy broadcast `Map` (`lazyBroadcastMap`) once its
+synthesized annotations stopped printing (they used to defeat the shorthand).
+Either print the wildcard parameters (`\_1\mapsto …`) or keep the shorthand
+out of the LaTeX route. Repro: the expression above.
+
+### `tycho-item-248-loop-invariant-hoist.test.ts` "a subexpression that mentions the index stays in the loop" fails on clean HEAD (OPEN, compilation tests — found 2026-09-05 at 75d9e21e)
+
+The test expects the loop body to contain `_SYS.at(`, and the emitted body
+reads `_tv2 += _tv1 * _SYS.atNumeric(_.P, j, "number"); …`: the element
+access of a `list<number>` operand now lowers through the typed accessor
+`_SYS.atNumeric`, and the pin was written for the untyped one. The run's value
+check (`run({ P })` = 44) is unaffected. Either the pin follows the accessor
+change (`toContain('_SYS.atNumeric(')`, if the typed accessor is the intended
+lowering) or the lowering regressed; the session that changed the accessor
+should decide. Repro: that test file, `-w 1`, on a clean checkout of HEAD.
+
+### The `Function` LaTeX serializer prints an INFERRED parameter type as a written annotation (FIXED 2026-09-05 — ruled: print only written annotations; the inferred `Typed` node is marked on its type operand and left out of `.json`/`.latex`, typing unchanged; the §8 test moved to the round-trip contract)
 
 Since the typed-lambda notation landed (`a538cd67`, 2026-09-04), the
 `Function` serializer writes every `Typed` parameter as `(x\colon T)\mapsto …`.

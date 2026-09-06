@@ -2964,8 +2964,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Normalize the type operand to a string WITHOUT canonicalizing it
         // (so a type-name symbol such as `real` is not auto-declared as a
         // variable), mirroring how `Declare` keeps its type operand raw.
-        const s = isString(t) ? t.string : sym(t);
-        const typeOp = s !== undefined ? ce.string(s) : t;
+        // An operand that is already a string is kept as the SAME node: the
+        // inference mark of a parameter annotation is keyed on it (see
+        // `isInferredTypedParameter`, `boxed-expression/inferred-annotations.ts`).
+        const s = sym(t);
+        const typeOp = isString(t) ? t : s !== undefined ? ce.string(s) : t;
         return ce._fn('Typed', [x.canonical, typeOp]);
       },
       // Ascription is transparent at evaluation.

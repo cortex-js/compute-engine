@@ -102,6 +102,19 @@ export type JsonSerializationOptions = {
   prettify: boolean;
 
   /**
+   * If true, a `Function` literal's parameter annotations that the engine
+   * INFERRED — the element type a callback parameter takes from the
+   * collection it is applied to — are included as `["Typed", param, type]`.
+   *
+   * By default only the annotations the author wrote are serialized: an
+   * annotation marks a contract the author chose, and the serialized form of
+   * a literal must not depend on what else the engine has bound.
+   *
+   * **Default**: `false`
+   */
+  inferredAnnotations?: boolean;
+
+  /**
    * Function names to exclude from prettified output.
    * Excluded functions are replaced by equivalent non-prettified forms.
    */

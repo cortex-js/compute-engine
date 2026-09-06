@@ -144,6 +144,20 @@
 
 ### Resolved Issues
 
+- **A parameter annotation that inference wrote is no longer printed.** With
+  `C` bound to a list of integers, `\operatorname{Filter}(C, Z\mapsto 0<|Z|)`
+  printed as `\mathrm{Filter}(C, (Z\colon integer)\mapsto0\lt\vert Z\vert)`
+  and its MathJSON carried `["Typed", "Z", "'integer'"]`, while the same input
+  on an engine where `C` is unbound printed the bare `Z`: the per-application
+  element-type inference writes the parameter type into the callback literal,
+  and since the typed-lambda LaTeX notation landed that node printed as a
+  written annotation. An annotation marks a contract the author chose, so the
+  inferred node is now left out of `.json` and `.latex`; a written
+  `(Z\colon integer)\mapsto …` still round-trips. The inference itself is
+  unchanged: the parameter is typed in the body, and a call still checks its
+  argument against the inferred type. To see what inference wrote, pass
+  `toMathJson({ inferredAnnotations: true })`.
+
 - **A multi-clause function with a typed scalar parameter now maps over a
   collection argument.** With `fib(0) = 0`, `fib(1) = 1` and
   `fib(n: integer) = fib(n - 1) + fib(n - 2)`, the program

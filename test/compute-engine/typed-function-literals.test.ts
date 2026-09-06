@@ -350,11 +350,15 @@ describe('Annotated function literal — differentiation', () => {
   });
 });
 
-describe('Annotated function literal — serialization drops annotations (§8)', () => {
-  test('LaTeX \\mapsto drops the parameter annotation', () => {
+describe('Annotated function literal — serialization (§8, revised 2026-09-05)', () => {
+  // A WRITTEN annotation round-trips through the LaTeX notation
+  // `(x\colon integer)\mapsto …` (see `latex-syntax/typed-lambda-parameters`);
+  // only an annotation that INFERENCE wrote is left out of the printed form
+  // (`typed-lambda-inferred-annotations.test.ts`).
+  test('LaTeX \\mapsto keeps a written parameter annotation', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', "'integer'"]]);
-    expect(f.latex).toBe('x\\mapsto x+1');
+    expect(f.latex).toBe('(x\\colon integer)\\mapsto x+1');
   });
 
   test('ASCII-math drops the parameter annotation', () => {

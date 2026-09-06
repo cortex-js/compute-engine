@@ -631,7 +631,8 @@ describe('color is an admissible inferred element type', () => {
       'cs',
     ]);
     expect(expr.ops[0].type.toString()).toBe('(c: color) -> string');
-    expect(expr.toMathJson()).toEqual([
+    // The inferred annotation is observed on request; it is not in the default serialization.
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['ColorToString', 'c'], ['Typed', 'c', "'color'"]],
       'cs',

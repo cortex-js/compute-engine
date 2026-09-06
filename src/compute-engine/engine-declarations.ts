@@ -99,6 +99,7 @@ import {
   defIsCallableShaped,
 } from './boxed-expression/utils.js';
 import { canonicalFunctionLiteral, lookup } from './function-utils.js';
+import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
 import {
   provisionalLiteral,
   registerProvisionalDependents,
@@ -3031,10 +3032,23 @@ function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
   // operands (sorting/flattening for associative operators, no folding).
   const structural = expr.structural;
   const ops = isFunction(structural) ? structural.ops : expr.ops;
-  const fn = [expr.operator, ...ops.map(jsonWithSourceOffsets)] as [
-    MathJsonSymbol,
-    ...MathJsonExpression[],
-  ];
+  // A `Function` literal's parameter annotation that INFERENCE wrote is left
+  // out here as it is in `BoxedFunction.get json` (`isInferredTypedParameter`):
+  // the mark is keyed on the node, so an annotation carried through this
+  // MathJSON and re-boxed would come back as a WRITTEN one and print as such.
+  // The re-boxed literal is canonicalized in the same body scope, where the
+  // inference runs again and marks the annotation again.
+  const fn = [
+    expr.operator,
+    ...ops.map((op, i) =>
+      expr.operator === 'Function' &&
+      i > 0 &&
+      isInferredTypedParameter(op) &&
+      isFunction(op)
+        ? jsonWithSourceOffsets(op.op1)
+        : jsonWithSourceOffsets(op)
+    ),
+  ] as [MathJsonSymbol, ...MathJsonExpression[]];
   return sourceOffsets !== undefined ? { fn, sourceOffsets } : fn;
 }
 

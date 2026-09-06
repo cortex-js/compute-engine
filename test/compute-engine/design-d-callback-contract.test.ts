@@ -1,3 +1,7 @@
+// This suite observes what INFERENCE wrote into a callback literal, so it
+// serializes with `inferredAnnotations: true`; by default an inferred
+// annotation is left out of `.json` and `.latex` (ruled 2026-09-05, see
+// `typed-lambda-inferred-annotations.test.ts`).
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -194,7 +198,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     const e = ce.box(['CountIf', 'cs', ['Function', ['Greater', 'n', 1], 'n']]);
-    expect(e.toMathJson()).toEqual([
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual([
       'CountIf',
       'cs',
       ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
@@ -222,7 +226,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     expect(
       ce
         .box(['CountIf', 'us', ['Function', ['Greater', 'n', 1], 'n']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual(['CountIf', 'us', ['Function', ['Less', 1, 'n'], 'n']]);
   });
 
@@ -230,7 +234,7 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let pred = n => n > 1');
-    expect(ce.box(['CountIf', 'cs', 'pred']).toMathJson()).toEqual([
+    expect(ce.box(['CountIf', 'cs', 'pred']).toMathJson({ inferredAnnotations: true })).toEqual([
       'CountIf',
       'cs',
       'pred',
@@ -290,7 +294,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
         ce,
         'let points: list<tuple<number, number>> = [(0,0),(1,2)]'
       );
-      return JSON.stringify(build(ce).toMathJson());
+      return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
     };
     const viaBox = canonicalJson((ce) =>
       ce.box([
@@ -357,7 +361,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     expect(
       ce
         .box(['Filter', 'mixed', ['Function', ['Greater', 'x', 1], 'x']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual(['Filter', 'mixed', ['Function', ['Less', 1, 'x'], 'x']]);
   });
 
@@ -370,7 +374,7 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
     executeEpsil(ce, 'let isbig = (n: integer) => n > 1');
     const e = ce.box(['Filter', 'mixed', 'isbig']);
     expect(e.isValid).toBe(true);
-    expect(e.toMathJson()).toEqual(['Filter', 'mixed', 'isbig']);
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual(['Filter', 'mixed', 'isbig']);
     const out = e.evaluate().toString();
     expect(out).toContain('incompatible-type');
     expect(out).toContain('2');
@@ -507,7 +511,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       const e = ce.box([op, 'cs', ['Function', body, 'n']] as any);
-      expect(e.toMathJson()).toEqual([
+      expect(e.toMathJson({ inferredAnnotations: true })).toEqual([
         op,
         'cs',
         ['Function', canonicalBody, ['Typed', 'n', "'integer'"]],
@@ -525,7 +529,7 @@ describe('phase 1: the single-clause single-collection family converts', () => {
     const ce = new ComputeEngine();
     const e = ce.box([op, XS, 'IsPrime'] as any);
     expect(e.isValid).toBe(true);
-    expect(e.toMathJson()).toEqual([op, [...XS], 'IsPrime']);
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual([op, [...XS], 'IsPrime']);
   });
 });
 
@@ -713,7 +717,7 @@ describe('phase 1: route parity (box / Epsil / LaTeX)', () => {
   ): string => {
     const ce = new ComputeEngine();
     executeEpsil(ce, setup);
-    return JSON.stringify(build(ce).toMathJson());
+    return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
   };
 
   it('`TakeWhile` (lazy) stamps identically on every route', () => {
@@ -861,7 +865,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
     ]);
-    expect(seedless.toMathJson()).toEqual([
+    expect(seedless.toMathJson({ inferredAnnotations: true })).toEqual([
       'Reduce',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -877,7 +881,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
       10,
     ]);
-    expect(seeded.toMathJson()).toEqual([
+    expect(seeded.toMathJson({ inferredAnnotations: true })).toEqual([
       'Reduce',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -905,7 +909,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       ['Function', ['Divide', 'a', 'x'], 'a', 'x'],
       1,
     ]);
-    expect(stamped.toMathJson()).toEqual([
+    expect(stamped.toMathJson({ inferredAnnotations: true })).toEqual([
       'Reduce',
       'cs',
       ['Function', ['Divide', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -938,7 +942,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
       0,
     ]);
-    expect(seeded.toMathJson()).toEqual([
+    expect(seeded.toMathJson({ inferredAnnotations: true })).toEqual([
       'Scan',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -976,7 +980,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       10,
       'cs',
     ]);
-    expect(e.toMathJson()).toEqual([
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual([
       'Reduce',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -992,7 +996,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
     const call: any =
       op === 'Fold' ? ['Fold', raw, 10, 'us'] : [op, 'us', raw, 0];
     // `Fold` rewrites to `Reduce`; either way the literal is untouched.
-    expect((ce.box(call).toMathJson() as any)[2]).toEqual(raw);
+    expect((ce.box(call).toMathJson({ inferredAnnotations: true }) as any)[2]).toEqual(raw);
   });
 
   // Clause 1: `S` plays no role in admission, and a named callback is shared,
@@ -1015,7 +1019,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     const e = ce.box(call as any);
     expect(e.isValid).toBe(true);
-    expect(e.toMathJson()).toEqual(expected);
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual(expected);
   });
 
   it('the seedless-fold rulings are untouched', () => {
@@ -1059,7 +1063,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
     const e = ce.box(['Partition', 'cs', ['Function', ['Less', 'n', 3], 'n']]);
-    expect(e.toMathJson()).toEqual([
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual([
       'Partition',
       'cs',
       ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
@@ -1071,7 +1075,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
     executeEpsil(ce, 'let k: integer = 2');
-    expect(ce.box(['Partition', 'cs', 2]).toMathJson()).toEqual([
+    expect(ce.box(['Partition', 'cs', 2]).toMathJson({ inferredAnnotations: true })).toEqual([
       'Partition',
       'cs',
       2,
@@ -1099,7 +1103,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
     ce.declare('p', 'function');
-    expect(ce.box(['Partition', 'cs', 'IsPrime']).toMathJson()).toEqual([
+    expect(ce.box(['Partition', 'cs', 'IsPrime']).toMathJson({ inferredAnnotations: true })).toEqual([
       'Partition',
       'cs',
       'IsPrime',
@@ -1122,7 +1126,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
     expect(
       ce
         .box(['Partition', 'mixed', ['Function', ['Less', 'n', 3], 'n']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual(['Partition', 'mixed', ['Function', ['Less', 'n', 3], 'n']]);
   });
 
@@ -1220,7 +1224,7 @@ describe('phase 3: `Map` — the callback-first signature', () => {
       ['List', 1, 2],
       ['List', 3, 4],
     ]);
-    expect(homog.toMathJson()).toEqual([
+    expect(homog.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
@@ -1235,7 +1239,7 @@ describe('phase 3: `Map` — the callback-first signature', () => {
       'cs',
       'ss',
     ]);
-    expect(heterog.toMathJson()).toEqual([
+    expect(heterog.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Pair', 'n', 's'], 'n', 's'],
       'cs',
@@ -1280,7 +1284,7 @@ describe('phase 3: `Map` — the callback-first signature', () => {
 
     // A named callback is shared, never rebuilt — on both clauses.
     executeEpsil(ce, 'let pair = (n, s) => (n, s)');
-    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson()).toEqual([
+    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       'pair',
       'cs',
@@ -1320,7 +1324,7 @@ describe('phase 3: `Map` — the callback-first signature', () => {
     // A union source still declines the stamp (the permanent union ruling).
     executeEpsil(ce, 'let mixed: list<integer|string> = [1,"a",2]');
     expect(
-      ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], 'mixed']).toMathJson()
+      ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], 'mixed']).toMathJson({ inferredAnnotations: true })
     ).toEqual(['Map', ['Function', ['Add', 'x', 1], 'x'], 'mixed']);
   });
 
@@ -1412,14 +1416,14 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
     expect(
       ce
         .box(['pick', 'cs', ['Function', ['Greater', 'n', 1], 'n']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual([
       'pick',
       'cs',
       ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
     ]);
     // The other arm's operand shape is untouched.
-    expect(ce.box(['pick', 'cs', 2]).toMathJson()).toEqual(['pick', 'cs', 2]);
+    expect(ce.box(['pick', 'cs', 2]).toMathJson({ inferredAnnotations: true })).toEqual(['pick', 'cs', 2]);
   });
 
   it('ARM granularity: a COMPETING arm that could take the function declines', () => {
@@ -1435,7 +1439,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
       '((collection<T>, (T) any -> boolean) -> integer where T) & ((collection<T>, f: function) -> string where T)'
     );
     expect(
-      ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
+      ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson({ inferredAnnotations: true })
     ).toEqual(['amb', 'cs', ['Function', ['Less', 1, 'n'], 'n']]);
 
     // …and the `Partition`-shaped disjointness still stamps: `integer` is
@@ -1445,7 +1449,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
       '((collection<T>, (T) any -> boolean) -> integer where T) & ((collection<T>, n: integer) -> string where T)'
     );
     expect(
-      ce.box(['ok', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
+      ce.box(['ok', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson({ inferredAnnotations: true })
     ).toEqual([
       'ok',
       'cs',
@@ -1465,7 +1469,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
       '((collection, (integer) -> boolean) -> integer) & ((collection, string) -> integer)'
     );
     expect(
-      ce.box(['two', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
+      ce.box(['two', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson({ inferredAnnotations: true })
     ).toEqual([
       'two',
       'cs',
@@ -1484,7 +1488,7 @@ describe('R-D4: the resolve-then-stamp helpers', () => {
       '((collection, (integer) -> boolean) -> integer) & ((collection, (string) -> boolean) -> string)'
     );
     expect(
-      ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson()
+      ce.box(['amb', 'cs', ['Function', ['Greater', 'n', 1], 'n']]).toMathJson({ inferredAnnotations: true })
     ).toEqual(['amb', 'cs', ['Function', ['Less', 1, 'n'], 'n']]);
   });
 });
@@ -1493,7 +1497,7 @@ describe('phase 2: route parity (box / Epsil / LaTeX)', () => {
   const parityJson = (build: (ce: ComputeEngine) => any): string => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    return JSON.stringify(build(ce).toMathJson());
+    return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
   };
 
   it('`Partition` (eager, union slot) stamps identically on every route', () => {
@@ -1668,7 +1672,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
       ['List', { str: 'a' }, { str: 'b' }],
       ['Function', ['Tuple', 'a', 'b'], 'a', 'b'],
     ]);
-    expect(e.ops[2].toMathJson()).toEqual([
+    expect(e.ops[2].toMathJson({ inferredAnnotations: true })).toEqual([
       'Function',
       ['Pair', 'a', 'b'],
       ['Typed', 'a', "'integer'"],
@@ -1690,7 +1694,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
       ['List', 1, 2],
       ['Function', ['Greater', 'p', 1], 'p', 'q'],
     ]);
-    expect(e.ops[1].toMathJson()).toEqual([
+    expect(e.ops[1].toMathJson({ inferredAnnotations: true })).toEqual([
       'Function',
       ['Less', 1, 'p'],
       ['Typed', 'p', "'integer'"],
@@ -1710,12 +1714,12 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
       ['Function', ['Greater', 'a', 1], 'a'],
       ['Function', ['Less', 'b', 1], 'b'],
     ]);
-    expect(e.ops[1].toMathJson()).toEqual([
+    expect(e.ops[1].toMathJson({ inferredAnnotations: true })).toEqual([
       'Function',
       ['Less', 1, 'a'],
       ['Typed', 'a', "'integer'"],
     ]);
-    expect(e.ops[2].toMathJson()).toEqual([
+    expect(e.ops[2].toMathJson({ inferredAnnotations: true })).toEqual([
       'Function',
       ['Less', 'b', 1],
       ['Typed', 'b', "'integer'"],
@@ -1735,7 +1739,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     // was R-D6, RETIRED with the §6 rev-4 re-ruling (the variadic `Map` clause
     // it existed for declares no contextual slot at all). No converted
     // signature spells a variadic `S`; one that did declines outright.
-    expect(e.ops[1].toMathJson()).toEqual(['Function', ['Less', 1, 'a'], 'a']);
+    expect(e.ops[1].toMathJson({ inferredAnnotations: true })).toEqual(['Function', ['Less', 1, 'a'], 'a']);
   });
 
   it('a PARTIAL solve stamps the solved parameter and leaves the open one bare', () => {
@@ -1751,7 +1755,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     ]);
     // `U` has no source, so it stays open and its parameter declines — each
     // parameter is an independent contract.
-    expect(e.ops[1].toMathJson()).toEqual([
+    expect(e.ops[1].toMathJson({ inferredAnnotations: true })).toEqual([
       'Function',
       ['Less', 1, 'a'],
       ['Typed', 'a', "'integer'"],
@@ -1763,7 +1767,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['CountIf', ['List', 1, 2, 3, 4], 'IsEven']);
     expect(e.isValid).toBe(true);
-    expect(e.toMathJson()).toEqual(['CountIf', ['List', 1, 2, 3, 4], 'IsEven']);
+    expect(e.toMathJson({ inferredAnnotations: true })).toEqual(['CountIf', ['List', 1, 2, 3, 4], 'IsEven']);
     expect(e.evaluate().toString()).toBe('2');
   });
 
@@ -1774,7 +1778,7 @@ describe('contextual stamping: shapes the first pass did not cover', () => {
         ce,
         'let points: list<tuple<number, number>> = [(0,0),(1,2)]'
       );
-      return JSON.stringify(build(ce).toMathJson());
+      return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
     };
     const viaBox = canonicalJson((ce) =>
       ce.box([
@@ -1880,7 +1884,7 @@ describe('the stamp declines on an ARITY mismatch', () => {
     expect(
       ce
         .box(['Filter', 'cs', ['Function', ['Greater', 'a', 0], 'a']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual([
       'Filter',
       'cs',
@@ -1901,7 +1905,7 @@ describe('phase 2/3: route parity for the remaining shapes', () => {
   const parityJson = (build: (ce: ComputeEngine) => any): string => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    return JSON.stringify(build(ce).toMathJson());
+    return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
   };
 
   it('`Fold` (callback FIRST) stamps identically on every route', () => {

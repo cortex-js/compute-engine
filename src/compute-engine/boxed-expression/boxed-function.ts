@@ -192,6 +192,7 @@ import {
 import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
+import { isInferredTypedParameter } from './inferred-annotations.js';
 import { runtimeConformanceError } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
@@ -930,6 +931,18 @@ export class BoxedFunction
   get json(): MathJsonExpression {
     const s = this.structural;
     const ops = isFunction(s) ? s.ops : this._ops;
+    // A `Function` literal's parameter annotation that INFERENCE wrote (see
+    // `isInferredTypedParameter`) is not part of what the author said: it is
+    // left out, so the MathJSON — and the LaTeX, which serializes it — show
+    // only the annotations the author chose, and the printed form of a
+    // literal does not depend on what else the engine has bound.
+    if (this._operator === 'Function')
+      return [
+        this._operator,
+        ...ops.map((x, i) =>
+          i > 0 && isInferredTypedParameter(x) && isFunction(x) ? x.op1.json : x.json
+        ),
+      ];
     return [this._operator, ...ops.map((x) => x.json)];
   }
 

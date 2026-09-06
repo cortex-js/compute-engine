@@ -1,3 +1,7 @@
+// This suite observes what INFERENCE wrote into a callback literal, so it
+// serializes with `inferredAnnotations: true`; by default an inferred
+// annotation is left out of `.json` and `.latex` (ruled 2026-09-05, see
+// `typed-lambda-inferred-annotations.test.ts`).
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
@@ -69,7 +73,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     expect(expr.ops[1].type.toString()).toBe(
       '(p: tuple<number, number>) -> boolean'
     );
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Filter',
       'points',
       [
@@ -164,7 +168,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
       ['List', 1, 2],
       ['List', 3, 4],
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Add', 'a', 'b'], 'a', 'b'],
       ['List', 1, 2],
@@ -177,7 +181,7 @@ describe('builtin contextual trigger: Filter/Map over a typed collection', () =>
     const canonicalJson = (build: (ce: ComputeEngine) => any) => {
       const ce = new ComputeEngine();
       executeEpsil(ce, POINTS);
-      return JSON.stringify(build(ce).toMathJson());
+      return JSON.stringify(build(ce).toMathJson({ inferredAnnotations: true }));
     };
     const viaBox = canonicalJson((ce) =>
       ce.box(filterPoints(['Tuple', 0, 0]) as any)
@@ -234,7 +238,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       const expr = ce.box([op, 'cs', ['Function', body, 'n']] as any);
-      expect(expr.toMathJson()).toEqual([
+      expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
         op,
         'cs',
         ['Function', canonicalBody, ['Typed', 'n', "'integer'"]],
@@ -249,7 +253,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
       const ce = new ComputeEngine();
       ce.declare('us', 'list');
       const expr = ce.box([op, 'us', ['Function', body, 'n']] as any);
-      expect(expr.toMathJson()).toEqual([
+      expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
         op,
         'us',
         ['Function', canonicalBody, 'n'],
@@ -263,7 +267,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       executeEpsil(ce, 'let pred = n => n > 1');
-      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
+      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson({ inferredAnnotations: true })).toEqual([
         op,
         'cs',
         'pred',
@@ -361,7 +365,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
       'cs',
       'ss',
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Pair', 'n', 's'], 'n', 's'],
       'cs',
@@ -386,7 +390,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     ]);
     // Parameter 0's source was provable under the metadata and stamped; the
     // variadic clause stamps neither.
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Pair', 'n', 's'], 'n', 's'],
       'cs',
@@ -411,7 +415,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
       ['List', 1, 2],
       ['List', 3, 4],
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       [
         'Error',
@@ -457,7 +461,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
     executeEpsil(ce, 'let ss: list<string> = ["a","bb","ccc"]');
     executeEpsil(ce, 'let pair = (n, s) => (n, s)');
-    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson()).toEqual([
+    expect(ce.box(['Map', 'pair', 'cs', 'ss']).toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       'pair',
       'cs',
@@ -480,7 +484,7 @@ describe('follow-up (4): a parameter with NO source stays bare', () => {
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
       0,
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Scan',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -510,7 +514,7 @@ describe('follow-up (4): a parameter with NO source stays bare', () => {
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
       0,
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Scan',
       'us',
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
@@ -530,7 +534,7 @@ describe('follow-up (4): a parameter with NO source stays bare', () => {
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Reduce',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -569,7 +573,7 @@ describe('follow-up (4): a parameter with NO source stays bare', () => {
     expect(
       ce
         .box(['Reduce', 'us', ['Function', ['Add', 'a', 'x'], 'a', 'x']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual(['Reduce', 'us', ['Function', ['Add', 'a', 'x'], 'a', 'x']]);
   });
 });
@@ -587,7 +591,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
       10,
       'cs',
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Reduce',
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
@@ -602,7 +606,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     expect(
       ce
         .box(['Fold', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 10, 'us'])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual(['Reduce', 'us', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 10]);
   });
 
@@ -615,7 +619,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
     const expr = ce.box([op, 'cs', ['Function', ['Less', 'n', 3], 'n']] as any);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       op,
       'cs',
       ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
@@ -631,7 +635,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
       expect(
         ce
           .box([op, 'us', ['Function', ['Less', 'n', 3], 'n']] as any)
-          .toMathJson()
+          .toMathJson({ inferredAnnotations: true })
       ).toEqual([op, 'us', ['Function', ['Less', 'n', 3], 'n']]);
     }
   );
@@ -646,7 +650,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
       'cs',
       ['Function', ['Less', 'n', 3], 'n'],
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Partition',
       'cs',
       ['Function', ['Less', 'n', 3], ['Typed', 'n', "'integer'"]],
@@ -660,7 +664,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let cs: list<integer> = [1,2,3,1]');
     const expr = ce.box(['Partition', 'cs', 2]);
-    expect(expr.toMathJson()).toEqual(['Partition', 'cs', 2]);
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual(['Partition', 'cs', 2]);
     expect(expr.evaluate().toString()).toBe('[[1,2],[3,1]]');
   });
 
@@ -670,7 +674,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
     expect(
       ce
         .box(['Partition', 'us', ['Function', ['Less', 'n', 3], 'n']])
-        .toMathJson()
+        .toMathJson({ inferredAnnotations: true })
     ).toEqual(['Partition', 'us', ['Function', ['Less', 'n', 3], 'n']]);
   });
 
@@ -691,7 +695,7 @@ describe('follow-up (6): Fold / TakeWhile / DropWhile / Partition', () => {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
       executeEpsil(ce, `let pred = ${callback}`);
-      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson()).toEqual([
+      expect(ce.box([op, 'cs', 'pred'] as any).toMathJson({ inferredAnnotations: true })).toEqual([
         op,
         'cs',
         'pred',
@@ -784,7 +788,7 @@ describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
     executeEpsil(ce, 'let f = p => p == (0,0)');
     const before = ce.lookupDefinition('f')!;
     const literalBefore = JSON.stringify(
-      (before as any).value.value.toMathJson()
+      (before as any).value.value.toMathJson({ inferredAnnotations: true })
     );
 
     executeEpsil(ce, POINTS);
@@ -797,7 +801,7 @@ describe('the sharing pin: a symbol-valued callback is never rebuilt', () => {
     // `f`'s literal is byte-identical: one application site must not retype
     // the literal for every other.
     expect(
-      JSON.stringify((ce.lookupDefinition('f') as any).value.value.toMathJson())
+      JSON.stringify((ce.lookupDefinition('f') as any).value.value.toMathJson({ inferredAnnotations: true }))
     ).toBe(literalBefore);
   });
 });
@@ -822,7 +826,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       const expr = ce.box(
         (op === 'Map' ? [op, literal, 'cs'] : [op, 'cs', literal]) as any
       );
-      expect(expr.toMathJson()).toEqual(
+      expect(expr.toMathJson({ inferredAnnotations: true })).toEqual(
         op === 'Map'
           ? [op, ['Function', canonicalBody, ['Typed', 'n', "'integer'"]], 'cs']
           : [op, 'cs', ['Function', canonicalBody, ['Typed', 'n', "'integer'"]]]
@@ -863,7 +867,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       ['Function', ['Mod', '_1', 7], '_1'],
       ['Range', 1, 200],
     ]);
-    expect(m.toMathJson()).toEqual([
+    expect(m.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Mod', '_1', 7], ['Typed', '_1', "'integer'"]],
       ['Range', 1, 200],
@@ -891,7 +895,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       ['List'],
       ['Function', ['Greater', 'x', 1], 'x'],
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Filter',
       ['List'],
       ['Function', ['Less', 1, 'x'], 'x'],
@@ -934,7 +938,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       ce.box(['List', ['Add', 'q', 2], ['Add', ['Multiply', 2, 'q'], 1]])
     );
     const expr = ce.box(['Map', ['Function', ['Multiply', 'x', 2], 'x'], 'es']);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Multiply', 2, 'x'], 'x'],
       'es',
@@ -950,7 +954,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     ce.declare('vs', 'list<value>');
     const expr = ce.box(['Map', ['Function', ['Add', 'x', 1], 'x'], 'vs']);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Add', 'x', 1], 'x'],
       'vs',
@@ -963,7 +967,7 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
     const ce = new ComputeEngine();
     ce.declare('ts', 'list<tuple>');
     const expr = ce.box(['Map', ['Function', ['Length', 't'], 't'], 'ts']);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Map',
       ['Function', ['Length', 't'], 't'],
       'ts',
@@ -995,7 +999,7 @@ describe('positive evidence only', () => {
       'us',
       ['Function', ['Greater', 'x', 1], 'x'],
     ]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'Filter',
       'us',
       ['Function', ['Less', 1, 'x'], 'x'],
@@ -1106,7 +1110,7 @@ describe('signature-driven trigger: a user-defined callee', () => {
     const ce = new ComputeEngine();
     ce.declare('gen', '((T) -> boolean, T) -> T where T: number');
     const expr = ce.box(['gen', ['Function', ['Greater', 'n', 1], 'n'], 3]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'gen',
       ['Function', ['Less', 1, 'n'], ['Typed', 'n', "'integer'"]],
       3,
@@ -1122,7 +1126,7 @@ describe('signature-driven trigger: a user-defined callee', () => {
       '(((number) -> number, number) -> number) & (((string) -> string, string) -> string)'
     );
     const expr = ce.box(['ov', ['Function', ['Add', 'n', 1], 'n'], 3]);
-    expect(expr.toMathJson()).toEqual([
+    expect(expr.toMathJson({ inferredAnnotations: true })).toEqual([
       'ov',
       ['Function', ['Add', 'n', 1], 'n'],
       3,
@@ -1187,7 +1191,7 @@ describe('annotation-as-contract', () => {
 describe('a wrong-arity literal takes no partial stamp', () => {
   /** The `Typed` wrappers a stamp leaves on the literal at operand 0. */
   function stampedParams(e: Expression): string {
-    return JSON.stringify((e.toMathJson() as any[])[1]);
+    return JSON.stringify((e.toMathJson({ inferredAnnotations: true }) as any[])[1]);
   }
 
   test('a matching arity still stamps', () => {

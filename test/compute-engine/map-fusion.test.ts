@@ -1119,7 +1119,8 @@ describe('Map fusion: Error elements bubble, they are not laundered', () => {
       ['Function', ['Multiply', 'w', 3], 'w'],
       'us2',
     ] as any);
-    expect(fused.ops[0].json).toEqual([
+    // The inferred annotation is observed on request; `.json` leaves it out.
+    expect(fused.ops[0].toMathJson({ prettify: false, inferredAnnotations: true })).toEqual([
       'Function',
       ['Block', ['Multiply', 3, 'w']],
       ['Typed', 'w', "'integer'"],

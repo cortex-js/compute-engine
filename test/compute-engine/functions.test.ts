@@ -841,7 +841,9 @@ describe('MAPSTO BODY PRECEDENCE', () => {
       ).json
     ).toEqual([
       'Map',
-      ['Function', ['Block', ['Less', 102, 'n']], ['Typed', 'n', "'integer'"]],
+      // The element type inference writes into the literal is not part of
+      // the serialized form (only a written annotation is).
+      ['Function', ['Block', ['Less', 102, 'n']], 'n'],
       ['Range', 100, 105],
     ]));
 

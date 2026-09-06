@@ -37,6 +37,7 @@ import type {
   DisplayDigits,
 } from '../global-types.js';
 import { isDictionary, isOperatorDef } from './utils.js';
+import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   isNumber,
   isSymbol,
@@ -202,6 +203,25 @@ function structuralNumeratorDenominator(
  * operand order and any explicit `Delimiter` are meaningful, so only
  * shape-preserving rewrites are applied.
  */
+/**
+ * The parameters of a `Function` literal with the annotations that INFERENCE
+ * wrote removed (see `isInferredTypedParameter`, `function-utils.ts`): an
+ * inferred annotation is not part of what the author said, so the MathJSON —
+ * and the LaTeX, which serializes it — show only the annotations the author
+ * chose, and the printed form of a literal does not depend on what else the
+ * engine has bound. A caller that wants to see what inference did passes
+ * `toMathJson({ inferredAnnotations: true })`. Returns `args` itself when
+ * nothing is removed.
+ */
+function withoutInferredAnnotations(
+  args: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (!args.some((p, i) => i > 0 && isInferredTypedParameter(p))) return args;
+  return args.map((p, i) =>
+    i > 0 && isInferredTypedParameter(p) && isFunction(p) ? p.op1 : p
+  );
+}
+
 function serializePrettyJsonFunction(
   ce: ComputeEngine,
   name: string,
@@ -416,6 +436,17 @@ function serializePrettyJsonFunction(
   }
 
   if (name === 'Function' && args.length > 0) {
+    if (options.inferredAnnotations !== true) {
+      const stripped = withoutInferredAnnotations(args);
+      if (stripped !== args)
+        return serializePrettyJsonFunction(
+          ce,
+          name,
+          stripped,
+          options,
+          metadata
+        );
+    }
     if (isFunction(args[0], 'Block')) {
       const block = args[0];
       if (block.nops === 1) {
@@ -472,6 +503,18 @@ function serializeJsonFunction(
   metadata?: Metadata
 ): MathJsonExpression {
   const exclusions = options.exclude;
+  // The non-pretty route reaches here directly; the pretty route has
+  // already stripped the inferred annotations (`withoutInferredAnnotations`).
+  if (
+    name === 'Function' &&
+    options.inferredAnnotations !== true &&
+    args.some((p, i) => i > 0 && p !== undefined && isInferredTypedParameter(p))
+  )
+    args = args.map((p, i) =>
+      i > 0 && p !== undefined && isInferredTypedParameter(p) && isFunction(p)
+        ? p.op1
+        : p
+    );
 
   //
   // Negate(number) is always prettyfied as a negative number, since `-2` gets
@@ -1216,7 +1259,28 @@ function serializeJsonExpression(
   // serialize as a symbol below. Re-entering the public `toMathJson()` here
   // would recurse forever and re-trip its option-validation warnings.)
   if (isDictionary(expr) && Array.isArray(expr.entries)) {
-    if (options.shorthands.includes('dictionary')) return expr.json;
+    if (options.shorthands.includes('dictionary')) {
+      const json = expr.json;
+      // `.json` serializes every entry with the default options, so a caller
+      // that asked for the inferred annotations (`inferredAnnotations`) needs
+      // the entries serialized with these options instead — in the same shape
+      // `.json` chose: the `{dict: …}` shorthand holds plain data only (no
+      // function literal, so nothing to annotate) and is returned as is; the
+      // `["Dictionary", ["KeyValuePair", …]]` form is rebuilt entry by entry.
+      if (options.inferredAnnotations !== true || !Array.isArray(json))
+        return json;
+      return [
+        'Dictionary',
+        ...expr.entries.map(
+          ([key, value]) =>
+            [
+              'KeyValuePair',
+              { str: key },
+              serializeJson(ce, value, options),
+            ] as MathJsonExpression
+        ),
+      ];
+    }
     const dict: Record<string, MathJsonExpression> = {};
     for (const [key, value] of expr.entries)
       dict[key] = serializeJson(ce, value, options);
