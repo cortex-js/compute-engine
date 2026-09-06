@@ -59,6 +59,7 @@ import type {
   OperandCompiler,
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import { resolveStorageHints } from './storage-hints.js';
 import { IntervalArithmetic } from '../interval/index.js';
 import {
   INTERVAL_QUADRATURE_BUDGET,
@@ -1934,6 +1935,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       options,
       INTERVAL_SUPPORTED_MODES.includes('complex')
     ).options;
+    // The `storage` hints are shader-only and ignored by this target, but
+    // validated on every target (see `javascript-target.ts`).
+    if (options.storage !== undefined)
+      resolveStorageHints(options.storage, [expr], this.createTarget(), {
+        vars: options.vars,
+        functions: options.functions,
+      });
     let result: CompilationResult<'interval-js', IntervalValue>;
     try {
       result = this.compileOrThrow(expr, options);

@@ -65,6 +65,28 @@ export type CompiledFunctionEntry =
 export type CompileMode = 'strict' | 'complex' | 'auto';
 
 /**
+ * Where the values of a free symbol live on a shader target — the kinds a
+ * `storage` hint (`CompilationOptions.storage`) may name.
+ *
+ * - `'sampler2D'`: a fixed-length numeric list whose values the host uploads
+ *   as a single-channel 32-bit float texture, one value per texel, laid out
+ *   row-major from texel (0, 0) with nearest filtering. The texture must hold
+ *   at least as many texels as the list's declared length; a larger texture
+ *   is fine (its trailing texels are never addressed). The texture's width is
+ *   read at run time inside the generated helper, so the host may pick any
+ *   width and resize without recompiling.
+ */
+export type StorageKind = 'sampler2D';
+
+/**
+ * One `storage` hint: a storage kind, spelled either as the bare kind string
+ * (`'sampler2D'`) or as an object with a `kind` field (`{ kind: 'sampler2D' }`).
+ * The two spellings are the same hint; the object form leaves room for
+ * per-kind settings should a storage kind ever need one.
+ */
+export type StorageHint = StorageKind | { readonly kind: StorageKind };
+
+/**
  * Which of the two kinds of compile decline a diagnostic reports:
  *
  * - `'capability'` — a compilable thing that this target or mode cannot
@@ -697,6 +719,17 @@ export interface CompileTarget<Expr = unknown> {
    * strictly proportional to expression size.
    */
   constantFold?: boolean;
+
+  /**
+   * The storage hints of this compilation, validated and normalized from the
+   * caller's `storage` option (`resolveStorageHints`): the free symbols whose
+   * values live in shader storage of the given kind. Stamped per call by the
+   * shader targets — an omitted option resets the field, like
+   * `constantFold`, so a reused target never carries a previous call's hints.
+   * The JavaScript, interval and Python targets never set it: the hint is
+   * validated there and then ignored.
+   */
+  storage?: ReadonlyMap<MathJsonSymbol, StorageKind>;
 
   /**
    * The promotion of an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` through the
@@ -1522,6 +1555,38 @@ export interface CompilationOptions<Expr = unknown> {
    * constant expression (codegen tests do this).
    */
   constantFold?: boolean;
+
+  /**
+   * Where the values of a free symbol live on a SHADER target, per symbol
+   * name. Today one kind exists, `'sampler2D'` (see {@link StorageKind}): the
+   * symbol is a fixed-length numeric list (`list<number^1600>`) whose values
+   * the host uploads as a single-channel float texture, and a positional read
+   * of it lowers to a texel fetch instead of a uniform-array subscript:
+   *
+   * ```typescript
+   * ce.declare('S', 'list<number^1600>');
+   * ce.declare('k', 'integer');
+   * glsl.compile(ce.box(['At', 'S', 'k']), { storage: { S: 'sampler2D' } });
+   * // code: `_gpu_texat1600(S, k)`; the preamble declares the helper.
+   * // The host declares `uniform sampler2D S;` and uploads the texture.
+   * ```
+   *
+   * The default, with no hint, is the uniform-array lowering
+   * (`_gpu_at1600(S, k)` over `uniform float S[1600];`). Both forms share one
+   * index contract: 1-based, a negative index counts from the end, and `0`, a
+   * non-integer, a non-finite value or an index out of range reads as NaN.
+   *
+   * A sampler-backed symbol can be read ONLY through a positional access; any
+   * other reference to it (as an operand, in a reduction, as a bare value) is
+   * a compile error on the shader targets, because a texture has no shader
+   * value of its own. The hint is IGNORED on the JavaScript, interval and
+   * Python targets — one options bag serves every lane — but it is VALIDATED
+   * on every target: an unknown storage kind, or a hint naming a symbol that
+   * is not a free symbol of the expression being compiled, throws an
+   * option-contract error before compilation starts (never an interpreter
+   * fallback). Each value is either the bare kind string or `{ kind }`.
+   */
+  storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
 
   /**
    * When provided, the compiler records the id of every symbol whose engine

@@ -1,3 +1,34 @@
+## [Unreleased]
+
+### New Features
+
+- **Sampler-backed positional access on the GLSL target.** A fixed-length
+  numeric list carried as a free symbol (`ce.declare('S', 'list<number^1600>')`)
+  can now be read from a texture instead of a uniform array. The new `storage`
+  compile option names the storage per symbol:
+
+  ```js
+  glsl.compile(ce.box(['At', 'S', 'k']), { storage: { S: 'sampler2D' } });
+  // code: `_gpu_texat1600(S, k)`; the preamble declares the helper.
+  ```
+
+  The host declares `uniform sampler2D S;` and uploads a single-channel float
+  texture holding the list row-major from texel (0, 0), of any width, with at
+  least as many texels as the list's length. The texture width is read at run
+  time inside the helper, so a resize needs no recompile. The uniform-array
+  lowering (`_gpu_at1600(S, k)`) stays the default, and both forms share one
+  index contract: 1-based, a negative index counts from the end, and `0`, a
+  non-integer, a non-finite value or an out-of-range index reads as NaN.
+
+  The hint is ignored on the JavaScript, interval and Python targets, so one
+  options bag serves every lane, but it is validated on every target: an
+  unknown storage kind, or a hint naming a symbol that is not a free symbol of
+  the expression, throws an option-contract error. A sampler-backed symbol can
+  be read only through `At` with a runtime index; a gather, a literal index, a
+  whole-value reference, and the WGSL target decline with a reason naming the
+  storage kind. Design record:
+  `docs/plans/2026-09-05-sampler-backed-positional-access.md`.
+
 ## 0.124.3 _2026-09-06_
 
 ### Breaking Changes

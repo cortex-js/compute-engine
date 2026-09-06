@@ -8,6 +8,7 @@ import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
+import { resolveStorageHints } from './storage-hints.js';
 import {
   isSymbol,
   isNumber,
@@ -8181,6 +8182,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       options,
       JS_SUPPORTED_MODES.includes('complex')
     ).options;
+    // The `storage` hints describe shader storage and are IGNORED by this
+    // target's lowering — but validated here all the same, outside the
+    // fallback `try`: an unknown storage kind or a hint naming something that
+    // is not a free symbol is an option-contract error on every target, since
+    // off the shader targets the hint leaves no other trace. Guarded so the
+    // analysis target is built only when there is something to validate.
+    if (options.storage !== undefined)
+      resolveStorageHints(options.storage, [expr], this.createTarget(), {
+        vars: options.vars,
+        functions: options.functions,
+      });
     const requestedMode = options.mode;
     try {
       // Under `auto` — requested, or this target's default — a lane mismatch

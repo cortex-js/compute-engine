@@ -5,6 +5,7 @@ import {
 } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
+import { resolveStorageHints } from './storage-hints.js';
 
 import type {
   CompileMode,
@@ -3554,6 +3555,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
       options,
       PYTHON_SUPPORTED_MODES.includes('complex')
     ).options;
+    // The `storage` hints are shader-only and ignored by this target, but
+    // validated on every target (see `javascript-target.ts`).
+    if (options.storage !== undefined)
+      resolveStorageHints(options.storage, [expr], this.createTarget(), {
+        vars: options.vars,
+        functions: options.functions,
+      });
     const requestedMode = options.mode;
     try {
       // Under `auto` — requested, or this target's default — a lane mismatch

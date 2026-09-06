@@ -1,9 +1,11 @@
 # Sampler-backed positional access on the shader targets
 
-**Status:** DRAFT — design proposal. Not implemented. The consumer-facing
-questions are answered (section 3); section 8 lists what is still open, all of
-it engine-side.
-**Date:** 2026-09-05
+**Status:** Steps 1 and 2 of section 6 IMPLEMENTED (2026-09-06): the
+`storage` compile option and the GLSL texel read. Steps 3 (the WGSL read) and
+4 (gathers and static indices over a texture) are NOT implemented and decline
+with a reason naming the storage kind. Section 8 records how each open
+question was decided. Section 10 records what shipped and where.
+**Date:** 2026-09-05 (design); 2026-09-06 (steps 1–2)
 **Scope:** `At` over a long fixed-length list on the GLSL and WGSL targets,
 where the values live in a texture instead of a uniform array.
 
@@ -291,15 +293,29 @@ Steps 1 and 2 are the useful minimum. Steps 3 and 4 do not block the consumer.
   0 or index -1 means, they are not interchangeable and the storage choice
   stops being transparent.
 
-## 8. Open questions
+## 8. Open questions, and how they were decided
 
-All engine-side; the consumer-facing ones are settled in section 3.
+All engine-side; the consumer-facing ones are settled in section 3. Each
+question is kept as it was asked, followed by the decision taken when steps 1
+and 2 were built (2026-09-06).
 
 1. **Does the storage hint belong on the compile options or on the target?** A
    target instance is reused across compilations; an option is per-compilation.
    Per-compilation is almost certainly right, but the hint must then travel
    through the same channel as `constantFold`, which is worth confirming
    against how that option is currently threaded.
+
+   **Decided: on the compile options, per call.** The hint travels exactly
+   as `constantFold` does: the caller's `storage` record is validated in the
+   target's `compile()`, normalized to a map, and stamped on the
+   per-compilation `CompileTarget.storage` field, which an omitted option
+   resets. A target reused across calls therefore never carries a previous
+   call's hints (pinned in `at-gpu-sampler-storage.test.ts`). The direct
+   custom-target route of the standalone `compile()` REFUSES a non-empty
+   hint set, as it refuses CSE: the reference gate and the helper preamble
+   both live in the registered shader target's own `compile()`, and a raw
+   `createTarget()` target has neither.
+
 2. **What is the hint's value space?** The consumer proposes the string
    `'sampler2D'`. A string is the smallest thing that works, but if a second
    storage kind ever appears (a buffer binding, say) the option becomes a
@@ -308,19 +324,71 @@ All engine-side; the consumer-facing ones are settled in section 3.
    an unrecognized kind is an error, on every target — because that validation
    is what carries the typo safety given the hint is otherwise ignored off the
    shader targets (section 3).
+
+   **Decided: both spellings, one meaning.** The value is `StorageHint =
+   StorageKind | { kind: StorageKind }`, with `StorageKind = 'sampler2D'`.
+   The bare string is the shorthand the consumer proposed; the object form is
+   the one a per-kind setting would extend. A value of any other shape, or a
+   kind outside `StorageKind`, throws
+   `Invalid compilation option "storage": …` on every target, before
+   compilation starts and outside the interpreter fallback. So does a hint
+   naming something that is not a free symbol of the expression as the code
+   generator sees it (`BaseCompiler.analyzeReferences`): a symbol with an
+   assigned value is folded and never read from storage, a bound variable is
+   not an input, and a name that does not occur at all is a typo. A symbol
+   read only inside a user-defined function body the expression calls
+   (`f(x) := At(S, x)`, compiled as `f(k)`) IS free, because the compilation
+   lowers that body; a function the caller overrides through `functions` is
+   never lowered, so its body's symbols are not. The validation lives in
+   `compilation/storage-hints.ts` and runs in the `compile()` of every
+   built-in target and in the standalone `compile()`.
+
 3. **Is the per-binding-name WGSL helper acceptable?** Every other helper in
    the file is generated per shape, and the preamble scan is deliberately keyed
    on emitted text rather than on a registry. A per-binding-name helper still
    fits that scan, but it is a new pattern and should be a deliberate choice.
+
+   **Deferred with step 3, and the GLSL design leaves room for it.** The
+   GLSL helper is `_gpu_texatN` (digits directly after the prefix), and its
+   preamble scan matches `_gpu_texat(\d+)(`. A WGSL helper generated per
+   binding name would be spelled `_gpu_texat_<name>` — an underscore after
+   the prefix — which that scan can never match, so the two can share the
+   prefix. The operand emission already resolves the binding identifier the
+   WGSL helper would embed (the `vars` mapping when the caller gave one, else
+   the bare name). On WGSL today a sampler-backed read declines, naming the
+   per-binding helper it lacks.
+
 4. **Which lowerings must learn to decline a sampler-backed name?** It should
    decline with a reason naming the storage kind wherever there is no texel
    form, but that set needs enumerating rather than discovering one at a time.
+
+   **Decided: one gate, not an enumeration.** A sampler-backed symbol has no
+   shader value, so the only legitimate emission of it is as the operand of
+   the texel read. Rather than teach every lowering to decline, the shader
+   target's `createTargetFor` wraps the two hooks a free symbol's emission
+   passes through — `var` (a `vars`-mapped name) and `mangleId` (a bare
+   identifier) — and refuses a hinted name from either, naming the storage
+   kind. The `At` lowering stands the gate aside for exactly its own operand
+   emission. This covers arithmetic, reductions, user-function arguments,
+   assignment targets and a bare value in one place. Inside `At`, the tiers
+   with no texel form — a gather or mask, a literal index — decline naming
+   the storage kind; `compileToSource()` refuses the option outright, since it
+   has no preamble channel for the helper.
+
 5. **Does the length still have to be static?** The helper's guard uses the
    list length as its bound, which today comes from the engine type. If a
    sampler-backed list could have an open length, the bound would have to come
    from the texture's dimensions too (`width * height`), which is a different
    guard and admits a partly-filled last row. Worth deciding now, because it
    affects whether the open-element-type declines in section 7 stay correct.
+
+   **Decided: static.** The bound is the list's declared length, read from
+   the engine type (a transparent alias is unfolded; a nominal reference is
+   not, and `At` refuses a nominal carrier at canonicalization anyway). An
+   open-length or unknown-extent list declines, naming the storage kind and
+   the missing length. The one relaxation is at the small end: a one-element
+   list is admissible over a texture (the array form declines it because there
+   is no `vec1`; a one-texel texture has no such problem).
 
 ## 9. Non-goals
 
@@ -331,3 +399,34 @@ All engine-side; the consumer-facing ones are settled in section 3.
 - Multi-dimensional lists. The consumer's board is a flat list with a computed
   index, and the two-dimensional list spelling declines on `At` for separate
   reasons this proposal does not address.
+
+## 10. What shipped in steps 1 and 2
+
+Delivered 2026-09-06, on the `compile()` routes of the built-in targets and the
+standalone `compile()` entry.
+
+- `CompilationOptions.storage`, `StorageKind`, `StorageHint`
+  (`compilation/types.ts`, exported from the package index), and the
+  per-compilation `CompileTarget.storage` field.
+- `compilation/storage-hints.ts`: the validation (`resolveStorageHints`,
+  `assertStorageHintsShape`), called from the `compile()` of the GLSL, WGSL,
+  JavaScript, interval and Python targets, from the standalone `compile()`
+  (both the registered-target and the direct-target branch) and from the
+  options-contract check.
+- `compilation/gpu-target.ts`: the sampler arm of the `At` base reading
+  (`gpuStorageAtBaseShape`), the `_gpu_texatN` GLSL helper and its preamble
+  scan, the guard text shared with `_gpu_atN` (`gpuAtIndexGuard`, one source
+  so the two forms cannot drift), and the reference gate
+  (`gpuRefuseStorageReference`).
+- Tests: `test/compute-engine/at-gpu-sampler-storage.test.ts`.
+
+Not delivered, by design of the staging:
+
+- Step 3, the WGSL read (declines; see question 3).
+- Step 4, gathers and static indices over a texture (decline; see question 4).
+- The hint on the `compileFunction()` and `compileShader()` routes. Those
+  routes declare their names with shader type spellings, and a declared name's
+  shape comes from its declaration, not from the engine type the hint applies
+  to. A sampler-backed name that is also declared or local declines naming
+  that conflict. The consumer's route is the free-symbol `compile()` route, so
+  this does not block it.

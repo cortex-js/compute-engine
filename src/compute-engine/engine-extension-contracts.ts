@@ -1,4 +1,5 @@
 import type { Expression, LibraryDefinition } from './global-types.js';
+import { assertStorageHintsShape } from './compilation/storage-hints.js';
 import type {
   LanguageTarget,
   CompileTarget,
@@ -361,6 +362,11 @@ export function assertCompilationOptionsContract(
       'Invalid compilation option "constantFold": expected a boolean'
     );
   }
+
+  // The shape half of the `storage` contract (an object of known storage
+  // kinds). The name half — every hinted name is a free symbol of the
+  // expression — needs the expression, and runs in `compile()` itself.
+  assertStorageHintsShape(options.storage);
 
   if (
     options.iterationBudget !== undefined &&

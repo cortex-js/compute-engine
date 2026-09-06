@@ -7,8 +7,10 @@ import type {
   CompileTarget,
   CompilationResult,
   DefaultRunnerResult,
+  StorageHint,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { resolveStorageHints } from './storage-hints.js';
 import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -37,6 +39,7 @@ export type CompileExpressionOptions<T extends string = string> = {
   varsObjectRefs?: Set<MathJsonSymbol>;
   cse?: boolean;
   constantFold?: boolean;
+  storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
 };
 
 /**
@@ -108,6 +111,44 @@ export function compile<
         'or use a registered target.'
     );
 
+  // The `storage` hints, validated on EVERY target — the same option-contract
+  // class as the CSE check above, and outside the `try` for the same reason:
+  // the hint is ignored on the non-shader targets, so an unknown storage kind
+  // or a hint naming something that is not a free symbol of `expr` would
+  // otherwise pass silently there, and an interpreter fallback must not
+  // swallow the error either. A registered target validates again in its own
+  // `compile()` (the route that bypasses this entry); the check is idempotent.
+  // An unregistered `to` has no target to analyze references with; it is
+  // skipped here and reported by the registry lookup below, as before.
+  //
+  // A DIRECT custom target refuses a non-empty hint set outright, like CSE: the
+  // gate that fails a sampler-backed symbol closed outside a positional read,
+  // and the preamble channel that delivers the texel helper, both live in the
+  // registered shader target's own `compile()`. A raw `createTarget()` target
+  // has neither, so honoring the hint there would emit a bare `S` as a value
+  // and a helper call with no declaration behind a reported success.
+  if (
+    options?.target !== undefined &&
+    options.storage !== undefined &&
+    Object.keys(options.storage).length > 0
+  )
+    throw new Error(
+      'The `storage` option is not supported on direct custom targets: the ' +
+        'sampler-backed read needs the reference gate and the helper ' +
+        'preamble a registered target provides. Omit `storage` or use a ' +
+        'registered target (`to: "glsl"`).'
+    );
+  if (options?.target === undefined && options?.storage !== undefined) {
+    const analysisTarget = expr.engine
+      ._getCompilationTarget(options.to ?? 'javascript')
+      ?.createTarget();
+    if (analysisTarget !== undefined)
+      resolveStorageHints(options.storage, [expr], analysisTarget, {
+        vars: options.vars,
+        functions: options.functions,
+      });
+  }
+
   try {
     // Determine the target to use
     if (options?.target) {
@@ -165,6 +206,10 @@ export function compile<
       // omitted option must reset the field, or a target reused after a
       // `complexPromotion: true` call would silently keep promoting.
       options.target.complexPromotion = options.complexPromotion;
+      // No storage hints reach a direct target (refused above when non-empty),
+      // and the field is cleared per call for the same reason as the two
+      // above: a reused caller target must not carry stale state.
+      options.target.storage = undefined;
       // The effective compile mode, resolved for a DIRECT target and stamped
       // per call (an omitted option must reset the field, like the two
       // above). A direct target offers `'complex'` only with the two lowering
@@ -260,6 +305,7 @@ export function compile<
       varsObjectRefs: options?.varsObjectRefs,
       cse: options?.cse,
       constantFold: options?.constantFold,
+      storage: options?.storage,
     };
     // The alias is dropped on a target that does not offer complex mode (see
     // `modeFromAlias` above): the target's default applies.

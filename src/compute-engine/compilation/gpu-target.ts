@@ -29,8 +29,10 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
+  StorageKind,
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import { resolveStorageHints } from './storage-hints.js';
 import {
   BaseCompiler,
   isProvablyCharacterOperand,
@@ -41,6 +43,7 @@ import {
 import {
   finitePartOfType,
   isNonRealNumber,
+  resolveTypeAlias,
   resolveTypeForCompilation,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
@@ -3000,7 +3003,17 @@ function gpuSwizzle(code: string, sw: string): string {
 // ---------------------------------------------------------------------------
 
 /** The static element count of an `At` base, or why it has no shader shape. */
-type GPUAtBase = { count: number } | { decline: string };
+type GPUAtBase =
+  | {
+      count: number;
+      /**
+       * Set when the base is a free symbol the caller's `storage` hint places
+       * in shader storage of this kind: the read then lowers to a fetch from
+       * that storage rather than to a subscript of a shader value.
+       */
+      storage?: StorageKind;
+    }
+  | { decline: string };
 
 /**
  * Is every element of `base` provably a SCALAR NUMERIC value? Returns the
@@ -3162,6 +3175,86 @@ function gpuAtFramedIndex(
 }
 
 /**
+ * The static element count of a sampler-backed `At` base (a free symbol the
+ * caller's `storage` hint places in a texture), or a DISCRIMINATED decline
+ * reason naming the storage kind — a consumer that picks a fallback lane by
+ * reading decline reasons must be able to tell a texture that could not be
+ * read from an array that could not.
+ *
+ * Only the LENGTH is needed from the type, and it must be static: the
+ * generated helper bounds the index by the list's declared length, which is
+ * what makes an out-of-range fetch unreachable (design ruling, section 3 of
+ * the plan). An open-length list would need the bound to come from the
+ * texture's own dimensions instead — a different guard, admitting a partly
+ * filled last row — and is declined rather than guessed at.
+ *
+ * The type question is a LATTICE one ("is this a fixed-length list of
+ * numbers?"), so a TRANSPARENT alias is unfolded to the list it names and a
+ * NOMINAL reference is left folded (and so declines as "not a list"):
+ * `resolveTypeAlias`, never `resolveTypeForCompilation`, which erases both
+ * because compilation asks about layout, not admissibility.
+ *
+ * Unlike the value-shape reading, a ONE-element list is admissible here:
+ * there is no `vec1`, but a one-texel texture reads like any other.
+ */
+function gpuStorageAtBaseShape(
+  base: Expression & { symbol: string },
+  kind: StorageKind
+): GPUAtBase {
+  const name = base.symbol;
+  const hinted = `the base "${name}" is ${kind}-backed (storage hint)`;
+  // A name the current shape frame binds — a caller-declared parameter or
+  // shader input, a `Block` local, a lambda parameter — is not the free
+  // symbol the hint was validated against: a declared name's shape comes from
+  // its declaration, and a texture is not a shape this target's declaration
+  // frame reads. Declined rather than read through the frame.
+  if (BaseCompiler.localShapeFrameOf(name) !== undefined)
+    return {
+      decline:
+        `${hinted}, but here "${name}" is a declared or local name whose ` +
+        `shape comes from its declaration, not from the engine type the ` +
+        `hint applies to — a sampler-backed name must be a free symbol of ` +
+        `the expression`,
+    };
+  const t = resolveTypeAlias(base.type.type);
+  const spelled = base.type.toString();
+  if (typeof t === 'string' || t.kind !== 'list')
+    return {
+      decline:
+        `${hinted}, which requires a one-dimensional fixed-length list of ` +
+        `numbers, but its type is \`${spelled}\``,
+    };
+  const dims = t.dimensions ?? [];
+  // Belt over suspenders, like the multi-axis arm of `gpuAtBaseShape`: a
+  // multi-axis base makes `At` answer a COLLECTION element, which the §3.F
+  // object-domain-absence gate intercepts ahead of any target function table.
+  // Kept because that gate's typing is not this entry's to depend on.
+  if (dims.length > 1)
+    return {
+      decline:
+        `${hinted}, which requires a ONE-dimensional list laid out in the ` +
+        `texture, but its type \`${spelled}\` is ${dims.length}-dimensional`,
+    };
+  // An unsized list has no `dimensions`; a NEGATIVE extent is the type
+  // builder's encoding of an UNKNOWN one (`list<number^?>` →
+  // `dimensions: [-1]`), the same reading the value-shape arm takes.
+  const n = dims[0] ?? -1;
+  if (n < 0)
+    return {
+      decline:
+        `${hinted}, but its type \`${spelled}\` states no static length, and ` +
+        `the texture read bounds the index by the list's declared length`,
+    };
+  if (n === 0)
+    return {
+      decline: `${hinted}, but its type \`${spelled}\` is an empty list, which has no element to read`,
+    };
+  const bad = gpuAtNonScalarElement(base);
+  if (bad !== undefined) return { decline: `${hinted}, and ${bad}` };
+  return { count: n, storage: kind };
+}
+
+/**
  * The static element count of an admissible `At` base — a declared
  * `vector<N>`, a parameterized `tuple<…>`, or a literal `List`/`Tuple` — or a
  * DISCRIMINATED decline reason.
@@ -3170,8 +3263,20 @@ function gpuAtFramedIndex(
  * the §3.F absence gate in `BaseCompiler.compile` pre-empts them with its own
  * diagnostic, so no reason is owed for them.
  */
-function gpuAtBaseShape(base: Expression | null): GPUAtBase {
+function gpuAtBaseShape(
+  base: Expression | null,
+  target: CompileTarget<Expression>
+): GPUAtBase {
   if (base === null) return { decline: 'it has no base operand' };
+
+  // A base the caller's `storage` hint places in shader storage: the values
+  // are not a shader VALUE at all, so none of the value-shape questions below
+  // apply to it — its admissibility is decided from the engine type alone.
+  if (isSymbol(base)) {
+    const kind = target.storage?.get(base.symbol);
+    if (kind !== undefined) return gpuStorageAtBaseShape(base, kind);
+  }
+
   const t = gpuType(base);
 
   if (isSymbol(base, 'Missing') || t === 'missing')
@@ -3462,9 +3567,22 @@ function compileGPUAt(
   const base = args[0];
   const index = args[1];
 
-  const shape = gpuAtBaseShape(base);
+  const shape = gpuAtBaseShape(base, target);
   if ('decline' in shape) decline(shape.decline);
   const n = shape.count;
+  // The storage kind of a sampler-backed base (`storage` compile option).
+  // Such a base has ONE lowering, the dynamic-index texel read: the gather and
+  // static-index tiers below fold to subscripts and swizzles of a shader
+  // VALUE, which a texture is not, and their texel forms are not lowered in
+  // this version. They decline naming the storage kind, so the reason stays
+  // distinguishable from every value-shape decline.
+  const storage = shape.storage;
+  const notLoweredForStorage = (what: string): never =>
+    decline(
+      `the base "${(base as Expression & { symbol: string }).symbol}" is ` +
+        `${storage}-backed (storage hint), and ${what} over a texture is not ` +
+        `lowered in this version — only a scalar runtime-valued index is`
+    );
 
   // Evaluate-once. A shader language does not specify the evaluation ORDER of
   // a call's arguments, so two impure operands could commute between drivers.
@@ -3524,6 +3642,7 @@ function compileGPUAt(
 
   // ---- Collection index: the gather / mask tiers (design § D2) ------------
   if (isFunction(index, 'List')) {
+    if (storage !== undefined) notLoweredForStorage('a gather or mask');
     const entries = index.ops!;
     const kinds = entries.map(gpuAtEntryKind);
 
@@ -3664,8 +3783,12 @@ function compileGPUAt(
 
   // A literal real index resolves against N at compile time — zero runtime
   // cost, and `0` / out of range / non-integer / non-finite fold straight to
-  // the NaN spelling.
+  // the NaN spelling. Not over a texture: a static index cannot fold to a
+  // constant texel coordinate, because the texture width is not known at
+  // compile time (it is read at run time inside the helper) — its texel form
+  // is a fetch with a computed coordinate, which is not lowered yet.
   if (isNumber(index)) {
+    if (storage !== undefined) notLoweredForStorage('a static (literal) index');
     const j = gpuAtSlot(index.re, n);
     if (j === null) {
       // The fold emits neither operand (the index is a literal, so pure).
@@ -3719,9 +3842,86 @@ function compileGPUAt(
   // converted at the call site — the guard runs entirely in float space.
   const isWGSL = target.language === 'wgsl';
   const idx = compile(index);
-  return `_gpu_at${n}(${compile(base)}, ${
-    framedIndex === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`
-  })`;
+  const floatIdx =
+    framedIndex === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
+  if (storage === undefined || !isSymbol(base))
+    return `_gpu_at${n}(${compile(base)}, ${floatIdx})`;
+
+  // A sampler-backed base: the same call shape and the same index contract,
+  // through the texel-fetch helper. WGSL has no lowering yet: a WGSL texture
+  // cannot be an ordinary function parameter the way a GLSL sampler (or an
+  // array) can, so its helper must be generated per BINDING NAME, not per
+  // length — a different helper shape (section 5 of the plan), not a missing
+  // spelling of this one.
+  if (isWGSL)
+    decline(
+      `the base "${base.symbol}" is ` +
+        `${storage}-backed (storage hint), and the wgsl target has no texture ` +
+        `read yet — a WGSL texture cannot be passed to a helper the way a GLSL ` +
+        `sampler can, so the helper must be generated per binding name, which ` +
+        `is not lowered in this version`
+    );
+  return `_gpu_texat${n}(${gpuStorageOperandSource(base, compile)}, ${floatIdx})`;
+}
+
+/**
+ * The name of the sampler-backed symbol whose read is being emitted, while
+ * `gpuStorageOperandSource` compiles it, else `undefined`.
+ *
+ * A sampler-backed symbol has no shader value, so every reference to it
+ * outside a positional read must fail closed — and the gate that refuses it
+ * (`gpuRefuseStorageReference`, installed on the target's `var` and
+ * `mangleId` hooks by `createTargetFor`) sees only an identifier, not where
+ * it is being emitted. This is how the ONE legitimate emission announces
+ * itself. Module state is safe here for the reason `currentUserFunctions` is:
+ * GPU compilation is synchronous and non-reentrant, and the window is a
+ * single `compile(base)` of a bare symbol, closed in a `finally`.
+ */
+let gpuOpenStorageOperand: string | undefined;
+
+/**
+ * The emitted source of the sampler-backed symbol `base` as the operand of a
+ * texel read: its ordinary free-symbol emission — the `vars` mapping when the
+ * caller gave one, else the bare identifier after the reserved-word check —
+ * with the storage-reference gate stood aside for exactly this emission.
+ */
+function gpuStorageOperandSource(
+  base: Expression & { symbol: string },
+  compile: (e: Expression) => string
+): string {
+  const saved = gpuOpenStorageOperand;
+  gpuOpenStorageOperand = base.symbol;
+  try {
+    return compile(base);
+  } finally {
+    gpuOpenStorageOperand = saved;
+  }
+}
+
+/**
+ * Fail closed (D6) when the free symbol `id` is one the caller's `storage`
+ * hint places in shader storage and it is being referenced anywhere but as
+ * the operand of a positional read. A texture has no shader value of its own:
+ * as an operand of arithmetic, a reduction, a user-function argument, an
+ * assignment target or a bare value it would emit an identifier the shader
+ * cannot use as a value, behind a reported success. The reason names the
+ * storage kind, so a consumer reading decline reasons can tell it apart.
+ */
+function gpuRefuseStorageReference(
+  id: string,
+  storage: ReadonlyMap<string, StorageKind>,
+  language: string
+): void {
+  const kind = storage.get(id);
+  if (kind === undefined || gpuOpenStorageOperand === id) return;
+  throw new Error(
+    `The symbol \`${id}\` is ${kind}-backed (compile option ` +
+      `\`storage: { ${id}: '${kind}' }\`), and a texture has no shader value ` +
+      `of its own on the ${language} target: it can be read only through a ` +
+      `positional access (\`At(${id}, i)\`). Here it is referenced as a whole ` +
+      `— as an operand, in a reduction, or as a bare value — which has no ` +
+      `lowering. Fail closed (D6).`
+  );
 }
 
 /**
@@ -3738,14 +3938,7 @@ function compileGPUAt(
 function gpuAtPreamble(n: number, isWGSL: boolean): string {
   const lang = isWGSL ? 'wgsl' : 'glsl';
   const nan = gpuNonFiniteLiteral(NaN, lang);
-  const b = formatFloat(n, lang);
-  const guard = `!(i >= -${b} && i <= ${b}) || i != floor(i) || i == 0.0`;
-  const doc =
-    `  // 1-based; negative counts from the end; anything else → NaN.\n` +
-    `  // The guard runs entirely in float space: it rejects NaN, ±∞, huge\n` +
-    `  // finite values, non-integers and 0 BEFORE the int cast (undefined\n` +
-    `  // outside int range), and makes both languages' out-of-bounds rules\n` +
-    `  // (GLSL UB / WGSL indeterminate) unreachable.`;
+  const { guard, doc } = gpuAtIndexGuard(n, lang);
   if (isWGSL) {
     // A value-typed `array` PARAMETER is not reliably indexable by a runtime
     // expression (the restriction WGSL has never applied to a `vecN`), so the
@@ -3778,6 +3971,72 @@ ${doc}
 }
 
 /**
+ * The index guard every positional-access helper opens with, over a base of
+ * `n` elements, plus the comment that documents it. Written ONCE and shared
+ * by the array helper (`gpuAtPreamble`) and the texture helper
+ * (`gpuTexAtPreamble`): the two storage kinds are interchangeable only while
+ * they answer every index identically, so the guard text has one source.
+ *
+ * The guard runs ENTIRELY IN FLOAT SPACE and is the load-bearing part: `int()`
+ * is undefined outside the int range, so nothing may be cast before the range
+ * test, and the negated compound (`!(i >= -N && i <= N)`) swallows `NaN` and
+ * `±∞` — which `floor` alone would not.
+ */
+function gpuAtIndexGuard(
+  n: number,
+  lang: 'glsl' | 'wgsl'
+): { guard: string; doc: string } {
+  const b = formatFloat(n, lang);
+  return {
+    guard: `!(i >= -${b} && i <= ${b}) || i != floor(i) || i == 0.0`,
+    doc:
+      `  // 1-based; negative counts from the end; anything else → NaN.\n` +
+      `  // The guard runs entirely in float space: it rejects NaN, ±∞, huge\n` +
+      `  // finite values, non-integers and 0 BEFORE the int cast (undefined\n` +
+      `  // outside int range), and makes both languages' out-of-bounds rules\n` +
+      `  // (GLSL UB / WGSL indeterminate) unreachable.`,
+  };
+}
+
+/**
+ * The `_gpu_texatN` positional-access helper for a SAMPLER-BACKED list of N
+ * elements, GLSL only (the WGSL form is not lowered yet — see `compileGPUAt`).
+ * Generated per N on demand like `_gpu_atN`, and named apart from it so one
+ * shader can carry both lowerings for different lists.
+ *
+ * The storage contract it reads (plan section 3): a single-channel 32-bit
+ * float texture, one value per texel, holding the list ROW-MAJOR from texel
+ * (0, 0) in a texture of any width, with at least N texels. The read is a
+ * bare `texelFetch` — integer coordinates, mip level 0, no filtering, no
+ * normalization — which is core in GLSL ES 3.00 / WebGL 2.
+ *
+ * Two different numbers meet here and must not be confused. N, the list's
+ * LENGTH, is baked into the name and the guard: it bounds the index, and it
+ * is what makes an out-of-range fetch unreachable — PROVIDED the texture
+ * holds at least N texels, a host precondition the shader cannot check. The
+ * texture's WIDTH is read at run time (`textureSize`) and only unflattens the
+ * 0-based slot into a coordinate; it is deliberately not baked in, so the
+ * host may pick any width and resize the texture without recompiling.
+ */
+function gpuTexAtPreamble(n: number): string {
+  const nan = gpuNonFiniteLiteral(NaN, 'glsl');
+  const { guard, doc } = gpuAtIndexGuard(n, 'glsl');
+  return `
+float _gpu_texat${n}(sampler2D v, float i) {
+${doc}
+  if (${guard})
+    return ${nan};
+  int k = int(i);
+  k = (k > 0) ? k - 1 : ${n} + k;
+  // Row-major in a texture of run-time width; the host guarantees at least
+  // ${n} texels, so the coordinate is in range whenever the guard passed.
+  int w = textureSize(v, 0).x;
+  return texelFetch(v, ivec2(k % w, k / w), 0).r;
+}
+`;
+}
+
+/**
  * The widths of the `_gpu_atN` helpers `code` calls — ascending and
  * deduplicated, so a helper used many times is declared once. Read off the
  * EMITTED source rather than kept in a per-compilation table, like every other
@@ -3788,8 +4047,21 @@ ${doc}
  * "helper" it then generated redeclared that name.
  */
 function gpuAtHelperWidths(code: string): number[] {
+  return gpuHelperWidths(code, /(?<![\w$])_gpu_at(\d+)\s*\(/g);
+}
+
+/**
+ * The widths of the `_gpu_texatN` texture helpers `code` calls, read the
+ * same way. The digits follow `_gpu_texat` directly, so a future WGSL helper
+ * generated per BINDING NAME (`_gpu_texat_S`, an underscore after the prefix)
+ * can share the prefix without ever matching this scan.
+ */
+function gpuTexAtHelperWidths(code: string): number[] {
+  return gpuHelperWidths(code, /(?<![\w$])_gpu_texat(\d+)\s*\(/g);
+}
+
+function gpuHelperWidths(code: string, re: RegExp): number[] {
   const widths = new Set<number>();
-  const re = /(?<![\w$])_gpu_at(\d+)\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) widths.add(Number(m[1]));
   return [...widths].sort((a, b) => a - b);
@@ -9143,6 +9415,25 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return inner ? inner(id) : id;
       };
     }
+    // A sampler-backed symbol (`storage` hint) may be emitted ONLY as the
+    // operand of a positional read (`gpuStorageOperandSource`); every other
+    // reference fails closed. Both hooks are gated because a free symbol
+    // reaches exactly one of them: `var` when the caller's `vars` maps it,
+    // `mangleId` when it is emitted as a bare identifier.
+    const storage = target.storage;
+    if (storage !== undefined && storage.size > 0) {
+      const innerVar = target.var;
+      const innerMangle = target.mangleId;
+      const language = this.languageId;
+      target.var = (id) => {
+        gpuRefuseStorageReference(id, storage, language);
+        return innerVar(id);
+      };
+      target.mangleId = (id) => {
+        gpuRefuseStorageReference(id, storage, language);
+        return innerMangle ? innerMangle(id) : id;
+      };
+    }
     const state = gpuRandomState(target);
     state.stage = stage;
     state.hostFrame = expr?.engine?._randomFrame !== undefined;
@@ -9543,8 +9834,21 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       options,
       GPU_SUPPORTED_MODES.includes('complex')
     ).options;
+    // The `storage` hints, validated OUTSIDE the fallback `try`: an unknown
+    // storage kind, or a hint naming something that is not a free symbol of
+    // `expr`, is an option-contract error (the same class as an unknown
+    // `mode`), never a decline the interpreter fallback may swallow. Guarded
+    // so the analysis target is built only when there is something to
+    // validate.
+    const storage =
+      options.storage === undefined
+        ? undefined
+        : resolveStorageHints(options.storage, [expr], this.createTarget(), {
+            vars: options.vars,
+            functions: options.functions,
+          });
     try {
-      return this.compileOrThrow(expr, options);
+      return this.compileOrThrow(expr, options, storage);
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.
@@ -9566,7 +9870,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
 
   private compileOrThrow(
     expr: Expression,
-    options: CompilationOptions<Expression> = {}
+    options: CompilationOptions<Expression> = {},
+    storage?: CompileTarget<Expression>['storage']
   ): CompilationResult {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
@@ -9585,6 +9890,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         ? new Set(Object.keys(userFunctions))
         : undefined,
       constantFold: options.constantFold,
+      // The validated `storage` hints (`compile()` resolved them), read by
+      // the `At` lowering and by the reference gate `createTargetFor`
+      // installs. Stamped per call like `constantFold`.
+      storage,
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
@@ -9690,7 +9999,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // WGSL has no `_gpu_nan` at all, so only GLSL is forced.
     const isWGSL = this.languageId === 'wgsl';
     const atWidths = gpuAtHelperWidths(code);
-    if (code.includes('_gpu_nan') || (!isWGSL && atWidths.length > 0))
+    const texAtWidths = gpuTexAtHelperWidths(code);
+    if (
+      code.includes('_gpu_nan') ||
+      (!isWGSL && (atWidths.length > 0 || texAtWidths.length > 0))
+    )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
     // projection of the interpreter's undirected infinity — pole-encoding
@@ -9703,6 +10016,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // declaration before its use, and these bodies call `_gpu_nan()`. The
     // order test in `at-gpu-compile.test.ts` is the tripwire.
     for (const w of atWidths) preamble += gpuAtPreamble(w, isWGSL);
+    // The texture helpers call `_gpu_nan()` too, so the same order rule
+    // applies. GLSL only: the WGSL read is not lowered (`compileGPUAt`).
+    for (const w of texAtWidths) preamble += gpuTexAtPreamble(w);
     // The scalar `_gpu_powi` and its per-width `vecN` overloads
     // (`_gpu_powi2`–`_gpu_powi4`) are declared independently: a compilation
     // that only powers a vector needs the vector form alone.
@@ -9833,6 +10149,20 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // BOTH targets a root `Declare` emits a bare declaration (dropping its
     // initializer). Checked structurally, before the body is compiled (D6).
     gpuAssertExpressionBody('compileToSource()', expr, this.languageId);
+    // A sampler-backed read needs its helper declared, and this route has no
+    // preamble channel — the same reason it opts out of user functions. An
+    // ignored hint would be the silent failure the option's validation
+    // exists to prevent, so it is refused outright.
+    if (
+      options.storage !== undefined &&
+      Object.keys(options.storage).length > 0
+    )
+      throw new Error(
+        'compileToSource() does not support the `storage` option: a ' +
+          'sampler-backed read needs a helper declaration, and this route ' +
+          'returns a bare expression with no preamble channel. Use ' +
+          '`compile()`, whose result carries the preamble. Fail closed (D6).'
+      );
     const code = BaseCompiler.compile(
       expr,
       this.createTargetFor(expr, undefined, {

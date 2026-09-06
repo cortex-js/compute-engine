@@ -295,6 +295,8 @@ export type {
   CompileMode,
   CompileDiagnostic,
   CompileDiagnosticKind,
+  StorageHint,
+  StorageKind,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
