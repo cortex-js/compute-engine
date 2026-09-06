@@ -16,6 +16,7 @@ export { widen, narrow } from './subtype.js';
 
 import type {
   EffectSet,
+  NamedElement,
   Type,
   ListType,
   FunctionSignature,
@@ -1445,6 +1446,47 @@ function collectionLeafType(
  * open rank — the rank-unknowable case §D6.1 identifies) with a compatible
  * leaf; rank-compatible nested lists with compatible leaves.
  */
+/**
+ * The slots of a TUPLE-shaped type, for the deferral test above:
+ * `'not-a-tuple'` when the type is not a tuple at all, `'unknown-arity'` for
+ * the bare `tuple` (which states no arity), and the slots themselves
+ * otherwise.
+ *
+ * The whole `NamedElement` is returned, not just its type: a slot NAME is a
+ * conformance constraint, so `tuple<x: number>` and `tuple<y: number>` are not
+ * interchangeable and the caller has to see the names to refute them.
+ *
+ * A transparent alias is unfolded first, for the same reason `collectionLeafType`
+ * unfolds one: a parameter or operand may name its tuple through an alias
+ * (`type alias Point = tuple<number, number>`), and reading the reference node
+ * as "not a tuple" would decline the deferral for exactly the shapes it exists
+ * to admit. A NOMINAL reference is deliberately left folded — it does not
+ * subtype its definition, and treating it as its definition here would admit
+ * what the lattice refuses.
+ */
+function tupleSlots(
+  t: Readonly<Type>
+): NamedElement[] | 'unknown-arity' | 'not-a-tuple' {
+  const unfolded = unfoldAliasOnDescent(t, undefined);
+  if (unfolded === undefined) return 'not-a-tuple';
+  t = unfolded.type;
+  if (t === 'tuple') return 'unknown-arity';
+  if (typeof t === 'string' || t.kind !== 'tuple') return 'not-a-tuple';
+  return t.elements;
+}
+
+/**
+ * Can a slot of the BARE `tuple` hold a value of this type?
+ *
+ * Bare `tuple` states no arity, but it is not unconstrained: its slots hold
+ * VALUES, so an absence marker or an empty type is not a possible inhabitant.
+ * Without this test the unknown-arity arm admitted `tuple<missing>` at a
+ * `tuple` parameter, two types with no common inhabitant at all.
+ */
+function bareTupleAdmitsSlot(t: Readonly<Type>): boolean {
+  return isSubtype(t, 'value');
+}
+
 export function overlapsForDeferredValidation(
   t: Readonly<Type>,
   param: Readonly<Type>
@@ -1455,6 +1497,79 @@ export function overlapsForDeferredValidation(
     return param.types.some((arm) => overlapsForDeferredValidation(t, arm));
   if (typeof t !== 'string' && t.kind === 'union')
     return t.types.some((arm) => overlapsForDeferredValidation(arm, param));
+
+  // TUPLE parameters participate too, and only against a tuple operand.
+  //
+  // Without this arm there was a HOLE. A tuple-shaped parameter is exempt from
+  // the general overlap admission (`runtimeCheckExemptParam` classes it with
+  // the collection kinds, because `typesOverlap` is unsound for them — it
+  // reads `list<number> ∧ matrix` as inhabited, since the empty list inhabits
+  // both), so this function is the authority for such a parameter. But it
+  // recognized only `list`, `collection` and `indexed_collection`, so a tuple
+  // parameter reached NEITHER admission and every union operand with a tuple
+  // member was refused.
+  //
+  // That is what made a library operator disagree with a user function
+  // declared with the identical signature: `PointX`, declared
+  // `(xs: collection<any> | tuple) -> any`, refused an indexed point carrier
+  // typed `missing | number | tuple<number, number>` — one member of which
+  // satisfies the parameter exactly — while a user `g` of the same signature
+  // admitted it (Tycho item 257).
+  //
+  // Only the tuple/tuple pairing defers. A tuple operand at a collection
+  // parameter, or a collection operand at a tuple parameter, keeps the
+  // refusal it has today; the union distribution above means one admitting
+  // pair is enough to admit the whole operand.
+  const paramTupleSlots = tupleSlots(param);
+  const opTupleSlots = tupleSlots(t);
+  if (paramTupleSlots !== 'not-a-tuple' || opTupleSlots !== 'not-a-tuple') {
+    if (paramTupleSlots === 'not-a-tuple' || opTupleSlots === 'not-a-tuple')
+      return false;
+    // A bare `tuple` on either side states no arity, so no slot PAIRS up and
+    // arity refutes nothing. The other side's slots are still checked against
+    // what a bare tuple can hold: its slots are values, so an explicit
+    // `missing` or `nothing` slot has no common inhabitant with it.
+    if (paramTupleSlots === 'unknown-arity' || opTupleSlots === 'unknown-arity') {
+      const explicit =
+        paramTupleSlots === 'unknown-arity' ? opTupleSlots : paramTupleSlots;
+      if (explicit === 'unknown-arity') return true;
+      return explicit.every((e) => bareTupleAdmitsSlot(e.type));
+    }
+    // Arity refutation: a 2-tuple can never be a 3-tuple. This is the tuple
+    // counterpart of the rank refutation the list arm performs below.
+    if (paramTupleSlots.length !== opTupleSlots.length) return false;
+    // Slot refutation, with the same either-direction `isSubtype`
+    // approximation the leaf refutation below documents: two slots that are
+    // incomparable are treated as disjoint.
+    for (let i = 0; i < paramTupleSlots.length; i++) {
+      // A NESTED top in the OPERAND is refuted, and must be tested before the
+      // either-direction check below would waive it. The top-type waiver
+      // (design decision D8) applies to a top arriving as the WHOLE operand's
+      // type; under a constructor there is no ground counterpart to preserve,
+      // because `(tuple<number>) -> number` refuses a `tuple<any>` operand and
+      // the deferring reading must not be looser than the ground signature.
+      // Without this the either-direction test admits it: `any` is a supertype
+      // of `number`, so `isSubtype(paramSlot, opSlot)` holds and a top slot
+      // reads exactly like the ordinary deferral case (a `number` slot that
+      // may hold an integer at run time).
+      const opSlot = opTupleSlots[i].type;
+      const paramSlot = paramTupleSlots[i].type;
+      // A slot NAME is part of the contract: `tuple<x: number>` does not
+      // satisfy `tuple<y: number>`, and `isSubtype` refuses it. Only two
+      // EXPLICIT and different names refute — a named slot still pairs with an
+      // unnamed one, which is the name erasure the lattice already permits.
+      const opName = opTupleSlots[i].name;
+      const paramName = paramTupleSlots[i].name;
+      if (opName !== undefined && paramName !== undefined && opName !== paramName)
+        return false;
+      const opSlotIsTop = opSlot === 'any' || opSlot === 'unknown';
+      const paramSlotIsTop = paramSlot === 'any' || paramSlot === 'unknown';
+      if (opSlotIsTop && !paramSlotIsTop) return false;
+      if (!isSubtype(opSlot, paramSlot) && !isSubtype(paramSlot, opSlot))
+        return false;
+    }
+    return true;
+  }
 
   // Only collection-kind parameters participate in deferral. A `string`
   // operand is deliberately NOT treated as collection-like below, even though

@@ -207,23 +207,69 @@ function powIntervalRaw(
     return { kind: 'empty' };
   }
   if (baseVal.lo <= 0) {
-    // Straddles or touches zero - complex behavior
-    // For safety, restrict to positive part
-    const posBase = {
-      lo: Math.max(baseVal.lo, Number.EPSILON),
-      hi: baseVal.hi,
-    };
-    const corners = [
-      Math.pow(posBase.lo, expVal.lo),
-      Math.pow(posBase.lo, expVal.hi),
-      Math.pow(posBase.hi, expVal.lo),
-      Math.pow(posBase.hi, expVal.hi),
+    // The base reaches 0. Two situations were previously collapsed into one
+    // `partial`, and only one of them is outside the domain.
+    //
+    // TOUCHING zero from the right (`lo === 0`) with a wholly POSITIVE
+    // exponent is entirely INSIDE the domain: `0^e = 0` for every `e > 0`, so
+    // the box has a value everywhere and the enclosure is exact. Reporting
+    // `partial` here made a smooth field read as clipped on every box, and a
+    // consumer that treats `partial` as a discontinuity saw a break in every
+    // cell (Tycho item 260). The scalar-exponent sibling `powRaw` already gets
+    // this right, which is why a constant exponent behaved and a symbolic one
+    // did not.
+    //
+    // STRADDLING zero (`lo < 0`) is genuinely partial: a negative base has no
+    // real value at a non-integer exponent, so the domain is clipped to the
+    // non-negative part and the result says so.
+    //
+    // A base reaching 0 with an exponent that can be ZERO OR NEGATIVE has a
+    // POLE there — `x^e → +∞` as `x → 0+` for `e < 0` — so the supremum is
+    // infinite. The previous code substituted `Number.EPSILON` for the zero
+    // endpoint and computed `EPSILON^e`, which answered an arbitrary finite
+    // bound (`1.36e39` for `e = -2.5`) in place of `+∞`: an enclosure that does
+    // NOT contain the true range, which is unsound rather than merely
+    // imprecise, and could hide a pole from a consumer scanning for one.
+    const clipped = baseVal.lo < 0;
+    const hiCorners = [
+      Math.pow(baseVal.hi, expVal.lo),
+      Math.pow(baseVal.hi, expVal.hi),
     ];
-    return {
-      kind: 'partial',
-      value: { lo: Math.min(...corners), hi: Math.max(...corners) },
-      domainClipped: 'lo',
-    };
+    // Three readings of the exponent, over a base reaching 0. The split is on
+    // whether a NEGATIVE exponent is present, because that alone creates the
+    // pole: an exponent of exactly 0 does not, since `x^0 = 1` for every `x`
+    // — including `x = 0`, which is this file's own convention (`intPow` with
+    // an exponent of 0 answers `[1, 1]`).
+    //
+    // - NO negative exponent (`expVal.lo >= 0`): every value is defined and
+    //   finite. 0 is the infimum — attained at `x = 0` for a positive
+    //   exponent, approached as `x -> 0+` otherwise — and the supremum is at
+    //   the far endpoint. Reading `expVal.lo === 0` as a pole instead answered
+    //   `+∞` for `[0,2]^[0,1]`, whose true range is `[0,2]`: sound, but it
+    //   throws away the bound and reports the very discontinuity this fix
+    //   exists to stop reporting. (An exponent interval that is exactly
+    //   `[0, 0]` never reaches here — it is an integer point, handled above.)
+    // - SPANS zero (`expVal.lo < 0 < expVal.hi`): both limits are reached as
+    //   `x -> 0+` — the positive exponents drive the value to 0 and the
+    //   negative ones to `+∞` — so the enclosure is the whole non-negative
+    //   line. Reading the infimum off the far endpoint alone would MISS the
+    //   small values: `[0,2]^[-1,3]` contains `0.5^3 = 0.125`, well under the
+    //   `2^-1 = 0.5` the endpoint corners suggest.
+    // - wholly NEGATIVE-or-zero (`expVal.hi <= 0`, with `expVal.lo < 0`):
+    //   `x^e` is non-increasing in `x` for each such `e`, so the infimum is at
+    //   the far endpoint, and `x -> 0+` sends the supremum to `+∞`.
+    const noNegativeExponent = expVal.lo >= 0;
+    const value = noNegativeExponent
+      ? { lo: 0, hi: Math.max(...hiCorners) }
+      : expVal.hi > 0
+        ? { lo: 0, hi: Infinity }
+        : { lo: Math.min(...hiCorners), hi: Infinity };
+    if (clipped) return { kind: 'partial', value, domainClipped: 'lo' };
+    // Touching zero with no negative exponent: nothing is outside the domain.
+    if (noNegativeExponent) return ok(value);
+    // Touching zero with an exponent that can be negative: the point `x = 0`
+    // is outside the domain, so the box is only partly covered.
+    return { kind: 'partial', value, domainClipped: 'lo' };
   }
 
   // Both base values are positive

@@ -1891,11 +1891,27 @@ function elementRequirementOfAt(
   // kept, which is the shape the validation wrote.
   if (isSubtype(indexType, 'string'))
     return [{ kind: 'dictionary', values: r }, undefined];
-  if (
-    isSubtype(indexType, 'number') ||
-    isSubtype(indexType, INDEXED_COLLECTION_SHAPE_TYPE)
-  )
+  if (isSubtype(indexType, 'number'))
     return [{ kind: 'indexed_collection', elements: r }, undefined];
+  // A PROVABLE gather or mask (a collection-typed index) selects a LIST of
+  // elements, so what the requirement names depends on its own shape — the
+  // same ambiguity the open-index branch below declines, and it has to be
+  // declined here too.
+  //
+  // A SCALAR requirement still names the ELEMENTS: the consumer broadcasts
+  // over the selected list, so `xs[[1, 2]] + 1` does prove `xs` holds numbers.
+  // A COLLECTION requirement does not: it is satisfied either by elements that
+  // are themselves collections (which is what a scalar index would mean) or by
+  // the SELECTED LIST being the collection, and a gather makes the second
+  // reading the right one. Writing the first turned a chained gather into a
+  // collection of collections: with `Z` undeclared, `(Z[1..p-1])[W]` refined
+  // `Z` to `indexed_collection<indexed_collection<…>>`, so `… = Z[p]` typed
+  // `list<boolean | missing>` and a `Filter` predicate over it was refused
+  // (Tycho item 258).
+  if (isSubtype(indexType, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    if (typeCouldBeCollection(r)) return undefined;
+    return [{ kind: 'indexed_collection', elements: r }, undefined];
+  }
   if (typeCouldBeCollection(r)) return undefined;
   return [
     {

@@ -31,6 +31,72 @@
   remains, spread over the type derivation of intermediate nodes (recorded in
   `ROADMAP.md`, entry P1).
 
+### Resolved Issues
+
+- **A coordinate accessor over a carrier that may hold one point or a list
+  of points no longer fails to canonicalize.** With `P` declared
+  `list<tuple<number, number>> | tuple<number, number>` — a variable that
+  may hold either — indexing it types
+  `missing | number | tuple<number, number>`, because element *n* of a point
+  list is a point while coordinate *n* of a single point is a number.
+  `PointX(P[2])` then reported an `incompatible-type` error on every route,
+  and an indexed computed point drew nothing. The engine refuses only what
+  is provably incompatible, and it has two ways to admit an operand whose
+  type merely overlaps a parameter; a tuple-shaped parameter took part in
+  neither, so nothing admitted it. A library operator therefore refused an
+  operand that a user-declared function with the same signature accepted.
+  Tuple parameters now take part in the same deferred admission that
+  collection parameters already had, with the matching refutations: a
+  2-tuple never satisfies a 3-tuple parameter, slots that share no values
+  are refused, and conflicting slot names (`tuple<x: number>` against
+  `tuple<y: number>`) are refused. An operand with no compatible member is
+  still refused where it is written — `PointX(5)` is still an error.
+
+- **A chained slice no longer makes its base a collection of collections.**
+  With `Z` undeclared, `(Z[1..p-1])[W] = Z[p]` typed
+  `list<boolean | missing>`, so a `Filter` whose predicate is that
+  comparison was refused. A use of an undeclared symbol refines its type,
+  and what the refinement names depends on the index: a single index selects
+  one element, while a range or a list of indices selects a *list* of them.
+  Under such a gather a scalar requirement still names the elements —
+  `xs[[1, 2]] + 1` does prove that `xs` holds numbers, because the consumer
+  works over the selected list — but a collection requirement is ambiguous
+  between "the elements are collections" and "the selected list is the
+  collection", and only the second reading is right for a gather. The
+  refinement now declines that ambiguous case instead of writing the first
+  reading, so the comparison types `broadcastable<boolean>` and the
+  predicate is accepted.
+
+- **`Dot` over a point list whose component is itself a `Dot` compiles to
+  GLSL again.** The nested form reported that `dot` "has no array overload"
+  instead of emitting
+  `dot(vec2(dot(vec3(x, y, z), vec3(1.0, 2.0, 3.0)), 0.0), vec2(1.0, 2.0))`.
+  A check added in 0.124.0 — that a fixed-length list has a vector reading
+  only when its elements are single floats — asked whether each element type
+  *lowers to* a shader scalar, a stricter question than the one it owed:
+  that test refuses every wide type except `unknown` and `any`, and a
+  computed point component carries `value`. An element is now refused only
+  when it provably cannot be a float, so a list of complex values (each a
+  pair of cells), of booleans, of strings, or of lists still fails to
+  compile, as it must. Nominal types and transparent aliases are resolved
+  before the question is asked.
+
+- **An interval power whose base reaches zero is no longer reported as
+  clipped.** On the `interval-js` target, a base of `[0, 2]` with an
+  exponent interval such as `[1.9, 2.1]` answered a partial result with the
+  domain clipped, although `0^e = 0` for every positive `e` and the box is
+  entirely inside the domain — so a smooth field was reported as
+  discontinuous on every box, and a consumer looking for breaks found one in
+  every cell. The same expression with a constant exponent was always right,
+  because only the interval-exponent path was affected. A base that reaches
+  zero is now clipped only when it has a negative part, or when the exponent
+  can be negative, which is a genuine pole. Two enclosure faults in the same
+  place are fixed with it: the supremum at such a pole is now `+∞` rather
+  than the arbitrary finite number that substituting a tiny base produced,
+  and an exponent that spans zero now reports an infimum of 0 rather than
+  reading it off an endpoint, which had excluded reachable values
+  (`[0, 2]^[-1, 3]` contains `0.5³`).
+
 ## 0.124.0 _2026-09-05_
 
 ### Breaking Changes
