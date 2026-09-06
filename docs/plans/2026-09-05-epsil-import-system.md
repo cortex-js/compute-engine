@@ -31,8 +31,8 @@ work before they can ship safely.
 
 Section 11 records the accepted decisions and remaining questions. Detailed
 rules not covered by an accepted decision remain proposals. Section 6.1
-develops the clarified initialization restriction, including the still-open
-choice of whether to prohibit persistent private mutable state.
+records the accepted initialization restrictions; their checking and runtime
+enforcement still need implementation design.
 
 ## 2. Lessons from other languages
 
@@ -261,7 +261,7 @@ host source acquisition or resource consumption.
 Exported functions may have any normal Epsil effects when called. The earlier
 recommendation to allow arbitrary initialization effects is superseded.
 
-**Revised recommendation, pending agreement:** initialization computes an
+**Accepted policy:** initialization computes an
 immutable module environment. Allow deterministic computation and temporary
 local mutation; prohibit external effects and persistent mutable state created
 during loading. These are two separate restrictions: banning import-time I/O
@@ -274,7 +274,7 @@ alone would still permit a shared counter initialized to zero.
 | Use a loop and local accumulator inside a computation | Allowed when writes are confined and only an immutable result escapes. |
 | Print, access files/network, read the clock/environment, or draw from ambient randomness/entropy | Rejected, including through a helper or dependency initializer. |
 | Modify caller bindings, assumptions, or existing engine registries | Rejected; the host establishes module identities separately. |
-| Create a persistent mutable module binding or a closure retaining mutable state | Rejected under the stronger state restriction proposed here. |
+| Create a persistent mutable module binding or a closure retaining mutable state | Rejected. |
 | Call a factory after importing it | Ordinary execution: state and effects are permitted by its normal contract. |
 
 For example, initialization can compute an immutable result using temporary
@@ -338,7 +338,7 @@ across separate module instances, nor authorize arbitrary re-initialization.
 An alternative is to enforce only initialization without external effects and
 allow explicitly documented per-instance mutable globals. That permits module
 caches and shared counters, but makes their instance lifetime part of the API.
-The stronger no-persistent-mutable-state proposal is recommended for the first
+The stronger no-persistent-mutable-state rule is accepted for the first
 version; allowing module caches or shared state later needs an explicit design.
 Ordinary runtime allocation by a called factory remains available immediately.
 
@@ -528,7 +528,7 @@ Minimum acceptance cases for an implementation:
 | Import named `sin` | Calls use the imported function, not the standard library alias. |
 | Assign/define a clause on an import | Read-only-binding error; original definition unchanged. |
 | Initializer computes a constant with a local accumulator | Allowed when only the immutable result escapes. |
-| Module retains a mutable counter, directly or inside a `const` closure | Rejected under the proposed persistent-state restriction. |
+| Module retains a mutable counter, directly or inside a `const` closure | Rejected under the accepted persistent-state restriction. |
 | Consumer calls an imported counter factory | Allowed; each call creates explicitly owned state and preserves closure effects. |
 | Initializer calls an effectful helper or imported function | Rejected before forbidden effects occur, just like a direct effectful call. |
 | Diamond dependency or equivalent paths | Shared module initializes exactly once per session. |
@@ -566,14 +566,17 @@ Accepted in the 2026-09-05 discussion:
    silently become a reload operation.
 7. **Explicit `.epsil` paths initially.** Retain a resolver boundary for future
    URLs, implicit names, and other specifier profiles.
+8. **Restricted initialization.** Loading may compute an immutable module
+   environment using temporary local mutation. It may not perform external
+   effects or retain persistent mutable state, including state hidden inside
+   closures. Exported functions keep their normal effects when called;
+   consumers explicitly create state through factories. Future dynamic imports
+   follow the same restrictions, with host source acquisition treated separately.
 
 Still open:
 
-- Exact restrictions on initialization and persistent state. The clarified
-  concern is load-time execution, not the effects of exported functions when
-  called. Section 6.1 now recommends enforcing restrictions on external effects
-  and persistent mutable state while allowing precomputation and temporary
-  mutation. The stronger persistent-state rule remains a proposal.
+- Implementation of initialization checks: confined mutation, retained captures,
+  transitive call analysis, and enforcement at host capability boundaries.
 - Detailed syntax (including export-list-only versus declaration-prefix
   exports), placement, collision rules, and the initial no-cycle policy.
 - Whether a later interactive declaration can replace an imported binding;
