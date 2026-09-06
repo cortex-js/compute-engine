@@ -38,7 +38,6 @@ import {
   Sign,
   TypeHandlerContext,
 } from '../global-types.js';
-import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { operandLiteralValue } from './type-handlers.js';
 import {
   isCharacter,
@@ -226,8 +225,7 @@ function euclideanNormTypeOf(
   components: ReadonlyArray<OperandDescriptor>
 ): string {
   if (components.length === 0) return 'number';
-  if (!components.every((c) => typeFact(c.type, 'number') === true))
-    return 'number';
+  if (!components.every((c) => isSubtype(c.type, 'number'))) return 'number';
   if (
     components.every(
       (c) => c.facts.finite === true || isSubtype(c.type, 'complex')
@@ -346,7 +344,7 @@ function lazyConstantMatrix(
 const transposedType: OperatorTypeHandlerOnTypes = (ops) => {
   const m = ops[0];
   if (m === undefined) return 'value';
-  if (typeFact(m.type, 'number') === true) return m.type;
+  if (isSubtype(m.type, 'number')) return m.type;
   const t = m.type;
   if (typeof t === 'string' || t.kind !== 'list') return 'value';
   const dims = t.dimensions;
@@ -632,7 +630,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, tuple) -> value',
       type: ([value, shape]) => {
         const dims = targetShapeDimensions(shape);
-        if (typeFact(value.type, 'number') === true) {
+        if (isSubtype(value.type, 'number')) {
           // Scalar input
           return parseType(`list<number^${dims}>`);
         }
@@ -1179,7 +1177,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (t.dimensions?.length === 2) return 'number';
           return undefined;
         }
-        if (typeFact(t, 'number') === true) return 'number';
+        if (isSubtype(t, 'number')) return 'number';
         return undefined;
       },
       evaluate: (ops, { engine: ce }) => {

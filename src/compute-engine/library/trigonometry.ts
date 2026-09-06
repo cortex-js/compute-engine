@@ -38,6 +38,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
@@ -184,11 +185,10 @@ function boundedEntireRealType(
 ): Type | undefined {
   if (x === undefined) return 'number';
   const t = broadcastOperandType(x);
-  if (typeFact(t, 'nan') === true) return undefined;
-  if (typeFact(t, EXTENDED_REAL_TYPE) === true) return 'real';
+  if (isSubtype(t, 'nan')) return undefined;
+  if (isSubtype(t, EXTENDED_REAL_TYPE)) return 'real';
   const scalar = x.facts.collection === true ? undefined : x;
-  if (scalar?.facts.finite === true || typeFact(t, 'complex') === true)
-    return 'number';
+  if (scalar?.facts.finite === true || isSubtype(t, 'complex')) return 'number';
   return 'number';
 }
 

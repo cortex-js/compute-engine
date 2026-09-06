@@ -19,7 +19,7 @@ import {
   nonRealDataError,
   nonRealDatum,
 } from './statistics-data.js';
-import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { nonNegativeSign, positiveSign } from '../boxed-expression/sgn.js';
 import {
   infinitePoint,
@@ -466,18 +466,15 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         // A provably-NaN operand DECLINES: a handler answer is never widened,
         // so answering `number` here would suppress any sharper claim the
         // framework can derive.
-        if (
-          (a && typeFact(a.type, 'nan') === true) ||
-          (z && typeFact(z.type, 'nan') === true)
-        )
+        if ((a && isSubtype(a.type, 'nan')) || (z && isSubtype(z.type, 'nan')))
           return undefined;
         if (
           a !== undefined &&
           z !== undefined &&
           a.facts.finite === true &&
           z.facts.finite === true &&
-          typeFact(a.type, 'real') === true &&
-          typeFact(z.type, 'real') === true &&
+          isSubtype(a.type, 'real') &&
+          isSubtype(z.type, 'real') &&
           positiveSign(a.facts.sgn) === true &&
           nonNegativeSign(z.facts.sgn) === true
         )
@@ -607,20 +604,20 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       type: ([x, a, b]) => {
         // A provably-NaN operand declines, as `GammaRegularized` does.
         if (
-          (x && typeFact(x.type, 'nan') === true) ||
-          (a && typeFact(a.type, 'nan') === true) ||
-          (b && typeFact(b.type, 'nan') === true)
+          (x && isSubtype(x.type, 'nan')) ||
+          (a && isSubtype(a.type, 'nan')) ||
+          (b && isSubtype(b.type, 'nan'))
         )
           return undefined;
         if (
           x !== undefined &&
           a !== undefined &&
           b !== undefined &&
-          typeFact(x.type, UNIT_INTERVAL) === true &&
+          isSubtype(x.type, UNIT_INTERVAL) &&
           a.facts.finite === true &&
           b.facts.finite === true &&
-          typeFact(a.type, 'real') === true &&
-          typeFact(b.type, 'real') === true &&
+          isSubtype(a.type, 'real') &&
+          isSubtype(b.type, 'real') &&
           positiveSign(a.facts.sgn) === true &&
           positiveSign(b.facts.sgn) === true
         )
@@ -914,9 +911,9 @@ function discreteSupportGuard(
   upper?: Expression
 ): Expression | undefined {
   const clauses: Expression[] = [];
-  if (typeFact(k.type.type, 'integer') !== true)
+  if (!isSubtype(k.type.type, 'integer'))
     clauses.push(ce.function('Equal', [ce.function('Floor', [k]), k]));
-  if (typeFact(k.type.type, NON_NEGATIVE_REAL_TYPE) !== true)
+  if (!isSubtype(k.type.type, NON_NEGATIVE_REAL_TYPE))
     clauses.push(ce.function('GreaterEqual', [k, ce.Zero]));
   if (upper !== undefined) clauses.push(ce.function('LessEqual', [k, upper]));
   if (clauses.length === 0) return undefined;
@@ -939,7 +936,7 @@ function discreteCDFGuard(
   upper?: Expression
 ): Expression {
   const clauses: Expression[] = [];
-  if (typeFact(x.type.type, NON_NEGATIVE_REAL_TYPE) !== true)
+  if (!isSubtype(x.type.type, NON_NEGATIVE_REAL_TYPE))
     clauses.push(ce.function('Less', [x, ce.Zero]), ce.Zero);
   if (upper !== undefined)
     clauses.push(ce.function('GreaterEqual', [x, upper]), ce.One);
@@ -1145,7 +1142,7 @@ function distributionCDF(
         ? x.isInteger === true
           ? x
           : fn('Floor', [x]).evaluate()
-        : typeFact(x.type.type, 'integer') === true
+        : isSubtype(x.type.type, 'integer')
           ? x
           : fn('Floor', [x]);
       // CDF(k) = I_{1−p}(n−k, k+1)
@@ -1169,7 +1166,7 @@ function distributionCDF(
         ? x.isInteger === true
           ? x
           : fn('Floor', [x]).evaluate()
-        : typeFact(x.type.type, 'integer') === true
+        : isSubtype(x.type.type, 'integer')
           ? x
           : fn('Floor', [x]);
       // CDF(k) = Q(⌊k⌋+1, λ)

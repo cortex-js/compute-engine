@@ -139,7 +139,11 @@ import {
   stripNumericRanges,
   widen,
 } from '../../common/type/utils.js';
-import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import {
+  couldMatch,
+  isEmptyType,
+  isSubtype,
+} from '../../common/type/subtype.js';
 import {
   negativeSign,
   nonNegativeSign,
@@ -485,10 +489,10 @@ function quotientComponentType(el: Type, den: OperandDescriptor): Type {
     if (isSubtype(el, 'real') && isExtendedRealOperand(den)) return 'integer';
     return 'number';
   }
-  if (typeFact(den.type, 'integer') === true && isSubtype(el, 'integer'))
+  if (isSubtype(den.type, 'integer') && isSubtype(el, 'integer'))
     return 'rational';
   if (isExtendedRealOperand(den) && isSubtype(el, 'real')) return 'real';
-  if (typeFact(den.type, 'complex') === true && isSubtype(el, 'complex'))
+  if (isSubtype(den.type, 'complex') && isSubtype(el, 'complex'))
     return 'complex';
   return 'number';
 }
@@ -668,6 +672,13 @@ function scaleTupleComponents(
  * widen or to decline, so the conflation costs precision, never soundness.
  */
 function provablyNaNOperand(d: OperandDescriptor): boolean {
+  // Fast path: an operand whose type is below `complex` is a finite number,
+  // so it is not NaN — and this answers for nearly every operand of an
+  // arithmetic derivation with one subtype test, before the structure view
+  // below is built. The empty type is excluded: it is below every type, and
+  // the general path answers `true` for it.
+  const t = d.type;
+  if (!isEmptyType(t) && isSubtype(t, 'complex')) return false;
   const kind = d.structureOf?.()?.kind;
   if (
     kind === 'application' ||
@@ -676,8 +687,8 @@ function provablyNaNOperand(d: OperandDescriptor): boolean {
     kind === 'function-literal'
   )
     return false;
-  if (typeFact(d.type, 'nan') === true) return true;
-  if (typeFact(d.type, 'infinity') === true) return false;
+  if (isSubtype(d.type, 'nan')) return true;
+  if (isSubtype(d.type, 'infinity')) return false;
   return d.facts.finite === false && d.facts.sgn === 'unsigned';
 }
 
@@ -687,7 +698,10 @@ function provablyNaNOperand(d: OperandDescriptor): boolean {
  * `Expression.isExtendedReal === true`.
  */
 function isExtendedRealOperand(d: OperandDescriptor): boolean {
-  return typeFact(d.type, EXTENDED_REAL_TYPE) === true;
+  // `real` first: it is a primitive, so the test is a lattice lookup, and
+  // it answers for nearly every operand; the union `real | +oo | -oo` is
+  // consulted only for a type that is not below `real`.
+  return isSubtype(d.type, 'real') || isSubtype(d.type, EXTENDED_REAL_TYPE);
 }
 
 /** Is this operand's sign a proof that it is not zero? */
@@ -870,11 +884,13 @@ function numericTensorElementType(t0: Type): Type | undefined {
  * Both halves are needed — the dimensions alone are a type claim, and the
  * literal `List` node is what the tensor value paths act on. */
 function isTensorOperand(d: OperandDescriptor): boolean {
-  if (d.structureOf?.()?.kind !== 'list-literal') return false;
+  // The type test comes first: it is a property read, while the structure
+  // view allocates, and most operands of an arithmetic derivation are
+  // scalars that fail it.
   const t = d.type;
-  return (
-    typeof t !== 'string' && t.kind === 'list' && t.dimensions !== undefined
-  );
+  if (typeof t === 'string' || t.kind !== 'list' || t.dimensions === undefined)
+    return false;
+  return d.structureOf?.()?.kind === 'list-literal';
 }
 
 /** Twin of `isNumericTuple`: every component provably a number. */
@@ -1472,7 +1488,7 @@ function incompleteGammaValueAtInfinity(
 function specialFunctionType(
   ops: ReadonlyArray<OperandDescriptor | undefined>
 ): Type | undefined {
-  if (ops.some((d) => d !== undefined && typeFact(d.type, 'nan') === true))
+  if (ops.some((d) => d !== undefined && isSubtype(d.type, 'nan')))
     return undefined;
   return numericTypeHandlerOnTypes(
     ops.filter((d): d is OperandDescriptor => d !== undefined)
@@ -1940,8 +1956,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // n-ary `Divide(a, b, c)` (never canonical) must not get bounds
         // computed from `a / b` alone.
         const bothInteger =
-          typeFact(den.type, 'integer') === true &&
-          typeFact(num.type, 'integer') === true;
+          isSubtype(den.type, 'integer') && isSubtype(num.type, 'integer');
         if (
           bothInteger ||
           (isExtendedRealOperand(den) && isExtendedRealOperand(num))
@@ -1978,16 +1993,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a literal 0 denominator (caught earlier) yields the top type.
         {
           const isImag = (x: OperandDescriptor) =>
-            typeFact(x.type, 'imaginary') === true;
+            isSubtype(x.type, 'imaginary');
           if (isImag(num) && isImag(den)) return 'real';
           if (isImag(num) && isExtendedRealOperand(den)) return 'imaginary';
           if (isExtendedRealOperand(num) && isImag(den))
             return provablyNonZeroSign(num) ? 'imaginary' : 'complex';
           // A quotient of finite complex operands is a finite complex number.
-          if (
-            typeFact(num.type, 'complex') === true &&
-            typeFact(den.type, 'complex') === true
-          )
+          if (isSubtype(num.type, 'complex') && isSubtype(den.type, 'complex'))
             return 'complex';
         }
         return 'number';
@@ -2152,13 +2164,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // operand declines (`specialFunctionType` records what that buys:
       // the derived claim stays `number` for a `number`-result head).
       type: ([x]) => {
-        if (x !== undefined && typeFact(x.type, 'nan') === true)
-          return undefined;
+        if (x !== undefined && isSubtype(x.type, 'nan')) return undefined;
         const s = x ? operandSgnOnTypes(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
         if (
           x !== undefined &&
-          typeFact(x.type, 'integer') === true &&
+          isSubtype(x.type, 'integer') &&
           nonNegativeSign(s) === true
         )
           return 'integer';
@@ -2168,7 +2179,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // (non-finite typing convention).
         if (
           x !== undefined &&
-          typeFact(x.type, 'integer') === true &&
+          isSubtype(x.type, 'integer') &&
           negativeSign(s) === true
         )
           return 'number';
@@ -2319,18 +2330,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // operand declines (`specialFunctionType` records what that buys:
       // the derived claim stays `number` for a `number`-result head).
       type: ([x]) => {
-        if (x !== undefined && typeFact(x.type, 'nan') === true)
-          return undefined;
+        if (x !== undefined && isSubtype(x.type, 'nan')) return undefined;
         const s = x ? operandSgnOnTypes(x) : undefined;
         if (
           x !== undefined &&
-          typeFact(x.type, 'integer') === true &&
+          isSubtype(x.type, 'integer') &&
           nonNegativeSign(s) === true
         )
           return 'integer';
         if (
           x !== undefined &&
-          typeFact(x.type, 'integer') === true &&
+          isSubtype(x.type, 'integer') &&
           negativeSign(s) === true
         )
           return 'number';
@@ -2681,12 +2691,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // head).
       type: ([n, x]) => {
         if (
-          (n !== undefined && typeFact(n.type, 'nan') === true) ||
-          (x !== undefined && typeFact(x.type, 'nan') === true)
+          (n !== undefined && isSubtype(n.type, 'nan')) ||
+          (x !== undefined && isSubtype(x.type, 'nan'))
         )
           return undefined;
         return x !== undefined &&
-          typeFact(x.type, 'integer') === true &&
+          isSubtype(x.type, 'integer') &&
           nonPositiveSign(operandSgnOnTypes(x)) === true
           ? 'number'
           : numericTypeHandlerOnTypes([n, x]);
@@ -2739,8 +2749,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // that buys: the derived claim stays `number` for a `number`-result
       // head).
       type: ([x]) => {
-        if (x !== undefined && typeFact(x.type, 'nan') === true)
-          return undefined;
+        if (x !== undefined && isSubtype(x.type, 'nan')) return undefined;
         return x !== undefined && operandLiteralValueOnTypes(x) === 1
           ? 'number'
           : numericTypeHandlerOnTypes([x]);
@@ -2805,7 +2814,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops) => {
         const nonposInt = (x: OperandDescriptor | undefined) =>
           x !== undefined &&
-          typeFact(x.type, 'integer') === true &&
+          isSubtype(x.type, 'integer') &&
           nonPositiveSign(operandSgnOnTypes(x)) === true;
         if (nonposInt(ops[0]) || nonposInt(ops[1])) return 'number';
         return numericTypeHandlerOnTypes(ops);
@@ -3817,11 +3826,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               mulIntervals
             )
           );
-        if (ops.every((x) => typeFact(x.type, 'integer') === true))
+        if (ops.every((x) => isSubtype(x.type, 'integer')))
           return refineMul('integer');
         if (ops.every((x) => isExtendedRealOperand(x)))
           return refineMul('real');
-        if (ops.every((x) => typeFact(x.type, 'rational') === true))
+        if (ops.every((x) => isSubtype(x.type, 'rational')))
           return refineMul('rational');
 
         // Real × pure-imaginary products: at least one factor is typed
@@ -3838,7 +3847,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //   `complex` (e.g. `x·i` with real x ∋ 0 may be 0, which
         //   is not `imaginary`).
         const isImaginary = (x: OperandDescriptor) =>
-          typeFact(x.type, 'imaginary') === true;
+          isSubtype(x.type, 'imaginary');
         const imaginaryCount = ops.filter(isImaginary).length;
         if (
           imaginaryCount > 0 &&
@@ -3853,8 +3862,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A product of finite complex factors is itself a finite complex
         // number (e.g. `√2·(1+i)`): claim `complex` rather than the
         // complex-unaware top type `number`.
-        if (ops.every((x) => typeFact(x.type, 'complex') === true))
-          return 'complex';
+        if (ops.every((x) => isSubtype(x.type, 'complex'))) return 'complex';
 
         return 'number';
       },
@@ -4275,8 +4283,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // (P0-11: `2^-2 = 1/4`). An EVEN exponent adds the sign: x² ≥ 0
         // (and x⁻² ≥ 0) for any real x (ROADMAP "Ranged types should carry
         // sign…", work item 4 — the even-power head).
-        const baseIsInteger = typeFact(base.type, 'integer') === true;
-        const expIsInteger = typeFact(exp.type, 'integer') === true;
+        const baseIsInteger = isSubtype(base.type, 'integer');
+        const expIsInteger = isSubtype(exp.type, 'integer');
         if (baseIsInteger && expIsInteger) {
           if (nonNegativeSign(expSgn) === true) {
             const even = operandParityIsEven(exp) === true;
@@ -4298,7 +4306,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             );
           }
         }
-        if (typeFact(base.type, 'rational') === true && expIsInteger) {
+        if (isSubtype(base.type, 'rational') && expIsInteger) {
           const even = operandParityIsEven(exp) === true;
           return (
             negativePoleTier() ??
@@ -4356,7 +4364,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // (bi)^n = bⁿ·iⁿ, so an even n is real, an odd n is pure imaginary
         // (non-zero since b ≠ 0), and an unknown-parity integer is one of the
         // two — both ⊂ `complex`.
-        if (typeFact(base.type, 'imaginary') === true && expIsInteger) {
+        if (isSubtype(base.type, 'imaginary') && expIsInteger) {
           if (operandParityIsEven(exp) === true) return 'real';
           if (operandParityIsOdd(exp) === true) return 'imaginary';
           return 'complex';
@@ -4367,7 +4375,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (
           isExtendedRealOperand(base) &&
           positiveSign(baseSgn) === true &&
-          typeFact(exp.type, 'complex') === true
+          isSubtype(exp.type, 'complex')
         )
           return 'complex';
         return 'number';
@@ -5059,7 +5067,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // extended-real arm below needs that distinction: `√(+∞) = +∞`, so a
         // `finite_*` claim over a type that spells out `+oo | -oo`
         // would be a lie.
-        const finiteOperand = typeFact(x.type, 'complex') === true;
+        const finiteOperand = isSubtype(x.type, 'complex');
         if (isExtendedRealOperand(x)) {
           // √x of a provably non-negative real is real; otherwise the value
           // may be a finite pure-imaginary (`√−2 = 1.414…i`), so an
@@ -5589,9 +5597,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Integer operands → a positive integer; polynomial operands → a
       // (monic) polynomial whose type and sign aren't known statically.
       type: (ops) =>
-        ops.every((x) => typeFact(x.type, 'integer') === true)
-          ? 'integer'
-          : 'number',
+        ops.every((x) => isSubtype(x.type, 'integer')) ? 'integer' : 'number',
       // gcd ≥ 0, and positive iff some argument is nonzero (gcd(0,…,0) = 0).
       sgn: (ops) => {
         if (!ops.every((x) => x.isInteger)) return undefined;
@@ -5625,9 +5631,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // a (non-negative) real via the tolerant float LCM.
       signature: '(any*) -> number',
       type: (ops) =>
-        ops.every((x) => typeFact(x.type, 'integer') === true)
-          ? 'integer'
-          : 'number',
+        ops.every((x) => isSubtype(x.type, 'integer')) ? 'integer' : 'number',
       // lcm ≥ 0; zero as soon as ANY argument is zero (lcm(0, n) = 0), and
       // positive only when every argument is provably nonzero.
       sgn: (ops) => {
@@ -6012,8 +6016,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const coords = [...ca, ...cb];
           if (
             !coords.every(
-              (c) =>
-                c.facts.finite === true || typeFact(c.type, 'complex') === true
+              (c) => c.facts.finite === true || isSubtype(c.type, 'complex')
             )
           )
             return 'number';

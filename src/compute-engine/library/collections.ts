@@ -1943,7 +1943,7 @@ function isIndexSpanD(ops: ReadonlyArray<OperandDescriptor>): boolean {
   if (ops.length === 0 || ops.length > 3) return false;
 
   const literal = (op: OperandDescriptor | undefined): number | null => {
-    if (op === undefined || typeFact(op.type, 'integer') !== true) return null;
+    if (op === undefined || !isSubtype(op.type, 'integer')) return null;
     const v = descriptorLiteralValue(op);
     if (v === undefined) return null;
     return Number.isInteger(v) ? v : null;
@@ -4297,7 +4297,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // integer), and a finite real iff every one of them is real. An operand
       // that could be complex or is not yet known — a symbolic step declared
       // `number` — keeps the wide `number`.
-      if (elementOps.every((op) => typeFact(op.type, 'integer') === true))
+      if (elementOps.every((op) => isSubtype(op.type, 'integer')))
         return parseType('indexed_collection<integer>');
       if (elementOps.every((op) => isSubtype(op.type, 'real')))
         return parseType('indexed_collection<real>');
@@ -7620,7 +7620,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (
             ops.length === 2 &&
             key !== undefined &&
-            typeFact(key.type, 'integer') === true
+            isSubtype(key.type, 'integer')
           ) {
             const n = t.elements.length;
             // The literal's handler-visible value. An exact integer no machine
@@ -7660,7 +7660,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else if (t.kind === 'tuple') {
           const n = t.elements.length;
           const slots = widen(...t.elements.map((x) => x.type)) as Type;
-          if (key !== undefined && typeFact(key.type, 'integer') === true) {
+          if (key !== undefined && isSubtype(key.type, 'integer')) {
             const raw = descriptorLiteralValue(key);
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;

@@ -25,6 +25,7 @@ import {
 } from './type-handlers.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { signOfType } from '../../common/type/utils.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import {
@@ -384,7 +385,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (
           ops.every(
             (x) =>
-              typeFact(x.type, EXTENDED_REAL_TYPE) === true &&
+              isSubtype(x.type, EXTENDED_REAL_TYPE) &&
               nonNegativeSign(x.facts.sgn) === true
           )
         )
@@ -491,7 +492,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           z !== undefined &&
           operandLiteralValue(z) === 1 &&
           s.structureOf?.()?.kind === 'number' &&
-          typeFact(s.type, 'real') === true &&
+          isSubtype(s.type, 'real') &&
           (intervalOfType(s.type)?.hi ?? Infinity) <= 1
         )
           return 'number';
@@ -771,7 +772,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // EXTENDED realness: `li(+∞) = +∞` is on the half-line the claim
         // covers, and a `+oo` argument does not match the bare (finite)
         // name `real`.
-        if (typeFact(t, EXTENDED_REAL_TYPE) !== true) return 'number';
+        if (!isSubtype(t, EXTENDED_REAL_TYPE)) return 'number';
         const scalar = x.facts.collection === false && t === x.type;
         const sgn = scalar ? x.facts.sgn : signOfType(t);
         return nonNegativeSign(sgn) === true ? EXTENDED_REAL_TYPE : 'number';

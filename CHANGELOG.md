@@ -1,3 +1,36 @@
+## [Unreleased]
+
+### Improvements
+
+- **Symbolic evaluation is faster: 25–45 % less time per call than 0.124.0
+  across simplification, integration, solving and plain construction of
+  expressions with exact literals.** Between 0.118.2 and 0.122.0 the symbolic
+  paths had slowed by 1.7–2.8× while numeric evaluation stayed flat; about two
+  thirds of that is recovered here, with identical results. Three causes were
+  found by profiling the releases side by side. (1) Reading the type of an
+  exact literal such as `√6` ran a square root at the working precision — once
+  to decide whether the value is machine-representable (a radical never is, so
+  the result was unused) and once more to build the two-digit enclosure
+  `real<2.4..2.5>`; a literal is boxed afresh each time an expression is built,
+  so the root ran on every construction. The exactness test no longer touches
+  the bignum projection, and the enclosure is derived from the machine value in
+  double arithmetic. (2) The same directed decimal rounding coarsened every
+  bound of every derived range through the arbitrary-precision decimal type; a
+  double-arithmetic routine now does it, and it gives the same double as the
+  decimal route on every finite normal input (checked on 2.7 million calls,
+  grid points and their neighbours included). (3) The type handlers asked
+  "is this operand provably NaN?" and "is it finite?" through a facts helper
+  that also computed the collection facts (two disjointness proofs) for every
+  operand of every derivation, and about a hundred `typeFact(…) === true`
+  probes paid for a disjointness proof whose answer they never read; the facts
+  are now computed one at a time, and a `true`-only probe is a subtype test.
+  Measured on the same machine, one warm process per build, median of 50
+  calls: boxing `√6x + √2x` 147 → 79 µs, simplifying it 1.53 → 0.96 ms,
+  `√(3+2√2)` 360 → 225 µs, `∫1/(x³+1)dx` 4.7 → 3.1 ms, solving `x⁴+x²−1=0`
+  8.5 → 6.0 ms, `∫₁² 1/x dx` 301 → 242 µs. Against 0.118.2 a gap of 1.2–1.5×
+  remains, spread over the type derivation of intermediate nodes (recorded in
+  `ROADMAP.md`, entry P1).
+
 ## 0.124.0 _2026-09-05_
 
 ### Breaking Changes

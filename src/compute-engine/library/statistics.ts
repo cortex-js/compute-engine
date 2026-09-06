@@ -85,6 +85,7 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { isEmptyType, isSubtype } from '../../common/type/subtype.js';
 import {
   bignumPreferred,
   withDrawRollback,
@@ -290,9 +291,9 @@ function pairedStatisticType(
   const [xs, ys] = ops;
   if (xs === undefined) return undefined;
   if (ys === undefined)
-    return typeFact(xs.type, FINITE_REAL_PAIRS) === true ? result : undefined;
-  return typeFact(xs.type, FINITE_REAL_DATA) === true &&
-    typeFact(ys.type, FINITE_REAL_DATA) === true
+    return isSubtype(xs.type, FINITE_REAL_PAIRS) ? result : undefined;
+  return isSubtype(xs.type, FINITE_REAL_DATA) &&
+    isSubtype(ys.type, FINITE_REAL_DATA)
     ? result
     : undefined;
 }
@@ -320,11 +321,17 @@ const CORRELATION_RANGE = parseType('real<-1..1>')!;
  * costs sharpness rather than soundness.
  */
 function provablyNaNOperand(d: OperandDescriptor): boolean {
-  if (typeFact(d.type, 'nan') === true) return true;
+  // Fast path: an operand whose type is below `complex` is a finite number,
+  // so it is not NaN — one subtype test that answers for nearly every
+  // operand. The empty type is excluded: it is below every type, and the
+  // general path answers `true` for it.
+  const t = d.type;
+  if (!isEmptyType(t) && isSubtype(t, 'complex')) return false;
+  if (isSubtype(t, 'nan')) return true;
   return (
     d.facts.finite === false &&
     d.facts.sgn === 'unsigned' &&
-    typeFact(d.type, 'infinity') !== true
+    !isSubtype(d.type, 'infinity')
   );
 }
 
@@ -447,11 +454,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!x || provablyNaNOperand(x)) return undefined;
         if (
           x.structureOf?.()?.kind === 'number' &&
-          typeFact(x.type, 'infinity') === true
+          isSubtype(x.type, 'infinity')
         )
           return 'nan';
         if (x.facts.finite === false) return 'number';
-        if (typeFact(x.type, EXTENDED_REAL_TYPE) !== true) return 'number';
+        if (!isSubtype(x.type, EXTENDED_REAL_TYPE)) return 'number';
         // A literal's handler-visible value classifies exactly — and it is
         // never a rounded double, so it cannot put `1 − 10⁻³⁰` at a pole
         // (`operandLiteralValue` is the channel that survives when the

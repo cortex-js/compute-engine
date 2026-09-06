@@ -3551,16 +3551,78 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 ### Symbolic-evaluation performance
 
-#### P-BOX-2. Structural cost of generic boxing (noted 2026-08-10)
+#### P1. Symbolic evaluation still 1.2–1.5× slower than 0.118.2 after the 2026-09-05 fix (OPEN, perf — residual)
 
-Not a regression — an observation left by the (closed) P-BOX investigation,
-recorded in case a "make boxing 2× faster" initiative is ever wanted: in
-high-resolution profiles of the box microloop, `isSubtype` accounts for ~12 % of
-box time and GC for ~8 %, and both shares are unchanged since at least 0.100.1.
-Type-check call volume and allocation pressure are the structural levers;
-everything else in the profile is a diffuse 1–2 % tail. (The P-BOX regression
-itself — R-D5 display-cache interaction and uncached resolver-aware `parseType`
-— was fixed 2026-08-10; see the CHANGELOG.)
+Found while regenerating the CHANGELOG benchmark tables for 0.124.0: against
+the same Mathematica baseline, the symbolic ratios of the current build were
+about half of those published with 0.116.0, while the 200-digit numeric rows
+were unchanged. Timing each published bundle and the current build in ONE
+warm process (`benchmarks/runners/run_ce_rubi.mjs` with `CE_PUBLISHED_BUNDLE`
+pointed at each release; the bundles for 0.116.0 through 0.123.2 are
+provisioned under `benchmarks/.competitors/`) showed the slowdown accumulated
+in steps at 0.119.0, 0.120.0, 0.121.0 and 0.122.0 — 1.7–2.8× in total on
+simplification, integration, definite integrals and solving.
+
+**Fixed (2026-09-05, unreleased; the CHANGELOG entry describes it):** three
+causes, found with CPU profiles of unminified bundles of the release tags
+diffed function by function. (1) `BoxedNumber._computeLiteralType` read
+`bignumRe` — a working-precision square root for a radical — on every fresh
+exact literal, twice (exactness test, enclosure); the exactness test no longer
+reads it and `literalEnclosureType` works from the double `re`. (2) The
+directed decimal rounding of every derived range bound (`finalizeInterval`)
+and of the enclosure ran through `BigDecimal`; `roundSignificantToward`
+(`numerics/interval-arithmetic.ts`) does it in double arithmetic, bit-identical
+to the decimal route (pinned by
+`test/compute-engine/round-significant-toward.test.ts`). (3) `factsFromType`
+computed the collection facts (two `provablyDisjoint` proofs) whenever a
+handler asked only for finiteness, and the `typeFact(…) === true` probes across
+the library paid a `provablyDisjoint` on their `false` arm for an answer they
+never read; the facts are per-fact now and the probes are `isSubtype` tests.
+Plus cheap first checks in `provablyNaNOperand`, `isExtendedRealOperand`,
+`isTensorOperand`, `isNumericTuple` and `isTuple`.
+
+**What remains** (µs per call, one warm process per build, interleaved runs,
+median of 50; box load 1.5–2.5):
+
+| Case | 0.118.2 | 0.124.0 | fixed | fixed ÷ 0.118.2 |
+| --- | --: | --: | --: | --: |
+| box `√6x + √2x` | 60 | 147 | 79 | 1.32 |
+| simplify `√6x + √2x` | 716 | 1526 | 957 | 1.34 |
+| simplify `√(3+2√2)` | 194 | 360 | 225 | 1.16 |
+| solve `x⁴+x²−1=0` | 4940 | 8540 | 5950 | 1.20 |
+| `∫1/(x³+1)dx` | 2380 | 4740 | 3120 | 1.31 |
+| `∫₁² 1/x dx` | 163 | 301 | 242 | 1.48 |
+
+The residual is diffuse — no single function above 3 % of a call. Per-function
+self-time diffs of the fixed build against 0.118.2 (simplify case, µs per
+call) name: garbage collection +18, `isSubtype` +15, the memoized type
+derivation of function nodes (`type`/`compute`/`cachedValue`) +12,
+`structureOfExpression` +8, `addTypeOnTypes` with `foldIntervalsOfTypes` /
+`finalizeInterval` +8, `get finite` +5, `sortProductOperands` +4, `isSame`
++3. Two structural sources behind those numbers:
+
+- `isTuple` / `isNumericTuple` read `.type` of every operand in the `Add` and
+  `Multiply` canonicalization, and on a function node that forces the full
+  handler derivation (descriptor per operand, facts, interval fold) — about a
+  quarter of a simplify call is spent inside `_computeLiteralType` and
+  handler `compute` reached this way. A structural pre-check (operator is a
+  known scalar head, or the operands are all scalar-typed) before the type
+  read would skip most derivations; the number-literal pre-check landed with
+  the fix, the function-node one did not.
+- Each derivation allocates an `ExpressionOperandDescriptor` and its facts
+  object per operand, a structure view per `structureOf()` call, an interval
+  per fold and a fresh literal type object per fresh literal — the GC share
+  doubled from 0.118.2. A per-value literal-type cache (the same rational or
+  radical value boxes to the same type object) and a descriptor pool would
+  cut it.
+
+Reproduce a measurement with `CE_PUBLISHED_BUNDLE=<bundle to compare> node
+benchmarks/runners/run_ce_rubi.mjs`: it times the published bundle and the
+current build (`dist/esm-min/compute-engine.js`, so build first) on the whole
+case set in one warm process — one shared engine per build, a warm-up pass,
+then the median of up to 50 timed calls per case — and prints one JSON line
+per (engine, case); compare the `ce-pub` and `ce-current` lines of a case.
+Take the box lock: the numbers are meaningless under load.
 
 #### P0. `.N()` over nested user-function applications is exponential (filed 2026-07-26)
 

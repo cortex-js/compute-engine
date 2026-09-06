@@ -34,24 +34,28 @@ import {
  * Design: `docs/plans/2026-08-22-type-handlers-on-types.md` §5.1–§5.2.
  */
 
-/** The facts a TYPE alone proves, shared by both constructors. */
-function factsFromType(t: Type): {
-  finite: Tri;
-  collection: Tri;
-  indexed: Tri;
-  finiteCollection: Tri;
-  shape: readonly number[] | undefined;
-} {
+// The facts a TYPE alone proves, shared by both constructors. Each fact is
+// its own function so that a descriptor pays only for the fact a handler
+// reads: the finiteness fact is one to three subtype tests, while each
+// collection fact can need a disjointness proof, an order of magnitude more
+// work — and the arithmetic handlers ask about finiteness on every operand of
+// every derivation, so computing the collection facts alongside it was one of
+// the causes of the symbolic slowdown recorded in `ROADMAP.md` (entry P1).
+
+/** Finite: `true` below `complex`, `false` below `infinity` or `nan`. */
+function finiteFromType(t: Type): Tri {
   // `infinity` is any value of infinite magnitude — the signed pair
   // `+oo | -oo` is one of its subtypes, so testing it covers `±∞`
   // as well as `~oo` — and `nan` is the NaN singleton, which is disjoint
   // from `infinity` and needs its own arm.
-  const finite: Tri = isSubtype(t, 'complex')
+  return isSubtype(t, 'complex')
     ? true
     : isSubtype(t, 'infinity') || isSubtype(t, 'nan')
       ? false
       : undefined;
+}
 
+function collectionFromType(t: Type): Tri {
   // Shape question, not capability: a valueless symbol declared
   // `list<integer>` IS a collection even though it cannot be enumerated
   // yet, so the subtype test against the absence-admitting `collection<any>`
@@ -59,22 +63,25 @@ function factsFromType(t: Type): {
   // absence-carrying element types). Top types (`unknown`, `any`, `value`)
   // and `broadcastable<T>` are neither subtypes of nor provably disjoint
   // from it, and answer `undefined` — "possibly a collection".
-  const collection: Tri = isSubtype(t, COLLECTION_SHAPE_TYPE)
+  return isSubtype(t, COLLECTION_SHAPE_TYPE)
     ? true
     : provablyDisjoint(t, COLLECTION_SHAPE_TYPE)
       ? false
       : undefined;
+}
 
-  const indexed: Tri = isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
+function indexedFromType(t: Type): Tri {
+  return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
     ? true
     : provablyDisjoint(t, INDEXED_COLLECTION_SHAPE_TYPE)
       ? false
       : undefined;
+}
 
-  // A dimensioned list type (`list<integer^2x3>`) is the one static shape a
-  // type can carry. Dimensions may hold placeholders for unknown extents, so
-  // only an all-concrete dimension list counts.
-  let shape: readonly number[] | undefined;
+/** A dimensioned list type (`list<integer^2x3>`) is the one static shape a
+ * type can carry. Dimensions may hold placeholders for unknown extents, so
+ * only an all-concrete dimension list counts. */
+function shapeFromType(t: Type): readonly number[] | undefined {
   if (
     typeof t === 'object' &&
     t.kind === 'list' &&
@@ -84,12 +91,24 @@ function factsFromType(t: Type): {
       (d) => typeof d === 'number' && Number.isFinite(d) && d >= 0
     )
   )
-    shape = t.dimensions;
+    return t.dimensions;
+  return undefined;
+}
 
+/** Every type-proved fact at once, for the synthetic descriptor
+ * (`describeType`), which has no per-fact laziness. */
+function factsFromType(t: Type): {
+  finite: Tri;
+  collection: Tri;
+  indexed: Tri;
+  finiteCollection: Tri;
+  shape: readonly number[] | undefined;
+} {
+  const shape = shapeFromType(t);
   return {
-    finite,
-    collection,
-    indexed,
+    finite: finiteFromType(t),
+    collection: collectionFromType(t),
+    indexed: indexedFromType(t),
     finiteCollection: shape !== undefined ? true : undefined,
     shape,
   };
@@ -327,6 +346,7 @@ const COLLECTION_COMPUTED = 8;
 const FINITE_COLLECTION_COMPUTED = 16;
 const INDEXED_COMPUTED = 32;
 const ELEMENT_TYPE_COMPUTED = 64;
+const SHAPE_COMPUTED = 128;
 
 /**
  * The facts of a real operand, each computed ON FIRST READ and memoized.
@@ -347,10 +367,13 @@ const ELEMENT_TYPE_COMPUTED = 64;
  * guard's window, where a state write went unreported (a `sgn` read of
  * `Random(Range(1, Sum(…)))` advanced the cache axis through its type
  * derivation). Lazily, a handler pays only for the facts it reads, and reads
- * them inside the guarded window. The facts the TYPE proves are lazy for the
- * same reason of cost: they take six lattice checks (`factsFromType`), and
- * the handlers that read only the type and the structure — the `List` shape
- * analysis — were paying for them on every operand.
+ * them inside the guarded window. The facts the TYPE proves are lazy too,
+ * and each is computed on its own, for the same reason of cost: the
+ * finiteness fact is one to three subtype tests, each collection fact can
+ * need a disjointness proof (an order of magnitude more), and a handler that
+ * reads only finiteness — every arithmetic derivation, on every operand —
+ * must not pay for the collection facts, nor the `List` shape analysis for
+ * any of them.
  */
 class ExpressionOperandFacts implements OperandFacts {
   // ECMAScript private fields, not TypeScript `private`: a `type` handler
@@ -363,7 +386,7 @@ class ExpressionOperandFacts implements OperandFacts {
   // `ExpressionOperandDescriptor.type`), and the facts must not force it.
   readonly #typeOf: () => Type;
   private _computed = 0;
-  private _typeFacts: ReturnType<typeof factsFromType> | undefined;
+  private _shape: readonly number[] | undefined;
   private _finite: Tri;
   private _sgn: Sign | undefined;
   private _closed: Tri;
@@ -375,10 +398,6 @@ class ExpressionOperandFacts implements OperandFacts {
   constructor(op: Expression, typeOf: () => Type) {
     this.#op = op;
     this.#typeOf = typeOf;
-  }
-
-  private typeFacts(): ReturnType<typeof factsFromType> {
-    return (this._typeFacts ??= factsFromType(this.#typeOf()));
   }
 
   get finite(): Tri {
@@ -419,11 +438,11 @@ class ExpressionOperandFacts implements OperandFacts {
   get collection(): Tri {
     if (!(this._computed & COLLECTION_COMPUTED)) {
       this._computed |= COLLECTION_COMPUTED;
-      const tf = this.typeFacts();
+      const collection = collectionFromType(this.#typeOf());
       this._collection =
-        tf.collection === true || this.#op.isCollection === true
+        collection === true || this.#op.isCollection === true
           ? true
-          : tf.collection;
+          : collection;
     }
     return this._collection;
   }
@@ -431,10 +450,10 @@ class ExpressionOperandFacts implements OperandFacts {
   get finiteCollection(): Tri {
     if (!(this._computed & FINITE_COLLECTION_COMPUTED)) {
       this._computed |= FINITE_COLLECTION_COMPUTED;
-      const tf = this.typeFacts();
+      // A type with a static shape names a finite collection.
       this._finiteCollection =
-        tf.finiteCollection !== undefined
-          ? tf.finiteCollection
+        this.shape !== undefined
+          ? true
           : this.collection !== false
             ? this.#op.isFiniteCollection
             : undefined;
@@ -445,17 +464,21 @@ class ExpressionOperandFacts implements OperandFacts {
   get indexed(): Tri {
     if (!(this._computed & INDEXED_COMPUTED)) {
       this._computed |= INDEXED_COMPUTED;
-      const tf = this.typeFacts();
+      const indexed = indexedFromType(this.#typeOf());
       this._indexed =
-        tf.indexed === true || this.#op.isIndexedCollection === true
+        indexed === true || this.#op.isIndexedCollection === true
           ? true
-          : tf.indexed;
+          : indexed;
     }
     return this._indexed;
   }
 
   get shape(): readonly number[] | undefined {
-    return this.typeFacts().shape;
+    if (!(this._computed & SHAPE_COMPUTED)) {
+      this._computed |= SHAPE_COMPUTED;
+      this._shape = shapeFromType(this.#typeOf());
+    }
+    return this._shape;
   }
 
   // The per-instance element type: the operand's own collection handler,
@@ -476,8 +499,8 @@ class ExpressionOperandFacts implements OperandFacts {
   }
 
   private finiteOf(): Tri {
-    const tf = this.typeFacts();
-    if (tf.finite !== undefined) return tf.finite;
+    const finite = finiteFromType(this.#typeOf());
+    if (finite !== undefined) return finite;
     const op = this.#op;
     if (isNumber(op)) return op.isFinite;
     if (isSymbol(op)) {

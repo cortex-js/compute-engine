@@ -1,5 +1,6 @@
 import { Complex } from 'complex-esm';
 import { BigDecimal } from '../../big-decimal/index.js';
+import { roundSignificantToward } from '../numerics/interval-arithmetic.js';
 
 import type {
   MathJsonExpression,
@@ -70,20 +71,6 @@ import {
   hasInfiniteComponent,
   logarithmAtExceptionalPoint,
 } from './logarithm.js';
-
-/** Is the exact rational `r` equal to the double `re`? Exact: the double is
- * decomposed into its dyadic fraction (power-of-two scaling of a double is
- * lossless, and the scaled numerator is a ≤53-bit integer), then
- * cross-multiplied in bigints. */
-function ratioEqualsDouble(r: Rational, re: number): boolean {
-  let num = re;
-  let den = 1n;
-  while (!Number.isInteger(num)) {
-    num *= 2;
-    den *= 2n;
-  }
-  return BigInt(r[0]) * den === BigInt(num) * BigInt(r[1]);
-}
 
 /** Is the exact rational `r` equal to the double `re` under the engine's
  * DECIMAL reading of doubles? A double stands for the decimal number its
@@ -159,36 +146,62 @@ function literalEnclosureType(
   tier: 'integer' | 'rational' | 'real',
   sign: 'positive' | 'negative'
 ): Type | undefined {
-  let d = v.bignumRe;
-  if (d === undefined) {
+  // The enclosure is two significant digits wide behind a relative padding
+  // of 10⁻⁶ (`ENCLOSURE_PADDING`), so the machine projection `re` — within a
+  // few ulps of the value, about 10⁻¹⁶ relative, for every value kind — is
+  // precise enough to derive it, in double arithmetic, with no bignum work
+  // at all. The working-precision projection `bignumRe` derived it before,
+  // and for an exact radical that projection is a square root at working
+  // precision computed on every boxing of the literal (`√6` each time
+  // `√6x + √2x` is built) — one of the causes of the symbolic slowdown
+  // between 0.118.2 and 0.122.0 recorded in `ROADMAP.md` (entry P1). The
+  // bignum projection is still read where the double cannot stand in: a
+  // projection that is not finite (a rational whose numerator and
+  // denominator both overflow a double), zero, or subnormal, where the
+  // bignum value decides whether a sound enclosure exists at all — and there
+  // the decimal route answers exactly as before.
+  //
+  // Soundness of the double route: the padded values `re ∓ pad` are at
+  // least ~10⁻⁶ (relative) clear of the value, their own rounding error is
+  // one ulp (~10⁻¹⁶), and the directed two-digit rounding only ever moves a
+  // bound further out — so neither bound can cross the value, and the
+  // rounded bound is the double nearest to a two-digit decimal, which prints
+  // compactly (`1.1`, not `1.0999999999999999`).
+  let lower: number;
+  let upper: number;
+  const re = v.re;
+  if (Number.isFinite(re) && re !== 0 && Math.abs(re) >= MIN_NORMAL_DOUBLE) {
+    const pad = Math.abs(re) * ENCLOSURE_PADDING;
+    const lo = re - pad;
+    const hi = re + pad;
+    // A padded bound that overflows has no finite enclosure (the largest
+    // doubles).
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return undefined;
+    lower = roundSignificantToward(lo, ENCLOSURE_DIGITS, 'floor');
+    upper = roundSignificantToward(hi, ENCLOSURE_DIGITS, 'ceiling');
+  } else {
+    const d = v.bignumRe;
     // Defensive, currently unreachable: every NumericValue kind that can
     // reach the non-machine-exact fallback defines `bignumRe` (Exact and
     // Big values always do; a Machine value without one is always
-    // machine-exact and takes the exact branch instead). If a future value
-    // kind lands here, its `re` projection is still enclosed soundly — the
-    // fixed padding is applied unconditionally and covers a half-ulp
-    // double error.
-    const re = v.re;
-    if (!Number.isFinite(re) || re === 0) return undefined;
-    d = new BigDecimal(re);
+    // machine-exact and takes the exact branch instead).
+    if (d === undefined) return undefined;
+    if (!d.isFinite() || d.isZero()) return undefined;
+    const pad = d.abs().mul(ENCLOSURE_PADDING);
+    const loDec = d.sub(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'floor');
+    const hiDec = d.add(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'ceiling');
+    // Project each decimal bound onto a double. `toNumber()` rounds to
+    // nearest, which can land INSIDE the interval — but for a NORMAL double
+    // at most ~10⁻¹⁶ relative away, while the padding keeps each decimal
+    // bound at least ~10⁻⁶ (relative) clear of the value (and the directed
+    // two-digit rounding only ever moves a bound further out), so the
+    // projected double can never cross the value. Skipping an outward
+    // ulp-step here is what keeps the bound's shortest decimal
+    // representation compact: the double nearest to `9.9e29` prints as
+    // `9.9e+29`, its ulp-neighbor as `9.899999999999999e+29`.
+    lower = loDec.toNumber();
+    upper = hiDec.toNumber();
   }
-  if (!d.isFinite() || d.isZero()) return undefined;
-
-  const pad = d.abs().mul(ENCLOSURE_PADDING);
-  const loDec = d.sub(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'floor');
-  const hiDec = d.add(pad).toPrecisionToward(ENCLOSURE_DIGITS, 'ceiling');
-
-  // Project each decimal bound onto a double. `toNumber()` rounds to
-  // nearest, which can land INSIDE the interval — but for a NORMAL double
-  // at most ~10⁻¹⁶ relative away, while the padding keeps each decimal
-  // bound at least ~10⁻⁶ (relative) clear of the value (and the directed
-  // two-digit rounding only ever moves a bound further out), so the
-  // projected double can never cross the value. Skipping an outward
-  // ulp-step here is what keeps the bound's shortest decimal
-  // representation compact: the double nearest to `9.9e29` prints as
-  // `9.9e+29`, its ulp-neighbor as `9.899999999999999e+29`.
-  const lower = loDec.toNumber();
-  const upper = hiDec.toNumber();
 
   // Both bounds must be NORMAL doubles: an overflow to ±∞ has no finite
   // bound, and a subnormal projection has ABSOLUTE (not relative) rounding
@@ -856,23 +869,43 @@ export class BoxedNumber
     const re = v.re;
     let exact = false;
     if (Number.isFinite(re)) {
-      const big = v.bignumRe;
-      if (big !== undefined) {
-        const ex = v.asExact;
-        if (ex !== undefined) {
-          // An EXACT value (a rational, possibly with a radical): decide
-          // exactness with the precision-independent rational comparison.
-          // Comparing through `bignumRe` here was a soundness hole: it is
-          // a WORKING-PRECISION projection, so a value within 10⁻ᴾ of a
-          // double compared "equal" to it — at default precision
-          // `(10³⁰−1)/10³⁰` projected to 1.0 and the literal claimed the
-          // VALUE type `1` for a value provably ≠ 1 (the artanh-pole
-          // class this test exists to prevent).
-          const ev = ex as ExactNumericValue;
-          exact =
-            Math.abs(re) < 2 ** 53 &&
-            ev.radical === 1 &&
-            rationalEqualsDecimal(ev.rational, re);
+      const ex = v.asExact;
+      if (ex !== undefined) {
+        // An EXACT value (a rational, possibly with a radical). A radical
+        // is never held by a double. A rational is compared with the
+        // precision-independent decimal comparison. Comparing through
+        // `bignumRe` here was a soundness hole: it is a WORKING-PRECISION
+        // projection, so a value within 10⁻ᴾ of a double compared "equal"
+        // to it — at default precision `(10³⁰−1)/10³⁰` projected to 1.0
+        // and the literal claimed the VALUE type `1` for a value provably
+        // ≠ 1 (the artanh-pole class this test exists to prevent).
+        //
+        // The bignum projection is not read on this branch in the common
+        // case. For a radical it is a square root at working precision, and
+        // a literal is boxed afresh on every construction (`√6` each time
+        // `√6x + √2x` is built), so that root ran on every boxing of every
+        // exact literal and the comparison never used it. One comparator
+        // serves every value kind: the machine and bignum kinds expose an
+        // exact form only for an INTEGER, and on an integer the decimal
+        // reading of a double agrees with its dyadic value.
+        //
+        // Beyond ±2⁵³ the comparison is refused for a value that has a
+        // bignum projection (an exact or bignum kind, whose `re` is a
+        // ROUNDING: `1e40` compares "equal" to `10⁴⁰`, a value the double
+        // does not hold), while a machine-backed integer IS its double and
+        // stays exact at any magnitude — the projection is read only there,
+        // to tell the two apart, which is rare.
+        const ev = ex as ExactNumericValue;
+        exact =
+          ev.radical === 1 &&
+          (Math.abs(re) < 2 ** 53
+            ? rationalEqualsDecimal(ev.rational, re)
+            : v.bignumRe === undefined);
+      } else {
+        const big = v.bignumRe;
+        if (big === undefined) {
+          // A machine-backed non-integer float: `re` IS the stored value.
+          exact = true;
         } else {
           // An INEXACT bignum: the stored decimal IS the value, and `eq`
           // compares it exactly against the double read by its printed
@@ -880,15 +913,6 @@ export class BoxedNumber
           // double can still compare "equal" to a decimal it does not
           // represent (`1e40` vs `10⁴⁰`), so the whole span is refused.
           exact = Math.abs(re) < 2 ** 53 && big.eq(re);
-        }
-      } else {
-        const ex = v.asExact;
-        if (ex === undefined) {
-          // A machine-backed non-integer float: `re` IS the stored value.
-          exact = true;
-        } else {
-          const ev = ex as ExactNumericValue;
-          exact = ev.radical === 1 && ratioEqualsDouble(ev.rational, re);
         }
       }
     }

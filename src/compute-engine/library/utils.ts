@@ -18,7 +18,6 @@ import { numericValueOf } from '../boxed-expression/numerics.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
-import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -139,15 +138,14 @@ export function euclideanNormType(
   components: ReadonlyArray<OperandDescriptor>
 ): string {
   if (components.length === 0) return 'number';
-  if (!components.every((c) => typeFact(c.type, 'number') === true))
-    return 'number';
+  if (!components.every((c) => isSubtype(c.type, 'number'))) return 'number';
   if (
     components.every(
-      (c) => c.facts.finite === true || typeFact(c.type, 'complex') === true
+      (c) => c.facts.finite === true || isSubtype(c.type, 'complex')
     )
   )
     return 'real';
-  if (components.every((c) => typeFact(c.type, EXTENDED_REAL_TYPE) === true))
+  if (components.every((c) => isSubtype(c.type, EXTENDED_REAL_TYPE)))
     return 'real | +oo';
   return 'number';
 }

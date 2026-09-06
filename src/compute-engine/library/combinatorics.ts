@@ -10,7 +10,7 @@ import type {
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
-import { typeFact } from '../boxed-expression/operand-descriptor.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { negativeSign, nonNegativeSign } from '../boxed-expression/sgn.js';
 import { operandNonFiniteNumber, operandSgn } from './type-handlers.js';
 import { apply2, shouldNumericize } from '../boxed-expression/apply.js';
@@ -288,23 +288,14 @@ function binomialType(
   // can derive. (What that buys today is recorded on `specialFunctionType`
   // in `library/arithmetic.ts`: for a head whose declared result is the wide
   // `number`, the derived claim stays `number`.)
-  if (
-    (n && typeFact(n.type, 'nan') === true) ||
-    (k && typeFact(k.type, 'nan') === true)
-  )
+  if ((n && isSubtype(n.type, 'nan')) || (k && isSubtype(k.type, 'nan')))
     return undefined;
   if (!n || !k) return 'number';
   if (operandNonFiniteNumber(n) || operandNonFiniteNumber(k)) return 'number';
-  if (
-    typeFact(n.type, 'integer') === true &&
-    typeFact(k.type, 'integer') === true
-  )
+  if (isSubtype(n.type, 'integer') && isSubtype(k.type, 'integer'))
     return 'integer';
-  if (typeFact(n.type, 'real') === true && typeFact(k.type, 'real') === true) {
-    if (
-      typeFact(n.type, 'integer') === true &&
-      negativeSign(operandSgn(n)) === true
-    )
+  if (isSubtype(n.type, 'real') && isSubtype(k.type, 'real')) {
+    if (isSubtype(n.type, 'integer') && negativeSign(operandSgn(n)) === true)
       return 'number';
     return 'real';
   }
@@ -696,21 +687,18 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       type: ([a, k]) => {
         // A provably-NaN operand declines, as `binomialType` does and for the
         // same reason: a handler answer is never widened.
-        if (
-          (a && typeFact(a.type, 'nan') === true) ||
-          (k && typeFact(k.type, 'nan') === true)
-        )
+        if ((a && isSubtype(a.type, 'nan')) || (k && isSubtype(k.type, 'nan')))
           return undefined;
         if (!a || !k) return 'number';
         if (operandNonFiniteNumber(a) || operandNonFiniteNumber(k))
           return 'number';
         if (
-          typeFact(k.type, 'integer') === true &&
+          isSubtype(k.type, 'integer') &&
           nonNegativeSign(operandSgn(k)) === true
         ) {
-          if (typeFact(a.type, 'integer') === true) return 'integer';
-          if (typeFact(a.type, 'rational') === true) return 'rational';
-          if (typeFact(a.type, 'real') === true) return 'real';
+          if (isSubtype(a.type, 'integer')) return 'integer';
+          if (isSubtype(a.type, 'rational')) return 'rational';
+          if (isSubtype(a.type, 'real')) return 'real';
         }
         return 'number';
       },

@@ -75,6 +75,90 @@ const DERIVED_BOUND_DIGITS = 4;
  * which imports this constant). */
 export const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
 
+/**
+ * `x` rounded OUTWARD (away from the value, on the side `direction` names)
+ * to `digits` significant decimal digits, in double arithmetic. The answer
+ * is the same one the exact decimal route gives —
+ * `new BigDecimal(x).toPrecisionToward(digits, direction).toNumber()`, where
+ * `x` is read as its shortest decimal representation, so `1.2` IS the grid
+ * point `1.2` — at about 70 ns instead of several µs, and it is called on
+ * every bound of every derived range and on every fresh exact literal
+ * (`ROADMAP.md`, entry P1).
+ *
+ * How: the grid is the set of decimals `r · 10^k` with `r` an integer of
+ * `digits` digits. The decade `k` is found from `log10` and then settled
+ * exactly by comparing `|x|` with the decade boundaries `10^(k+digits-1)`
+ * and `10^(k+digits)` (`log10` alone can be off by one next to a power of
+ * ten: `log10(9.999999999999999e-6)` is exactly `-5`). The mantissa
+ * `|x| / 10^k` is floored or ceiled away from the value, then corrected by
+ * one step: it carries the rounding error of one division (`1.2 / 0.1` is
+ * `11.999999999999998`), so the candidate is checked against its neighbour
+ * by scaling both back and comparing with `|x|` — the largest grid value
+ * not above `|x|` for a floor, the smallest not below it for a ceiling.
+ * Scaling back multiplies or divides by a power of ten that is exactly
+ * representable (|k| ≤ 22), a single correctly rounded operation, so a grid
+ * value scaled back is the double nearest the decimal it names — which is
+ * why comparing doubles decides decimal order, and why the result prints
+ * compactly (`1.1`, `9.9e+29`). Beyond that exponent range a decimal
+ * literal is parsed, which is also correctly rounded.
+ *
+ * Two classes of input keep the decimal route, both rare, so the cost does
+ * not matter and the answer stays the same. An integer of magnitude 2⁵³ or
+ * more: there `BigDecimal` reads the exact binary integer (`4.73e21` is
+ * `4729999999999999475712`), not the short decimal the double prints as,
+ * and the two readings floor differently. And a subnormal (`|x|` below
+ * `MIN_NORMAL_DOUBLE`): the scaling by a power of ten loses precision
+ * there, and an outward rounding can carry such a value back into the
+ * normal range (`-2.225073858507201e-308` floors to `-2.226e-308`), which a
+ * caller then keeps as a finite bound.
+ *
+ * Checked against the decimal route on 2.7·10⁶ calls for 2 and 4 digits:
+ * random values across the exponent range, every grid point and its
+ * neighbours at ±1 and ±2 ulp, sums and products of grid points, the
+ * powers of ten, both signs — identical on every call.
+ *
+ * A non-finite or zero `x` is returned unchanged; the callers never pass
+ * one.
+ */
+export function roundSignificantToward(
+  x: number,
+  digits: number,
+  direction: 'floor' | 'ceiling'
+): number {
+  const ax = Math.abs(x);
+  if (!Number.isFinite(ax) || ax === 0) return x;
+  if (ax >= 2 ** 53 || ax < MIN_NORMAL_DOUBLE)
+    return new BigDecimal(x).toPrecisionToward(digits, direction).toNumber();
+  const low = 10 ** (digits - 1);
+  const high = 10 ** digits;
+  let k = Math.floor(Math.log10(ax)) - (digits - 1);
+  while (ax < gridValue(low, k)) k -= 1;
+  while (ax >= gridValue(high, k)) k += 1;
+  const m = ax / 10 ** k;
+  // Outward is away from zero when flooring a negative value or ceiling a
+  // positive one.
+  let r: number;
+  if (x < 0 === (direction === 'floor')) {
+    // The smallest grid value not below |x|.
+    r = Math.ceil(m);
+    if (gridValue(r - 1, k) >= ax) r -= 1;
+    else if (gridValue(r, k) < ax) r += 1;
+  } else {
+    // The largest grid value not above |x|.
+    r = Math.floor(m);
+    if (gridValue(r + 1, k) <= ax) r += 1;
+    else if (gridValue(r, k) > ax) r -= 1;
+  }
+  const magnitude = gridValue(r, k);
+  return x < 0 ? -magnitude : magnitude;
+}
+
+/** The double nearest the decimal `r · 10^k` (see `roundSignificantToward`). */
+function gridValue(r: number, k: number): number {
+  if (k >= 0) return k <= 22 ? r * 10 ** k : Number(`${r}e${k}`);
+  return -k <= 22 ? r / 10 ** -k : Number(`${r}e${k}`);
+}
+
 /** The numeric primitives whose values are totally ordered on the
  * extended real line and exclude NaN — the only tiers an interval can
  * describe, and the only tiers a computed range may attach to.
@@ -741,10 +825,12 @@ export function finalizeInterval(iv: Interval): Interval {
   // closed; an untouched bound keeps its flag (§3.5 demotion rule).
   let loOpen = iv.loOpen === true;
   let hiOpen = iv.hiOpen === true;
+  // The coarsening is a directed decimal rounding of each bound; it runs in
+  // double arithmetic (`roundSignificantToward`) and answers exactly what the
+  // `BigDecimal` route it replaced answered, at a fraction of the cost — it
+  // runs on every bound of every derived range.
   if (Number.isFinite(lo) && lo !== 0) {
-    const c = new BigDecimal(lo)
-      .toPrecisionToward(DERIVED_BOUND_DIGITS, 'floor')
-      .toNumber();
+    const c = roundSignificantToward(lo, DERIVED_BOUND_DIGITS, 'floor');
     if (c !== lo) loOpen = false;
     lo = c;
     if (!Number.isFinite(lo) || Math.abs(lo) < MIN_NORMAL_DOUBLE) {
@@ -753,9 +839,7 @@ export function finalizeInterval(iv: Interval): Interval {
     }
   } else if (lo === 0) lo = 0; // normalize -0
   if (Number.isFinite(hi) && hi !== 0) {
-    const c = new BigDecimal(hi)
-      .toPrecisionToward(DERIVED_BOUND_DIGITS, 'ceiling')
-      .toNumber();
+    const c = roundSignificantToward(hi, DERIVED_BOUND_DIGITS, 'ceiling');
     if (c !== hi) hiOpen = false;
     hi = c;
     if (!Number.isFinite(hi) || Math.abs(hi) < MIN_NORMAL_DOUBLE) {

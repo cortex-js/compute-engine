@@ -26,7 +26,6 @@ import {
   signFromBounds,
 } from '../boxed-expression/constraint-subject.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
-import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import type { Type } from '../../common/type/types.js';
 import {
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -135,7 +134,7 @@ function provablyNaN(d: OperandDescriptor): boolean {
   return (
     d.facts.finite === false &&
     d.facts.sgn === 'unsigned' &&
-    typeFact(d.type, 'infinity') !== true
+    !isSubtype(d.type, 'infinity')
   );
 }
 

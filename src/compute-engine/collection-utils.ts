@@ -624,6 +624,11 @@ const TUPLE_OPERATORS = new Set(['Tuple', 'Pair', 'Triple', 'Single']);
  * tuple type (e.g. `z: tuple<number, number>`).
  */
 export function isNumericTuple(expr: Expression): boolean {
+  // A number literal is never a tuple, and its `.type` is the literal type,
+  // synthesized on first read (`BoxedNumber._literalType`) — a cost the
+  // `Add`/`Multiply` canonicalization, which asks this of every operand,
+  // need not pay to learn the answer.
+  if (isNumber(expr)) return false;
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
   const t = resolveTypeAlias(expr.type.type);
@@ -1794,6 +1799,9 @@ export function typeMayCarryQuotientShape(t: Type): boolean {
  * body's arithmetic would broadcast the point into a list.
  */
 export function isTuple(expr: Expression): boolean {
+  // A number literal is never a tuple (see `isNumericTuple` on why the type
+  // is not read for one).
+  if (isNumber(expr)) return false;
   // The bare `tuple` primitive counts: a symbol declared `w: tuple` has no
   // component types to read, but every value it can hold IS a tuple, so a
   // product `2w` must be scaled component-wise and typed as a tuple, never
