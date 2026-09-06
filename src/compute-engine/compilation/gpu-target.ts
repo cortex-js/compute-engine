@@ -727,14 +727,83 @@ function gpuNaN(target?: CompileTarget<Expression>): string {
 }
 
 /**
+ * Are the ELEMENTS of a fixed-length aggregate shader floats?
+ *
+ * `BaseCompiler.vectorComponentCount` reads a width off the OUTER dimension of
+ * a 1-axis `list` type (or a tuple's slot count) and says nothing about what
+ * the elements are. On a shader target that is only half the question: a
+ * `vecN` holds N single floats, so a 3-element list of complex values is three
+ * `vec2` cells and a 3-element list of 2-element lists is a 3×2 block — neither
+ * has a `vec3` reading, or any shader value shape at all. Without this check
+ * the width flowed on and a symbol typed `list<complex^3>` emitted `sin(c)`,
+ * `c + c` and `length(c)`, and one typed `list<boolean^3>` emitted
+ * `max(max(b.x, b.y), b.z)` — source no shader compiler accepts, behind a
+ * reported success. (The `At` lowering asks the same question of its base in
+ * `gpuAtNonScalarElement`; this is that guard on the shape reading itself, so
+ * every consumer of a width gets it.)
+ *
+ * Answers `true` — leaving the width alone — for the three shapes whose
+ * elements this type reading does not decide:
+ *
+ *  - a `List`/`Tuple` LITERAL, whose components are checked where the
+ *    constructor is emitted (`assertGPUScalarComponents`) and whose operands
+ *    routinely carry no element type of their own (a parametric body
+ *    `(x(t), y(t))`);
+ *  - a COMPLEX value, which is `vec2(re, im)` by the complex convention rather
+ *    than a two-element collection;
+ *  - a `Block` local, whose boxed type is `unknown` and whose width was
+ *    inferred from the value bound to it — components that are already shader
+ *    floats.
+ *
+ * A CALLER-declared name (a `compileFunction` parameter, a `compileShader`
+ * `in`/`uniform`) is the one framed case that must still be asked: the frame
+ * stores only a WIDTH, so `bvec3`, `ivec3` and `uvec3` are entered as a plain
+ * 3 and are indistinguishable there from a `vec3`. The declared SPELLING is
+ * the only place their element kind survives, so it is read back here
+ * (`gpuDeclaredTypeOf`) — the same question `gpuAtFramedBaseElements` asks of
+ * an indexed base.
+ *
+ * `unknown` counts as a float here, by the same unknown-as-numeric-parameter
+ * rule `gpuIsVectorComponentType` states — so a `list<unknown^3>` keeps its
+ * `vec3` reading.
+ */
+function gpuHasShaderScalarElements(expr: Expression): boolean {
+  if (isFunction(expr, 'List') || isFunction(expr, 'Tuple')) return true;
+  if (BaseCompiler.isComplexValued(expr)) return true;
+  if (
+    isSymbol(expr) &&
+    BaseCompiler.localShapeFrameOf(expr.symbol) !== undefined
+  ) {
+    const declared = gpuDeclaredTypeOf(expr);
+    // No declared type alongside the frame entry is the `Block`-local case:
+    // the width came from a bound value whose components are shader floats.
+    return declared?.value === undefined || declared.value.element === 'f';
+  }
+  const t = gpuType(expr);
+  if (typeof t === 'string') return true;
+  // Reached only with a `tuple` or 1-axis `list` type — the two type shapes
+  // `aggregateComponentCount` reads a width from once the sources above are
+  // excluded — which is exactly what `gpuDeclaredComponentCount` answers for,
+  // and it answers `undefined` when an element is not a `vecN` slot.
+  return gpuDeclaredComponentCount(t) !== undefined;
+}
+
+/**
  * Number of vector components a value expression occupies on the GPU (2–4),
  * or `undefined` for a scalar. Structural for `Tuple`/`List` literals (the
  * parametric-body shape `(x(t), y(t))` → `vec2`), type-based for typed
  * operands (`tuple<…>`, a 1-axis `list`), and 2 for a complex value (lowered
  * as `vec2(re, im)`).
+ *
+ * THE width reading of this target: a type-sourced width whose elements are
+ * not shader floats has no `vecN` lowering and answers `undefined` here
+ * (`gpuHasShaderScalarElements`), so every consumer treats it as the
+ * shapeless value it is instead of emitting `vecN` source for it.
  */
 function gpuComponentCount(expr: Expression | null): 2 | 3 | 4 | undefined {
-  return BaseCompiler.vectorComponentCount(expr);
+  const n = BaseCompiler.vectorComponentCount(expr);
+  if (n === undefined) return undefined;
+  return gpuHasShaderScalarElements(expr!) ? n : undefined;
 }
 
 /**
@@ -974,7 +1043,7 @@ function gpuSelectionConditionWidth(c: Expression): 2 | 3 | 4 | undefined {
             `has no element-wise reading — the interpreter binds a tuple ` +
             `atomically.`
         );
-      const w = BaseCompiler.vectorComponentCount(op);
+      const w = gpuComponentCount(op);
       if (w === undefined) {
         if (BaseCompiler.isNonScalarShape(op))
           gpuSelectionDecline(
@@ -1022,6 +1091,10 @@ function gpuSelectionConditionWidth(c: Expression): 2 | 3 | 4 | undefined {
   // A complex-valued condition is a scalar-side value (its `vec2` is (re, im),
   // not two cells): left exactly as it is today.
   if (BaseCompiler.isComplexValued(c)) return undefined;
+  // The RAW width, not `gpuComponentCount`: a mask is a `bvecN` / `vec<bool>`,
+  // whose cells are booleans, so the shader-float element test that reading
+  // applies would reject the very shape this slot exists for. The elements are
+  // checked here instead, against `boolean` rather than against a float.
   const w = BaseCompiler.vectorComponentCount(c);
   if (w !== undefined) {
     // A value used DIRECTLY as a boolean-vector condition (e.g. a `vars`-mapped
@@ -1118,7 +1191,7 @@ function gpuSelectionMask(
       );
     const operand = (op: Expression, once: boolean): string => {
       const code = once ? gpuOperandOnce(h, op, compile, target) : compile(op);
-      return BaseCompiler.vectorComponentCount(op) === undefined
+      return gpuComponentCount(op) === undefined
         ? `${fvec}(${code})`
         : code;
     };
@@ -1166,7 +1239,9 @@ function gpuSelectionMask(
   }
 
   // A boolean-vector value used directly as the condition, or a scalar boolean
-  // splat across the selection width.
+  // splat across the selection width. The RAW width again, for the reason
+  // `gpuSelectionConditionWidth` states: this slot holds a `bvecN`, and that
+  // width has already been admitted there as a collection of booleans.
   if (
     !BaseCompiler.isComplexValued(c) &&
     BaseCompiler.vectorComponentCount(c) !== undefined
@@ -1261,7 +1336,7 @@ function compileGPUSelection(
           `vector, and there is no boolean-cell convention. Use numeric arms ` +
           `(e.g. 1 and 0) instead.`
       );
-    const w = BaseCompiler.vectorComponentCount(arm);
+    const w = gpuComponentCount(arm);
     if (w === width) return compile(arm);
     if (w === undefined && !BaseCompiler.isNonScalarShape(arm))
       return `${fvec}(${compile(arm)})`;
@@ -1305,9 +1380,10 @@ function compileGPUSelection(
  *
  * Gated on the operand having a static `vec2`–`vec4` shape — the same
  * activation gate as the element-wise selection lowering
- * (`BaseCompiler.vectorComponentCount`). Anything else (an unknown-length
- * list, a matrix, a 5+-element list) has no shader vector value at all, so it
- * fails closed (D6) rather than emitting source a driver would reject.
+ * (`gpuComponentCount`). Anything else (an unknown-length list, a matrix, a
+ * 5+-element list, or a fixed-length list whose elements are not shader
+ * floats) has no shader vector value at all, so it fails closed (D6) rather
+ * than emitting source a driver would reject.
  *
  * The EMITTED lowering is then checked for componentwise safety: most scalar
  * lowerings are built from genType-polymorphic pieces (`sin(v)`, `-v`,
@@ -1335,7 +1411,7 @@ function compileGPUBroadcastUnary(
         `componentwise shader builtin would treat its real and imaginary ` +
         `parts as two independent elements.`
     );
-  if (BaseCompiler.vectorComponentCount(operand) === undefined)
+  if (gpuComponentCount(operand) === undefined)
     decline(
       `the operand \`${operand.toString()}\` has no static vec2–vec4 shape ` +
         `(an unknown-length list, a matrix, or a 5+-element list), so it is ` +
@@ -1412,10 +1488,15 @@ function gpuIsComponentwise(code: string, vector?: string): string | undefined {
  * width), a `matN`, or an array (`float[N]` / `array<f32, N>`).
  *
  * Derived from the shape helpers the rest of the GPU analysis already uses —
- * `isNonScalarShape` ("is this a scalar at all?") and `vectorComponentCount`
+ * `isNonScalarShape` ("is this a scalar at all?") and `gpuComponentCount`
  * ("does it have a `vec2`–`vec4` lowering?") — so it stays in step with them
  * rather than re-deciding shape from scratch, plus `gpuIsCollectionShaped` for
  * the collection type spellings `isNonScalarShape` does not recognize.
+ *
+ * A fixed-length list whose ELEMENTS are not shader floats (`list<complex^3>`,
+ * a list of lists) has no `vecN` reading and no other shader value shape
+ * either, so it lands on `'array'` here and every arithmetic and builtin gate
+ * declines it — the fail-closed answer for a shape the language cannot hold.
  *
  * A COMPLEX value reads as a scalar here, even though it lowers to a `vec2` of
  * (re, im): the complex convention is its own, carried by the complex codegen
@@ -1429,7 +1510,7 @@ export function gpuOperandShape(
   if (BaseCompiler.isComplexValued(expr)) return 'scalar';
   if (!BaseCompiler.isNonScalarShape(expr) && !gpuIsCollectionShaped(expr))
     return 'scalar';
-  const width = BaseCompiler.vectorComponentCount(expr);
+  const width = gpuComponentCount(expr);
   if (width !== undefined) return width;
   if (isFunction(expr, 'Matrix')) return 'matrix';
   const t = gpuType(expr);
@@ -1962,6 +2043,15 @@ function markAggregateConsuming<T extends CompiledFunction<Expression>>(
  */
 const gpuDestructuresListOperand = (args: ReadonlyArray<Expression>): boolean =>
   args.length === 1 && isFunction(args[0], 'List');
+
+/**
+ * Is this the COLLECTION (reduce) form of `Sum`/`Product` — one operand, no
+ * indexing set? That form destructures its operand into scalar components; the
+ * indexed form (body plus `Limits`) does not.
+ */
+const gpuIsCollectionReduceForm = (
+  args: ReadonlyArray<Expression>
+): boolean => args.length === 1;
 
 /** `{1}` → "in argument 2"; `{1, 2}` → "in arguments 2 and 3". */
 function gpuSlotNames(slots: ReadonlySet<number>): string {
@@ -3771,6 +3861,90 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
 };
 
 /**
+ * Compile the COLLECTION (reduce) form of `Sum`/`Product` — no indexing set,
+ * the operand itself is the collection (`Sum([3, 4, 5])`, `Sum(v)` for a
+ * `vector<3>`). This is what `.total` and a bare list product canonicalize to,
+ * and the JavaScript target has lowered it since Tycho item 237; on a shader
+ * target the fold is the same one `Max`/`Min` already perform, over the same
+ * statically known scalar components (`gpuScalarComponents`).
+ *
+ * A shader has no dynamic iteration, so everything without a compile-time
+ * component list fails closed (D6): an unknown-length list, a matrix, and a
+ * fixed-length list whose elements are not shader floats. So does a
+ * statically SCALAR operand — the interpreter answers `Sum(x) = x` for one,
+ * but a value that is not a collection at all reaching a reduction is a shape
+ * the caller did not mean, and the JavaScript target declines it too.
+ *
+ * The empty collection is the identity (`Sum([]) = 0`, `Product([]) = 1`),
+ * matching the interpreter. It is recognized BEFORE the operand is compiled:
+ * `[]` lowers to `float[0]()` / `array<f32, 0>()`, which
+ * `assertGPUScalarComponents` refuses outright, so compiling it first would
+ * decline the whole reduction — the same ordering `compileGPUExtremum` uses.
+ */
+function compileGPUCollectionReduce(
+  kind: 'Sum' | 'Product',
+  operand: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const identity = kind === 'Sum' ? '0.0' : '1.0';
+  const op = kind === 'Sum' ? ' + ' : ' * ';
+  if (operand.isCollection && operand.count === 0) return identity;
+
+  const shape = gpuOperandShape(operand);
+  const code = compile(operand);
+  // Non-scalar by the shape analysis, OR by the emitted source: a `Range`
+  // types only as `indexed_collection` (no `list` dimensions), which
+  // `gpuOperandShape` reads as a scalar, but it lowers to an array
+  // CONSTRUCTOR — and a constructor is exactly what a reduction can consume.
+  // (The same reading `compileGPUExtremum` takes of its operands.)
+  //
+  // A COMPLEX value is excluded from that second reading, and the exclusion is
+  // load-bearing: it lowers to `vec2(re, im)`, which matches the aggregate
+  // constructor pattern while being a single NUMBER in the complex convention,
+  // not a two-cell collection. Without this, `Sum(i)` folded the real and
+  // imaginary parts into `(0.0 + 1.0)` and answered a real `1.0` where the
+  // interpreter answers `i` — a silent disagreement, not a decline. (The
+  // `Max`/`Min` reduction never saw this: a real-only guard rejects a complex
+  // operand of those heads before the lowering runs.)
+  const call = gpuTopLevelCall(code);
+  const isAggregate =
+    !BaseCompiler.isComplexValued(operand) &&
+    (shape !== 'scalar' ||
+      (call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee)));
+  if (!isAggregate)
+    throw new Error(
+      `${kind}: the operand \`${operand.toString()}\` is not a collection ` +
+        `(type \`${operand.type.toString()}\`), so there is nothing to ` +
+        `reduce over — this is the collection form of ${kind}, which takes ` +
+        `no indexing set. Fail closed (D6).`
+    );
+
+  const comps = gpuScalarComponents(operand, code, target);
+  if (comps === undefined)
+    throw new Error(
+      `${kind}: the operand \`${operand.toString()}\` lowers to a shader ` +
+        `${gpuShapeName(shape)} with no compile-time component list, so ` +
+        `there is nothing for the reduction to fold over — a shader has no ` +
+        `dynamic iteration here. Fail closed (D6).`
+    );
+  // Each component is parenthesized, and so is the fold as a whole. A
+  // component is a constructor ARGUMENT compiled at its own precedence, so its
+  // source can be bare infix arithmetic (`float[2](x + 1.0, y)`), and the
+  // result is spliced into whatever context the caller has. Joining the raw
+  // texts let a neighbouring operator bind into a component: `Sum([x + 1])`
+  // returned a bare `x + 1.0`, so `2·Sum([x + 1])` emitted `2.0 * x + 1.0` —
+  // `2x + 1` where the interpreter computes `2(x + 1)`. A `Product` fold
+  // reassociates the same way from the inside (`(a + b) * c` written as
+  // `a + b * c`).
+  //
+  // `gpuScalarComponents` never answers an EMPTY list (a zero-argument
+  // constructor answers `undefined` there), and the empty collection already
+  // returned the identity above, so one component is the smallest fold.
+  return `(${comps.map((c) => `(${c})`).join(op)})`;
+}
+
+/**
  * Compile a Sum or Product expression for GPU targets.
  *
  * Two compilation strategies:
@@ -3789,12 +3963,15 @@ function compileGPUSumProduct(
   target: CompileTarget<Expression>
 ): string {
   if (!args[0]) throw new Error(`${kind}: no body`);
-  if (!args[1]) throw new Error(`${kind}: no indexing set`);
+  // No indexing set: the operand IS the collection to reduce
+  // (`Sum([3, 4, 5])`), not a body indexed by one.
+  if (!args[1])
+    return compileGPUCollectionReduce(kind, args[0], _compile, target);
 
   // Reject a collection-valued body for the indexed form (see
   // `BaseCompiler.assertScalarBigOpBody`): scalar accumulation over arrays
   // would silently produce a wrong value. Reached only for the indexed form
-  // (the `!args[1]` guard above rules out the reduce form).
+  // (the `!args[1]` guard above returns for the reduce form).
   BaseCompiler.assertScalarBigOpBody(kind, args[0]);
 
   if (BaseCompiler.isComplexValued(args[0]))
@@ -5336,11 +5513,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Reflect: 'reflect',
   Refract: 'refract',
 
-  // Sum/Product — unrolled or for-loop
-  Sum: (args, compile, target) =>
-    compileGPUSumProduct('Sum', args, compile, target),
-  Product: (args, compile, target) =>
-    compileGPUSumProduct('Product', args, compile, target),
+  // Sum/Product — unrolled or for-loop (indexed form), or a fold over the
+  // operand's components (collection form).
+  //
+  // `markAggregateConsuming` for the COLLECTION form only: there the reduction
+  // DESTRUCTURES its operand into scalars, so the emission carries none of the
+  // operand's `vecN`/array shape and must not be judged against it. The
+  // indexed form's operands (a scalar body and a `Limits`) stay gated.
+  Sum: markAggregateConsuming(
+    (args, compile, target) => compileGPUSumProduct('Sum', args, compile, target),
+    gpuIsCollectionReduceForm
+  ),
+  Product: markAggregateConsuming(
+    (args, compile, target) =>
+      compileGPUSumProduct('Product', args, compile, target),
+    gpuIsCollectionReduceForm
+  ),
 
   // Range — inline constant array literal (bounds must be compile-time constants)
   Range: (args, _compile, target) => {
