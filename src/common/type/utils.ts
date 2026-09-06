@@ -1529,7 +1529,10 @@ export function overlapsForDeferredValidation(
     // arity refutes nothing. The other side's slots are still checked against
     // what a bare tuple can hold: its slots are values, so an explicit
     // `missing` or `nothing` slot has no common inhabitant with it.
-    if (paramTupleSlots === 'unknown-arity' || opTupleSlots === 'unknown-arity') {
+    if (
+      paramTupleSlots === 'unknown-arity' ||
+      opTupleSlots === 'unknown-arity'
+    ) {
       const explicit =
         paramTupleSlots === 'unknown-arity' ? opTupleSlots : paramTupleSlots;
       if (explicit === 'unknown-arity') return true;
@@ -1560,7 +1563,11 @@ export function overlapsForDeferredValidation(
       // unnamed one, which is the name erasure the lattice already permits.
       const opName = opTupleSlots[i].name;
       const paramName = paramTupleSlots[i].name;
-      if (opName !== undefined && paramName !== undefined && opName !== paramName)
+      if (
+        opName !== undefined &&
+        paramName !== undefined &&
+        opName !== paramName
+      )
         return false;
       const opSlotIsTop = opSlot === 'any' || opSlot === 'unknown';
       const paramSlotIsTop = paramSlot === 'any' || paramSlot === 'unknown';
