@@ -1453,6 +1453,9 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `inferOperandTypes`: (`ops`, `requirement`) => 
+     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -1524,6 +1527,9 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `inferOperandTypes`: (`ops`, `requirement`) => 
+     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| `undefined`;
  \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
 
@@ -5005,6 +5011,21 @@ optional elementCount?: (expr) => number | undefined;
 ```
 
 The eager producer's element count — see the `elementCount` contract on
+[OperatorDefinition](#operatordefinition).
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.inferOperandTypes? {#inferoperandtypes}
+
+```ts
+optional inferOperandTypes?: (ops, requirement) => 
+  | readonly (Type | undefined)[]
+  | undefined;
+```
+
+Use-driven element inference — see the `inferOperandTypes` contract on
 [OperatorDefinition](#operatordefinition).
 
 </MemberCard>
@@ -8566,6 +8587,9 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   collection: CollectionHandlers;
   canEnumerate: (expr) => boolean | undefined;
   elementCount: (expr) => number | undefined;
+  inferOperandTypes: (ops, requirement) => 
+     | ReadonlyArray<Type | undefined>
+     | undefined;
 };
 ```
 
@@ -8971,6 +8995,40 @@ Contract, mirroring `canEnumerate`:
 
 Consulted only when the definition has no `collection.count` handler —
 a declared `count` owns the answer, including its `undefined`.
+
+#### OperatorDefinition.inferOperandTypes?
+
+```ts
+optional inferOperandTypes?: (ops, requirement) => 
+  | ReadonlyArray<Type | undefined>
+  | undefined;
+```
+
+Use-driven element inference. Called when a type REQUIREMENT reaches
+an application of this operator: its result is an operand of a typed
+parameter (`k(xs[1])` with `k: (integer) -> integer` requires
+`integer`) or of an arithmetic operator, which requires a scalar
+numeric result (`xs[1] + 1` requires `real`). The handler answers the
+type each OPERAND must have for the result to satisfy the requirement:
+one entry per operand, `undefined` where that operand learns nothing,
+or `undefined` for the whole call to decline.
+
+The engine writes each entry onto the operand through the ordinary
+inference path, so only an operand whose type is inferred (or still
+unknown) moves, a declared type never does, and an operand that is
+itself an application forwards to its own operator's handler
+(`m[1][2] + 1` reaches `m`). A `widen` never reaches the handler: it
+carries a result possibility, not a constraint on the operands.
+
+Only a VALUE requirement reaches the handler: never `any`, `unknown`,
+`value`, `nothing`, an absence marker alone, or a function type. An
+absence arm (`real | missing`) is stripped before the call.
+
+`At` answers `dictionary<r> | indexed_collection<r>` for its base and
+`First`/`Second`/`Third`/`Last` answer `indexed_collection<r>`. The
+scalar reading is written on purpose: `xs[1] + 1` requires `number`
+of the element, exactly as `x + 1` infers a bare `x` as `number`.
+Design and rulings: `docs/INFERENCE_ROADMAP.md` §5.
 
 </MemberCard>
 
@@ -10722,6 +10780,9 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `inferOperandTypes`: (`ops`, `requirement`) => 
+     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
   `holdUntil`: `"never"` \| `"evaluate"` \| `"N"`;
@@ -10793,6 +10854,9 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `collection`: [`CollectionHandlers`](#collectionhandlers);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
+  `inferOperandTypes`: (`ops`, `requirement`) => 
+     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| `undefined`;
  \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
 
@@ -14431,6 +14495,7 @@ controlled by the `notation` / `avoidExponentsInRange` options.
 ```ts
 type JsonSerializationOptions = {
   prettify: boolean;
+  inferredAnnotations: boolean;
   exclude: string[];
   shorthands: ("all" | "number" | "symbol" | "function" | "string" | "dictionary")[];
   metadata: ("all" | "wikidata" | "latex" | "sourceOffsets")[];
