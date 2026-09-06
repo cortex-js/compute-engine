@@ -22,8 +22,9 @@ The current working set is intentionally small:
   broadcast typing, parse-scope control, and declared `broadcastable<T>`;
 - compilation: CSE and the remaining quiet-machine complex-mode benchmark;
 - type/runtime initiatives: sum-type sugar/compilation, mutable objects,
-  deep-tree boxing, and type handlers as functions of types
-  (`2026-08-22-type-handlers-on-types.md`);
+  deep-tree boxing, type handlers as functions of types
+  (`2026-08-22-type-handlers-on-types.md`), and type facts computed once per
+  type value (`2026-09-06-type-facts-per-type.md`);
 - checkpoint/restore for strict linear notebook replay.
 
 The status header inside each document is authoritative. A plan marked

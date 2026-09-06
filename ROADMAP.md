@@ -3647,9 +3647,14 @@ nodes built), `finiteFromType` +21. The definite integral's gap is in
 boxing, not evaluation: `makeCanonicalFunctionCore` 110 vs 81 µs,
 `applyOperatorDefinition` 63 vs 48, with `hasSignatureArm`,
 `reduceUnionType` (under `widen`), `recordTypeProvenance` and
-`_withoutFacts` new since 0.118.2 at 1–3 µs each. Levers not yet taken: a
-per-value literal-type cache (the same rational or radical value boxes to
-the same type object), a descriptor pool, and a memo of
+`_withoutFacts` new since 0.118.2 at 1–3 µs each. The next round is designed in
+`docs/plans/2026-09-06-type-facts-per-type.md`: an instrumented count shows
+that the volume is not the derivations (146 per solve call) but the
+questions asked of types afterwards (4 389 subtype queries over 1 121
+distinct pairs, 1 818 type reads), so the facts a type has are to be
+computed once per type value and read by every predicate. Levers after
+that: a per-value literal-type cache (the same rational or radical value
+boxes to the same type object), a descriptor pool, and a memo of
 `broadcastsOverTuples` / `broadcastableParamSlots` per definition.
 
 **Literal types are not the lever (measured 2026-09-06, box load 2.7,
