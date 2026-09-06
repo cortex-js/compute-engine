@@ -145,7 +145,10 @@ describe('Tycho item 248 — loop-form Sum', () => {
     ]);
     const { code, run } = js(expr);
     const [body] = whileBodies(code);
-    expect(body).toContain('_SYS.at(');
+    // `P` is a run-time argument whose element type is inferred numeric, so
+    // the element read lowers through the shape-checked accessor
+    // (`_SYS.atNumeric`), not the plain `_SYS.at`.
+    expect(body).toContain('_SYS.atNumeric(');
     expect(run({ P })).toBe(11 * 4);
   });
 

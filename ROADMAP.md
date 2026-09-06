@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-04.
+**Last updated:** 2026-09-05.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -138,21 +138,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   states of the one-row walk and treats an operand too large for a `number`
   as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
-- **Tycho item 236 residue — the two "what still declines" pins no longer
-  decline (CLOSED 2026-09-04).** Settled by the Tycho item 251 round (commit
-  aaed579e): a complex-valued CONDITION takes the element-wise runtime rule
-  (the roots are projected onto the real lane, a complex root projects to NaN)
-  and scalar arithmetic over a list-valued selection broadcasts through the
-  shape-dispatching `_SYS.sadd`; both tests in
-  `test/compute-engine/compile-which-complex-selection.test.ts` pin the current
-  values.
-- **`interval-js` target: four heads confirmed with no lowering** (Tycho item
-  237, filed 2026-08-30 — CLOSED 2026-09-05: fixed 2026-08-30 and committed;
-  `Choose`, `Apply` of a function literal, `WithRandomSeed` with a literal seed
-  and the index-less `Sum` lower on `compilation/interval-javascript-target.ts`,
-  pinned in `test/compute-engine/tycho-item-237-interval-lowering-batch.test.ts`;
-  `Random()` lowers to its support enclosure `[0, 1]`, a seeded sequence being
-  unsound on the interval lane).
 
 ### Open items from the finite-by-default flip (Phase 1, 2026-08-27)
 
@@ -172,57 +157,6 @@ fixed in that change. One item remains.
 
 ### Open items from the small-fix release batch (2026-08-31)
 
-- **No LaTeX parse route exists for annotated lambda parameters (FIXED
-  2026-09-04).** `ce.parse('(i: integer) \\mapsto 2i')` produced `Colon` and an
-  `unexpected-operator` error — a parser-surface capability gap found
-  2026-08-31 while fixing the `i`-shield. The `Colon` parselet
-  (`parseParameterTypeAnnotation`, `latex-syntax/dictionary/definitions-core.ts`)
-  now looks ahead for the `\\mapsto` that makes a colon an annotation and reads
-  the type as RAW SOURCE TEXT, validated by the type parser, so
-  `(x: list<integer>) \\mapsto x`, `(f: (real) -> real) \\mapsto f(1)`,
-  `\\mathrm{…}`/`\\text{…}` type names and the `\\left(…\\right)` spelling all
-  parse to `Typed` parameters; every other colon (set-builder, compact
-  piecewise, `f: A \\to B`) reads as before. The scan tracks the angle
-  brackets of the type grammar (`tuple<integer, integer>`), a quoted value
-  type, and every delimiter spelling and sizing prefix the parser knows
-  (`\\lparen`, `\\bigl…\\bigr`, `\\mleft…\\mright`; the tables now live in
-  `latex-syntax/delimiter-tables.ts`, shared with the parser); a plain name
-  the type parser does not know (`Point`) is accepted by its shape and
-  resolved at boxing, where the engine's type resolver is available. The
-  `Function` serializer writes the annotation back
-  (`(i\\colon integer)\\mapsto 2i`, the symbol-form `Typed` included), so
-  typed lambdas round-trip. Pinned in
-  `test/compute-engine/latex-syntax/typed-lambda-parameters.test.ts`.
-- **A parenthesized lambda applied inline parses as a product (FIXED
-  2026-09-04 — found 2026-09-04 while adding the annotated-parameter route).**
-  `(i \\mapsto 2i)(3)` parsed to
-  `InvisibleOperator(Delimiter(Function(…)), Delimiter(3))` and evaluated to
-  `3(i) => 2i`, a product of the lambda and 3. The invisible-operator
-  canonicalization (`boxed-expression/invisible-operator.ts`) now applies a
-  function literal to the delimited argument list that follows it, the way it
-  applies a function symbol — in the two-operand case and in the
-  adjacent-pair combiner (`2(i \\mapsto 2i)(3)` is `2 · Apply(…)`) — and the
-  `Apply` serializer writes such an application back as `(i\\mapsto 2i)(3)`.
-  An index bracket after a literal is not an argument list, and a power or
-  factorial the parser attached to the argument list applies to the
-  application (`(x \mapsto 2x)(3)^2` is 36). Pinned in
-  `test/compute-engine/latex-syntax/inline-lambda-application.test.ts`.
-- **A parenthesized function SYMBOL applied inline does not take a postfix
-  power (FIXED 2026-09-04 — found 2026-09-04 by the review of the inline
-  lambda application).** `f(3)^2` was 36 for `f := x \mapsto 2x`, but
-  `(f)(3)^2` canonicalized to `9f` and `(\sin)(x)^2` to `25 sin`: the power
-  attaches to the argument list before the juxtaposition is read, and the
-  symbol branch of `canonicalInvisibleOperator` only recognized a bare
-  `Delimiter`. For a symbol DECLARED as a function (an operator, or a value of
-  function type) the power or factorial is now rebuilt around the application
-  (`applySymbolThroughPostfix`), on the two-operand path and in the
-  adjacent-pair combiner. An undeclared symbol or a number keeps the product:
-  `(x)(3)^2` with `x := 5` is `45`; an undeclared symbol records a provisional
-  application, so a definition made later repairs the reading, as for a bare
-  argument list. A chain of postfixes is walked (`(f)(3)!^2`). A second
-  argument list, `(f)(3)(4)`, stays the factor reading `f(3) · 4`: a curried
-  application has no juxtaposition notation. Pinned in
-  `test/compute-engine/latex-syntax/inline-lambda-application.test.ts`.
 - **The discrete pmf/CDF guards at a SYMBOLIC point use the tolerant relations,
   where the literal route is exact at the support boundary (OPEN, ruling — found
   2026-09-04 while guarding the symbolic forms).**
@@ -234,63 +168,11 @@ fixed in that change. One item remains.
   exactly and answers 0. Options: make the symbolic guard exact (a
   tolerance-free relation the guard can name), or accept the tolerant reading as
   the symbolic route's contract and pin the boundary.
-- **`GammaRegularized(a, z)` for a negative non-integer `a` (FIXED
-  2026-09-04).** `Q(-1/2, 2)` stayed symbolic because the regularized kernel
-  computes `Q(a, z)` for `a > 0` only, and `Q(a, 0)` there — a decided
-  divergence, `sign(Γ(a))·∞` — was left symbolic for uniformity. For `z > 0`
-  the head now answers `Γ(a, z)/Γ(a)`: at machine precision through the upper
-  incomplete gamma kernel (`incompleteGammaUpper`, whose Tricomi series and
-  Legendre continued fraction hold for any real order), and at every higher
-  precision through the new bignum kernel `bigGammaQNegativeOrder`
-  (`numerics/special-functions.ts`: the same series and continued-fraction
-  loops as `bigGammaQ`, with the signed prefactor `xᵃe⁻ˣ/Γ(a)`). Checked
-  against a quadrature of ∫_z^∞ t^{a−1}e^{−t} dt in log space at orders down
-  to −200 (nine to twelve digits). `Q(a, 0)` answers the signed infinity on
-  both routes, the sign read from the position between poles (the machine Γ
-  underflows past −171). At machine precision a value outside the double
-  range — the quotient overflows, or both factors underflow to 0/0 — stays
-  symbolic rather than report an infinity or a NaN at an interior point. The
-  complex half (`z < 0`) still stays symbolic.
 - **Past the exact-expansion caps a few Γ-ratio points stay symbolic**:
   `Pochhammer(a, k)` with both `Γ(a)` and `Γ(a + k)` on a pole and `|k| > 20`
   (`SYMBOLIC_EXPANSION_CAP`), and `GammaRegularized(n, z)` for `z < 0` and
   `n > 20` (`MAX_GAMMA_Q_SERIES_ORDER`). Honest gaps, never `NaN`.
 
-- **`Correlation` cannot declare `real<-1..1>` until the paired kernels stop
-  cancelling (FIXED 2026-09-04).** A fuzz of 3000 random samples at machine
-  precision had measured `max |r| = 1.0000000000063`: the `Σxy − ΣxΣy/n` form
-  of the covariance kernels lost digits on a two-point sample with ordinary
-  magnitudes, and the `Σx² − (Σx)²/n` variance kernels lost them on data far
-  from zero (`Variance([10⁸+1, 10⁸+2, 10⁸+3])`). The variance kernels in
-  `numerics/statistics.ts` (sample and population, machine and `BigDecimal`)
-  now use Welford's single-pass update, so a lazy source is consumed once;
-  the covariance and correlation kernels use two-pass centered sums with the
-  `(Σd)²/n` compensation terms; `correlation` scales each column's deviations
-  by a power of two near its largest deviation (exact, and it keeps data of
-  machine range from overflowing — the correlation half of item 4 of the
-  type-system sweep below; the covariance half stays open, since a covariance
-  is not scale-invariant) and clips its rounding residue to [−1, 1]
-  (Cauchy–Schwarz makes any excess rounding, never data; NumPy's `corrcoef`
-  does the same). `Correlation` declares `real<-1..1> | nan` and its type
-  handler answers the range; the compiled JavaScript lane bakes the same
-  kernels. Pinned in `error-model-statistics.test.ts` and
-  `statistics.test.ts`.
-- **`validateArguments` admits a collection with provably non-numeric cells for
-  a threadable numeric parameter (FIXED 2026-09-04 — found 2026-09-04 by the
-  boxing validation seam).** `Ln(["a", "b"])` and `Sqrt(["a", "b"])` were valid
-  at boxing: the numeric fast path (`checkNumericArgs`) admitted any dimensioned
-  list through its tensor arm ahead of its own reject arm, and the declaration
-  route ran the element-carrier check (`validateThreadableOperand`) for the
-  canonical-handler seam only. The fast path now rejects a provably non-numeric
-  collection before every admission, and the declaration route runs the check
-  for every `broadcastable` LIBRARY operator, on the plain path and the seam
-  alike. A user-defined function (`isUserFunctionDefinition`) stays fail-open
-  on purpose: its broadcast runs per element at evaluation and each failing
-  cell reports its own error with a broadcast frame
-  (`broadcast-error-context.test.ts`), which a whole-collection refusal would
-  take away. Measured cost: none (`Abs(xs)` over a `list<number>` symbol boxes
-  in the same 5.4 µs as `Abs(x)`). Pinned in
-  `test/compute-engine/non-numeric-collection-operand.test.ts`.
 - **The element-carrier check at a threadable numeric slot tests numericity,
   not the declared parameter (OPEN, ruling — found 2026-09-04 by the review of
   the non-numeric collection admission fix).** `validateThreadableOperand`
@@ -319,186 +201,30 @@ fixed in that change. One item remains.
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
 
-### Growing a list one element per loop turn costs seconds by a few hundred turns (FIXED 2026-09-04 — found 2026-09-04 writing the Epsil style guide)
+### The interpreted growing-list loop stays quadratic (OPEN, no urgency — recorded 2026-09-04)
 
-`let xs = []; for k in 1..n { xs = Join(xs, [k]) }` — the idiom the Epsil docs
-recommended until 2026-09-04 — took 2.9 s at n = 400 on a quiet box, growing
-four-fold per doubling; `Append(xs, k)` and the spread literal `[...xs, k]`
-scaled the same way. The cause was typing and re-validation, not boxing (boxing
-a fresh 400-element list costs about 1 µs per element). The loop's value was a
-lazy `Join` view with one operand PER TURN, and each turn's evaluation walked
-all of them six to eight times (canonical validation, overload resolution for
-the node's type, finiteness, purity, a per-operand NaN check, then the rebuilt
-result's type and memo checks again) at 3 to 15 µs per operand. Materializing
-each turn was slow for a second reason: typing a fresh n-element `List` cost 6
-to 12 µs per element, almost all in `describe`
-(`boxed-expression/operand-descriptor.ts`), which built a closure-heavy
-descriptor per element and eagerly ran six lattice checks the `List` type
-handler never reads.
+`let xs = []; for k in 1..n { xs = Join(xs, [k]) }` costs about 0.5 µs per
+element per turn on the interpreter since the literal-list fold of 2026-09-04
+(857 ms at 1000 turns; the compiled route was already a native array copy per
+turn): an immutable append copies the list. Levers not taken, for a later round
+if interpreted loops of many thousands of turns matter: a growable backing
+buffer with prefix views (amortized O(1) append, safe without ownership
+analysis because every holder of an older value keeps its own prefix) paired
+with an incremental type for the new node, and a per-node descriptor cache on
+the type cache's invalidation axis.
 
-Four changes, all in the same round:
+### An asynchronous-only operator inside the body of a big operator or a `Block` statement is not awaited (OPEN, evaluation — found 2026-09-05)
 
-- `Join` over list literals, and `Append` to a list literal, fold into ONE list
-  literal at canonicalization (`foldLiteralListJoin` / `foldLiteralListAppend`,
-  `library/collections.ts`), bounded by `ce.maxCollectionSize`. Laziness is an
-  optimization, not a contract (ruled 2026-09-04): a view over materialized
-  literals always costs more than the literal. The accumulator therefore holds a
-  flat list and a turn costs one typed copy of it. Pinned in
-  `test/compute-engine/join-append-literal-fold.test.ts`.
-- The operand descriptor is a class with prototype getters and bit-flag memo
-  slots, and the type facts are computed on first read: 1.61 µs → 0.22 µs per
-  descriptor, 2.13 µs → 0.61 µs per element to type a fresh list.
-- `BoxedFunction`'s `type` derivation resolves the overload and solves the
-  signature's generic arms only when the `type` handler declines: both walked
-  every operand and their result was discarded whenever a handler answered (27%
-  of a `Join`'s typing cost before the fold).
-- The type cache of a LITERAL LIST TREE (a `List` whose elements are number or
-  string literals or such lists, `_isLiteralListTree`) is keyed on the world
-  version alone, not on the engine generation (`BoxedFunction.type`). `Assign`
-  advances the generation every turn, and the accumulator's list was re-typed
-  four times PER TURN through four readers (the symbol's type revision, the
-  assignment's type derivation, the operand descriptor, the operand NaN check):
-  13 ms a turn at 300 elements on the `Assign` route where the same loop without
-  the assignment cost 0.2 ms. A literal list tree's type depends on no
-  definition, symbol or assumption, and every configuration change advances the
-  world version, so the constant key is sound where the general constant key the
-  comment there records as removed was not. Pinned in
-  `test/compute-engine/type-cache-literal-list.test.ts`.
-
-Measured on a quiet box, build time of the interpreter loop on the boxed route:
-`Join` 2.9 s → 89 ms at 400 turns and about 30 s → 379 ms at 1000 turns;
-`Append` 0.92 s → 85 ms at 400 turns. The Epsil loop
-(`let xs = []; for k in 1..n { xs = Join(xs, [k]) }`, the `Assign` route): 127
-ms at 250 turns, 276 ms at 500 and 857 ms at 1000, against 4.7 s, 16.6 s and
-about 30 s before. The loop stays quadratic (an immutable append copies the
-list) at about 0.5 µs per element per turn; the compiled route was already a
-native array copy per turn. Levers not taken, for a later round if interpreted
-loops of many thousands of turns matter: a growable backing buffer with prefix
-views (amortized O(1) append, safe without ownership analysis because every
-holder of an older value keeps its own prefix) paired with an incremental type
-for the new node, and a per-node descriptor cache on the type cache's
-invalidation axis.
-
-The dual review of the round found two more defects, both fixed in it: a `List`
-or `Set` literal never awaited an element whose operator has only an
-`evaluateAsync` handler (`[1, AsyncOnly()]` stayed unevaluated on the async
-route, and the fold routed `Append([1], AsyncOnly())` into that gap) — both
-literals now have an `evaluateAsync` handler that awaits the elements in order;
-and the descriptor classes carried the operand as a TypeScript-private property,
-readable by a type handler at runtime — they are ECMAScript private fields now.
-A second review pass on the async handlers found two more, also fixed: the base
-`evaluateAsync` of a leaf dropped its options, so
-`[1/3].evaluateAsync({ numericApproximation: true })` — and `Add(1/3, 1)` on the
-same route — kept the exact value (it now forwards them); and the set
-comprehension branch enumerated synchronously — it now awaits the domain, every
-extracted value, the condition at every value and each substituted body, with
-the caller's options (`enumerateSetComprehensionAsync`; an undecidable condition
-keeps the comprehension symbolic, as on the synchronous route). The synchronous
-enumeration now evaluates an extracted value too (`{k : k ∈ {x, 2}}` with
-`x := 5` produced `Set(x, 2)`) and forwards `numericApproximation` to the body.
-Two gaps the review uncovered are open entries below: the LaTeX form of a
-comprehension with a condition, and asynchronous-only operators inside held
-operands.
-
-The Epsil style guide (`src/epsil/docs/style.md`, "Building a list one element
-at a time") now presents the growing loop as acceptable for lists of a few
-thousand elements and keeps steering to `Map`/`Fold` when the list has a
-formula; its measured table was refreshed.
-
-### The LaTeX form of a set comprehension with a condition is not a comprehension (FIXED 2026-09-04 — found 2026-09-04 by the review of the growing-list round)
-
-`\{ k : k \in \{1, 2, 3\}, k > 1 \}` parsed to
-`["Set", ["Colon", "k", ["Element", "k", ["Set", 1, 2, 3]]], ["Less", 1, "k"]]`
-— the condition was a SECOND operand of the `Set` — so the expression evaluated
-to itself on both routes, where the MathJSON form
-`["Set", "k", ["Element", "k", S, cond]]` evaluated to `Set(2, 3)`. The `:`
-and `\mid` bind tighter than the `,` separator, so the `Set` matchfix handler
-(`latex-syntax/dictionary/definitions-sets.ts`) received a sequence whose first
-element was the `Colon` (or `Divides`) and whose later elements were the extra
-conditions, and read it as a literal set. The handler now joins the conditions
-under `And` inside a `Condition` operand — the shape the single-condition form
-already produced — for both the `{body : cond, cond…}` and the
-`{v \in S : cond, cond…}` spellings. The same pass drops the trailing element a
-trailing comma leaves in the sequence, which had also broken the compact
-piecewise detection for `\{ x < 0 : 1, x, \}`; the marker is read from the
-spelling the comma parselet records (`hasTrailingEmptySegment`), never from
-the value being `Nothing`, so an authored `\mathrm{Nothing}` default survives. Pinned in
-`test/compute-engine/set-comprehension.test.ts` and `a2-restrictions.test.ts`.
-
-### An asynchronous-only operator inside a held operand is not awaited (FIXED 2026-09-05 — found 2026-09-04 by the review of the growing-list round)
-
-`Less(15, AsyncOnly(2)).evaluateAsync()` answered `15 < AsyncOnly(2)` for an
-`AsyncOnly` declared with only an `evaluateAsync` handler: a comparison holds
-its operands and evaluates them synchronously inside its own handler, and the
-asynchronous route had no hook to await a held operand before the handler ran.
-The asynchronous route now runs a pre-pass before the synchronous handler of a
-lazy operator that DEMANDS every held operand — a relation, `Element`, an
-arithmetic fold (`awaitAsyncOnlyDescendants`,
-`boxed-expression/async-only-descendants.ts`): every asynchronous-only
-application inside a held operand is awaited, in operand order, and the operand
-is rebuilt with the values in place. An operator that selects among its held
-operands (`selectsOperands`: `If`, `Which`, the short-circuit connectives),
-scopes them (`Block`, a big operator) or quotes them is kept away from the
-pass, since it would run an unreachable arm, break a short circuit, reorder a
-block or evaluate quoted data; nested inside a held operand, a selecting node
-is awaited WHOLE through its own asynchronous handler, which honors the
-selection. `If` and `Which` got asynchronous twins that await the condition
-and the selected arm through the asynchronous route (`And`/`Or` already had
-theirs). An engine that never defined an asynchronous-only operator skips the
-walk (`_hasAsyncOnlyOperator`, set when such a definition is created). Still
-uncovered: an asynchronous-only
-application inside the body of a big operator or the statements of a `Block`,
-which those operators evaluate themselves in their own order; that needs an
-asynchronous reduction of their own. Pinned in `test/compute-engine/async-only-held-operand.test.ts`.
-
-### A compiled block lets a `let` redeclare a capture or a parameter that the interpreter refuses (RULED 2026-09-05, FIXED 2026-09-05 — found 2026-09-03 reviewing the `while let` compile work)
-
-**Ruling (2026-09-05):** a `let`/`const` may not re-declare a name its own scope
-already declares — an earlier `let` of the same block or program, a parameter
-of the function whose body the block is, or the index of the loop whose body
-the block is. The statement is the `variable-redeclaration` error on every
-route: `canonicalBlock` canonicalizes it to the error value, the Epsil static
-pass reports it before the program runs (and, at the top level of one program,
-`executeEpsil` evaluates the repeat to the error value), and the compiler
-refuses the invalid block. Shadowing a name bound in an OUTER scope — a nested
-block, a closure body, an `if` inside a loop body — stays legal, and the
-shadowing `let`'s initializer now reads the outer name on every re-entry of the
-block (it used to read its own previous value: `let t = 1; for k in 1..3 { let
-t = t * 2 }` collected 2, 4, 8). Across programs a top-level `let` re-declares
-legally (the notebook re-run gesture). Pinned in
-`test/epsil/redefinition-discipline.test.ts` and `test/compute-engine/scope.test.ts`.
-The original report, kept for the mechanism:
-
-`match xs { [h, ...t] => do { let t = 7; Length([t]) } }` and
-`((t) => do { let t = 7; t })(1)` both evaluate to the error
-`The symbol "t" is already declared in this scope` in the interpreter: a block
-directly under a binder may not redeclare the binder's name. The JavaScript
-target compiles both — the block's `let t = 7` shadows the parameter or the
-capture accessor — and answers `1` and `7`, so a program the interpreter rejects
-runs compiled with a value. The compiled answer is the one most languages give,
-so this is a ruling: either the interpreter admits the shadowing (a scope-rule
-change) or the block compiler fails closed on a `Declare` whose name is in
-`target.boundVars` (`compileBlock` and `compileLoopBody`,
-`compilation/base-compiler.ts`). Not specific to `match`: every binder has it.
-
-### A destructuring comprehension binder has no binding-site type (FIXED 2026-09-04 — found 2026-09-03 while fixing Tycho item 245)
-
-The binder-authority rule (ruled 2026-09-03: a binding-site type is
-authoritative over the body's inference, and a use that contradicts it is a type
-error, pinned in
-`test/compute-engine/point-list-lift-and-binder-authority.test.ts`) was
-enforced for a SYMBOL binder only: `[p + q for (p, q) in pairs]` declared its
-leaves `p` and `q` as `unknown` and never narrowed them from the source's
-element type, so the leaves were typed by use and the fresh-matrix repair could
-retype them. `canonicalLoopLike` (`library/control-structures.ts`) now binds
-each leaf of a destructuring pattern to its component of the element's TUPLE
-type — the only element type the runtime destructuring accepts — recursively
-for a nested pattern, with the same authoritative write and fresh-set removal as
-the symbol binder (an alias or nominal component is resolved first); an
-unknown component and the wildcard `_` are left as declared; a pattern whose
-arity the tuple type does not match, and a name the pattern binds twice, are
-errors at canonicalization, as the runtime destructuring would fail on every
-value. Pinned in the same test file.
+The asynchronous route awaits an asynchronous-only application inside a HELD
+operand of a relation, `Element` or an arithmetic fold before the synchronous
+handler runs (`awaitAsyncOnlyDescendants`,
+`boxed-expression/async-only-descendants.ts`, 2026-09-05). A big operator
+(`Sum`, `Product`, …) and `Block` are kept away from that pass on purpose: they
+scope their operands and evaluate them themselves in their own order, so an
+asynchronous-only application inside a big operator's body or among a block's
+statements still reaches the synchronous handler unawaited. Closing this needs
+an asynchronous reduction of those operators' own. Pins for the covered shapes
+are in `test/compute-engine/async-only-held-operand.test.ts`.
 
 ### A typed scalar user function applied to a VALUELESS collection-typed symbol is an error, not a held call (OPEN, evaluation — found 2026-09-05 while fixing the multi-clause broadcast flag)
 
@@ -575,43 +301,6 @@ here.
   answers `1` and compiled `x > 0` answers `true`, where the interpreter leaves
   both unevaluated — both previously threw; whether those two divergences are
   acceptable is undecided.
-- **An Epsil effects violation is swallowed with zero diagnostics (FIXED
-  2026-09-03, commit 71ce3dfa: the error value now leaves the function body
-  through `bodyResultValue` and the Epsil route reports it as a
-  `runtime-error` diagnostic).** A function
-  whose body writes to a binding of the ENCLOSING call needs the `scope` effect
-  declared. When it is missing, the inner `DefineFunction` evaluates to
-  `Error(ErrorCode("incompatible-type", "non-scope effects (writes outside a function requires a declared `scope` effect)", "scope effects"))`
-  — raised at `src/compute-engine/boxed-expression/ effects-inference.ts:193` —
-  but the program reports NO diagnostic and the enclosing function silently
-  becomes uncallable. Chain: `evaluateStatements` short-circuits on the `Error`
-  (`src/compute-engine/function-utils.ts:1805`), then `makeLambda`'s
-  nullary-scoped-block arm ends `return result.isValid ? result : undefined`
-  (`function-utils.ts:2583`), and an `Error` is not `isValid`, so `apply()`
-  falls through to an inert `Apply` (`function-utils.ts:1749`). Engine-level
-  repro:
-  `Apply(Function(Block(Declare(n, {value: 0}), DefineFunction(h, Function(Block(Assign(n, Add(n, 1)), n))), 99)))`
-  evaluates to itself. The swallow point is `function-utils.ts:2583`; the error
-  should reach the user. (This is what broke the `counter()` closure example in
-  `src/epsil/docs/evaluation.md`, now fixed there by declaring the effect.)
-- **`if cond { }` with an EMPTY block yields an inert `Block`, not `Nothing`
-  (FIXED 2026-09-04: `canonicalBlock` no longer declines zero operands, so the
-  empty block is canonical and its handlers run; pinned in
-  `test/compute-engine/scope.test.ts` and `test/epsil/execute.test.ts`).**
-  `if 1 < 2 { }` parses to `["If", ["Less", 1, 2], ["Block"]]` and evaluates to
-  `["Block"]` — rendered `{}` — with type `unknown`, where
-  `src/epsil/docs/control-flow.md:906` says an empty block's value is `Nothing`.
-  It is NOT the empty-SET parse it looks like: `["Block"]` is a genuine empty
-  block, and `{}` is only how an empty `Block` renders. Both correct
-  implementations already exist and are unreachable: `canonicalBlock` returns
-  `null` for zero operands
-  (`src/compute-engine/library/control-structures.ts:1372`), and `null` means
-  "cannot be put in canonical form"
-  (`src/compute-engine/ types-definitions.ts:824`), so the node stays
-  non-canonical and unbound and neither its `type` handler (`'nothing'` at zero
-  args, `control-structures.ts:98`) nor its `evaluate` handler (`ce.Nothing` at
-  zero args, `control-structures.ts:1309`) ever ran. The fix stops the decline
-  in `canonicalBlock` for the zero-operand case.
 - **`.value =` does not infer a symbol's type, while `ce.assign()` does.**
   `doc/04-guide-symbols.md:19-27` promises inference and uses `n.value = 5` as
   its live example. Measured: after `ce.expr('n')` then `n.value = 5`, the type
@@ -737,41 +426,24 @@ regenerated; 32 of the 36 regressions closed. The four that remain
 Until both are decided the report lists these four as known Stage-1 failures,
 and `--check` is green against that baseline.
 
-**With the deadline restored Stage 2 finished in 47 s and reported 16 False
-instances in 6 entries (July: 0 — the same shapes were then unevaluated).
-Triage, all on 2026-08-29:**
+**Left from the Stage-2 triage of 2026-08-29.** (With the deadline restored,
+Stage 2 finished in 47 s and reported 16 False instances in 6 entries. The
+defects it found are fixed: the `leadingOrder` rewrite in `symbolic/limit.ts`
+that turned `Fibonacci(n+1)/Fibonacci(n)` into `1`, `Integrate(…).N()` dropping
+the imaginary part of a complex integrand, the upstream statement of
+`π = Σ n!/(2n+1)!!` in entry `419b45` — the sum is π/2 — and the translator's
+elementwise reading of Fungrim's Cartesian power in entry `4099d2`.)
 
-- FIXED (engine): `Limit(Fibonacci(n+1)/Fibonacci(n), n→∞)` answered `1`
-  (entries `2b6e60`, `d56025`, `fdfdcc`). `leadingOrder` in `symbolic/limit.ts`
-  dropped a dominated additive term inside EVERY function argument, so
-  `Fibonacci(n+1)` became `Fibonacci(n)`; the same rewrite gave
-  `Γ(x+1)/(x·Γ(x))` → 0 and `f(n+1)/f(n)` → 1 for an unknown `f`. The rewrite
-  now enters an argument only under a slowly varying head (products, quotients,
-  `Ln`/`Log`, roots, x-free powers). The Fibonacci ratio now stays an inert
-  `Limit` (no growth class for `Fibonacci`); resolving it to φ needs a growth
-  level for exponential-class special functions — OPEN, low.
-- FIXED (engine): `Integrate(…).N()` of a COMPLEX-valued integrand dropped the
-  imaginary part (entry `f4e249`, `∫₀^π e^{e^{e^{ix}}} sin(nx) dx`):
-  `library/calculus.ts` read `.re` of every sample. The integrand is now split
-  into real and imaginary parts, both integrated, and returned as a complex
-  `Measurement`; `Real`/`Imaginary`/`Abs`/`Conjugate` propagate through a
-  Measurement (`measurementLipschitzUnary`). `BellNumber(n)` from that integral
-  now evaluates to `n`'s Bell number to 15 digits.
-- FIXED (upstream source, 2026-08-29): `419b45` stated `π = Σ n!/(2n+1)!!`; the
-  sum is π/2 (checked independently in Python to 16 digits, and the engine
-  agrees). The Fungrim source in the `arnog/fungrim` fork
-  (`pygrim/formulas/pi.py`) now reads `π = 2·Σ …`; the corpus was regenerated
-  and `data/fungrim/MANIFEST.json` carries the new content hash (the fork commit
-  id in the manifest must be refreshed once that fork change is committed).
-- FIXED (translator, 2026-08-29): `4099d2` used `Power(Range(1, N), n)` for
-  Fungrim's CARTESIAN power (n-tuples), which the Compute Engine reads as an
-  elementwise power. `grim2mathjson` now emits the shell `CartesianPower(S, n)`
-  when the base of `Pow` is a set or domain constructor (`translate_pow` in
-  `grim2mathjson/structural.py`); the entry is now `not-evaluable` (shell head)
-  instead of False. `scripts/fungrim/load.ts` `setify` keeps the `collection`
-  base parameter for that shell (a `Range` is an indexed collection, not a set).
-  A Compute Engine `CartesianPower` operator would make the entry evaluable —
-  OPEN, low.
+- `Limit(Fibonacci(n+1)/Fibonacci(n), n→∞)` stays an inert `Limit` (no growth
+  class for `Fibonacci`); resolving it to φ needs a growth level for
+  exponential-class special functions — OPEN, low.
+- `data/fungrim/MANIFEST.json` carries the regenerated corpus hash for the
+  `419b45` correction; the fork commit id in the manifest must be refreshed once
+  the `arnog/fungrim` fork change (`pygrim/formulas/pi.py`) is committed.
+- A Compute Engine `CartesianPower` operator would make entry `4099d2`
+  evaluable: `grim2mathjson` emits the shell `CartesianPower(S, n)` for a
+  set-based `Pow`, so the entry is `not-evaluable` instead of False — OPEN,
+  low.
 
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
 
@@ -865,44 +537,6 @@ element function of a lazy broadcast `Map` (`lazyBroadcastMap`) once its
 synthesized annotations stopped printing (they used to defeat the shorthand).
 Either print the wildcard parameters (`\_1\mapsto …`) or keep the shorthand
 out of the LaTeX route. Repro: the expression above.
-
-### `tycho-item-248-loop-invariant-hoist.test.ts` "a subexpression that mentions the index stays in the loop" fails on clean HEAD (OPEN, compilation tests — found 2026-09-05 at 75d9e21e)
-
-The test expects the loop body to contain `_SYS.at(`, and the emitted body
-reads `_tv2 += _tv1 * _SYS.atNumeric(_.P, j, "number"); …`: the element
-access of a `list<number>` operand now lowers through the typed accessor
-`_SYS.atNumeric`, and the pin was written for the untyped one. The run's value
-check (`run({ P })` = 44) is unaffected. Either the pin follows the accessor
-change (`toContain('_SYS.atNumeric(')`, if the typed accessor is the intended
-lowering) or the lowering regressed; the session that changed the accessor
-should decide. Repro: that test file, `-w 1`, on a clean checkout of HEAD.
-
-### The `Function` LaTeX serializer prints an INFERRED parameter type as a written annotation (FIXED 2026-09-05 — ruled: print only written annotations; the inferred `Typed` node is marked on its type operand and left out of `.json`/`.latex`, typing unchanged; the §8 test moved to the round-trip contract)
-
-Since the typed-lambda notation landed (`a538cd67`, 2026-09-04), the
-`Function` serializer writes every `Typed` parameter as `(x\colon T)\mapsto …`.
-Two committed tests fail on a clean `HEAD`:
-
-- `test/compute-engine/tycho-item-168-format-totality.test.ts` "the degraded
-  spelling equals the nothing-bound spelling": the user wrote
-  `Z \mapsto 0 < |Z|` with NO annotation; once `C_heckH` is bound, the
-  lambda's parameter is inferred `integer`, that inference is materialized
-  into the literal as `Typed`, and `.latex` prints
-  `(Z\colon integer)\mapsto 0\lt\vert Z\vert` where a bare engine prints
-  `Z\mapsto 0\lt\vert Z\vert`. An annotation the user never wrote is now in
-  the output (the ergonomics rule: an annotation marks a CHOSEN contract).
-- `test/compute-engine/typed-function-literals.test.ts` "serialization drops
-  annotations (§8)": pins the pre-notation contract that `.latex` drops a
-  WRITTEN annotation, which the round-trip design of the notation reversed
-  on purpose (`ROADMAP.md`, typed-lambda entry above). This test is stale if
-  the round-trip stays the ruling.
-
-Ruling needed: should a `Typed` node that INFERENCE inserted be printed?
-Recommended: no — print the annotation only when the literal carried it as
-written (distinguish the two at the point where inference materializes
-`Typed`, or keep inferred types on the definition and out of the literal),
-update the §8 test to the round-trip contract. Repro: the two test files
-above, `-w 1`.
 
 ### A recursive function with a function-typed parameter is rebuilt at every application — exponential time, and a type that overflows the stack (OPEN, evaluation — found 2026-08-22)
 
@@ -1020,453 +654,70 @@ with the unification or sooner):
   (`OperatorDefinition.collection`, `ValueDefinition.collection`) and is
   unpinned.
 
-### Type handlers as functions of TYPES, not expressions — measured 2026-08-22 (OPEN, design input)
+### Left open by the type-handler migration (OPEN, defects — the migration itself is done)
 
-The `type` handler of an operator definition takes `ops: Expression[]`, a
-signature that predates the type system. A survey of the 146 handlers in
-`library/*.ts` (regex over what each reads from its operands; counts
-approximate) found 116 read nothing but `ops[i].type`, and the other ~30 read a
-handful of VALUE facts: `isFinite`/`isNaN`/`isReal` (~45 reads), sign and
-integrality (~15), `.ops`/`.op1`/`.operator` (structure, ~5), and literal
-content (`.string`, `isSame`, `isLess`, ~5).
+Every `type` handler has taken operand descriptors since 2026-09-03, when the
+expressions shape was retired; `docs/plans/2026-08-22-type-handlers-on-types.md`
+is the design record and holds the batch history, and `CHANGELOG.md` the landed
+changes. The residues accepted in the retirement round all widen or prove more
+(radical literals decline in `Element`; NaN and `~oo` behind a wide declaration
+are indistinguishable to a descriptor; a symbol's held tuple behind a scalar
+declaration is invisible to `Abs`; a point accessor over a symbol whose declared
+element type is wider than its held content answers `unknown`). What remains:
 
-Measured in a worktree by proxying the operands at the ONE call site
-(`BoxedFunction` type derivation, `def.type(expr.ops, …)`) and running the full
-suite; `--ci`, no snapshots written. Each row's model is stated because the
-first two were wrong in instructive ways.
-
-| model                                                       | failures | what it showed                                                                                                           |
-| ----------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| every `isX` getter and value read blinded                   | 345      | over-blinded: `isReal`/`isInteger`/`isFinite` on a SYMBOL answer from its declared type, so the type channel was cut too |
-| type-backed predicates pass through; literal types on input | 244      | literal types LEAK: handler results carrying `tuple<1,2>`, `((z: 0) -> 0)`, `() -> 1` get STORED as contracts            |
-| + widen every `{kind:'value'}` in a handler result          | 423      | the naive walker rebuilt nominal/reference nodes (identity lost) and recursed a recursive record type                    |
-| + widen through STRUCTURAL nodes only, cycle-guarded        | **75**   | the residue, 23 suites, 0 crashes, 0 snapshot diffs                                                                      |
-
-Of the 75: 51 assert a type STRING and received one equally sound or MORE
-refined (`broadcastable<finite_number>` for `broadcastable<number>`); 9 are
-boolean predicates; 15 are behavior. Decomposed by cause, the residue is mostly
-limits of the experiment's spelling, not of the design:
-
-- **Assumptions** (~10, `inverse-trig-domain-type`, `solve-domain`): sign facts
-  from `ce.assume(x > 0)` reach handlers through the same getters. A third
-  channel, neither value nor declared type. Would need assumptions to refine the
-  TYPE, or a types-only handler to lose them.
-- **Rational literals** (~8, `(1,2)/3`, `(-2)^(p/q)` provenance): `1/3` is not a
-  parseable literal type (lexer rejects `/`), so the experiment spelled it as a
-  float and lost exactness. Rational literal types are a prerequisite.
-- **Closed complex constants** (5 Fungrim rules + 1): `i` is a constant WITH a
-  value, not a literal; `isImaginary`/`isComplex` were not derived from its type
-  in the shim. A shim gap — and the refusal is the STRICT canonicalization gate
-  (`validate.ts:464`, `!op.type.matches(param)`), not the handler.
-- **Symbol with an assigned function value** (2, `derivatives`): `f'(0.25)`'s
-  type reads `f`'s VALUE. The only genuinely dynamic dependence found.
-- Shim artifacts (union member duplicated by widening two literals to one
-  primitive, no `reduceType` after widen).
-
-Three facts the experiment established that any design should start from:
-
-1. Numeric literal types already exist (`ce.type('2')` → `2`,
-   `<: finite_integer`), but a boxed literal does not carry one —
-   `ce.box(2).type` is `finite_integer`. Giving literals their literal type on
-   handler INPUT recovers every literal-derived fact (`n²` integer, `x/2` real,
-   `10²¹` integer, `At` with a literal index) without a value channel; helpers
-   such as `toInteger()` then read the value from the type.
-2. Literal types must be WIDENED at storage boundaries (tuple element types,
-   inferred signature results, collection joins) or they become over-specific
-   contracts. The widening must stop at `reference`/`object`/ `record` nodes,
-   which carry identity and may be recursive.
-3. Most of what the value-dependent 20% "earns" is passage through the strict
-   signature gate at canonicalization, not correctness of results —
-   `FactorInteger(3+10²¹)`, `Mod(2^(3^20), 100)` and 25 simplify rules were
-   REFUSED, not miscomputed, when `10²¹` typed `finite_number`. Arithmetic
-   already admits by `couldMatch` and rejects at evaluation (`validate.ts:459`);
-   the declared-signature path refuses by strict `matches` five lines later
-   (`validate.ts:464`). One rule for both is a product decision (an error moves
-   from box time to evaluate time).
-
-Worktree with the shim: the experiment is reproducible from this entry; the
-proxy gates on `CE_TYPE_VALUE_BLIND` / `CE_TYPE_LITERAL` and is not for landing.
-
-Step 2 of the design's migration plan (§5.3) LANDED 2026-08-23: the dual handler
-shape. An operator definition may declare `typeHandlerKind: 'types'` and receive
-operand DESCRIPTORS (`OperandDescriptor` — handler-visible type, three-valued
-facts, on-demand structure; built by `describe()` / `describeType()` in
-`boxed-expression/operand-descriptor.ts`) instead of operand expressions; the
-single call site in `boxed-function.ts` dispatches on the flag, and a runtime
-purity guard (on under test) throws if a `'types'` handler moves any
-invalidation axis. First migrated handlers: `Coalesce`, `Hold`, `ReleaseHold` —
-byte-identical types, pinned in `type-handler-parity.test.ts` /
-`type-handler-descriptors.test.ts`.
-
-Two follow-ups landed 2026-08-23, before the mass conversion bakes the contract
-in: (1) `OperandFacts` was REDUCED (user-directed) to the facts the type cannot
-carry — `valid` deleted (an error operand's type IS `'error'`, and the error
-type propagates, so validity is a type read); `application` deleted as a fact
-(its consumers — `isPossiblyCollectionTyped` in
-`Add`/`Multiply`/`Equal`/`PointX` — are answered by
-`structureOf().kind === 'application'`, §5.6's own conclusion); `inferred` moved
-to where §5.6 said it fits, an attribute of the `structureOf()` symbol node (its
-consumers, `Multiply`'s `isDeclaredScalarNumber` and the `List` fold, read a
-symbol-node flag); `finite` kept for the NaN-literal soundness bit, `sgn` kept
-for the held-value and declined-range-assumption residues — the full per-field
-rationale is the 2026-08-23 amendment in the plan doc's §5.1. (2) The §5.5
-parity harness shipped as a DIFFERENTIAL shadow: a converted operator's legacy
-handler moves verbatim to `test/compute-engine/type-handler-shadow-legacy.ts`,
-and while installed both shapes run on every derivation and any divergence
-throws (`checkShadowTypeParity`), so the executing tests are the corpus —
-`type-handler-shadow-parity.test.ts` for the dedicated mix, and
-`CE_TYPE_PARITY_SHADOW=1` installs the fixture into EVERY suite's module
-registry (via `test/jest-config.ts`) so a full-suite run is the full corpus. The
-shadow already earned its keep: its dual review caught the call site
-pre-stripping a `handle` operator's LAST operand type, which made
-`Coalesce(1, m)` with `m: integer | missing` falsely promise presence — the
-strip fold is now gated to `propagate` operators and the contract is pinned.
-
-**RETIRED 2026-09-03: every step of §5.3 is done and the expressions shape is
-gone.** By ruling, the N+1 warning release was skipped and the 129 handlers
-still on the old shape were converted in one round (five file groups, each with
-a verbatim legacy fixture and a parity suite, then a full-suite run with every
-fixture installed); the same delivery deletes `typeHandlerKind`,
-`OperatorTypeHandlerOnExpressions`, the `operandTypes` handler option,
-`library/type-handlers.ts`, the shadow registry and every fixture. Residues
-accepted in the round, all in the widening or "descriptor proves more"
-direction: radical literals decline in `Element`; NaN and `~oo` behind a wide
-declaration are indistinguishable to a descriptor (handlers decline instead of
-claiming); a symbol's held tuple behind a scalar declaration is invisible to
-`Abs`; the ring-constant arms of `Subscript`/`At` match by name and set shape
-rather than binding identity; a point accessor over a symbol whose declared
-element type is wider than its held content answers `unknown`. Two rows were put
-to a ruling the same day. (1) `Pipe`'s static type was tighter than the
-evaluated lazy `Map` node's type (`list<boolean^3>` against
-`list<broadcastable<boolean>^3>`): RULED (b), one source of truth — the pipe now
-builds its implicit `Map` from the RAW stage and canonicalizes it as a whole, so
-the `Map` stamps the parameter with the element type and both types agree
-(`pipeImplicitMap`, `library/core.ts`; pinned in `functions.test.ts`). Still
-OPEN on the parse route: a LaTeX shorthand stage (`[1,2,3] |> \_^2`) reaches the
-handler as a bare application mentioning `_`, not as a function literal, so the
-static type is `unknown` while evaluation maps to `vector<integer^3>`; the
-static handler could read such a stage as the shorthand literal the evaluate
-route treats it as. (2) A `Map` whose element type cannot be derived echoes a
-non-collection source unwrapped: RULED keep (a). The only program that reaches
-it is a `Map` over a scalar, which evaluation refuses, and the pipe's and the
-explicit `Map`'s evaluated nodes already disagree on its type, so no derivation
-has a target to match. History of the migration follows.
-
-Step 3 (mass conversion) was IN PROGRESS — batch 1 landed 2026-08-24: 39
-handlers across `number-theory` (whole file), `distributions`, the nullary
-`combinatorics` handlers, and `DigitCount`/`Block`/`When`. Nullary constant
-handlers are RETIRED outright (user-suggested): the constant result moves into
-the declared signature (`(integer) -> finite_integer`) and the handler is
-deleted — ledgered with the declared results in `RETIRED_CONSTANT_TYPE_HANDLERS`
-and pinned. Operand-reading handlers convert with verbatim legacy copies in the
-shadow fixture and per-operator corpus coverage. ⚠️ The retirement class has a
-hard boundary: a constant handler answering bare `number` or `finite_number`
-must NOT be retired into the signature — those two result spellings are exactly
-what activates the no-handler fallback narrowing at the type-derivation call
-site, so deleting such a handler CHANGES derived types. A retiree whose constant
-claim is itself UNSOUND off the operator's domain gets a domain-gated `'types'`
-handler instead, never a promoted signature
-(`GammaRegularized`/`BetaRegularized` were caught claiming `finite_real` while
-`GammaRegularized(-1, 2)` is NaN — they now gate on proven positivity/range, and
-an unproven fact claims `number`).
-
-The RETIREMENT SWEEP of the nullary handlers outside batch 1's files followed on
-2026-08-24 and is DONE: nineteen candidates in `arithmetic`, `collections`,
-`core`, `linear-algebra`, `regexp`, `special-functions`, `statistics` and
-`trigonometry`, of which ten retired and nine were corrected instead. (The
-bare-`number` statistics handlers — `Mean`/`Median`/`Variance`/… — were never
-candidates: their result spelling is the fallback trigger above, and their
-absence-absorbs-to-NaN behavior depends on it.) The nine pure deletes, whose
-declared signature already claimed exactly what the handler returned, were
-`Length`, `Keys`, `Any`, `All`, `Position`, `ArgMax`, `ArgMin`, `TypeFrom` and
-`RegExp`; `Rank` was promoted from a bare `number` result to
-`(value) -> finite_integer`, which is what its handler had been supplying. That
-leaves 44 entries in the retirement ledger (`RETIRED_CONSTANT_TYPE_HANDLERS`,
-`test/compute-engine/type-handler-shadow-legacy.ts`): 34 from batch 1 plus
-these 10. The other nine candidates were caught by the soundness gate — each
-claimed a type that its own values contradict at NaN, at infinity, or off the
-real line — and now carry domain-gated `'types'` handlers, pinned in
-`type-handler-parity.test.ts` with no shadow entry (the change from the old
-claim IS the point): `Sinc`/`FresnelS`/`FresnelC` (all three numericize to NaN
-at NaN and are complex-valued off the real line),
-`Covariance`/`PopulationCovariance`/`Correlation` (one NaN or ±∞ data value
-makes the whole statistic NaN), `Heaviside`/`Sign` (defined on the reals only —
-no value at NaN, at `~oo`, or off the real line) and `LogIntegral`, which was
-first taken as a pure delete and pulled back out of the ledger when review
-showed its declared `real` result unsound: `LogIntegral(NaN).N()` is NaN, which
-`real` does not admit, and li(x) = Ei(ln x) is complex for a negative argument.
-Six of the nine are declared broadcastable — `Sinc`, `FresnelS`, `FresnelC`,
-`Heaviside`, `Sign` and `LogIntegral` — and for those the result-typing code
-re-adds the operand's lifted shape around the scalar type the handler returns,
-so each gate reads a collection operand through its fully unwrapped element type
-(`broadcastOperandType`, `library/type-handlers-types.ts`), which is what keeps
-`Sinc([1, 2])` at `vector<finite_real^2>`. The three paired statistics are the
-opposite case: `Covariance`, `PopulationCovariance` and `Correlation` are
-declared `broadcastable: false` because the dataset IS the operand, so their
-gate reads the collection type whole. The defects the sweep's probes surfaced
-are recorded as open items below, under "Left open by the type-handler
-retirement sweep". `Binomial`/`Choose`/`Pochhammer` were converted and REVERTED
-by the batch's dual review: their pole-widening sign gates can be proven by
-operator `sgn` handlers on compound operands — a channel descriptors did not
-then carry — so converting narrowed the claim, which the parity rules forbid.
-The O7 sign-channel audit has since executed (2026-08-24, record at the plan
-doc's O7 open item): the `sgn` handler family is certified pure (the two
-evaluating handlers, `Random` and `Count`, were rewritten against literal-only
-readers), `describe()` now consults the handlers for applications, and every
-recorded sign-channel divergence in `type-handler-twins.test.ts` closed. The
-once-held heads have since converted (2026-08-25, sixteen operators: the trio,
-the Γ family, `PolyGamma`, `Factorial`/`Factorial2`, `Ln`/`Log` and
-`Cot`/`Csc`/`Coth`/`Csch`), with their legacy handlers frozen in the shadow
-fixture and sign-channel witnesses in the parity corpus; the plan doc's §5.3
-status has the batch record. The nine bounded inverse trig heads followed
-(2026-08-25, by ruling): their conversion ADOPTS the descriptor shape's stronger
-ranged-type channel — a declared range or a ranged result type now proves domain
-membership (`Arcosh(BIG)` with `BIG: real<2..>` types `finite_real`), while
-exact literals with no machine value widen per the accepted rational-literal
-residue — so they run no shadow parity, and the changed rows are recorded in the
-twins divergence tables and pinned in `type-handler-parity.test.ts`. The
-`typeFact` helper (three-valued `isInteger`/`isReal` replacement) shipped with
-the batch, and `describe()`'s `finite` fact now reads a held number value, so a
-wide-typed symbol holding `±∞`/`NaN` answers `finite: false`.
-
-The descriptor twins of the shared helpers in `library/type-handlers.ts` landed
-next, in `library/type-handlers-types.ts`, with a direct A/B suite
-(`test/compute-engine/type-handler-twins.test.ts`) that runs both shapes over a
-44-row operand battery and asserts the mismatch set against an explicit
-divergence table — a new divergence and a vanished one both fail. That unblocks
-the numeric families. Two twins stay blocked on the same sign-channel gap as
-`Binomial`/`Choose`/`Pochhammer` (`gammaPoleType` and the log heads), and the
-audit surfaced one unsound expressions-shape arm, fixed in the same round:
-`Sinh`/`Cosh`/`Tanh`/ `Sech` took their real-infinity branch on
-`isReal === true`, which a NaN literal answers `true`, so they claimed a finite
-or non-finite type for a value that is NaN.
-
-What remains here: the rest of the ~210 pure handlers (§5.3 step 3 — next up:
-the numeric families now that the twins exist, then the structure-bound
-control-structure / core handlers and the collection files), the seven
-impure-handler rewrites (§5.4), `context.derive` for the handlers that type an
-application they do not hold, and the old shape's deprecation (release N+1) and
-removal (N+2) — the removal includes deleting the `@fixme`-tagged shadow-parity
-apparatus wholesale (the registry's doc comment, `_legacyTypeHandlerShadow` in
-`boxed-expression/operand-descriptor.ts`, lists every piece).
-
-Left open by the type-handler retirement sweep and the helper-twins audit that
-followed it (2026-08-24), all found by probing operators at NaN, ±∞, complex,
-and out-of-machine-range arguments:
-
-1. Several signatures still declare `-> real` for functions whose value is NaN
-   at a NaN argument, and `real` does not admit NaN. `LogIntegral` was the
-   instance the sweep caught, and it is fixed: it now carries a domain-gated
-   `'types'` handler and a `-> number` declared result. The hole is a property
-   of the SIGNATURE, though, and other `-> real` heads share it. Auditing that
-   family — deciding per operator between a domain-gated handler and a widened
-   declared result — is its own pass.
-2. `Divide` of two bignum operands returns NaN when both machine projections
-   underflow to `-0`. With `ce.precision = 500`, dividing two bignum values
-   around `-3.18…e-401` — each carrying its full decimal expansion, but with
-   `.re === -0` — evaluates to NaN: the division takes the machine fast path off
-   the `.re` projection instead of the bignum channel the operands actually
-   hold. This makes relative-error computations on sub-`1e-324` bignums
-   unusable. The fix belongs in the division fast-path gate (the
-   `arithmetic-mul-div` machine-path selection): a machine projection that has
-   underflowed must not be allowed to stand in for a bignum operand. Found while
-   writing the high-precision Fresnel regression tests, which work around it by
-   comparing decimal expansions instead of dividing.
-
-3. Define ONE semantics for operator signatures and invalid arguments, and apply
-   it across the library (user-directed 2026-08-24, accepting the current state
-   as interim). Today the library is deliberately permissive but inconsistent
-   off an operator's mathematical domain, in three ways. (a) NaN handling:
-   `Sin(NaN).N()` and `Sinc(NaN).N()` propagate to NaN, while `Heaviside(NaN)`
-   and `Sign(NaN)` stay inert symbolic forms — an artifact of predicate-based
-   evaluate handlers with no numeric kernel, not a ruling. (b) The meaning of a
-   declared result: it is sometimes read as an unconditional promise over
-   everything the parameter type admits (the reading that forced the corrected
-   operators onto wide `-> number` declarations with proof-gated `'types'`
-   handlers) and sometimes as a happy-path claim. (c) Parameter types
-   deliberately admit values the operator has no value for (`Heaviside(1+2i)`
-   boxes and stays symbolic rather than erroring), so the mathematical domain is
-   not expressed in the signature at all. (d) A declared result can be plainly
-   contradicted by an overload the signature does not distinguish:
-   `LinearRegression` declares `-> tuple<number, number>` and `PolynomialFit`
-   declares `-> list<number>`, but both accept an optional trailing variable
-   symbol and then return the FITTED EXPRESSION —
-   `LinearRegression([1, 2, 3], [2, 4, 6], x)` is `2x`, typed
-   `tuple<number, number>` before evaluation and `finite_number` after. The
-   declaration describes only the no-variable overload. The pass should choose:
-   what a signature's result means (codomain sort vs value promise), what its
-   parameters mean (admission filter vs mathematical domain), and one per-class
-   convention for off-domain arguments (propagate NaN, stay inert, or error) —
-   then sweep the library to it. Item 1 (the `-> real` family's NaN holes) is a
-   special case that folds into this pass.
-
-4. `Covariance`, `PopulationCovariance` and `Correlation` declare a
-   `finite_real` result whenever the operand types prove every data value is a
-   finite real (`pairedStatisticType`, `library/statistics.ts`), but data large
-   enough to overflow the machine sums of squares makes all three answer a
-   non-finite value, which `finite_real` does not admit: at machine precision
-   `Covariance([1.5e200, 2.5e200, 3.5e200], [1.5e200, 2.5e200, 3.5e200])` is
-   typed `finite_real` and evaluates to `+oo`. This is NOT a soundness hole in
-   the declaration: the engine-wide convention is that a declared type describes
-   the MATHEMATICAL value, and an artifact of the machine-precision
-   approximation does not falsify it. `Exp(1000)` settles the convention — it is
-   typed `finite_real<0..> & !0` while its `.N()` at `ce.precision = 'machine'`
-   is `+oo`, and nobody proposes widening `Exp`'s declared result to `number`
-   because of it. What is left here is therefore a question about the numeric
-   path, not the type: whether the bivariate statistics should compute their
-   sums of squares in a way that survives machine-range data (scaling the data,
-   or routing through the bignum lane the way the default precision already
-   does), so that finite data gets a finite answer at machine precision too.
-   The `Correlation` half is closed (2026-09-04): its kernel scales each
-   column's deviations by a power of two, and r is invariant under that, so
-   `Correlation([1.5e200, 2.5e200, 3.5e200], [1, 2, 3])` answers `1` at machine
-   precision. A covariance is NOT scale-invariant, so the two covariance heads
-   still overflow there; only the bignum route would close that half.
-5. Assumption bounds are recorded with direction-blind machine rounding.
-   `boundsFromNormalizedInequality` (`constraint-subject.ts`) accumulates an
-   inequality's constant terms in a JavaScript number, so an exact bound the
-   machine cannot represent is rounded to nearest in EITHER direction before it
-   is stored — and every consumer (the `cmp` comparison predicates,
-   `signFromBounds`, the descriptor `bounds` fact) then treats the stored value
-   as exact. A lower bound rounded UP over-proves: canonicalization already
-   folds `assume(v > 1 − 10⁻³⁰)` to a stored strict bound of exactly 1, from
-   which every channel "proves" `v > 1` — refuted by `v = 1 − 10⁻³¹`. Sound
-   recording rounds a lower bound DOWN and an upper bound UP (weakening only),
-   or stores the exact bound expression and lets each consumer project it with
-   its own direction awareness. The descriptor fact already refuses a STORED
-   bound whose machine projection is inexact (`describe()`'s `machine` gate),
-   but it cannot see rounding that happened before storage. Both handler shapes
-   read the same store, so this predates the descriptor channel and is not a
-   conversion regression. (A further item — `BoxedNumber.isOdd` reading the
-   parity of a bigint's ROUNDED double past 2⁵³ — was fixed in the same round:
-   parity now comes from the exact integer channel, and the regression battery
-   lives in `test/compute-engine/numbers.test.ts` under "PARITY OF INTEGERS
-   BEYOND THE SAFE RANGE". A `FresnelS`/`FresnelC` stack overflow at huge
-   arguments — `bigFresnel` escalating `BigDecimal.precision` to `Infinity` —
-   was fixed then too, pinned in `test/compute-engine/fresnel.test.ts`. Two more
-   were fixed on 2026-08-24 after the user ruled on them: the bivariate
-   statistics used to project complex data onto its real part and answer as if
-   the imaginary parts had never been given — `Covariance([1, 1+2i], [2, 3])`
-   returned `0`, the covariance of `[1, 1]` — and now return an
-   `incompatible-type` error naming the real constraint and the offending datum,
-   in both accepted input forms and in the `LinearRegression`/`PolynomialFit`
-   siblings that share the same extraction path; and `Correlation` now
-   propagates NaN for any data it has no real value for — NaN, ±∞ and `~oo` —
-   the way `Covariance` always did, instead of reporting a variance of zero that
-   the data does not have. Its "zero variance" error is now raised only when a
-   column is genuinely constant, which also removes it from finite data whose
-   sums of squares overflow. Both are pinned in
-   `test/compute-engine/statistics.test.ts` under "Bivariate statistics reject
-   non-real data". The one-sample statistics had the same real-part projection
-   and were resolved the same day, by a ruling that splits them rather than
-   rejecting uniformly: `Mean` now returns the COMPLEX mean (`Mean([1, 1+2i])`
-   is `1 + i`, exactly, because the mean is linear and needs no convention);
-   `Variance`, `PopulationVariance`, `StandardDeviation` and
-   `PopulationStandardDeviation` compute `E[|X − μ|²]`, a real non-negative
-   answer, with the divisors they already used; and every order-based or
-   higher-moment head — `Median`, `Mode`, `Quartiles`, `InterquartileRange`,
-   `Skewness`, `Kurtosis`, `Histogram` and `BinCounts` — raises the same
-   `incompatible-type` error, because there is no canonical order on the complex
-   plane and no convention-free complex extension of the standardized moments.
-   Pinned in the same file under "One-sample statistics on complex data".)
-
-(The two questions this list opened as item 0 were ruled on 2026-08-24 and are
-implemented, so the item is gone. (a) `Histogram` and `BinCounts` now ERROR on a
-datum or an explicit bin edge with no finite real reading — `NaN`, a real `±∞`,
-or `~oo` under either spelling — with the same `incompatible-type` shape the
-complex rejection uses, naming the `finite_real` constraint
-(`dataConstraintError`, `library/statistics-data.ts`). They cannot absorb such a
-value the way `Mean` does, because their result is a vector of COUNTS with no
-reading for "unreadable", and the drop they used to perform answered a different
-question than the one asked. A third refusal came with it: a value that IS a
-finite real but exceeds the double range the binning computes in (`10^400`) gets
-an `out-of-range` error naming that range, because the limit belongs to the
-kernel and not to the value — calling such a datum "not a finite real" would
-contradict its own `finite_integer` type. Pinned in
-`test/compute-engine/statistics.test.ts` under "Histogram/BinCounts reject
-values they cannot bin". (b) `Re` and `Im` are now defined, as canonical-rewrite
-aliases of `Real` and `Imaginary` (`library/complex.ts`), matching the `Arg` →
-`Argument` alias beside them; the `\Re` and `\Im` LaTeX commands already parsed
-to `Real`/`Imaginary` and are what the serializer emits, so the dictionary
-needed no change. Each alias validates its argument list and derives its type
-through its target, so the two spellings of one function cannot disagree —
-before this, `Arg(1, 2)` silently dropped the second operand and `Re(NaN)`
-claimed the type `real` on the structural route. Pinned in
-`test/compute-engine/complex-argument.test.ts`, beside the `Arg` alias tests.
-
-Ruled the same day and implemented with them: `LinearRegression` and
-`PolynomialFit` PROPAGATE NaN for data with no finite real reading, instead of
-letting the Gaussian elimination decide. A non-finite value in the X column made
-the pivot search find no non-zero pivot and reported
-`unexpected-argument: "degenerate data"` — a claim about the geometry of the
-sample the data does not support — while
-`LinearRegression([[+oo, 2], [2, 4], [3, 6]])` pivoted successfully on a later
-row and returned the half-`NaN` tuple `(NaN, 0)`, whose `0` slope is not a fit
-of anything. Every coefficient is now `NaN`, in the shape each head declares:
-`(NaN, NaN)` for `LinearRegression`, a `degree + 1` list of `NaN` for
-`PolynomialFit`, and the fitted expression with `NaN` coefficients when a
-trailing variable is given. That is what both heads already answered when the
-non-finite value sat in the Y column, so the two columns now agree, and it
-matches the covariance family. The `degenerate data` error survives for
-rank-deficient FINITE real data, such as
-`LinearRegression([2, 2, 2], [1, 2, 3])`. Two neighbouring misdiagnoses went
-with it, both of which used to reach that same rank guard: two data collections
-of different lengths now report `incompatible-dimensions 2 vs 3`, the error
-`Covariance` and the other pairwise heads already use for a length disagreement,
-and a sample of fewer than two points now reports `not enough data points` — one
-point determines no line whatever its value is, so that fact is reported ahead
-of both the NaN propagation and the rank guard, matching what `PolynomialFit`
-already said.)
-
-Two exactness holes from the same sweep were fixed on 2026-08-24 as well. `Sqrt`
-of an exact radicand too large for the `radical` field used to be computed by
-converting the radicand to the engine's numeric format first, so at
-`ce.precision = 'machine'` `Sqrt(10^402)` was `Sqrt(+oo) = +oo` instead of
-`10^201` — which made `Correlation` of exact, perfectly correlated data around
-`1e200` answer `0`, since its exact path divides the covariance by
-`Sqrt(vx · vy)`. A perfect square is now detected with bigint arithmetic before
-any narrowing, so the reduction no longer depends on the precision setting, and
-the same detection reaches exact rationals past the `10^6` radical cliff
-(`Sqrt(10^12/9)` is `10^6/3`, not the unevaluated `Sqrt` it used to be) and
-their negatives (`Sqrt(-10^12/9) = (10^6/3)i`). When no exact root exists the
-float lane still takes it, but from the bignum value whenever the narrowed one
-has overflowed to `±oo` or underflowed to zero, so `Sqrt(1/10^402)` is
-`1/10^201` at machine precision rather than `0`. The fix is in
-`ExactNumericValue.sqrt` (`numeric-value/exact-numeric-value.ts`) and the
-regressions are in `test/compute-engine/exactness-regressions.test.ts` under "a
-large exact radicand reduces exactly, at any precision", run at both precisions.
-One snapshot moved with it and has NOT been updated: `SQRT √(1000000/49)` in
-`test/compute-engine/__snapshots__/arithmetic.test.ts.snap` records the old
-symbolic `sqrt(1000000/49)`, where the fix now gives the exact `1000/7`.
-
-`Conjugate`, `Real` and `Imaginary` (`library/complex.ts`) lost exactness on an
-exact complex operand: `Conjugate(1/3 + 2/5i)` returned the machine float
-`0.3333… − 0.4i`, so `z · Conjugate(z)` — the natural spelling of `|z|²` —
-answered `0.2711…` where the exact `61/225` was available, and
-`Real`/`Imaginary` returned the numeric projection of the component
-(`ce.number(op.bignumRe ?? op.re)`, a bignum, and `ce.number(op.im)`, a machine
-float) rather than the component itself. An `ExactNumericValue` carries each
-part as a rational multiple of a square root, and the three handlers now read
-and reassemble those parts — negating the imaginary one for the conjugate — so
-`Real(1/3 + 2/5i)` is `1/3`, `Imaginary(√2·i)` is `√2`, and `Conjugate(3 + 4i)`
-is an exact Gaussian integer. Inexact and symbolic operands are untouched.
-Pinned in `test/compute-engine/exactness-regressions.test.ts` under "the parts
-of an EXACT complex operand stay exact".
-
-Design and implementation draft:
-`docs/plans/2026-08-22-type-handlers-on-types.md` (third draft, 2026-08-22). The
-draft reframes this entry: the GOAL is type derivation that does not modify
-engine state (the item-219 pattern); the value-read survey above measured
-precision, not side effects. Step 0 (type assertions say which drift they guard
-— `expectTypeBetween` in `test/utils.ts`, rule in
-`docs/COMMENTING-GUIDELINES.md`) is executed (d3faf62d); residue baseline 57.
-Rulings 2026-08-22 (doc §6): declared signatures admit by OVERLAP and check at
-evaluation (the arithmetic model; `couldMatch` is comparability, not overlap —
-build on D6.2 `overlapsForDeferredValidation`); precision loss accepted; literal
-types for `0`/`1` only; a pure facts channel (sign, closedness) beside the
-types; `_reviseInferredType` moves to a write site; `Pipe`/`Dot` fixed now. The
-"closed complex constants" group above was mis-filed: the lost facts are the
-SIGN of `π`/`e` and the CLOSEDNESS `poleReciprocalType` reads via `isConstant`.
+- **A LaTeX shorthand pipe stage types `unknown`.** `[1,2,3] |> \_^2` reaches
+  the `Pipe` type handler as a bare application mentioning `_`, not as a
+  function literal, so the static type is `unknown` while evaluation maps to
+  `vector<integer^3>`; the static handler could read such a stage as the
+  shorthand literal the evaluate route treats it as (`pipeImplicitMap`,
+  `library/core.ts`).
+- **Bignum division underflow.** `Divide` of two bignum operands returns NaN
+  when both machine projections underflow to `-0`. With `ce.precision = 500`, dividing two bignum values
+  around `-3.18…e-401` — each carrying its full decimal expansion, but with
+  `.re === -0` — evaluates to NaN: the division takes the machine fast path off
+  the `.re` projection instead of the bignum channel the operands actually
+  hold. This makes relative-error computations on sub-`1e-324` bignums
+  unusable. The fix belongs in the division fast-path gate (the
+  `arithmetic-mul-div` machine-path selection): a machine projection that has
+  underflowed must not be allowed to stand in for a bignum operand. Found while
+  writing the high-precision Fresnel regression tests, which work around it by
+  comparing decimal expansions instead of dividing.
+- **Overload-blind result declarations.** A declared result can be plainly
+  contradicted by an overload the signature does not distinguish:
+  `LinearRegression` declares `-> tuple<number, number>` and `PolynomialFit`
+  declares `-> list<number>`, but both accept an optional trailing variable
+  symbol and then return the FITTED EXPRESSION —
+  `LinearRegression([1, 2, 3], [2, 4, 6], x)` is `2x`, typed
+  `tuple<number, number>` before evaluation and `finite_number` after. The
+  declaration describes only the no-variable overload.
+- **`Covariance` and `PopulationCovariance` overflow on machine-range data.**
+  Both declare a `finite_real` result whenever the operand types prove every
+  datum a finite real (`pairedStatisticType`, `library/statistics.ts`), and the
+  declaration is sound by convention (a declared type describes the
+  MATHEMATICAL value; `Exp(1000)` is typed `finite_real<0..> & !0` while its
+  `.N()` at machine precision is `+oo`), but at machine precision
+  `Covariance([1.5e200, 2.5e200, 3.5e200], [1.5e200, 2.5e200, 3.5e200])`
+  evaluates to `+oo` because the sums of squares overflow. `Correlation` was
+  closed on 2026-09-04 by scaling each column by a power of two, which r is
+  invariant under; a covariance is not scale-invariant, so only routing the
+  machine path through the bignum lane would close this half.
+- **Direction-blind assumption bounds.** An assumption's bound is recorded
+  with machine rounding that ignores direction.
+  `boundsFromNormalizedInequality` (`constraint-subject.ts`) accumulates an
+  inequality's constant terms in a JavaScript number, so an exact bound the
+  machine cannot represent is rounded to nearest in EITHER direction before it
+  is stored — and every consumer (the `cmp` comparison predicates,
+  `signFromBounds`, the descriptor `bounds` fact) then treats the stored value
+  as exact. A lower bound rounded UP over-proves: canonicalization already
+  folds `assume(v > 1 − 10⁻³⁰)` to a stored strict bound of exactly 1, from
+  which every channel "proves" `v > 1` — refuted by `v = 1 − 10⁻³¹`. Sound
+  recording rounds a lower bound DOWN and an upper bound UP (weakening only),
+  or stores the exact bound expression and lets each consumer project it with
+  its own direction awareness. The descriptor fact already refuses a STORED
+  bound whose machine projection is inexact (`describe()`'s `machine` gate),
+  but it cannot see rounding that happened before storage. Both handler shapes
+  read the same store, so this predates the descriptor channel and is not a
+  conversion regression.
 
 ### Ranged types — remaining design tasks (OPEN; the interval arithmetic and open-bound halves shipped 2026-08-27 and 2026-08-28)
 
@@ -1523,7 +774,7 @@ digits to stay inside propagated claims, or the grid's oracle should compare the
 VALUE against the static range instead of comparing the two range spellings.
 Nightly-only, so no default-suite impact.
 
-### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects; the GETTER half is FIXED 2026-08-22 — `_reviseInferredType` no longer writes on read (R4, plan §4.2); the 7 handlers and 2 `elttype` handlers remain scheduled by the type-handler design)
+### Type derivation reaches state mutation at 7 handlers, 2 `elttype` handlers and 1 getter — AUDITED 2026-08-22 (OPEN, defects — the getter half is done: `_reviseInferredType` no longer writes on read; the 7 handlers and 2 `elttype` handlers remain)
 
 A transitive call-graph audit (depth ≤ 8) of every `type:` handler in
 `library/*.ts` — 220 arrow-form handlers plus ~65 string/named entries — for the
@@ -2439,23 +1690,6 @@ Historical numbers (pre-fallback): order-1 compile 6/21/77/429 ms at depth
 depth. (Reported by the Tycho project as its item 177, `docs/COMPUTE_ENGINE.md`
 in `dev/tycho`; bare-engine repro `docs/scratch/d209-ce-asks-repro.mts` there.)
 
-Its sibling report, Tycho item 176 (a lambda `i ↦ Σ_{n=1..i} …` compiling to all
-zeros with `success: true`), was root-caused and FIXED the same day it was filed
-(2026-08-12, staged): a big-operator bound whose name collides with a library
-constant (`i`, the imaginary unit; `e`) was read through the shadowed engine
-symbol — `.re` of the imaginary unit is `0`, so the range `1..0` folded empty —
-both when the name was really a compile-bound parameter (fixed via
-`BaseCompiler.bigOpBoundConstant()` refusing the constant fold for compile-bound
-names, applied in the javascript/gpu/interval targets) and at top level, where
-`bigopBoundValue` (`library/utils.ts`) dropped a nonzero imaginary part instead
-of staying symbolic. Pinned in
-`test/compute-engine/compile-sum-product.test.ts`, parameterized over
-`i`/`e`/`k`/`n`/`x`. An earlier revision of this entry misattributed the cause
-to enumerability of `Range` with undeclared bounds — the enumerability tier was
-never implicated (an undeclared non-constant bound always stayed symbolic;
-declaring `i: number` shadowed the constant, which is what made declaredness
-look like the trigger).
-
 ### Static argument-checking of user-defined callees — residue
 
 Tier 1 landed 2026-08-12; what remains is generic functions (below) and
@@ -2672,7 +1906,7 @@ unenforced (other positions behave as `function`); a union of two DIFFERENT
 `callback<S>` members resolves first-seen; undeclared source symbols infer
 `collection<unknown>` (the standing polytype behavior).
 
-**Cleanups (opened here 2026-08-09; the first five CLOSED 2026-08-09):**
+**Cleanups (opened 2026-08-09):**
 
 - **An eager IMPURE collection source is evaluated several times**
   (pre-existing, measured 2026-08-09 during the above): counting handler
@@ -3550,27 +2784,6 @@ _importance_.
   target gaps, not memoizable work. See
   [`docs/plans/2026-07-28-compile-cse-design.md`](./docs/plans/2026-07-28-compile-cse-design.md)
   §10.
-
-### Kleene-absence residue (missing-value typing landed 2026-07-24)
-
-The `Missing`/`missing` feature shipped (record in `CHANGELOG.md` and
-`docs/TYPE-SYSTEM.md`).
-
-**Ruling (2026-07-24):** comparisons are **IEEE over `NaN`** (`NaN == NaN` is
-`False`, orderings with `NaN` are `False`) and **Kleene over the `Missing`
-symbol** only, across the full relational family (`Equal`/`NotEqual`/`Less`/
-`LessEqual`/`Greater`/`GreaterEqual`). Absence for discharge (`IsMissing`/
-`Coalesce`) and aggregates (`Max`/`Mean`/…) is unchanged — `NaN` stays absent
-there. Because `NaN` follows IEEE, compiled and interpreted numeric comparisons
-now agree by construction (plain `==`, no guard); empty `Max`/`Min` compile to
-`NaN` matching the interpreter.
-
-**Ruling (2026-07-24, later):** a scalar `If`/`Which` condition evaluating to
-`Missing` yields a catchable **error expression** ("The condition is absent…"),
-the R `if (NA)` stance — absence is a runtime data state, not a program defect.
-The typo path (a condition that is not boolean at all, `If(3, …)`) deliberately
-keeps its spell-check **throw**: changing it was ruled out of this feature's
-blast radius. No residue remains from the missing-value feature.
 
 ### Broadcast typing residue (`broadcastable<T>` lift landed 2026-07-17)
 
