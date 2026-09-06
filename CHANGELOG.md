@@ -413,6 +413,71 @@
   A trailing comma inside a set literal or a compact piecewise
   (`\{ x < 0 : 1, x, \}`) no longer leaves a stray element behind.
 
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
+
+| Expression         | CE 0.124.0 | CE 0.123.2 | SymPy | math.js | Mathematica |
+| ------------------ | ---------: | ---------: | ----: | ------: | ----------: |
+| $\pi^2$            |         10 |         12 |   175 |     103 |         3.9 |
+| $\sin 1$           |         22 |         23 |   219 |     438 |         5.1 |
+| $\cos 1$           |         21 |         23 |   216 |     522 |         7.1 |
+| $\ln 2$            |         15 |         17 |   342 |   4,364 |         3.7 |
+| $e^{\pi}$          |         14 |         16 |   211 |   4,659 |         4.6 |
+| $\zeta(3)$         |      1,538 |      1,587 |   270 |       — |          49 |
+| $\Gamma(\tfrac13)$ |        855 |        839 |   339 |       — |         213 |
+| $\psi(\tfrac13)$   |        729 |        723 | 2,795 |       — |         171 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case. Compare the **CE 0.124.0** and
+**CE 0.123.2** columns to see what is _new this release_ (a `—` under `0.123.2`
+next to a number under the current build). The **CE + R/F** column is the
+current build with the opt-in Rubi integrator + Fungrim identities loaded
+(`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+
+| Operation                              | CE 0.124.0 | CE + R/F | CE 0.123.2 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :--------: | :------: | :--------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |            |          |            |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |    2.2×    |   1.4×   |    1.7×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |    5.0×    |   0.9×   |    3.6×    | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |    2.1×    |   0.6×   |    1.7×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |     —      |   0.7×   |     —      |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |     —      |   0.5×   |     —      | 0.01×  |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |     —      |   0.5×   |     —      | 0.007× |    —    |     1×      |
+| **Derivatives**                        |            |          |            |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |   0.02×    |  0.02×   |   0.01×    | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |            |          |            |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |    16×     |   15×    |    14×     |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |    23×     |   20×    |    16×     |  3.2×  |   20×   |     1×      |
+| **Evaluation**                         |            |          |            |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |    23×     |   11×    |    19×     |  3.0×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |    3.1×    |   3.0×   |    3.0×    |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |   1441×    |  2430×   |   1187×    |  85×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |    140×    |   57×    |    118×    |  2.5×  |    —    |     1×      |
+| **Solving**                            |            |          |            |        |         |             |
+| $x^4+x^2-1=0$                          |   0.08×    |  0.08×   |   0.08×    | 0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |    1.0×    |   1.1×   |    1.0×    | 0.04×  |    —    |     1×      |
+
+Across the cases both solve, Compute Engine is a **median 2.2× faster than
+Mathematica** (up to 1441×) — in the browser, not a proprietary kernel.
+
+<sub>Measured 2026-09-05 · Compute Engine `0.124.0` (current build @ `5a5db888`)
+· published `0.123.2` · SymPy `1.14.0` · math.js `15.2.0` · Node `v22.13.1`.
+The Mathematica column (`14.3.0 for Mac OS X ARM`) is carried over from the
+2026-08-19 run on the same machine, because the Wolfram kernel licence could not
+be activated on the day of this run; for the four evaluation rows and the two
+solving rows, the absolute Mathematica time was reconstructed from the ratios
+published with 0.116.0 (about ±15 %). Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
+
 ## 0.123.2 _2026-09-04_
 
 ### Improvements
