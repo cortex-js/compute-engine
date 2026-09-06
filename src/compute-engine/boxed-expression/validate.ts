@@ -75,6 +75,7 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
   isSymbol,
   isFunction,
+  isNumber,
   isString,
   isContinuationOperand,
   containsContinuationOperand,
@@ -675,8 +676,18 @@ export function nonNumericOperandError(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
+  // A number literal, and any operand whose type is below `number`, share
+  // values with `broadcastable<number>`: neither is disjoint, and the
+  // subtype test answers that before the disjointness proof (five arms,
+  // each a proof of its own) has to. The empty type `never` is below
+  // `number` as well but shares no value with anything, so it keeps the
+  // disjointness route and stays an error.
   const bad = ops.find(
-    (x) => x.isValid && x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)
+    (x) =>
+      x.isValid &&
+      !isNumber(x) &&
+      (x.type.type === 'never' || !isSubtype(x.type.type, 'number')) &&
+      x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)
   );
   if (bad === undefined) return undefined;
   return ce.typeError('number', bad.type, bad);
@@ -924,14 +935,19 @@ export function runtimeConformanceError(
     idx: number
   ): boolean => {
     if (!op.isValid) return false;
+    // The concrete-value gate comes first: a symbolic operand (an
+    // application that did not evaluate to a literal) is never refuted, and
+    // the two gates below it read the operand's type — a derivation nothing
+    // else needs for such an operand. Every gate here answers `false` on
+    // its own, so their order does not change the answer.
+    const v = concreteValueOf(op);
+    if (v === undefined && !isSymbol(op, 'Nothing')) return false;
     if (broadcastable && couldBeUnkeyedCollectionOperand(op)) return false;
     // Contract B NaN admission — see the `nanPolicyAt` parameter above.
     if (op.isNaN === true && nanPolicyAt !== undefined) {
       const policy = nanPolicyAt(idx);
       if (policy === 'propagate' || policy === 'handle') return false;
     }
-    const v = concreteValueOf(op);
-    if (v === undefined && !isSymbol(op, 'Nothing')) return false;
     // A collection-shaped value at a parameter with a collection arm is the
     // handler's to judge (lenient spellings, element-wise gates).
     if (

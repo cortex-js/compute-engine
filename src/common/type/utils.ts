@@ -3,6 +3,7 @@ import { isEffectSubset, unionEffectSets } from './effects.js';
 import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
 import { isValidType, NUMERIC_TYPES_SET } from './primitive.js';
+import { isComplexInfinityValue } from './types.js';
 import { declarationOf } from './reference.js';
 import { typeToString } from './serialize.js';
 import { isSubtype, provablyDisjoint, widen } from './subtype.js';
@@ -24,6 +25,24 @@ import type {
   TypeReference,
   TypeString,
 } from './types.js';
+
+/**
+ * Is `t` a NUMERIC SCALAR type — a numeric primitive name (`integer`,
+ * `real`, …), a numeric range (`real<0..1>`) or a numeric value type (`3`,
+ * `~oo`)? A value of such a type is never a collection, a tuple or a
+ * broadcast lift, so a shape gate can skip its collection predicates for
+ * an operand of that type. A union, an alias reference, `unknown` and `any`
+ * do not qualify: each may hold a collection.
+ */
+export function isNumericScalarType(t: Type): boolean {
+  if (typeof t === 'string')
+    return NUMERIC_TYPES_SET.has(t as NumericPrimitiveType);
+  return (
+    t.kind === 'numeric' ||
+    (t.kind === 'value' &&
+      (typeof t.value === 'number' || isComplexInfinityValue(t.value)))
+  );
+}
 
 /** `tier<0..>` — the non-negative half of a numeric tier. */
 export function nonNegativeRangeType(tier: NumericPrimitiveType): Type {

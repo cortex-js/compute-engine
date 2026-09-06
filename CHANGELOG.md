@@ -1,3 +1,46 @@
+## [Unreleased]
+
+### Improvements
+
+- **Symbolic evaluation is 5–12 % faster per call on simplification and
+  solving, and 4–10 % on an indefinite integral in most runs** (measured
+  against 0.124.1 on the same machine at box load 3–5, one warm process per
+  build, five interleaved rounds, median of 50 calls: simplifying
+  `√6x + √2x` 292 → 279 µs, `√(3+2√2)` 95 → 87 µs, solving `x⁴+x²−1=0`
+  3.17 → 2.86 ms, `∫1/(x³+1)dx` 2.66 → 2.39 ms — one run under heavier load
+  showed no gain on the integral; boxing and a definite integral
+  `∫₁² 1/x dx` unchanged), with identical results. The
+  0.124.1 profile named the type derivation of intermediate nodes as the
+  remaining cost, and most of those derivations were forced by questions
+  whose answer does not need the type. (1) The `Add`/`Multiply`
+  canonicalization asks "is this operand a tuple?" of every product and sum
+  it builds; deriving the type of an arithmetic application to answer it
+  costs a descriptor per operand, the facts and the interval fold of its
+  handler. An arithmetic application (`Add`, `Multiply`, `Power`, `Sqrt`,
+  the elementary functions) has a tuple-shaped type only when one of its
+  operands has one, so the question is now answered from the operands, and
+  the derivation is skipped when none can be a tuple. (2) The evaluate-time
+  NaN gate asked `isNaN` of every evaluated operand; an application never
+  answers `true` there (its getter answers `false` or `undefined`), yet
+  asking derived its type — a symbolic residue's derivation nothing else
+  read. Only literals and symbols are asked now. (3) The runtime conformance
+  check tested a symbolic operand's type for collection-ness and NaN before
+  its concrete-value gate declined it; the gate comes first now. (4) The
+  non-numeric operand check proved disjointness against a five-arm union for
+  every operand; a number literal or a `number`-typed operand is not
+  disjoint, and a subtype test answers that first. Smaller cuts: `isSubtype`
+  answers a primitive-against-primitive query and a numeric-scalar-against-
+  composite query at the top instead of after a dozen unit-type checks; the
+  directed rounding of a derived bound returns a small integer unchanged
+  without a logarithm; `isRelationalOperator` is a set lookup instead of a
+  scan of the LaTeX dictionary; the tuple-broadcast arity scan skips numeric
+  scalar operands; the exactness test of an integer literal compares
+  integers instead of parsing a decimal string. Against 0.118.2 a residual of
+  1.0–1.2× remains on these paths (1.27× on the definite integral), spread
+  over the per-node derivation cost (2.3–2.9 µs per intermediate node
+  against 1.1–2.0 µs) and a doubled garbage-collection share; `ROADMAP.md`
+  entry P1 records the breakdown.
+
 ## 0.124.1 _2026-09-06_
 
 ### Improvements

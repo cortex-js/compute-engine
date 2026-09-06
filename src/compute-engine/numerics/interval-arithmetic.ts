@@ -127,6 +127,12 @@ export function roundSignificantToward(
 ): number {
   const ax = Math.abs(x);
   if (!Number.isFinite(ax) || ax === 0) return x;
+  // An integer below 10^digits is already a grid point (`r · 10^k` with
+  // `k ≤ 0` and an integer `r` of at most `digits` digits), so rounding
+  // toward either direction returns it unchanged. Most derived bounds are
+  // small integers (`0`, `1`, `2` — the ranges of squares, counts and
+  // parities), so this answers the common case without a logarithm.
+  if (ax < 10 ** digits && Number.isInteger(ax)) return x;
   if (ax >= 2 ** 53 || ax < MIN_NORMAL_DOUBLE)
     return new BigDecimal(x).toPrecisionToward(digits, direction).toNumber();
   const low = 10 ** (digits - 1);

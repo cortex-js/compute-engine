@@ -117,6 +117,7 @@ import {
   broadcastShapedResultType,
   functionResult,
   staticMembership,
+  isNumericScalarType,
   isSignatureType,
   isWildcardFunctionType,
   resolveTypeAlias,
@@ -4267,7 +4268,11 @@ export class BoxedFunction
         // wide fallback clause must catch it — exactly why the dispatch
         // conformance check (`genericRuntimeConformance`) excludes them.
         !cbIsUserFn &&
-        tail.some((x) => x.isNaN === true) &&
+        // An application never answers `isNaN === true` (its getter answers
+        // `false` or `undefined`), but asking it derives the operand's TYPE
+        // — for a symbolic residue that survived evaluation, a derivation
+        // nothing else reads. Only a literal or a symbol can hold the marker.
+        tail.some((x) => !isFunction(x) && x.isNaN === true) &&
         // The collection stand-down is scoped to BROADCASTABLE operators:
         // only there does the element-wise broadcast re-enter this gate per
         // cell. A non-broadcastable operator takes a collection operand as
@@ -5049,7 +5054,11 @@ export class BoxedFunction
         // wide fallback clause must catch it — exactly why the dispatch
         // conformance check (`genericRuntimeConformance`) excludes them.
         !cbIsUserFn &&
-        tail.some((x) => x.isNaN === true) &&
+        // An application never answers `isNaN === true` (its getter answers
+        // `false` or `undefined`), but asking it derives the operand's TYPE
+        // — for a symbolic residue that survived evaluation, a derivation
+        // nothing else reads. Only a literal or a symbol can hold the marker.
+        tail.some((x) => !isFunction(x) && x.isNaN === true) &&
         // The collection stand-down is scoped to BROADCASTABLE operators:
         // only there does the element-wise broadcast re-enter this gate per
         // cell. A non-broadcastable operator takes a collection operand as
@@ -5651,6 +5660,13 @@ function tupleBroadcastArity(
     // A transparent alias of a tuple supplies its components like the tuple
     // it names (`Sin(p)` for `p: pt`, an alias of `tuple<number, number>`).
     const t = resolveTypeAlias(op.type.type);
+    // A literal or an application of numeric scalar type supplies no cells:
+    // it is neither a tuple nor a collection, and it has no value binding
+    // that the value-level predicates below could read past its type. (A
+    // SYMBOL of numeric type may still hold a collection — a lambda
+    // parameter inferred `number` from its body and applied to a list — so
+    // it takes the full test.)
+    if (!isSymbol(op) && isNumericScalarType(t)) continue;
     // A symbol declared with the bare `tuple` type names neither its arity
     // nor its component types, but every value it can hold is a tuple, and
     // once it holds one the value arm broadcasts over its components
@@ -5880,6 +5896,10 @@ function normalizeLiftedAbsence(
  * configurations trigger each declared exemption — so the per-operator fact
  * lives in the definition and only the generic mechanism lives here.
  */
+/** The `matrix` type, parsed once: `skipBroadcastForVectorOps` tests every
+ * operand of every `'tensors'`-exempt application against it. */
+const MATRIX_TYPE = new BoxedType('matrix');
+
 function skipBroadcastForVectorOps(
   def: BoxedOperatorDefinition | undefined,
   hasTensors: boolean,
@@ -5902,7 +5922,7 @@ function skipBroadcastForVectorOps(
     if (hasTensors) return true;
     // A `never`-typed operand matches `matrix` vacuously (the bottom type
     // matches everything) but has no shape to broadcast over; exclude it.
-    if (ops.some((x) => x.type.type !== 'never' && x.type.matches('matrix')))
+    if (ops.some((x) => x.type.type !== 'never' && x.type.matches(MATRIX_TYPE)))
       return true;
   }
 
@@ -6450,7 +6470,9 @@ function type(expr: BoxedFunction): Type {
       };
       // One descriptor memo for the whole application: a node shared
       // between two operands is described once (see `DescriptorMemo`).
-      const walk: DescriptorMemo = new Map();
+      // Allocated only when two operands could share a node.
+      const walk: DescriptorMemo | undefined =
+        expr.ops.length > 1 ? new Map() : undefined;
       const descriptors = expr.ops.map((x, i) =>
         describeOperand(x, strippedFor(i), walk)
       );

@@ -3599,22 +3599,58 @@ call) name: garbage collection +18, `isSubtype` +15, the memoized type
 derivation of function nodes (`type`/`compute`/`cachedValue`) +12,
 `structureOfExpression` +8, `addTypeOnTypes` with `foldIntervalsOfTypes` /
 `finalizeInterval` +8, `get finite` +5, `sortProductOperands` +4, `isSame`
-+3. Two structural sources behind those numbers:
++3. Two structural sources behind those numbers: the type derivations that
+the `Add`/`Multiply` canonicalization forced on every intermediate product
+and sum through `isTuple` / `isNumericTuple` (a quarter of a simplify call),
+and the allocation per derivation (a descriptor and its facts object per
+operand, a structure view per `structureOf()` call, an interval per fold, a
+fresh literal type per fresh literal).
 
-- `isTuple` / `isNumericTuple` read `.type` of every operand in the `Add` and
-  `Multiply` canonicalization, and on a function node that forces the full
-  handler derivation (descriptor per operand, facts, interval fold) — about a
-  quarter of a simplify call is spent inside `_computeLiteralType` and
-  handler `compute` reached this way. A structural pre-check (operator is a
-  known scalar head, or the operands are all scalar-typed) before the type
-  read would skip most derivations; the number-literal pre-check landed with
-  the fix, the function-node one did not.
-- Each derivation allocates an `ExpressionOperandDescriptor` and its facts
-  object per operand, a structure view per `structureOf()` call, an interval
-  per fold and a fresh literal type object per fresh literal — the GC share
-  doubled from 0.118.2. A per-value literal-type cache (the same rational or
-  radical value boxes to the same type object) and a descriptor pool would
-  cut it.
+**Forced derivations removed (2026-09-06, unreleased; the CHANGELOG entry
+describes it).** `isTuple` / `isNumericTuple` now answer from the operands
+for an arithmetic application (`SCALAR_LIFT_HEADS` in `collection-utils.ts`:
+tuple-shaped only when an operand is), the evaluate-time NaN gate no longer
+asks an application (`isNaN === true` is never its answer), the runtime
+conformance check declines a symbolic operand before reading its type, and
+`nonNumericOperandError` skips literals and `number`-typed operands. With
+`isSubtype` fast paths and four smaller cuts: 5–12 % less time per call on
+simplify, solve and the indefinite integral; boxing and `∫₁² 1/x` unchanged.
+Measured with the lock held at box load 3–5, five interleaved rounds,
+medians (µs per call):
+
+| Case | 0.118.2 | 0.124.1 | now | now ÷ 0.118.2 |
+| --- | --: | --: | --: | --: |
+| box `√6x + √2x` | 41 | 45 | 44 | 1.07 |
+| simplify `√6x + √2x` | 234 | 292 | 279 | 1.19 |
+| simplify `√(3+2√2)` | 85 | 95 | 87 | 1.02 |
+| solve `x⁴+x²−1=0` | 2475 | 3165 | 2859 | 1.16 |
+| `∫1/(x³+1)dx` | 1985 | 2661 | 2393 | 1.21 |
+| `∫₁² 1/x dx` | 173 | 221 | 220 | 1.27 |
+
+**What remains** is the cost of a derivation itself and its allocation. A
+fresh `Add(x, y)` / `Power(x, 2)` / `Multiply(√6, x)` node types in 2.3 /
+2.8 / 3.3 µs against 1.2 / 1.1 / 2.5 µs on 0.118.2 (micro-benchmark on
+`ce._fn` nodes, 20 000 each), and no single line of the derivation carries
+it: the handler call (Add/Multiply/Power handlers with their interval folds)
+is ~0.4 µs, the function's own body ~0.5 µs (closures, descriptor array,
+the missing-absorption and broadcast scans over the operands), then
+`skipBroadcastForVectorOps`, `provablyNaNOperand`, `isExtendedRealOperand`,
+`broadcastsOverTuples` at 0.1–0.2 µs each. The solve case's per-function
+self-time deltas against 0.118.2 (µs per call) are led by garbage
+collection +160, then `roundSignificantToward` +70 (now cut for integer
+bounds), `get re` in `getImaginaryFactor` +45, `makeNumericFunction` +38,
+`replace` +32, `provablyNaNOperand` +31, `structureOfExpression` +28,
+`factor` +27, `canonicalPower` +26, the derivation body +26,
+`broadcastsOverTuples` +25 (now a set lookup), `isPrimitiveSubtype` +24,
+`makeNumericValue` +22, `addTypeOnTypes` +22, `_BoxedExpression` +22 (more
+nodes built), `finiteFromType` +21. The definite integral's gap is in
+boxing, not evaluation: `makeCanonicalFunctionCore` 110 vs 81 µs,
+`applyOperatorDefinition` 63 vs 48, with `hasSignatureArm`,
+`reduceUnionType` (under `widen`), `recordTypeProvenance` and
+`_withoutFacts` new since 0.118.2 at 1–3 µs each. Levers not yet taken: a
+per-value literal-type cache (the same rational or radical value boxes to
+the same type object), a descriptor pool, and a memo of
+`broadcastsOverTuples` / `broadcastableParamSlots` per definition.
 
 **Literal types are not the lever (measured 2026-09-06, box load 2.7,
 three interleaved rounds, medians).** Four retreats from the literal-tier
@@ -3631,7 +3667,7 @@ of the remaining gap to 0.118.2. The capability lost is concrete:
 enclosure, `arcsin(0.5)` needs the value type of a non-integer, and
 `1/(x + 1/3)` with `x: real<0..1>` loses its bounds. Decision: keep the
 literal-tier types as they are; the residual lies in the derivation of
-function nodes, below.
+function nodes, above.
 
 Reproduce a measurement with `CE_PUBLISHED_BUNDLE=<bundle to compare> node
 benchmarks/runners/run_ce_rubi.mjs`: it times the published bundle and the

@@ -83,6 +83,14 @@ import {
  * not `1` at any precision. */
 function rationalEqualsDecimal(r: Rational, re: number): boolean {
   if (!Number.isFinite(re)) return false;
+  // An integer (denominator 1 — denominators are positive by convention)
+  // equals the double exactly when the double is that integer. Every fresh
+  // integer literal reaches here, so the decimal-string route below is
+  // reserved for the fractional case.
+  if (r[1] === 1 || r[1] === 1n) {
+    if (!Number.isInteger(re)) return false;
+    return typeof r[0] === 'bigint' ? r[0] === BigInt(re) : r[0] === re;
+  }
   // Shortest decimal representation: [-]ddd[.ddd][e±k]
   const m = re.toString().match(/^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/);
   if (m === null) return false;

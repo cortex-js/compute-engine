@@ -47,6 +47,25 @@ import { typeToDedupKey } from './serialize.js';
 import { declarationOf } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
 
+/**
+ * The composite kinds no scalar (a numeric type, a boolean, a numeric or
+ * boolean value) is ever a subtype of. Read by the fast negative at the top
+ * of `isSubtype`; the kinds left out are the ones that can admit a scalar
+ * (`union`, `intersection`, `negation`, `reference`, `broadcastable`,
+ * `expression`, `variable`, `symbol`).
+ */
+const SCALAR_DISJOINT_KINDS: ReadonlySet<string> = new Set([
+  'list',
+  'set',
+  'tuple',
+  'record',
+  'dictionary',
+  'collection',
+  'indexed_collection',
+  'signature',
+  'object',
+]);
+
 /** For each key, *all* the primitive subtypes of the type corresponding to that key */
 const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // `number` is the top of a DISJOINT decomposition: every numeric value is a
@@ -971,6 +990,32 @@ export function isSubtype(
     lhs = parseType(lhs);
   if (typeof rhs === 'string' && !PRIMITIVE_TYPES_SET.has(rhs as PrimitiveType))
     rhs = parseType(rhs);
+
+  // Two fast paths for the most frequent query shapes. Both give the answer
+  // the general rules below give; they only reach it first.
+  //
+  // Primitive against primitive: a string here is a primitive name (any
+  // other string was parsed above), and `isPrimitiveSubtype` applies the
+  // unit-type rules (`any`, `never`, `error`, `nothing`, `missing`,
+  // `unknown`) in the same order as the general path.
+  if (typeof lhs === 'string' && typeof rhs === 'string')
+    return isPrimitiveSubtype(lhs as PrimitiveType, rhs as PrimitiveType);
+  // A numeric or boolean scalar against a structural composite (a list, a
+  // tuple, a signature, …): never a subtype. The composite kinds that admit
+  // a scalar — a union arm, a negation, a reference to an alias, a
+  // `broadcastable<T>` (a scalar IS a `T`), an `expression` — are not in
+  // the set. A `string` is not a scalar here: in the lattice it is a
+  // collection of its characters.
+  if (typeof rhs !== 'string' && SCALAR_DISJOINT_KINDS.has(rhs.kind)) {
+    if (
+      typeof lhs === 'string'
+        ? lhs === 'boolean' ||
+          NUMERIC_TYPES_SET.has(lhs as NumericPrimitiveType)
+        : lhs.kind === 'numeric' ||
+          (lhs.kind === 'value' && typeof lhs.value !== 'string')
+    )
+      return false;
+  }
 
   //
   // A structural alias reference on the LHS unfolds to its definition

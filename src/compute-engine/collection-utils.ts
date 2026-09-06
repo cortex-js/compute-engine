@@ -20,7 +20,12 @@ import {
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
-import { Expression, CollectionHandlers, Sign } from './global-types.js';
+import {
+  Expression,
+  CollectionHandlers,
+  FunctionInterface,
+  Sign,
+} from './global-types.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
   isFunction,
@@ -615,6 +620,121 @@ export function isDrawFreeBroadcast(expr: Expression): boolean {
 const TUPLE_OPERATORS = new Set(['Tuple', 'Pair', 'Triple', 'Single']);
 
 /**
+ * Heads whose application has a tuple-shaped TYPE only when one of its
+ * operands has one: the arithmetic and elementary numeric heads.
+ *
+ * Each of them declares a scalar result. The only two ways the type
+ * derivation of such an application (`type()` in `boxed-function.ts`)
+ * produces a tuple are the head's own component-wise handler (`Add`,
+ * `Multiply`, `Negate`, `Subtract` and `Divide` combine points in their
+ * type handlers) and the generic tuple broadcast (arm 0 of the derivation,
+ * `tupleBroadcastArity`), and both find the tuple by reading the operand
+ * TYPES — a transparent alias unfolded, a nominal reference left opaque,
+ * which is also how `isTupleShapedType` reads them. A list operand lifts the
+ * result to a `list`, a possibly-collection operand to a `broadcastable`;
+ * neither is tuple-shaped.
+ *
+ * `isTuple` and `isNumericTuple` use this to answer `false` for such an
+ * application WITHOUT deriving its type when no operand can be a tuple: the
+ * `Add`/`Multiply` canonicalization asks the question of every operand it
+ * builds, and a derivation costs a descriptor per operand, the facts and the
+ * interval fold of the handler — a quarter of a `simplify` call was spent
+ * deriving the types of intermediate products and sums that only this
+ * question ever read.
+ *
+ * A head is listed here only if its type handler never builds a tuple from
+ * non-tuple operands. A head that constructs tuples (`Tuple`, `Pair`) or
+ * reads one out of a collection (`At`, `First`) must stay off the list, as
+ * must user functions, which may return a tuple from a scalar. The name
+ * alone is not the test: a user definition may shadow a built-in name
+ * (`ce.declare('Sin', { signature: '(number) -> tuple<number, number>' })`
+ * makes `Sin(1)` a tuple), so `isScalarLiftApplication` also requires the
+ * node's definition to be the engine's own, by identity with the
+ * system-scope binding.
+ */
+const SCALAR_LIFT_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+  'Square',
+  'Exp',
+  'Ln',
+  'Log',
+  'Lb',
+  'Lg',
+  'Abs',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Arsinh',
+  'Arcosh',
+  'Artanh',
+]);
+
+/**
+ * How many levels of `SCALAR_LIFT_HEADS` applications
+ * `operandTypeCannotBeTuple` descends before it reads a type. A derived type
+ * is memoized per node, so reading it keeps a shared subtree (`(x+x)+(x+x)`,
+ * nested) linear; the structural descent has no memo and would visit a
+ * shared node once per path. The budget bounds that at 2⁴ visits.
+ */
+const SCALAR_LIFT_DESCENT = 4;
+
+/**
+ * Is `expr` an application of a `SCALAR_LIFT_HEADS` head resolved to the
+ * engine's OWN definition of it? A definition declared by the user under
+ * the same name — in any scope, or through the constructor's `libraries`
+ * option, which installs into the system scope and is recorded in
+ * `_customLibraryOperators` — is a different object from the system-scope
+ * binding and answers `false`, so its application is typed by derivation.
+ * The same identity test gates the compiler's built-in callbacks
+ * (`builtinOperatorDefinition`, `compilation/builtin-callback.ts`).
+ */
+function isScalarLiftApplication(
+  expr: Expression
+): expr is Expression & FunctionInterface {
+  if (!isFunction(expr)) return false;
+  const name = expr.operator;
+  if (!SCALAR_LIFT_HEADS.has(name)) return false;
+  const engine = expr.engine;
+  if (engine._customLibraryOperators.has(name)) return false;
+  const binding = engine.contextStack[0]?.lexicalScope.bindings.get(name);
+  return (
+    binding !== undefined &&
+    'operator' in binding &&
+    binding.operator === expr.operatorDefinition
+  );
+}
+
+/**
+ * True when the TYPE of `expr` is provably not tuple-shaped, decided without
+ * deriving the type of a `SCALAR_LIFT_HEADS` application: a number literal
+ * never is, such an application is not when none of its operands is, and
+ * any other expression is read off its type (a symbol's type is a definition
+ * lookup, an unlisted head's type is the derivation itself).
+ */
+function operandTypeCannotBeTuple(expr: Expression, depth: number): boolean {
+  if (isNumber(expr)) return true;
+  if (depth > 0 && isScalarLiftApplication(expr))
+    return expr.ops.every((x) => operandTypeCannotBeTuple(x, depth - 1));
+  return !isTupleShapedType(expr.type.type);
+}
+
+/**
  * A **numeric tuple** is a `Tuple`/`Pair`/`Triple` — type `tuple<number,…>` —
  * whose every element type is a subtype of `number`. These are treated as
  * points/vectors in ℝⁿ, semantically distinct from Lists (see
@@ -627,8 +747,15 @@ export function isNumericTuple(expr: Expression): boolean {
   // A number literal is never a tuple, and its `.type` is the literal type,
   // synthesized on first read (`BoxedNumber._literalType`) — a cost the
   // `Add`/`Multiply` canonicalization, which asks this of every operand,
-  // need not pay to learn the answer.
+  // need not pay to learn the answer. An arithmetic application over
+  // operands that cannot be tuples is not one either, and its type
+  // derivation is skipped for the same reason (`SCALAR_LIFT_HEADS`).
   if (isNumber(expr)) return false;
+  if (
+    isScalarLiftApplication(expr) &&
+    operandTypeCannotBeTuple(expr, SCALAR_LIFT_DESCENT)
+  )
+    return false;
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
   const t = resolveTypeAlias(expr.type.type);
@@ -1800,8 +1927,16 @@ export function typeMayCarryQuotientShape(t: Type): boolean {
  */
 export function isTuple(expr: Expression): boolean {
   // A number literal is never a tuple (see `isNumericTuple` on why the type
-  // is not read for one).
+  // is not read for one), and neither is an arithmetic application over
+  // operands that cannot be tuples (`SCALAR_LIFT_HEADS`): an application
+  // has no value binding of its own, so the symbol arm below does not apply
+  // to it, and its type arm is what the pre-check decides.
   if (isNumber(expr)) return false;
+  if (
+    isScalarLiftApplication(expr) &&
+    operandTypeCannotBeTuple(expr, SCALAR_LIFT_DESCENT)
+  )
+    return false;
   // The bare `tuple` primitive counts: a symbol declared `w: tuple` has no
   // component types to read, but every value it can hold IS a tuple, so a
   // product `2w` must be scaled component-wise and typed as a tuple, never

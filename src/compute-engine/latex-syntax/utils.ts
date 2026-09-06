@@ -47,9 +47,22 @@ export const RING_CONSTANTS: ReadonlySet<string> = new Set([
   'ComplexNumbers',
 ]);
 
+/** The operator names of `DEFINITIONS_INEQUALITIES`, collected once on
+ * first use: `isRelationalOperator` is asked on every type derivation of a
+ * broadcastable head (`broadcastsOverTuples`), and a scan of the dictionary
+ * per call was measurable there. Built lazily because the dictionary is a
+ * module-level table this module imports; a set built at load time would
+ * depend on module initialization order. */
+let RELATIONAL_OPERATOR_NAMES: ReadonlySet<string> | undefined;
+
 export function isRelationalOperator(name: string | undefined): boolean {
   if (typeof name !== 'string') return false;
-  return DEFINITIONS_INEQUALITIES.some((x) => x.name === name);
+  RELATIONAL_OPERATOR_NAMES ??= new Set(
+    DEFINITIONS_INEQUALITIES.map((x) => x.name).filter(
+      (n): n is string => typeof n === 'string'
+    )
+  );
+  return RELATIONAL_OPERATOR_NAMES.has(name);
 }
 
 export function isInequalityOperator(operator: string | undefined): boolean {
