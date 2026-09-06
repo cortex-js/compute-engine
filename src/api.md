@@ -3868,11 +3868,7 @@ It answers `undefined` for an unknown operator.
 ### OperatorTypeHandlerOnTypes {#operatortypehandlerontypes}
 
 ```ts
-type OperatorTypeHandlerOnTypes = (operands, context) => 
-  | Type
-  | TypeString
-  | BoxedType
-  | undefined;
+type OperatorTypeHandlerOnTypes = (operands, context) => BoxedType | undefined;
 ```
 
 The `type` handler of an operator definition: a function of operand
@@ -3882,6 +3878,10 @@ state-purity contract of
 `docs/plans/2026-08-22-type-handlers-on-types.md`. Under test, and with
 `CE_TYPE_PURITY_GUARD` set elsewhere, a handler that writes engine state
 throws.
+Return a `BoxedType` (for example `context.engine.type('real')`), or
+`undefined` to use the declared signature. Numeric literal cargo in a
+boxed result is widened at the application boundary; intentional ranges
+remain intact. Built-ins use `BoxedType.forResult()` to share that work.
 
 </MemberCard>
 
@@ -15785,7 +15785,7 @@ static setInteger: BoxedType;
 ##### BoxedType.type {#type}
 
 ```ts
-type: Type;
+readonly type: Type;
 ```
 
 </MemberCard>
@@ -15805,6 +15805,14 @@ Computed ONCE, here, at construction: every per-call dispatch check
 (argument validation, result typing) reads this boolean and is O(1) — it
 must never become a tree walk. Polytypes are legal only as signatures, so
 the computation itself is a shallow field test.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.facts {#facts}
+
+Lazily shared facts of this type, independent of any expression.
 
 </MemberCard>
 
@@ -15861,6 +15869,141 @@ ce.type('number').effects;                 // ➔ undefined
 <MemberCard>
 
 ##### BoxedType.isUnknown {#isunknown}
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.from() {#from}
+
+```ts
+static from(type, resolver?): BoxedType
+```
+
+Box an ordinary type, sharing immutable type values within a resolver.
+
+####### type
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`ObjectType`](#objecttype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
+
+####### resolver?
+
+[`TypeResolver`](#typeresolver)
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedType.forResult() {#forresult}
+
+###### forResult(type, resolver)
+
+```ts
+static forResult(type, resolver?): undefined
+```
+
+A type-handler result: widen numeric literal cargo to its stored tier,
+retaining intentional ranges and resolver context. Undefined declines.
+Normalization is shared only for immutable input types.
+
+####### type
+
+`undefined`
+
+####### resolver?
+
+[`TypeResolver`](#typeresolver)
+
+###### forResult(type, resolver)
+
+```ts
+static forResult(type, resolver?): BoxedType
+```
+
+A type-handler result: widen numeric literal cargo to its stored tier,
+retaining intentional ranges and resolver context. Undefined declines.
+Normalization is shared only for immutable input types.
+
+####### type
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`ObjectType`](#objecttype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
+
+####### resolver?
+
+[`TypeResolver`](#typeresolver)
+
+###### forResult(type, resolver)
+
+```ts
+static forResult(type, resolver?): BoxedType | undefined
+```
+
+A type-handler result: widen numeric literal cargo to its stored tier,
+retaining intentional ranges and resolver context. Undefined declines.
+Normalization is shared only for immutable input types.
+
+####### type
+
+  \| `string`
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`RecordType`](#recordtype)
+  \| [`ObjectType`](#objecttype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
+  \| `undefined`
+
+####### resolver?
+
+[`TypeResolver`](#typeresolver)
 
 </MemberCard>
 

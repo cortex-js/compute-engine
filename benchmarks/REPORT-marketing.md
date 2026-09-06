@@ -70,18 +70,18 @@ Median time per call (warm). Lower is better. Compute Engine and math.js run in 
 | Operation | Example | Compute Engine | SymPy | math.js | Mathematica |
 |---|---|--:|--:|--:|--:|
 | Evaluate | $\pi$ <sub>(200 digits)</sub> | <0.01 ms | 0.16 ms | 0.01 ms | <0.01 ms |
-| Evaluate | $100!$ <sub>(exact)</sub> | 0.01 ms | 0.26 ms | 0.13 ms | <0.01 ms |
-| Evaluate | $\Gamma(\tfrac13)$ <sub>(40 digits)</sub> | 0.16 ms | 0.23 ms | — | 0.05 ms |
-| Simplify | $\frac{x^2-1}{x-1}$ | 0.19 ms | 8.2 ms | 0.95 ms | 0.17 ms |
-| Simplify | $\sin^2 x+\cos^2 x$ | 0.10 ms | 8.5 ms | 0.79 ms | 0.08 ms |
-| Simplify | $\frac{x^3-1}{x-1}$ | 0.16 ms | 8.7 ms | 1.2 ms | 1.0 ms |
-| Differentiate | $\tfrac{d}{dx}x^x$ | 0.16 ms | 1.7 ms | 1.6 ms | <0.01 ms |
-| Differentiate | $\tfrac{d}{dx}x^2\sin x$ | 0.41 ms | 2.0 ms | 1.7 ms | <0.01 ms |
-| Integrate | $\int x e^x\,dx$ | 0.26 ms | 6.2 ms | — | 0.57 ms |
-| Integrate | $\int\frac{1}{1+x^2}\,dx$ | 0.14 ms | 9.0 ms | — | 0.86 ms |
-| Integrate | $\int\frac{1}{x^3+1}\,dx$ | 3.9 ms | 23.8 ms | — | 8.1 ms |
+| Evaluate | $100!$ <sub>(exact)</sub> | 0.01 ms | 0.26 ms | 0.11 ms | <0.01 ms |
+| Evaluate | $\Gamma(\tfrac13)$ <sub>(40 digits)</sub> | 0.17 ms | 0.24 ms | — | 0.05 ms |
+| Simplify | $\frac{x^2-1}{x-1}$ | 0.16 ms | 7.9 ms | 0.94 ms | 0.17 ms |
+| Simplify | $\sin^2 x+\cos^2 x$ | 0.09 ms | 8.4 ms | 0.89 ms | 0.08 ms |
+| Simplify | $\frac{x^3-1}{x-1}$ | 0.12 ms | 8.8 ms | 1.00 ms | 1.0 ms |
+| Differentiate | $\tfrac{d}{dx}x^x$ | 0.10 ms | 1.8 ms | 1.8 ms | <0.01 ms |
+| Differentiate | $\tfrac{d}{dx}x^2\sin x$ | 0.24 ms | 2.0 ms | 1.7 ms | <0.01 ms |
+| Integrate | $\int x e^x\,dx$ | 0.19 ms | 6.7 ms | — | 0.57 ms |
+| Integrate | $\int\frac{1}{1+x^2}\,dx$ | 0.11 ms | 9.3 ms | — | 0.86 ms |
+| Integrate | $\int\frac{1}{x^3+1}\,dx$ | 2.3 ms | 24.1 ms | — | 8.1 ms |
 
-On the symbolic operations shared with SymPy above, **Compute Engine is roughly 45× faster per call** (median 0.19 ms vs 8.5 ms) — while running in the browser rather than requiring a Python backend.
+On the symbolic operations shared with SymPy above, **Compute Engine is roughly 53× faster per call** (median 0.16 ms vs 8.4 ms) — while running in the browser rather than requiring a Python backend.
 
 ## The bottom line
 
@@ -93,4 +93,4 @@ On the symbolic operations shared with SymPy above, **Compute Engine is roughly 
 
 ---
 
-_Versions: Compute Engine 0.123.2, SymPy 1.14.0, math.js 15.2.0, NumPy 2.4.2, Mathematica 14.3.0 for Mac OS X ARM (timings carried over from the 2026-08-19 run). Methodology and the full case list: [REPORT.md](./REPORT.md). Reproduce: `node benchmarks/report.mjs && node benchmarks/report_marketing.mjs`._
+_Versions: Compute Engine 0.124.2, SymPy 1.14.0, math.js 15.2.0, NumPy 2.4.2, Mathematica 14.3.0 for Mac OS X ARM (timings carried over from the 2026-08-19 run). Methodology and the full case list: [REPORT.md](./REPORT.md). Reproduce: `node benchmarks/report.mjs && node benchmarks/report_marketing.mjs`._
