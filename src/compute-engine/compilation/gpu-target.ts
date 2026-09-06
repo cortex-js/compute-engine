@@ -763,9 +763,46 @@ function gpuNaN(target?: CompileTarget<Expression>): string {
  * (`gpuDeclaredTypeOf`) — the same question `gpuAtFramedBaseElements` asks of
  * an indexed base.
  *
- * `unknown` counts as a float here, by the same unknown-as-numeric-parameter
- * rule `gpuIsVectorComponentType` states — so a `list<unknown^3>` keeps its
- * `vec3` reading.
+ * An element declines only when it is PROVABLY not a shader float, which is
+ * the same standard the `At` index gate in this file already applies to its
+ * own operand. The WIDE types — `unknown`, `any`, `value`, `expression` — are
+ * admitted, by the unknown-as-numeric-parameter rule: a component whose type
+ * is merely unresolved is a float here, and rejecting it would decline shapes
+ * that have always compiled. `value` is the one that matters in practice: a
+ * `PointList` component that is itself a computed expression types `value`,
+ * and reading that as a non-float declined `Dot` over a point list — a shape
+ * with a correct `dot(vec2(…))` lowering.
+ *
+ * A COMPLEX element is rejected even though it could match `number`: it
+ * occupies a `vec2` of (re, im) by the complex convention, so a list of them
+ * is not a vector of float cells.
+ */
+function gpuElementIsShaderFloat(t: Type): boolean {
+  // A nominal type or alias answers layout questions as its DEFINITION —
+  // compilation is type erasure. Without this a `list<meters^3>` over a
+  // nominal `meters = real` was rejected: a nominal type deliberately does not
+  // subtype its definition, so `couldMatch` answers `false` for it and the
+  // list lost the `vec3` reading it has always had.
+  t = resolveTypeForCompilation(t);
+  // Complex is asked FIRST, because it satisfies `couldMatch(_, 'number')`
+  // while being a two-cell `vec2` of (re, im) here rather than a float.
+  //
+  // The infinite branches are dropped before that question is put. A head such
+  // as `Ln`, `Log`, `Artanh`, `Arcoth` or `Arsech` returns `complex | +oo |
+  // -oo`, and `isNonRealNumber` of that whole union answers `false` — the
+  // infinite members are not subtypes of `complex`, so the union is not one
+  // either. Execution then reached `couldMatch`, which answers `true` because
+  // the `complex` member alone overlaps `number`, and a genuinely
+  // complex-valued element was admitted into a vector of float cells. That is
+  // the same fail-open this gate exists to close, reached through a computed
+  // union instead of a written `complex`. `finitePartOfType` reduces the union
+  // to `complex`, of which `isNonRealNumber` answers `true`.
+  if (isNonRealNumber(finitePartOfType(t))) return false;
+  return couldMatch(t, 'number');
+}
+
+/**
+ * See `gpuElementIsShaderFloat` for the element test this applies.
  */
 function gpuHasShaderScalarElements(expr: Expression): boolean {
   if (isFunction(expr, 'List') || isFunction(expr, 'Tuple')) return true;
@@ -783,9 +820,26 @@ function gpuHasShaderScalarElements(expr: Expression): boolean {
   if (typeof t === 'string') return true;
   // Reached only with a `tuple` or 1-axis `list` type — the two type shapes
   // `aggregateComponentCount` reads a width from once the sources above are
-  // excluded — which is exactly what `gpuDeclaredComponentCount` answers for,
-  // and it answers `undefined` when an element is not a `vecN` slot.
-  return gpuDeclaredComponentCount(t) !== undefined;
+  // excluded.
+  //
+  // Asked directly rather than through `gpuDeclaredComponentCount`, whose
+  // element test (`gpuIsVectorComponentType`) answers "does this LOWER to the
+  // shader scalar", a stricter question than the one owed here. That test
+  // rejects every wide type but `unknown` and `any`, so routing through it
+  // declined a `value`-typed component — the type a computed `PointList`
+  // component carries.
+  if (t.kind === 'tuple')
+    return t.elements.every((e) => gpuElementIsShaderFloat(e.type));
+  if (t.kind === 'list' && t.dimensions?.length === 1)
+    return gpuElementIsShaderFloat(t.elements);
+  // Every other shape fails CLOSED, which is also what the previous reading
+  // (`gpuDeclaredComponentCount(t) !== undefined`) answered for it. Today the
+  // only caller has already established a component width, and the two type
+  // shapes above are the only ones a width is read from, so nothing reaches
+  // this line. Answering `true` here would make a multi-axis list or a
+  // tensor-typed element pass for a shader float the moment that stops being
+  // so — the fail-open this gate exists to prevent.
+  return false;
 }
 
 /**

@@ -148,11 +148,76 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
     );
   });
 
-  // `unknown` is a float by the unknown-as-numeric-parameter rule, so a list
-  // that states no element type keeps the width it always had.
-  test('list<unknown^3> keeps its vecN reading', () => {
-    const ce = engineWith({ u: 'list<unknown^3>' });
-    expect(glsl.compile(ce.box(['Sin', 'u']), NO_FOLD).code).toBe('sin(u)');
+  // The WIDE types are floats by the unknown-as-numeric-parameter rule, so a
+  // list that states no useful element type keeps the width it always had.
+  // The element test admits anything that COULD be a number and rejects only
+  // what provably could not — the same standard the `At` index gate applies.
+  //
+  // `value` is the one that bites in practice, and an over-strict test for it
+  // declined a real shape: a `PointList` component that is itself a computed
+  // expression types `value`, and rejecting that turned `Dot` over a point
+  // list into a decline even though `dot(vec2(…))` is its correct lowering.
+  test.each(['unknown', 'any', 'value', 'expression', 'number', 'real', 'integer'])(
+    'list<%s^3> keeps its vecN reading',
+    (element) => {
+      const ce = engineWith({ u: `list<${element}^3>` });
+      expect(glsl.compile(ce.box(['Sin', 'u']), NO_FOLD).code).toBe('sin(u)');
+    }
+  );
+
+  // Compilation is type erasure, so a nominal element answers layout questions
+  // as its DEFINITION. A nominal type deliberately does not subtype that
+  // definition, so asking the element question without resolving it first
+  // rejected a list whose elements are nominally real — the same false decline
+  // as the `value` case above, one layer deeper.
+  test('a nominal element type resolves to its definition', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('nmeters', 'real');
+    ce.declare('m', 'list<nmeters^3>');
+    ce.declare('p', 'tuple<nmeters, nmeters>');
+    expect(glsl.compile(ce.box(['Dot', 'p', 'p']), NO_FOLD).code).toBe(
+      'dot(p, p)'
+    );
+    expect(glsl.compile(ce.box(['Sum', 'm']), NO_FOLD).code).toBe(
+      '((m.x) + (m.y) + (m.z))'
+    );
+  });
+
+  // `Ln`, `Log`, `Artanh`, `Arcoth` and `Arsech` return `complex | +oo | -oo`.
+  // `isNonRealNumber` of that whole union is `false` — the infinite members are
+  // not subtypes of `complex`, so the union is not one either — and
+  // `couldMatch(_, 'number')` is `true` because the `complex` member overlaps
+  // `number`. Asked that way, a genuinely complex element was admitted into a
+  // vector of float cells: this gate's own fail-open, reached through a
+  // computed union instead of a written `complex`.
+  test('a union whose finite part is complex is not a float cell', () => {
+    const ce = engineWith({ u: 'list<complex | +oo | -oo ^2>' });
+    expect(() => glsl.compile(ce.box(['Sin', 'u']), NO_FOLD)).toThrow(
+      /no array overload/
+    );
+    expect(() => glsl.compile(ce.box(['Add', 'u', 'u']), NO_FOLD)).toThrow(
+      /shader ARRAY/
+    );
+  });
+
+  // The mirror of the case above: a union whose finite part is REAL keeps its
+  // vector reading, so dropping the infinite branches cannot over-reject.
+  test('a union whose finite part is real keeps its vecN reading', () => {
+    const ce = engineWith({ r: 'list<real | +oo | -oo ^3>' });
+    expect(glsl.compile(ce.box(['Sin', 'r']), NO_FOLD).code).toBe('sin(r)');
+  });
+
+  test('Dot over value-typed components lowers, it does not decline', () => {
+    const ce = engineWith({
+      p: 'list<value^2>',
+      q: 'tuple<value, value>',
+    });
+    expect(glsl.compile(ce.box(['Dot', 'p', 'p']), NO_FOLD).code).toBe(
+      'dot(p, p)'
+    );
+    expect(glsl.compile(ce.box(['Dot', 'q', 'q']), NO_FOLD).code).toBe(
+      'dot(q, q)'
+    );
   });
 
   // The frame stores only a WIDTH, so a caller-declared `bvec3` is entered as
