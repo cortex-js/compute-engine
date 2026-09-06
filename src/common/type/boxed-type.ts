@@ -3,8 +3,12 @@ import { couldMatch, isSubtype, provablyDisjoint } from './subtype.js';
 import { typeToString } from './serialize.js';
 import { parseType } from './parse.js';
 import { narrow, signatureEffects, widen } from './utils.js';
+import { factsOf, isStableType } from './facts.js';
+import { isInternedType } from './intern.js';
+import { widenValueTypes } from './widen-value.js';
 import {
   hasOptionalWithVariadic,
+  isValidPrimitiveType,
   VARIADIC_WITH_OPTIONAL_MESSAGE,
 } from './primitive.js';
 import {
@@ -15,6 +19,43 @@ import {
   TypeVariableError,
   validateDeclaredType,
 } from './instantiate.js';
+
+type BoxCache = {
+  primitives: Map<string, BoxedType>;
+  composites: WeakMap<object, BoxedType>;
+  results: WeakMap<object, { boxed: BoxedType; type: Type }>;
+};
+const unscopedBoxes: BoxCache = {
+  primitives: new Map(),
+  composites: new WeakMap(),
+  results: new WeakMap(),
+};
+const scopedBoxes = new WeakMap<TypeResolver, BoxCache>();
+
+function boxesFor(resolver: TypeResolver | undefined): BoxCache {
+  if (resolver === undefined) return unscopedBoxes;
+  let cache = scopedBoxes.get(resolver);
+  if (cache === undefined) {
+    cache = {
+      primitives: new Map(),
+      composites: new WeakMap(),
+      results: new WeakMap(),
+    };
+    scopedBoxes.set(resolver, cache);
+  }
+  return cache;
+}
+
+// Called only for the fresh result of widening an immutable graph. Sharing
+// that result requires the new containers to be immutable too; its unchanged
+// children already passed isStableType(). No host-authored mutable AST is
+// frozen by the result factory.
+function freezeResult(value: unknown): void {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value))
+    return;
+  Object.freeze(value);
+  for (const child of Object.values(value)) freezeResult(child);
+}
 
 /** @category Type */
 export class BoxedType {
@@ -40,7 +81,109 @@ export class BoxedType {
   static setRational = new BoxedType('set<rational>');
   static setInteger = new BoxedType('set<integer>');
 
-  type: Type;
+  readonly type: Type;
+  #facts: ReturnType<typeof factsOf> | undefined;
+  #normalizedResultType: Type | undefined;
+
+  /** Lazily shared facts of this type, independent of any expression. */
+  get facts(): ReturnType<typeof factsOf> {
+    if (this.#facts?.type === this.type) return this.#facts;
+    return (this.#facts = factsOf(this.type));
+  }
+
+  /** Box an ordinary type, sharing immutable type values within a resolver. */
+  static from(
+    type: Type | TypeString | BoxedType,
+    resolver?: TypeResolver
+  ): BoxedType {
+    if (type instanceof BoxedType) return type;
+    const t =
+      typeof type === 'string' && !isValidPrimitiveType(type)
+        ? parseType(type, resolver)
+        : (type as Type);
+    const cache = boxesFor(resolver);
+    if (typeof t === 'string') {
+      let boxed = cache.primitives.get(t);
+      if (boxed === undefined || boxed.type !== t) {
+        boxed = new BoxedType(t, resolver);
+        cache.primitives.set(t, boxed);
+      }
+      return boxed;
+    }
+    if (!isInternedType(t) && !isStableType(t))
+      return new BoxedType(t, resolver);
+    let boxed = cache.composites.get(t);
+    if (boxed === undefined || boxed.type !== t) {
+      boxed = new BoxedType(t, resolver);
+      cache.composites.set(t, boxed);
+    }
+    return boxed;
+  }
+
+  static forResult(type: undefined, resolver?: TypeResolver): undefined;
+  static forResult(
+    type: Type | TypeString | BoxedType,
+    resolver?: TypeResolver
+  ): BoxedType;
+  static forResult(
+    type: Type | TypeString | BoxedType | undefined,
+    resolver?: TypeResolver
+  ): BoxedType | undefined;
+  /**
+   * A type-handler result: widen numeric literal cargo to its stored tier,
+   * retaining intentional ranges and resolver context. Undefined declines.
+   * Normalization is shared only for immutable input types.
+   */
+  static forResult(
+    type: Type | TypeString | BoxedType | undefined,
+    resolver?: TypeResolver
+  ): BoxedType | undefined {
+    if (type === undefined) return undefined;
+    const boxed = type instanceof BoxedType ? type : undefined;
+    resolver = boxed?.typeResolver ?? resolver;
+    const reusableBox = boxed?.typeResolver === resolver ? boxed : undefined;
+    const t =
+      boxed?.type ??
+      (typeof type === 'string' && !isValidPrimitiveType(type)
+        ? parseType(type, resolver)
+        : (type as Type));
+    // Built-in handlers already normalize their result. Retain that proof
+    // with an immutable boxed type so the application boundary needs no
+    // global lookups; mutable host ASTs never receive this marker.
+    if (reusableBox !== undefined && reusableBox.#normalizedResultType === t)
+      return reusableBox;
+    if (typeof t === 'string' || isInternedType(t))
+      return reusableBox ?? BoxedType.from(t, resolver);
+    const cacheable = isStableType(t);
+    const cache = boxesFor(resolver);
+    const cached = cacheable ? cache.results.get(t) : undefined;
+    // Each entry owns its proof. A JavaScript caller can replace .type and
+    // normalize that same box again, so a marker on the box alone cannot
+    // certify entries made for earlier inputs.
+    if (cached !== undefined && cached.boxed.type === cached.type) {
+      if (cached.type === t && reusableBox !== undefined) {
+        reusableBox.#normalizedResultType = t;
+        return reusableBox;
+      }
+      cached.boxed.#normalizedResultType = cached.type;
+      return cached.boxed;
+    }
+    const widened = widenValueTypes(t);
+    if (cacheable && widened !== t) freezeResult(widened);
+    const result =
+      widened === t && reusableBox !== undefined
+        ? reusableBox
+        : BoxedType.from(widened, resolver);
+    if (cacheable) {
+      result.#normalizedResultType = widened;
+      const entry = { boxed: result, type: widened };
+      cache.results.set(t, entry);
+      // Widening is idempotent. The application boundary can consume this
+      // already-normalized result without another walk.
+      if (typeof widened === 'object') cache.results.set(widened, entry);
+    }
+    return result;
+  }
 
   /**
    * True when this type is a **polytype**: a signature carrying a `where`
@@ -150,6 +293,7 @@ export class BoxedType {
   private _resolve(other: Type | TypeString | BoxedType): Type {
     if (other instanceof BoxedType) return other.type;
     if (typeof other !== 'string') return other;
+    if (isValidPrimitiveType(other)) return other;
     try {
       return parseType(other);
     } catch (e) {
@@ -178,6 +322,26 @@ export class BoxedType {
     // Gated on the O(1) flags: a ground pattern costs exactly what it did.
     if (!this.isPolymorphic && isPolymorphicType(pattern))
       return matchesPolytypePattern(this.type, pattern);
+    if (!this.isPolymorphic) {
+      switch (pattern) {
+        case 'integer':
+          return this.facts.integer;
+        case 'rational':
+          return this.facts.rational;
+        case 'real':
+          return this.facts.real;
+        case 'imaginary':
+          return this.facts.imaginary;
+        case 'complex':
+          return this.facts.complex;
+        case 'number':
+          return this.facts.belowNumber;
+        case 'nan':
+          return this.facts.nan;
+        case 'infinity':
+          return this.facts.infinity;
+      }
+    }
     return isSubtype(this.type, pattern);
   }
 

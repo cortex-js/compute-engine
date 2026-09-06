@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   SIGNED_INFINITY_TYPE,
   EXTENDED_REAL_TYPE,
@@ -192,7 +193,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Real for m < 1, the +∞ pole at m = 1 (mirroring the `evaluate`
       // special case below), and a finite complex value for m > 1
       // (`K(2) = 1.311… − 1.311…i`).
-      type: (ops) => boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_K_DOMAIN),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_K_DOMAIN),
+          context.engine._typeResolver
+        ),
       evaluate: ([m], { numericApproximation, engine }) => {
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && m.im === 0 && m.isSame(1))
@@ -240,10 +245,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `number`, which admits real and complex alike. It is constant: the
       // non-finite operand case reaches the same `number`, so testing for
       // one changes nothing.
-      type: (ops) =>
-        ops.length === 1
-          ? boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_E_DOMAIN)
-          : 'number',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          ops.length === 1
+            ? boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_E_DOMAIN)
+            : 'number',
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 2) {
           // Incomplete E(φ|m): E(0|m) = 0 exactly
@@ -302,7 +310,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // `F(φ|m) = ∫₀^φ dθ/√(1 − m·sin²θ)` has a pole at m = 1, θ = π/2, so
       // `F(π/2|1)` is infinite. A finiteness claim is therefore unsound too,
       // even for operands that are themselves finite.
-      type: () => 'number',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: ([phi, m], { numericApproximation, engine }) => {
         // F(0|m) = 0 exactly
         if (isNumber(phi) && phi.im === 0 && phi.isSame(0)) return engine.Zero;
@@ -335,7 +344,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no finiteness claim is sound even for finite operands, and the
       // incomplete form is complex outside the real domain (a condition on
       // several operands), so no real claim is sound either.
-      type: () => 'number',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: (ops, { numericApproximation, engine }) => {
         if (ops.length === 3) {
           const [n, phi, m] = ops;
@@ -380,8 +390,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       // Real and finite for non-negative real operands; a negative operand
       // takes the complex AGM (`AGM(1, −2) = −0.4229… + 0.6612…i`).
-      type: (ops) => {
-        if (ops.some((x) => x.facts.finite === false)) return 'number';
+      type: (ops, context) => {
+        if (ops.some((x) => x.facts.finite === false))
+          return BoxedType.forResult('number', context.engine._typeResolver);
         if (
           ops.every(
             (x) =>
@@ -389,8 +400,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               nonNegativeSign(x.facts.sgn) === true
           )
         )
-          return 'real';
-        return 'number';
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: (ops, { numericApproximation, engine }) => {
         const args = ops.length === 1 ? [engine.One, ops[0]] : [...ops];
@@ -413,7 +424,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, complex | infinity, complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₂F₁(a, b; c; 0) = 1 exactly
         const z = ops[3];
@@ -444,7 +459,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, complex | infinity, complex | infinity, complex | infinity, complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation, engine }) => {
         // F₁(a; b₁, b₂; c; 0, 0) = 1 exactly
         const [, , , , x, y] = ops;
@@ -486,7 +505,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // handler-visible type still encloses it (`rational<0.33..0.34>`), and
       // an upper bound of that enclosure at or below 1 is the proof the arm
       // needs.
-      type: ([s, z]) => {
+      type: ([s, z], context) => {
         if (
           s !== undefined &&
           z !== undefined &&
@@ -495,8 +514,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           isSubtype(s.type, 'real') &&
           (intervalOfType(s.type)?.hi ?? Infinity) <= 1
         )
-          return 'number';
-        return numericTypeHandlerOnTypes([s, z]);
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        return BoxedType.forResult(
+          numericTypeHandlerOnTypes([s, z]),
+          context.engine._typeResolver
+        );
       },
       evaluate: (ops, { numericApproximation, engine }) => {
         const [s, z] = ops;
@@ -534,7 +556,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation, engine }) => {
         // ₁F₁(a; b; 0) = 1 exactly
         const z = ops[2];
@@ -571,7 +597,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no-handler fallback, which derives a NARROWER type than this
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
-      type: () => 'number',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: (ops, { numericApproximation, engine }) => {
         // The index and the derivative order are validated first: an
         // invalid index, or an unimplemented order r > 0, leaves the
@@ -615,7 +642,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no-handler fallback, which derives a NARROWER type than this
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
-      type: () => 'number',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: ([tau], { numericApproximation, engine }) => {
         const point = infinitePoint(tau);
         if (point === 'anonymous') return engine.NaN;
@@ -652,7 +680,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // no-handler fallback, which derives a NARROWER type than this
       // constant claim. Only its SHAPE moved to `'types'` — the claim reads
       // no operand, so the flip changes nothing it derives.
-      type: () => 'number',
+      type: (_ops, context) =>
+        BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: (ops, { numericApproximation, engine }) => {
         // The weight is validated first: an invalid weight leaves the
         // application symbolic at every τ, an infinite τ included.
@@ -701,14 +730,21 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // declaration is caught by the fact pair below — no finiteness and no
       // sign — which also catches `~oo` held the same way, where `number` is
       // right as well (`Ei(~oo)` is NaN).
-      type: ([x]) => {
-        if (!x) return 'number';
+      type: ([x], context) => {
+        if (!x)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
         if (x.facts.finite === false && x.facts.sgn === 'unsigned')
-          return 'number';
-        return EXTENDED_REAL_TYPE;
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        return BoxedType.forResult(
+          EXTENDED_REAL_TYPE,
+          context.engine._typeResolver
+        );
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -766,16 +802,21 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       // Reading the operand's own sign there answers `undefined` for the
       // whole collection and needlessly widens `broadcastable<real<0..>>` to
       // `broadcastable<number>`.
-      type: ([x]) => {
-        if (x === undefined) return 'number';
+      type: ([x], context) => {
+        if (x === undefined)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const t = broadcastOperandType(x);
         // EXTENDED realness: `li(+∞) = +∞` is on the half-line the claim
         // covers, and a `+oo` argument does not match the bare (finite)
         // name `real`.
-        if (!isSubtype(t, EXTENDED_REAL_TYPE)) return 'number';
+        if (!isSubtype(t, EXTENDED_REAL_TYPE))
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const scalar = x.facts.collection === false && t === x.type;
         const sgn = scalar ? x.facts.sgn : signOfType(t);
-        return nonNegativeSign(sgn) === true ? EXTENDED_REAL_TYPE : 'number';
+        return BoxedType.forResult(
+          nonNegativeSign(sgn) === true ? EXTENDED_REAL_TYPE : 'number',
+          context.engine._typeResolver
+        );
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;

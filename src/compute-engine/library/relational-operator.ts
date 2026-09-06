@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
   OperandDescriptor,
@@ -332,7 +333,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'handle',
 
     type: (ops, { engine }) =>
-      comparisonType('Equal', comparisonResultType, ops, engine.tolerance),
+      BoxedType.forResult(
+        comparisonType('Equal', comparisonResultType, ops, engine.tolerance),
+        engine._typeResolver
+      ),
 
     // Broadcast element-wise over a list operand (Desmos `L[d=4]` filtering).
     // Restricted to the list-vs-scalar case by the exemption below: with two
@@ -531,7 +535,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // comparison `Missing` (Kleene), a `NaN` operand makes it `False` (IEEE).
     missingBehavior: 'handle',
 
-    type: (ops) => relationalAbsenceType(ops),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        relationalAbsenceType(ops),
+        context.engine._typeResolver
+      ),
 
     // Deliberately NOT `broadcastable`: this is a PROVER (is this an identity
     // in all the free variables?), not an arithmetic comparison, so a list
@@ -650,7 +658,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'handle',
 
     type: (ops, { engine }) =>
-      comparisonType('NotEqual', comparisonResultType, ops, engine.tolerance),
+      BoxedType.forResult(
+        comparisonType('NotEqual', comparisonResultType, ops, engine.tolerance),
+        engine._typeResolver
+      ),
 
     // Broadcast element-wise over a list operand (list-vs-scalar only; two or
     // more collection operands compare whole, as at `Equal` above).
@@ -784,7 +795,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     nanBehavior: 'handle',
 
     type: (ops, { engine }) =>
-      comparisonType('Less', relationalAbsenceType, ops, engine.tolerance),
+      BoxedType.forResult(
+        comparisonType('Less', relationalAbsenceType, ops, engine.tolerance),
+        engine._typeResolver
+      ),
 
     lazy: true,
     // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
@@ -862,7 +876,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
   Greater: {
     type: (ops, { engine }) =>
-      comparisonType('Greater', relationalAbsenceType, ops, engine.tolerance),
+      BoxedType.forResult(
+        comparisonType('Greater', relationalAbsenceType, ops, engine.tolerance),
+        engine._typeResolver
+      ),
     description: 'Greater-than comparison (strictly greater than).',
     complexity: 11000,
     signature: '(any, any*) -> boolean',
@@ -902,7 +919,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     nanBehavior: 'handle',
 
     type: (ops, { engine }) =>
-      comparisonType('LessEqual', relationalAbsenceType, ops, engine.tolerance),
+      BoxedType.forResult(
+        comparisonType(
+          'LessEqual',
+          relationalAbsenceType,
+          ops,
+          engine.tolerance
+        ),
+        engine._typeResolver
+      ),
 
     lazy: true,
     // Broadcast element-wise over a list operand (see `Less`).
@@ -979,11 +1004,14 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
   GreaterEqual: {
     type: (ops, { engine }) =>
-      comparisonType(
-        'GreaterEqual',
-        relationalAbsenceType,
-        ops,
-        engine.tolerance
+      BoxedType.forResult(
+        comparisonType(
+          'GreaterEqual',
+          relationalAbsenceType,
+          ops,
+          engine.tolerance
+        ),
+        engine._typeResolver
       ),
     description: 'Greater-than-or-equal comparison (greater than or equal to).',
     complexity: 11000,

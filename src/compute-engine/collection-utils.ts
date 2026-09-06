@@ -1,3 +1,4 @@
+import { factsOf } from '../common/type/facts.js';
 import {
   widen,
   broadcastElementType,
@@ -1805,8 +1806,7 @@ export function isCollectionShaped(x: Expression): boolean {
 export function isTupleShapedType(t: Type): boolean {
   // A transparent alias of a tuple IS a tuple (see
   // `typeCouldBeNumericCollection`); a nominal reference stays opaque.
-  t = resolveTypeAlias(t);
-  return t === 'tuple' || (typeof t === 'object' && t.kind === 'tuple');
+  return factsOf(t).tupleShaped;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -1293,7 +1294,7 @@ volumes
         const t = fn?.type;
         const result = t !== undefined ? functionResult(t) : undefined;
         if (result !== undefined && result !== 'any' && result !== 'unknown')
-          return engine.type(t!);
+          return BoxedType.forResult(engine.type(t!), engine._typeResolver);
         // The DECLARED type is uninformative, but the symbol may nevertheless
         // hold a function literal whose codomain is known: a head declared as
         // a bare `function` and only then assigned `(t) ↦ (cos t, sin 2t, t)`
@@ -1317,7 +1318,10 @@ volumes
             valueResult !== 'any' &&
             valueResult !== 'unknown'
           )
-            return engine.type(valueType);
+            return BoxedType.forResult(
+              engine.type(valueType),
+              engine._typeResolver
+            );
         }
         // Neither the declaration nor a held value says what the function
         // returns (e.g. a symbol declared plain `function` and never
@@ -1326,7 +1330,10 @@ volumes
         // number-valued function — the same compromise as the `D` type
         // handler below — rather than passing the `any` through, which would
         // type applications as `any`.
-        return engine.type('(any*) -> number');
+        return BoxedType.forResult(
+          engine.type('(any*) -> number'),
+          engine._typeResolver
+        );
       },
       canonical: (ops, { engine }) => {
         const fn = canonicalFunctionLiteral(ops[0].canonical);
@@ -1480,7 +1487,8 @@ volumes
         const t = body.type;
         // The derivative of a numeric expression is numeric — preserve the
         // concrete numeric type (e.g. `number` for `D(Sin(x),x)`).
-        if (isSubtype(t, 'number')) return t;
+        if (isSubtype(t, 'number'))
+          return BoxedType.forResult(t, engine._typeResolver);
         // A numeric TUPLE or COLLECTION body differentiates component-wise and
         // the result keeps that shape: `D((cos t, sin 2t, t), t)` evaluates to
         // `(-sin t, 2cos 2t, 1)`, and `D([cos t, sin t], t)` to a list. The
@@ -1490,7 +1498,7 @@ volumes
         // parametric curve outright (Tycho item 210). Echoing the body's type
         // follows the same tier convention as the numeric branch above.
         if (typeCouldBeNumericTuple(t) || typeCouldBeNumericCollection(t))
-          return t;
+          return BoxedType.forResult(t, engine._typeResolver);
         // A derivative is otherwise scalar-valued: report `number` rather than
         // the signature's `expression`. This covers the derivative of an
         // application of an undeclared function (`y(x)` has type `any`), a
@@ -1501,7 +1509,7 @@ volumes
         // corrupting parsed input like `y''(x) + y(x) = 0` before `DSolve`
         // ever runs — and leaving inconsistent trees (a bare application
         // `y(x)` already reports `any` and composes fine there).
-        return engine.type('number');
+        return BoxedType.forResult(engine.type('number'), engine._typeResolver);
       },
       canonical: (ops, { engine: ce, scope }) => {
         // Guard against a malformed `D` with no operand. This can arise when
@@ -1718,11 +1726,13 @@ volumes
           (structure?.kind === 'function-literal' &&
             structure.body.kind === 'list-literal')
         )
-          return 'matrix';
+          return BoxedType.forResult('matrix', context.engine._typeResolver);
         const denoted = denotedTypeOf(fs, context);
-        if (isSubtype(denoted, JACOBIAN_LIST_SHAPE_TYPE)) return 'matrix';
-        if (isSubtype(denoted, 'number')) return 'vector';
-        return 'value';
+        if (isSubtype(denoted, JACOBIAN_LIST_SHAPE_TYPE))
+          return BoxedType.forResult('matrix', context.engine._typeResolver);
+        if (isSubtype(denoted, 'number'))
+          return BoxedType.forResult('vector', context.engine._typeResolver);
+        return BoxedType.forResult('value', context.engine._typeResolver);
       },
 
       evaluate: (ops, { engine: ce }) => {
@@ -2869,7 +2879,8 @@ volumes
       // result's honest type is the operand's own type: a truncated series
       // stays numeric, and a non-numeric value (which `normalStrip` returns
       // unchanged) keeps its own type instead of a false `number` claim.
-      type: ([x]) => x?.type ?? 'value',
+      type: ([x], context) =>
+        BoxedType.forResult(x?.type ?? 'value', context.engine._typeResolver),
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
         // Not lazy: the operand (typically a `Series`) is already evaluated.

@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import {
@@ -748,13 +749,12 @@ function describeDerived(
   type: Type,
   children: ReadonlyArray<OperandDescriptor>
 ): OperandDescriptor {
-  const d = describeType(type);
   const closed: Tri = children.every((c) => c.facts.closed === true)
     ? true
     : children.some((c) => c.facts.closed === false)
       ? false
       : undefined;
-  return { type: d.type, facts: { ...d.facts, closed } };
+  return describeType(type, closed);
 }
 
 /**
@@ -2545,18 +2545,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Ordered sequence of expressions.',
       lazy: true,
       signature: 'function',
-      type: (args) => {
-        if (args.length === 0) return 'nothing';
-        if (args.length === 1) return args[0].type;
+      type: (args, context) => {
+        if (args.length === 0)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
+        if (args.length === 1)
+          return BoxedType.forResult(
+            args[0].type,
+            context.engine._typeResolver
+          );
         // Built STRUCTURALLY: serializing the operand types into a
         // `tuple<…>` string and reparsing it loses any user-declared type
         // name (a resolver-less `parseType()` cannot read it back). Each
         // slot carries the operand's stored-contract type — a number
         // literal's tier, never its literal type (`storedComponentTypeD`).
-        return {
-          kind: 'tuple',
-          elements: args.map((a) => ({ type: storedComponentTypeD(a) })),
-        };
+        return BoxedType.forResult(
+          {
+            kind: 'tuple',
+            elements: args.map((a) => ({ type: storedComponentTypeD(a) })),
+          },
+          context.engine._typeResolver
+        );
       },
       canonical: (args, { engine: ce }) => {
         const xs = flatten(args);
@@ -2575,9 +2583,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(any, string?) -> any',
       // Echoes the body operand's type; nothing but the type is read.
-      type: (args) => {
-        if (args.length === 0) return 'nothing';
-        return args[0].type;
+      type: (args, context) => {
+        if (args.length === 0)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
+        return BoxedType.forResult(args[0].type, context.engine._typeResolver);
       },
 
       canonical: (args, { engine: ce }) => {
@@ -2724,7 +2733,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // Unlike Hold, the argument is canonicalized
       lazy: true,
       signature: '(any) -> unknown',
-      type: ([x]) => x.type,
+      type: ([x], context) =>
+        BoxedType.forResult(x.type, context.engine._typeResolver),
       canonical: (args, { engine: ce, scope }) =>
         ce._fn('Unevaluated', canonical(ce, args, scope)),
       evaluate: ([x], options) => x.evaluate(options),
@@ -2768,12 +2778,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       //
       // `'types'`-shape handler: reads operand descriptors, never operand
       // expressions, so the derivation cannot touch engine state.
-      type: (operands) => {
-        if (operands.length === 0) return 'nothing';
+      type: (operands, context) => {
+        if (operands.length === 0)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
         const arms = operands.map((op, i) =>
           i < operands.length - 1 ? stripMissingFromType(op.type) : op.type
         );
-        return widen(...arms) as Type;
+        return BoxedType.forResult(
+          widen(...arms) as Type,
+          context.engine._typeResolver
+        );
       },
       canonical: (args, { engine: ce, scope }) => {
         if (args.length === 0) return ce.error('missing');
@@ -2836,18 +2850,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `isString`/`isNumber`/`isFunction` guards. Every application kind
       // (compound, tuple, list literal, function literal) lands in the
       // default arm, mirroring the old `isFunction` branch.
-      type: ([x]) => {
+      type: ([x], context) => {
         const s = x?.structureOf?.();
-        if (s === undefined) return 'unknown';
+        if (s === undefined)
+          return BoxedType.forResult('unknown', context.engine._typeResolver);
         switch (s.kind) {
           case 'symbol':
-            return 'symbol';
+            return BoxedType.forResult('symbol', context.engine._typeResolver);
           case 'string':
-            return 'string';
+            return BoxedType.forResult('string', context.engine._typeResolver);
           case 'number':
-            return x.type;
+            return BoxedType.forResult(x.type, context.engine._typeResolver);
           default:
-            return functionResult(x.type) ?? 'unknown';
+            return BoxedType.forResult(
+              functionResult(x.type) ?? 'unknown',
+              context.engine._typeResolver
+            );
         }
       },
       // When comparing hold expressions, consider them equal if their
@@ -2874,11 +2892,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (the descriptor of the held operand's first child); anything else
       // keeps its own type. `'nothing'` for the degenerate argument-less
       // `Hold()`, matching what the expressions shape read off `op1`.
-      type: ([x]) => {
+      type: ([x], context) => {
         const s = x?.structureOf?.();
         if (s?.kind === 'application' && s.head === 'Hold')
-          return s.children[0]?.type ?? 'nothing';
-        return x?.type ?? 'unknown';
+          return BoxedType.forResult(
+            s.children[0]?.type ?? 'nothing',
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(
+          x?.type ?? 'unknown',
+          context.engine._typeResolver
+        );
       },
       // Note: the operator is lazy and doesn't have a canonical handler:
       // the argument is not canonicalized.
@@ -2907,7 +2931,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Attach metadata or style annotations to an expression.',
       signature: '(expression, dictionary<any>) -> expression',
       // Transparent to the type system: the annotated expression's own type.
-      type: ([x]) => x.type,
+      type: ([x], context) =>
+        BoxedType.forResult(x.type, context.engine._typeResolver),
       complexity: 9000,
       lazy: true,
       canonical: ([x, style], { engine: ce }) => {
@@ -2949,7 +2974,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // a string literal's text, or a type-name symbol's name — and resolved
       // with the engine's type resolver, which is a pure read.
       type: ([x, t], { engine: ce }) => {
-        if (!t) return x?.type ?? 'unknown';
+        if (!t)
+          return BoxedType.forResult(x?.type ?? 'unknown', ce._typeResolver);
         const s = typeTextOf(t);
         let parsed: Type | undefined;
         try {
@@ -2957,7 +2983,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         } catch {
           parsed = undefined;
         }
-        return parsed ?? x?.type ?? 'unknown';
+        return BoxedType.forResult(
+          parsed ?? x?.type ?? 'unknown',
+          ce._typeResolver
+        );
       },
       canonical: ([x, t], { engine: ce }) => {
         if (t === undefined) return x?.canonical ?? ce.Nothing;
@@ -3003,7 +3032,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // operator definition — `["Record", …]`, which no library declares —
       // would re-box as an inert application typed `unknown`, and this
       // handler would report `unknown` for every snapshot.
-      type: ([x]) => x?.type ?? 'unknown',
+      type: ([x], context) =>
+        BoxedType.forResult(x?.type ?? 'unknown', context.engine._typeResolver),
       // Transparent: it yields the wrapped record. Reconstruction is
       // deliberately NOT the evaluation semantics — a snapshot must never
       // silently mint a fresh object, so this handler never constructs one
@@ -3371,13 +3401,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `boxed-expression/generic-instantiation.ts`).
       type: ([fn, ...args], { engine }) => {
         const t = fn.type;
-        return (
+        return BoxedType.forResult(
           instantiatedResultTypeOverActuals(t, args.map(actualOfDescriptor), {
             threadable: false,
             resolver: engine._typeResolver,
           }) ??
-          functionResult(t) ??
-          'unknown'
+            functionResult(t) ??
+            'unknown',
+          engine._typeResolver
         );
       },
       canonical: (args, { engine: ce }) => {
@@ -3447,11 +3478,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // the stage implicitly maps (`pipeImplicitMapType`), where the pipe is a
       // collection of that result rather than the result itself.
       type: ([x, f], context) =>
-        f
-          ? (pipeImplicitMapType(context, x, f) ??
-            functionResult(f.type) ??
-            'unknown')
-          : undefined,
+        BoxedType.forResult(
+          f
+            ? (pipeImplicitMapType(context, x, f) ??
+                functionResult(f.type) ??
+                'unknown')
+            : undefined,
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         if (ops.length !== 2) return ce._fn('Pipe', checkArity(ce, ops, 2));
         // Reject early only a statically-refutable rhs: a bare number, string,
@@ -3918,7 +3952,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // effects still count: `Assign(x, Random())` stays `{random, scope}`.
       invokes: false,
       // The type of the assignment expression is the type of what it stores.
-      type: ([_symbol, value]) => value.type,
+      type: ([_symbol, value], context) =>
+        BoxedType.forResult(value.type, context.engine._typeResolver),
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
 
@@ -4614,8 +4649,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // With a positional value operand, `Declare` evaluates to the value;
       // otherwise to `Nothing`. (A trailing dictionary operand is the
       // attributes bag, not a value.)
-      type: (ops) =>
-        ops[2] && !isDictionaryOperand(ops[2]) ? ops[2].type : 'nothing',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          ops[2] && !isDictionaryOperand(ops[2]) ? ops[2].type : 'nothing',
+          context.engine._typeResolver
+        ),
       canonical: (args, { engine: ce }) => {
         // Note: we can't use checkType() because it canonicalized/bind the argument.
         // A `Tuple` first operand is a destructuring pattern (`let (x, y) = v`):
@@ -5241,7 +5279,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine: ce }) => canonicalProtocolMember(ce, ops),
       // The handler reads the operands' names and types only, through the
       // read-only engine view's protocol registry.
-      type: (ops, { engine: ce }) => protocolMemberResultType(ce, ops),
+      type: (ops, { engine: ce }) =>
+        BoxedType.forResult(
+          protocolMemberResultType(ce, ops),
+          ce._typeResolver
+        ),
       evaluate: (ops, options) =>
         evaluateProtocolMember(options.engine, ops, options),
     },
@@ -5293,7 +5335,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(protocol: string, property: string, receiver: any, value: any?) -> unknown',
       // See `ProtocolMember`: names and types only, no operand expression.
-      type: (ops, { engine: ce }) => protocolPropertyResultType(ce, ops),
+      type: (ops, { engine: ce }) =>
+        BoxedType.forResult(
+          protocolPropertyResultType(ce, ops),
+          ce._typeResolver
+        ),
       evaluate: (ops, options) =>
         evaluateProtocolPropertyOperator(options.engine, ops, options),
     },
@@ -5714,7 +5760,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Evaluate an expression.',
       lazy: true,
       signature: '(any) -> unknown',
-      type: ([x]) => x.type,
+      type: ([x], context) =>
+        BoxedType.forResult(x.type, context.engine._typeResolver),
       canonical: (ops, { engine: ce }) => {
         const xs = checkArity(ce, ops, 1);
         // Redundant nesting: evaluating an `Evaluate` or `N` node is exactly
@@ -5735,7 +5782,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: 'Evaluate a function at one point or between two bounds.',
       lazy: true,
       signature: '(function, lower:expression, upper:expression) -> unknown',
-      type: ([x]) => functionResult(x.type) ?? 'number',
+      type: ([x], context) =>
+        BoxedType.forResult(
+          functionResult(x.type) ?? 'number',
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return null;
         const fn = canonicalFunctionLiteral(ops[0]);
@@ -5870,7 +5921,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, any?) -> expression',
       // Simplification is type-preserving in the handler's view: report the
       // operand's own type.
-      type: ([x]) => x?.type ?? undefined,
+      type: ([x], context) =>
+        BoxedType.forResult(x?.type ?? undefined, context.engine._typeResolver),
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return ce._fn('Simplify', checkArity(ce, ops, 1));
         if (ops.length > 2) return ce._fn('Simplify', checkArity(ce, ops, 2));
@@ -5927,7 +5979,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // same-named assigned value would substitute first.
       lazy: true,
       signature: '(any, any?) -> expression',
-      type: ([x]) => x?.type ?? undefined,
+      type: ([x], context) =>
+        BoxedType.forResult(x?.type ?? undefined, context.engine._typeResolver),
       canonical: (rawOps, { engine: ce }) => {
         // The held operands arrive UNBOUND on the box/parse routes, so a
         // `type` handler reading `body.type` would see `unknown`. `.canonical`
@@ -6003,7 +6056,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // operand that might be a collection is declined by the compiler
       // (fail-closed), so `WithRandomSeed(s, Random()) < y` would silently
       // leave the compile path.
-      type: ([, body]) => body?.type ?? undefined,
+      type: ([, body], context) =>
+        BoxedType.forResult(
+          body?.type ?? undefined,
+          context.engine._typeResolver
+        ),
       canonical: (rawOps, { engine: ce }) => {
         // The held operands arrive UNBOUND on the box/parse routes; without
         // this the `type` handler above would read `unknown`. `.canonical`
@@ -6186,7 +6243,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       ],
       lazy: true,
       signature: '(any, integer?) -> unknown',
-      type: ([x]) => x.type,
+      type: ([x], context) =>
+        BoxedType.forResult(x.type, context.engine._typeResolver),
       canonical: (ops, { engine: ce }) => {
         // Accept one or two arguments: N(expr) or N(expr, precision).
         if (ops.length === 0) return ce._fn('N', checkArity(ce, ops, 1));
@@ -6263,9 +6321,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // effect set: it consumes draws from the ambient seeded stream, hence
       // impure (the derived `pure`/`drawsRandom` getters read it).
       signature: '((collection<any> | set<real>)?) random -> any',
-      type: ([domain]) => {
-        if (domain === undefined) return 'real';
-        return randomElementType(domain);
+      type: ([domain], context) => {
+        if (domain === undefined)
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult(
+          randomElementType(domain),
+          context.engine._typeResolver
+        );
       },
       // Derived from the DOMAIN's endpoints. (The old handler read
       // `ops.every(x => x.isNonNegative)` against numeric bounds that no
@@ -6360,7 +6422,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have
       // to round it first. It is rounded on evaluation.
       signature: '(collection<any> | set<real>, number) random -> list<any>',
-      type: ([domain, k]) => randomListType(domain, k),
+      type: ([domain, k], context) =>
+        BoxedType.forResult(
+          randomListType(domain, k),
+          context.engine._typeResolver
+        ),
       // IMPURE producer: decline-only, from the domain operand's facet alone
       // — zero draws, never `true` (the `at()` materialize fallback is
       // pure-only and could not honor it). Mirrors `RandomShuffle`.
@@ -6470,7 +6536,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // The base's value comes from the literal's handler-visible type,
           // the only value channel a descriptor carries.
           const base = smallIntegerOperandValue(op2);
-          return base !== null && base > 1 && base <= 36 ? 'integer' : 'error';
+          return BoxedType.forResult(
+            base !== null && base > 1 && base <= 36 ? 'integer' : 'error',
+            ce._typeResolver
+          );
         }
 
         // A subscript on a blackboard-bold RING constant canonicalizes to the
@@ -6479,16 +6548,23 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `Subscript(Integers, n)` — which never reaches `canonical` — fell
         // through to `collectionElementType` and claimed `integer`:
         // the element type of ℤ, not the type of the quotient RING.
-        if (isRingConstantOperand(op1)) return quotientRingType([op1, op2]);
+        if (isRingConstantOperand(op1))
+          return BoxedType.forResult(
+            quotientRingType([op1, op2]),
+            ce._typeResolver
+          );
 
         if (op1?.facts.indexed === true)
-          return collectionElementType(op1.type) ?? 'any';
+          return BoxedType.forResult(
+            collectionElementType(op1.type) ?? 'any',
+            ce._typeResolver
+          );
 
         // Check if the symbol is declared as a collection type
         const op1Name = base1?.kind === 'symbol' ? base1.name : undefined;
         if (op1Name) {
           const eltType = collectionElementType(op1!.type);
-          if (eltType) return eltType;
+          if (eltType) return BoxedType.forResult(eltType, ce._typeResolver);
         }
 
         // For symbol bases with complex subscripts (like a_{n+1}), return 'unknown'
@@ -6499,10 +6575,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // If the base symbol has subscriptEvaluate, the result will be a number
           // (or undefined, which keeps it as Subscript)
           const symbolDef = ce.lookupDefinition(op1Name);
-          if (symbolDef?.value?.subscriptEvaluate) return 'number';
+          if (symbolDef?.value?.subscriptEvaluate)
+            return BoxedType.forResult('number', ce._typeResolver);
           // Check if this would become a compound symbol (simple subscript)
           const sub = compoundSymbolPart(op2);
-          if (sub) return 'symbol';
+          if (sub) return BoxedType.forResult('symbol', ce._typeResolver);
           // Check for InvisibleOperator of symbols/numbers (also becomes compound symbol)
           const sub2 = op2?.structureOf?.();
           if (
@@ -6511,12 +6588,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ) {
             const parts = sub2.children.map((x) => nameOrSmallInteger(x));
             if (parts.every((p) => p !== undefined && p !== null))
-              return 'symbol';
+              return BoxedType.forResult('symbol', ce._typeResolver);
           }
           // Complex subscript - return 'unknown' to allow numeric inference
-          return 'unknown';
+          return BoxedType.forResult('unknown', ce._typeResolver);
         }
-        return 'expression';
+        return BoxedType.forResult('expression', ce._typeResolver);
       },
 
       canonical: ([op1, op2], { engine: ce }) => {
@@ -6673,9 +6750,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: 'function',
       // Arity is all the handler reads.
-      type: (args) => {
-        if (args.length === 0) return 'nothing';
-        return 'symbol';
+      type: (args, context) => {
+        if (args.length === 0)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
+        return BoxedType.forResult('symbol', context.engine._typeResolver);
       },
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return ce.Nothing;

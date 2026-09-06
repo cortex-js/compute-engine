@@ -1,12 +1,12 @@
 import {
   SIGNED_INFINITY_TYPE,
-  EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
   NUMERIC_TYPES_SET,
 } from '../../common/type/primitive.js';
 import type { OperandDescriptor, Sign } from '../global-types.js';
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { factsOf } from '../../common/type/facts.js';
 import {
   absRange,
   intervalOfType,
@@ -448,7 +448,7 @@ export function numericTypeHandler(
   ops: ReadonlyArray<OperandDescriptor>
 ): Type {
   if (ops.some((d) => operandNonFiniteNumber(d))) return 'number';
-  if (ops.every((d) => isSubtype(d.type, 'real'))) return 'real';
+  if (ops.every((d) => factsOf(d.type).real)) return 'real';
   return 'number';
 }
 
@@ -553,9 +553,7 @@ function logType(ops: ReadonlyArray<OperandDescriptor>): Type {
   // operand's type excludes NaN too (`ln(NaN) = NaN`): an operand that may
   // be NaN — `number`, which sits ABOVE `complex` rather than inside it —
   // keeps the top type.
-  return isSubtype(x.type, 'complex')
-    ? COMPLEX_OR_SIGNED_INFINITY_TYPE
-    : 'number';
+  return factsOf(x.type).complex ? COMPLEX_OR_SIGNED_INFINITY_TYPE : 'number';
 }
 
 /**
@@ -587,12 +585,10 @@ function poleReciprocalType(
   // The arm asks for EXTENDED realness because the operand it exists for is
   // `±∞`, which the bare (finite) name `real` does not match.
   if (operandNonFiniteNumber(x))
-    return hyperbolic && isSubtype(x.type, EXTENDED_REAL_TYPE)
-      ? 'real'
-      : 'number';
+    return hyperbolic && factsOf(x.type).extendedReal ? 'real' : 'number';
   // Past the non-finite arm the operand is not provably infinite, so the
   // finite name is the right question here.
-  if (!isSubtype(x.type, 'real')) return 'number';
+  if (!factsOf(x.type).real) return 'number';
   // Only the pole at 0 is reachable by a number literal (every other pole is
   // an irrational multiple of π, which no literal — rational, float, or
   // radical — equals).
@@ -735,7 +731,7 @@ export function boundedInverseTrigType(
 ): Type {
   const x = ops[0];
   if (!x || operandNonFiniteNumber(x)) return 'number';
-  if (!isSubtype(x.type, 'real')) return 'number';
+  if (!factsOf(x.type).real) return 'number';
 
   // Fast path: a (finite) real LITERAL classifies by arithmetic alone,
   // without going through the comparison machinery. Rounding to machine
@@ -869,7 +865,7 @@ const ARCSCH_DOMAIN: RealDomain = {
 function arctanType(ops: ReadonlyArray<OperandDescriptor>): Type {
   const x = ops[0];
   if (!x) return 'number';
-  if (isSubtype(x.type, EXTENDED_REAL_TYPE)) return 'real';
+  if (factsOf(x.type).extendedReal) return 'real';
   return 'number';
 }
 
@@ -907,9 +903,9 @@ export function gammaPoleType(
   x: OperandDescriptor | undefined
 ): Type | undefined {
   if (!x) return 'number';
-  if (isSubtype(x.type, 'nan')) return undefined;
-  if (isSubtype(x.type, 'integer') && nonPositiveSign(operandSgn(x)) === true)
-    return 'number';
+  const f = factsOf(x.type);
+  if (f.nan) return undefined;
+  if (f.integer && nonPositiveSign(operandSgn(x)) === true) return 'number';
   return numericTypeHandler([x]);
 }
 
@@ -946,6 +942,7 @@ export function roundingFunctionType(
 ): Type | undefined {
   if (!x) return undefined;
   const t = broadcastOperandType(x);
+  const f = factsOf(t);
   // The VALUE channel first: `facts.finite === false` is a PROOF of
   // non-finiteness the descriptor can read through an application whose
   // static type stays a union (`Ceil(Abs(w))` with `w := +∞` — the type
@@ -960,12 +957,12 @@ export function roundingFunctionType(
   // collection operand's cells answer through the element-type arms
   // below.
   if (x.facts.collection !== true && operandNonFiniteNumber(x))
-    return isSubtype(t, EXTENDED_REAL_TYPE) ? SIGNED_INFINITY_TYPE : undefined;
+    return f.extendedReal ? SIGNED_INFINITY_TYPE : undefined;
   // Bare `real` names the FINITE reals (finite-by-default lattice), so this
   // single fact is the whole finiteness proof.
-  if (isSubtype(t, 'real')) return 'integer';
+  if (f.real) return 'integer';
   if (isSubtype(t, SIGNED_INFINITY_TYPE)) return SIGNED_INFINITY_TYPE;
-  if (isSubtype(t, EXTENDED_REAL_TYPE)) return INTEGER_OR_SIGNED_INFINITY_TYPE;
+  if (f.extendedReal) return INTEGER_OR_SIGNED_INFINITY_TYPE;
   return undefined;
 }
 
@@ -993,6 +990,7 @@ export function roundingFunctionType(
 export function absFunctionType(x: OperandDescriptor | undefined): Type {
   if (!x) return 'number';
   const t = x.type;
+  const f = factsOf(t);
   // An operand the TYPE proves infinite — the signed pair `±∞` and the
   // unsigned `~oo` — has magnitude `+∞`, so `+oo | -oo` (the signed
   // pair) is the claim. This arm runs before every other test: a
@@ -1000,7 +998,7 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // not preempt it, and every tier the walk below can reach denotes FINITE
   // values only, so any of them would exclude the value the operand
   // actually has.
-  if (isSubtype(t, 'infinity')) return SIGNED_INFINITY_TYPE;
+  if (f.infinity) return SIGNED_INFINITY_TYPE;
   // NaN's static type is just `number`, so only the value channel proves
   // it — and the descriptor carries that channel for a held value as well
   // as for a literal, hence no literal gate here.
@@ -1026,11 +1024,11 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // gracefully — whatever a given lattice means by `real`, `|x|` of it is
   // the non-negative half of that same set.
   for (const tier of ['integer', 'rational', 'real'] as const)
-    if (isSubtype(t, tier)) return absRange(tier, t);
+    if (f[tier]) return absRange(tier, t);
   // A finite operand that matched no real tier is complex, and the
   // magnitude of a finite complex number is a finite real that is neither
   // rational nor integer.
-  if (isSubtype(t, 'complex')) return absRange('real', t);
+  if (f.complex) return absRange('real', t);
   // The operand is neither provably finite nor provably infinite, so `|x|`
   // is either a non-negative real or `+∞` — the only infinite magnitude
   // there is. NaN is NOT covered by this claim: the exclusion above catches
@@ -1060,9 +1058,9 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
  */
 export function extremumType(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'number';
-  if (!ops.every((d) => isSubtype(d.type, 'number'))) return 'number';
+  if (!ops.every((d) => factsOf(d.type).belowNumber)) return 'number';
   for (const t of ['integer', 'rational', 'real'] as const)
-    if (ops.every((d) => isSubtype(d.type, t))) return t;
+    if (ops.every((d) => factsOf(d.type)[t])) return t;
   return 'number';
 }
 
@@ -1109,8 +1107,8 @@ export function elementExtremumType(
   if (ts.some((t) => isSubtype(t, 'never'))) return undefined;
   // Bare `integer`/`real` name the FINITE values (finite-by-default
   // lattice), so each of these single facts is the whole finiteness proof.
-  if (ts.every((t) => isSubtype(t, 'integer'))) return 'integer';
-  if (ts.every((t) => isSubtype(t, 'real'))) return 'real';
+  if (ts.every((t) => factsOf(t).integer)) return 'integer';
+  if (ts.every((t) => factsOf(t).real)) return 'real';
   return undefined;
 }
 
@@ -1205,7 +1203,7 @@ export function elementaryFunctionType(
       if (
         ops[0] !== undefined &&
         ops[0].facts.finite === false &&
-        isSubtype(ops[0].type, EXTENDED_REAL_TYPE)
+        factsOf(ops[0].type).extendedReal
       )
         return SIGNED_INFINITY_TYPE;
       return numericTypeHandler(ops);
@@ -1214,7 +1212,7 @@ export function elementaryFunctionType(
       if (
         ops[0] !== undefined &&
         ops[0].facts.finite === false &&
-        isSubtype(ops[0].type, EXTENDED_REAL_TYPE)
+        factsOf(ops[0].type).extendedReal
       )
         return 'real';
       return numericTypeHandler(ops);

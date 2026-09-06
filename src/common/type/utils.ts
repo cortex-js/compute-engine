@@ -1,4 +1,5 @@
 import { makeNumericRangeType } from './numeric-range.js';
+import { immutableNumericType } from './immutable.js';
 import { isEffectSubset, unionEffectSets } from './effects.js';
 import { substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
@@ -46,12 +47,12 @@ export function isNumericScalarType(t: Type): boolean {
 
 /** `tier<0..>` — the non-negative half of a numeric tier. */
 export function nonNegativeRangeType(tier: NumericPrimitiveType): Type {
-  return { kind: 'numeric', type: tier, lower: 0 };
+  return immutableNumericType(tier, 0);
 }
 
 /** `tier<..0>` — the non-positive half of a numeric tier. */
 export function nonPositiveRangeType(tier: NumericPrimitiveType): Type {
-  return { kind: 'numeric', type: tier, upper: 0 };
+  return immutableNumericType(tier, undefined, 0);
 }
 
 /** `tier<0<..>` — the positive members of a numeric tier, as an open range

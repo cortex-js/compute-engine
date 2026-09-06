@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type { Expression, SymbolDefinitions } from '../global-types.js';
 import { toBigint } from '../boxed-expression/numerics.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
@@ -959,7 +960,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Count digits of `n` in the given `base` (default 10); the sign of `n` is ignored. With a third argument `digit`, return how many times that digit occurs. Otherwise return a list `[count of 1, count of 2, …, count of base-1, count of 0]`.',
       signature: '(integer, integer?, integer?) -> integer | list<integer>',
-      type: ([, , digit]) => (digit !== undefined ? 'integer' : 'list'),
+      type: ([, , digit], context) =>
+        BoxedType.forResult(
+          digit !== undefined ? 'integer' : 'list',
+          context.engine._typeResolver
+        ),
       examples: ['DigitCount(122, 10, 2)  // 2'],
       evaluate: ([nOp, baseOp, digitOp], { engine: ce }) => {
         const k = toBigint(nOp);

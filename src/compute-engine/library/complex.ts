@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)
 
@@ -167,70 +168,97 @@ function infinitePointOfDescriptor(
 // part, a signed or anonymous infinity has an infinite one, and `~oo` has
 // none. A proven-NaN literal declines, so the framework's proven-NaN arm
 // answers for it.
-const realPartType: OperatorTypeHandlerOnTypes = ([z]) => {
-  if (!z) return 'number';
+const realPartType: OperatorTypeHandlerOnTypes = ([z], context) => {
+  if (!z) return BoxedType.forResult('number', context.engine._typeResolver);
   if (provablyNaN(z)) return undefined;
   const point = infinitePointOfDescriptor(z);
-  if (point === '~oo') return 'nan';
-  if (point !== undefined) return '+oo | -oo';
+  if (point === '~oo')
+    return BoxedType.forResult('nan', context.engine._typeResolver);
+  if (point !== undefined)
+    return BoxedType.forResult('+oo | -oo', context.engine._typeResolver);
   const t = z.type;
-  if (isSubtype(t, 'complex')) return 'real';
-  if (isSubtype(t, SIGNED_INFINITY_TYPE)) return '+oo | -oo';
+  if (isSubtype(t, 'complex'))
+    return BoxedType.forResult('real', context.engine._typeResolver);
+  if (isSubtype(t, SIGNED_INFINITY_TYPE))
+    return BoxedType.forResult('+oo | -oo', context.engine._typeResolver);
   // Collection operand: scalar claim for the broadcast lift — elements
   // keep the generic finite-point convention (list-broadcast-typing).
   if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
-    return collectionPartClaim(t);
+    return BoxedType.forResult(
+      collectionPartClaim(t),
+      context.engine._typeResolver
+    );
   // A real-typed operand is its own real part. The bare name `real` is
   // finite and excludes `~oo` and NaN, so this claim is exact; a
   // `number`-typed operand may be either of those and keeps the top type.
-  return isSubtype(t, 'real') ? 'real' : 'number';
+  return BoxedType.forResult(
+    isSubtype(t, 'real') ? 'real' : 'number',
+    context.engine._typeResolver
+  );
 };
 
 // Im of a finite number is a finite real, a real ±∞ and an anonymous
 // infinity have a finite imaginary part, and `~oo` has none.
-const imaginaryPartType: OperatorTypeHandlerOnTypes = ([z]) => {
-  if (!z) return 'number';
+const imaginaryPartType: OperatorTypeHandlerOnTypes = ([z], context) => {
+  if (!z) return BoxedType.forResult('number', context.engine._typeResolver);
   if (provablyNaN(z)) return undefined;
   const point = infinitePointOfDescriptor(z);
-  if (point === '~oo') return 'nan';
-  if (point !== undefined) return 'real';
+  if (point === '~oo')
+    return BoxedType.forResult('nan', context.engine._typeResolver);
+  if (point !== undefined)
+    return BoxedType.forResult('real', context.engine._typeResolver);
   const t = z.type;
   if (isSubtype(t, 'complex') || isSubtype(t, SIGNED_INFINITY_TYPE))
-    return 'real';
+    return BoxedType.forResult('real', context.engine._typeResolver);
   if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
-    return collectionPartClaim(t);
+    return BoxedType.forResult(
+      collectionPartClaim(t),
+      context.engine._typeResolver
+    );
   // A real-typed operand has Im = 0. The bare name `real` is finite and
   // excludes `~oo` and NaN; a `number`-typed operand may be either, and
   // their imaginary part is not a finite real.
-  return isSubtype(t, 'real') ? 'real' : 'number';
+  return BoxedType.forResult(
+    isSubtype(t, 'real') ? 'real' : 'number',
+    context.engine._typeResolver
+  );
 };
 
 // Arg of a finite number, of a real ±∞ (0 or π) or of an anonymous
 // infinity (0 or π as well) is a finite real; `~oo` has no phase angle.
-const argumentType: OperatorTypeHandlerOnTypes = ([z]) => {
-  if (!z) return 'number';
+const argumentType: OperatorTypeHandlerOnTypes = ([z], context) => {
+  if (!z) return BoxedType.forResult('number', context.engine._typeResolver);
   if (provablyNaN(z)) return undefined;
   const point = infinitePointOfDescriptor(z);
-  if (point === '~oo') return 'nan';
-  if (point !== undefined) return 'real';
+  if (point === '~oo')
+    return BoxedType.forResult('nan', context.engine._typeResolver);
+  if (point !== undefined)
+    return BoxedType.forResult('real', context.engine._typeResolver);
   const t = z.type;
   if (isSubtype(t, 'complex') || isSubtype(t, SIGNED_INFINITY_TYPE))
-    return 'real';
+    return BoxedType.forResult('real', context.engine._typeResolver);
   if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
-    return collectionPartClaim(t);
+    return BoxedType.forResult(
+      collectionPartClaim(t),
+      context.engine._typeResolver
+    );
   // A real-typed operand has Arg ∈ {0, π}. The bare name `real` is finite
   // and excludes `~oo` and NaN; a `number`-typed operand may be either,
   // where Arg is NaN.
-  return isSubtype(t, 'real') ? 'real' : 'number';
+  return BoxedType.forResult(
+    isSubtype(t, 'real') ? 'real' : 'number',
+    context.engine._typeResolver
+  );
 };
 
 // `AbsArg` builds the pair `(Abs(z), Argument(z))`, so its cells follow the
 // two components: the modulus is a finite real or `+∞`, the angle a finite
 // real — except at `~oo`, whose angle is NaN. Only that literal needs a
 // claim sharper than the declared result.
-const absArgType: OperatorTypeHandlerOnTypes = ([z]) => {
+const absArgType: OperatorTypeHandlerOnTypes = ([z], context) => {
   if (!z || provablyNaN(z)) return undefined;
-  if (infinitePointOfDescriptor(z) === '~oo') return 'tuple<+oo, nan>';
+  if (infinitePointOfDescriptor(z) === '~oo')
+    return BoxedType.forResult('tuple<+oo, nan>', context.engine._typeResolver);
   return undefined;
 };
 

@@ -40,6 +40,10 @@ import {
   nonPositiveSign,
 } from './sgn.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import {
+  immutableNumericType,
+  immutableNumericValueType,
+} from '../../common/type/immutable.js';
 import type { Type } from '../../common/type/types.js';
 import { COMPLEX_INFINITY_VALUE } from '../../common/type/types.js';
 import {
@@ -134,6 +138,11 @@ const ENCLOSURE_PADDING = 1e-6;
  * therefore forfeits the enclosure (sign-range fallback). */
 const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
 
+const COMPLEX_INFINITY_TYPE: Type = Object.freeze({
+  kind: 'value',
+  value: COMPLEX_INFINITY_VALUE,
+});
+
 /**
  * A compact CLOSED interval, on the literal's tier, that provably contains
  * the value: `rational<0.33..0.34>` for `1/3`, `real<1.4..1.5>` for `√2`.
@@ -222,7 +231,7 @@ function literalEnclosureType(
   // The range replaces a `& !0` sign range, so it must keep the sign fact.
   if (sign === 'positive' ? lower <= 0 : upper >= 0) return undefined;
 
-  return { kind: 'numeric', type: tier, lower, upper };
+  return immutableNumericType(tier, lower, upper);
 }
 
 /**
@@ -245,10 +254,9 @@ export class BoxedNumber
    * of a literal never changes, so the memo never invalidates. */
   private _literalTypeMemo: Type | null | undefined = undefined;
 
-  /** Memo for the public `.type` when it is the literal type: one
-   * `BoxedType` per literal, so repeated reads return the SAME object —
-   * the display projection (`typeToDisplayString`) keys on `BoxedType`
-   * identity. Never invalidates, for the same reason `_literalTypeMemo`
+  /** Memo for the public `.type` when it is the literal type. Immutable
+   * singleton types share a box within the same resolver; repeated reads
+   * retain its identity, used by the display projection (`typeToDisplayString`). Never invalidates, for the same reason `_literalTypeMemo`
    * never does. */
   private _publicTypeMemo: BoxedType | undefined = undefined;
 
@@ -778,7 +786,7 @@ export class BoxedNumber
     if (!inBroadcastCell(this.engine)) {
       const lit = this._literalType;
       if (lit !== undefined) {
-        this._publicTypeMemo ??= new BoxedType(lit, this.engine._typeResolver);
+        this._publicTypeMemo ??= BoxedType.from(lit, this.engine._typeResolver);
         return this._publicTypeMemo;
       }
     }
@@ -809,10 +817,10 @@ export class BoxedNumber
     // `⊑ +oo | -oo` while the same value as a plain machine number
     // succeeded.
     if (this._value.isPositiveInfinity)
-      return new BoxedType({ kind: 'value', value: Infinity });
+      return BoxedType.from(immutableNumericValueType(Infinity));
     if (this._value.isNegativeInfinity)
-      return new BoxedType({ kind: 'value', value: -Infinity });
-    return new BoxedType(this._value.type, this.engine._typeResolver);
+      return BoxedType.from(immutableNumericValueType(-Infinity));
+    return BoxedType.from(this._value.type, this.engine._typeResolver);
   }
 
   /** The handler-visible type of this literal (ruling O9 first half,
@@ -850,17 +858,16 @@ export class BoxedNumber
       // singleton value type — the same treatment every other exactly-held
       // literal gets. The `v === 0` test normalizes `-0` to `0`; NaN and the
       // infinities fail it and pass through unchanged.
-      return { kind: 'value', value: v === 0 ? 0 : v };
+      return immutableNumericValueType(v);
     }
     // The three named infinite/undefined singletons. Each names exactly one
     // value, so the value type says everything the tier would and more:
     // `nan`, `+oo`, `-oo` and `~oo` widen back to `nan`/`infinity` at every
     // storage position (`widenValueTypes`).
-    if (v.isNaN) return { kind: 'value', value: NaN };
-    if (v.isPositiveInfinity) return { kind: 'value', value: Infinity };
-    if (v.isNegativeInfinity) return { kind: 'value', value: -Infinity };
-    if (v.isComplexInfinity)
-      return { kind: 'value', value: COMPLEX_INFINITY_VALUE };
+    if (v.isNaN) return immutableNumericValueType(NaN);
+    if (v.isPositiveInfinity) return immutableNumericValueType(Infinity);
+    if (v.isNegativeInfinity) return immutableNumericValueType(-Infinity);
+    if (v.isComplexInfinity) return COMPLEX_INFINITY_TYPE;
     // Any OTHER complex literal has no singleton spelling — a value node
     // carries one JavaScript number, and `∞ + i` needs two — so its tier
     // answers on its own.
@@ -930,8 +937,8 @@ export class BoxedNumber
         // The lattice deliberately does not class a bare numeric value as
         // rational (`0.5 <: rational` is false), so an exact rational keeps
         // its tier through a singleton range instead.
-        return { kind: 'numeric', type: tier, lower: re, upper: re };
-      return { kind: 'value', value: re === 0 ? 0 : re };
+        return immutableNumericType(tier, re, re);
+      return immutableNumericValueType(re);
     }
 
     // No machine number holds the value (`√2`, `1/3`, a bigint beyond

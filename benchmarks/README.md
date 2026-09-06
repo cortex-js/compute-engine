@@ -25,6 +25,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Kernel microbench** | `big-decimal/*` | CE · CE published · SymPy · mpmath | `big-decimal/BIGNUM-COMPARISON.md` |
 | **Engine configuration** | `effects-registration.ts` | CE (self, before/after) | stdout |
 | **Overload resolution** | `overload-resolution.ts` | CE (self, before/after) | stdout |
+| **Type derivation / P1** | `type-derivation.mjs` | CE baseline · CE current | stdout |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources

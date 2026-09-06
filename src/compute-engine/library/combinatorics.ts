@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   toBigint,
   toInteger,
@@ -590,7 +591,8 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // for what the carrier and the explicit `nanBehavior` say.
       signature: '(n:complex | infinity, m:complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: ([n, k]) => binomialType(n, k),
+      type: ([n, k], context) =>
+        BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
 
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
@@ -661,7 +663,8 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // in the carrier, that seam only ever sees a non-number.
       signature: '(complex | infinity, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: ([n, k]) => binomialType(n, k),
+      type: ([n, k], context) =>
+        BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
       evaluate: ([n, k], { numericApproximation, engine: ce }) =>
         evaluateBinomial(n, k, numericApproximation, ce),
     },
@@ -684,23 +687,30 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `sgn` handler on a compound operand — a proof the descriptor's sign
       // fact carries (open item O7 of
       // `docs/plans/2026-08-22-type-handlers-on-types.md`).
-      type: ([a, k]) => {
+      type: ([a, k], context) => {
         // A provably-NaN operand declines, as `binomialType` does and for the
         // same reason: a handler answer is never widened.
         if ((a && isSubtype(a.type, 'nan')) || (k && isSubtype(k.type, 'nan')))
           return undefined;
-        if (!a || !k) return 'number';
+        if (!a || !k)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         if (operandNonFiniteNumber(a) || operandNonFiniteNumber(k))
-          return 'number';
+          return BoxedType.forResult('number', context.engine._typeResolver);
         if (
           isSubtype(k.type, 'integer') &&
           nonNegativeSign(operandSgn(k)) === true
         ) {
-          if (isSubtype(a.type, 'integer')) return 'integer';
-          if (isSubtype(a.type, 'rational')) return 'rational';
-          if (isSubtype(a.type, 'real')) return 'real';
+          if (isSubtype(a.type, 'integer'))
+            return BoxedType.forResult('integer', context.engine._typeResolver);
+          if (isSubtype(a.type, 'rational'))
+            return BoxedType.forResult(
+              'rational',
+              context.engine._typeResolver
+            );
+          if (isSubtype(a.type, 'real'))
+            return BoxedType.forResult('real', context.engine._typeResolver);
         }
-        return 'number';
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([a, k], { numericApproximation, engine: ce }) =>
         evaluatePochhammer(a, k, ce, numericApproximation),

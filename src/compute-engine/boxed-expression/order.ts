@@ -17,11 +17,6 @@ export type Order = 'lex' | 'dexlex' | 'grevlex' | 'elim';
 import { DEFAULT_COMPLEXITY } from './constants.js';
 export { DEFAULT_COMPLEXITY };
 
-import { BoxedType } from '../../common/type/boxed-type.js';
-
-const MATRIX_TYPE = new BoxedType('matrix');
-const VECTOR_TYPE = new BoxedType('vector');
-
 /**
  * Is this operand a matrix/vector (concrete tensor, `Matrix(…)` literal, or a
  * symbol *declared* matrix/vector)? Products of two or more such operands are
@@ -32,11 +27,9 @@ const VECTOR_TYPE = new BoxedType('vector');
  * unknown symbols do not match, so ordinary products like `x·y` still sort.
  */
 export function isTensorProductOperand(x: Expression): boolean {
-  return (
-    isFunction(x, 'Matrix') ||
-    x.type.matches(MATRIX_TYPE) ||
-    x.type.matches(VECTOR_TYPE)
-  );
+  if (isFunction(x, 'Matrix')) return true;
+  const facts = x.type.facts;
+  return facts.matrix || facts.vector;
 }
 
 /**

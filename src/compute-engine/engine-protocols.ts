@@ -1,3 +1,4 @@
+import { BoxedType } from '../common/type/boxed-type.js';
 import type {
   DeclarationOrigin,
   EffectSet,
@@ -3919,7 +3920,10 @@ function dispatcherDefinition(
     signature,
     canonical: (ops, { engine }) => dispatcherCanonical(engine, member, ops),
     type: (ops, { engine }) =>
-      dispatcherResultTypeOfDescriptors(engine, member, null, ops),
+      BoxedType.forResult(
+        dispatcherResultTypeOfDescriptors(engine, member, null, ops),
+        engine._typeResolver
+      ),
     evaluate: (ops, options) =>
       dispatchMember(options.engine, member, null, ops, options),
   };

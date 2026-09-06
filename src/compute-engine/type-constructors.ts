@@ -1,3 +1,4 @@
+import { BoxedType } from '../common/type/boxed-type.js';
 import type {
   EffectSet,
   FunctionSignature,
@@ -419,7 +420,15 @@ export function mintTypeConstructor(
     // instantiation and OVERWRITES its result, so a handler returning the
     // declaration record would type every `tree(1, [])` as the bare `tree` and
     // discard the solve.
-    ...(typeParams === undefined ? { type: () => (alias ? body : ref) } : {}),
+    ...(typeParams === undefined
+      ? {
+          type: (_ops, context) =>
+            BoxedType.forResult(
+              alias ? body : ref,
+              context.engine._typeResolver
+            ),
+        }
+      : {}),
   };
 
   if (objectFields !== undefined) {
@@ -908,7 +917,12 @@ export function installConstructorFunction(
     // The single source of nominal-ness (§4.1). A PARAMETERIZED nominal mints
     // no handler: `def.type` runs AFTER the resolved arm's instantiation and
     // would overwrite `tree<integer>` with the bare `tree`.
-    ...(generic ? {} : { type: () => ref }),
+    ...(generic
+      ? {}
+      : {
+          type: (_ops, context) =>
+            BoxedType.forResult(ref, context.engine._typeResolver),
+        }),
     eq: constructorEq,
     evaluate: (ops, options) => {
       // Raw injection first (D14a): operands that already form the payload

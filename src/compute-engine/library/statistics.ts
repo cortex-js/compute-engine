@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   operandLiteralValue,
   provablyEquals,
@@ -366,15 +367,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // complex argument gives a finite complex value. An operand of unproven
       // realness (a `number`-typed symbol) keeps the generic finite hedge —
       // its value may be complex, so it must not claim real.
-      type: ([x]) => {
+      type: ([x], context) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN
         // arm answers the sharp `nan`.
         if (!x || provablyNaNOperand(x)) return undefined;
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
-        if (extendedReal === true) return 'real';
-        return 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
+        if (extendedReal === true)
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -409,15 +414,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
       // Same shape as Erf: entire, bounded on the reals (Erfc(±∞) = 2, 0).
-      type: ([x]) => {
+      type: ([x], context) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN
         // arm answers the sharp `nan`.
         if (!x || provablyNaNOperand(x)) return undefined;
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
-        if (extendedReal === true) return 'real';
-        return 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
+        if (extendedReal === true)
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
@@ -448,7 +457,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // carrier is not below `complex`).
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: ([x]) => {
+      type: ([x], context) => {
         // A proven-NaN operand declines, so the framework's proven-NaN arm
         // answers; an infinite literal is a decided NaN.
         if (!x || provablyNaNOperand(x)) return undefined;
@@ -456,27 +465,38 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           x.structureOf?.()?.kind === 'number' &&
           isSubtype(x.type, 'infinity')
         )
-          return 'nan';
-        if (x.facts.finite === false) return 'number';
-        if (!isSubtype(x.type, EXTENDED_REAL_TYPE)) return 'number';
+          return BoxedType.forResult('nan', context.engine._typeResolver);
+        if (x.facts.finite === false)
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        if (!isSubtype(x.type, EXTENDED_REAL_TYPE))
+          return BoxedType.forResult('number', context.engine._typeResolver);
         // A literal's handler-visible value classifies exactly — and it is
         // never a rounded double, so it cannot put `1 − 10⁻³⁰` at a pole
         // (`operandLiteralValue` is the channel that survives when the
         // value reads are unavailable to a type handler).
         const v = operandLiteralValue(x);
         if (v !== undefined) {
-          if (v > -1 && v < 1) return 'real';
-          if (v === 1 || v === -1) return SIGNED_INFINITY_TYPE;
-          return 'number';
+          if (v > -1 && v < 1)
+            return BoxedType.forResult('real', context.engine._typeResolver);
+          if (v === 1 || v === -1)
+            return BoxedType.forResult(
+              SIGNED_INFINITY_TYPE,
+              context.engine._typeResolver
+            );
+          return BoxedType.forResult('number', context.engine._typeResolver);
         }
-        if (provablyGreater(x, -1) && provablyLess(x, 1)) return 'real';
+        if (provablyGreater(x, -1) && provablyLess(x, 1))
+          return BoxedType.forResult('real', context.engine._typeResolver);
         // The pole test is an EXACT one: an operand whose type merely
         // encloses ±1 (`real<0.9..1.1>`) is not at the pole, and a value
         // just past it (`1 + 10⁻²⁰`, whose erfinv is NaN, not ±∞) must not
         // be pulled onto it.
         if (provablyEquals(x, 1) || provablyEquals(x, -1))
-          return SIGNED_INFINITY_TYPE;
-        return 'number';
+          return BoxedType.forResult(
+            SIGNED_INFINITY_TYPE,
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -521,14 +541,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // finite complex value. Unproven realness → `number` (Erfi is unbounded,
       // so no finite hedge is available). A proven-NaN operand declines, so
       // the framework's proven-NaN arm answers the sharp `nan`.
-      type: ([x]) => {
+      type: ([x], context) => {
         if (!x || provablyNaNOperand(x)) return undefined;
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
         if (extendedReal === true)
-          return x.facts.finite === true ? 'real' : EXTENDED_REAL_TYPE;
-        return 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'real' : EXTENDED_REAL_TYPE,
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -1340,7 +1366,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      type: (ops) => pairedStatisticType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          pairedStatisticType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, false),
     },
@@ -1366,7 +1396,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      type: (ops) => pairedStatisticType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          pairedStatisticType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCovariance(ce, ops, !!numericApproximation, true),
     },
@@ -1398,7 +1432,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // `collection<unknown>` and would not match it.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      type: (ops) => pairedStatisticType(ops, CORRELATION_RANGE),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          pairedStatisticType(ops, CORRELATION_RANGE),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateCorrelation(ce, ops, !!numericApproximation),
     },

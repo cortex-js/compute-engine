@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- Operator `type` handlers now return `BoxedType | undefined`. Return
+  `context.engine.type('real')` for a fixed result, or
+  `context.engine.type(computedType)` for a computed result. `undefined`
+  continues to use the declared signature fallback.
+- `BoxedType.type` is now readonly. Use `engine.type(newType)` to construct
+  a boxed type with a different value.
+
+### Improvements
+
+- **Symbolic simplification is 14–16% faster, solving 7%, integration 9%,
+  and a definite integral 25%** on the focused P1 probes compared with
+  0.124.2 (two warm interleaved runs, Node 22.13.1, identical results).
+  Type handlers share lazy facts through `BoxedType`, and unchanged boxed
+  results survive the application boundary. Immutable numeric literal and
+  range types share identities and interval bounds; mutable types and aliases
+  retain live reads. Numeric literal precision, derived ranges, missing-value
+  handling, and broadcasting
+  are preserved. Measurements and the remaining symbolic performance work
+  are recorded in `docs/plans/2026-09-06-type-facts-per-type.md`.
+
 ## 0.124.2 _2026-09-06_
 
 ### Improvements

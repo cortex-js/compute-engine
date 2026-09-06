@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { descriptorStats } from '../../src/compute-engine/boxed-expression/operand-descriptor';
 
 /**
  * The type cache of a LITERAL LIST TREE — a `List` whose elements are number
@@ -34,8 +35,11 @@ describe('a literal list tree keeps its type across generation bumps', () => {
     const before = xs.type;
     // An assumption advances the world version.
     ce.assume(ce.parse('n > 0'));
+    const built = descriptorStats.built;
     const after = xs.type;
-    expect(after).not.toBe(before);
+    // The derivation must run again, even when it reuses the same immutable
+    // boxed result. Each list element is described during that derivation.
+    expect(descriptorStats.built - built).toBe(3);
     expect(after.toString()).toBe(before.toString());
   });
 

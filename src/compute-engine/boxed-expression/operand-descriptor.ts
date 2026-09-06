@@ -1,3 +1,4 @@
+import { factsOf } from '../../common/type/facts.js';
 import type {
   IComputeEngine as ComputeEngine,
   Expression,
@@ -10,10 +11,6 @@ import type {
 import type { Type } from '../../common/type/types.js';
 
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
-import {
-  COLLECTION_SHAPE_TYPE,
-  INDEXED_COLLECTION_SHAPE_TYPE,
-} from '../../common/type/primitive.js';
 import { signOfType } from '../../common/type/utils.js';
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { asRational } from './numerics.js';
@@ -48,11 +45,7 @@ function finiteFromType(t: Type): Tri {
   // `+oo | -oo` is one of its subtypes, so testing it covers `±∞`
   // as well as `~oo` — and `nan` is the NaN singleton, which is disjoint
   // from `infinity` and needs its own arm.
-  return isSubtype(t, 'complex')
-    ? true
-    : isSubtype(t, 'infinity') || isSubtype(t, 'nan')
-      ? false
-      : undefined;
+  return factsOf(t).finite;
 }
 
 function collectionFromType(t: Type): Tri {
@@ -63,19 +56,11 @@ function collectionFromType(t: Type): Tri {
   // absence-carrying element types). Top types (`unknown`, `any`, `value`)
   // and `broadcastable<T>` are neither subtypes of nor provably disjoint
   // from it, and answer `undefined` — "possibly a collection".
-  return isSubtype(t, COLLECTION_SHAPE_TYPE)
-    ? true
-    : provablyDisjoint(t, COLLECTION_SHAPE_TYPE)
-      ? false
-      : undefined;
+  return factsOf(t).collection;
 }
 
 function indexedFromType(t: Type): Tri {
-  return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
-    ? true
-    : provablyDisjoint(t, INDEXED_COLLECTION_SHAPE_TYPE)
-      ? false
-      : undefined;
+  return factsOf(t).indexed;
 }
 
 /** A dimensioned list type (`list<integer^2x3>`) is the one static shape a
@@ -93,25 +78,6 @@ function shapeFromType(t: Type): readonly number[] | undefined {
   )
     return t.dimensions;
   return undefined;
-}
-
-/** Every type-proved fact at once, for the synthetic descriptor
- * (`describeType`), which has no per-fact laziness. */
-function factsFromType(t: Type): {
-  finite: Tri;
-  collection: Tri;
-  indexed: Tri;
-  finiteCollection: Tri;
-  shape: readonly number[] | undefined;
-} {
-  const shape = shapeFromType(t);
-  return {
-    finite: finiteFromType(t),
-    collection: collectionFromType(t),
-    indexed: indexedFromType(t),
-    finiteCollection: shape !== undefined ? true : undefined,
-    shape,
-  };
 }
 
 /**
@@ -382,9 +348,9 @@ class ExpressionOperandFacts implements OperandFacts {
   // ordinary property at runtime that a handler could read the operand
   // through.
   readonly #op: Expression;
-  // A thunk, not the type: a number literal's type is read on demand (see
-  // `ExpressionOperandDescriptor.type`), and the facts must not force it.
-  readonly #typeOf: () => Type;
+  // Keep the descriptor, not its type: numeric literal types stay lazy.
+  // A private reference also avoids allocating a type-reader closure.
+  readonly #descriptor: OperandDescriptor;
   private _computed = 0;
   private _shape: readonly number[] | undefined;
   private _finite: Tri;
@@ -395,9 +361,9 @@ class ExpressionOperandFacts implements OperandFacts {
   private _indexed: Tri;
   private _elementType: Type | undefined;
 
-  constructor(op: Expression, typeOf: () => Type) {
+  constructor(op: Expression, descriptor: OperandDescriptor) {
     this.#op = op;
-    this.#typeOf = typeOf;
+    this.#descriptor = descriptor;
   }
 
   get finite(): Tri {
@@ -422,7 +388,7 @@ class ExpressionOperandFacts implements OperandFacts {
       const op = this.#op;
       let sgn: Sign | undefined;
       if (isNumber(op) || isSymbol(op) || isFunction(op)) sgn = op.sgn;
-      this._sgn = sgn ?? signOfType(this.#typeOf());
+      this._sgn = sgn ?? signOfType(this.#descriptor.type);
     }
     return this._sgn;
   }
@@ -438,7 +404,7 @@ class ExpressionOperandFacts implements OperandFacts {
   get collection(): Tri {
     if (!(this._computed & COLLECTION_COMPUTED)) {
       this._computed |= COLLECTION_COMPUTED;
-      const collection = collectionFromType(this.#typeOf());
+      const collection = collectionFromType(this.#descriptor.type);
       this._collection =
         collection === true || this.#op.isCollection === true
           ? true
@@ -464,7 +430,7 @@ class ExpressionOperandFacts implements OperandFacts {
   get indexed(): Tri {
     if (!(this._computed & INDEXED_COMPUTED)) {
       this._computed |= INDEXED_COMPUTED;
-      const indexed = indexedFromType(this.#typeOf());
+      const indexed = indexedFromType(this.#descriptor.type);
       this._indexed =
         indexed === true || this.#op.isIndexedCollection === true
           ? true
@@ -476,7 +442,7 @@ class ExpressionOperandFacts implements OperandFacts {
   get shape(): readonly number[] | undefined {
     if (!(this._computed & SHAPE_COMPUTED)) {
       this._computed |= SHAPE_COMPUTED;
-      this._shape = shapeFromType(this.#typeOf());
+      this._shape = shapeFromType(this.#descriptor.type);
     }
     return this._shape;
   }
@@ -499,7 +465,7 @@ class ExpressionOperandFacts implements OperandFacts {
   }
 
   private finiteOf(): Tri {
-    const finite = finiteFromType(this.#typeOf());
+    const finite = finiteFromType(this.#descriptor.type);
     if (finite !== undefined) return finite;
     const op = this.#op;
     if (isNumber(op)) return op.isFinite;
@@ -511,7 +477,7 @@ class ExpressionOperandFacts implements OperandFacts {
       const held = op.valueDefinition?.value;
       return held !== undefined && isNumber(held) ? held.isFinite : undefined;
     }
-    if (isFunction(op) && isSubtype(this.#typeOf(), 'number')) {
+    if (isFunction(op) && isSubtype(this.#descriptor.type, 'number')) {
       // The value channel is the REFUTATION backstop for the generic-point
       // convention. A result type is deliberately optimistic about
       // finiteness: an operator that is finite at a generic point claims a
@@ -551,7 +517,7 @@ class ExpressionOperandDescriptor implements OperandDescriptor {
   // from a handler.
   readonly #op: Expression;
   #walk: DescriptorMemo | undefined;
-  readonly facts: OperandFacts;
+  private _facts: OperandFacts | undefined;
   private _type: Type | undefined;
   private _structure: OperandStructure | undefined;
   private _structureComputed = false;
@@ -570,7 +536,11 @@ class ExpressionOperandDescriptor implements OperandDescriptor {
     // window would otherwise report it.
     this._type = typeOverride;
     if (typeOverride === undefined && !isNumber(op)) this._type = op.type.type;
-    this.facts = new ExpressionOperandFacts(op, () => this.type);
+  }
+
+  /** Allocate value-backed facts only when a handler requests them. */
+  get facts(): OperandFacts {
+    return (this._facts ??= new ExpressionOperandFacts(this.#op, this));
   }
 
   /**
@@ -608,20 +578,34 @@ class ExpressionOperandDescriptor implements OperandDescriptor {
  * cannot prove stay `undefined`, which every consumer must treat as the
  * conservative branch.
  */
-export function describeType(t: Type): OperandDescriptor {
-  const tf = factsFromType(t);
-  return {
-    type: t,
-    facts: {
-      finite: tf.finite,
-      sgn: signOfType(t),
-      closed: undefined,
-      collection: tf.collection,
-      finiteCollection: tf.finiteCollection,
-      indexed: tf.indexed,
-      shape: tf.shape,
-    },
-  };
+class TypeOperandFacts implements OperandFacts {
+  constructor(
+    private readonly type: Type,
+    readonly closed: Tri = undefined
+  ) {}
+
+  get finite(): Tri {
+    return factsOf(this.type).finite;
+  }
+  get sgn(): Sign | undefined {
+    return signOfType(this.type);
+  }
+  get collection(): Tri {
+    return factsOf(this.type).collection;
+  }
+  get finiteCollection(): Tri {
+    return factsOf(this.type).finiteCollection;
+  }
+  get indexed(): Tri {
+    return factsOf(this.type).indexed;
+  }
+  get shape(): readonly number[] | undefined {
+    return factsOf(this.type).shape;
+  }
+}
+
+export function describeType(t: Type, closed?: Tri): OperandDescriptor {
+  return { type: t, facts: new TypeOperandFacts(t, closed) };
 }
 
 /**
@@ -647,15 +631,14 @@ export function describeBoundSymbol(
   t: Type,
   name = '__boundSymbol'
 ): OperandDescriptor {
-  const d = describeType(t);
   return {
-    type: d.type,
+    type: t,
     // A bound variable is a free symbol, not a closed constant: `closed` is
     // `false`, as `isConstant` is for the declared stand-in symbol the
     // expression route spliced in, so a handler that widens a CLOSED
     // operand at a possible pole (`Tan(π/2)`) keeps its claim for the
     // element.
-    facts: { ...d.facts, closed: false },
+    facts: new TypeOperandFacts(t, false),
     structureOf: () => ({ kind: 'symbol', name }),
   };
 }

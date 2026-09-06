@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -341,17 +342,25 @@ function lazyConstantMatrix(
  * type handler — unusable inside `Multiply` (`incompatible-type`), while the
  * directly-nested `Determinant(JacobianMatrix(…))` worked.
  */
-const transposedType: OperatorTypeHandlerOnTypes = (ops) => {
+const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
   const m = ops[0];
-  if (m === undefined) return 'value';
-  if (isSubtype(m.type, 'number')) return m.type;
+  if (m === undefined)
+    return BoxedType.forResult('value', context.engine._typeResolver);
+  if (isSubtype(m.type, 'number'))
+    return BoxedType.forResult(m.type, context.engine._typeResolver);
   const t = m.type;
-  if (typeof t === 'string' || t.kind !== 'list') return 'value';
+  if (typeof t === 'string' || t.kind !== 'list')
+    return BoxedType.forResult('value', context.engine._typeResolver);
   const dims = t.dimensions;
   // Rank unknown: the element type is still preserved, but no shape claim.
-  if (!dims) return { kind: 'list', elements: t.elements };
+  if (!dims)
+    return BoxedType.forResult(
+      { kind: 'list', elements: t.elements },
+      context.engine._typeResolver
+    );
   // Scalar-ish or vector (rank ≤ 1): identity.
-  if (dims.length <= 1) return t;
+  if (dims.length <= 1)
+    return BoxedType.forResult(t, context.engine._typeResolver);
   let axis1 = dims.length - 1;
   let axis2 = dims.length;
   if (ops.length === 3) {
@@ -365,9 +374,12 @@ const transposedType: OperatorTypeHandlerOnTypes = (ops) => {
       !Number.isInteger(a1) ||
       !Number.isInteger(a2)
     )
-      return { kind: 'list', elements: t.elements };
+      return BoxedType.forResult(
+        { kind: 'list', elements: t.elements },
+        context.engine._typeResolver
+      );
     if (a1 <= 0 || a1 > dims.length || a2 <= 0 || a2 > dims.length)
-      return 'value';
+      return BoxedType.forResult('value', context.engine._typeResolver);
     axis1 = a1;
     axis2 = a2;
   }
@@ -376,7 +388,14 @@ const transposedType: OperatorTypeHandlerOnTypes = (ops) => {
     swapped[axis2 - 1],
     swapped[axis1 - 1],
   ];
-  return { kind: 'list', elements: t.elements, dimensions: swapped };
+  return BoxedType.forResult(
+    {
+      kind: 'list',
+      elements: t.elements,
+      dimensions: swapped,
+    },
+    context.engine._typeResolver
+  );
 };
 
 /**
@@ -558,7 +577,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // type. The arity guard is what the declared signature cannot supply
       // on the raw box route, where a `Matrix` with no operand at all
       // reaches the handler.
-      type: ([matrix]) => matrix?.type,
+      type: ([matrix], context) =>
+        BoxedType.forResult(matrix?.type, context.engine._typeResolver),
       canonical: canonicalMatrix,
       evaluate: (ops, options) => ops[0].evaluate(options),
     },
@@ -579,9 +599,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // structural tier, where the `Matrix` rewrite has not happened yet —
       // so non-numeric content falls back to the honest `list`.
       type: (elements, { engine }) =>
-        elements.every((op) => isSubtype(op.type, 'number'))
-          ? parseType(`vector<${elements.length}>`, engine._typeResolver)
-          : 'list',
+        BoxedType.forResult(
+          elements.every((op) => isSubtype(op.type, 'number'))
+            ? parseType(`vector<${elements.length}>`, engine._typeResolver)
+            : 'list',
+          engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         return ce._fn('Matrix', [
           ce.function(
@@ -628,20 +651,28 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Reshape a tensor or collection to a target shape.',
       complexity: 8200,
       signature: '(value, tuple) -> value',
-      type: ([value, shape]) => {
+      type: ([value, shape], context) => {
         const dims = targetShapeDimensions(shape);
         if (isSubtype(value.type, 'number')) {
           // Scalar input
-          return parseType(`list<number^${dims}>`);
+          return BoxedType.forResult(
+            parseType(`list<number^${dims}>`),
+            context.engine._typeResolver
+          );
         }
         // When the operand is not a numeric list the evaluate handler
         // DECLINES (the call stays unevaluated), so the honest static type
         // is the declared result `value`, not `nothing` — `nothing` claimed
         // an absent value for an expression the runtime keeps intact.
-        if (!isSubtype(value.type, LIST_SHAPE_TYPE)) return 'value';
+        if (!isSubtype(value.type, LIST_SHAPE_TYPE))
+          return BoxedType.forResult('value', context.engine._typeResolver);
         const col = value.type as ListType;
-        if (!isSubtype(col.elements, 'number')) return 'value';
-        return parseType(`list<number^${dims}>`);
+        if (!isSubtype(col.elements, 'number'))
+          return BoxedType.forResult('value', context.engine._typeResolver);
+        return BoxedType.forResult(
+          parseType(`list<number^${dims}>`),
+          context.engine._typeResolver
+        );
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         let op1 = ops[0];
@@ -901,7 +932,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // expression whose type this cannot read. The empty bottom type is
       // excluded first — `never` matches every type, so a claim keyed on a
       // subtype test alone would let a `never`-typed operand claim `integer`.
-      type: ([m]) => {
+      type: ([m], context) => {
         if (m === undefined || isSubtype(m.type, 'never')) return undefined;
         const t = m.type;
         if (typeof t === 'string' || t.kind !== 'list') return undefined;
@@ -925,7 +956,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         )
           return undefined;
         for (const tier of ['integer', 'rational', 'real', 'complex'] as const)
-          if (isSubtype(t.elements, tier)) return tier;
+          if (isSubtype(t.elements, tier))
+            return BoxedType.forResult(tier, context.engine._typeResolver);
         return undefined;
       },
       evaluate: (ops, { engine: ce }) => {
@@ -1168,16 +1200,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // applies. It declines for anything it cannot read too: a type-handler
       // answer is authoritative, never widened, so answering the old wide
       // `value` would replace the declared union with a wider type.
-      type: ([m]) => {
+      type: ([m], context) => {
         if (m === undefined) return undefined;
         const t = m.type;
         if (typeof t !== 'string' && t.kind === 'list') {
           // A matrix carries 2 dimensions (e.g. `matrix` = `[-1, -1]`); a
           // vector (rank-1 list) has no `dimensions` and has no trace.
-          if (t.dimensions?.length === 2) return 'number';
+          if (t.dimensions?.length === 2)
+            return BoxedType.forResult('number', context.engine._typeResolver);
           return undefined;
         }
-        if (isSubtype(t, 'number')) return 'number';
+        if (isSubtype(t, 'number'))
+          return BoxedType.forResult('number', context.engine._typeResolver);
         return undefined;
       },
       evaluate: (ops, { engine: ce }) => {
@@ -1529,7 +1563,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       //
       // With the components in hand the claim sharpens from `number` to the
       // type of the inner product written out (`innerProductType`).
-      type: ([a, b], { derive }) => {
+      type: ([a, b], { derive, engine }) => {
         if (
           !a ||
           !b ||
@@ -1539,8 +1573,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               (isSubtype(x.type, 'vector') && !isSubtype(x.type, 'matrix'))
           )
         )
-          return 'value';
-        return innerProductType(a, b, derive) ?? 'number';
+          return BoxedType.forResult('value', engine._typeResolver);
+        return BoxedType.forResult(
+          innerProductType(a, b, derive) ?? 'number',
+          engine._typeResolver
+        );
       },
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
       // vectors and to the matrix product otherwise — exactly what
@@ -2221,12 +2258,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       type: ([x], { engine }) => {
         if (x === undefined) return undefined;
         if (isTupleOperand(x, engine))
-          return declineWideNormType(pointNormTypeOf(x, engine));
+          return BoxedType.forResult(
+            declineWideNormType(pointNormTypeOf(x, engine)),
+            engine._typeResolver
+          );
         if (isPointListOperand(x, engine))
-          return { kind: 'list', elements: 'number' };
+          return BoxedType.forResult(
+            { kind: 'list', elements: 'number' },
+            engine._typeResolver
+          );
         if (x.structureOf?.()?.kind === 'list-literal')
-          return declineWideNormType(
-            euclideanNormTypeOf(operandOperands(x) ?? [])
+          return BoxedType.forResult(
+            declineWideNormType(euclideanNormTypeOf(operandOperands(x) ?? [])),
+            engine._typeResolver
           );
         return undefined;
       },

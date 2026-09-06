@@ -1,4 +1,5 @@
 import type { NumericPrimitiveType, Type } from './types.js';
+import { immutableNumericType } from './immutable.js';
 
 /**
  * The ONE constructor for a numeric range type. Every site that builds a
@@ -58,15 +59,13 @@ export function makeNumericRangeType(
   if (lo === hi && (lowerOpen || upperOpen)) return 'never';
   if (lo === -Infinity && hi === Infinity) return tier;
 
-  const node: Extract<Type, { kind: 'numeric' }> = {
-    kind: 'numeric',
-    type: tier,
-  };
-  if (lo !== -Infinity) node.lower = lo;
-  if (hi !== Infinity) node.upper = hi;
-  if (lowerOpen) node.lowerOpen = true;
-  if (upperOpen) node.upperOpen = true;
-  return node;
+  return immutableNumericType(
+    tier,
+    lo === -Infinity ? undefined : lo,
+    hi === Infinity ? undefined : hi,
+    lowerOpen,
+    upperOpen
+  );
 }
 
 export function isIntegerTier(tier: NumericPrimitiveType): boolean {

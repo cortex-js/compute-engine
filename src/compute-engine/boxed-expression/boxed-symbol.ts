@@ -1080,13 +1080,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // type entails non-finiteness (see `get isInfinity`).
     const t = this.type;
     if (!t.isUnknown) {
-      if (t.matches('complex')) return true;
-      // `infinity` is any value of infinite magnitude (`+oo`, `-oo`, `~oo`),
-      // so it also covers the signed pair `+oo | -oo`; `nan` is the
-      // NaN singleton, disjoint from `infinity`. Neither is a finite number,
-      // which is what `isFinite` asks: a NaN VALUE answers `false` here too.
-      if (t.matches('infinity')) return false;
-      if (t.matches('nan')) return false;
+      return t.facts.finite;
     }
     return undefined;
   }
@@ -1121,8 +1115,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // and, now that the bare name `real` denotes the FINITE reals, every
       // finite numeric tier as well — a `real`-declared symbol is not an
       // infinity.
-      if (t.matches('infinity')) return true;
-      if (provablyDisjoint(t.type, 'infinity')) return false;
+      return t.facts.infinityMembership;
     }
     return undefined;
   }
@@ -1191,7 +1184,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (t.isUnknown) return undefined;
     // Three-valued, like `isInteger` below: a symbol declared `number |
     // string` or `any` may hold a number, so it is undecided, not `false`.
-    return staticMembership(t.type, 'number');
+    return t.facts.numberMembership;
   }
 
   // Three-valued discipline (D3), the same rule as `BoxedFunction`

@@ -3,16 +3,14 @@ import type {
   OperandDescriptor,
   TypeHandlerContext,
 } from '../global-types.js';
-import type { Type, TypeString } from '../../common/type/types.js';
+import type { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
-import { parseType } from '../../common/type/parse.js';
 import {
   absorbNumericAbsence,
   functionResult,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
-import { widenValueTypes } from '../../common/type/widen-value.js';
 import { typeCouldBeUnkeyedCollection } from '../collection-utils.js';
 import { guardedTypeHandlerCall } from './operand-descriptor.js';
 import {
@@ -101,7 +99,7 @@ export function deriveApplicationType(
     const raw = guardedTypeHandlerCall(engine, operator, () =>
       def.type!(handlerOperands, typeHandlerContext(engine))
     );
-    const answered = normalize(engine, raw);
+    const answered = BoxedType.forResult(raw, engine._typeResolver)?.type;
     if (answered !== undefined) return absorb(answered);
   }
 
@@ -150,16 +148,4 @@ export function actualOfDescriptor(d: OperandDescriptor): SolveActual {
       );
     },
   };
-}
-
-/** A handler's raw answer, brought to the form the call site stores: parsed
- * against the engine's resolver, literal cargo widened to tiers. */
-function normalize(
-  engine: ComputeEngine,
-  raw: Type | TypeString | BoxedType | undefined
-): Type | undefined {
-  if (raw === undefined) return undefined;
-  const t =
-    raw instanceof BoxedType ? raw.type : parseType(raw, engine._typeResolver);
-  return t === undefined ? undefined : widenValueTypes(t);
 }

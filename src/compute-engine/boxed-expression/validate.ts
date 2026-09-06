@@ -20,7 +20,6 @@ import {
 import {
   broadcastableBaseMatches,
   collectionElementType,
-  couldBeNonRealNumber,
   narrowingPreservesEffects,
   overlapsForDeferredValidation,
   resolveTypeAlias,
@@ -191,7 +190,7 @@ export function inferNumericArgs(
   ce._withoutFacts(() => {
     let inferredType: Type = 'real';
     for (const x of ops)
-      if (couldBeNonRealNumber(x.type.type)) {
+      if (x.type.facts.couldBeNonReal) {
         inferredType = 'number';
         break;
       }
@@ -409,7 +408,7 @@ export function checkNumericArgs(
       // If any of the arguments is a complex or imaginary number,
       // we'll infer the type as number
       for (const x of xs)
-        if (couldBeNonRealNumber(x.type.type)) {
+        if (x.type.facts.couldBeNonReal) {
           inferredType = 'number';
           break;
         }
@@ -475,7 +474,7 @@ export function checkNumericArgs(
       // lockstep with the `Add`/`Multiply` type handlers.
       isValid = false;
       xs.push(ce.typeError('number', op.type, op));
-    } else if (typeContainsMissing(op.type.type)) {
+    } else if (op.type.facts.containsMissing) {
       // An absent (`Missing`) or possibly-absent (`T | missing`) operand in a
       // numeric position. Every numeric operator resolves to `propagate`
       // (§3.A), so the ABSENCE is admitted — the runtime gate produces `NaN`
@@ -686,7 +685,7 @@ export function nonNumericOperandError(
     (x) =>
       x.isValid &&
       !isNumber(x) &&
-      (x.type.type === 'never' || !isSubtype(x.type.type, 'number')) &&
+      (x.type.type === 'never' || !x.type.facts.belowNumber) &&
       x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)
   );
   if (bad === undefined) return undefined;
@@ -1593,7 +1592,7 @@ function strippedMatchesParam(
   stripMissing?: (index: number) => boolean
 ): boolean {
   if (!stripMissing?.(idx)) return false;
-  if (!typeContainsMissing(op.type.type)) return false;
+  if (!op.type.facts.containsMissing) return false;
   const stripped = stripMissingFromType(op.type.type);
   return stripped === 'never' || isSubtype(stripped, param);
 }

@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
@@ -700,7 +701,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
   // validation seam that checks a `canonical`-handler head against its
   // declaration.
   Element: {
-    type: elementLiteralType,
+    type: (ops, context) =>
+      BoxedType.forResult(
+        elementLiteralType(ops, context),
+        context.engine._typeResolver
+      ),
     complexity: 11200,
     keywords: ['element of', 'member'],
     // EL-3: Extended signature to support optional condition for filtered iteration
@@ -1030,7 +1035,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // undeclared free variable, and a narrower parameter type would INFER a
     // declaration for it (`\Z[x]` retyping `x` for the engine's lifetime).
     signature: '(set<any>, any+) -> set',
-    type: adjoinType,
+    type: (ops, context) =>
+      BoxedType.forResult(adjoinType(ops), context.engine._typeResolver),
   },
 
   QuotientRing: {
@@ -1054,7 +1060,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // `any` for the modulus: see the note on `Adjoin` — a narrower parameter
     // type would infer a declaration for a free `n`/`p`.
     signature: '(set<any>, any) -> set',
-    type: quotientRingType,
+    type: (ops, context) =>
+      BoxedType.forResult(quotientRingType(ops), context.engine._typeResolver),
   },
 
   Complement: {

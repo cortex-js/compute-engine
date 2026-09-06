@@ -41,7 +41,7 @@ ce.declare('Ln', {
 // definition shared one parameter union.
 ce.declare('f', {
   signature: '(number) -> number',
-  type: (ops) => ops[0].type,
+  type: (ops) => ce.type(ops[0].type),
 });
 
 const expr = ce.parse('x^2 + 2x + 1');

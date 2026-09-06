@@ -100,12 +100,11 @@ import type {
   TypeString,
 } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
-import { widenValueTypes } from '../../common/type/widen-value.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
 import { internType, isInternedType } from '../../common/type/intern.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
@@ -126,7 +125,6 @@ import {
   codomainMarkerType,
   staticCollectionDims,
   stripMissingFromType,
-  typeContainsMissing,
   typeHasNanFreeNumericCell,
   widen,
   widenCellsWithMarker,
@@ -1502,8 +1500,7 @@ export class BoxedFunction
     // cached at this point (consulted by `isNumber` on entry).
     const t = this.type;
     if (!t.isUnknown) {
-      if (isSubtype(t.type, 'infinity')) return true;
-      if (provablyDisjoint(t.type, 'infinity')) return false;
+      return t.facts.infinityMembership;
     }
     return undefined; // We don't know until we evaluate
   }
@@ -2032,8 +2029,7 @@ export class BoxedFunction
   // value is not an integer, so a `false` there would be wrong for an
   // even `k`. A `false` means "certainly not".
   get isNumber(): boolean | undefined {
-    if (this.type.isUnknown) return undefined;
-    return staticMembership(this.type.type, 'number');
+    return this.type.facts.numberMembership;
   }
 
   get isInteger(): boolean | undefined {
@@ -2160,11 +2156,17 @@ export class BoxedFunction
     // list's cell fold joins them by identity. An interned type is bounded
     // by construction, so the size walk is skipped for it.
     const compute = (): BoxedType => {
-      const t = type(this);
-      return new BoxedType(
-        isInternedType(t) ? t : internType(boundTypeSize(t)),
-        this.engine._typeResolver
-      );
+      const derived = type(this);
+      const t = derived instanceof BoxedType ? derived.type : derived;
+      const stored = isInternedType(t) ? t : internType(boundTypeSize(t));
+      return derived instanceof BoxedType && stored === t
+        ? derived
+        : BoxedType.from(
+            stored,
+            derived instanceof BoxedType
+              ? (derived.typeResolver ?? this.engine._typeResolver)
+              : this.engine._typeResolver
+          );
     };
     const result =
       cachedValue(
@@ -5896,10 +5898,6 @@ function normalizeLiftedAbsence(
  * configurations trigger each declared exemption — so the per-operator fact
  * lives in the definition and only the generic mechanism lives here.
  */
-/** The `matrix` type, parsed once: `skipBroadcastForVectorOps` tests every
- * operand of every `'tensors'`-exempt application against it. */
-const MATRIX_TYPE = new BoxedType('matrix');
-
 function skipBroadcastForVectorOps(
   def: BoxedOperatorDefinition | undefined,
   hasTensors: boolean,
@@ -5922,7 +5920,7 @@ function skipBroadcastForVectorOps(
     if (hasTensors) return true;
     // A `never`-typed operand matches `matrix` vacuously (the bottom type
     // matches everything) but has no shape to broadcast over; exclude it.
-    if (ops.some((x) => x.type.type !== 'never' && x.type.matches(MATRIX_TYPE)))
+    if (ops.some((x) => x.type.type !== 'never' && x.type.facts.matrix))
       return true;
   }
 
@@ -6253,7 +6251,7 @@ function lambdaBroadcastType(
   return undefined;
 }
 
-function type(expr: BoxedFunction): Type {
+function type(expr: BoxedFunction): Type | BoxedType {
   if (!expr.isValid) return 'error';
 
   // Is this a 'Function' expression?
@@ -6335,7 +6333,7 @@ function type(expr: BoxedFunction): Type {
     // so a Missing-free program's type is byte-identical.
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
-      expr.ops.some((x) => typeContainsMissing(x.type.type));
+      expr.ops.some((x) => x.type.facts.containsMissing);
 
     // Contract B derived application type (`docs/ERROR-MODEL.md` §4; Phase
     // C of `docs/plans/2026-08-30-error-model-implementation.md`). Applied
@@ -6355,6 +6353,7 @@ function type(expr: BoxedFunction): Type {
     // `applyContractB` directly (it must not pick up the missing-value
     // absorption, which never applied on that path).
     let typeHandlerAnswered = false;
+    let boxedHandlerResult: BoxedType | undefined;
     const applyContractB = (t: Type): Type => {
       if (typeHandlerAnswered) return t;
       if (!(def instanceof _BoxedOperatorDefinition)) return t;
@@ -6416,8 +6415,12 @@ function type(expr: BoxedFunction): Type {
       // elements, so the lifted result widens per cell (`list<real | nan>`).
       return widenNumericCellsWithNan(t);
     };
-    const maybeAbsorb = (t: Type): Type =>
-      applyContractB(absorbMissing ? absorbNumericAbsence(t) : t);
+    const maybeAbsorb = (t: Type): Type | BoxedType => {
+      const result = applyContractB(
+        absorbMissing ? absorbNumericAbsence(t) : t
+      );
+      return result === boxedHandlerResult?.type ? boxedHandlerResult : result;
+    };
 
     // If there is a type handler, call it. Strip-before-validate (§3.B step 3):
     // for a `propagate`/`handle` operator with an absent operand, convey the
@@ -6429,11 +6432,11 @@ function type(expr: BoxedFunction): Type {
         (def.resolvedMissingBehavior === 'propagate' ||
           def.resolvedMissingBehavior === 'handle') &&
         expr.ops.some(
-          (x, i) => def.stripsMissingAt(i) && typeContainsMissing(x.type.type)
+          (x, i) => def.stripsMissingAt(i) && x.type.facts.containsMissing
         );
       const operandTypes = stripsAny
         ? expr.ops.map((x, i) =>
-            def.stripsMissingAt(i) && typeContainsMissing(x.type.type)
+            def.stripsMissingAt(i) && x.type.facts.containsMissing
               ? stripMissingFromType(x.type.type)
               : undefined
           )
@@ -6453,7 +6456,7 @@ function type(expr: BoxedFunction): Type {
       // Descriptors are built OUTSIDE the guarded window: they are the
       // handler's input, and a child operand's own type derivation during
       // `describe` must not be attributed to this handler.
-      let calculatedType: Type | TypeString | BoxedType | undefined;
+      let calculatedType: BoxedType | undefined;
       const strippedFor = (i: number) => {
         if (def.resolvedMissingBehavior !== 'propagate') return undefined;
         const stripped = operandTypes?.[i];
@@ -6496,15 +6499,17 @@ function type(expr: BoxedFunction): Type {
       if (
         descriptors.some((d, i) => !isNumber(expr.ops[i]) && d.type === 'never')
       )
-        calculatedType = 'never';
+        calculatedType = BoxedType.forResult(
+          'never',
+          expr.engine._typeResolver
+        );
       if (calculatedType) {
         typeHandlerAnswered = true;
-        if (calculatedType instanceof BoxedType)
-          sigResult = calculatedType.type;
-        else
-          sigResult =
-            parseType(calculatedType, expr.engine._typeResolver) ??
-            declaredResultType();
+        boxedHandlerResult = BoxedType.forResult(
+          calculatedType,
+          expr.engine._typeResolver
+        );
+        sigResult = boxedHandlerResult.type;
         // Literal types are handler-visible only (`_literalType`, ruling O9
         // first half): a handler that echoes one into its result must not
         // store an over-specific contract nobody wrote (`tuple<1, 2>`), so
@@ -6514,7 +6519,8 @@ function type(expr: BoxedFunction): Type {
         // primitive names only, so it is already widened and the walk is
         // skipped — this is the container handlers' hot path, one result
         // per point of a point list.
-        if (!isInternedType(sigResult)) sigResult = widenValueTypes(sigResult);
+        // BoxedType.forResult() owns this normalization and shares it for
+        // immutable result types, along with their lazily computed facts.
       }
     } else if (expr.ops.some((x) => x.type.type === 'never')) {
       // The same rule both handler shapes apply above, for a head with NO

@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   bigBetaRegularized,
   bigGammaQ,
@@ -462,7 +463,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // the unconditional `real` this definition used to claim was unsound.
       // Both gates NARROW on `true`, so the descriptor sign channel errs on
       // the wide side: an unproven sign claims `number`.
-      type: ([a, z]) => {
+      type: ([a, z], context) => {
         // A provably-NaN operand DECLINES: a handler answer is never widened,
         // so answering `number` here would suppress any sharper claim the
         // framework can derive.
@@ -478,8 +479,8 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           positiveSign(a.facts.sgn) === true &&
           nonNegativeSign(z.facts.sgn) === true
         )
-          return 'real';
-        return 'number';
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([a, z], { numericApproximation, engine: ce }) => {
         if (!a || !z) return undefined;
@@ -601,7 +602,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
       // definition used to claim was unsound outside it. As for
       // `GammaRegularized` above, every gate narrows on `true`, so an
       // unproven fact claims the wide `number`.
-      type: ([x, a, b]) => {
+      type: ([x, a, b], context) => {
         // A provably-NaN operand declines, as `GammaRegularized` does.
         if (
           (x && isSubtype(x.type, 'nan')) ||
@@ -621,8 +622,8 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           positiveSign(a.facts.sgn) === true &&
           positiveSign(b.facts.sgn) === true
         )
-          return 'real';
-        return 'number';
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x, a, b], { numericApproximation, engine: ce }) => {
         if (!x || !a || !b) return undefined;

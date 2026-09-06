@@ -1,3 +1,4 @@
+import { BoxedType } from '../../src/common/type/boxed-type';
 /**
  * `deriveApplicationType` — the recursive entry point a `'types'`-shape
  * `type` handler reaches as `context.derive`: the type of applying an
@@ -82,7 +83,9 @@ describe('deriveApplicationType', () => {
     // a bound variable's stand-in is a free symbol and keeps `real`.
     expect(derive('Tan', 'real')).toBe('number');
     expect(
-      typeToString(deriveApplicationType(ce, 'Tan', [describeBoundSymbol('real')])!)
+      typeToString(
+        deriveApplicationType(ce, 'Tan', [describeBoundSymbol('real')])!
+      )
     ).toBe('real');
   });
 
@@ -93,13 +96,16 @@ describe('deriveApplicationType', () => {
       signature: '(any) -> unknown',
       type: (_ops, { engine }) => {
         (engine as unknown as ComputeEngine).declare(`leak${n++}`, 'number');
-        return 'unknown';
+        return BoxedType.forResult('unknown', engine._typeResolver);
       },
     });
     e.declare('Outer', {
       signature: '(any) -> unknown',
-      type: (ops, { derive }) => derive('LeakInner', ops) ?? 'unknown',
+      type: (ops, { derive }) =>
+        BoxedType.forResult(derive('LeakInner', ops) ?? 'unknown'),
     });
-    expect(() => e.box(['Outer', 1]).type).toThrow(/"LeakInner" modified engine state/);
+    expect(() => e.box(['Outer', 1]).type).toThrow(
+      /"LeakInner" modified engine state/
+    );
   });
 });

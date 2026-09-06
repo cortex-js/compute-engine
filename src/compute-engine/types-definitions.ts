@@ -650,13 +650,17 @@ export type TypeHandlerContext = {
  * `docs/plans/2026-08-22-type-handlers-on-types.md`. Under test, and with
  * `CE_TYPE_PURITY_GUARD` set elsewhere, a handler that writes engine state
  * throws.
+ * Return a `BoxedType` (for example `context.engine.type('real')`), or
+ * `undefined` to use the declared signature. Numeric literal cargo in a
+ * boxed result is widened at the application boundary; intentional ranges
+ * remain intact. Built-ins use `BoxedType.forResult()` to share that work.
  *
  * @category Definitions
  */
 export type OperatorTypeHandlerOnTypes = (
   operands: ReadonlyArray<OperandDescriptor>,
   context: TypeHandlerContext
-) => Type | TypeString | BoxedType | undefined;
+) => BoxedType | undefined;
 
 export type OperatorDefinition = Partial<BaseDefinition> &
   Partial<OperatorDefinitionFlags> & {

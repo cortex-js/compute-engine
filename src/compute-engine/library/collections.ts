@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   checkArity,
   checkType,
@@ -3416,12 +3417,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     signature: '(any*) -> list',
-    type: (ops) =>
-      shapedListTypeD(ops) ??
-      internType({
-        kind: 'list',
-        elements: widen(...ops.map((op) => storedComponentTypeD(op))),
-      }),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        shapedListTypeD(ops) ??
+          internType({
+            kind: 'list',
+            elements: widen(...ops.map((op) => storedComponentTypeD(op))),
+          }),
+        context.engine._typeResolver
+      ),
     canonical: canonicalList,
     lazy: true,
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
@@ -3502,15 +3506,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
 
     signature: '(any*) -> set',
-    type: (ops) => {
+    type: (ops, context) => {
       // A comprehension's element type is not the type of its syntactic
       // operands (body + indexing set); the `elttype` handler below derives
       // it, and the declared type stays the bare `set`.
-      if (isSetComprehensionShape(ops)) return parseType('set');
-      return internType({
-        kind: 'set',
-        elements: widen(...ops.map((op) => storedComponentTypeD(op))),
-      });
+      if (isSetComprehensionShape(ops))
+        return BoxedType.forResult(
+          parseType('set'),
+          context.engine._typeResolver
+        );
+      return BoxedType.forResult(
+        internType({
+          kind: 'set',
+          elements: widen(...ops.map((op) => storedComponentTypeD(op))),
+        }),
+        context.engine._typeResolver
+      );
     },
 
     canonical: canonicalSet,
@@ -3684,13 +3695,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // infinite, and nothing is lost by it — the two spellings report the same
     // type once the widening has run, so there is no open question here about
     // exempting this result from that widening.
-    type: ([xs]) => {
+    type: ([xs], context) => {
       const source = xs?.structureOf?.();
-      return source?.kind === 'application' &&
-        source.head === 'Range' &&
-        source.children.some((op) => isSubtype(op.type, 'infinity'))
-        ? COUNT_OR_INFINITE
-        : 'integer';
+      return BoxedType.forResult(
+        source?.kind === 'application' &&
+          source.head === 'Range' &&
+          source.children.some((op) => isSubtype(op.type, 'infinity'))
+          ? COUNT_OR_INFINITE
+          : 'integer',
+        context.engine._typeResolver
+      );
     },
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a length (see `peekCountPreserving`).
@@ -3771,7 +3785,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(any*) -> tuple',
-    type: (ops) => tupleTypeOfD(ops),
+    type: (ops, context) =>
+      BoxedType.forResult(tupleTypeOfD(ops), context.engine._typeResolver),
     // Run the framework's default flatten step, which a custom `canonical`
     // handler would otherwise short-circuit. It does two things here, and
     // both change the ARITY (and therefore the type) of the tuple:
@@ -3845,7 +3860,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
     complexity: 8200,
     signature: '(any+) -> any',
-    type: (ops) => {
+    type: (ops, context) => {
       // A list component (for typing): an indexed-collection type that is not
       // itself a tuple. Mirrors the `evaluate` predicate, but type-based.
       const isListType = (op: OperandDescriptor): boolean => {
@@ -3870,12 +3885,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const coordinates = ops.map((op) => ({
           type: isListType(op) ? elementTypeOfD(op) : storedComponentTypeD(op),
         }));
-        return {
-          kind: 'list',
-          elements: { kind: 'tuple', elements: coordinates },
-        };
+        return BoxedType.forResult(
+          {
+            kind: 'list',
+            elements: { kind: 'tuple', elements: coordinates },
+          },
+          context.engine._typeResolver
+        );
       }
-      return tupleTypeOfD(ops);
+      return BoxedType.forResult(
+        tupleTypeOfD(ops),
+        context.engine._typeResolver
+      );
     },
     evaluate: (ops, { engine: ce, numericApproximation }) => {
       const isListComponent = (op: Expression): boolean =>
@@ -4217,13 +4238,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Return a list of the values of a dictionary.',
     complexity: 8200,
     signature: '(dictionary<any>) -> list',
-    type: ([dict]) => {
+    type: ([dict], context) => {
       const t = dict.type;
       if (typeof t === 'object' && t.kind === 'dictionary')
-        return { kind: 'list', elements: t.values };
+        return BoxedType.forResult(
+          { kind: 'list', elements: t.values },
+          context.engine._typeResolver
+        );
       if (typeof t === 'object' && t.kind === 'record')
-        return { kind: 'list', elements: widen(...Object.values(t.elements)) };
-      return parseType('list<any>');
+        return BoxedType.forResult(
+          {
+            kind: 'list',
+            elements: widen(...Object.values(t.elements)),
+          },
+          context.engine._typeResolver
+        );
+      return BoxedType.forResult(
+        parseType('list<any>'),
+        context.engine._typeResolver
+      );
     },
     // Complete precondition — see `Keys`.
     canEnumerate: (expr) =>
@@ -4282,14 +4315,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(number, number?, step: number?) -> indexed_collection<number>',
 
-    type: (ops) => {
+    type: (ops, context) => {
       // ops: [lower, upper?, step?]
       // An INDEX SPAN — the `range` type — when the operands prove the value
       // is a contiguous ascending run of valid 1-based indices; see
       // `isIndexSpan` and `docs/STRING_ROADMAP.md` ("The `range` type").
       // This is a NARROWING of the two results below, never a widening:
       // `range <: indexed_collection<integer>`.
-      if (isIndexSpanD(ops)) return 'range';
+      if (isIndexSpanD(ops))
+        return BoxedType.forResult('range', context.engine._typeResolver);
       // An infinite endpoint marks unbounded EXTENT; it does not name a last
       // element, so it says nothing about the elements and is dropped before
       // the tests below. Every element of `Range(1, +oo)` is a finite
@@ -4314,10 +4348,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // that could be complex or is not yet known — a symbolic step declared
       // `number` — keeps the wide `number`.
       if (elementOps.every((op) => isSubtype(op.type, 'integer')))
-        return parseType('indexed_collection<integer>');
+        return BoxedType.forResult(
+          parseType('indexed_collection<integer>'),
+          context.engine._typeResolver
+        );
       if (elementOps.every((op) => isSubtype(op.type, 'real')))
-        return parseType('indexed_collection<real>');
-      return parseType('indexed_collection<number>');
+        return BoxedType.forResult(
+          parseType('indexed_collection<real>'),
+          context.engine._typeResolver
+        );
+      return BoxedType.forResult(
+        parseType('indexed_collection<number>'),
+        context.engine._typeResolver
+      );
     },
 
     canonical: (ops, { engine: ce }) => {
@@ -5063,8 +5106,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // handler keeps the tighter `+oo` because a count is never negatively
     // infinite. `Length` above carries the same pair of spellings for the same
     // reason.
-    type: (ops) => {
-      if (ops.length !== 1) return 'integer';
+    type: (ops, context) => {
+      if (ops.length !== 1)
+        return BoxedType.forResult('integer', context.engine._typeResolver);
       const xs = ops[0];
       if (xs !== undefined) {
         const source = xs.structureOf?.();
@@ -5074,12 +5118,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           source?.kind === 'list-literal' ||
           (source?.kind === 'application' && source.head === 'Set')
         )
-          return 'integer';
+          return BoxedType.forResult('integer', context.engine._typeResolver);
         const t = xs.type;
         if (typeof t !== 'string' && t.kind === 'list' && t.dimensions)
-          return 'integer';
+          return BoxedType.forResult('integer', context.engine._typeResolver);
       }
-      return COUNT_OR_INFINITE;
+      return BoxedType.forResult(
+        COUNT_OR_INFINITE,
+        context.engine._typeResolver
+      );
     },
     // Peek through count-preserving wrappers so an eager Sort/RandomShuffle isn't
     // materialized just to read a count (see `peekCountPreserving`). Only the
@@ -5339,7 +5386,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (ops.length <= 2) {
         // A source-less `Map(f)` is never canonical (the handler declines
         // it), but the type can be asked of the raw form.
-        if (ops[1] === undefined) return 'indexed_collection';
+        if (ops[1] === undefined)
+          return BoxedType.forResult(
+            'indexed_collection',
+            engine._typeResolver
+          );
         const resultType =
           bareMappingElementTypeD(ops[0], [ops[1]], engine, derive) ??
           functionResult(ops[0].type);
@@ -5355,14 +5406,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // would claim a type its value need not have. Widen to the honest
           // supertype — the same reasoning as `mapResultType`'s `range` case,
           // which this fallback path bypasses.
-          if (s === 'range') return 'indexed_collection';
+          if (s === 'range')
+            return BoxedType.forResult(
+              'indexed_collection',
+              engine._typeResolver
+            );
           // A string source must not be echoed either, and for a stronger
           // reason: `Map` is permanently list-out over a string (a mapped
           // string is a `list`, even when the callback returns characters — so
           // echoing `string` would promise a value the runtime never produces.
           // The element type is the unknown one this branch is handling.
-          if (s === 'string') return 'list';
-          if (s === 'indexed_collection' && ops[1].type !== s) return s;
+          if (s === 'string')
+            return BoxedType.forResult('list', engine._typeResolver);
+          if (s === 'indexed_collection' && ops[1].type !== s)
+            return BoxedType.forResult(s, engine._typeResolver);
           // The source type is echoed even when it is not a collection type
           // at all. That is deliberate, and it is what the expressions shape
           // did: wrapping a non-collection source in `collection<unknown>`
@@ -5374,18 +5431,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // by this echo. A source that is provably not a collection is only
           // reachable here through `derive`; a real `Map` application over
           // one is refused at canonicalization.
-          return ops[1].type;
+          return BoxedType.forResult(ops[1].type, engine._typeResolver);
         }
-        return mapResultType(sourceType(0), resultType);
+        return BoxedType.forResult(
+          mapResultType(sourceType(0), resultType),
+          engine._typeResolver
+        );
       }
       const resultType =
         bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
         functionResult(ops[0].type);
-      return mapResultType(
-        'indexed_collection',
-        !resultType || resultType === 'unknown' || resultType === 'any'
-          ? 'unknown'
-          : resultType
+      return BoxedType.forResult(
+        mapResultType(
+          'indexed_collection',
+          !resultType || resultType === 'unknown' || resultType === 'any'
+            ? 'unknown'
+            : resultType
+        ),
+        engine._typeResolver
       );
     },
     canonical: (ops, { engine }) => {
@@ -5609,7 +5672,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // grapheme clusters, so the result may hold a different number of
     // characters than the predicate accepted — filtering away a base character
     // leaves its combining mark to attach to whatever now precedes it.
-    type: (ops) => {
+    type: (ops, context) => {
       const t = ops[0].type;
       // Tested with `matches` (a SUBTYPE test) rather than by comparing the
       // type constructor, so that a transparent alias or reference whose
@@ -5623,9 +5686,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // reaches `string` through one arm — for those the runtime may well
       // produce a list, so claiming `string` would be a promise the
       // evaluation cannot keep.
-      if (isSubtype(t, 'string')) return t;
-      if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return t;
-      return { kind: 'list', elements: collectionElementType(t) ?? 'any' };
+      if (isSubtype(t, 'string'))
+        return BoxedType.forResult(t, context.engine._typeResolver);
+      if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE))
+        return BoxedType.forResult(t, context.engine._typeResolver);
+      return BoxedType.forResult(
+        {
+          kind: 'list',
+          elements: collectionElementType(t) ?? 'any',
+        },
+        context.engine._typeResolver
+      );
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -5903,7 +5974,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
 
     type: (ops, { engine }) =>
-      parseType(foldResultTypeD(ops[0], ops[1], ops[2], engine) ?? 'unknown'),
+      BoxedType.forResult(
+        parseType(foldResultTypeD(ops[0], ops[1], ops[2], engine) ?? 'unknown'),
+        engine._typeResolver
+      ),
 
     evaluate: (
       [collection, fn, initial],
@@ -6120,8 +6194,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops, { engine }) => {
       const resultType = foldResultTypeD(ops[0], ops[1], ops[2], engine);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
-        return ops[0].type;
-      return mapResultType(ops[0].type, resultType);
+        return BoxedType.forResult(ops[0].type, engine._typeResolver);
+      return BoxedType.forResult(
+        mapResultType(ops[0].type, resultType),
+        engine._typeResolver
+      );
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -6210,7 +6287,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     lazy: true,
     signature: '(collection<any>) -> indexed_collection',
-    type: (ops) => {
+    type: (ops, context) => {
       const elt = collectionElementType(ops[0].type) ?? 'number';
       // Each element is a SUBTRACTION of two source elements, so echoing the
       // source's element type is only honest when subtraction is closed over
@@ -6220,8 +6297,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // character, and is not defined at all). Report the element type as
       // unknown there rather than a type the runtime cannot produce; the
       // runtime itself stays inert.
-      if (!isSubtype(elt, 'number')) return 'list';
-      return { kind: 'list', elements: elt };
+      if (!isSubtype(elt, 'number'))
+        return BoxedType.forResult('list', context.engine._typeResolver);
+      return BoxedType.forResult(
+        { kind: 'list', elements: elt },
+        context.engine._typeResolver
+      );
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -6304,7 +6385,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
     // Preserve the source's element type / indexed-ness (mirrors Filter).
-    type: (ops) => ops[0].type,
+    type: (ops, context) =>
+      BoxedType.forResult(ops[0].type, context.engine._typeResolver),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -6447,7 +6529,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // handler (§7 rule 1).
     signature:
       '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
-    type: (ops) => ops[0].type,
+    type: (ops, context) =>
+      BoxedType.forResult(ops[0].type, context.engine._typeResolver),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       const fn = canonicalCallbackOperand(ops[1], {
@@ -6546,13 +6629,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     type: (ops, { engine }) => {
       const resultType = callbackResultTypeD(ops[1], engine);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
-        return parseType('list');
+        return BoxedType.forResult(parseType('list'), engine._typeResolver);
       // A `string` callback result is NOT peeled: the runtime splice keeps a
       // string whole (strings are atomic under deep descent), so the element
       // type is the string itself, not `character`. Type and value must agree.
       const inner =
         resultType === 'string' ? undefined : collectionElementType(resultType);
-      return { kind: 'list', elements: inner ?? resultType };
+      return BoxedType.forResult(
+        { kind: 'list', elements: inner ?? resultType },
+        engine._typeResolver
+      );
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
@@ -6749,7 +6835,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       return ce._fn('Join', joined);
     },
-    type: joinResultTypeD,
+    type: (ops, context) =>
+      BoxedType.forResult(joinResultTypeD(ops), context.engine._typeResolver),
     collection: {
       isEnumerable: enumerableFromAllSources,
       isLazy: (_expr) => true,
@@ -7038,7 +7125,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       return ce._fn('Append', appended);
     },
-    type: appendResultTypeD,
+    type: (ops, context) =>
+      BoxedType.forResult(appendResultTypeD(ops), context.engine._typeResolver),
     collection: {
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
@@ -7221,11 +7309,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           : undefined;
       if (protocol !== undefined) {
         const name = ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
-        if (name === undefined) return 'unknown';
-        return protocolMemberSignature(ce, protocol, name) ?? 'error';
+        if (name === undefined)
+          return BoxedType.forResult('unknown', ce._typeResolver);
+        return BoxedType.forResult(
+          protocolMemberSignature(ce, protocol, name) ?? 'error',
+          ce._typeResolver
+        );
       }
       const rt = fieldBearingType(ops[0].type);
-      if (rt === undefined) return 'unknown';
+      if (rt === undefined)
+        return BoxedType.forResult('unknown', ce._typeResolver);
       const name = ops[1] === undefined ? undefined : stringLiteralOf(ops[1]);
       // The ORDINARY field routes. `undefined` means none of them answered —
       // a settled non-field-bearing operand, or a name the record/named-tuple
@@ -7252,12 +7345,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // (`At` parity).
         return withMarker(rt.values);
       })();
-      if (ordinary !== undefined) return ordinary;
+      if (ordinary !== undefined)
+        return BoxedType.forResult(ordinary, ce._typeResolver);
       if (name !== undefined) {
         const property = protocolPropertyTypeOfReceiver(ce, ops[0].type, name);
-        if (property !== undefined) return property;
+        if (property !== undefined)
+          return BoxedType.forResult(property, ce._typeResolver);
       }
-      return 'error';
+      return BoxedType.forResult('error', ce._typeResolver);
     },
     evaluate: ([base, field], { engine: ce, numericApproximation }) => {
       if (!isString(field)) return undefined;
@@ -7560,7 +7655,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const n = idx.count;
       return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
     },
-    type: (ops) => {
+    type: (ops, context) => {
       // Bracket notation over a blackboard-bold RING constant canonicalizes to
       // ring ADJUNCTION (see the `canonical` handler below), so report the same
       // type it does. Without this, a STRUCTURAL `At(Integers, √2)` — which
@@ -7579,7 +7674,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         RING_CONSTANTS.has(base.name) &&
         base.system === true
       )
-        return adjoinTypeD(ops);
+        return BoxedType.forResult(
+          adjoinTypeD(ops),
+          context.engine._typeResolver
+        );
 
       // The RAW type of the element(s) a single index selects (no absence
       // marker). Used as the inner element type of a gather and as the peeled
@@ -7725,11 +7823,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           isGatherIndex(ops[1])
         ) {
           const inner = elementType();
-          return isMaskIndex(ops[1])
-            ? ({ kind: 'list', elements: inner } as ListType)
-            : ({ kind: 'list', elements: withMarker(inner) } as ListType);
+          return BoxedType.forResult(
+            isMaskIndex(ops[1])
+              ? ({ kind: 'list', elements: inner } as ListType)
+              : ({ kind: 'list', elements: withMarker(inner) } as ListType),
+            context.engine._typeResolver
+          );
         }
-        return scalarResultType();
+        return BoxedType.forResult(
+          scalarResultType(),
+          context.engine._typeResolver
+        );
       }
 
       // CHAINED form `At(M, i, j, …)`: `evaluate` walks the indices, and each
@@ -7757,7 +7861,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         !isSubtype(sourceType, INDEXED_COLLECTION_SHAPE_TYPE) ||
         isTupleSource
       )
-        return scalarResultType();
+        return BoxedType.forResult(
+          scalarResultType(),
+          context.engine._typeResolver
+        );
 
       // Peel RAW through the intermediate steps; the absence marker is applied
       // only to the FINAL position's domain (chained value-level absorption,
@@ -7777,7 +7884,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           current = last ? withMarker(peeled) : peeled;
         }
       }
-      return current;
+      return BoxedType.forResult(current, context.engine._typeResolver);
     },
 
     // Custom canonical handler delegating operand validation to
@@ -8255,7 +8362,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs]) => componentResultTypeD(presentArmOf(xs), 1),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        componentResultTypeD(presentArmOf(xs), 1),
+        context.engine._typeResolver
+      ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 1, ce),
   },
@@ -8265,7 +8376,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs]) => componentResultTypeD(presentArmOf(xs), 2),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        componentResultTypeD(presentArmOf(xs), 2),
+        context.engine._typeResolver
+      ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 2, ce),
   },
@@ -8275,7 +8390,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs]) => componentResultTypeD(presentArmOf(xs), 3),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        componentResultTypeD(presentArmOf(xs), 3),
+        context.engine._typeResolver
+      ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, 3, ce),
   },
@@ -8310,7 +8429,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
-    type: ([xs]) => pointComponentTypeD(xs, 1),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        pointComponentTypeD(xs, 1),
+        context.engine._typeResolver
+      ),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 1, ce, numericApproximation ?? false),
   },
@@ -8321,7 +8444,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
-    type: ([xs]) => pointComponentTypeD(xs, 2),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        pointComponentTypeD(xs, 2),
+        context.engine._typeResolver
+      ),
     evaluate: ([xs], { engine: ce, numericApproximation }) =>
       pointComponentAt(xs, 2, ce, numericApproximation ?? false),
   },
@@ -8346,7 +8473,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       return ce._fn('PointZ', args);
     },
-    type: ([xs]) => pointComponentTypeD(xs, 3),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        pointComponentTypeD(xs, 3),
+        context.engine._typeResolver
+      ),
     evaluate: ([xs], { engine: ce, numericApproximation }) => {
       // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
       // but the concrete value is 2-D: the WHOLE application errors — a
@@ -8363,7 +8494,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
-    type: ([xs]) => componentResultTypeD(presentArmOf(xs), -1),
+    type: ([xs], context) =>
+      BoxedType.forResult(
+        componentResultTypeD(presentArmOf(xs), -1),
+        context.engine._typeResolver
+      ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce }) => componentAt(xs, -1, ce),
   },
@@ -8579,7 +8714,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // span makes the result possibly-`Nothing`. Returning `undefined` leaves
     // the resolver's arm in place, which is the whole mechanism for keeping
     // `Slice("abc", 2..3)` typed exactly `string`.
-    type: (ops) => sliceResultTypeD(ops),
+    type: (ops, context) =>
+      BoxedType.forResult(sliceResultTypeD(ops), context.engine._typeResolver),
     // `Slice(xs, Nothing)` folds to `Nothing`, which is why this handler
     // exists at all: the framework's DEFAULT canonicalization runs `flatten`
     // first, and `flatten` DROPS a `Nothing` operand outright — it is the
@@ -9498,11 +9634,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or `Nothing` when no element matches: the
     // element type of the collection, not the collection type.
-    type: (ops) =>
-      reduceType({
-        kind: 'union',
-        types: [collectionElementType(ops[0].type) ?? 'any', 'nothing'],
-      }),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        reduceType({
+          kind: 'union',
+          types: [collectionElementType(ops[0].type) ?? 'any', 'nothing'],
+        }),
+        context.engine._typeResolver
+      ),
     evaluate: ([xs, fn], { engine: ce }) => {
       const f = applicable(fn);
       if (!f) return ce.Nothing;
@@ -9705,7 +9844,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!collection.isValid || !fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
     },
-    type: (ops) => collectionElementType(ops[0].type) ?? 'any',
+    type: (ops, context) =>
+      BoxedType.forResult(
+        collectionElementType(ops[0].type) ?? 'any',
+        context.engine._typeResolver
+      ),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
@@ -9733,7 +9876,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!collection.isValid || !fn) return null;
       return engine._fn('MinBy', [collection, fn]);
     },
-    type: (ops) => collectionElementType(ops[0].type) ?? 'any',
+    type: (ops, context) =>
+      BoxedType.forResult(
+        collectionElementType(ops[0].type) ?? 'any',
+        context.engine._typeResolver
+      ),
     evaluate: ([xs, fn], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
       const f = applicable(fn);
@@ -9943,13 +10090,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // element type so it serializes as a list `[…]`, not a set `{…}`: for a 1-D
     // tabulation the element is the function's result; for higher rank each
     // element is itself a (nested) list.
-    type: (ops) => {
-      if (ops.length <= 1) return parseType('indexed_collection');
+    type: (ops, context) => {
+      if (ops.length <= 1)
+        return BoxedType.forResult(
+          parseType('indexed_collection'),
+          context.engine._typeResolver
+        );
       if (ops.length === 2) {
         const elt = functionResult(ops[0].type) ?? 'any';
-        return { kind: 'indexed_collection', elements: elt };
+        return BoxedType.forResult(
+          {
+            kind: 'indexed_collection',
+            elements: elt,
+          },
+          context.engine._typeResolver
+        );
       }
-      return parseType('indexed_collection<list>');
+      return BoxedType.forResult(
+        parseType('indexed_collection<list>'),
+        context.engine._typeResolver
+      );
     },
     canonical: (ops, { engine }) => {
       // One index per DIMENSION operand (`Tabulate(f, n, m)` computes
@@ -10158,7 +10318,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     lazy: true,
     signature: '(collection<any>) -> collection',
     // Preserve the source's element type / indexed-ness (mirrors TakeWhile).
-    type: (ops) => ops[0].type,
+    type: (ops, context) =>
+      BoxedType.forResult(ops[0].type, context.engine._typeResolver),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (!collection.isValid) return null;
@@ -10332,7 +10493,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // for it while the evaluated result held strings.
     //
     // Declining (returning `undefined`) falls back to the declared signature.
-    type: (ops) => (isTextAtomD(ops[0]) ? 'list<string>' : undefined),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        isTextAtomD(ops[0]) ? 'list<string>' : undefined,
+        context.engine._typeResolver
+      ),
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
@@ -10771,17 +10936,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // known; a source with an unknown element type leaves the bare `list`
     // of the signature. The precise type is what lets a destructuring
     // `for (a, b) in Zip(xs, ys)` prove its elements are pairs.
-    type: (ops) => {
+    type: (ops, context) => {
       const elements = ops.map((x) => mappingSourceElementTypeD(x));
       if (elements.length === 0 || elements.some((t) => t === undefined))
-        return 'list';
-      return {
-        kind: 'list',
-        elements: {
-          kind: 'tuple',
-          elements: elements.map((t) => ({ type: t as Type })),
+        return BoxedType.forResult('list', context.engine._typeResolver);
+      return BoxedType.forResult(
+        {
+          kind: 'list',
+          elements: {
+            kind: 'tuple',
+            elements: elements.map((t) => ({ type: t as Type })),
+          },
         },
-      };
+        context.engine._typeResolver
+      );
     },
     collection: {
       isEnumerable: enumerableFromAllSources,
@@ -11148,14 +11316,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Create a list from the elements of a collection.',
     complexity: 8200,
     signature: '(value*) -> list',
-    type: (ops) => {
-      if (ops.length === 0) return 'list';
+    type: (ops, context) => {
+      if (ops.length === 0)
+        return BoxedType.forResult('list', context.engine._typeResolver);
       let type: Type = 'unknown';
       for (const xs of ops) {
-        if (unboundedCollectionOperand(xs)) return 'list';
+        if (unboundedCollectionOperand(xs))
+          return BoxedType.forResult('list', context.engine._typeResolver);
         type = widen(type, collectionElementType(xs.type) ?? type);
       }
-      return { kind: 'list', elements: type };
+      return BoxedType.forResult(
+        { kind: 'list', elements: type },
+        context.engine._typeResolver
+      );
     },
     // Provable declines only, over the COLLECTION operands (a scalar operand
     // contributes itself) — see `canEnumerateCollectionOperands`.
@@ -11223,14 +11396,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: 'Create a set from the elements of a collection.',
     complexity: 8200,
     signature: '(value*) -> set',
-    type: (ops) => {
-      if (ops.length === 0) return 'set';
+    type: (ops, context) => {
+      if (ops.length === 0)
+        return BoxedType.forResult('set', context.engine._typeResolver);
       let type: Type = 'unknown';
       for (const xs of ops) {
-        if (unboundedCollectionOperand(xs)) return 'set';
+        if (unboundedCollectionOperand(xs))
+          return BoxedType.forResult('set', context.engine._typeResolver);
         type = widen(type, collectionElementType(xs.type) ?? type);
       }
-      return { kind: 'set', elements: type };
+      return BoxedType.forResult(
+        { kind: 'set', elements: type },
+        context.engine._typeResolver
+      );
     },
     // Provable declines only — see `ListFrom`.
     canEnumerate: canEnumerateCollectionOperands,

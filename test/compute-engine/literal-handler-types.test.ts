@@ -1,3 +1,4 @@
+import { BoxedType } from '../../src/common/type/boxed-type';
 import { ComputeEngine } from '../../src/compute-engine';
 import { widenValueTypes } from '../../src/common/type/widen-value';
 import { parseType } from '../../src/common/type/parse';
@@ -64,9 +65,7 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
 
   it('a machine-exact rational keeps its tier through a singleton range', () => {
     expect(lit(ce.parse('\\frac12'))).toBe('rational<0.5..0.5>');
-    expect(lit(ce.parse('-\\frac{3}{4}'))).toBe(
-      'rational<-0.75..-0.75>'
-    );
+    expect(lit(ce.parse('-\\frac{3}{4}'))).toBe('rational<-0.75..-0.75>');
   });
 
   it('a non-machine-representable value is enclosed outward, never claimed as a rounded double', () => {
@@ -75,12 +74,8 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     expect(lit(ce.parse('\\sqrt2').evaluate())).toBe('real<1.4..1.5>');
     // An integer beyond the DOUBLE range has no finite double bounds, so it
     // falls back to proving its sign alone.
-    expect(lit(ce.parse('10^{400}').evaluate())).toBe(
-      'integer<1..>'
-    );
-    expect(lit(ce.parse('-10^{400}').evaluate())).toBe(
-      'integer<..-1>'
-    );
+    expect(lit(ce.parse('10^{400}').evaluate())).toBe('integer<1..>');
+    expect(lit(ce.parse('-10^{400}').evaluate())).toBe('integer<..-1>');
     // A magnitude in the SUBNORMAL double range falls back too: subnormal
     // spacing is absolute (5·10⁻³²⁴), so the nearest-double projection of a
     // bound can cross the value — near the bottom, `7·10⁻³²⁴` would
@@ -127,9 +122,7 @@ describe('LITERAL HANDLER TYPES — the _literalType channel', () => {
     expect(ce.box(21).type.toString()).toBe('21');
     expect(ce.box(21).type.matches('21')).toBe(true);
     expect(ce.box(0.5).type.toString()).toBe('0.5');
-    expect(ce.parse('\\frac12').type.toString()).toBe(
-      'rational<0.5..0.5>'
-    );
+    expect(ce.parse('\\frac12').type.toString()).toBe('rational<0.5..0.5>');
   });
 
   it('the handler-visible type is a SUBTYPE of the public type', () => {
@@ -154,7 +147,7 @@ describe('LITERAL HANDLER TYPES — results are widened before storage', () => {
     const e = new ComputeEngine();
     e.declare('EchoLit', {
       signature: '(number) -> number',
-      type: () => '21',
+      type: () => BoxedType.forResult('21'),
       evaluate: ([x]) => x,
     });
     e.declare('x', 'real');
@@ -166,13 +159,11 @@ describe('LITERAL HANDLER TYPES — results are widened before storage', () => {
     const e = new ComputeEngine();
     e.declare('RangedResult', {
       signature: '(number) -> number',
-      type: () => 'real<0..>',
+      type: () => BoxedType.forResult('real<0..>'),
       evaluate: ([x]) => x,
     });
     e.declare('x', 'real');
-    expect(e.box(['RangedResult', 'x']).type.toString()).toBe(
-      'real<0..>'
-    );
+    expect(e.box(['RangedResult', 'x']).type.toString()).toBe('real<0..>');
   });
 });
 
@@ -193,12 +184,8 @@ describe('widenValueTypes — the §4.3 walker', () => {
       kind: 'list',
       elements: { kind: 'value', value: 21 },
     };
-    expect(typeToString(widenValueTypes(listOf21))).toBe(
-      'list<integer>'
-    );
-    expect(widenStr('tuple<1, 2>')).toBe(
-      'tuple<integer, integer>'
-    );
+    expect(typeToString(widenValueTypes(listOf21))).toBe('list<integer>');
+    expect(widenStr('tuple<1, 2>')).toBe('tuple<integer, integer>');
     expect(widenStr('21 | string')).toBe('integer | string');
     expect(widenStr('set<0.5>')).toBe('set<real>');
   });
@@ -375,11 +362,7 @@ describe('LITERAL HANDLER TYPES — precision edge (kept last: constructing a hi
     // The engine's decimal reading of doubles is preserved: an exact
     // rational whose decimal expansion terminates within double range is
     // still "machine-exact" (`1/5` ≡ `0.2` — the isSame convention).
-    expect(dp.parse('\\frac15').type.toString()).toBe(
-      'rational<0.2..0.2>'
-    );
-    expect(dp.parse('\\frac{7}{5}').type.toString()).toBe(
-      'rational<1.4..1.4>'
-    );
+    expect(dp.parse('\\frac15').type.toString()).toBe('rational<0.2..0.2>');
+    expect(dp.parse('\\frac{7}{5}').type.toString()).toBe('rational<1.4..1.4>');
   });
 });

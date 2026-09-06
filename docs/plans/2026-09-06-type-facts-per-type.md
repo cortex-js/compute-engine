@@ -1,10 +1,11 @@
 # Type facts computed once per type
 
-**Status: PROPOSED (2026-09-06).** Design for the next performance round of
+**Status: IMPLEMENTED (2026-09-06); P1 remains open.** Performance round of
 `ROADMAP.md` entry P1 ("symbolic evaluation still slower than 0.118.2").
-Nothing here is implemented. The analysis in §1–§3 was measured on the tree
+The execution notes below record the implemented scope. The original analysis
+in §1–§3 was measured on the tree
 staged on 2026-09-06 (the "forced derivations removed" round described in the
-`[Unreleased]` CHANGELOG entry).
+0.124.2 CHANGELOG entry).
 
 ## Summary
 
@@ -19,7 +20,7 @@ that today issues a subtype query read those facts instead. The semantics do
 not change: each fact is computed by the predicate that computes it today,
 just once.
 
-Expected effect: 15–20 % less time per call on the symbolic paths (solve,
+Original estimate, to be checked by end-to-end measurement: 15–20 % less time per call on the symbolic paths (solve,
 simplify, integrate), which is most of the remaining 1.1–1.2× against
 0.118.2, and a gain on every other path that reads types.
 
@@ -271,3 +272,148 @@ timing (`ROADMAP.md` P1 lists the protocol), and the instrumented counts of
   `boxed-expression`, so the descriptor code and the library handlers can
   read it without a new dependency edge; the circular-dependency budget is
   zero and `npm run check:deps` gates the round.
+
+
+## 7. Execution: boxed results and lazy facts
+
+The user approved a required `BoxedType` result for
+`OperatorTypeHandlerOnTypes` on 2026-09-06. `undefined` still declines so
+signature fallback and marker handling keep their existing meaning. Built-in
+handlers now use `BoxedType.forResult(raw, context.engine._typeResolver)`;
+custom handlers can return `context.engine.type(...)`. The application
+boundary retains numeric-value widening, missing absorption, broadcasting,
+and the type-size limit. When those transforms leave a result unchanged,
+its boxed object survives into the expression cache. An immutable normalized
+box carries its normalization proof in a private slot. Each result-cache entry
+also keeps its own expected type identity, so a JavaScript caller replacing
+and renormalizing a box cannot corrupt an earlier entry. Private slots keep
+these read caches usable even when callers freeze the `BoxedType` itself.
+
+`BoxedType.facts` exposes shared lazy type evidence. Primitive names use a
+small map; composite identities use a weak map. Only deeply immutable,
+ground types cache answers. Mutable host ASTs, accessor-bearing objects,
+custom prototypes, references (including references nested in containers),
+variables, and polymorphic signatures keep live predicate reads. Alias
+redefinition does mutate reference definitions, so these exclusions are
+required, not hypothetical.
+
+Engine-created numeric ranges are frozen and registered by their scalar-only
+constructor. The brand avoids a reflective immutability walk on each fresh
+range without trusting mutable caller objects. Numeric value types use a bounded
+4 096-entry table, with SameValueZero keys (shared NaN, normalized negative
+zero). This shares literal type identities while preserving singleton and
+rational/enclosure precision. A separate 4 096-entry table shares equal numeric
+ranges, including repeated rational and radical enclosures and sign ranges.
+Its key retains every stored field, including openness, absent bounds versus
+explicit infinities, and signed zero. Eviction changes identity only; existing
+frozen types and their facts remain valid. Newly widened immutable
+results are frozen before their normalized boxes are cached. Resolver-scoped
+box caches keep user type names tied to the correct engine.
+
+Consumers include numeric argument validation, arithmetic handler helpers,
+number/infinity membership, operand finiteness and collection facts, tuple
+shape tests, product ordering, and application missing/broadcast checks.
+Synthetic descriptors now compute facts lazily as well. Real descriptors allocate
+their expression-backed facts only on first use, and keep a private descriptor
+reference instead of allocating a type-reader closure. Expression-derived
+sign, held-value, and assumption evidence stays in the descriptor cascade;
+it is never stored in a global type-only fact record.
+
+The fact cache stays below the compute-engine layer. Interval memoization
+lives in `numerics/interval-arithmetic.ts`, which can depend on the common
+immutability proof without a dependency cycle. It caches only independent,
+immutable types and never reuses a recursive alias read with a traversal
+context. Cached intervals are frozen; arithmetic computes fresh result
+intervals before changing their endpoints.
+
+### Validation and measurement
+
+`CE_TYPE_FACTS_ASSERT=1` reruns the original predicates on both first
+computations and cached reads and asserts equality. Derived facts can reuse
+component facts; numeric ranges share their primitive-tier proofs, matching
+the numeric/primitive arm of `isSubtype` exactly. The full suite runs in that mode. New regressions cover
+unknown/bottom types, mutable ASTs and aliases, shallow freezes, inherited
+mutable fields, resolver separation/redefinition, and literal-result
+normalization.
+
+`benchmarks/type-derivation.mjs` compares separately built revisions in one
+process, rotating their order over seven rounds after warm-up. It includes
+the six P1 probes plus numeric, ranged-product and list-type controls, and
+reports result differences as well as timings. Hold the shared-box lock and
+verify active CPU consumers before accepting measurements. Instrumented
+counts are measured separately from elapsed time.
+
+### Validation results
+
+- `npm run typecheck`: passed, including the handler return-type pins,
+  public-surface checks, and zero circular dependencies.
+- `CE_TYPE_FACTS_ASSERT=1 node node_modules/jest/bin/jest.js --config
+  ./config/jest.config.cjs --watchman=false --reporters summary`: passed on
+  the main tree, including loopback MCP tests outside the filesystem sandbox.
+  708 suites and 33 018 tests passed; 10 suites and 859 tests were skipped,
+  with one todo. All 4 237 snapshots passed. Source/test fingerprints matched
+  before and after. Jest reported a worker teardown warning after the tests;
+  the command exited successfully.
+- `npm run build development`, `npm run test:nodenext`, and the native
+  TypeScript check of `test/public-ts-declarations/main.ts`: passed in the
+  isolated checkout containing the same source.
+- Two independent in-session reviewers passed the final changes. Findings
+  fixed include inherited mutable type fields, synthetic descriptor facts,
+  frozen interval identity powers, frozen boxed metadata, and result-cache
+  identity validation. An external Claude review was unavailable because
+  automatic approval review rejected external sharing of repository code.
+
+### Measured outcome
+
+Two runs against the 0.124.2 source, with identical standalone minified ESM
+build settings, Node 22.13.1, and the CPU lock held. Loads before/after were
+2.8/3.2 and 3.0/2.9 (one-minute average, eight cores). Each variant warmed up
+for 1 000 calls; seven rounds of 100 samples rotated the execution order.
+The second run reversed baseline/current order. All result fingerprints match.
+Raw medians, per-round values, controls, and instrumented counts are in
+[`2026-09-06-type-facts-results.json`](./2026-09-06-type-facts-results.json).
+
+| Probe | Baseline µs (second run) | Current µs (second run) | Reduction across both runs |
+| --- | ---: | ---: | ---: |
+| Box `√6x + √2x` | 25.54 | 24.33 | 5–8% |
+| Simplify `√6x + √2x` | 181.17 | 156.54 | 14–16% |
+| Simplify `√(3+2√2)` | 52.79 | 51.00 | 3–4% |
+| Solve `x⁴+x²−1=0` | 1 865.67 | 1 736.88 | 7% |
+| `∫1/(x³+1)dx` | 1 972.38 | 1 788.42 | 9% |
+| `∫₁² 1/x dx` | 93.87 | 70.67 | 25% |
+| Numeric `√2.N()` control | 3.58 | 3.25 | 8–9% |
+| Ranged product type | 3.33 | 1.79 | 44–46% |
+| Type of 100 tuples in a list | 22.75 | 22.54 | 1–4% |
+
+These are warm, focused probes, not a claim about all symbolic workloads.
+The original 15–20% estimate was not met uniformly. In particular, the
+historical gap to 0.118.2 has not been remeasured with this harness, so P1 is
+still open. Before equal range types were shared, solving remained 1–6%
+slower despite fewer subtype queries; allocation and identity reuse mattered
+in addition to caching predicates.
+
+Instrumented counts were taken separately from timing, after five warm-up
+calls. Simplification drops from 871 to 26 subtype queries, solving from
+4 243 to 333, and integration from 4 491 to 392. Descriptor counts remain
+40, 269, and 145 respectively. Thus the next allocation target is the
+per-application derivation protocol; the current gain does not come from
+eliminating those descriptors.
+
+### Subsequent experiments
+
+Next, measure a scalar arithmetic dispatch path before a general subtype-pair
+cache, descriptor pool, or more global memoization. A separate experiment may
+withhold computed arithmetic endpoints while retaining literal types, sign facts,
+numeric tiers, collection shape, and pole/NaN possibilities. A demand-driven
+split must avoid computing the detailed result first and then stripping its
+ranges; it must also keep coarse and refined cache states distinct so query
+order cannot change public type precision. No precision reduction is part of
+this implementation.
+
+An ablation during this round skipped `foldIntervalsOfTypes` and Power's
+`refinePow`, before the final range-sharing optimization. It improved the
+then-current solve probe by about 6–10%, but changed the ranged-product
+control from `real<8..15>` to `real`. It did not disable all interval work,
+and its gain must not be added to the final measured gain above. This is
+evidence for a future demand-driven refinement experiment, not a reason to
+remove range precision by default.

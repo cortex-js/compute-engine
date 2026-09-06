@@ -258,3 +258,13 @@ describe('describeType()', () => {
     expect(describeType(t).facts.sgn).toBe('positive');
   });
 });
+
+test('derived mapping operands retain lazy sign facts when closedness is overridden', () => {
+  ce.declare('xs', 'list<real>');
+  const expr = ce.box([
+    'Pipe',
+    'xs',
+    ['Function', ['Sqrt', ['Abs', 'x']], 'x'],
+  ]);
+  expect(expr.type.toString()).toBe('list<real>');
+});

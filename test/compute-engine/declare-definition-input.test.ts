@@ -1,5 +1,9 @@
+import { BoxedType } from '../../src/common/type/boxed-type';
 import { ComputeEngine } from '../../src/compute-engine';
-import type { Expression } from '../../src/compute-engine';
+import type {
+  Expression,
+  OperatorTypeHandlerOnTypes,
+} from '../../src/compute-engine';
 
 // The type-level pins in this file (the contextual typing of handler
 // parameters, the `@ts-expect-error` lines) are checked by
@@ -58,7 +62,10 @@ describe('ce.declare() inline type handlers', () => {
     // and facts are reachable without an annotation.
     ce.declare('f', {
       signature: '(number) -> number',
-      type: (ops) => (ops[0].facts.finite === true ? ops[0].type : 'number'),
+      type: (ops) =>
+        BoxedType.forResult(
+          ops[0].facts.finite === true ? ops[0].type : 'number'
+        ),
     });
     expect(ce.box(['f', 2]).type.matches('integer')).toBe(true);
 
@@ -68,7 +75,7 @@ describe('ce.declare() inline type handlers', () => {
     ce.declare({
       h: {
         signature: '(number) -> number',
-        type: (ops) => ops[0].type,
+        type: (ops) => BoxedType.forResult(ops[0].type),
       },
       k: 'integer',
     });
@@ -83,5 +90,33 @@ describe('ce.declare() inline type handlers', () => {
       signature: '(number) -> number',
       type: (ops: ReadonlyArray<Expression>) => ops[0].type,
     });
+  });
+});
+
+describe('boxed operator type-handler results', () => {
+  test('accepts public boxed results and undefined, rejects raw types', () => {
+    const ce = new ComputeEngine();
+    const boxed: OperatorTypeHandlerOnTypes = () => ce.type('integer');
+    const decline: OperatorTypeHandlerOnTypes = () => undefined;
+    // @ts-expect-error handlers must return a BoxedType, not a type string
+    const rawString: OperatorTypeHandlerOnTypes = () => 'integer';
+    // @ts-expect-error handlers must box structural Type results too
+    const rawType: OperatorTypeHandlerOnTypes = () => ({
+      kind: 'value',
+      value: 21,
+    });
+    void rawString;
+    void rawType;
+
+    ce.declare('BoxedResult', {
+      signature: '(number) -> number',
+      type: boxed,
+    });
+    ce.declare('DeclinedResult', {
+      signature: '(number) -> real',
+      type: decline,
+    });
+    expect(ce.box(['BoxedResult', 2]).type.toString()).toBe('integer');
+    expect(ce.box(['DeclinedResult', 2]).type.toString()).toBe('real');
   });
 });

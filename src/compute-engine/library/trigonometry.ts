@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import { euclideanNormType, pointNormBroadcasts } from './utils.js';
@@ -218,7 +219,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> real',
       // A non-real or non-finite argument flows through the linear conversion
       // (`Degrees(i) = iπ/180`), so the claim must follow the operand.
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine }) => {
         const ce = engine;
         if (ce.angularUnit === 'deg') return ops[0];
@@ -292,7 +297,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // component is provably real and the wide `number` otherwise, which
       // is what the declared result says.
       signature: '(number, number?, number?) -> number',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         const deg = ops[0]?.re ?? NaN;
         const min = ops[1]?.re ?? 0;
@@ -403,12 +412,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // A point argument with a broadcasting component zips into one result
       // per element (via its norm below) — report the honest list type, not
       // a decided-but-wrong scalar (the Tycho item-44 class).
-      type: ([x, y]) => {
+      type: ([x, y], context) => {
         if (
           (x && isTupleShapedType(x.type) && pointNormBroadcasts(x)) ||
           (y && isTupleShapedType(y.type) && pointNormBroadcasts(y))
         )
-          return 'list<number>';
+          return BoxedType.forResult(
+            'list<number>',
+            context.engine._typeResolver
+          );
         // Both operands enter ONE sum of squares — a fixed-arity point
         // through its own norm — so the application is itself a Euclidean
         // norm over the flattened components, and `euclideanNormType`
@@ -426,7 +438,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             components.push(...structure.elements);
           else components.push(o);
         }
-        return euclideanNormType(components);
+        return BoxedType.forResult(
+          euclideanNormType(components),
+          context.engine._typeResolver
+        );
       },
       // A hypotenuse is `√(…)` of a sum of squares, so it is non-negative
       // — `+∞` included. The one exception is the NaN the handler answers
@@ -524,7 +539,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // complex value; the type handler carries the per-call sharpness).
       signature: '(complex | signed_infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => elementaryFunctionTypeOnTypes('Arctan', ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          elementaryFunctionTypeOnTypes('Arctan', ops),
+          context.engine._typeResolver
+        ),
       // arctan is odd and strictly increasing with arctan(0) = 0, so it
       // preserves the sign of its (real) argument; a non-real argument gives
       // `x.sgn` = 'unsigned'/undefined, which is also correct. (The generic
@@ -580,7 +599,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(y: real | signed_infinity, x: real | signed_infinity) -> real',
       nanBehavior: 'propagate',
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
         // operand is not finite, so without this early return it would slip
@@ -792,7 +815,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       signature: '(real) -> number',
       // hav is entire (½(1−cos z)): finite real → [0,1] ⊂ finite real, but
       // `hav(±∞)` is NaN and a complex argument gives a complex value.
-      type: (ops) => numericTypeHandlerOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        ),
       // Evaluate the constructed ½(1−cos z) so `.N()` returns a number, not the
       // unevaluated expression; exact arguments still stay symbolic under
       // `evaluate()` (e.g. `Haversine(2) → ½(1−cos 2)`).
@@ -813,8 +840,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // honest-join treatment as the Arcsin family (user ruling 2026-07-30):
       // a symbolic real of unknown magnitude claims `complex`, and
       // the compiled path emits complex code accordingly.
-      type: (ops) =>
-        boundedInverseTrigTypeOnTypes(ops, INVERSE_HAVERSINE_DOMAIN),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          boundedInverseTrigTypeOnTypes(ops, INVERSE_HAVERSINE_DOMAIN),
+          context.engine._typeResolver
+        ),
       // Evaluate the constructed 2·arcsin(√z): under `.N()` it numericizes,
       // and under `evaluate()` the exact fold applies (`InverseHaversine(1/2) →
       // 2·arcsin(√2/2) → 2·(π/4) → π/2`).
@@ -957,7 +987,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // `reject`).
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
-      type: ([x]) => boundedEntireRealType(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          boundedEntireRealType(x),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -983,7 +1017,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // (every value finite), `NaN` propagates by explicit declaration.
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
-      type: ([x]) => boundedEntireRealType(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          boundedEntireRealType(x),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -1009,7 +1047,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // (every value finite), `NaN` propagates by explicit declaration.
       signature: '(complex | signed_infinity) -> complex',
       nanBehavior: 'propagate',
-      type: ([x]) => boundedEntireRealType(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          boundedEntireRealType(x),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x) || x.im !== 0) return undefined;
         // Exact special values, regardless of numericApproximation
@@ -1054,13 +1096,18 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // real — it keeps the generic finite-point hedge. A NaN operand is
       // refuted as an extended real, so it takes the finite test below and
       // reaches the same `number` an explicit NaN gate would give.
-      type: ([x]) => {
-        if (!x) return 'number';
+      type: ([x], context) => {
+        if (!x)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
-        if (extendedReal === true) return 'real';
-        return 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
+        if (extendedReal === true)
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -1108,15 +1155,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // A finite complex argument → finite complex value. Unproven realness
       // → `number`. A NaN operand is refuted as an extended real, so it takes
       // the finite test and reaches `number` without a separate NaN gate.
-      type: ([x]) => {
-        if (!x) return 'number';
+      type: ([x], context) => {
+        if (!x)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
-        return extendedReal === true &&
-          nonNegativeSign(operandSgnOnTypes(x)) === true
-          ? EXTENDED_REAL_TYPE
-          : 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(
+          extendedReal === true &&
+            nonNegativeSign(operandSgnOnTypes(x)) === true
+            ? EXTENDED_REAL_TYPE
+            : 'number',
+          context.engine._typeResolver
+        );
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -1163,14 +1217,21 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // finite hedge is available). A NaN operand is refuted as an extended
       // real, so it takes the finite test and reaches `number` without a
       // separate NaN gate.
-      type: ([x]) => {
-        if (!x) return 'number';
+      type: ([x], context) => {
+        if (!x)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
         if (extendedReal === true)
-          return x.facts.finite === true ? 'real' : EXTENDED_REAL_TYPE;
-        return 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'real' : EXTENDED_REAL_TYPE,
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -1216,15 +1277,22 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Unproven realness → `number`. A NaN operand is refuted as an extended
       // real, so it takes the finite test and reaches `number` without a
       // separate NaN gate.
-      type: ([x]) => {
-        if (!x) return 'number';
+      type: ([x], context) => {
+        if (!x)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         const extendedReal = typeFact(x.type, EXTENDED_REAL_TYPE);
         if (extendedReal === false)
-          return x.facts.finite === true ? 'complex' : 'number';
-        return extendedReal === true &&
-          nonNegativeSign(operandSgnOnTypes(x)) === true
-          ? EXTENDED_REAL_TYPE
-          : 'number';
+          return BoxedType.forResult(
+            x.facts.finite === true ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(
+          extendedReal === true &&
+            nonNegativeSign(operandSgnOnTypes(x)) === true
+            ? EXTENDED_REAL_TYPE
+            : 'number',
+          context.engine._typeResolver
+        );
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
@@ -1648,6 +1716,10 @@ function trigFunction(
 
   return {
     ...common,
-    type: (ops) => elementaryFunctionTypeOnTypes(operator, ops),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        elementaryFunctionTypeOnTypes(operator, ops),
+        context.engine._typeResolver
+      ),
   };
 }

@@ -3674,6 +3674,22 @@ enclosure, `arcsin(0.5)` needs the value type of a non-integer, and
 literal-tier types as they are; the residual lies in the derivation of
 function nodes, above.
 
+**Shared type facts and boxed handler results implemented (2026-09-06,
+unreleased).** `OperatorTypeHandlerOnTypes` now returns
+`BoxedType | undefined`. Immutable types share lazy proofs, intervals,
+normalized boxes, and equal numeric value/range identities. Mutable types
+and aliases keep live reads; literal precision and derived bounds are
+preserved. Two warm, interleaved comparisons against 0.124.2 reduce time by
+14–16% on `√6x + √2x` simplification, 7% on solving `x⁴+x²−1=0`, 9% on
+`∫1/(x³+1)dx`, and 25% on `∫₁² 1/x dx`. Boxing improves 5–8%, nested-root
+simplification 3–4%, and the ranged-product type control 44–46%. Subtype
+queries fall 871 → 26 / 4 243 → 333 / 4 491 → 392 on simplify / solve /
+integrate, while descriptor counts are unchanged. The measured setup and
+raw results are in
+[`docs/plans/2026-09-06-type-facts-per-type.md`](docs/plans/2026-09-06-type-facts-per-type.md#measured-outcome).
+P1 stays open: the next experiment is a scalar arithmetic dispatch path;
+the historical gap to 0.118.2 has not been remeasured in this round.
+
 Reproduce a measurement with `CE_PUBLISHED_BUNDLE=<bundle to compare> node
 benchmarks/runners/run_ce_rubi.mjs`: it times the published bundle and the
 current build (`dist/esm-min/compute-engine.js`, so build first) on the whole

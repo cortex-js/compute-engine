@@ -68,6 +68,11 @@ import { subtypingVarianceOf } from './variance.js';
  * safe because the rebuilt node is acyclic by construction.
  */
 export function widenValueTypes(t: Type): Type {
+  // Scalar ranges are already stored claims. Only the rational tier can
+  // encode literal cargo as a singleton; leave that case on the walker.
+  // The common real/integer range needs neither memo maps nor a tree walk.
+  if (typeof t === 'string' || (t.kind === 'numeric' && t.type !== 'rational'))
+    return t;
   // One memo per polarity: a node SHARED between a covariant and a
   // contravariant position (a value type used as both a parameter and the
   // result of one signature) must not reuse the other polarity's rewrite.
@@ -78,9 +83,14 @@ export function widenValueTypes(t: Type): Type {
   const out = widen(t, true, memo);
   // Widening must never narrow: the original type must be a subtype of the
   // result. (`isSubtype` is pure; the assert is stripped from the
-  // production build.)
+  // production build.) An invalid type is the exception: the reducer
+  // poisons a union/intersection containing `error`, so `0 | error`
+  // normalizes to `error`, which is not a supertype of that unreduced AST.
+  // Verify that the input was already invalid before allowing this case.
   console.assert(
-    out === t || isSubtype(t, out),
+    out === t ||
+      isSubtype(t, out) ||
+      (out === 'error' && reduceType(t) === 'error'),
     'widenValueTypes(): result is not a supertype of its input'
   );
   return out;

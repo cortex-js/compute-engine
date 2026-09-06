@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   evaluateStatements,
   resolveEscapingLambda,
@@ -99,9 +100,13 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // precedent (`List`, `If`, `Which`, `Assign`, `Declare`), and releases a
       // seed frame that a surviving build-and-return block owes no draws to.
       invokes: false,
-      type: (args) => {
-        if (args.length === 0) return 'nothing';
-        return args[args.length - 1].type;
+      type: (args, context) => {
+        if (args.length === 0)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
+        return BoxedType.forResult(
+          args[args.length - 1].type,
+          context.engine._typeResolver
+        );
       },
       canonical: canonicalBlock,
       evaluate: evaluateBlock,
@@ -148,13 +153,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // with `Which`).
       // The handler reads only the operands' TYPES, so it is declared on the
       // descriptor shape and cannot touch engine state while deriving.
-      type: ([cond, ifTrue, ifFalse]) => {
+      type: ([cond, ifTrue, ifFalse], context) => {
         // A type read must never crash, whatever the application looks like.
         // The parse and box routes both admit a malformed `If` with no
         // branch at all, which reaches this handler with `ifTrue`
         // undefined; it answers `unknown` rather than dereferencing a
         // missing operand — the same hardening `When` carries.
-        if (ifTrue === undefined) return 'unknown';
+        if (ifTrue === undefined)
+          return BoxedType.forResult('unknown', context.engine._typeResolver);
         // A condition that is provably a boolean indexed collection selects
         // element-wise (see `evaluateElementwiseSelection`): the result is a
         // list of the branches' element types.
@@ -163,12 +169,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           .filter((x) => x !== undefined)
           .map((x) => x.type);
         if (shape)
-          return elementwiseResultType(
-            armList,
-            shape.length,
-            // The else branch IS the default clause: without one, unselected
-            // positions are the `NaN` no-match cell.
-            ifFalse !== undefined
+          return BoxedType.forResult(
+            elementwiseResultType(
+              armList,
+              shape.length,
+              // The else branch IS the default clause: without one, unselected
+              // positions are the `NaN` no-match cell.
+              ifFalse !== undefined
+            ),
+            context.engine._typeResolver
           );
         // A condition that is only POSSIBLY a boolean collection selects
         // element-wise for some of its runtime values and picks a single arm
@@ -180,20 +189,29 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             kind: 'broadcastable',
             elements: elementwiseCellType(armList, ifFalse !== undefined),
           };
-          return ifFalse !== undefined
-            ? broadcast
-            : reduceType({ kind: 'union', types: [broadcast, 'missing'] });
+          return BoxedType.forResult(
+            ifFalse !== undefined
+              ? broadcast
+              : reduceType({ kind: 'union', types: [broadcast, 'missing'] }),
+            context.engine._typeResolver
+          );
         }
         // Without an else branch a false condition yields `Missing`, and that
         // arm must survive in the type, so build the union explicitly rather
         // than through `widen` (which joins toward a common supertype and
         // would dissolve the absence marker into a top type).
         if (ifFalse === undefined)
-          return reduceType({
-            kind: 'union',
-            types: [ifTrue.type, 'missing'],
-          });
-        return widen(ifTrue.type, ifFalse.type);
+          return BoxedType.forResult(
+            reduceType({
+              kind: 'union',
+              types: [ifTrue.type, 'missing'],
+            }),
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(
+          widen(ifTrue.type, ifFalse.type),
+          context.engine._typeResolver
+        );
       },
       canonical: (ops, { engine }) =>
         engine._fn(
@@ -230,13 +248,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // The handler reads the body's inert STRUCTURE (does it contain a
       // value-carrying `Return`/`Break`?), never the body expression, so it is
       // declared on the descriptor shape.
-      type: ([body]) => {
-        if (!body) return 'nothing';
+      type: ([body], context) => {
+        if (!body)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
         // A `Loop` is evaluated for effect: its value is `Nothing` unless the
         // body can short-circuit with a value (`Break v` / `Return`).
-        return loopBodyYieldsValue(body.structureOf?.())
-          ? 'unknown'
-          : 'nothing';
+        return BoxedType.forResult(
+          loopBodyYieldsValue(body.structureOf?.()) ? 'unknown' : 'nothing',
+          context.engine._typeResolver
+        );
       },
       canonical: (ops, options) => canonicalLoopLike('Loop', ops, options),
       evaluate: (ops, { engine: ce }) =>
@@ -267,12 +287,19 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(body:expression, iterators:expression+) -> indexed_collection',
       // The handler reads the body operand's type and nothing else.
-      type: ([body]) => {
-        if (!body) return 'nothing';
+      type: ([body], context) => {
+        if (!body)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
         // Result is an indexed collection of body.type values. The body's
         // type may itself be parametric (e.g. a tuple) — wrap in
         // indexed_collection<...>.
-        return { kind: 'indexed_collection', elements: body.type };
+        return BoxedType.forResult(
+          {
+            kind: 'indexed_collection',
+            elements: body.type,
+          },
+          context.engine._typeResolver
+        );
       },
       canonical: (ops, options) =>
         canonicalLoopLike('Comprehension', ops, options),
@@ -313,7 +340,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
       lazy: true,
       signature: '(expression, boolean) -> any',
-      type: ([expr, cond]) => {
+      type: ([expr, cond], context) => {
         // A list/vector-of-booleans condition broadcasts: the result is a
         // list whose element type is `expr`'s type (see the broadcast branch
         // in `evaluate`). Lazy operators bypass the generic list-broadcast
@@ -325,13 +352,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // like, so a malformed arity-0 `When` answers `unknown` here. (An
         // earlier version of this handler dereferenced `expr.type`
         // unconditionally and threw on that input.)
-        if (expr === undefined) return 'unknown';
+        if (expr === undefined)
+          return BoxedType.forResult('unknown', context.engine._typeResolver);
         if (
           cond !== undefined &&
           isSubtype(cond.type, parseType('list<boolean>')!)
         )
-          return `list<${typeToString(expr.type)}>`;
-        return expr.type;
+          return BoxedType.forResult(
+            `list<${typeToString(expr.type)}>`,
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(expr.type, context.engine._typeResolver);
       },
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
@@ -490,7 +521,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // The handler reads the operands' types plus one structural fact — a
       // literal `True` condition names the default clause — so it is declared
       // on the descriptor shape and cannot touch engine state.
-      type: (args) => {
+      type: (args, context) => {
         // The operands are strictly PAIRED, so an odd count is a malformed
         // call, and the `canonical` handler below turns such a call into an
         // `Error`. An odd list still reaches this handler on the structural
@@ -501,7 +532,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // without running the handler; that is internal engine construction,
         // not something user input reaches. Report what every user-reachable
         // route produces.
-        if (args.length % 2 !== 0) return 'error';
+        if (args.length % 2 !== 0)
+          return BoxedType.forResult('error', context.engine._typeResolver);
         let arms = args.filter((_, i) => i % 2 === 1);
         let conds = args.filter((_, i) => i % 2 === 0);
         // Only the REACHABLE clauses contribute: a literal `True` condition is
@@ -522,12 +554,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // list of the arms' element types.
         const shape = elementwiseConditionShape(conds.map((c) => c?.type));
         if (shape)
-          return elementwiseResultType(
-            arms.map((x) => x.type),
-            shape.length,
-            // A literal `True` condition is the default clause: it matches
-            // every position, so the `NaN` no-match cell is unreachable.
-            dflt >= 0
+          return BoxedType.forResult(
+            elementwiseResultType(
+              arms.map((x) => x.type),
+              shape.length,
+              // A literal `True` condition is the default clause: it matches
+              // every position, so the `NaN` no-match cell is unreachable.
+              dflt >= 0
+            ),
+            context.engine._typeResolver
           );
         // A condition that is only POSSIBLY a boolean collection selects
         // element-wise for some of its runtime values and picks a single arm
@@ -548,14 +583,22 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               dflt >= 0
             ),
           };
-          return dflt >= 0
-            ? broadcast
-            : reduceType({ kind: 'union', types: [broadcast, 'missing'] });
+          return BoxedType.forResult(
+            dflt >= 0
+              ? broadcast
+              : reduceType({ kind: 'union', types: [broadcast, 'missing'] }),
+            context.engine._typeResolver
+          );
         }
-        if (arms.length === 0) return 'missing';
+        if (arms.length === 0)
+          return BoxedType.forResult('missing', context.engine._typeResolver);
         const armType = widen(...arms.map((x) => x.type));
-        if (dflt >= 0) return armType;
-        return reduceType({ kind: 'union', types: [armType, 'missing'] });
+        if (dflt >= 0)
+          return BoxedType.forResult(armType, context.engine._typeResolver);
+        return BoxedType.forResult(
+          reduceType({ kind: 'union', types: [armType, 'missing'] }),
+          context.engine._typeResolver
+        );
       },
       canonical: (args, options) => {
         // The operands are strictly PAIRED `(condition, value)`, so the
@@ -613,7 +656,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       signature: '(expression, expression+) -> unknown',
       // The handler reads each case's inert structure (its head and the type
       // of its last child), never an operand expression.
-      type: (ops) => {
+      type: (ops, context) => {
         // Result is the widened type of the case bodies (the last operand of
         // each `MatchCase`), mirroring `If`/`Which`. Bodies reference capture
         // names free at this scope, so most resolve to `unknown` — widen is a
@@ -625,8 +668,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           if (st.children.length < 2) continue;
           bodyTypes.push(st.children[st.children.length - 1].type);
         }
-        if (bodyTypes.length === 0) return 'nothing';
-        return widen(...bodyTypes);
+        if (bodyTypes.length === 0)
+          return BoxedType.forResult('nothing', context.engine._typeResolver);
+        return BoxedType.forResult(
+          widen(...bodyTypes),
+          context.engine._typeResolver
+        );
       },
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return ce.Nothing;

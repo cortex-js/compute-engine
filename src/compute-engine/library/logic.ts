@@ -1,3 +1,4 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type { Type } from '../../common/type/types.js';
 import type {
   Expression,
@@ -384,7 +385,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   // logic rules for simplify)
   // See also: https://en.wikipedia.org/wiki/Prenex_normal_form
   And: {
-    type: (ops) => connectiveType('And', ops),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        connectiveType('And', ops),
+        context.engine._typeResolver
+      ),
     description:
       'Logical conjunction (AND): true when all operands are true. ' +
       'Short-circuits: operands are evaluated left to right and evaluation ' +
@@ -440,7 +445,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluateAsync: evaluateShortCircuitAsync('And', decideAnd, evaluateAnd),
   },
   Or: {
-    type: (ops) => connectiveType('Or', ops),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        connectiveType('Or', ops),
+        context.engine._typeResolver
+      ),
     description:
       'Logical disjunction (OR): true when at least one operand is true. ' +
       'Short-circuits: operands are evaluated left to right and evaluation ' +
@@ -466,7 +475,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluateAsync: evaluateShortCircuitAsync('Or', decideOr, evaluateOr),
   },
   Not: {
-    type: (ops) => connectiveType('Not', ops),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        connectiveType('Not', ops),
+        context.engine._typeResolver
+      ),
     description: 'Logical negation (NOT).',
     wikidata: 'Q190558',
     broadcastable: true,
@@ -530,7 +543,11 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     ),
   },
   Xor: {
-    type: (ops) => connectiveType('Xor', ops),
+    type: (ops, context) =>
+      BoxedType.forResult(
+        connectiveType('Xor', ops),
+        context.engine._typeResolver
+      ),
     description: 'Exclusive or: true when an odd number of operands are true',
     wikidata: 'Q498186',
     broadcastable: true,

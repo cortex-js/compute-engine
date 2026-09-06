@@ -31,6 +31,7 @@ import { nextDown, nextUp } from './numeric.js';
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
 import { nonNegativeRangeType } from '../../common/type/utils.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
+import { isStableType } from '../../common/type/facts.js';
 
 /** A closed interval over the extended reals. `lo ≤ hi`; `±Infinity`
  * means unbounded on that side. Never represents an empty set — a reader
@@ -173,10 +174,19 @@ function gridValue(r: number, k: number): number {
  * infinity `~oo` — and neither is `nan`.) */
 const NAN_FREE_REAL_TIERS = new Set<string>(['integer', 'rational', 'real']);
 
+const NO_INTERVAL = Symbol('no interval');
+type CachedInterval = Readonly<Interval> | typeof NO_INTERVAL;
+const primitiveIntervals = new Map<string, CachedInterval>();
+const compositeIntervals = new WeakMap<object, CachedInterval>();
+
 /**
  * The interval a numeric type claims, or `undefined` when the type makes
  * no real-line claim (a NaN-admitting or complex base, a non-numeric
  * type, a contradictory intersection).
+ *
+ * Returned bounds are shared and read-only for deeply immutable types.
+ * Mutable types and aliases are read afresh. A caller-supplied traversal
+ * context bypasses the memo: its visited aliases can change the answer.
  *
  * This is THE bounds reader: `typeBounds`
  * (`library/type-handlers.ts`) delegates to it, so a domain proof
@@ -200,7 +210,23 @@ const NAN_FREE_REAL_TIERS = new Set<string>(['integer', 'rational', 'real']);
 export function intervalOfType(
   t: Type,
   seen?: Set<object>
-): Interval | undefined {
+): Readonly<Interval> | undefined {
+  if (seen !== undefined) return readIntervalOfType(t, seen);
+  const cached =
+    typeof t === 'string'
+      ? primitiveIntervals.get(t)
+      : compositeIntervals.get(t);
+  if (cached !== undefined) return cached === NO_INTERVAL ? undefined : cached;
+  if (!isStableType(t)) return readIntervalOfType(t);
+
+  const interval = readIntervalOfType(t);
+  const result = interval === undefined ? NO_INTERVAL : Object.freeze(interval);
+  if (typeof t === 'string') primitiveIntervals.set(t, result);
+  else compositeIntervals.set(t, result);
+  return interval;
+}
+
+function readIntervalOfType(t: Type, seen?: Set<object>): Interval | undefined {
   if (typeof t === 'string') {
     // The bare tiers here are all finite; the SIGNED infinities reach this
     // reader as `±Infinity` VALUE types (points, handled below) or as their
@@ -508,7 +534,9 @@ export function negInterval(a: Interval): Interval {
  * while the reciprocal forgot the divisor was finite — dual-review
  * catch), never unsound. */
 function keepFinite(r: Interval, ...sources: Interval[]): Interval {
-  if (sources.every((s) => s.finite === true)) r.finite = true;
+  // The identity power returns its input, which may be shared and frozen.
+  if (r.finite !== true && sources.every((s) => s.finite === true))
+    r.finite = true;
   return r;
 }
 

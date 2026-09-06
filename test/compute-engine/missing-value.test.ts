@@ -1,3 +1,4 @@
+import { BoxedType } from '../../src/common/type/boxed-type';
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
 import { parseType } from '../../src/common/type/parse';
@@ -330,7 +331,7 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
       missingBehavior: 'propagate',
       type: ([x]) => {
         seen = e.type(x.type).toString();
-        return 'number';
+        return BoxedType.forResult('number');
       },
       evaluate: ([x]) => x,
     });

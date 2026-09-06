@@ -444,7 +444,7 @@ interface BoxedOperatorDefinition
         operands: ReadonlyArray<OperandDescriptorMirror>
       ) => Type | undefined;
     }
-  ) => Type | TypeString | BoxedType | undefined;
+  ) => BoxedType | undefined;
   sgn?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ExpressionComputeEngine }

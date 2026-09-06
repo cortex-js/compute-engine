@@ -1,3 +1,5 @@
+import { BoxedType } from '../../common/type/boxed-type.js';
+import { factsOf } from '../../common/type/facts.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
@@ -151,7 +153,6 @@ import {
   positiveSign,
 } from '../boxed-expression/sgn.js';
 import {
-  EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
@@ -486,14 +487,12 @@ function quotientComponentType(el: Type, den: OperandDescriptor): Type {
   if (operandNonFiniteNumberOnTypes(den)) {
     // The scalar path's symmetric claim: a provably finite real component
     // over a provably non-finite REAL denominator is exactly 0.
-    if (isSubtype(el, 'real') && isExtendedRealOperand(den)) return 'integer';
+    if (factsOf(el).real && isExtendedRealOperand(den)) return 'integer';
     return 'number';
   }
-  if (isSubtype(den.type, 'integer') && isSubtype(el, 'integer'))
-    return 'rational';
-  if (isExtendedRealOperand(den) && isSubtype(el, 'real')) return 'real';
-  if (isSubtype(den.type, 'complex') && isSubtype(el, 'complex'))
-    return 'complex';
+  if (factsOf(den.type).integer && factsOf(el).integer) return 'rational';
+  if (isExtendedRealOperand(den) && factsOf(el).real) return 'real';
+  if (factsOf(den.type).complex && factsOf(el).complex) return 'complex';
   return 'number';
 }
 
@@ -601,18 +600,7 @@ function divisorKeepsNumeratorShape(den: OperandDescriptor): boolean {
     typeCouldBeNumericTuple(dt.elements)
   )
     return false;
-  return !isSubtype(dt, matrixType());
-}
-
-/** The `matrix` type — a list of unknown extent in two dimensions — parsed
- * once on first use. NOT parsed at module initialization: under jest's
- * CommonJS module graph the type parser is not yet initialized when this
- * file's top level executes (the same hazard `POSSIBLY_ZERO_QUOTIENT_TYPE`
- * documents above). */
-let MATRIX_TYPE: Type | undefined;
-function matrixType(): Type {
-  MATRIX_TYPE ??= parseType('matrix')!;
-  return MATRIX_TYPE;
+  return !factsOf(dt).matrix;
 }
 
 /**
@@ -642,7 +630,7 @@ function scaleTupleComponents(
   return {
     kind: 'tuple',
     elements: t.elements.map((e) =>
-      isSubtype(e.type, 'number')
+      factsOf(e.type).belowNumber
         ? { ...e, type: widen(stripNumericRanges(e.type), ...factors) as Type }
         : e
     ),
@@ -678,7 +666,8 @@ function provablyNaNOperand(d: OperandDescriptor): boolean {
   // below is built. The empty type is excluded: it is below every type, and
   // the general path answers `true` for it.
   const t = d.type;
-  if (!isEmptyType(t) && isSubtype(t, 'complex')) return false;
+  const f = factsOf(t);
+  if (!isEmptyType(t) && f.complex) return false;
   const kind = d.structureOf?.()?.kind;
   if (
     kind === 'application' ||
@@ -687,8 +676,8 @@ function provablyNaNOperand(d: OperandDescriptor): boolean {
     kind === 'function-literal'
   )
     return false;
-  if (isSubtype(d.type, 'nan')) return true;
-  if (isSubtype(d.type, 'infinity')) return false;
+  if (f.nan) return true;
+  if (f.infinity) return false;
   return d.facts.finite === false && d.facts.sgn === 'unsigned';
 }
 
@@ -701,7 +690,7 @@ function isExtendedRealOperand(d: OperandDescriptor): boolean {
   // `real` first: it is a primitive, so the test is a lattice lookup, and
   // it answers for nearly every operand; the union `real | +oo | -oo` is
   // consulted only for a type that is not below `real`.
-  return isSubtype(d.type, 'real') || isSubtype(d.type, EXTENDED_REAL_TYPE);
+  return factsOf(d.type).extendedReal;
 }
 
 /** Is this operand's sign a proof that it is not zero? */
@@ -877,7 +866,7 @@ function numericTensorElementType(t0: Type): Type | undefined {
   const t = resolveTypeAlias(t0);
   if (typeof t === 'string' || t.kind !== 'list') return undefined;
   if (t.dimensions === undefined) return undefined;
-  return isSubtype(t.elements, 'number') ? t.elements : undefined;
+  return factsOf(t.elements).belowNumber ? t.elements : undefined;
 }
 
 /** Twin of `isTensorValue`: a literal `List` whose type carries dimensions.
@@ -897,7 +886,7 @@ function isTensorOperand(d: OperandDescriptor): boolean {
 function isNumericTupleType(t0: Type): boolean {
   const t = resolveTypeAlias(t0);
   if (typeof t === 'string' || t.kind !== 'tuple') return false;
-  return t.elements.every((el) => isSubtype(el.type, 'number'));
+  return t.elements.every((el) => factsOf(el.type).belowNumber);
 }
 
 /**
@@ -955,7 +944,7 @@ function isDeclaredScalarNumberOperand(
   engine: PureEngineView
 ): boolean {
   if (isNumericTupleType(d.type)) return false;
-  if (!isSubtype(d.type, 'number')) return false;
+  if (!factsOf(d.type).belowNumber) return false;
   const s = d.structureOf?.();
   if (s === undefined) return false;
   if (s.kind === 'number') return true;
@@ -1117,7 +1106,7 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
     const shaped = args.filter(isBroadcastShaped);
     if (
       shaped.length > 0 &&
-      args.every((x) => isBroadcastShaped(x) || isSubtype(x.type, 'number'))
+      args.every((x) => isBroadcastShaped(x) || factsOf(x.type).belowNumber)
     ) {
       const collected = widen(
         ...shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type)))
@@ -1488,8 +1477,7 @@ function incompleteGammaValueAtInfinity(
 function specialFunctionType(
   ops: ReadonlyArray<OperandDescriptor | undefined>
 ): Type | undefined {
-  if (ops.some((d) => d !== undefined && isSubtype(d.type, 'nan')))
-    return undefined;
+  if (ops.some((d) => d !== undefined && factsOf(d.type).nan)) return undefined;
   return numericTypeHandlerOnTypes(
     ops.filter((d): d is OperandDescriptor => d !== undefined)
   );
@@ -1507,7 +1495,7 @@ const COMPLEX_NAN_TYPE = parseType('complex | nan');
  * `real | nan`. A type that is not a union is returned unchanged. */
 function withoutNaN(t: Type): Type {
   if (typeof t === 'string' || t.kind !== 'union') return t;
-  const rest = t.types.filter((m) => !isSubtype(m, 'nan'));
+  const rest = t.types.filter((m) => !factsOf(m).nan);
   if (rest.length === t.types.length) return t;
   if (rest.length === 1) return rest[0];
   return { kind: 'union', types: rest };
@@ -1544,10 +1532,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A TYPE test, not an `operator === 'Tuple'` check: a tuple-TYPED
       // symbol or lambda parameter is a point too, even without a literal
       // `Tuple` node.
-      type: ([x]) =>
-        x && isTupleTypedOperand(x)
-          ? pointNormType(x)
-          : absFunctionTypeOnTypes(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          x && isTupleTypedOperand(x)
+            ? pointNormType(x)
+            : absFunctionTypeOnTypes(x),
+          context.engine._typeResolver
+        ),
       sgn: ([x], { engine: ce }) => {
         if (x.isNaN) return 'unsigned'; // |NaN| = NaN
         if (x.isSame(0)) return 'zero';
@@ -1592,7 +1583,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `propagate` so an absent operand yields `NaN` (every cell `Add`
       // computes on is numeric — §3.A/§5 of the missing-value typing design).
       missingBehavior: 'propagate',
-      type: addTypeOnTypes,
+      type: (ops, context) =>
+        BoxedType.forResult(addTypeOnTypes(ops), context.engine._typeResolver),
 
       sgn: (ops) => {
         if (ops.some((x) => x.isNaN)) return 'unsigned';
@@ -1715,7 +1707,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // cannot fail (an exact real always has a ceiling): the strong claim
       // discharges the marker arm.
       partiality: 'total',
-      type: ([x]) => roundingFunctionTypeOnTypes(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          roundingFunctionTypeOnTypes(x),
+          context.engine._typeResolver
+        ),
       sgn: ([x]) => {
         if (x.isLessEqual(-1)) return 'negative';
         if (x.isPositive) return 'positive';
@@ -1802,9 +1798,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
       signature: '(complex | infinity, (complex | infinity)+) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => {
+      type: (ops, context) => {
         const [num, den] = ops;
-        if (operandLiteralValueOnTypes(den) === 1) return num.type;
+        if (operandLiteralValueOnTypes(den) === 1)
+          return BoxedType.forResult(num.type, context.engine._typeResolver);
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
         // type, mirroring the `Multiply` handler. `canonicalDivide` scales
         // component-wise only when the numerator's components are ACCESSIBLE
@@ -1836,7 +1833,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           typeCouldBeNumericTuple(num.type) &&
           divisorKeepsNumeratorShape(den)
         )
-          return quotientShapeType(num.type, den);
+          return BoxedType.forResult(
+            quotientShapeType(num.type, den),
+            context.engine._typeResolver
+          );
         // The ELEMENTWISE counterpart of the branch above (Tycho item 209): a
         // COLLECTION whose elements are numeric tuples — a point LIST, e.g.
         // the `N = P / l(P)` a Desmos document writes to normalize a set of
@@ -1857,7 +1857,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           typeCouldBeNumericTupleCollection(num.type) &&
           divisorKeepsNumeratorShape(den)
         )
-          return quotientShapeType(num.type, den);
+          return BoxedType.forResult(
+            quotientShapeType(num.type, den),
+            context.engine._typeResolver
+          );
         // The broadcast-lifted counterpart, one wrapper out (Tycho item 188):
         // a numerator typed `broadcastable<vector<n>>` — a vector-valued call
         // whose arguments' collection-ness is not statically knowable, e.g. a
@@ -1880,10 +1883,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             isShapedNumericType(nt.elements) &&
             !isShapedNumericType(den.type)
           )
-            return {
-              kind: 'broadcastable',
-              elements: quotientShapeType(nt.elements, den),
-            };
+            return BoxedType.forResult(
+              {
+                kind: 'broadcastable',
+                elements: quotientShapeType(nt.elements, den),
+              },
+              context.engine._typeResolver
+            );
         }
         // A proven-NaN operand: DECLINE, so the claim comes from the
         // declaration and the Contract B derivation rather than from this
@@ -1896,7 +1902,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (provablyNaNOperand(den) || provablyNaNOperand(num))
           return undefined;
         // Division by zero: k/0 = ~oo, 0/0 = NaN — indeterminate.
-        if (operandLiteralValueOnTypes(den) === 0) return 'number';
+        if (operandLiteralValueOnTypes(den) === 0)
+          return BoxedType.forResult('number', context.engine._typeResolver);
         // A non-finite operand: `x/±∞ = 0`, `±∞/finite = ±∞`, but `∞/∞`,
         // `∞/i`, `i/∞` give NaN/~oo. Operands like `Ln(0)`, or a symbol
         // declared `+oo | -oo`, have no value to probe: the descriptor's
@@ -1921,7 +1928,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             isExtendedRealOperand(den) &&
             provablyNonZeroSign(den)
           )
-            return '+oo | -oo';
+            return BoxedType.forResult(
+              '+oo | -oo',
+              context.engine._typeResolver
+            );
           // The symmetric claim: a provably finite, real numerator over a
           // provably non-finite REAL denominator is exactly `0`. Both
           // extended-real obligations are load-bearing: `i/∞` and `x/~oo`
@@ -1933,11 +1943,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             nonFinite(den) &&
             isExtendedRealOperand(den)
           )
-            return 'integer';
+            return BoxedType.forResult('integer', context.engine._typeResolver);
           // Every other non-finite configuration (`∞/∞`, `∞/i`, `i/∞`, an
           // unknown-finiteness numerator or denominator) widens to the top
           // type.
-          return 'number';
+          return BoxedType.forResult('number', context.engine._typeResolver);
         }
         // The two real-quotient rungs (interval-division plan,
         // `docs/plans/2026-08-29-interval-division.md` §3.4–§3.5).
@@ -1956,7 +1966,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // n-ary `Divide(a, b, c)` (never canonical) must not get bounds
         // computed from `a / b` alone.
         const bothInteger =
-          isSubtype(den.type, 'integer') && isSubtype(num.type, 'integer');
+          factsOf(den.type).integer && factsOf(num.type).integer;
         if (
           bothInteger ||
           (isExtendedRealOperand(den) && isExtendedRealOperand(num))
@@ -1970,18 +1980,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // numerator was answered by the non-finite arm above; this is
           // the unknown-finiteness residue (pre-existing: this rung
           // claimed `real` for it before the interval round too).
-          if (num.facts.finite !== true) return POSSIBLY_ZERO_QUOTIENT_TYPE;
+          if (num.facts.finite !== true)
+            return BoxedType.forResult(
+              POSSIBLY_ZERO_QUOTIENT_TYPE,
+              context.engine._typeResolver
+            );
           if (dIv === undefined || !intervalExcludesZero(dIv)) {
-            if (!provablyNonZero) return POSSIBLY_ZERO_QUOTIENT_TYPE;
-            return tier;
+            if (!provablyNonZero)
+              return BoxedType.forResult(
+                POSSIBLY_ZERO_QUOTIENT_TYPE,
+                context.engine._typeResolver
+              );
+            return BoxedType.forResult(tier, context.engine._typeResolver);
           }
-          if (ops.length !== 2) return tier;
+          if (ops.length !== 2)
+            return BoxedType.forResult(tier, context.engine._typeResolver);
           const nIv = intervalOfType(num.type);
-          if (nIv === undefined) return tier;
+          if (nIv === undefined)
+            return BoxedType.forResult(tier, context.engine._typeResolver);
           const q = divIntervals(nIv, dIv);
-          return q === undefined
-            ? tier
-            : attachInterval(tier, finalizeInterval(q));
+          return BoxedType.forResult(
+            q === undefined ? tier : attachInterval(tier, finalizeInterval(q)),
+            context.engine._typeResolver
+          );
         }
         // Real/pure-imaginary quotients (mirrors the Multiply type handler;
         // `imaginary`-typed operands are non-zero and non-real by type —
@@ -1992,17 +2013,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // above (which claims `real` even when `den` may be 0): only
         // a literal 0 denominator (caught earlier) yields the top type.
         {
-          const isImag = (x: OperandDescriptor) =>
-            isSubtype(x.type, 'imaginary');
-          if (isImag(num) && isImag(den)) return 'real';
-          if (isImag(num) && isExtendedRealOperand(den)) return 'imaginary';
+          const isImag = (x: OperandDescriptor) => factsOf(x.type).imaginary;
+          if (isImag(num) && isImag(den))
+            return BoxedType.forResult('real', context.engine._typeResolver);
+          if (isImag(num) && isExtendedRealOperand(den))
+            return BoxedType.forResult(
+              'imaginary',
+              context.engine._typeResolver
+            );
           if (isExtendedRealOperand(num) && isImag(den))
-            return provablyNonZeroSign(num) ? 'imaginary' : 'complex';
+            return BoxedType.forResult(
+              provablyNonZeroSign(num) ? 'imaginary' : 'complex',
+              context.engine._typeResolver
+            );
           // A quotient of finite complex operands is a finite complex number.
-          if (isSubtype(num.type, 'complex') && isSubtype(den.type, 'complex'))
-            return 'complex';
+          if (factsOf(num.type).complex && factsOf(den.type).complex)
+            return BoxedType.forResult('complex', context.engine._typeResolver);
         }
-        return 'number';
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
 
       sgn: (ops) => {
@@ -2163,28 +2191,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-22-type-handlers-on-types.md`). A provably-NaN
       // operand declines (`specialFunctionType` records what that buys:
       // the derived claim stays `number` for a `number`-result head).
-      type: ([x]) => {
-        if (x !== undefined && isSubtype(x.type, 'nan')) return undefined;
+      type: ([x], context) => {
+        if (x !== undefined && factsOf(x.type).nan) return undefined;
         const s = x ? operandSgnOnTypes(x) : undefined;
         // A non-negative integer factorial is a (finite) positive integer.
         if (
           x !== undefined &&
-          isSubtype(x.type, 'integer') &&
+          factsOf(x.type).integer &&
           nonNegativeSign(s) === true
         )
-          return 'integer';
+          return BoxedType.forResult('integer', context.engine._typeResolver);
         // A *negative* integer is a pole of Γ(x+1): the value is `~oo`,
         // which no finite type admits and which `+oo | -oo` — the
         // SIGNED pair — excludes, so the claim is the top type `number`
         // (non-finite typing convention).
         if (
           x !== undefined &&
-          isSubtype(x.type, 'integer') &&
+          factsOf(x.type).integer &&
           negativeSign(s) === true
         )
-          return 'number';
+          return BoxedType.forResult('number', context.engine._typeResolver);
         // Otherwise it is Γ(x+1); type it like `Gamma`.
-        return numericTypeHandlerOnTypes([x]);
+        return BoxedType.forResult(
+          numericTypeHandlerOnTypes([x]),
+          context.engine._typeResolver
+        );
       },
 
       // x! = Γ(x+1): positive for x ≥ 0; a pole (~oo) at negative integers.
@@ -2329,22 +2360,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-22-type-handlers-on-types.md`). A provably-NaN
       // operand declines (`specialFunctionType` records what that buys:
       // the derived claim stays `number` for a `number`-result head).
-      type: ([x]) => {
-        if (x !== undefined && isSubtype(x.type, 'nan')) return undefined;
+      type: ([x], context) => {
+        if (x !== undefined && factsOf(x.type).nan) return undefined;
         const s = x ? operandSgnOnTypes(x) : undefined;
         if (
           x !== undefined &&
-          isSubtype(x.type, 'integer') &&
+          factsOf(x.type).integer &&
           nonNegativeSign(s) === true
         )
-          return 'integer';
+          return BoxedType.forResult('integer', context.engine._typeResolver);
         if (
           x !== undefined &&
-          isSubtype(x.type, 'integer') &&
+          factsOf(x.type).integer &&
           negativeSign(s) === true
         )
-          return 'number';
-        return numericTypeHandlerOnTypes([x]);
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        return BoxedType.forResult(
+          numericTypeHandlerOnTypes([x]),
+          context.engine._typeResolver
+        );
       },
       // Positive for x ≥ 0; NaN at negative integers (see evaluate). A
       // negative non-integer stays symbolic (its continuation value can be a
@@ -2419,7 +2453,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(real | signed_infinity) -> integer | signed_infinity',
       nanBehavior: 'propagate',
       partiality: 'total',
-      type: ([x]) => roundingFunctionTypeOnTypes(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          roundingFunctionTypeOnTypes(x),
+          context.engine._typeResolver
+        ),
       sgn: ([x]) => {
         if (x.isNegative) return 'negative';
         if (x.isGreaterEqual(1)) return 'positive';
@@ -2523,10 +2561,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // incomplete Γ(s, z) keeps the generic handler. A provably-NaN
       // operand declines (`specialFunctionType` records what that buys:
       // the derived claim stays `number` for a `number`-result head).
-      type: (ops) =>
-        ops.length === 1
-          ? gammaPoleTypeOnTypes(ops[0])
-          : specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          ops.length === 1
+            ? gammaPoleTypeOnTypes(ops[0])
+            : specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
 
       // Γ is positive on the positive reals; 0 and the negative integers are
       // poles (value ~oo, hence 'unsigned' — NOT 'zero': Γ never vanishes).
@@ -2596,7 +2637,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // poles) and takes the Γ-family values at the infinite points.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => gammaPoleTypeOnTypes(ops[0]),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          gammaPoleTypeOnTypes(ops[0]),
+          context.engine._typeResolver
+        ),
 
       evaluate: (ops, { numericApproximation, engine }) => {
         const x = ops[0];
@@ -2637,7 +2682,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // kernel, a capability gap and not an off-carrier point.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => gammaPoleTypeOnTypes(ops[0]),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          gammaPoleTypeOnTypes(ops[0]),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(0, x, engine);
         if (special !== undefined) return special;
@@ -2658,7 +2707,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `polygammaValueAtExceptionalPoint`'s (`ψ₁(+∞) = 0`).
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => gammaPoleTypeOnTypes(ops[0]),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          gammaPoleTypeOnTypes(ops[0]),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(1, x, engine);
         if (special !== undefined) return special;
@@ -2689,17 +2742,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // provably-NaN operand declines (`specialFunctionType` records what
       // that buys: the derived claim stays `number` for a `number`-result
       // head).
-      type: ([n, x]) => {
+      type: ([n, x], context) => {
         if (
-          (n !== undefined && isSubtype(n.type, 'nan')) ||
-          (x !== undefined && isSubtype(x.type, 'nan'))
+          (n !== undefined && factsOf(n.type).nan) ||
+          (x !== undefined && factsOf(x.type).nan)
         )
           return undefined;
-        return x !== undefined &&
-          isSubtype(x.type, 'integer') &&
-          nonPositiveSign(operandSgnOnTypes(x)) === true
-          ? 'number'
-          : numericTypeHandlerOnTypes([n, x]);
+        return BoxedType.forResult(
+          x !== undefined &&
+            factsOf(x.type).integer &&
+            nonPositiveSign(operandSgnOnTypes(x)) === true
+            ? 'number'
+            : numericTypeHandlerOnTypes([n, x]),
+          context.engine._typeResolver
+        );
       },
       evaluate: ([n, x], { numericApproximation, engine }) => {
         const order = asSmallInteger(n);
@@ -2748,11 +2804,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // provably-NaN operand declines (`specialFunctionType` records what
       // that buys: the derived claim stays `number` for a `number`-result
       // head).
-      type: ([x]) => {
-        if (x !== undefined && isSubtype(x.type, 'nan')) return undefined;
-        return x !== undefined && operandLiteralValueOnTypes(x) === 1
-          ? 'number'
-          : numericTypeHandlerOnTypes([x]);
+      type: ([x], context) => {
+        if (x !== undefined && factsOf(x.type).nan) return undefined;
+        return BoxedType.forResult(
+          x !== undefined && operandLiteralValueOnTypes(x) === 1
+            ? 'number'
+            : numericTypeHandlerOnTypes([x]),
+          context.engine._typeResolver
+        );
       },
       evaluate: ([x], { numericApproximation, engine }) => {
         // The pole and the infinite points are exact, so they are answered
@@ -2811,13 +2870,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // integer (unless cancelled). Such an argument may be a pole → claim the
       // top type `number` per the non-finite typing convention, rather than
       // `real`. (`B(−2, 2) = 1/2` is finite but `number` still admits it.)
-      type: (ops) => {
+      type: (ops, context) => {
         const nonposInt = (x: OperandDescriptor | undefined) =>
           x !== undefined &&
-          isSubtype(x.type, 'integer') &&
+          factsOf(x.type).integer &&
           nonPositiveSign(operandSgnOnTypes(x)) === true;
-        if (nonposInt(ops[0]) || nonposInt(ops[1])) return 'number';
-        return numericTypeHandlerOnTypes(ops);
+        if (nonposInt(ops[0]) || nonposInt(ops[1]))
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        return BoxedType.forResult(
+          numericTypeHandlerOnTypes(ops),
+          context.engine._typeResolver
+        );
       },
       evaluate: ([a, b], { numericApproximation, engine }) => {
         // The infinite points are exact, so they are answered on both
@@ -2894,7 +2957,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // at boxing.
       signature: '(complex | infinity, number?) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation, engine }) => {
         const x = ops[0];
         // Branch index: default 0 (principal W₀). Only the real branches 0
@@ -2955,7 +3022,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       signature: '(order: complex, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
         evaluateBessel('J', n, x, engine, numericApproximation),
     },
@@ -2970,7 +3041,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Signature shape and seams: see `BesselJ` above.
       signature: '(order: complex, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
         evaluateBessel('Y', n, x, engine, numericApproximation),
     },
@@ -2984,7 +3059,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Signature shape and seams: see `BesselJ` above.
       signature: '(order: complex, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
         evaluateBessel('I', n, x, engine, numericApproximation),
     },
@@ -3000,7 +3079,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Signature shape and seams: see `BesselJ` above.
       signature: '(order: complex, complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
         evaluateBessel('K', n, x, engine, numericApproximation),
     },
@@ -3022,7 +3105,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // operand is rejected at boxing.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine }) =>
         airyValueAtInfinity('Ai', x, engine) ??
         (shouldNumericize(numericApproximation, x)
@@ -3039,7 +3126,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine }) =>
         airyValueAtInfinity('Bi', x, engine) ??
         (shouldNumericize(numericApproximation, x)
@@ -3056,7 +3147,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine }) =>
         airyValueAtInfinity('AiPrime', x, engine) ??
         (shouldNumericize(numericApproximation, x)
@@ -3073,7 +3168,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Signature and seams: see `AiryAi` above.
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => specialFunctionType(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          specialFunctionType(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([x], { numericApproximation, engine }) =>
         airyValueAtInfinity('BiPrime', x, engine) ??
         (shouldNumericize(numericApproximation, x)
@@ -3108,7 +3207,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature:
         '(complex | infinity, base: complex | infinity?) -> complex | infinity',
       nanBehavior: 'propagate',
-      type: (ops) => elementaryFunctionTypeOnTypes('Ln', ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          elementaryFunctionTypeOnTypes('Ln', ops),
+          context.engine._typeResolver
+        ),
       sgn: ([x]) => lnSign(x),
       evaluate: ([z], { numericApproximation, engine }) => {
         // Ln(a, b) = Log(a, b), so no need to check second argument
@@ -3169,7 +3272,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // sharpness lives in the type handler.
       signature: '(complex | infinity, base: complex | infinity?) -> number',
       nanBehavior: 'propagate',
-      type: (ops) => elementaryFunctionTypeOnTypes('Log', ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          elementaryFunctionTypeOnTypes('Log', ops),
+          context.engine._typeResolver
+        ),
 
       sgn: ([x, base]) => {
         if (!base) return lnSign(x);
@@ -3343,8 +3450,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // proven real is not decided here either, or a symbol holding `+∞`
         // would take the marker instead of the carrier error.
         if (
-          !isSubtype(broadcastCellType(dividend.type.type), 'real') ||
-          !isSubtype(broadcastCellType(divisor.type.type), 'real')
+          !factsOf(broadcastCellType(dividend.type.type)).real ||
+          !factsOf(broadcastCellType(divisor.type.type)).real
         )
           return undefined;
         if (isNumber(divisor)) return !divisor.isSame(0);
@@ -3352,7 +3459,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (positiveSign(s) === true || negativeSign(s) === true) return true;
         return s === 'not-zero' ? true : undefined;
       },
-      type: ([a, b]) => {
+      type: ([a, b], context) => {
         if (!a || !b) return undefined;
         // A floored remainder is defined only for a finite real dividend and a
         // finite, non-zero real modulus, and it stays in the operands' common
@@ -3384,11 +3491,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (!bNonZero) return undefined;
         const ta = broadcastCellType(a.type);
         const tb = broadcastCellType(b.type);
-        if (isSubtype(ta, 'integer') && isSubtype(tb, 'integer'))
-          return 'integer';
-        if (isSubtype(ta, 'rational') && isSubtype(tb, 'rational'))
-          return 'rational';
-        if (isSubtype(ta, 'real') && isSubtype(tb, 'real')) return 'real';
+        if (factsOf(ta).integer && factsOf(tb).integer)
+          return BoxedType.forResult('integer', context.engine._typeResolver);
+        if (factsOf(ta).rational && factsOf(tb).rational)
+          return BoxedType.forResult('rational', context.engine._typeResolver);
+        if (factsOf(ta).real && factsOf(tb).real)
+          return BoxedType.forResult('real', context.engine._typeResolver);
         return undefined;
       },
       sgn: (ops) => {
@@ -3511,8 +3619,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       lazy: true,
       signature: '(number*) -> number',
       type: (ops, { engine }) => {
-        if (ops.length === 0) return 'integer'; // = 1
-        if (ops.length === 1) return ops[0].type;
+        if (ops.length === 0)
+          return BoxedType.forResult('integer', engine._typeResolver); // = 1
+        if (ops.length === 1)
+          return BoxedType.forResult(ops[0].type, engine._typeResolver);
         // A dimensionless list/indexed-collection factor together with a
         // numeric-tuple (point) factor broadcasts the collection while scaling
         // the point component-wise: the value path (`mul()`) checks the
@@ -3576,7 +3686,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 : undefined;
             });
           const scaled = factorTypes.every(
-            (t) => t !== undefined && isSubtype(t, 'number')
+            (t) => t !== undefined && factsOf(t).belowNumber
           )
             ? scaleTupleComponents(tupleType, factorTypes as Type[])
             : tupleType;
@@ -3589,8 +3699,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? undefined
               : (resolveTypeAlias(tensor.type) as ListType).dimensions;
           if (dims !== undefined)
-            return { kind: 'list', elements: scaled, dimensions: dims };
-          return broadcastResultType(scaled);
+            return BoxedType.forResult(
+              { kind: 'list', elements: scaled, dimensions: dims },
+              engine._typeResolver
+            );
+          return BoxedType.forResult(
+            broadcastResultType(scaled),
+            engine._typeResolver
+          );
         }
         // A numeric tuple (point/vector) scaled by scalars keeps the tuple
         // type. Hoisted above the NaN/finiteness early-returns (a tuple is
@@ -3613,13 +3729,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // the tuple type as written.
           const others = ops.filter((x) => x !== tupleOps[0]);
           if (others.every((x) => isDeclaredScalarNumberOperand(x, engine)))
-            return scaleTupleComponents(
-              tupleOps[0].type,
-              others.map((x) => x.type)
+            return BoxedType.forResult(
+              scaleTupleComponents(
+                tupleOps[0].type,
+                others.map((x) => x.type)
+              ),
+              engine._typeResolver
             );
           // The echo unfolds a transparent alias: the product is typed by the
           // tuple it names (the alias policy of the broadcast lift).
-          return resolveTypeAlias(tupleOps[0].type);
+          return BoxedType.forResult(
+            resolveTypeAlias(tupleOps[0].type),
+            engine._typeResolver
+          );
         }
         // Element-wise product of a single tensor (vector/matrix) with scalars
         // keeps the tensor's shape/type. The list-broadcast wrapper is
@@ -3648,9 +3770,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // tensor's honest cell type with the scalar types so the
             // declared type stays a sound upper bound (`x·[0,0,1,1]` has
             // `number` cells, not `integer`).
-            return absorbScalarsIntoCells(
-              tensorOps[0].type,
-              others.map((x) => x.type)
+            return BoxedType.forResult(
+              absorbScalarsIntoCells(
+                tensorOps[0].type,
+                others.map((x) => x.type)
+              ),
+              engine._typeResolver
             );
           }
         }
@@ -3699,13 +3824,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             (x) => !isLinearAlgebraCollectionType(x.type)
           );
           if (others.every((x) => isDeclaredScalarNumberOperand(x, engine)))
-            return absorbScalarsIntoCells(
-              collectionOps[0].type,
-              others.map((x) => x.type)
+            return BoxedType.forResult(
+              absorbScalarsIntoCells(
+                collectionOps[0].type,
+                others.map((x) => x.type)
+              ),
+              engine._typeResolver
             );
           // The echo unfolds a transparent alias: the product is typed by the
           // collection it names (the alias policy of the broadcast lift).
-          return resolveTypeAlias(collectionOps[0].type);
+          return BoxedType.forResult(
+            resolveTypeAlias(collectionOps[0].type),
+            engine._typeResolver
+          );
         }
         if (collectionOps.length > 1) {
           // A point LIST paired with a sibling collection of SCALARS scales
@@ -3743,24 +3874,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             tupleCollections.length === 1 &&
             collectionOps.every((x) => {
               if (x === tupleCollections[0]) return true;
-              if (isSubtype(x.type, matrixType())) return false;
+              if (factsOf(x.type).matrix) return false;
               const el = collectionElementTypeOf(x.type);
-              if (el === undefined || !isSubtype(el, 'number')) return false;
+              if (el === undefined || !factsOf(el).belowNumber) return false;
               scalarSiblings.push(el);
               return true;
             });
           if (siblingsAreRank1Scalars)
-            return absorbScalarsIntoCells(
-              tupleCollections[0].type,
-              scalarSiblings
+            return BoxedType.forResult(
+              absorbScalarsIntoCells(tupleCollections[0].type, scalarSiblings),
+              engine._typeResolver
             );
           // Strip range decorations before the join: a product of two
           // `list<real<-1..>>` operands does not stay above −1
           // (see `stripNumericRanges`).
-          return widen(
-            ...collectionOps.map((x) =>
-              stripNumericRanges(broadcastSiblingType(x.type))
-            )
+          return BoxedType.forResult(
+            widen(
+              ...collectionOps.map((x) =>
+                stripNumericRanges(broadcastSiblingType(x.type))
+              )
+            ),
+            engine._typeResolver
           );
         }
         // An operand whose collection-ness is not statically visible (a top
@@ -3772,8 +3906,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // neither NaN-ness nor finiteness. The `imaginary` → `complex`
         // closure (i·i = −1 is real) is applied inside the helper.
         if (ops.some((x) => isPossiblyCollectionTypedOperand(x)))
-          return broadcastableResultTypeOfOperands(ops);
-        if (ops.some((x) => provablyNaNOperand(x))) return 'number';
+          return BoxedType.forResult(
+            broadcastableResultTypeOfOperands(ops),
+            engine._typeResolver
+          );
+        if (ops.some((x) => provablyNaNOperand(x)))
+          return BoxedType.forResult('number', engine._typeResolver);
         // A provably non-finite factor may be visible only in its static
         // TYPE: `Ln(0)` types `+oo | -oo`, as does a symbol declared
         // `+oo | -oo`, and neither has a value to probe.
@@ -3783,7 +3921,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => operandNonFiniteNumberOnTypes(x))) {
           // 0 · ±∞ = NaN (indeterminate).
           if (ops.some((x) => operandLiteralValueOnTypes(x) === 0))
-            return 'number';
+            return BoxedType.forResult('number', engine._typeResolver);
           // real · ±∞ = ±∞ (a non-finite real); a non-real factor (i, complex)
           // with ∞ gives ~oo or NaN, and a *possibly-zero* finite factor gives
           // NaN (0 · ∞). So every factor must be provably REAL, and every
@@ -3807,8 +3945,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return provablyNonZeroSign(x);
             })
           )
-            return '+oo | -oo';
-          return 'number';
+            return BoxedType.forResult('+oo | -oo', engine._typeResolver);
+          return BoxedType.forResult('number', engine._typeResolver);
         }
         // From here every operand is finite (no `isFinite === false`).
         // The all-real tiers get an interval refinement (interval
@@ -3826,12 +3964,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               mulIntervals
             )
           );
-        if (ops.every((x) => isSubtype(x.type, 'integer')))
-          return refineMul('integer');
+        if (ops.every((x) => factsOf(x.type).integer))
+          return BoxedType.forResult(
+            refineMul('integer'),
+            engine._typeResolver
+          );
         if (ops.every((x) => isExtendedRealOperand(x)))
-          return refineMul('real');
-        if (ops.every((x) => isSubtype(x.type, 'rational')))
-          return refineMul('rational');
+          return BoxedType.forResult(refineMul('real'), engine._typeResolver);
+        if (ops.every((x) => factsOf(x.type).rational))
+          return BoxedType.forResult(
+            refineMul('rational'),
+            engine._typeResolver
+          );
 
         // Real × pure-imaginary products: at least one factor is typed
         // `imaginary` and every other factor is provably real. Since
@@ -3846,25 +3990,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //   factors are non-zero by type); otherwise the sound answer is
         //   `complex` (e.g. `x·i` with real x ∋ 0 may be 0, which
         //   is not `imaginary`).
-        const isImaginary = (x: OperandDescriptor) =>
-          isSubtype(x.type, 'imaginary');
+        const isImaginary = (x: OperandDescriptor) => factsOf(x.type).imaginary;
         const imaginaryCount = ops.filter(isImaginary).length;
         if (
           imaginaryCount > 0 &&
           ops.every((x) => isImaginary(x) || isExtendedRealOperand(x))
         ) {
-          if (imaginaryCount % 2 === 0) return 'real';
+          if (imaginaryCount % 2 === 0)
+            return BoxedType.forResult('real', engine._typeResolver);
           if (ops.every((x) => isImaginary(x) || provablyNonZeroSign(x)))
-            return 'imaginary';
-          return 'complex';
+            return BoxedType.forResult('imaginary', engine._typeResolver);
+          return BoxedType.forResult('complex', engine._typeResolver);
         }
 
         // A product of finite complex factors is itself a finite complex
         // number (e.g. `√2·(1+i)`): claim `complex` rather than the
         // complex-unaware top type `number`.
-        if (ops.every((x) => isSubtype(x.type, 'complex'))) return 'complex';
+        if (ops.every((x) => factsOf(x.type).complex))
+          return BoxedType.forResult('complex', engine._typeResolver);
 
-        return 'number';
+        return BoxedType.forResult('number', engine._typeResolver);
       },
       // @fastpath: canonicalization is done in the function
       // makeNumericFunction().
@@ -4031,7 +4176,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // for `L: nums` (an alias of `list<number>`) is `list<number>` — the
       // alias policy of the broadcast lift — while a scalar alias keeps its
       // name (`-m` for `m: meters` is `meters`, like `m + 1`).
-      type: ([x]) => negateNumericType(resolveShapedTypeAlias(x.type)),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          negateNumericType(resolveShapedTypeAlias(x.type)),
+          context.engine._typeResolver
+        ),
       sgn: ([x]) => oppositeSgn(x.sgn),
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
@@ -4084,7 +4233,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       lazy: true,
       signature: '(value, value) -> value',
-      type: measurementTypeOnTypes,
+      type: (ops, context) =>
+        BoxedType.forResult(
+          measurementTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return ce.error('incompatible-type');
         const value = args[0].canonical;
@@ -4188,7 +4341,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // type handler below.
       signature: '(complex | infinity, complex | signed_infinity) -> number',
       nanBehavior: 'propagate',
-      type: ([base, exp]) => {
+      type: ([base, exp], context) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` from the propagate policy (the
         // `Sqrt`/`Erf` precedent).
@@ -4216,8 +4369,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             positiveSign(expSgn) === true &&
             operandNonFiniteNumberOnTypes(base)
           )
-            return '+oo | -oo';
-          return 'number';
+            return BoxedType.forResult(
+              '+oo | -oo',
+              context.engine._typeResolver
+            );
+          return BoxedType.forResult('number', context.engine._typeResolver);
         }
         // `0` raised to a non-positive power is a pole: `0^0` is indeterminate
         // and `0^-k = ±∞` (P0-11: `0^(−0.5) = +∞`).
@@ -4225,7 +4381,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           operandLiteralValueOnTypes(base) === 0 &&
           positiveSign(expSgn) !== true
         )
-          return 'number';
+          return BoxedType.forResult('number', context.engine._typeResolver);
         // Interval refinement for a LITERAL positive integer exponent (the
         // ruled first-round scope of the interval-arithmetic plan,
         // `docs/plans/2026-08-27-interval-arithmetic-result-types.md`;
@@ -4283,14 +4439,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // (P0-11: `2^-2 = 1/4`). An EVEN exponent adds the sign: x² ≥ 0
         // (and x⁻² ≥ 0) for any real x (ROADMAP "Ranged types should carry
         // sign…", work item 4 — the even-power head).
-        const baseIsInteger = isSubtype(base.type, 'integer');
-        const expIsInteger = isSubtype(exp.type, 'integer');
+        const baseIsInteger = factsOf(base.type).integer;
+        const expIsInteger = factsOf(exp.type).integer;
         if (baseIsInteger && expIsInteger) {
           if (nonNegativeSign(expSgn) === true) {
             const even = operandParityIsEven(exp) === true;
-            return (
+            return BoxedType.forResult(
               refinePow('integer', { clampNonNegative: even }) ??
-              (even ? nonNegativeRangeType('integer') : 'integer')
+                (even ? nonNegativeRangeType('integer') : 'integer'),
+              context.engine._typeResolver
             );
           }
           {
@@ -4299,19 +4456,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // literal exponent is known (`x: integer<2<..<3>`, `x^-2`) —
             // unless the base may be zero, a pole.
             const even = operandParityIsEven(exp) === true;
-            return (
+            return BoxedType.forResult(
               negativePoleTier() ??
-              refinePow('rational', { clampNonNegative: even }) ??
-              (even ? nonNegativeRangeType('rational') : 'rational')
+                refinePow('rational', { clampNonNegative: even }) ??
+                (even ? nonNegativeRangeType('rational') : 'rational'),
+              context.engine._typeResolver
             );
           }
         }
-        if (isSubtype(base.type, 'rational') && expIsInteger) {
+        if (factsOf(base.type).rational && expIsInteger) {
           const even = operandParityIsEven(exp) === true;
-          return (
+          return BoxedType.forResult(
             negativePoleTier() ??
-            refinePow('rational', { clampNonNegative: even }) ??
-            (even ? nonNegativeRangeType('rational') : 'rational')
+              refinePow('rational', { clampNonNegative: even }) ??
+              (even ? nonNegativeRangeType('rational') : 'rational'),
+            context.engine._typeResolver
           );
         }
         // A real result needs a non-negative base or an integer exponent;
@@ -4328,24 +4487,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // The refinement must keep the positivity this arm proves, so
             // it only replaces the `& !0` claim when its own lower bound
             // is strictly positive.
-            return (
+            return BoxedType.forResult(
               refinePow('real', { requirePositive: true }) ??
-              positiveRangeType('real')
+                positiveRangeType('real'),
+              context.engine._typeResolver
             );
           if (nonNegativeSign(baseSgn) === true)
-            return (
+            return BoxedType.forResult(
               negativePoleTier() ??
-              refinePow('real', { clampNonNegative: true }) ??
-              nonNegativeRangeType('real')
+                refinePow('real', { clampNonNegative: true }) ??
+                nonNegativeRangeType('real'),
+              context.engine._typeResolver
             );
           if (operandParityIsEven(exp) === true)
-            return (
+            return BoxedType.forResult(
               negativePoleTier() ??
-              refinePow('real', { clampNonNegative: true }) ??
-              nonNegativeRangeType('real')
+                refinePow('real', { clampNonNegative: true }) ??
+                nonNegativeRangeType('real'),
+              context.engine._typeResolver
             );
           if (expIsInteger)
-            return negativePoleTier() ?? refinePow('real') ?? 'real';
+            return BoxedType.forResult(
+              negativePoleTier() ?? refinePow('real') ?? 'real',
+              context.engine._typeResolver
+            );
           // A *provably negative* base with an exponent that provably lands on
           // the complex branch (`(−2)^0.3`) is a finite complex value — the
           // `number` default below is true but too coarse for the
@@ -4357,17 +4522,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             negativeSign(baseSgn) === true &&
             negativeBaseIsComplexBranch(exp)
           )
-            return 'complex';
+            return BoxedType.forResult('complex', context.engine._typeResolver);
         }
         // A pure-imaginary base (non-zero by type: `imaginary ∩ real =
         // nothing` in the lattice, and 0 is real) raised to an integer power:
         // (bi)^n = bⁿ·iⁿ, so an even n is real, an odd n is pure imaginary
         // (non-zero since b ≠ 0), and an unknown-parity integer is one of the
         // two — both ⊂ `complex`.
-        if (isSubtype(base.type, 'imaginary') && expIsInteger) {
-          if (operandParityIsEven(exp) === true) return 'real';
-          if (operandParityIsOdd(exp) === true) return 'imaginary';
-          return 'complex';
+        if (factsOf(base.type).imaginary && expIsInteger) {
+          if (operandParityIsEven(exp) === true)
+            return BoxedType.forResult('real', context.engine._typeResolver);
+          if (operandParityIsOdd(exp) === true)
+            return BoxedType.forResult(
+              'imaginary',
+              context.engine._typeResolver
+            );
+          return BoxedType.forResult('complex', context.engine._typeResolver);
         }
         // A positive real base raised to a finite complex power is
         // e^(exp·ln base): finite and non-zero, hence a finite complex
@@ -4375,10 +4545,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (
           isExtendedRealOperand(base) &&
           positiveSign(baseSgn) === true &&
-          isSubtype(exp.type, 'complex')
+          factsOf(exp.type).complex
         )
-          return 'complex';
-        return 'number';
+          return BoxedType.forResult('complex', context.engine._typeResolver);
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       canonical: (args, { engine }) => {
         // @fastpath: See also shortcut in makeNumericFunction()
@@ -4681,7 +4851,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (n === undefined || !isNumber(n)) return undefined;
         return n.isSame(0) ? false : undefined;
       },
-      type: ([base, exp]) => {
+      type: ([base, exp], context) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the `Sqrt` precedent).
         if (provablyNaNOperand(base) || provablyNaNOperand(exp))
@@ -4693,19 +4863,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           operandNonFiniteNumberOnTypes(base) ||
           operandNonFiniteNumberOnTypes(exp)
         )
-          return 'number';
+          return BoxedType.forResult('number', context.engine._typeResolver);
         // Root(x, 0) = x^(1/0) = x^~oo: an Error at evaluation (the
         // `requires` precondition above); the type stays the wide hedge.
-        if (operandLiteralValueOnTypes(exp) === 0) return 'number';
-        if (operandLiteralValueOnTypes(exp) === 1) return base.type;
+        if (operandLiteralValueOnTypes(exp) === 0)
+          return BoxedType.forResult('number', context.engine._typeResolver);
+        if (operandLiteralValueOnTypes(exp) === 1)
+          return BoxedType.forResult(base.type, context.engine._typeResolver);
         // Root(0, n): 0 for n>0, a pole (±∞) for n≤0, NaN for a complex index.
         const rootExpSgn = operandSgnOnTypes(exp);
         if (operandLiteralValueOnTypes(base) === 0)
-          return positiveSign(rootExpSgn) === true ? 'integer' : 'number';
+          return BoxedType.forResult(
+            positiveSign(rootExpSgn) === true ? 'integer' : 'number',
+            context.engine._typeResolver
+          );
         if (isExtendedRealOperand(base) && isExtendedRealOperand(exp)) {
           const rootBaseSgn = operandSgnOnTypes(base);
           // A positive base always gives a positive real root.
-          if (positiveSign(rootBaseSgn) === true) return 'real';
+          if (positiveSign(rootBaseSgn) === true)
+            return BoxedType.forResult('real', context.engine._typeResolver);
           // A negative real base with a provably *even* degree has no real
           // value: Root(−8, 4) = 1.1892… + 1.1892…i. (An *odd* degree keeps
           // CE's real-root convention — Root(−8, 3) = −2 — and a degree of
@@ -4716,14 +4892,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             operandParityIsEven(exp) === true &&
             positiveSign(rootExpSgn) === true
           )
-            return 'complex';
+            return BoxedType.forResult('complex', context.engine._typeResolver);
           // A negative real base: a positive index yields a finite (real or
           // complex) value; a non-positive index can numericize to NaN in the
           // current evaluate path (e.g. Root(−2,−2)), so widen to `number`.
-          if (positiveSign(rootExpSgn) === true) return 'number';
-          return 'number';
+          if (positiveSign(rootExpSgn) === true)
+            return BoxedType.forResult('number', context.engine._typeResolver);
+          return BoxedType.forResult('number', context.engine._typeResolver);
         }
-        return 'number';
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       sgn: ([x, n]) => {
         // Note: we can't simplify this to a power, then get the sgn of that because this may cause an infinite loop
@@ -4833,9 +5010,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`.)
       signature: '(real | signed_infinity, integer?) -> real | signed_infinity',
       nanBehavior: ['propagate'],
-      type: ([x, n]) => {
+      type: ([x, n], context) => {
         const t = roundingFunctionTypeOnTypes(x);
-        if (n === undefined) return t;
+        if (n === undefined)
+          return BoxedType.forResult(t, context.engine._typeResolver);
         // With a precision arg the result is generally non-integer
         // (`Round(3.14159, 2)` is `3.14`): keep the non-finite
         // classification, but replace the integer claim by `real`.
@@ -4843,7 +5021,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `integer`, including a bare `real` symbol of unknown
         // finiteness — an earlier guard on `isFinite === true` let
         // `Round(x, 2)` with `x: real` fall through to `integer`.
-        if (t === 'integer') return 'real';
+        if (t === 'integer')
+          return BoxedType.forResult('real', context.engine._typeResolver);
         if (t === undefined) return undefined;
         // A pure signed-infinity claim survives the precision arg
         // (`Round(±∞, n) = ±∞`); any mixed claim relaxes to
@@ -4851,7 +5030,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // decline and let it apply. Structural test, not object identity:
         // the helper's claim must not be tied to which constant it built
         // the type from.
-        return isSubtype(t, SIGNED_INFINITY_TYPE) ? t : undefined;
+        return BoxedType.forResult(
+          isSubtype(t, SIGNED_INFINITY_TYPE) ? t : undefined,
+          context.engine._typeResolver
+        );
       },
       sgn: ([x, n]) => {
         // Only reason about the sign in the single-argument (round-to-integer)
@@ -4917,8 +5099,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // VALID operand is in the extended-real carrier now, but the sign
       // channel can be probed before validation settles, so the guard
       // stays: extended realness, matching the carrier.
-      sgn: ([x]) =>
-        x.type.matches(EXTENDED_REAL_TYPE) ? 'non-negative' : undefined,
+      sgn: ([x]) => (x.type.facts.extendedReal ? 'non-negative' : undefined),
       evaluate: ([x], { engine }) => {
         // Only mathematics: the NaN arm this handler used to carry is the
         // generic policy gate's job now (`nanBehavior: 'propagate'`
@@ -4949,8 +5130,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // adds the `nan` arm exactly where the argument can carry one.
       // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4.)
       signature: '(complex | signed_infinity) -> complex',
-      type: ([x]) => {
-        if (x === undefined) return 'complex';
+      type: ([x], context) => {
+        if (x === undefined)
+          return BoxedType.forResult('complex', context.engine._typeResolver);
         // Under a broadcast the handler describes ONE element and the call
         // site re-wraps the operand's shape (`broadcastOperandType`).
         const t = broadcastOperandType(x);
@@ -4961,14 +5143,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // the `nan` arm beside the sign's own type, which is read off the
         // NaN-free part: the NaN member alone must not turn a real operand
         // into a complex one.
-        if (t !== 'never' && isSubtype(t, 'nan')) return undefined;
+        if (t !== 'never' && factsOf(t).nan) return undefined;
         const maybeNaN = couldMatch(t, 'nan');
-        const real = isSubtype(
-          maybeNaN ? withoutNaN(t) : t,
-          EXTENDED_REAL_TYPE
+        const real = factsOf(maybeNaN ? withoutNaN(t) : t).extendedReal;
+        if (!maybeNaN)
+          return BoxedType.forResult(
+            real ? SIGN_RANGE_TYPE : 'complex',
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(
+          real ? SIGN_RANGE_NAN_TYPE : COMPLEX_NAN_TYPE,
+          context.engine._typeResolver
         );
-        if (!maybeNaN) return real ? SIGN_RANGE_TYPE : 'complex';
-        return real ? SIGN_RANGE_NAN_TYPE : COMPLEX_NAN_TYPE;
       },
       // Explicit: the DERIVED default for this carrier would propagate
       // already (a finite complex carrier is the mechanical propagate test),
@@ -5044,7 +5230,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
-      type: ([x]) => {
+      type: ([x], context) => {
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the propagated value's own type).
         if (provablyNaNOperand(x)) return undefined;
@@ -5053,9 +5239,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // signed pair `+oo | -oo` excludes `~oo`, so only the top
           // type admits it (non-finite typing convention).
           const s = operandSgnOnTypes(x);
-          if (negativeSign(s) === true) return 'number';
-          if (nonNegativeSign(s) === true) return '+oo | -oo';
-          return 'number';
+          if (negativeSign(s) === true)
+            return BoxedType.forResult('number', context.engine._typeResolver);
+          if (nonNegativeSign(s) === true)
+            return BoxedType.forResult(
+              '+oo | -oo',
+              context.engine._typeResolver
+            );
+          return BoxedType.forResult('number', context.engine._typeResolver);
         }
         // Whether the operand's TYPE proves it finite.
         // A subtype test against `complex` is the engine's canonical
@@ -5067,7 +5258,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // extended-real arm below needs that distinction: `√(+∞) = +∞`, so a
         // `finite_*` claim over a type that spells out `+oo | -oo`
         // would be a lie.
-        const finiteOperand = isSubtype(x.type, 'complex');
+        const finiteOperand = factsOf(x.type).complex;
         if (isExtendedRealOperand(x)) {
           // √x of a provably non-negative real is real; otherwise the value
           // may be a finite pure-imaginary (`√−2 = 1.414…i`), so an
@@ -5095,15 +5286,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // unchanged. See the §5.4 `Sqrt` row of
           // `docs/plans/2026-08-22-type-handlers-on-types.md`.
           if (nonNegativeSign(operandSgnOnTypes(x)) === true)
-            return finiteOperand ? 'real' : 'real | +oo | -oo';
-          return finiteOperand ? 'complex' : 'number';
+            return BoxedType.forResult(
+              finiteOperand ? 'real' : 'real | +oo | -oo',
+              context.engine._typeResolver
+            );
+          return BoxedType.forResult(
+            finiteOperand ? 'complex' : 'number',
+            context.engine._typeResolver
+          );
         }
         // An operand that is not on the extended real line keeps the generic-
         // point convention the other numeric handlers use (`numericTypeHandler`,
         // `library/type-handlers.ts`): merely-possible non-finiteness does not
         // demote the claim, only a PROVABLE one does, and that was answered
         // above.
-        return 'number';
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       // @fastpath: canonicalization is done in the function
       // makeNumericFunction().
@@ -5249,7 +5446,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(real | signed_infinity) -> integer | signed_infinity',
       nanBehavior: 'propagate',
       partiality: 'total',
-      type: ([x]) => roundingFunctionTypeOnTypes(x),
+      type: ([x], context) =>
+        BoxedType.forResult(
+          roundingFunctionTypeOnTypes(x),
+          context.engine._typeResolver
+        ),
       // trunc(x) = 0 for |x| < 1, so the sign of x alone is not enough
       // (trunc(1/2) = 0, not positive). Mirror the Floor/Ceil interval logic.
       sgn: ([x]) => {
@@ -5472,14 +5673,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       // n + 1 stays in the operand's numeric kind (except `imaginary`, which
       // the handler widens to complex), so the result claims that kind.
-      type: kindClosureType,
+      type: (ops, context) =>
+        BoxedType.forResult(kindClosureType(ops), context.engine._typeResolver),
     },
     PreDecrement: {
       description: 'Decrement a number by one.',
       signature: '(number) -> number',
       // n - 1 stays in the operand's numeric kind (except `imaginary`, which
       // the handler widens to complex), so the result claims that kind.
-      type: kindClosureType,
+      type: (ops, context) =>
+        BoxedType.forResult(kindClosureType(ops), context.engine._typeResolver),
     },
   },
 
@@ -5489,10 +5692,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
   {
     IsPrime: {
-      type: (ops) =>
-        literalPredicateType(
-          ops,
-          (n) => Number.isInteger(n) && isPrimeNumber(n)
+      type: (ops, context) =>
+        BoxedType.forResult(
+          literalPredicateType(
+            ops,
+            (n) => Number.isInteger(n) && isPrimeNumber(n)
+          ),
+          context.engine._typeResolver
         ),
       description: '`IsPrime(n)` returns `True` if `n` is a prime number',
       wikidata: 'Q49008',
@@ -5526,10 +5732,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
     IsComposite: {
-      type: (ops) =>
-        literalPredicateType(
-          ops,
-          (n) => Number.isInteger(n) && n > 3 && !isPrimeNumber(n)
+      type: (ops, context) =>
+        BoxedType.forResult(
+          literalPredicateType(
+            ops,
+            (n) => Number.isInteger(n) && n > 3 && !isPrimeNumber(n)
+          ),
+          context.engine._typeResolver
         ),
       description:
         '`IsComposite(n)` returns `True` if `n` is a composite number',
@@ -5554,10 +5763,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     IsOdd: {
-      type: (ops) =>
-        literalPredicateType(
-          ops,
-          (n) => Number.isInteger(n) && Math.abs(n % 2) === 1
+      type: (ops, context) =>
+        BoxedType.forResult(
+          literalPredicateType(
+            ops,
+            (n) => Number.isInteger(n) && Math.abs(n % 2) === 1
+          ),
+          context.engine._typeResolver
         ),
       description: '`IsOdd(n)` returns `True` if `n` is an odd number',
       complexity: 1200,
@@ -5572,8 +5784,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([n], { engine }) => parityPredicate(engine, n, 'odd'),
     },
     IsEven: {
-      type: (ops) =>
-        literalPredicateType(ops, (n) => Number.isInteger(n) && n % 2 === 0),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          literalPredicateType(ops, (n) => Number.isInteger(n) && n % 2 === 0),
+          context.engine._typeResolver
+        ),
       description: '`IsEven(n)` returns `True` if `n` is an even number',
       complexity: 1200,
       broadcastable: true,
@@ -5596,8 +5811,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(any*) -> number',
       // Integer operands → a positive integer; polynomial operands → a
       // (monic) polynomial whose type and sign aren't known statically.
-      type: (ops) =>
-        ops.every((x) => isSubtype(x.type, 'integer')) ? 'integer' : 'number',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          ops.every((x) => factsOf(x.type).integer) ? 'integer' : 'number',
+          context.engine._typeResolver
+        ),
       // gcd ≥ 0, and positive iff some argument is nonzero (gcd(0,…,0) = 0).
       sgn: (ops) => {
         if (!ops.every((x) => x.isInteger)) return undefined;
@@ -5630,8 +5848,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Integer operands → a positive integer; non-integer real operands →
       // a (non-negative) real via the tolerant float LCM.
       signature: '(any*) -> number',
-      type: (ops) =>
-        ops.every((x) => isSubtype(x.type, 'integer')) ? 'integer' : 'number',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          ops.every((x) => factsOf(x.type).integer) ? 'integer' : 'number',
+          context.engine._typeResolver
+        ),
       // lcm ≥ 0; zero as soon as ANY argument is zero (lcm(0, n) = 0), and
       // positive only when every argument is provably nonzero.
       sgn: (ops) => {
@@ -5816,7 +6037,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // input evaluates to `NaN` (I6 absorption). `missingStrip: 'all'` (the
       // default) lets a `Missing` operand validate against `(value*)`.
       missingBehavior: 'handle',
-      type: (ops) => extremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          extremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       sgn: (ops) => {
         if (ops.some((x) => x.isExtendedReal == false || x.isNaN))
           return 'unsigned';
@@ -5849,7 +6074,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // including collections
       signature: '(value+) -> number',
       missingBehavior: 'handle',
-      type: (ops) => extremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          extremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       sgn: (ops) => {
         if (ops.some((x) => x.isExtendedReal == false || x.isNaN))
           return 'unsigned';
@@ -5900,7 +6129,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         '(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity',
       nanBehavior: 'propagate',
       partiality: 'total',
-      type: (ops) => elementExtremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          elementExtremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation }) =>
         foldExtremum(ops, true, numericApproximation === true),
     },
@@ -5915,7 +6148,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         '(real | signed_infinity, (real | signed_infinity)+) -> real | signed_infinity',
       nanBehavior: 'propagate',
       partiality: 'total',
-      type: (ops) => elementExtremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          elementExtremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { numericApproximation }) =>
         foldExtremum(ops, false, numericApproximation === true),
     },
@@ -5930,7 +6167,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         '(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | signed_infinity',
       nanBehavior: 'propagate',
       partiality: 'total',
-      type: (ops) => elementExtremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          elementExtremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: ([x, lo, hi], { numericApproximation }) => {
         // max(x, lo) then min(·, hi). Keep the intermediate exact; numericize
         // only the final result. Stays symbolic if any comparison is undecided.
@@ -5948,7 +6189,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(value*) -> number',
       missingBehavior: 'handle',
-      type: (ops) => extremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          extremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Supremum'),
     },
 
@@ -5960,7 +6205,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       signature: '(value*) -> number',
       missingBehavior: 'handle',
-      type: (ops) => extremumTypeOnTypes(ops),
+      type: (ops, context) =>
+        BoxedType.forResult(
+          extremumTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
       evaluate: (xs, { engine }) => evaluateMinMax(engine, xs, 'Infimum'),
     },
 
@@ -5983,11 +6232,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // because a tuple operand IS a collection, which the gate defers to.
       missingBehavior: 'propagate',
       // A point-list operand broadcasts: one distance per point.
-      type: ([a, b]) => {
+      type: ([a, b], context) => {
         const pa = a ? isPointListType(a.type) : false;
         const pb = b ? isPointListType(b.type) : false;
         if (pa === true || pb === true)
-          return { kind: 'list', elements: 'number' };
+          return BoxedType.forResult(
+            { kind: 'list', elements: 'number' },
+            context.engine._typeResolver
+          );
         // An operand that COULD be a list of points — an indexed collection
         // whose ELEMENT type is unknown, e.g. a base declared with the bare
         // `indexed_collection` type — must not be reported as the scalar: a
@@ -5996,7 +6248,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `success: true` (Tycho item 143). Report the union instead, so the
         // consumer (and the lowering) sees that both shapes are possible.
         if (pa === undefined || pb === undefined)
-          return 'number | list<number>';
+          return BoxedType.forResult(
+            'number | list<number>',
+            context.engine._typeResolver
+          );
         // Point-to-point: a distance is the norm of the difference, so it is
         // real whatever the coordinates are — and `number` (which admits
         // complex) is refused by every `real`-declared slot. Read off the
@@ -6016,13 +6271,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const coords = [...ca, ...cb];
           if (
             !coords.every(
-              (c) => c.facts.finite === true || isSubtype(c.type, 'complex')
+              (c) => c.facts.finite === true || factsOf(c.type).complex
             )
           )
-            return 'number';
-          return euclideanNormType(coords);
+            return BoxedType.forResult('number', context.engine._typeResolver);
+          return BoxedType.forResult(
+            euclideanNormType(coords),
+            context.engine._typeResolver
+          );
         }
-        return 'number';
+        return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
         // An absent point absorbs: a distance is numeric, so the marker is
@@ -6077,7 +6335,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
-      type: bigOpResultTypeOnTypes,
+      type: (ops, context) =>
+        BoxedType.forResult(
+          bigOpResultTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
 
       canonical: ([body, ...bounds], { scope }) =>
         canonicalBigop('Product', body, bounds, scope),
@@ -6235,7 +6497,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
-      type: bigOpResultTypeOnTypes,
+      type: (ops, context) =>
+        BoxedType.forResult(
+          bigOpResultTypeOnTypes(ops),
+          context.engine._typeResolver
+        ),
 
       canonical: ([body, ...bounds], { scope, engine: ce }) => {
         // Arity-1 collection-reducer form: bypass canonicalBigop, which would

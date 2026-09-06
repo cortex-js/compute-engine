@@ -1,3 +1,4 @@
+import { BoxedType } from '../../src/common/type/boxed-type';
 /**
  * Behavior and contract pins for operator `type` handlers that take
  * operand DESCRIPTORS and for the engine
@@ -81,11 +82,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
       ['Hold', ['Function', ['Add', 'n', 1], 'n']],
       'unknown',
     ],
-    [
-      'ReleaseHold of a held literal',
-      ['ReleaseHold', ['Hold', 2]],
-      'integer',
-    ],
+    ['ReleaseHold of a held literal', ['ReleaseHold', ['Hold', 2]], 'integer'],
     ['ReleaseHold of a symbol', ['ReleaseHold', 'q'], 'unknown'],
     [
       'ReleaseHold of a held application',
@@ -238,9 +235,7 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
       ce.box(['Heaviside', { num: '-Infinity' }] as any).type.toString()
     ).toBe('rational<0..1>');
     expect(ce.box(['Heaviside', NAN] as any).type.toString()).toBe('nan');
-    expect(ce.box(['Heaviside', ['Complex', 1, 2]] as any).isValid).toBe(
-      false
-    );
+    expect(ce.box(['Heaviside', ['Complex', 1, 2]] as any).isValid).toBe(false);
     expect(ce.box(['Heaviside', 'u'] as any).type.toString()).toBe(
       'nan | rational<0..1>'
     );
@@ -248,29 +243,23 @@ describe('Coalesce, Hold and ReleaseHold type derivation (raw-operand route)', (
     // complex sign `z/|z|` off the real line (carrier
     // `complex | signed_infinity`, result `complex` there); `~oo` has no
     // direction and stays a boxing error.
-    expect(ce.box(['Sign', -2] as any).type.toString()).toBe(
-      'integer<-1..1>'
-    );
-    expect(ce.box(['Sign', 's'] as any).type.toString()).toBe(
-      'integer<-1..1>'
-    );
+    expect(ce.box(['Sign', -2] as any).type.toString()).toBe('integer<-1..1>');
+    expect(ce.box(['Sign', 's'] as any).type.toString()).toBe('integer<-1..1>');
     expect(ce.box(['Sign', NAN] as any).type.toString()).toBe('nan');
     expect(ce.box(['Sign', 'ComplexInfinity'] as any).isValid).toBe(false);
     expect(ce.box(['Sign', ['Complex', 1, 2]] as any).type.toString()).toBe(
       'complex'
     );
-    expect(ce.box(['Sign', 'u'] as any).type.toString()).toBe(
-      'complex | nan'
-    );
+    expect(ce.box(['Sign', 'u'] as any).type.toString()).toBe('complex | nan');
     // Broadcast: the per-element claim is wrapped in the operand's shape.
     expect(ce.box(['Sign', ['List', 1, -2]] as any).type.toString()).toBe(
       'list<integer<-1..1>^2>'
     );
     // The ranged claim reaches type-channel consumers: non-negativity is in
     // the type, so a square root of it stays real.
-    expect(
-      ce.box(['Sqrt', ['Heaviside', 's']] as any).type.toString()
-    ).toBe('real');
+    expect(ce.box(['Sqrt', ['Heaviside', 's']] as any).type.toString()).toBe(
+      'real'
+    );
     // A collection whose ELEMENT type may carry a NaN gains the propagated
     // arm per CELL, exactly as the scalar operand `u: number` does — the
     // NaN evidence is read off the element type under a broadcast. A
@@ -511,7 +500,7 @@ describe('user-declared type handlers', () => {
       signature: '(any) -> unknown',
       type: (operands) => {
         seen.push([...operands]);
-        return operands[0]?.type;
+        return BoxedType.forResult(operands[0]?.type);
       },
     });
     const t = ce.box(['EchoT', 3] as any).type.toString();
@@ -537,7 +526,7 @@ describe('user-declared type handlers', () => {
           `leak${counter++}`,
           'number'
         );
-        return 'unknown';
+        return BoxedType.forResult('unknown', engine._typeResolver);
       },
     });
     expect(() => ce.box(['LeakyT', 1] as any).type).toThrow(
@@ -577,12 +566,8 @@ describe('bounded inverse trig heads read ranged types', () => {
   it('a ranged RESULT type proves domain membership', () => {
     // Sign(r) types integer<-1..1>, inside Arcsin/Arccos's closed
     // real domain [−1, 1].
-    expect(ce.box(['Arcsin', ['Sign', 'r']]).type.toString()).toBe(
-      'real'
-    );
-    expect(ce.box(['Arccos', ['Sign', 'r']]).type.toString()).toBe(
-      'real'
-    );
+    expect(ce.box(['Arcsin', ['Sign', 'r']]).type.toString()).toBe('real');
+    expect(ce.box(['Arccos', ['Sign', 'r']]).type.toString()).toBe('real');
   });
 
   it('an assumed range still proves membership (both channels agree)', () => {
@@ -633,9 +618,7 @@ describe('bounded inverse trig heads read ranged types', () => {
     // (`rational<0.33..0.34>`), and `[0.33, 0.34] ⊆ [−1, 1]` is a
     // bounds fact, so the domain claim no longer widens to the complex
     // join.
-    expect(ce.box(['Arcsin', ['Rational', 1, 3]]).type.toString()).toBe(
-      'real'
-    );
+    expect(ce.box(['Arcsin', ['Rational', 1, 3]]).type.toString()).toBe('real');
     // A machine-representable literal still classifies exactly.
     expect(ce.box(['Arcsin', 0.5]).type.toString()).toBe('real');
     expect(ce.box(['Arcsin', 2]).type.toString()).toBe('complex');
@@ -668,6 +651,8 @@ describe('descriptor reads that must match the value route', () => {
     // A scope that shadows `Integers` with an ordinary set keeps the
     // ordinary indexing reading, as the canonical route does.
     ce.declare('Integers', 'set<string>');
-    expect(ce.box(['At', 'Integers', 2]).type.toString()).not.toBe('set<integer>');
+    expect(ce.box(['At', 'Integers', 2]).type.toString()).not.toBe(
+      'set<integer>'
+    );
   });
 });
