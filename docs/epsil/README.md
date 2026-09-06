@@ -7,6 +7,7 @@ work. It is not the public language reference.
 - Implemented lowering and runtime invariants: `docs/LANGUAGE-MODEL.md`
 - Effects shared with the Compute Engine: `docs/EFFECTS-MODEL.md`
 - Open Epsil work: [`ROADMAP.md`](./ROADMAP.md)
+- Import system draft: [`Design proposal`](../plans/2026-09-05-epsil-import-system.md)
 - Initiative-level history: `docs/STATUS_REPORT.md` and Git history
 
 The former `roadmap/cortex/` directory recorded the July 2026 language revival

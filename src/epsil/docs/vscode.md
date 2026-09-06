@@ -28,8 +28,9 @@ behavior may change between releases.
 
 ## Installation
 
-The extension is not yet published to the Visual Studio Code Marketplace. To
-install it from the repository:
+The extension is available on the Visual Studio Code Marketplace. 
+
+You can also install it from the repository:
 
 ```shell
 git clone https://github.com/cortex-js/compute-engine.git
