@@ -142,11 +142,11 @@ and monitoring.
 
 | Tool        | Purpose                                                        |
 | :---------- | :------------------------------------------------------------- |
-| `evaluate`  | Run an Epsil program and return its value — as display text, Epsil source, and [MathJSON](/epsil/implementation/) — along with any diagnostics |
+| `evaluate`  | Run an Epsil program and return its value — as display text, Epsil source, and [MathJSON](/epsil/implementation/) — along with any diagnostics; `fancySymbols: true` writes the Epsil source with the Unicode notations (`√x`, `x²`, `×`, `⩽`, …) |
 | `check`     | Validate a program without evaluating it; `effects: true` adds the inferred effects of each top-level function |
 | `doc`       | Look up a library function by name, or search the library by keywords |
 | `parse`     | Convert Epsil source to MathJSON                              |
-| `serialize` | Convert MathJSON to Epsil source                              |
+| `serialize` | Convert MathJSON to Epsil source; `fancySymbols: true` for the Unicode notations |
 
 The server also publishes the [language card for AI agents](/epsil/for-agents/)
 as a resource (`epsil://docs/for-agents`), and its setup instructions tell

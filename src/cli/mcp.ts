@@ -62,6 +62,11 @@ const TOOLS = [
           description:
             'Evaluation deadline in milliseconds; 0 disables it (default: 10000)',
         },
+        fancySymbols: {
+          type: 'boolean',
+          description:
+            'Write the `epsil` form with the Unicode notations (√x, x², ×, ⩽, …) instead of the ASCII spellings (default: false)',
+        },
       },
       required: ['source'],
     },
@@ -126,6 +131,11 @@ const TOOLS = [
       properties: {
         mathjson: {
           description: 'A MathJSON expression, e.g. ["Add", "x", 1]',
+        },
+        fancySymbols: {
+          type: 'boolean',
+          description:
+            'Write the Unicode notations (√x, x², ×, ⩽, …) instead of the ASCII spellings (default: false)',
         },
       },
       required: ['mathjson'],
@@ -533,6 +543,8 @@ class McpServer {
         ? this.timeLimit
         : requireTimeLimit(args.timeLimit);
 
+    const fancySymbols = optionalBoolean(args, 'fancySymbols');
+
     const { result, output } = withHostIOCaptured(() =>
       makeEpsilSession(timeLimit).evaluate(source)
     );
@@ -546,7 +558,7 @@ class McpServer {
       value: isSymbol(result.value, 'Nothing')
         ? 'Nothing'
         : formatValue(result, 'value'),
-      epsil: formatValue(result, 'epsil'),
+      epsil: formatValue(result, 'epsil', { fancySymbols }),
       mathjson: json ? JSON.parse(json) : null,
       ...(output.length > 0 ? { output } : {}),
       diagnostics: result.diagnostics.map((x) => diagnosticToJson(x, source)),
@@ -555,7 +567,7 @@ class McpServer {
 
   private static check(args: Record<string, unknown>): unknown {
     const source = requireString(args, 'source');
-    const wantEffects = args.effects === true;
+    const wantEffects = optionalBoolean(args, 'effects');
     const { diagnostics, effects } = checkSource(source, undefined, {
       effects: wantEffects,
     });
@@ -607,10 +619,24 @@ class McpServer {
       throw new Error('Expected a "mathjson" argument.');
     return toolResult({
       epsil: serializeEpsil(
-        args.mathjson as Parameters<typeof serializeEpsil>[0]
+        args.mathjson as Parameters<typeof serializeEpsil>[0],
+        { fancySymbols: optionalBoolean(args, 'fancySymbols') }
       ),
     });
   }
+}
+
+/** An optional boolean argument: `false` when absent, an error for any other
+ * non-boolean value (a string `"true"` is refused, not coerced — the schema
+ * declares the type, and a silent `false` would hide the caller's mistake).
+ * Every optional boolean of the tool set goes through here, so the tools
+ * answer a wrong type the same way. */
+function optionalBoolean(args: Record<string, unknown>, key: string): boolean {
+  const value = args[key];
+  if (value === undefined) return false;
+  if (typeof value !== 'boolean')
+    throw new Error(`Expected a "${key}" boolean argument.`);
+  return value;
 }
 
 function toolResult(payload: unknown): unknown {

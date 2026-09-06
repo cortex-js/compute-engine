@@ -320,6 +320,40 @@ describe('MCP server tools', () => {
     expect(payload(response).epsil).toBe('x + 1');
   });
 
+  test('serialize writes the Unicode notations on request', async () => {
+    const [ascii, fancy] = await runServer([
+      callTool(1, 'serialize', { mathjson: ['Sqrt', ['Power', 'x', 2]] }),
+      callTool(2, 'serialize', {
+        mathjson: ['Sqrt', ['Power', 'x', 2]],
+        fancySymbols: true,
+      }),
+    ]);
+    expect(payload(ascii).epsil).toBe('Sqrt(x ^ 2)');
+    expect(payload(fancy).epsil).toBe('√x²');
+  });
+
+  test('evaluate writes the Epsil form with the Unicode notations on request', async () => {
+    const [ascii, fancy] = await runServer([
+      callTool(1, 'evaluate', { source: 'Sqrt(3) + x^2' }),
+      callTool(2, 'evaluate', { source: 'Sqrt(3) + x^2', fancySymbols: true }),
+    ]);
+    expect(payload(ascii).epsil).toBe('x ^ 2 + Sqrt(3)');
+    // Fancy-symbol mode spaces infix operators with U+205F.
+    expect(payload(fancy).epsil).toBe('x²\u205f+\u205f√3');
+  });
+
+  test('a non-boolean fancySymbols is refused by both tools', async () => {
+    const [serialized, evaluated, checked] = await runServer([
+      callTool(1, 'serialize', { mathjson: 'x', fancySymbols: 'yes' }),
+      callTool(2, 'evaluate', { source: '1', fancySymbols: 'yes' }),
+      // The `check` tool's `effects` flag is validated the same way.
+      callTool(3, 'check', { source: '1', effects: 'yes' }),
+    ]);
+    expect(serialized.result.isError).toBe(true);
+    expect(evaluated.result.isError).toBe(true);
+    expect(checked.result.isError).toBe(true);
+  });
+
   test('rejects an unknown tool as a protocol error', async () => {
     const [response] = await runServer([callTool(1, 'bogus', {})]);
     expect(response.error.code).toBe(-32602);

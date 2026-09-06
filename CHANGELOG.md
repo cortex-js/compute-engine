@@ -41,7 +41,8 @@
   unchanged: ASCII, so `Sqrt(x)` and `x ^ 2`. The `--epsil` output of the
   command line (and of the MCP `evaluate` tool) now writes a square as `x ^ 2`
   where it wrote `Square(x)`, the display head the MathJSON export prettifies
-  a square into.
+  a square into. The MCP `serialize` and `evaluate` tools take the same
+  option as a `fancySymbols: true` argument.
 - **A use of an element refines the collection's element type.** `xs[1] + 1`
   makes an undeclared `xs` an `indexed_collection<number>` (it was
   `dictionary<any> | indexed_collection<any>`), `xs["a"] + 1` a
