@@ -3169,6 +3169,41 @@ function gpuAtBaseShape(base: Expression | null): GPUAtBase {
 
   const n = BaseCompiler.aggregateComponentCount(base);
   if (n === undefined) {
+    // A CALLER-DECLARED name whose spelling this target's declaration frame
+    // does not parse. `gpuDeclaredShapeFrame` enters such a name as
+    // `LOCAL_UNSHAPED`, and a frame entry OVERRIDES the boxed type, so the
+    // count is gone even when the engine type states one — a `float[1600]`
+    // parameter over a symbol typed `list<number^1600>` arrives here with the
+    // length written twice and readable neither time.
+    //
+    // Reported separately because the honest cause is the DECLARATION, not
+    // the type: saying "no statically known length" of a type that states
+    // 1600 is false, and it collided with the message the genuinely unsized
+    // `list<number>` below is owed. The two declines must stay
+    // distinguishable — a consumer that falls back to another lane reads
+    // them to tell an open type from an unparsed declaration.
+    // The symbol's OWN name, never `declared.ref`: `ref` is the identifier the
+    // emitted source references the name by, which for a WGSL shader input is
+    // a field of the entry point's `input` struct (`input.S`, set by
+    // `compileShaderBody`'s caller). A diagnostic must name what the caller
+    // WROTE, so that the name in the message is the one they can search their
+    // declaration list for.
+    if (isSymbol(base)) {
+      const declared = gpuDeclaredTypeOf(base);
+      if (declared !== undefined && declared.value === undefined)
+        return {
+          decline:
+            `the base is the caller-declared name "${base.symbol}", whose ` +
+            `declared shader type \`${declared.spelling}\` is not one this ` +
+            `target reads — it parses the scalar spellings and the ` +
+            `two-to-four component vector spellings of both languages ` +
+            `(\`vec3\`, \`ivec3\`, \`vec3f\`, \`vec3<f32>\`), and no array, ` +
+            `matrix or struct type. The declaration decides the shape of a ` +
+            `declared name, so no static element count reaches the analysis ` +
+            `(the engine type \`${base.type.toString()}\` is not consulted ` +
+            `for a declared name)`,
+        };
+    }
     if (typeof t !== 'string' && t.kind === 'list') {
       // Belt over suspenders: no spelling reaches this arm today. A multi-axis
       // base makes `At` answer a COLLECTION element (`missing | vector<3>`),

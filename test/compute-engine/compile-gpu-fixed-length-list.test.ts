@@ -204,6 +204,101 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
   });
 });
 
+/**
+ * The `At` declines must stay DISCRIMINATED. A consumer that falls back to
+ * another lane (Tycho's Game of Life heatmap falls to its CPU lane) reads the
+ * reason to tell an OPEN element type from a declaration this target cannot
+ * parse, so the two must not share a message — and neither may claim a length
+ * is unknown when the type states one.
+ */
+describe('GPU FIXED-LENGTH LIST — At decline reasons stay distinct', () => {
+  const gridExpr = (ce: ComputeEngine) => ce.box(['At', 'S', 'k']);
+
+  test('an open element type is "not statically counted"', () => {
+    const ce = engineWith({ S: 'indexed_collection<integer>', k: 'integer' });
+    expect(() => glsl.compile(gridExpr(ce), NO_FOLD)).toThrow(
+      /is not a statically counted collection/
+    );
+  });
+
+  test('a genuinely unsized list has no statically known length', () => {
+    const ce = engineWith({ S: 'list<number>', k: 'integer' });
+    expect(() => glsl.compile(gridExpr(ce), NO_FOLD)).toThrow(
+      /has no statically known length/
+    );
+  });
+
+  // The length is stated twice (the engine type and the declared spelling) and
+  // readable neither time, because a frame entry overrides the boxed type and
+  // this target parses no array spelling. Claiming the length is unknown was
+  // false, and it collided with the unsized message above.
+  test('an unparsed declared spelling names the declaration, not the type', () => {
+    const ce = engineWith({ S: 'list<number^1600>', k: 'integer' });
+    let message = '';
+    try {
+      glsl.compileFunction(
+        gridExpr(ce),
+        'cell',
+        'float',
+        [
+          ['S', 'float[1600]'],
+          ['k', 'int'],
+        ],
+        NO_FOLD
+      );
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/caller-declared name "S"/);
+    expect(message).toMatch(/float\[1600\]/);
+    expect(message).not.toMatch(/has no statically known length/);
+    expect(message).not.toMatch(/is not a statically counted collection/);
+  });
+
+  // A WGSL shader INPUT is referenced from the emitted source as a field of
+  // the entry point's `input` struct, so the frame's `ref` for it is
+  // `input.S`, not `S`. The diagnostic must name what the caller WROTE — the
+  // name they can find in their own declaration list. `compileFunction` omits
+  // `ref` (it defaults to the name), so only this route witnesses the
+  // difference.
+  test('the message names the declared name, not its emission identifier', () => {
+    const ce = engineWith({ S: 'list<number^1600>', k: 'integer' });
+    let message = '';
+    try {
+      wgsl.compileShader({
+        type: 'vertex',
+        inputs: [
+          { name: 'S', type: 'array<f32, 1600>' },
+          { name: 'k', type: 'i32' },
+        ],
+        outputs: [{ name: 'pos', type: 'vec4f' }],
+        body: [{ variable: 'pos.x', expression: ce.box(['At', 'S', 'k']) }],
+        constantFold: false,
+      });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/caller-declared name "S"/);
+    expect(message).not.toMatch(/input\.S/);
+  });
+
+  // The route a shader host actually uses: the carrier is a free engine symbol
+  // of counted type, and the host injects `uniform float S[1600];` itself.
+  test('a counted free symbol compiles through the array helper', () => {
+    const ce = engineWith({ S: 'list<number^1600>', k: 'integer' });
+    const r = glsl.compile(gridExpr(ce), NO_FOLD);
+    expect(r.code).toBe('_gpu_at1600(S, k)');
+    expect(r.preamble).toContain('float _gpu_at1600(float v[1600], float i)');
+  });
+
+  test('a static index into that symbol folds to a subscript', () => {
+    const ce = engineWith({ S: 'list<number^1600>', k: 'integer' });
+    expect(glsl.compile(ce.box(['At', 'S', 800]), NO_FOLD).code).toBe(
+      'S[799]'
+    );
+  });
+});
+
 describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('folds a list literal', () => {
     const ce = new ComputeEngine();
