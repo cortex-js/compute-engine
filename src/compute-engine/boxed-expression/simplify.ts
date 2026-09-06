@@ -801,8 +801,12 @@ function simplifyOperands(
         simplifiedOps.push(full(x, i));
       // Simplify Ln/Log operands within Add/Multiply to enable term cancellation
       // (e.g., ln(x^3) -> 3*ln(x) so that ln(x^3) - 3*ln(x) = 0)
-      // Only simplify Ln (natural log), not Log (which may lose base info)
-      else if (x.operator === 'Ln') simplifiedOps.push(full(x, i));
+      // Log with base e is safe to simplify: log_e(x) -> ln(x)
+      else if (
+        x.operator === 'Ln' ||
+        (isFunction(x, 'Log') && x.op2 && isSymbol(x.op2, 'ExponentialE'))
+      )
+        simplifiedOps.push(full(x, i));
       // Simplify Abs operands to enable cancellation
       // (e.g., |xy| -> |x||y| so that |xy| - |x||y| = 0)
       // Also handle Negate(Abs(...)) which appears in subtraction expressions
