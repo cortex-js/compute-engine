@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.125.1 _2026-09-07_
 
 ### Improvements
 
