@@ -2,6 +2,12 @@
 
 ### Improvements
 
+- **GLSL and WGSL reuse folded loop bounds and proven integer indices.**
+  Exactly representable folded bounds select literal loop headers, unrolling,
+  or empty-range results. Bounded counters and exact integer arithmetic can
+  index fixed-size arrays directly when the index is proven in range. Other
+  indices retain their guards; WGSL array reads use a local reference when needed.
+
 - **JavaScript loop bounds reuse constant-folding results.** Sums and products
   recognize folded bounds such as the length of an assigned list before choosing
   a loop or unrolled code. Known finite bounds omit redundant `Math.floor()` and

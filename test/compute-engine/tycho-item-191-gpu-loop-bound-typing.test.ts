@@ -39,7 +39,7 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
     ['bare symbolic upper bound', '\\sum_{j=1}^{K}jx'],
     ['Product with symbolic upper bound', '\\prod_{i=1}^{N}(x+i)'],
     ['symbolic LOWER bound', '\\sum_{j=K}^{9}jx'],
-    ['folded float constant bound', '\\sum_{i=1}^{\\mathrm{Length}(L)}\\frac{x}{i}'],
+    ['folded float constant bound', '\\sum_{i=1}^{\\mathrm{Length}(L)+100}\\frac{x}{i}'],
   ];
 
   for (const [name, latex] of cases) {

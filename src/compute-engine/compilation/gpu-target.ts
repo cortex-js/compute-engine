@@ -1,5 +1,11 @@
 import type { Expression } from '../global-types.js';
 import { entrySource } from './function-purity.js';
+import { isCallerMapped } from './cse.js';
+import {
+  clearGPUCounters,
+  gpuIntegerFact,
+  recordGPUCounter,
+} from './gpu-value-facts.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
@@ -930,6 +936,10 @@ function gpuNaNFor(
   return `${ctor}(${gpuNaN(target)})`;
 }
 
+// A conditional arm may use its sink to detect forbidden statement emission,
+// but optional array-index specialization must not add such statements.
+const conditionalGPUSinks = new WeakSet<object>();
+
 /**
  * Compile a **conditionally-evaluated** operand of a GPU conditional — an
  * `If`/`When`/`Which`/`Match` arm, or a `Which` condition past the first —
@@ -956,7 +966,16 @@ function compileGPUConditionalArm(
 ): string {
   const sink = BaseCompiler.canHoist(target) ? target.hoist : undefined;
   const before = sink?.stmts.length ?? 0;
-  const code = compiled();
+  const alreadyConditional =
+    sink !== undefined && conditionalGPUSinks.has(sink);
+  if (sink !== undefined) conditionalGPUSinks.add(sink);
+  let code: string;
+  try {
+    code = compiled();
+  } finally {
+    if (sink !== undefined && !alreadyConditional)
+      conditionalGPUSinks.delete(sink);
+  }
   if (sink !== undefined && sink.stmts.length > before) {
     // Drop the escaped statements: the throw is recoverable (the engine-level
     // `compile()` catches it to build the interpreter fallback) and a caller
@@ -3836,6 +3855,36 @@ function compileGPUAt(
         `number, so it selects no element and \`At\` has no value to project`
     );
 
+  // A proven positive, in-range integer needs neither a guard nor a float
+  // conversion. Textures retain their storage helper. WGSL array values are
+  // copied to a local reference before dynamic indexing, as in gpuAtPreamble.
+  const fact = gpuIntegerFact(
+    index,
+    target,
+    (op) =>
+      !target.foldExcludedOps?.has(op) &&
+      target.operators?.(op) === GPU_OPERATORS[op] &&
+      target.functions?.(op) === GPU_FUNCTIONS[op]
+  );
+  if (
+    storage === undefined &&
+    fact &&
+    fact.min >= 1 &&
+    fact.max <= n &&
+    (target.language !== 'wgsl' ||
+      n <= 4 ||
+      (BaseCompiler.canHoist(target) &&
+        !conditionalGPUSinks.has(target.hoist!)))
+  ) {
+    let code = compile(base);
+    if (target.language === 'wgsl' && n > 4) {
+      const name = BaseCompiler.tempVar(target);
+      BaseCompiler.hoistStatement(target, `var ${name} = ${code};`);
+      code = name;
+    }
+    return `${gpuIsAtomicEmission(code) ? code : `(${code})`}[${fact.code} - 1]`;
+  }
+
   // Dynamic index: one call, so the base and the index are each evaluated
   // exactly once. The guard inside the helper is what makes both languages'
   // out-of-bounds rules unreachable. A caller-declared INTEGER index is
@@ -4302,6 +4351,63 @@ function compileGPUCollectionReduce(
   return `(${comps.map((c) => `(${c})`).join(op)})`;
 }
 
+/** Opaque source or effects in the body may change a compiler-owned counter. */
+function gpuCounterIsStable(
+  expr: Expression,
+  index: string,
+  target: CompileTarget<Expression>,
+  depth = 0
+): boolean {
+  if (depth > 64) return false;
+  if (isNumber(expr)) return true;
+  if (isSymbol(expr)) {
+    if (expr.symbol === index) return true;
+    const ref = target.var(expr.symbol);
+    return (
+      !target.varsKeys?.has(expr.symbol) &&
+      (ref === undefined || gpuIsAtomicEmission(ref))
+    );
+  }
+  if (
+    !isFunction(expr) ||
+    !expr.isPure ||
+    isCallerMapped(expr) ||
+    target.foldExcludedOps?.has(expr.operator)
+  )
+    return false;
+  const fn = GPU_FUNCTIONS[expr.operator];
+  const op = GPU_OPERATORS[expr.operator];
+  if (
+    (fn === undefined && op === undefined) ||
+    target.functions?.(expr.operator) !== fn ||
+    (op !== undefined && target.operators?.(expr.operator) !== op)
+  )
+    return false;
+  return expr.ops.every((x) => gpuCounterIsStable(x, index, target, depth + 1));
+}
+
+/**
+ * Fold a bound only when its literal has the same exact value in binary32
+ * and in host arithmetic. Keep the counter and its final increment in i32
+ * range; other values retain the existing shader floor/conversion path.
+ */
+function gpuBoundConstant(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): number | undefined {
+  const literal = BaseCompiler.bigOpBoundConstant(expr);
+  if (literal !== undefined) return literal;
+  const value = BaseCompiler.foldedRealNumber(expr, target);
+  if (
+    value === undefined ||
+    !Number.isFinite(value) ||
+    Math.fround(value) !== value
+  )
+    return undefined;
+  const bound = Math.floor(value);
+  return bound >= -(2 ** 31) && bound < 2 ** 31 - 1 ? bound : undefined;
+}
+
 /**
  * Compile a Sum or Product expression for GPU targets.
  *
@@ -4357,8 +4463,8 @@ function compileGPUSumProduct(
   // enclosing binder's index) is NOT a compile-time constant — see
   // `BaseCompiler.bigOpBoundConstant`. Reading one folded
   // `F(i) = Σ_{m=1..i} m` to `float _fn_F(float i) { return 0.0; }`.
-  const lowerNum = BaseCompiler.bigOpBoundConstant(limitsOps[1]);
-  const upperNum = BaseCompiler.bigOpBoundConstant(limitsOps[2]);
+  const lowerNum = gpuBoundConstant(limitsOps[1], target);
+  const upperNum = gpuBoundConstant(limitsOps[2], target);
 
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
@@ -4367,6 +4473,8 @@ function compileGPUSumProduct(
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
 
   if (bothConstant && lowerNum > upperNum) return identity;
+
+  const canProveCounter = gpuCounterIsStable(args[0], index, target);
 
   // Unroll small constant ranges — pure inline expression
   if (bothConstant && upperNum - lowerNum + 1 <= GPU_UNROLL_LIMIT) {
@@ -4396,7 +4504,14 @@ function compileGPUSumProduct(
         boundVars: termBoundVars,
         hoist: BaseCompiler.canHoist(target) ? termSink : undefined,
       };
-      const code = BaseCompiler.compile(args[0], innerTarget);
+      if (canProveCounter)
+        recordGPUCounter(innerTarget, index, k, k, String(k));
+      let code: string;
+      try {
+        code = BaseCompiler.compile(args[0], innerTarget);
+      } finally {
+        clearGPUCounters(innerTarget);
+      }
       if (termSink.stmts.length === 0) {
         terms.push(`(${code})`);
         continue;
@@ -4439,7 +4554,14 @@ function compileGPUSumProduct(
     boundVars: bodyBoundVars,
     hoist: bodySink,
   };
-  const body = BaseCompiler.compile(args[0], bodyTarget);
+  if (canProveCounter && bothConstant)
+    recordGPUCounter(bodyTarget, index, lowerNum, upperNum, index);
+  let body: string;
+  try {
+    body = BaseCompiler.compile(args[0], bodyTarget);
+  } finally {
+    clearGPUCounters(bodyTarget);
+  }
 
   // Compiled BEFORE the loop statements are pushed, so anything the bounds
   // themselves hoist lands ahead of the loop that consumes them.

@@ -4760,18 +4760,32 @@ export class BaseCompiler {
       target?.language === 'javascript' &&
       target.constantFold !== false
     ) {
-      const value = BaseCompiler.constantFoldValue(expr, target)?.value;
-      if (
-        value !== undefined &&
-        isNumber(value) &&
-        value.im === 0 &&
-        !BaseCompiler.isComplexValued(expr) &&
-        Number.isSafeInteger(Math.floor(value.re))
-      )
-        re = value.re;
+      const value = BaseCompiler.foldedRealNumber(expr, target);
+      if (value !== undefined && Number.isSafeInteger(Math.floor(value)))
+        re = value;
     }
     if (isNaN(re) || !Number.isFinite(re)) return undefined;
     return Math.floor(re);
+  }
+
+  /** A real scalar accepted by the ordinary constant-fold emission gates. */
+  static foldedRealNumber(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): number | undefined {
+    if (target.constantFold === false) return undefined;
+    if (
+      target.boundVars !== undefined &&
+      BaseCompiler.mentionsExcludedName(expr, target.boundVars, undefined)
+    )
+      return undefined;
+    const value = BaseCompiler.constantFoldValue(expr, target)?.value;
+    return value !== undefined &&
+      isNumber(value) &&
+      value.im === 0 &&
+      !BaseCompiler.isComplexValued(expr)
+      ? value.re
+      : undefined;
   }
 
   /**
