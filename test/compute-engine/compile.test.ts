@@ -1524,9 +1524,10 @@ describe('COMPILE interpreter-alignment (CO-P2-24)', () => {
   });
 
   it('constant nonzero exponent keeps the plain Math.pow fast path', () => {
-    // x^3 with a symbol base does not need the 0^0 guard.
+    // x^5 with a symbol base does not need the 0^0 guard (`_SYS.pow(`). The
+    // small-exponent multiplication helper `_SYS.pow5` is not the guard.
     const r = compile(ce.box(['Power', 'x', 5]), { fallback: false })!;
-    expect(r.code).not.toContain('_SYS.pow');
+    expect(r.code).not.toContain('_SYS.pow(');
   });
 
   it('1/0 compiles to a complex-infinity object, matching interpreted ~oo', () => {
