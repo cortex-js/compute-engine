@@ -993,7 +993,7 @@ describe('ND', () => {
   it('should compute the numerical approximation of the derivative of an expression', () => {
     const expr = parse('\\mathrm{ND}(x \\mapsto \\cos x + 2x^3 - 4, 2)');
     const result = expr.N();
-    expect(result.json).toMatchInlineSnapshot(`23.090702573188732`);
+    expect(result.json).toMatchInlineSnapshot(`23.09070257318873`);
   });
 });
 

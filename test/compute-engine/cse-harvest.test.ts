@@ -21,6 +21,10 @@ const ce = new ComputeEngine();
 
 /** `sin(6u)` — the baseline size-4 subtree of the design doc's probe. */
 const SIN6U = ['Sin', ['Multiply', 6, 'u']] as any;
+// A size-4 subtree that is NOT a native transcendental call. A transcendental
+// call (`Sin`, `Exp`, `Ln`, …) is admitted from two occurrences because the
+// call itself is expensive; the score threshold is witnessed with `Sqrt`.
+const SQRT6U = ['Sqrt', ['Multiply', 6, 'u']] as any;
 
 function box(json: any): Expression {
   return ce.box(json);
@@ -168,9 +172,17 @@ describe('CSE HARVEST — basic candidates', () => {
 
 describe('CSE HARVEST — G4 thresholds', () => {
   it('rejects a size-4 subtree occurring only twice (score 4 < CSE_MIN_SCORE)', () => {
-    const harvest = harvestCse(box(['Add', SIN6U, SIN6U]));
+    const harvest = harvestCse(box(['Add', SQRT6U, SQRT6U]));
     expect(allReps(harvest)).toEqual([]);
     expect(harvest.diagnostics.droppedByThreshold).toBe(1);
+  });
+
+  it('admits a native transcendental call from two occurrences', () => {
+    // `sin(6u)` is only four nodes, but the call is expensive at run time, so
+    // two occurrences pay for a temporary without reaching CSE_MIN_SCORE.
+    const harvest = harvestCse(box(['Add', SIN6U, SIN6U]));
+    expect(allReps(harvest)).toEqual(['sin(6u)']);
+    expect(harvest.diagnostics.droppedByThreshold).toBe(0);
   });
 
   it('rejects a below-CSE_MIN_SIZE subtree however often it repeats', () => {
@@ -460,8 +472,8 @@ describe('CSE HARVEST — regions', () => {
     const harvest = harvestCse(
       box([
         'Block',
-        ['Assign', 'y', ['Add', SIN6U, SIN6U]],
-        ['Assign', 'z', SIN6U],
+        ['Assign', 'y', ['Add', SQRT6U, SQRT6U]],
+        ['Assign', 'z', SQRT6U],
         'y',
       ])
     );

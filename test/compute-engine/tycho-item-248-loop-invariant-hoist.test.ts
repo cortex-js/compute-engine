@@ -249,8 +249,11 @@ describe('Tycho item 248 — Comprehension', () => {
     ]);
     const { code, run } = js(expr);
     expect(count(code, 'reduce(')).toBe(1);
+    // A numeric `Range` source iterates a counter (`for (let _tvN = 0; …)`)
+    // and binds `k` from it, so the loop header is not pinned; only the
+    // first-iteration guard around the hoisted binding is.
     expect(code).toMatch(
-      /let (_tv\d+) = false; let _tv\d+; for \(const k of .*?\) \{ if \(!\1\) \{ \1 = true; /
+      /let (_tv\d+) = false; let _tv\d+; for \(.*?\) \{ (?:const k = [^;]*; )?if \(!\1\) \{ \1 = true; /
     );
     expect(run({ P })).toEqual([2, 3, 4]);
   });
