@@ -927,7 +927,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // arm, and every condition after the first, is conditionally evaluated —
     // pass its operand index so the CSE pass opens the matching region.
     const buildPiecewise = (i: number): string => {
-      if (i >= args.length) return `{ kind: 'empty' }`;
+      if (i >= args.length) return `({ kind: 'empty' })`;
       const cond = args[i];
       const val = args[i + 1];
       // If condition is the symbol True, it's the default branch

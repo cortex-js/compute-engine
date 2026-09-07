@@ -348,6 +348,30 @@ describe('INTERVAL JS EXECUTION', () => {
     expect(result.value.hi).toBeCloseTo(3, 6);
   });
 
+  test('piecewise without a default returns empty when no branch matches', () => {
+    for (const expr of [
+      ce.expr(['Which', ['Less', 'x', 0], 1]),
+      ce.expr(['Which', ['Less', 'x', 0], 1, ['Less', 'x', 1], 2]),
+      ce.parse('\\begin{cases}1 & x < 0\\end{cases}'),
+    ]) {
+      const fn = compile(expr, { to: 'interval-js' });
+      expect(fn.success).toBe(true);
+      expect(fn.run!({ x: { lo: 2, hi: 3 } })).toEqual({ kind: 'empty' });
+      expect(fn.run!({ x: { lo: -2, hi: -1 } })).toEqual({
+        kind: 'interval',
+        value: { lo: 1, hi: 1 },
+      });
+    }
+
+    const fn = compile(ce.expr(['Which', ['Less', 'x', 0], 1]), {
+      to: 'interval-js',
+    });
+    expect(fn.run!({ x: { lo: -1, hi: 1 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 1 },
+    });
+  });
+
   test('piecewise union on indeterminate condition', () => {
     const expr = ce.expr([
       'If',

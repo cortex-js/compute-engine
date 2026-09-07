@@ -78,6 +78,11 @@
 
 ### Resolved Issues
 
+- **Interval compilation preserves an empty piecewise fallback.** A piecewise
+  expression with no matching branch and no default now returns `empty` instead
+  of `entire`. The generated fallback returns its object literal correctly,
+  allowing interval samplers to exclude regions outside the expression's domain.
+
 - **`simplify()` treats a base-`e` logarithm as the natural logarithm.**
   `\log_e(x)` now simplifies to `\ln(x)`, and a `Log(x, ExponentialE)`
   term is combined with `Ln` terms in a sum, so `\ln(x) + \log_e(y)` gives
