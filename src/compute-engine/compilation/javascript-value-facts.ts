@@ -6,6 +6,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import type { CompileTarget } from './types.js';
 import { isCallerMapped } from './cse.js';
+import { isSubtype } from '../../common/type/subtype.js';
 
 type IntegerRange = { min: number; max: number };
 
@@ -132,7 +133,8 @@ export function canIndexArrayDirectly(
 }
 
 /** A scalar constructed from numeric literals, compiler-owned counters and
- * scalar arithmetic. This does not infer anything about free runtime inputs. */
+ * scalar arithmetic, or an explicitly declared scalar runtime input. Inferred
+ * types remain eligible for runtime broadcasting. */
 export function isConstructedScalar(
   expr: Expression,
   target: CompileTarget<Expression>,
@@ -140,7 +142,21 @@ export function isConstructedScalar(
 ): boolean {
   if (depth > 32) return false;
   if (isNumber(expr)) return true;
-  if (isSymbol(expr)) return integerRange(expr, target) !== undefined;
+  if (isSymbol(expr)) {
+    if (integerRange(expr, target) !== undefined) return true;
+    // A caller's explicit declaration is the input contract. A type inferred
+    // from use in a scalar parameter is not such a promise. Local binders and
+    // caller mappings have their own representations and do not inherit it.
+    return (
+      !target.boundVars?.has(expr.symbol) &&
+      !target.varsKeys?.has(expr.symbol) &&
+      expr.valueDefinition?.inferredType === false &&
+      expr.engine._getSymbolValue(expr.symbol) === undefined &&
+      ['number', 'boolean', 'string'].some((t) =>
+        isSubtype(expr.type.type, t as 'number' | 'boolean' | 'string')
+      )
+    );
+  }
   return (
     isFunction(expr) &&
     builtin(expr, target) &&

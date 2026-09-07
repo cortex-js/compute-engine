@@ -435,3 +435,18 @@ competing tests; these timings do not measure GPU execution.
 ```bash
 node --import tsx benchmarks/codegen-samples.mjs /path/to/baseline /path/to/candidate
 ```
+
+## Numeric selection fusion
+
+`numeric-selection.mjs` compares the 200² Game of Life rule between two source
+checkouts. It checks every output cell, warms each runner, and alternates nine
+measurement rounds. Controls include a plain array with a fresh output and a
+typed array with a reused output. Binary and real-valued boards are measured
+separately. These are compiled-kernel timings; they exclude boxing and rendering.
+Use `--check` for numerical verification without a timing claim. For timings,
+hold the shared-box lock and verify that competing tests are absent.
+
+```sh
+node --import tsx benchmarks/numeric-selection.mjs BASELINE_ROOT CANDIDATE_ROOT --check
+node --import tsx benchmarks/numeric-selection.mjs BASELINE_ROOT CANDIDATE_ROOT
+```

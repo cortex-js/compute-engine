@@ -264,7 +264,7 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
       // for sin(x) < 0 on a real GPU (log2 of a negative). The sign-preserving
       // helper evaluates the base once and is defined for negative bases.
       expect(glsl.compile(ce.expr(['Square', ['Sin', 'x']])).code).toBe(
-        '_gpu_powi(sin(x), 2.0)'
+        '_gpu_pow2(sin(x))'
       );
     });
   });
@@ -294,7 +294,7 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
       // Compound base: the helper avoids duplicating `sin(x)` and is
       // sign-correct (`pow(neg, 2.0)` is NaN on a real GPU).
       expect(glsl.compile(ce.expr(['Power', ['Sin', 'x'], 2])).code).toBe(
-        '_gpu_powi(sin(x), 2.0)'
+        '_gpu_pow2(sin(x))'
       );
     });
 

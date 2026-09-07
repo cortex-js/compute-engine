@@ -8,7 +8,7 @@
  * but the SQUARE did not, so the whole family declined on `glsl` and `wgsl`
  * while compiling on `javascript`:
  *
- *   Power: the shader lowering `_gpu_powi(x + vec3(1.0, 3.0, 5.0), 2.0)`
+ *   Power: the shader lowering `_gpu_pow2(x + vec3(1.0, 3.0, 5.0))`
  *   cannot take the non-scalar operand shapes (vec3, scalar) …
  *
  * `_gpu_powi` is the sign-preserving integer power, declared with scalar
@@ -69,13 +69,13 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     // The squares stay `vec3`; only the final `min` reduces to a scalar, over
     // the components of a hoisted temporary.
     expect(gl(latex)).toBe(
-      'vec3 _tv1 = _gpu_powi3(x + vec3(1.0, 3.0, 5.0), 2.0) + ' +
-        '_gpu_powi3(y + vec3(-2.0, -4.0, -6.0), 2.0);\n' +
+      'vec3 _tv1 = _gpu_pow2_v3(x + vec3(1.0, 3.0, 5.0)) + ' +
+        '_gpu_pow2_v3(y + vec3(-2.0, -4.0, -6.0));\n' +
         'return (min(min(_tv1.x, _tv1.y), _tv1.z));'
     );
     expect(wl(latex)).toBe(
-      'var _tv1: vec3f = _gpu_powi3(x + vec3f(1.0, 3.0, 5.0), 2.0) + ' +
-        '_gpu_powi3(y + vec3f(-2.0, -4.0, -6.0), 2.0);\n' +
+      'var _tv1: vec3f = _gpu_pow2_v3(x + vec3f(1.0, 3.0, 5.0)) + ' +
+        '_gpu_pow2_v3(y + vec3f(-2.0, -4.0, -6.0));\n' +
         'return (min(min(_tv1.x, _tv1.y), _tv1.z));'
     );
   });
@@ -85,8 +85,8 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     const r = new GLSLTarget().compile(
       ce.parse('\\left(x-\\mathrm{PointX}(P)\\right)^2')
     );
-    expect(r.code).toBe('_gpu_powi3(x + vec3(1.0, 3.0, 5.0), 2.0)');
-    expect(r.preamble).toContain('vec3 _gpu_powi3(vec3 x, float n) {');
+    expect(r.code).toBe('_gpu_pow2_v3(x + vec3(1.0, 3.0, 5.0))');
+    expect(r.preamble).toContain('vec3 _gpu_pow2_v3(vec3 x) {');
     // The scalar declaration is a different overload with a different name, so
     // a compilation that only powers a vector must not drag it in.
     expect(r.preamble).not.toContain('float _gpu_powi(');
@@ -94,19 +94,19 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     const rw = new WGSLTarget().compile(
       fresh().parse('\\left(x-\\mathrm{PointX}(P)\\right)^2')
     );
-    expect(rw.preamble).toContain('fn _gpu_powi3(x: vec3f, n: f32) -> vec3f {');
+    expect(rw.preamble).toContain('fn _gpu_pow2_v3(x: vec3f) -> vec3f {');
     expect(rw.preamble).not.toContain('fn _gpu_powi(');
   });
 
   it('every vector width has an overload', () => {
     expect(g(['Power', ['List', 1, 2], 2])).toBe(
-      '_gpu_powi2(vec2(1.0, 2.0), 2.0)'
+      '_gpu_pow2_v2(vec2(1.0, 2.0))'
     );
-    expect(g(['Power', V3, 3])).toBe('_gpu_powi3(vec3(1.0, 2.0, 3.0), 3.0)');
+    expect(g(['Power', V3, 3])).toBe('_gpu_pow3_v3(vec3(1.0, 2.0, 3.0))');
     expect(g(['Power', ['List', 1, 2, 3, 4], 2])).toBe(
-      '_gpu_powi4(vec4(1.0, 2.0, 3.0, 4.0), 2.0)'
+      '_gpu_pow2_v4(vec4(1.0, 2.0, 3.0, 4.0))'
     );
-    expect(w(['Power', V3, 3])).toBe('_gpu_powi3(vec3f(1.0, 2.0, 3.0), 3.0)');
+    expect(w(['Power', V3, 3])).toBe('_gpu_pow3_v3(vec3f(1.0, 2.0, 3.0))');
   });
 
   it('`Square` takes the same overload as `Power(…, 2)`', () => {
@@ -115,7 +115,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
       g(['Power', ['Add', 'x', V3], 2], ce)
     );
     expect(g(['Square', ['Add', 'x', V3]], ce)).toBe(
-      '_gpu_powi3(x + vec3(1.0, 2.0, 3.0), 2.0)'
+      '_gpu_pow2_v3(x + vec3(1.0, 2.0, 3.0))'
     );
   });
 
@@ -123,10 +123,10 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     // `float / vecN` is componentwise in both languages, so the reciprocal
     // needs no widening of its own.
     expect(g(['Power', V3, -2])).toBe(
-      '(1.0 / _gpu_powi3(vec3(1.0, 2.0, 3.0), 2.0))'
+      '(1.0 / _gpu_pow2_v3(vec3(1.0, 2.0, 3.0)))'
     );
     expect(w(['Power', V3, -2])).toBe(
-      '(1.0 / _gpu_powi3(vec3f(1.0, 2.0, 3.0), 2.0))'
+      '(1.0 / _gpu_pow2_v3(vec3f(1.0, 2.0, 3.0)))'
     );
   });
 
@@ -184,7 +184,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     const r = new GLSLTarget().compile(
       fresh().box(['Power', ['Add', 'x', V3], 2] as any)
     );
-    expect(r.preamble).toContain('_gpu_powi3(vec3 x, float n)');
+    expect(r.preamble).toContain('_gpu_pow2_v3(vec3 x)');
   });
 
   it('exponents with no integer form widen the scalar side of `pow`', () => {
@@ -208,7 +208,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
       '\\max\\left(e^{-\\left(\\left(x-\\mathrm{PointX}(P)\\right)^2+' +
       '\\left(y-\\mathrm{PointY}(P)\\right)^2\\right)}\\right)';
     for (const code of [gl(latex), wl(latex)]) {
-      expect(code).toContain('_gpu_powi3(');
+      expect(code).toContain('_gpu_pow2_v3(');
       expect(code).toContain('pow(vec3');
       expect(code).toMatch(/max\(max\(/);
     }

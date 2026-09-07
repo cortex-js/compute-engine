@@ -90,13 +90,13 @@ describe('GLSL COMPILATION', () => {
 
       it('compound base → helper (base not duplicated)', () => {
         const r = glsl.compile(ce.parse('(x+y)^3'));
-        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x + y, 3.0)`);
+        expect(r.code).toMatchInlineSnapshot(`_gpu_pow3(x + y)`);
         expect(r.code).not.toContain('pow(');
       });
 
       it('compound base squared → helper (pow(neg,2) is NaN on GPU)', () => {
         expect(glsl.compile(ce.parse('(x+y)^2')).code).toMatchInlineSnapshot(
-          `_gpu_powi(x + y, 2.0)`
+          `_gpu_pow2(x + y)`
         );
       });
 

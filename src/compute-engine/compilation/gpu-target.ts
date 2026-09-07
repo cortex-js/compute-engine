@@ -578,6 +578,28 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec3f' : 'vec3';
 }
 
+/** A direct sRGB constructor can skip its perceptual-space round trip when
+ * bounded channels keep the conversion in its real-valued domain. Compile the
+ * child normally first so alpha, operand-shape, and caller-mapping checks still
+ * govern its lowering. */
+function gpuRgbBoundary(
+  color: Expression,
+  code: string,
+  target: CompileTarget<Expression>
+): string {
+  if (
+    isFunction(color) &&
+    ['Rgb', 'Hsv', 'Hsl'].includes(color.operator) &&
+    !isCallerMapped(color, target.cse?.harvestOptions) &&
+    !target.foldExcludedOps?.has(color.operator)
+  ) {
+    const prefix = '_gpu_srgb_to_oklch(';
+    if (code.startsWith(prefix) && code.endsWith(')'))
+      return `_gpu_srgb_roundtrip(${code.slice(prefix.length, -1)})`;
+  }
+  return `_gpu_oklch_to_srgb(${code})`;
+}
+
 /**
  * Fail closed (D6) on a color constructor given a 4th (alpha) operand.
  *
@@ -4177,6 +4199,50 @@ function assertFiniteGPUBound(
  */
 const GPU_POWI_INLINE_LIMIT = 4;
 
+/** Keep small constant powers branch-free while evaluating the base once.
+ * Invalid aggregate shapes retain the general helper and its shape diagnostic. */
+function gpuFixedPower(
+  code: string,
+  exponent: number,
+  shape: ReturnType<typeof gpuOperandShape>
+): string {
+  const width = typeof shape === 'number' ? shape : undefined;
+  if (
+    (shape === 'scalar' || width !== undefined) &&
+    exponent >= 2 &&
+    exponent <= 4
+  )
+    return `_gpu_pow${exponent}${width === undefined ? '' : `_v${width}`}(${code})`;
+  return `_gpu_powi${width ?? ''}(${code}, ${formatGPUNumber(exponent)})`;
+}
+
+/** Emit only the scalar/vector specializations actually called by the source. */
+function gpuFixedPowerPreamble(code: string, isWGSL: boolean): string {
+  const names = new Set<string>();
+  const calls = /(?<![\w$])(_gpu_pow([234])(?:_v([234]))?)\s*\(/g;
+  let result = '';
+  for (const match of code.matchAll(calls)) {
+    const name = match[1];
+    if (names.has(name)) continue;
+    names.add(name);
+    const type = match[3]
+      ? gpuVecType(Number(match[3]), isWGSL)
+      : isWGSL
+        ? 'f32'
+        : 'float';
+    const body =
+      match[2] === '2'
+        ? 'return x * x;'
+        : match[2] === '3'
+          ? 'return x * x * x;'
+          : `${isWGSL ? 'let' : type} s = x * x; return s * s;`;
+    result += isWGSL
+      ? `\nfn ${name}(x: ${type}) -> ${type} { ${body} }\n`
+      : `\n${type} ${name}(${type} x) { ${body} }\n`;
+  }
+  return result;
+}
+
 /**
  * Largest literal `k` for which `Binomial(n, k)`/`Choose(n, k)` unrolls to its
  * explicit falling-factorial product on a GPU target. Every unit of `k` adds
@@ -5153,12 +5219,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         const code = compile(base);
         pos = /^[A-Za-z_]\w*$|^-?[0-9]+(?:\.[0-9]*)?$/.test(code)
           ? `(${Array(absN).fill(code).join(' * ')})`
-          : `_gpu_powi${powWidth ?? ''}(${code}, ${formatGPUNumber(absN)})`;
+          : gpuFixedPower(code, absN, gpuOperandShape(base));
       } else {
         // Compound or large: route through the helper so the base subexpression
         // is evaluated once (not duplicated) and the sign stays correct. The
         // exponent stays a scalar in the `vecN` overloads too.
-        pos = `_gpu_powi${powWidth ?? ''}(${compile(base)}, ${formatGPUNumber(absN)})`;
+        pos = gpuFixedPower(compile(base), absN, gpuOperandShape(base));
       }
       // `float / vecN` is a componentwise division in both languages, so the
       // reciprocal of a vector power needs no widening either.
@@ -5671,7 +5737,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       if (/^[A-Za-z_]\w*$|^-?[0-9]+(?:\.[0-9]*)?$/.test(arg))
         return `(${arg} * ${arg})`;
       const width = gpuOperandShape(x);
-      return `_gpu_powi${typeof width === 'number' ? width : ''}(${arg}, 2.0)`;
+      return gpuFixedPower(arg, 2, width);
     }
     // Compound base: `pow(x, 2.0)` is NaN for x < 0 on a real GPU (log2 of a
     // negative). Route through the sign-preserving helper, which also evaluates
@@ -5680,7 +5746,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // scalar one is declared with `float`/`f32` parameters and has no vector
     // reading.
     const width = gpuOperandShape(x);
-    return `_gpu_powi${typeof width === 'number' ? width : ''}(${compile(x)}, 2.0)`;
+    return gpuFixedPower(compile(x), 2, width);
   },
   Root: ([x, n], compile, target) => {
     if (x === null) throw new Error('Root: no argument');
@@ -5782,7 +5848,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const white = `${v3}(1.0, 0.0, 0.0)`;
     return pick(`(_gpu_apca(${bg}, ${black}) > 50.0)`, black, white);
   },
-  ColorToColorspace: ([color, space], compile) => {
+  ColorToColorspace: ([color, space], compile, target) => {
     if (color === null || space === null)
       throw new Error('ColorToColorspace: need color and space');
     // The input color is canonical OKLCh; route to the requested space.
@@ -5799,7 +5865,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       case 'lab':
         return `_gpu_oklch_to_oklab(${c})`;
       case 'rgb':
-        return `_gpu_oklch_to_srgb(${c})`;
+        return gpuRgbBoundary(color, c, target);
       case 'hsl':
         return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${c}))`;
       case 'hsv':
@@ -5932,9 +5998,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_gpu_oklch_to_oklab(${compile(c)})`;
   },
 
-  AsRgb: ([c], compile) => {
+  AsRgb: ([c], compile, target) => {
     if (c === null) throw new Error('AsRgb: no argument');
-    return `_gpu_oklch_to_srgb(${compile(c)})`;
+    return gpuRgbBoundary(c, compile(c), target);
   },
 
   AsHsv: ([c], compile) => {
@@ -10200,6 +10266,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // The scalar `_gpu_powi` and its per-width `vecN` overloads
     // (`_gpu_powi2`–`_gpu_powi4`) are declared independently: a compilation
     // that only powers a vector needs the vector form alone.
+    preamble += gpuFixedPowerPreamble(code, isWGSL);
     for (const form of gpuPowiHelperForms(code))
       preamble +=
         form === 'scalar'
@@ -10293,6 +10360,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           : GPU_MEDIAN_PREAMBLE_GLSL;
     if (
       code.includes('_gpu_srgb_to') ||
+      code.includes('_gpu_srgb_roundtrip(') ||
       code.includes('_gpu_oklab') ||
       code.includes('_gpu_oklch') ||
       code.includes('_gpu_color_mix') ||
@@ -10303,6 +10371,44 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           ? GPU_COLOR_PREAMBLE_WGSL
           : GPU_COLOR_PREAMBLE_GLSL;
     }
+    if (code.includes('_gpu_srgb_roundtrip('))
+      preamble += isWGSL
+        ? `
+fn _gpu_srgb_roundtrip(rgb: vec3f) -> vec3f {
+  // Bound positive contributions before checking the cube-root domain.
+  if (all(rgb <= vec3f(2.0))) {
+    if (all(rgb >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
+    let r = _gpu_srgb_to_linear(rgb.x);
+    let g = _gpu_srgb_to_linear(rgb.y);
+    let b = _gpu_srgb_to_linear(rgb.z);
+    let lms = vec3f(
+      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    );
+    if (all(lms >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
+  }
+  return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
+}
+`
+        : `
+vec3 _gpu_srgb_roundtrip(vec3 rgb) {
+  // Bound positive contributions before checking the cube-root domain.
+  if (all(lessThanEqual(rgb, vec3(2.0)))) {
+    if (all(greaterThanEqual(rgb, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
+    float r = _gpu_srgb_to_linear(rgb.x);
+    float g = _gpu_srgb_to_linear(rgb.y);
+    float b = _gpu_srgb_to_linear(rgb.z);
+    vec3 lms = vec3(
+      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    );
+    if (all(greaterThanEqual(lms, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
+  }
+  return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
+}
+`;
     if (!userDefs) return preamble;
     return preamble ? `${preamble}\n${userDefs}` : userDefs;
   }

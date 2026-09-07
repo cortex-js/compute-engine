@@ -726,7 +726,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `mod(((sin(100000.0 * sqrt(_gpu_powi(ceil(x), 2.0) + _gpu_powi(ceil(y), 2.0))) < 0.0) ? (x) : ((y))), 1.0)`
+      `mod(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y))), 1.0)`
     );
   });
 
@@ -738,7 +738,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `mod(100000.0 * sqrt(_gpu_powi(ceil(x), 2.0) + 1.0), 1.0)`
+      `mod(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0), 1.0)`
     );
   });
 
@@ -756,7 +756,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `mod(((2.0 * sqrt(_gpu_powi(ceil(x), 2.0) + _gpu_powi(ceil(y), 2.0)) < 0.0) ? (x) : ((y))), 1.0)`
+      `mod(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y))), 1.0)`
     );
   });
 

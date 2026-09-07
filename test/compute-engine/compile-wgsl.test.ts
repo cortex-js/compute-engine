@@ -89,7 +89,7 @@ describe('WGSL COMPILATION', () => {
 
       it('compound base → helper (base not duplicated)', () => {
         const r = wgsl.compile(ce.parse('(x+y)^3'));
-        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x + y, 3.0)`);
+        expect(r.code).toMatchInlineSnapshot(`_gpu_pow3(x + y)`);
         expect(r.code).not.toContain('pow(');
       });
 

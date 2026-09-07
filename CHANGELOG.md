@@ -24,6 +24,21 @@
 
 ### Improvements
 
+- **Code generation specializes more numeric operations.** GLSL and WGSL use
+  branch-free helpers for small constant powers of compound expressions and
+  skip sRGB/OKLCh round trips for bounded colors after checking the conversion
+  domain, retaining final channel clipping. JavaScript combines leading
+  numeric factors introduced during lowering, including degree conversion,
+  and omits user-call array checks for explicitly declared scalar inputs.
+  Inferred and caller-mapped inputs retain runtime broadcasting.
+
+- **Numeric array selections can execute in one element loop.** JavaScript
+  fuses eligible pure arithmetic, rotations, and comparisons into selection,
+  sharing repeated cell calculations without intermediate arrays. Runtime
+  checks retain the existing selection path for empty, nested, nonnumeric,
+  scalar, or mismatched inputs. Caller mappings and effectful expressions
+  keep their original evaluation behavior.
+
 - **The `javascript` target accepts a numeric typed array for a
   list-declared input.** A symbol or lambda parameter declared as a list
   (`list<number>`, `vector<3>`, ...) that receives a `Float64Array` or

@@ -6018,26 +6018,51 @@ export class BaseCompiler {
               // operands need no extra parens.
               const leftAssocNonAssociative =
                 h === 'Subtract' || h === 'Divide';
-              resultStr = args
-                .map((arg, i) => {
-                  let operandPrec = op[1];
-                  if (rightAssoc && i < args.length - 1)
-                    operandPrec = op[1] + 1;
-                  else if (leftAssocNonAssociative && i > 0)
-                    operandPrec = op[1] + 1;
-                  // Routed through the edge helper so a short-circuiting
-                  // connective (`And`/`Or`, whose operands after the first are
-                  // lazy edges) pushes its region instance; a non-region edge
-                  // compiles exactly as before.
-                  return BaseCompiler.compileOpValue(
-                    node,
-                    i,
-                    target,
-                    operandPrec,
-                    arg
+              const operandCodes = args.map((arg, i) => {
+                let operandPrec = op[1];
+                if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
+                else if (leftAssocNonAssociative && i > 0)
+                  operandPrec = op[1] + 1;
+                // Routed through the edge helper so a short-circuiting
+                // connective (`And`/`Or`, whose operands after the first are
+                // lazy edges) pushes its region instance; a non-region edge
+                // compiles exactly as before.
+                return BaseCompiler.compileOpValue(
+                  node,
+                  i,
+                  target,
+                  operandPrec,
+                  arg
+                );
+              });
+              // Fold only a leading run of emitted numeric literals. It has
+              // the same left-to-right rounding as the original product and
+              // also catches constants introduced by lowering, such as degrees.
+              if (
+                target.language === 'javascript' &&
+                target.constantFold !== false &&
+                h === 'Multiply' &&
+                op[0] === '*'
+              ) {
+                const numeric = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
+                let count = 0;
+                let product = 1;
+                for (const code of operandCodes) {
+                  if (!numeric.test(code) || !Number.isFinite(Number(code)))
+                    break;
+                  const next = product * Number(code);
+                  if (!Number.isFinite(next)) break;
+                  product = next;
+                  count++;
+                }
+                if (count > 1)
+                  operandCodes.splice(
+                    0,
+                    count,
+                    Object.is(product, -0) ? '-0' : String(product)
                   );
-                })
-                .join(` ${op[0]} `);
+              }
+              resultStr = operandCodes.join(` ${op[0]} `);
             }
             // Same shape gate as the function-codegen and string-helper paths
             // (see `CompileTarget.checkOperandShapes`): the infix arithmetic
@@ -16292,8 +16317,8 @@ export class BaseCompiler {
     //   - every argument PROVABLY not a collection (`provablyScalarArg`, at
     //     the top of this function) takes the cheaper runtime `Array.isArray`
     //     guard below instead of this unconditional dispatch. That static
-    //     reading is a claim about the TYPE, not about the value, so it
-    //     chooses the form of the test and never removes it.
+    //     reading alone chooses the form of the test. Explicit scalar input
+    //     declarations and constructed scalar values can remove it.
     // The dispatch is `_SYS.bcastFn`, not `_SYS.bcast`: applying a function
     // literal to an EMPTY collection zips zero elements and answers `[]` in
     // the interpreter, where an empty operator position answers `Nothing`
@@ -16360,11 +16385,10 @@ export class BaseCompiler {
     // an array all the same. A bare `_fn_f(_.y)` computed NaN there, where
     // the interpreter broadcasts to `[3, 5, 7]`.
     //
-    // So the shape class only chooses WHERE the test happens, never whether
-    // there is one: a provably-scalar argument list keeps the direct call in
-    // the taken branch of a runtime `Array.isArray` guard (measured at about
-    // 3 ns per call, ruled acceptable) instead of dispatching through
-    // `_SYS.bcastFn` unconditionally.
+    // Inferred scalar types choose a guarded direct call instead of an
+    // unconditional broadcast. Explicit scalar input declarations and values
+    // constructed from known scalars are stronger contracts: `scalarArg`
+    // excludes those arguments from the test.
     //
     // The guard binds each tested argument to a temporary, so an argument
     // expression is evaluated exactly once however the test goes. A LITERAL
@@ -19730,6 +19754,26 @@ export class BaseCompiler {
     }
     if (instance.bindings.length === 0) return code;
     return target.cseBind!(instance.bindings, code);
+  }
+
+  /**
+   * Compile `fn` under a fresh instance of the innermost region, so that every
+   * temporary `fn` binds is emitted by `cseBind` around `fn`'s OWN result
+   * instead of by the enclosing instance. A lowering that emits a guarded fast
+   * path followed by the generic lowering of the same node uses this for the
+   * generic branch: its temporaries (an array-valued intermediate, say) then
+   * run only when the guard takes that branch, never before the fast path,
+   * while the branch still shares repeated work with itself. Temporaries an
+   * enclosing instance has ALREADY bound stay in scope and are reused. With
+   * CSE inactive `fn` compiles as is.
+   */
+  static withCseLocalInstance(
+    target: CompileTarget<Expression>,
+    fn: () => TargetSource
+  ): TargetSource {
+    const top = BaseCompiler.cseTop(target);
+    if (top === undefined) return fn();
+    return BaseCompiler.withCseRegion(target, BaseCompiler.cseRegionOf(top), fn);
   }
 
   /**

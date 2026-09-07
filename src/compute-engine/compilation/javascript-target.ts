@@ -8,6 +8,7 @@ import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
 import { javascriptStatements } from './javascript-statements.js';
+import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   canIndexArrayDirectly,
   recordIntegerRange,
@@ -1007,7 +1008,8 @@ function compileJSCollectionBoolean(
  */
 function compileJSSelection(
   args: ReadonlyArray<Expression>,
-  compile: OperandCompiler<Expression>
+  compile: OperandCompiler<Expression>,
+  target?: CompileTarget<Expression>
 ): string | null {
   const conds = args.filter((_x, i) => i % 2 === 0);
   const collectionish = (a: Expression): boolean =>
@@ -1015,6 +1017,17 @@ function compileJSSelection(
     a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
+  if (target) {
+    const fused = compileNumericSelection(
+      args,
+      target,
+      (fallbackTarget) =>
+        compileJSSelection(args, (expr) =>
+          BaseCompiler.compileValueOperand(expr, fallbackTarget)
+        )!
+    );
+    if (fused !== undefined) return fused;
+  }
   // Every clause is a thunk the runtime helper owns the evaluation of, so each
   // position after the first condition is a conditionally-evaluated operand:
   // pass its index, and the CSE pass pushes the matching region instance
@@ -6792,6 +6805,18 @@ function enterIntegral(): boolean {
 const SYS_HELPERS = {
   bcast,
   bcastFn,
+  // Establish the representation used by the fused numeric selection loop.
+  // Scan every cell: a declaration alone cannot exclude nested or absent cells.
+  numericSelectionInputs: (...arrays: unknown[]): boolean => {
+    const first = arrays[0];
+    if (!Array.isArray(first) || first.length === 0) return false;
+    for (const array of arrays) {
+      if (!Array.isArray(array) || array.length !== first.length) return false;
+      for (let i = 0; i < array.length; i++)
+        if (typeof array[i] !== 'number') return false;
+    }
+    return true;
+  },
   // `RotateLeft`/`RotateRight` over an evaluated array, and the in-place
   // rotated READ a broadcast consumes instead of a copy (see `RotView`).
   rotl,
@@ -8591,7 +8616,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
       // Element-wise `Which`/`If` selection over a collection-valued condition.
-      selection: (args, compile) => compileJSSelection(args, compile),
+      selection: (args, compile, target) =>
+        compileJSSelection(args, compile, target),
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
       // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
       absence: {
