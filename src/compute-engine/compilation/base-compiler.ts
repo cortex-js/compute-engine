@@ -6466,6 +6466,15 @@ export class BaseCompiler {
       // Every value arm, and every condition after the first, sits behind a
       // ternary test: each is its own region (§5.1(b)), so nothing binds
       // across an arm that may not be evaluated.
+      //
+      // The FIRST condition is compiled before its arm and before the
+      // remaining clauses. It is the one operand evaluated unconditionally,
+      // so it belongs to the enclosing region, and a subexpression it shares
+      // with an arm is bound at that region's top when the condition is
+      // emitted (the dominance rule of `cse.ts`) — an arm compiled earlier
+      // would find no binding yet and emit the subexpression again. Every
+      // later condition is its own region with no descendant arm, so its
+      // order relative to the arms is immaterial.
       const compilePair = (i: number): string => {
         if (i >= args.length) return noBranch;
         const cond = args[i];
@@ -6476,12 +6485,14 @@ export class BaseCompiler {
         // with a construct the target cannot lower.
         const claim = BaseCompiler.booleanClaim(cond);
         if (claim === false) return compilePair(i + 2);
-        const armCode = BaseCompiler.compileOp(node, i + 1, target, 0, val);
-        const valCode = coerce ? coerce(val, armCode) : armCode;
+        const compileArm = (): string => {
+          const armCode = BaseCompiler.compileOp(node, i + 1, target, 0, val);
+          return coerce ? coerce(val, armCode) : armCode;
+        };
         // If condition is the symbol True, or proven `true` by its type,
         // it's the default branch.
         if (isSymbol(cond, 'True') || claim === true) {
-          return `(${valCode})`;
+          return `(${compileArm()})`;
         }
         // A condition that is not exactly `true` or `false` when the
         // compiled function runs selects no clause and ends the search. See
@@ -6500,25 +6511,40 @@ export class BaseCompiler {
               : BaseCompiler.withCseOperand(node, i, target, () =>
                   BaseCompiler.guardCondition(cond, target)
                 );
+          const valCode = compileArm();
           return `((${condCode}) ? (${valCode}) : ${compilePair(i + 2)})`;
         }
-        // The remaining clauses are compiled BEFORE the region below is
-        // opened: they belong to sibling regions, and a temporary they bind
-        // must not land in this clause's wrapper. The condition and its
-        // decidedness test, in contrast, must both be built inside that
+        if (i === 0) {
+          const condCode = BaseCompiler.compileExactCondition(
+            cond,
+            decidability,
+            target
+          );
+          const valCode = compileArm();
+          return BaseCompiler.exactSelect(
+            condCode,
+            `(${valCode})`,
+            compilePair(i + 2),
+            noBranch,
+            target
+          );
+        }
+        // The arm and the remaining clauses are compiled BEFORE the region
+        // below is opened: they belong to sibling regions, and a temporary
+        // they bind must not land in this clause's wrapper. The condition and
+        // its decidedness test, in contrast, must both be built inside that
         // wrapper — see `compileExactCondition`.
+        const valCode = compileArm();
         const rest = compilePair(i + 2);
-        const build = (): string =>
+        return BaseCompiler.withCseOperand(node, i, target, () =>
           BaseCompiler.exactSelect(
             BaseCompiler.compileExactCondition(cond, decidability, target),
             `(${valCode})`,
             rest,
             noBranch,
             target
-          );
-        return i === 0
-          ? build()
-          : BaseCompiler.withCseOperand(node, i, target, build);
+          )
+        );
       };
       return compilePair(0);
     }
@@ -7394,6 +7420,58 @@ export class BaseCompiler {
     return true;
   }
 
+  /**
+   * The `_SYS.rotv(base, shift, ±1)` spelling of a `RotateLeft`/`RotateRight`
+   * operand of a broadcast, or `undefined` when the operand must compile as
+   * itself: it is not a rotation, its base is not provably a list of scalars
+   * (a view reads the base by index, so the base must be an array whose
+   * cells the closure applies to — a string or a list of points is not one),
+   * the rotation head is caller-mapped (`functions`/`operators`/a compile
+   * handler: the caller's implementation, not the built-in rotation, is what
+   * the operand denotes), or the node already has a name — a loop-invariant
+   * hoist override, a CSE temporary bound by an enclosing instance, or a CSE
+   * candidate of the current region, which must go through `compile()` to
+   * bind or read it.
+   *
+   * A view reads its base when the element loop runs, AFTER every operand of
+   * the broadcast has been evaluated, where a materialized rotation copied
+   * the base at its own evaluation. The two agree only if nothing evaluated
+   * in between mutates the base, so the caller (`tryCompileBroadcast`) asks
+   * for views only when every operand is pure and neither the head nor any
+   * operand is caller-mapped — the checks `admission` carries.
+   *
+   * The base and the shift are compiled through the same `compile()` the
+   * rotation's own handler would have used, so their CSE and override state
+   * is honored. The rotation node itself is not compiled: compiling it would
+   * bind or emit the materializing rotation, which is what the view replaces.
+   */
+  private static rotationView(
+    a: Expression,
+    target: CompileTarget<Expression>,
+    admission: CseHarvestOptions
+  ): string | undefined {
+    if (!isFunction(a)) return undefined;
+    const dir =
+      a.operator === 'RotateLeft' ? 1 : a.operator === 'RotateRight' ? -1 : 0;
+    if (dir === 0 || a.nops < 1 || a.nops > 2) return undefined;
+    if (!BaseCompiler.isScalarElementSource(a.op1)) return undefined;
+    if (isCallerMapped(a, admission)) return undefined;
+    if (BaseCompiler._codeOverrides.has(a)) return undefined;
+    const session = target.cse;
+    if (session !== undefined && session.enabled) {
+      const top = session.instances[session.instances.length - 1];
+      if (top !== undefined) {
+        if (BaseCompiler.availableCseBinding(session, a, true) !== undefined)
+          return undefined;
+        if (candidateAt(BaseCompiler.cseRegionOf(top), a) !== undefined)
+          return undefined;
+      }
+    }
+    const base = BaseCompiler.compile(a.op1, target);
+    const shift = a.nops === 2 ? BaseCompiler.compile(a.op2, target) : '1';
+    return `_SYS.rotv(${base}, ${shift}, ${dir})`;
+  }
+
   private static tryCompileBroadcast(
     engine: ComputeEngine,
     h: string,
@@ -8093,7 +8171,34 @@ export class BaseCompiler {
         BaseCompiler._broadcastRadicalVerdict.pop();
       BaseCompiler._popLocalComplex();
     }
-    const compiledArgs = args.map((a) => BaseCompiler.compile(a, target));
+    // A `RotateLeft`/`RotateRight` operand whose base provably holds scalars
+    // is handed to the plain broadcast as an in-place VIEW (`_SYS.rotv`): the
+    // element loop reads the base at a shifted index instead of first
+    // allocating and copying the rotated list — one full-list copy per
+    // rotation, eight per evaluation of a Life stencil (Tycho item 262). The
+    // point-broadcast shapes below keep the materialized rotation: their
+    // inner `_SYS.bcast` receives the outer closure's parameters, not the
+    // operands themselves. Only for the JavaScript target, whose runtime
+    // helpers implement the view. A view reads the base when the element
+    // loop runs, after every operand has been evaluated, so it is used only
+    // when nothing evaluated in between can mutate the base: every operand
+    // is pure and neither the head nor an operand is caller-mapped (a
+    // caller-supplied function may do anything to an array it receives).
+    // `rotationView` adds the per-operand conditions.
+    const admission =
+      atomicTuple === undefined && target.cseBind !== undefined
+        ? BaseCompiler.cseAdmission(target, new Set())
+        : undefined;
+    const viewsAllowed =
+      admission !== undefined &&
+      admission.isOverriddenOperator?.(h) !== true &&
+      args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
+    const compiledArgs = args.map(
+      (a) =>
+        (viewsAllowed
+          ? BaseCompiler.rotationView(a, target, admission!)
+          : undefined) ?? BaseCompiler.compile(a, target)
+    );
     const body = BaseCompiler.guardConnectiveAbsence(h, params, scalarBody);
     const closure = `(${params.join(', ')}) => ${body}`;
     // A point multiplied by a list (`[1,2,3]·(cos a, sin a)`, Tycho item 214):

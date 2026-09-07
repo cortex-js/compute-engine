@@ -420,6 +420,27 @@ standalone `compile()` entry.
   (`gpuRefuseStorageReference`).
 - Tests: `test/compute-engine/at-gpu-sampler-storage.test.ts`.
 
+**Adopted by the consumer (2026-09-06, Compute Engine 0.125.0).** Tycho's
+Game of Life entry resolves onto the GLSL lane with `_gpu_texat40000(S, …)`,
+verified in a browser. Its uploader uses an R32F texture, nearest filtering,
+row-major from texel (0, 0), width `min(length, 2048)` clamped to the device's
+maximum texture size and height `ceil(length / width)`, so the texture never
+holds fewer texels than the length; it declares `uniform sampler2D S;` and
+`precision highp sampler2D;` itself. The consumer uses only the runtime-index
+form and the WebGL 2 lane, so neither step 3 nor step 4 is needed for it.
+
+One sharp edge the consumer met, recorded here because it reads backwards
+easily: **a counted width declared in a pushed scope does not reach an
+expression that was boxed before the declaration.** `At` reads its base's type
+from the definition captured when the expression was boxed, so `pushScope`
+followed by `declare` after the fact leaves the compile reading the old open
+type, and the sampler arm declines with the `indexed_collection` message even
+though `lookupDefinition` inside the scope reports the counted type. Re-boxing
+inside the scope (`ce.box(expr.json)`) resolves it. A probe can appear to
+confirm the scope route by accident: a carrier that was `ce.assign`-ed without
+an explicit `declare` is auto-declared with a counted type, so the right helper
+is emitted for the wrong reason.
+
 Not delivered, by design of the staging:
 
 - Step 3, the WGSL read (declines; see question 3).

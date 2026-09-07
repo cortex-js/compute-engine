@@ -3301,22 +3301,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Rotate left/right by n positions (default 1). The shift is rounded and
   // normalized modulo the length, matching the interpreter; a non-finite
   // shift falls back to the default 1 (the interpreter's `toInteger` treats
-  // it as missing); an empty collection yields [].
+  // it as missing); an empty collection yields []. The rotation itself is the
+  // runtime helper `_SYS.rotl`/`_SYS.rotr` (see `rotl`); a rotation that is
+  // consumed element-wise by a broadcast is emitted as an in-place view
+  // instead (`_SYS.rotv`, `BaseCompiler.tryCompileBroadcast`).
   RotateLeft: (args, compile) => {
     const coll = elementsArg('RotateLeft', args[0], compile);
     const n = args[1] == null ? '1' : compile(args[1]);
-    return joinIfString(
-      args[0],
-      `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`
-    );
+    return joinIfString(args[0], `_SYS.rotl(${coll}, ${n})`);
   },
   RotateRight: (args, compile) => {
     const coll = elementsArg('RotateRight', args[0], compile);
     const n = args[1] == null ? '1' : compile(args[1]);
-    return joinIfString(
-      args[0],
-      `((_l, _n) => { if (_l.length === 0) return []; _n = Math.round(_n); if (!Number.isFinite(_n)) _n = 1; _n = ((-_n % _l.length) + _l.length) % _l.length; return [..._l.slice(_n), ..._l.slice(0, _n)]; })(${coll}, ${n})`
-    );
+    return joinIfString(args[0], `_SYS.rotr(${coll}, ${n})`);
   },
   // Element-wise combination: a list of tuples (compiled as arrays), with
   // the length of the shortest input.
@@ -5660,7 +5657,7 @@ function oneDatumOk<T>(
 
 function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
-  ...args: BcastValue[]
+  ...args: unknown[]
 ): BcastValue {
   return bcastWith(false, f, args);
 }
@@ -5674,30 +5671,203 @@ function bcast(
  */
 function bcastFn(
   f: (...xs: BcastValue[]) => BcastValue,
-  ...args: BcastValue[]
+  ...args: unknown[]
 ): BcastValue {
   return bcastWith(true, f, args);
+}
+
+/**
+ * A rotated READ of a flat array, handed to `bcast` in place of a rotated
+ * COPY. `_SYS.rotv(base, shift, ±1)` is emitted only as a DIRECT operand of a
+ * `_SYS.bcast` call (see `BaseCompiler.tryCompileBroadcast`), so a view never
+ * escapes into a value position: the broadcast reads `base[(i + shift) mod n]`
+ * inside its element loop instead of allocating and copying the whole
+ * rotation first. A stencil that sums eight rotations of a 40 000-element
+ * board allocated eight full copies per evaluation before this (Tycho item
+ * 262).
+ *
+ * `shift` is already normalized to `0 ≤ shift < base.length` by `rotv`, with
+ * the `RotateLeft`/`RotateRight` rounding, default and modulo rules applied
+ * (`normalizeRotation`), so a view denotes exactly the array `rotl`/`rotr`
+ * would have produced.
+ */
+class RotView {
+  constructor(
+    readonly base: BcastValue[],
+    readonly shift: number
+  ) {}
+}
+
+/**
+ * The shift a `RotateLeft` (`dir = 1`) or `RotateRight` (`dir = -1`) of a
+ * length-`n` collection applies, as a non-negative offset below `n`: rounded,
+ * a non-finite shift falls back to the default 1 (the interpreter's
+ * `toInteger` treats it as missing), then reduced modulo `n`. `n` must be
+ * positive.
+ */
+function normalizeRotation(shift: number, dir: 1 | -1, n: number): number {
+  let k = Math.round(shift);
+  if (!Number.isFinite(k)) k = 1;
+  return (((dir * k) % n) + n) % n;
+}
+
+/** `RotateLeft` over an already-evaluated array: an empty array stays empty.
+ * The two halves are joined with `concat`, never spread into a literal:
+ * spreading a large `slice` walks it element by element through the iterator
+ * protocol, and on a 40 000-element list that cost more than the broadcast
+ * the rotation fed (Tycho item 262). */
+function rotl<T>(l: T[], shift: number): T[] {
+  if (l.length === 0) return [];
+  const k = normalizeRotation(shift, 1, l.length);
+  return l.slice(k).concat(l.slice(0, k));
+}
+
+/** `RotateRight` over an already-evaluated array; see `rotl`. */
+function rotr<T>(l: T[], shift: number): T[] {
+  if (l.length === 0) return [];
+  const k = normalizeRotation(shift, -1, l.length);
+  return l.slice(k).concat(l.slice(0, k));
+}
+
+/**
+ * A rotation operand of a broadcast: a `RotView` over an array base, or —
+ * for a base that is not an array — whatever the materializing rotation
+ * answers, so the two spellings never disagree. An EMPTY base materializes
+ * too (to `[]`): a view needs a positive length to normalize its shift, and
+ * `bcast` answers the empty position from the array's length anyway.
+ */
+function rotv(base: unknown, shift: number, dir: 1 | -1): unknown {
+  if (!Array.isArray(base) || base.length === 0)
+    return dir === 1
+      ? rotl(base as unknown[], shift)
+      : rotr(base as unknown[], shift);
+  return new RotView(
+    base as BcastValue[],
+    normalizeRotation(shift, dir, base.length)
+  );
+}
+
+/** The value of broadcast operand `a` at position `i` (`a` is an array or a
+ * view; a scalar operand is never asked). */
+function bcastCell(a: BcastValue[] | RotView, i: number): BcastValue {
+  if (a instanceof RotView) {
+    let p = i + a.shift;
+    const n = a.base.length;
+    if (p >= n) p -= n;
+    return a.base[p];
+  }
+  return a[i];
+}
+
+/**
+ * One element loop per operand SHAPE: a generated function that reads each
+ * operand the way its kind requires — `a` an array cell, `v` a rotation view
+ * cell, `s` the scalar itself — and applies the closure to the cells, with
+ * the operand reads written out explicitly for that arity.
+ *
+ * A single generic loop over an operand buffer (`for (j < k) cell[j] = …`)
+ * cost 3.5× the explicit form on an 8-operand broadcast of 40 000 elements,
+ * and the closure call itself was not the cost (Tycho item 264, measured
+ * 2026-09-06). Generating the loop per shape is how a runtime helper gets the
+ * explicit form for every arity; the same `Function` constructor already
+ * builds every compiled artifact, so this adds no capability the artifact
+ * did not need. Shapes are cached by signature; a host that forbids dynamic
+ * code (the constructor throws) is remembered, and every broadcast then takes
+ * the generic loop.
+ *
+ * The loop returns `-1` when every position was scalar, or the first position
+ * whose cell is itself an array: positions before it are complete, and the
+ * caller resumes there with the recursive projection.
+ */
+type BcastKernel = (
+  f: (...xs: BcastValue[]) => BcastValue,
+  out: BcastValue[],
+  n: number,
+  ...operands: unknown[]
+) => number;
+
+const BCAST_KERNELS = new Map<string, BcastKernel>();
+const BCAST_KERNEL_CACHE_LIMIT = 256;
+let bcastKernelsDisabled = false;
+
+function bcastKernel(signature: string): BcastKernel | undefined {
+  if (bcastKernelsDisabled) return undefined;
+  const cached = BCAST_KERNELS.get(signature);
+  if (cached !== undefined) return cached;
+  if (BCAST_KERNELS.size >= BCAST_KERNEL_CACHE_LIMIT) return undefined;
+  const params: string[] = [];
+  const reads: string[] = [];
+  const nested: string[] = [];
+  const cells: string[] = [];
+  for (let j = 0; j < signature.length; j++) {
+    const kind = signature[j];
+    params.push(`_o${j}`);
+    if (kind === 's') {
+      cells.push(`_o${j}`);
+      continue;
+    }
+    if (kind === 'v') {
+      // `_o${j}` is the view's base array, `_k${j}` its shift: both are
+      // passed separately so the loop reads a plain array element.
+      params.push(`_k${j}`);
+      reads.push(
+        `let _p${j} = _i + _k${j}; if (_p${j} >= _n) _p${j} -= _n; ` +
+          `const _x${j} = _o${j}[_p${j}];`
+      );
+    } else reads.push(`const _x${j} = _o${j}[_i];`);
+    nested.push(`Array.isArray(_x${j})`);
+    cells.push(`_x${j}`);
+  }
+  const body =
+    `for (let _i = 0; _i < _n; _i++) { ${reads.join(' ')} ` +
+    (nested.length > 0 ? `if (${nested.join(' || ')}) return _i; ` : '') +
+    `_out[_i] = _f(${cells.join(', ')}); } return -1;`;
+  let kernel: BcastKernel;
+  try {
+    kernel = new Function('_f', '_out', '_n', ...params, body) as BcastKernel;
+  } catch {
+    bcastKernelsDisabled = true;
+    return undefined;
+  }
+  BCAST_KERNELS.set(signature, kernel);
+  return kernel;
 }
 
 /**
  * Shared implementation of `bcast`/`bcastFn`. `emptyIsList` selects what an
  * empty broadcast position produces, and is carried into the nested positions
  * so a `[[], [1]]` argument projects consistently at every depth.
+ *
+ * An operand is a scalar, an array, or a rotation view (`RotView`, read in
+ * place — see `rotv`). The array and view operands must share one length;
+ * a mismatch projects the interpreter's `incompatible-dimensions` result to
+ * NaN. Do not truncate or recycle operands.
  */
 function bcastWith(
   emptyIsList: boolean,
   f: (...xs: BcastValue[]) => BcastValue,
-  args: BcastValue[]
+  args: unknown[]
 ): BcastValue {
+  const k = args.length;
   let n = -1;
-  for (const a of args) {
-    if (!Array.isArray(a)) continue;
-    if (n < 0) n = a.length;
-    // A length mismatch projects the interpreter's `incompatible-dimensions`
-    // result to NaN. Do not truncate or recycle operands.
-    else if (a.length !== n) return NaN;
+  let signature = '';
+  for (let j = 0; j < k; j++) {
+    const a = args[j];
+    let len: number;
+    if (Array.isArray(a)) {
+      signature += 'a';
+      len = a.length;
+    } else if (a instanceof RotView) {
+      signature += 'v';
+      len = a.base.length;
+    } else {
+      signature += 's';
+      continue;
+    }
+    if (n < 0) n = len;
+    else if (len !== n) return NaN;
   }
-  if (n < 0) return f(...args);
+  if (n < 0) return f(...(args as BcastValue[]));
   // An EMPTY position broadcasts to `Nothing` in the interpreter, not to an
   // empty list — `Not([])` is `Nothing` (NaN here), and in a nested operand
   // (`Not([[], [True]])` → `[Nothing, [False]]`) only that position is
@@ -5707,12 +5877,42 @@ function bcastWith(
   // shared instance).
   if (n === 0) return emptyIsList ? [] : NaN;
   const out: BcastValue[] = new Array(n);
-  for (let i = 0; i < n; i++)
-    out[i] = bcastWith(
-      emptyIsList,
-      f,
-      args.map((a) => (Array.isArray(a) ? a[i] : a))
-    );
+
+  // Flat fast path: every position whose cells are all scalars is one direct
+  // application, through the explicit-read loop generated for this operand
+  // shape. It stops at the first position holding a nested array, and the
+  // recursive projection below finishes from there — so matrices, ragged
+  // operands and a lone nested cell all keep the per-position semantics.
+  let from = 0;
+  const kernel = bcastKernel(signature);
+  if (kernel !== undefined) {
+    const operands: unknown[] = [];
+    for (let j = 0; j < k; j++) {
+      const a = args[j];
+      if (a instanceof RotView) operands.push(a.base, a.shift);
+      else operands.push(a);
+    }
+    from = kernel(f, out, n, ...operands);
+    if (from < 0) return out;
+  }
+
+  const cell: BcastValue[] = new Array(k);
+  for (let i = from; i < n; i++) {
+    let nested = false;
+    for (let j = 0; j < k; j++) {
+      const a = args[j];
+      const x =
+        signature[j] === 's'
+          ? (a as BcastValue)
+          : bcastCell(a as BcastValue[] | RotView, i);
+      if (Array.isArray(x)) nested = true;
+      cell[j] = x;
+    }
+    // The recursive call keeps its operand array (it reads it after this loop
+    // has moved on), so it gets a copy; the direct call consumes the buffer
+    // before the next position overwrites it.
+    out[i] = nested ? bcastWith(emptyIsList, f, cell.slice()) : f(...cell);
+  }
   return out;
 }
 
@@ -5788,18 +5988,32 @@ function select(...clauses: Array<() => unknown>): unknown {
   }
 
   // 3/ Selection: the first clause that is `true` at each position (`-1`: no
-  // match), and the positions whose condition cell is absent.
+  // match), and the positions whose condition cell is absent. A lifted
+  // scalar selector decides every undecided position the same way, so it is
+  // applied without reading a cell.
   const selection = new Int32Array(n).fill(-1);
   const absent = new Uint8Array(n);
+  const reached = new Uint8Array(selectors.length);
   let undecided = n;
   for (let k = 0; k < selectors.length && undecided > 0; k++) {
     const cells = selectors[k];
+    if (cells === true || cells === 'absent') {
+      const lifted = cells === true;
+      for (let j = 0; j < n; j++) {
+        if (selection[j] >= 0 || absent[j] === 1) continue;
+        if (lifted) selection[j] = k;
+        else absent[j] = 1;
+      }
+      if (lifted) reached[k] = 1;
+      undecided = 0;
+      break;
+    }
     for (let j = 0; j < n; j++) {
       if (selection[j] >= 0 || absent[j] === 1) continue;
-      const v =
-        cells === true ? true : cells === 'absent' ? undefined : cells[j];
+      const v = cells[j];
       if (v === true) {
         selection[j] = k;
+        reached[k] = 1;
         undecided -= 1;
       } else if (v === false) {
         continue;
@@ -5819,26 +6033,27 @@ function select(...clauses: Array<() => unknown>): unknown {
   }
 
   // 4/ Each REACHED arm once, whole (R2), in clause order.
-  const reached = new Set<number>();
-  for (let j = 0; j < n; j++) if (selection[j] >= 0) reached.add(selection[j]);
   const values: unknown[] = new Array(selectors.length);
   for (let k = 0; k < selectors.length; k++) {
-    if (!reached.has(k)) continue;
+    if (reached[k] === 0) continue;
     const v = armThunks[k]();
     // A list-valued arm is a length participant too (R3).
     if (Array.isArray(v) && v.length !== n) return NaN;
     values[k] = v;
   }
 
-  // 5/ Assemble, position by position.
+  // 5/ Assemble, position by position. Whether an arm is indexed or lifted
+  // whole is a property of the arm, decided once outside the loop.
+  const indexed: boolean[] = new Array(values.length);
+  for (let k = 0; k < values.length; k++) indexed[k] = Array.isArray(values[k]);
   const out: unknown[] = new Array(n);
   for (let j = 0; j < n; j++) {
-    if (absent[j] === 1 || selection[j] < 0) {
+    const k = selection[j];
+    if (absent[j] === 1 || k < 0) {
       out[j] = NaN;
       continue;
     }
-    const v = values[selection[j]];
-    out[j] = Array.isArray(v) ? v[j] : v;
+    out[j] = indexed[k] ? (values[k] as unknown[])[j] : values[k];
   }
   return out;
 }
@@ -5978,8 +6193,30 @@ function eqTensor(
       if (eqTensor(a[i], b[i], tol) !== true) return false;
     return true;
   }
-  if (aArr) return a.map((x) => eqTensor(x, b, tol)) as (boolean | unknown[])[];
-  if (bArr) return b.map((y) => eqTensor(a, y, tol)) as (boolean | unknown[])[];
+  // Array-vs-scalar with a NUMBER on the scalar side: one tolerance test per
+  // element, with the `{re, im}` projection and the string branch reserved
+  // for the elements that need them. The generic per-element recursion
+  // allocated two projection objects per cell and re-probed the scalar's kind
+  // at every position; over a 40 000-element list that was the larger half of
+  // a compiled `Equal(list, 3)` (Tycho item 264).
+  if (aArr !== bArr) {
+    const arr = (aArr ? a : b) as unknown[];
+    const scalar = aArr ? b : a;
+    const out: (boolean | unknown[])[] = new Array(arr.length);
+    if (typeof scalar === 'number') {
+      for (let i = 0; i < arr.length; i++) {
+        const x = arr[i];
+        out[i] =
+          typeof x === 'number'
+            ? Math.abs(x - scalar) <= tol
+            : eqTensor(x, scalar, tol);
+      }
+      return out;
+    }
+    for (let i = 0; i < arr.length; i++)
+      out[i] = aArr ? eqTensor(arr[i], b, tol) : eqTensor(a, arr[i], tol);
+    return out;
+  }
   if (typeof a === 'string' || typeof b === 'string') return eqText(a, b);
   const part = (v: unknown): { re: number; im: number } =>
     typeof v === 'object' && v !== null && 're' in v
@@ -6520,6 +6757,11 @@ function enterIntegral(): boolean {
 const SYS_HELPERS = {
   bcast,
   bcastFn,
+  // `RotateLeft`/`RotateRight` over an evaluated array, and the in-place
+  // rotated READ a broadcast consumes instead of a copy (see `RotView`).
+  rotl,
+  rotr,
+  rotv,
   // Element/scalar equality that is faithful for text — see `eqText`. Emitted
   // by `IndexOf`'s element test, where the elements and the needle may be text
   // or anything else; the equality LOWERINGS reach the same verdict through
@@ -7972,7 +8214,23 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
  */
 function normalizeRunResult(r: unknown): unknown {
   if (typeof r === 'number' || typeof r === 'boolean') return r;
-  if (Array.isArray(r)) return r.map(normalizeRunResult);
+  if (Array.isArray(r)) {
+    // A number or boolean element copies through as it is; only another
+    // shape is normalized recursively. The recursive `map` this replaced
+    // was a full pass through a function call per element, which on a
+    // 40 000-element result cost as much as the computation it followed
+    // (Tycho item 264).
+    const n = r.length;
+    const out: unknown[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = r[i];
+      out[i] =
+        typeof x === 'number' || typeof x === 'boolean'
+          ? x
+          : normalizeRunResult(x);
+    }
+    return out;
+  }
   if (
     typeof r === 'object' &&
     r !== null &&

@@ -529,9 +529,32 @@ interval). The candidate pipeline, in order:
    (2026-08-03; the 2026-08-01 item-120 round covered definition bodies).
 3. **G2 — same-region rule.** ≥ 2 occurrences attributed to the **same
    region**; binds at that region's top; occurrences elsewhere emit inline
-   (or join that region's own candidate). No binding crosses a region
-   boundary. This makes name-keyed matching capture-sound and selection
-   laziness free.
+   (or join that region's own candidate). A region never binds for
+   occurrences that are all outside it. This makes name-keyed matching
+   capture-sound and selection laziness free.
+
+   **Dominance extension (2026-09-06, Tycho item 261).** A bindable region
+   with exactly ONE occurrence of its own may also count the occurrences in
+   its DESCENDANT regions (`CseCandidate.served`), and binds when own +
+   served ≥ 2. The binding at the region's top is evaluated unconditionally
+   either way — the region's own occurrence forces it — so a descendant that
+   is evaluated conditionally (a `Which` arm, a short-circuited operand) or
+   repeatedly (a loop body) evaluates nothing new by reading it, and laziness
+   is preserved. The motivating shape is a piecewise whose first condition
+   and arms read one expensive list pipeline: `Which(n = 3, 1, n = 2, S,
+   True, 0)` computed `n` once per clause. Two restrictions keep a served
+   occurrence sound, both mirrors of what `availableCseBinding` checks when
+   it resolves the occurrence at emission time: no region between the
+   descendant and the binding region may bind a name the candidate
+   mentions, and no `opaque-scope` region whose bound names are unknown may
+   sit between them; and the descendant occurrence must come AFTER the
+   region's first own occurrence in DFS order, because the temporary is
+   created when that occurrence is emitted. Emission follows DFS order for
+   the constructs this targets (`Which` compiles its first condition before
+   its arms for exactly this reason); an emitter that compiles operands out
+   of DFS order simply inlines the descendant occurrence. A served candidate
+   takes no part in subsumption (step 5), in either role, since its served
+   occurrences lie outside the region-local lists that step compares.
 4. **G3 — mutation.** Drop a candidate if any of its free symbols is the
    target of `Assign`/`Declare` anywhere in the candidate's region subtree,
    **including all descendant regions**. Deliberately conservative

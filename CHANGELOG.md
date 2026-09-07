@@ -1,3 +1,42 @@
+## [Unreleased]
+
+### Improvements
+
+- **`javascript` target: a list pipeline runs an order of magnitude faster.**
+  A Game of Life step over a 40 000-cell board read by reference
+  (`Which(n = 3, 1, n = 2, S, True, 0)` with `n` the sum of eight
+  `RotateLeft(S, k)`) went from 13.3 ms to about 1.1 ms per generation, three
+  times the hand-written typed-array loop (Tycho items 261, 262, 264). Four
+  changes, none of which alters a result:
+
+  - **A subexpression shared between an unconditional position and a lazy
+    arm is bound once.** The common-subexpression pass bound a temporary only
+    for occurrences inside ONE region, so a piecewise whose first condition
+    and arms read the same expensive expression computed it once per clause.
+    A region with one occurrence of its own now also serves the occurrences
+    in its descendant regions (a `Which` arm, a short-circuited operand, a
+    loop body): the temporary is evaluated at the region's top whether or not
+    the descendant runs, so nothing new is evaluated and laziness is kept. A
+    binder that rebinds a name the candidate mentions is never served across,
+    and an expression that occurs only inside lazy arms still binds nothing.
+    `Which` now compiles its first condition before its arms so the binding
+    exists when the arms are emitted. Design record: §5.2 of
+    `docs/plans/2026-07-28-compile-cse-design.md`.
+  - **A rotation feeding a broadcast is read in place.** A `RotateLeft`/
+    `RotateRight` operand of an element-wise operation is emitted as a view
+    (`_SYS.rotv`) that the broadcast reads at a shifted index; the rotated
+    list is no longer allocated and copied. A rotation in value position
+    stays a copy (`_SYS.rotl`/`_SYS.rotr`, which join the two halves with
+    `concat` instead of spreading them).
+  - **The broadcast helper runs one explicit-read loop per operand shape.**
+    `_SYS.bcast` decided per element which operands were arrays and rebuilt
+    an operand array per element; it now classifies the operands once and
+    runs a loop generated for that arity and shape, falling back to the
+    per-position projection only from the first position that holds a
+    nested array. `_SYS.eq` has a flat numeric path, and `_SYS.select` applies
+    a lifted scalar selector without reading cells.
+  - **A list result is normalized without a function call per element.**
+
 ## 0.125.0 _2026-09-06_
 
 ### New Features

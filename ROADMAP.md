@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-05.
+**Last updated:** 2026-09-06.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -200,6 +200,37 @@ fixed in that change. One item remains.
   documented compiled spelling for "no value" (the compiled `If`/`Which`
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
+
+### `javascript` target: a typed-array contract for numeric lists (OPEN, design — Tycho item 263, filed 2026-09-06)
+
+Every list intermediate of the `javascript` target is a plain `Array`, and the
+runtime helpers dispatch on `Array.isArray`, so a `Float64Array` handed in the
+argument bag is treated as a SCALAR today — silently, not as an error. Tycho
+asks for a contract under which `Float64Array` is accepted for a `list<number>`
+input, produced by the list helpers, and returned for a list-valued body, so a
+carrier can stay typed end to end. What it takes: one `isList` predicate in
+place of every `Array.isArray` in the helpers and the result normalizer (the
+helpers that build results with `map`/`slice` must not inherit a typed array
+where the result is not numeric — `_SYS.eq` answers booleans, `_SYS.select`
+may mix cells), a decision on which kind a mixed operation returns, and an
+entry-check that rejects a typed array where the contract is not declared
+rather than reading it as a scalar. After the 2026-09-06 round the plain-Array
+pipeline runs the witness step at 3× the hand-written typed-array loop, so the
+remaining gain is bounded by that ratio. Not started.
+
+### An engine `List` value backed by a numeric array, without boxing every element (OPEN, design — Tycho item 265, filed 2026-09-06)
+
+Boxing a 40 000-element list through `ce.box(['List', …])` costs about 3 ms
+and produces one boxed number per element; reading it back through `.each()`
+costs another 1.3 ms, and a consumer that writes a board on every interval
+firing pays both ends per firing. Tycho asks for a public constructor that
+builds a `List` value over a `number[]`/`Float64Array` with elements boxed on
+demand (`.ops`/`.each()`), `.count` and a numeric-elements accessor answered
+from the array, and `assign` plus the `javascript` target's by-reference read
+passing the array through untouched. This is a new value representation
+(every collection handler that reaches `ops` would have to accept it, and
+the type must still be derived — `list<number^40000>` from the length), so it
+needs a design ruling before code. Not started.
 
 ### The interpreted growing-list loop stays quadratic (OPEN, no urgency — recorded 2026-09-04)
 

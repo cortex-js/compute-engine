@@ -212,10 +212,13 @@ export interface CseRegionSite {
 }
 
 /**
- * A static region of the expression tree. Regions form a tree;
- * candidates bind at a region's top, and no binding ever crosses a region
- * boundary — which is what makes name-keyed matching capture-sound and
- * selection laziness free.
+ * A static region of the expression tree. Regions form a tree; candidates
+ * bind at a region's top. A binding is READ across a region boundary in one
+ * direction only — from a descendant region, and only when the binding
+ * region has an occurrence of its own, so the temporary is evaluated whether
+ * or not the descendant runs (the dominance rule, `selectCandidates`). A
+ * region never binds for occurrences that are all outside it, which is what
+ * keeps name-keyed matching capture-sound and selection laziness free.
  */
 export interface CseRegion {
   /** Creation-ordered identity; stable for a given expression. */
@@ -269,9 +272,24 @@ export interface CseCandidate {
   readonly size: number;
   /** The region whose top binds this candidate. */
   readonly region: CseRegion;
-  /** Occurrences attributed to `region`, in DFS order (≥ 2). */
+  /**
+   * Occurrences attributed to `region` itself, in DFS order. At least two,
+   * or at least one when `served` is not empty.
+   */
   readonly occurrences: ReadonlyArray<CseOccurrence>;
-  /** `(occurrences.length − 1) × size`. */
+  /**
+   * Occurrences in DESCENDANT regions of `region` that read this binding
+   * instead of emitting the structure again (in DFS order). The binding is
+   * evaluated unconditionally at `region`'s top because of the occurrences in
+   * `occurrences`, so a descendant that is evaluated only conditionally (a
+   * `Which` arm) or repeatedly (a loop body) evaluates nothing new by reading
+   * it. Emission resolves them through the enclosing instances
+   * (`availableCseBinding` in `base-compiler.ts`), not through
+   * `candidateByNode`, so they are listed here for scoring and diagnostics
+   * only.
+   */
+  readonly served: ReadonlyArray<CseOccurrence>;
+  /** `(occurrences.length + served.length − 1) × size`. */
   readonly score: number;
   /** The distinct node objects those occurrences reach (a DAG collapses
    * several occurrences onto one object). */
@@ -565,6 +583,40 @@ function bindsNoNames(region: CseRegion): boolean {
     );
   }
   return true;
+}
+
+/**
+ * Whether an occurrence attributed to `from` may read a temporary bound at the
+ * top of its proper ancestor `to` — the harvest-time mirror of
+ * `availableCseBinding` (`base-compiler.ts`), which is what resolves such an
+ * occurrence to the temporary during emission.
+ *
+ * Walking up from `from` to `to` (excluding `to` itself), every region on the
+ * way must be name-transparent for the candidate: a region that binds one of
+ * `mentioned` (a lambda parameter, a binder's index) makes the structure
+ * denote a different value inside, and an `opaque-scope` region of a
+ * definition without a site selector binds names nobody knows. `false` when
+ * `to` is not a proper ancestor of `from`.
+ */
+function reachesBindingWithoutRebinding(
+  from: CseRegion,
+  to: CseRegion,
+  mentioned: ReadonlySet<string>
+): boolean {
+  if (from === to) return false;
+  for (let r: CseRegion | undefined = from; r !== undefined; r = r.parent) {
+    if (r === to) return true;
+    if (r.kind === 'opaque-scope') {
+      const site = r.site?.node;
+      if (
+        !isFunction(site) ||
+        site.operatorDefinition?.bindingSites === undefined
+      )
+        return false;
+    }
+    for (const name of r.boundNames) if (mentioned.has(name)) return false;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1839,11 +1891,37 @@ class Harvester {
     // G2 — same-region rule. Attribution already happened during the DFS;
     // group each structural class by region and keep the bindable regions with
     // at least two occurrences.
+    //
+    // Extended by the DOMINANCE rule: a bindable region with one or more
+    // occurrences of its own may also serve the class's occurrences in its
+    // descendant regions. The binding at the region's top is evaluated
+    // unconditionally either way — the region's own occurrence forces it — so
+    // a descendant that is evaluated conditionally (a `Which` arm, a
+    // short-circuited operand) or repeatedly (a loop body) evaluates nothing
+    // new by reading it, and laziness is preserved. Without this, a piecewise
+    // whose condition and arms read one expensive subexpression (`Which(n = 3,
+    // 1, n = 2, S, True, 0)` with `n` a list pipeline) computed it once per
+    // clause (Tycho item 261). Two restrictions keep the served occurrences
+    // sound: (1) no region between the descendant and the binding region may
+    // rebind a name the candidate mentions, and no `opaque-scope` region
+    // whose bound names are unknown may sit between them — the mirror of the
+    // check `availableCseBinding` performs at emission time, which is what
+    // resolves a served occurrence to the temporary; (2) the descendant
+    // occurrence must come AFTER the region's first own occurrence in DFS
+    // order, because the temporary is bound when that first occurrence is
+    // emitted and emission follows DFS order — an earlier descendant would
+    // simply emit inline, and counting it would overstate the benefit. A
+    // descendant occurrence is credited to ONE region only, the nearest
+    // qualifying ancestor (regions are claimed deepest first): emission
+    // resolves it to the nearest enclosing binding, so crediting an outer
+    // region too would inflate that region's score with a read it never
+    // receives.
     type Provisional = {
       representative: Expression;
       size: number;
       region: MutableRegion;
       occurrences: MutableOccurrence[];
+      served: MutableOccurrence[];
     };
     const provisional: Provisional[] = [];
     for (const bucket of buckets.values()) {
@@ -1856,13 +1934,36 @@ class Harvester {
           if (list === undefined) byRegion.set(region, [occ]);
           else list.push(occ);
         }
-        for (const [region, occurrences] of byRegion) {
-          if (occurrences.length < 2) continue;
+        const mentioned = this.symbolsOf(cls.representative);
+        const claimed = new Set<MutableOccurrence>();
+        const regions = [...byRegion.keys()].sort(
+          (a, b) => b.depth - a.depth || a.id - b.id
+        );
+        for (const region of regions) {
+          const occurrences = byRegion.get(region)!;
+          const served: MutableOccurrence[] = [];
+          const first = occurrences[0].enter;
+          for (const occ of cls.occurrences) {
+            if (occ.region === region || occ.enter < first) continue;
+            if (claimed.has(occ)) continue;
+            if (
+              reachesBindingWithoutRebinding(
+                occ.region as MutableRegion,
+                region,
+                mentioned
+              )
+            ) {
+              served.push(occ);
+              claimed.add(occ);
+            }
+          }
+          if (occurrences.length + served.length < 2) continue;
           provisional.push({
             representative: cls.representative,
             size: cls.size,
             region,
             occurrences,
+            served,
           });
         }
       }
@@ -1899,11 +2000,17 @@ class Harvester {
       if (list === undefined) byRegionForSubsumption.set(c.region, [c]);
       else list.push(c);
     }
+    // A candidate that serves descendant occurrences takes no part in
+    // subsumption, in either role: its served occurrences sit outside the
+    // region's own occurrences, so "every occurrence of A is inside an
+    // occurrence of B" cannot be decided from the region-local lists. Keeping
+    // both candidates costs at most one extra temporary.
     const subsumed = new Set<Provisional>();
     for (const group of byRegionForSubsumption.values()) {
       for (const a of group) {
+        if (a.served.length > 0) continue;
         for (const b of group) {
-          if (a === b || subsumed.has(b)) continue;
+          if (a === b || subsumed.has(b) || b.served.length > 0) continue;
           if (b.occurrences.length !== a.occurrences.length) continue;
           if (b.size <= a.size) continue;
           const allInside = a.occurrences.every((oa) =>
@@ -1923,9 +2030,9 @@ class Harvester {
     // user-function application is exempt from the size/score heuristics
     // (see `isAdmittedUserFnApp`).
     const surviving = afterSubsumption.filter((c) => {
-      if (c.occurrences.length < 2) return false;
+      const count = c.occurrences.length + c.served.length;
+      if (count < 2) return false;
       if (this.isAdmittedUserFnApp(c.representative)) return true;
-      const count = c.occurrences.length;
       if (c.size < this.minSize || (count - 1) * c.size < this.minScore) {
         this.droppedByThreshold += 1;
         return false;
@@ -1942,7 +2049,8 @@ class Harvester {
         size: c.size,
         region: c.region,
         occurrences: c.occurrences,
-        score: (c.occurrences.length - 1) * c.size,
+        served: c.served,
+        score: (c.occurrences.length + c.served.length - 1) * c.size,
         nodes: new Set(c.occurrences.map((o) => o.node)),
       };
       const list = byRegion.get(c.region);
