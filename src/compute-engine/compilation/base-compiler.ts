@@ -9,6 +9,7 @@ import type {
 } from '../../math-json/types.js';
 import {
   clearIntegerRanges,
+  isConstructedScalar,
   recordIntegerRange,
 } from './javascript-value-facts.js';
 import {
@@ -10593,6 +10594,28 @@ export class BaseCompiler {
       const name = binders[i].jsPattern;
       const collExpr = elem.ops[1];
       let collection: string;
+      if (
+        target.language === 'javascript' &&
+        isFunction(collExpr, 'Range') &&
+        // The iterable lowering uses the real parts of complex constants.
+        !collExpr.ops.some((op) => isNumber(op) && op.im !== 0) &&
+        binders[i].names.length === 1 &&
+        !BaseCompiler.mentionsExcludedName(
+          collExpr,
+          new Set(binders[i].names),
+          undefined
+        ) &&
+        target.cse?.harvestOptions !== undefined &&
+        !isCallerMapped(collExpr, target.cse.harvestOptions)
+      ) {
+        inner = BaseCompiler.compileCountedRange(
+          collExpr,
+          name,
+          inner,
+          bodyTarget
+        );
+        continue;
+      }
       if (isFunction(collExpr, 'Range'))
         collection = BaseCompiler.compileRangeIterable(collExpr, bodyTarget);
       else if (isProvablyStringOperand(collExpr)) {
@@ -10644,6 +10667,70 @@ export class BaseCompiler {
     if (isNumber(hi) && !Number.isInteger(hi.re)) return false;
     if (isNumber(lo) && isNumber(hi) && lo.re > hi.re) return false;
     return true;
+  }
+
+  /** Iterate range values without allocating the intermediate array. Bounds
+   * are captured in source order and each value uses the same multiplication
+   * as Array.from, avoiding cumulative error for fractional steps. */
+  private static compileCountedRange(
+    range: Expression & { ops: ReadonlyArray<Expression> },
+    name: string,
+    body: string,
+    target: CompileTarget<Expression>
+  ): string {
+    const [loExpr, hiExpr, stepExpr] = range.ops;
+    if (
+      isNumber(loExpr) &&
+      loExpr.im === 0 &&
+      isNumber(hiExpr) &&
+      hiExpr.im === 0 &&
+      (stepExpr === undefined || (isNumber(stepExpr) && stepExpr.im === 0))
+    ) {
+      const stepValue =
+        stepExpr === undefined
+          ? hiExpr.re >= loExpr.re
+            ? 1
+            : -1
+          : stepExpr.re;
+      const length =
+        stepValue === 0
+          ? 0
+          : Math.max(0, Math.floor((hiExpr.re - loExpr.re) / stepValue) + 1);
+      if (
+        Number.isFinite(length) &&
+        length <= 4294967295 &&
+        Number.isFinite(loExpr.re) &&
+        Number.isFinite(stepValue)
+      ) {
+        const index = BaseCompiler.tempVar(target);
+        return (
+          `for (let ${index} = 0; ${index} < ${length}; ${index}++) { ` +
+          `const ${name} = ${loExpr.re} + (${stepValue}) * ${index}; ${body} }`
+        );
+      }
+    }
+
+    const lo = BaseCompiler.tempVar(target);
+    const hi = BaseCompiler.tempVar(target);
+    const step = BaseCompiler.tempVar(target);
+    const count = BaseCompiler.tempVar(target);
+    const index = BaseCompiler.tempVar(target);
+    const loCode = BaseCompiler.compile(loExpr, target);
+    const hiCode = BaseCompiler.compile(hiExpr, target);
+    const stepCode =
+      stepExpr === undefined
+        ? `(${hi} >= ${lo} ? 1 : -1)`
+        : BaseCompiler.compile(stepExpr, target);
+    return (
+      `{ const ${lo} = ${loCode}; const ${hi} = ${hiCode}; ` +
+      `const ${step} = ${stepCode}; ` +
+      `const ${count} = ${step} === 0 ? 0 : Math.max(0, Math.floor((${hi} - ${lo}) / ${step}) + 1); ` +
+      // Array.from treats NaN as a zero length and rejects lengths that
+      // exceed the maximum Array length. Preserve both behaviors.
+      `if (${count} > 4294967295) throw new RangeError('Invalid array length'); ` +
+      `for (let ${index} = 0; ${index} < ${count}; ${index}++) { ` +
+      `const ${name} = ${lo} + ${step} * ${index}; ${body} } }`
+    );
   }
 
   /**
@@ -16255,11 +16342,13 @@ export class BaseCompiler {
       )}), ${codes.join(', ')})`;
     };
 
+    const scalarArg = (a: Expression): boolean =>
+      BaseCompiler.certainlyScalarArg(a) ||
+      (target.language === 'javascript' && isConstructedScalar(a, target));
+
     if (
       mayBroadcast &&
-      !args.every(
-        alwaysDispatch ? BaseCompiler.certainlyScalarArg : provablyScalarArg
-      )
+      !args.every(alwaysDispatch ? scalarArg : provablyScalarArg)
     )
       return dispatchCall(compiledArgs);
 
@@ -16295,9 +16384,9 @@ export class BaseCompiler {
     // `provablyScalarArg`, whose answer is `true` for exactly the `number`,
     // `boolean` and `string` types. A point-typed argument fails that test, so
     // it never reaches the guard; it takes whichever path it took before.
-    if (mayBroadcast && !args.every(BaseCompiler.certainlyScalarArg)) {
+    if (mayBroadcast && !args.every(scalarArg)) {
       const tested = args
-        .map((a, i) => (BaseCompiler.certainlyScalarArg(a) ? -1 : i))
+        .map((a, i) => (scalarArg(a) ? -1 : i))
         .filter((i) => i >= 0);
       const temps = new Map(
         tested.map((i) => [i, BaseCompiler.tempVar(target)] as const)
@@ -19511,7 +19600,7 @@ export class BaseCompiler {
    * The session is stamped `enabled: false` — every CSE hook then short-circuits
    * and emission is byte-identical to the pre-CSE one — when the caller passed
    * `cse: false`, or when the target cannot bind temporaries in expression
-   * position (no `cseBind`: the GPU shader targets).
+   * or statement position (neither `cseBind` nor `cseMaterialize`).
    *
    * `isOverriddenOperator` / `isStringVar` are the G1b provenance predicates
    * (§5.2). They must be built from the caller's RAW options, before those are
@@ -19547,7 +19636,11 @@ export class BaseCompiler {
     // a decision of its own (`isEmissionSkippable`) must not have its answer
     // change because sharing was turned off. Every transform that DOES share
     // an emission checks `enabled` for itself.
-    if (options.enabled === false || typeof target.cseBind !== 'function') {
+    if (
+      options.enabled === false ||
+      (typeof target.cseBind !== 'function' &&
+        typeof target.cseMaterialize !== 'function')
+    ) {
       target.cse = { enabled: false, harvestOptions, instances: [] };
       return;
     }
@@ -20411,6 +20504,17 @@ export class BaseCompiler {
     const available = BaseCompiler.availableCseBinding(session, expr);
     if (available !== undefined) return available;
 
+    // Statement-only targets cannot place a new declaration inside a lazy
+    // expression. Already-bound enclosing values remain usable above.
+    if (
+      target.cseMaterialize &&
+      session.instances.some(
+        (instance) =>
+          BaseCompiler.cseRegionOf(instance)?.kind === 'lazy-operand'
+      )
+    )
+      return BaseCompiler._compileInner(expr, target, prec);
+
     const candidate = candidateAt(BaseCompiler.cseRegionOf(top), expr);
     if (candidate === undefined)
       return BaseCompiler._compileInner(expr, target, prec);
@@ -20433,9 +20537,14 @@ export class BaseCompiler {
       return prec === 0 ? rhs : BaseCompiler._compileInner(expr, target, prec);
 
     const name = BaseCompiler.cseTempVar(target);
+    if (target.cseMaterialize) {
+      if (!target.cseMaterialize(expr, name, rhs, target))
+        return prec === 0
+          ? rhs
+          : BaseCompiler._compileInner(expr, target, prec);
+    } else top.bindings.push([name, rhs]);
     top.state.set(candidate, 'bound');
     top.names.set(candidate, name);
-    top.bindings.push([name, rhs]);
     return name;
   }
 

@@ -251,10 +251,9 @@ export type CseRegionInstance = {
 
 /**
  * Per-compilation CSE state. Present on every compilation of a target that can
- * bind temporaries
- * (`cseBind`); `enabled: false` when the caller passed `cse: false`, when the
- * target has no `cseBind`, or on the direct custom-target route (which gets no
- * CSE).
+ * bind temporaries (`cseBind` or `cseMaterialize`). Disabled when the caller
+ * passed `cse: false`, when neither hook exists, or on the direct custom-target
+ * route (which gets no CSE).
  *
  * Like `NamingContext`, this is a SHARED OBJECT REFERENCE on the target
  * (`CompileTarget.cse`), so it survives the compiler's pervasive
@@ -418,8 +417,8 @@ export interface CompileTarget<Expr = unknown> {
    * expression-position body: each temporary is evaluated exactly once, and
    * later right-hand sides — and the body — may reference earlier ones. The
    * compile-time common-subexpression elimination pass wraps each region's
-   * compiled body with this. **Absent ⇒ CSE is inactive for this target** (the
-   * GPU shader targets, whose driver compilers already CSE pure expressions).
+   * compiled body with this. Targets that only support statement-position
+   * declarations, including GLSL and WGSL, use `cseMaterialize` instead.
    *
    * Deliberately NOT the existing `bindExpr`: that one's parallel-application
    * shape (`((a, b) => body)(x, y)`) cannot express a temporary whose value
@@ -449,6 +448,15 @@ export interface CompileTarget<Expr = unknown> {
     bindings: ReadonlyArray<[name: string, code: string]>,
     body: string
   ) => string;
+
+  /** Bind a CSE value at a statement position. Return false when this
+   * position cannot safely declare a temporary; emission then stays inline. */
+  cseMaterialize?: (
+    expr: Expr,
+    name: string,
+    code: string,
+    target: CompileTarget<Expr>
+  ) => boolean;
 
   /**
    * Per-compilation common-subexpression-elimination state — the static
@@ -1633,8 +1641,8 @@ export interface CompilationOptions<Expr = unknown> {
    * `false` disables CSE, but generated temporary names remain deterministic
    * (`_tv1`, `_tv2`, …) regardless of this option.
    *
-   * Consumed at each root compilation boundary. A target with no `cseBind`
-   * capability (the GPU shader targets), and the direct custom-target route
+   * Consumed at each root compilation boundary. A target with neither
+   * `cseBind` nor `cseMaterialize`, and the direct custom-target route
    * (`compile({ target })`), behave as `false`.
    */
   cse?: boolean;

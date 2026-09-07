@@ -4558,7 +4558,14 @@ function compileGPUSumProduct(
     recordGPUCounter(bodyTarget, index, lowerNum, upperNum, index);
   let body: string;
   try {
-    body = BaseCompiler.compile(args[0], bodyTarget);
+    if (target.cse?.enabled) {
+      BaseCompiler.openCseSession(
+        args[0],
+        bodyTarget,
+        target.cse.harvestOptions
+      );
+      body = BaseCompiler.compileCseRoot(args[0], bodyTarget);
+    } else body = BaseCompiler.compile(args[0], bodyTarget);
   } finally {
     clearGPUCounters(bodyTarget);
   }
@@ -5117,6 +5124,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_powi(${compile(base)}, 0.0)`;
     }
     if (eConst === 1) return compile(base);
+    if (
+      isSymbol(base, 'ExponentialE') &&
+      gpuOperandShape(exp) === 'scalar' &&
+      compile(base) === '2.71828182846'
+    )
+      return `exp(${compile(exp)})`;
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
     // Literal integer exponent: emit sign-preserving code. GLSL/WGSL `pow(x, y)`
     // is spec-defined as `exp2(y·log2(x))` and is undefined for a negative base
@@ -5138,7 +5151,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         // unroll to repeated multiplication — exact and free of any `pow` call.
         // A `vecN` base needs no widening here: `*` is componentwise.
         const code = compile(base);
-        pos = `(${Array(absN).fill(code).join(' * ')})`;
+        pos = /^[A-Za-z_]\w*$|^-?[0-9]+(?:\.[0-9]*)?$/.test(code)
+          ? `(${Array(absN).fill(code).join(' * ')})`
+          : `_gpu_powi${powWidth ?? ''}(${code}, ${formatGPUNumber(absN)})`;
       } else {
         // Compound or large: route through the helper so the base subexpression
         // is evaluated once (not duplicated) and the sign stays correct. The
@@ -5653,7 +5668,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Square: no argument');
     if (isSymbol(x) || isNumber(x)) {
       const arg = compile(x);
-      return `(${arg} * ${arg})`;
+      if (/^[A-Za-z_]\w*$|^-?[0-9]+(?:\.[0-9]*)?$/.test(arg))
+        return `(${arg} * ${arg})`;
+      const width = gpuOperandShape(x);
+      return `_gpu_powi${typeof width === 'number' ? width : ''}(${arg}, 2.0)`;
     }
     // Compound base: `pow(x, 2.0)` is NaN for x < 0 on a real GPU (log2 of a
     // negative). Route through the sign-preserving helper, which also evaluates
@@ -8659,6 +8677,9 @@ float _gpu_inf() {
 export const GPU_POWI_PREAMBLE_GLSL = `
 float _gpu_powi(float x, float n) {
   if (n == 0.0) return 1.0;
+  if (n == 2.0) return x * x;
+  if (n == 3.0) return x * x * x;
+  if (n == 4.0) { float s = x * x; return s * s; }
   float r = pow(abs(x), n);
   if (x < 0.0 && mod(n, 2.0) == 1.0) return -r;
   return r;
@@ -8671,6 +8692,9 @@ float _gpu_powi(float x, float n) {
 export const GPU_POWI_PREAMBLE_WGSL = `
 fn _gpu_powi(x: f32, n: f32) -> f32 {
   if (n == 0.0) { return 1.0; }
+  if (n == 2.0) { return x * x; }
+  if (n == 3.0) { return x * x * x; }
+  if (n == 4.0) { let s = x * x; return s * s; }
   let r = pow(abs(x), n);
   if (x < 0.0 && (n % 2.0) == 1.0) { return -r; }
   return r;
@@ -8703,6 +8727,9 @@ function gpuPowiVecPreamble(n: number, isWGSL: boolean): string {
     return `
 fn _gpu_powi${n}(x: ${v}, n: f32) -> ${v} {
   if (n == 0.0) { return ${v}(1.0); }
+  if (n == 2.0) { return x * x; }
+  if (n == 3.0) { return x * x * x; }
+  if (n == 4.0) { let s = x * x; return s * s; }
   let r = pow(abs(x), ${v}(n));
   if ((n % 2.0) == 1.0) { return sign(x) * r; }
   return r;
@@ -8711,6 +8738,9 @@ fn _gpu_powi${n}(x: ${v}, n: f32) -> ${v} {
   return `
 ${v} _gpu_powi${n}(${v} x, float n) {
   if (n == 0.0) return ${v}(1.0);
+  if (n == 2.0) return x * x;
+  if (n == 3.0) return x * x * x;
+  if (n == 4.0) { ${v} s = x * x; return s * s; }
   ${v} r = pow(abs(x), ${v}(n));
   if (mod(n, 2.0) == 1.0) return sign(x) * r;
   return r;
@@ -9354,6 +9384,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // source both times (§7). Target-specific: only the GPU languages number
       // anything per compilation.
       beginCompilation: resetGPURandomNumbering,
+      cseMaterialize: (expr, name, code, current) => {
+        if (
+          !BaseCompiler.canHoist(current) ||
+          conditionalGPUSinks.has(current.hoist!)
+        )
+          return false;
+        const type = gpuTypeOfValue(expr, current.language === 'wgsl');
+        if (type === undefined) return false;
+        BaseCompiler.hoistStatement(
+          current,
+          current.language === 'wgsl'
+            ? `let ${name}: ${type} = ${code};`
+            : `${type} ${name} = ${code};`
+        );
+        return true;
+      },
       // A shader has no expression-level loop or IIFE, so the multi-statement
       // block forms (loop-form Sum/Product, Loop, Block) are only valid at
       // statement position. Flag it so the base compiler fails closed (D6)
@@ -10069,7 +10115,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // loop-form `Sum`/`Product` nested anywhere inside may hoist its loop ahead
     // of the value (Tycho item 110). With nothing hoisted this is byte-identical
     // to a plain `compile()`.
-    const code = BaseCompiler.compileFunctionBody(expr, target);
+    BaseCompiler.openCseSession(expr, target, {
+      enabled: options.cse,
+      isOverriddenOperator: (name) =>
+        userFunctions !== undefined && Object.hasOwn(userFunctions, name),
+      isStringVar: (name) =>
+        vars !== undefined && typeof vars[name] === 'string',
+      isVarsKey: (name) => vars !== undefined && Object.hasOwn(vars, name),
+    });
+    const code = BaseCompiler.compileCseRoot(expr, target, 0, () =>
+      BaseCompiler.compileFunctionBody(expr, target)
+    );
     // `code` is spliced into a shader function body by the caller, so the same
     // placement rule applies here as inside an emitted definition (D6).
     gpuAssertReturnPlacement('this expression', code, this.languageId);

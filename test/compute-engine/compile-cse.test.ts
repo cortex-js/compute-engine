@@ -328,9 +328,14 @@ describe('COMPILE CSE — binder bodies', () => {
     expect(
       (result.run as (v: Record<string, number>) => number)({})
     ).toBeCloseTo(expr.evaluate().N().re!, 12);
-    expect(result.code).toBe(
-      compile(expr, { fallback: false, cse: false, constantFold: false }).code
-    );
+    expect(occurrences(result.code, 'Math.sin')).toBe(5);
+    const unshared = compile(expr, {
+      fallback: false,
+      cse: false,
+      constantFold: false,
+    });
+    expect(occurrences(unshared.code, 'Math.sin')).toBe(10);
+    expect(result.run!()).toBeCloseTo(unshared.run!() as number, 12);
   });
 
   it('gives every unrolled term its own temporary', () => {
@@ -1103,13 +1108,14 @@ describe('COMPILE CSE — name collisions', () => {
  * §5.2 G4 and §6.2 — the benefit threshold and the per-region binding cap.
  */
 describe('COMPILE CSE — threshold and the per-region cap', () => {
-  it('leaves a sub-threshold repeat inline', () => {
-    // `sin(6u)` is size 4 but occurs only twice: score 4 < `CSE_MIN_SCORE`.
-    const expr = ce.parse('\\sin(6u)+\\sin(6u)');
+  it('leaves a cheap sub-threshold repeat inline', () => {
+    const expr = ce._fn('Add', [
+      ce._fn('Multiply', [ce.number(6), ce.symbol('u')]),
+      ce._fn('Multiply', [ce.number(6), ce.symbol('u')]),
+    ]);
     const result = compile(expr, { fallback: false });
-
     expect(result.code).not.toMatch(/_cse\d/);
-    expect(result.code).toBe('Math.sin(6 * _.u) + Math.sin(6 * _.u)');
+    expect(result.code).toBe('6 * _.u + 6 * _.u');
   });
 
   /** 40 distinct thrice-repeated candidates in ONE region. */
@@ -2015,11 +2021,11 @@ describe('COMPILE CSE — determinism across targets', () => {
     expect(second).toBe(first);
   });
 
-  it('emits byte-identical GLSL twice (naming context, no CSE)', () => {
+  it('emits byte-identical GLSL twice with CSE', () => {
     const first = glsl.compile(ce.parse(CHAINED)).code;
     const second = glsl.compile(ce.parse(CHAINED)).code;
 
-    expect(first).not.toMatch(/_cse/);
+    expect(first).toMatch(/_cse/);
     expect(second).toBe(first);
   });
 });

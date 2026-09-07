@@ -422,3 +422,16 @@ npm run test compute-engine/compile-python-generate   # regenerate python-perfor
 python benchmarks/python-performance.py                # run (add --verbose for detail)
 npm run test compute-engine/compile-performance        # JS side, same expressions
 ```
+
+## Document code-generation microbenchmarks
+
+`codegen-samples.mjs` compares generated JavaScript runners from two source
+checkouts. It verifies numeric agreement, warms both implementations, alternates
+measurement order, and reports median nanoseconds per call. Cases cover small
+powers, exponentials, repeated trigonometry, range comprehensions, and calls
+whose arguments are loop counters. Hold the shared-box lock and run without
+competing tests; these timings do not measure GPU execution.
+
+```bash
+node --import tsx benchmarks/codegen-samples.mjs /path/to/baseline /path/to/candidate
+```

@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **Code generation reuses expensive work in document formulas.** GLSL and
+  WGSL bind repeated pure expressions at safe statement positions, including
+  inside sum and product loops. Common-subexpression elimination recognizes
+  repeated small transcendental calls. JavaScript calls with arguments built
+  from known numeric counters can skip broadcast checks; free runtime inputs
+  retain their dispatch.
+- **Small powers, exponentials, and range iteration use simpler code.**
+  JavaScript powers three through five evaluate the base once through
+  multiplication helpers; GPU integer-power helpers use multiplication for
+  exponents two through four. Scalar real powers of `e` use native exponentials.
+  JavaScript comprehensions iterate numeric ranges without allocating an
+  intermediate array, preserving fractional steps and dependent bounds.
+
 - **GLSL and WGSL reuse folded loop bounds and proven integer indices.**
   Exactly representable folded bounds select literal loop headers, unrolling,
   or empty-range results. Bounded counters and exact integer arithmetic can

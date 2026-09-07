@@ -261,7 +261,7 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     expect(out).toEqual([2, 3, 4]);
   });
 
-  test('JS: compiled code contains for-of for multi-Element comprehension', () => {
+  test('JS: compiled code uses counted loops for multi-Element range comprehension', () => {
     const expr = ce.expr([
       'Comprehension',
       'x',
@@ -270,11 +270,13 @@ describe('COMPILE Variadic Loop (comprehension)', () => {
     ]);
     // `constantFold: false`: both ranges are literal, so the comprehension
     // would otherwise be evaluated at compile time and emitted as the literal
-    // `[1, 1, 2, 2, 3, 3]` — this test pins the for-of lowering, not the fold.
+    // `[1, 1, 2, 2, 3, 3]` — this test pins range iteration, not the fold.
     const result = compile(expr, { constantFold: false });
     expect(result.success).toBe(true);
-    expect(result.code).toContain('for (const x of');
-    expect(result.code).toContain('for (const y of');
+    expect(result.code).toContain('const x =');
+    expect(result.code).toContain('const y =');
+    expect(result.code!.match(/for \(let/g)).toHaveLength(2);
+    expect(result.code).not.toContain('Array.from');
     expect(result.code).toContain('result.push(');
   });
 

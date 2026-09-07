@@ -947,7 +947,9 @@ class Harvester {
       isFunction(node) &&
       !underMapped &&
       node.isPure &&
-      (this.sizeOf(node) >= this.minSize || this.isAdmittedUserFnApp(node)) &&
+      (this.sizeOf(node) >= this.minSize ||
+        this.isAdmittedUserFnApp(node) ||
+        this.isExpensiveBuiltin(node)) &&
       this.isEligible(node)
     ) {
       this.occurrences.push({
@@ -958,6 +960,29 @@ class Harvester {
         size: this.sizeOf(node),
       });
     }
+  }
+
+  /** A native transcendental call can pay for a temporary even when its
+   * syntax is only two nodes. Purity and caller mappings are checked by the
+   * same admission rules as every other CSE candidate. */
+  private isExpensiveBuiltin(node: Expression): boolean {
+    return (
+      isFunction(node) &&
+      [
+        'Sin',
+        'Cos',
+        'Tan',
+        'Sinh',
+        'Cosh',
+        'Tanh',
+        'Exp',
+        'Ln',
+        'Log',
+        'Arcsin',
+        'Arccos',
+        'Arctan',
+      ].includes(node.operator)
+    );
   }
 
   /**
@@ -2032,7 +2057,11 @@ class Harvester {
     const surviving = afterSubsumption.filter((c) => {
       const count = c.occurrences.length + c.served.length;
       if (count < 2) return false;
-      if (this.isAdmittedUserFnApp(c.representative)) return true;
+      if (
+        this.isAdmittedUserFnApp(c.representative) ||
+        this.isExpensiveBuiltin(c.representative)
+      )
+        return true;
       if (c.size < this.minSize || (count - 1) * c.size < this.minScore) {
         this.droppedByThreshold += 1;
         return false;

@@ -4076,10 +4076,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cpow(${complexOperandCode(base, compile)}, ${complexOperandCode(exp, compile)})`;
     if (eConst === 0) return '1';
     if (eConst === 1) return compile(base);
-    if (eConst === 2 && (isSymbol(base) || isNumber(base))) {
+    if (
+      eConst === 2 &&
+      (isSymbol(base) || isNumber(base)) &&
+      !(isSymbol(base) && target.varsKeys?.has(base.symbol))
+    ) {
       const code = compile(base);
       return `(${code} * ${code})`;
     }
+    if (isSymbol(base, 'ExponentialE') && compile(base) === 'Math.E')
+      return `Math.exp(${compile(exp)})`;
+    if (
+      eConst !== undefined &&
+      eConst >= 3 &&
+      eConst <= 5 &&
+      Number.isInteger(eConst)
+    )
+      return `_SYS.pow${eConst}(${compile(base)})`;
     if (eConst === -1) return `(1 / (${compile(base)}))`;
     if (eConst === 0.5) return `Math.sqrt(${compile(base)})`;
     if (eConst === 1 / 3) return `Math.cbrt(${compile(base)})`;
@@ -4333,12 +4346,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       `return (Math.sign(${xv}) * Math.round(Math.abs(${xv}))) / ${fv}; })()`
     );
   },
-  Square: (args, compile) => {
+  Square: (args, compile, target) => {
     const arg = args[0];
     if (arg === null) throw new Error('Square: no argument');
     const c = tryGetConstant(arg);
     if (c !== undefined) return String(c * c);
-    if (isSymbol(arg)) {
+    if (isSymbol(arg) && !target.varsKeys?.has(arg.symbol)) {
       const code = compile(arg);
       return `(${code} * ${code})`;
     }
@@ -6915,6 +6928,18 @@ const SYS_HELPERS = {
     (f: (x: number) => number, order: number) =>
     (x: number): number =>
       centeredDiffHigherOrder(realFn(f), x, order),
+  // Fixed exponents avoid repeated base evaluation and the general power
+  // kernel. Keep multiplication order explicit for small real powers.
+  pow3: (x: number) => x * x * x,
+  pow4: (x: number) => {
+    const s = x * x;
+    return s * s;
+  },
+  pow5: (x: number) => {
+    const s = x * x;
+    return s * s * x;
+  },
+
   // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only
   // on the variable-exponent path — where the exponent could be 0 at run time

@@ -130,3 +130,42 @@ export function canIndexArrayDirectly(
   const range = integerRange(index, target);
   return range !== undefined && range.min > 0 && numericArray(coll, target);
 }
+
+/** A scalar constructed from numeric literals, compiler-owned counters and
+ * scalar arithmetic. This does not infer anything about free runtime inputs. */
+export function isConstructedScalar(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  depth = 0
+): boolean {
+  if (depth > 32) return false;
+  if (isNumber(expr)) return true;
+  if (isSymbol(expr)) return integerRange(expr, target) !== undefined;
+  return (
+    isFunction(expr) &&
+    builtin(expr, target) &&
+    [
+      'Add',
+      'Subtract',
+      'Negate',
+      'Multiply',
+      'Divide',
+      'Power',
+      'Square',
+      'Sin',
+      'Cos',
+      'Tan',
+      'Exp',
+      'Ln',
+      'Sqrt',
+      'Abs',
+      'Floor',
+      'Ceil',
+      'Round',
+      'Sign',
+      'Min',
+      'Max',
+    ].includes(expr.operator) &&
+    expr.ops.every((arg) => isConstructedScalar(arg, target, depth + 1))
+  );
+}
