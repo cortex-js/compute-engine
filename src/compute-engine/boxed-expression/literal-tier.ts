@@ -38,11 +38,38 @@ export function numberLiteralTierType(literal: {
   readonly numericValue: number | NumericValue;
 }): Type {
   const v = literal.numericValue;
-  if (typeof v === 'number') {
-    if (Number.isNaN(v)) return 'nan';
-    if (!Number.isFinite(v)) return SIGNED_INFINITY_TYPE;
-    return Number.isInteger(v) ? 'integer' : 'real';
-  }
+  if (typeof v === 'number') return machineNumberTierType(v);
   if (v.isPositiveInfinity || v.isNegativeInfinity) return SIGNED_INFINITY_TYPE;
   return v.type;
+}
+
+/**
+ * The tier of a MACHINE number: `nan`, the signed-infinity pair, `integer`
+ * or `real`. This is the number branch of `numberLiteralTierType`, kept as
+ * its own function so a list that holds its elements as plain numbers
+ * (`ce.list()`, `FunctionInterface._numericStore`) is typed by the same
+ * rule as one that holds boxed literals.
+ */
+export function machineNumberTierType(v: number): Type {
+  if (Number.isNaN(v)) return 'nan';
+  if (!Number.isFinite(v)) return SIGNED_INFINITY_TYPE;
+  return Number.isInteger(v) ? 'integer' : 'real';
+}
+
+/**
+ * The tiers present in a numeric store, each once, in first-seen order —
+ * the operands `widen` joins to type the list. One pass, no allocation per
+ * element: a run of equal tiers (an integer board) costs one comparison per
+ * element, and the membership test runs only when the tier changes.
+ */
+export function numericStoreTiers(store: readonly number[]): Type[] {
+  const tiers: Type[] = [];
+  let last: Type | undefined;
+  for (const v of store) {
+    const t = machineNumberTierType(v);
+    if (t === last) continue;
+    last = t;
+    if (!tiers.includes(t)) tiers.push(t);
+  }
+  return tiers;
 }

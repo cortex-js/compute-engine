@@ -3411,6 +3411,31 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
+  list(values: ArrayLike<number>): Expression {
+    const n = values.length;
+    if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0)
+      throw new TypeError(
+        `list(): the length must be a non-negative safe integer, not ${String(n)}`
+      );
+    // The empty list keeps its ordinary construction, type and identity.
+    if (n === 0) return this.function('List', []);
+    const store = new Array<number>(n);
+    for (let i = 0; i < n; i++) {
+      const v = values[i];
+      if (typeof v !== 'number')
+        throw new TypeError(
+          `list(): element ${i} is ${v === undefined ? 'undefined' : typeof v}, not a number`
+        );
+      // `-0 === 0`, so this stores `+0` for both, which is what
+      // `ce.number(-0)` boxes to.
+      store[i] = v === 0 ? 0 : v;
+    }
+    return new BoxedFunction(this, 'List', undefined, {
+      canonical: true,
+      numericStore: Object.freeze(store),
+    });
+  }
+
   type(type: Type | TypeString | BoxedType): BoxedType {
     if (type instanceof BoxedType) return type;
     if (typeof type === 'string' && isValidPrimitiveType(type)) {

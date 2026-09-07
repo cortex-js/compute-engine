@@ -523,8 +523,12 @@ export class _BoxedValueDefinition
       const x = x0 as {
         operator?: string;
         ops?: ReadonlyArray<{ operator?: string }> | null;
+        _numericStore?: readonly number[];
       };
       if (x.operator === 'Function') return true;
+      // A store-backed list (`ce.list()`) holds numbers only: no `Function`
+      // literal inside, and reading its `ops` would box every element.
+      if (x._numericStore !== undefined) return false;
       return x.ops?.some((o) => o.operator === 'Function') ?? false;
     };
     let callable = litCallable(prev) || litCallable(v);

@@ -1,3 +1,40 @@
+## [Unreleased]
+
+### New Features
+
+- **`ce.list(values)` builds a `List` of numbers without boxing each
+  element.** The numbers are copied into a frozen array that the list keeps
+  as its store; the boxed operands are built only when `.ops` is read. The
+  count, an indexed read, the type, the hash, structural equality, the
+  symbol and effect walks, `evaluate()` and an assignment all answer from the
+  store, so a 40 000-element board is written into the engine in a fraction
+  of a millisecond instead of about 5 ms. The value is an ordinary canonical
+  `List` in every other respect: same type, same `json`, same `hash`, same
+  `isSame` answers as `ce.box(['List', ...])`. The input may be a `number[]`,
+  a `Float64Array` or any array-like of numbers; a malformed length or a
+  non-number element throws a `TypeError`.
+- **`expr.array` reads a `List` back as plain machine numbers.** For a list
+  built by `ce.list()` it is the store itself, with no boxing. For an ordinary
+  `List` whose every element is a machine number (an integer, a finite
+  double, an infinity or `NaN`) it is computed once and cached, frozen. An
+  element that is not a machine number (an exact rational such as `1/3`, a
+  radical, a bignum beyond double precision, a complex number, a symbol, a
+  nested list) makes it `undefined`: the value is never approximated. The
+  array can be passed as is into a compiled function's argument bag.
+
+### Improvements
+
+- **The `javascript` target accepts a numeric typed array for a
+  list-declared input.** A symbol or lambda parameter declared as a list
+  (`list<number>`, `vector<3>`, ...) that receives a `Float64Array` or
+  another numeric typed array gets a plain-array copy at entry, where it used
+  to be read as a scalar and give `NaN` silently. A plain array passes as
+  is, and any other value keeps its runtime-shape dispatch. List values stay
+  plain arrays inside the artifact and in the result: measured on a
+  40 000-cell stencil, a typed-array pipeline is not faster than the plain
+  one. Design and measurements:
+  `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
+
 ## 0.125.1 _2026-09-07_
 
 ### Improvements

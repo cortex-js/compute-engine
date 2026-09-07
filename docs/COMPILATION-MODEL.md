@@ -66,6 +66,22 @@ the documented scalar-or-`{re, im}` convention; nested collections retain
 their shape. Target entry checks reject values incompatible with the compiled
 lane assumptions.
 
+The list carrier of the JavaScript target is the plain `Array`, in both
+directions. On a binding whose declared type proves a JS array, a plain
+`Array` passes as it is, and a numeric typed array (`Float64Array`,
+`Int32Array`, …) gets a plain-array copy once, at entry. Any other value
+passes untouched and the lowerings dispatch on its runtime shape, as before: a
+scalar there is not an error, because a declared type is routinely wider than
+the value a caller binds and several lowerings project on the runtime shape —
+a `list`-typed summand of an element-wise big operator bound to a number gives
+the scalar sum. A list-valued result always comes back as a fresh plain
+`Array`, never as a typed array and never aliasing caller data. Typed arrays
+are not used inside the artifact: a typed pipeline measured no faster than the
+plain one on the witness that asked for it, so the container would add
+per-helper result-kind rules for no gain. The measurements and the decision
+are in
+`docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
+
 ## Complex modes
 
 `strict` preserves real-lane assumptions and declines on an incompatible

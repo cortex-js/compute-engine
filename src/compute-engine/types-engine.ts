@@ -1397,6 +1397,24 @@ export interface IComputeEngine {
   tuple(...elements: ReadonlyArray<number>): Expression;
   tuple(...elements: ReadonlyArray<Expression>): Expression;
 
+  /**
+   * A `List` of numbers, built without boxing each element.
+   *
+   * The elements are copied into a frozen array of machine numbers that the
+   * list keeps as its store: `count`, `at`, `type`, `isSame` and `array`
+   * answer from it, and the boxed operands are built only if `ops` is read.
+   * The result is an ordinary canonical `List` in every other respect.
+   *
+   * `values` may be a `number[]`, a `Float64Array` or any array-like of
+   * numbers. Its `length` must be a non-negative safe integer and each
+   * element a JS number; anything else throws a `TypeError`. `-0` is stored
+   * as `+0`.
+   *
+   * Use it to hand a large numeric list to the engine cheaply, and read it
+   * back with `expr.array`.
+   */
+  list(values: ArrayLike<number>): Expression;
+
   type(type: Type | TypeString | BoxedType): BoxedType;
 
   rules(

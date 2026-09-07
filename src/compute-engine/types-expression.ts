@@ -2692,6 +2692,26 @@ export interface Expression {
   isCollection: boolean;
 
   /**
+   * The elements of a `List` as plain machine numbers, or `undefined`.
+   *
+   * Defined for a `List` whose every element is a machine number: an
+   * integer, a finite double, an infinity or `NaN`. A list built by
+   * `ce.list()` answers its own frozen array without boxing an element; an
+   * ordinary list answers a frozen array computed once from its elements.
+   * An element that is not a machine number — an exact rational such as
+   * `1/3`, a radical, a bignum with more digits than a double holds, a
+   * complex number, a symbol, a nested list — makes the answer `undefined`:
+   * the value is never approximated. Evaluate with `.N()` first to get the
+   * floats of an exact list.
+   *
+   * The array is frozen. It may be passed as is into a compiled function's
+   * argument bag.
+   *
+   * :category: Collections
+   */
+  readonly array: readonly number[] | undefined;
+
+  /**
    * Is `true` if this is an indexed collection, such as a list, a vector,
    * a matrix, a tuple, etc...
    *
@@ -2893,6 +2913,15 @@ export interface FunctionInterface {
   readonly isFunctionExpression: true;
   readonly ops: ReadonlyArray<Expression>;
   readonly nops: number;
+  /**
+   * Internal. The numeric store of a `List` built by `ce.list()`: its
+   * elements as frozen machine numbers, from which the operands are boxed on
+   * the first read of `ops`. `undefined` for every other function
+   * expression. A walker that only looks for symbols or effects skips a node
+   * with a store instead of reading `ops`, which would box every element.
+   * The public view is `array`.
+   */
+  readonly _numericStore: readonly number[] | undefined;
   readonly op1: Expression;
   readonly op2: Expression;
   readonly op3: Expression;

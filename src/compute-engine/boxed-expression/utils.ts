@@ -1172,8 +1172,12 @@ export function defIsCallableShaped(def: BoxedDefinition | undefined): boolean {
   const v = def.value.value;
   if (v === undefined) return false;
   if (v.operator === 'Function') return true;
+  // A store-backed list (`ce.list()`) holds numbers only: no `Function`
+  // literal inside, and reading its `ops` would box every element.
   return (
-    isFunction(v) && v.ops.some((o: Expression) => o.operator === 'Function')
+    isFunction(v) &&
+    v._numericStore === undefined &&
+    v.ops.some((o: Expression) => o.operator === 'Function')
   );
 }
 

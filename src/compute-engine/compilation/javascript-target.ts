@@ -8149,15 +8149,26 @@ function makeSysHelpers(ce: ComputeEngine): SysHelpers {
  * - analyzed COMPLEX (a `complex`-typed symbol or annotated parameter): a
  *   plain number is LIFTED to `{re, im: 0}` — a real IS a complex, and the
  *   compiled code reads `.re`/`.im` off it;
+ * - analyzed as a LIST (a binding whose declared type proves a JS array): a
+ *   plain `Array` passes as it is, with no copy, and a numeric typed array
+ *   (`Float64Array`, `Int32Array`, ...) is COPIED into a fresh plain `Array`,
+ *   because the compiled body reads plain arrays only. Any other value passes
+ *   UNTOUCHED and the lowerings dispatch on its runtime shape, as before: a
+ *   scalar there is not an error, because the declared type is routinely wider
+ *   than the value a caller binds and several lowerings project on the runtime
+ *   shape. The element-wise big-operator lane is the witness — a `list`-typed
+ *   summand bound to a number gives the scalar sum, not `NaN` (see
+ *   `test/compute-engine/compile-elementwise-bigop.test.ts`). Carrier contract:
+ *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`;
  * - anything else (a string, a boolean, an array, `undefined`) is left to
  *   today's behavior.
  *
  * One `typeof` per checked binding per call. The vars object is never mutated
- * (a lifted copy is built only when a lift is needed).
+ * (a lifted copy is built only when a lift or a typed-array copy is needed).
  */
 type EntryPlan =
-  | { kind: 'vars'; real: string[]; complex: string[] }
-  | { kind: 'args'; real: number[]; complex: number[] };
+  | { kind: 'vars'; real: string[]; complex: string[]; lists: string[] }
+  | { kind: 'args'; real: number[]; complex: number[]; lists: number[] };
 
 const isComplexObject = (v: unknown): v is ComplexResult =>
   typeof v === 'object' &&
@@ -8191,6 +8202,51 @@ function entryCheckError(binding: string): TypeError {
   );
 }
 
+/**
+ * The brands (`Object.prototype.toString` tags) of the typed arrays whose
+ * elements read as JavaScript numbers. A `DataView` is not listed (it has no
+ * indexed elements at all) and neither are the two `BigInt` views (their
+ * elements read as `bigint`, which the compiled arithmetic cannot mix with
+ * numbers).
+ */
+const NUMERIC_TYPED_ARRAY_BRANDS = new Set([
+  '[object Int8Array]',
+  '[object Uint8Array]',
+  '[object Uint8ClampedArray]',
+  '[object Int16Array]',
+  '[object Uint16Array]',
+  '[object Int32Array]',
+  '[object Uint32Array]',
+  '[object Float16Array]',
+  '[object Float32Array]',
+  '[object Float64Array]',
+]);
+
+/**
+ * Whether `v` is a typed array of NUMBERS — a view on an `ArrayBuffer` whose
+ * elements read as JavaScript numbers. The test is the object's brand, not
+ * `instanceof`: a view built in another realm (an iframe, a Node `vm`
+ * context) has a different constructor, so `instanceof DataView` would let
+ * a foreign `DataView` or `BigInt64Array` through as numeric.
+ */
+const isNumericTypedArray = (v: unknown): v is ArrayLike<number> =>
+  ArrayBuffer.isView(v) &&
+  NUMERIC_TYPED_ARRAY_BRANDS.has(Object.prototype.toString.call(v));
+
+/**
+ * A fresh plain `Array` holding the elements of a numeric typed array.
+ *
+ * The copy is an index loop on purpose: `Array.from` on a typed array goes
+ * through the iterator protocol, and on a 40 000-element `Float64Array` it
+ * measured about nine times slower than this loop.
+ */
+function copyToPlainArray(x: ArrayLike<number>): number[] {
+  const n = x.length;
+  const out = new Array<number>(n);
+  for (let i = 0; i < n; i++) out[i] = x[i];
+  return out;
+}
+
 function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
   if (plan.kind === 'vars') {
     const vars = argumentsList[0];
@@ -8220,6 +8276,16 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
         lifted[id] = { re: x, im: 0 };
       }
     }
+    // A numeric typed array on a list-declared symbol is copied into a plain
+    // one, which is what the compiled body reads. Every other value passes
+    // untouched, including a scalar: the lowerings dispatch on the runtime
+    // shape, so a narrower declaration is not enforced here.
+    for (const id of plan.lists) {
+      const x = v[id];
+      if (!isNumericTypedArray(x)) continue;
+      lifted ??= { ...v };
+      lifted[id] = copyToPlainArray(x);
+    }
     return lifted === undefined ? argumentsList : [lifted];
   }
   let lifted: unknown[] | undefined;
@@ -8238,6 +8304,14 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
       lifted ??= [...argumentsList];
       lifted[i] = { re: x, im: 0 };
     }
+  }
+  // The positional-parameter route applies the same list rule as the
+  // free-symbol route above.
+  for (const i of plan.lists) {
+    const x = argumentsList[i];
+    if (!isNumericTypedArray(x)) continue;
+    lifted ??= [...argumentsList];
+    lifted[i] = copyToPlainArray(x);
   }
   return lifted ?? argumentsList;
 }
@@ -8856,9 +8930,35 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 }
 
 /**
- * The D3 entry plan of the LAMBDA route: parameter `i` is complex-shaped
- * when its annotation is a non-real number type, real-shaped otherwise (an
- * unannotated parameter is wide, which the analysis shapes real).
+ * True when a declared type PROVES the caller's value is a JS array, and so
+ * names a binding whose typed-array value the D3 entry check copies to a plain
+ * array.
+ *
+ * The shape question is the one `isIndexedCollectionOperand` asks — does this
+ * lower to a JS array? — asked against the absence-admitting family tops
+ * `list<any>` / `indexed_collection<any>`, and it must hold for the WHOLE
+ * declared type: a union such as `number | list<number>` admits a scalar, so
+ * it is not a list binding.
+ *
+ * A type that a STRING inhabits is excluded, because a string is a legitimate
+ * caller value there and the string lowerings read it as a string, not as an
+ * array of numbers. Two types are excluded for this reason: `string` itself,
+ * and the bare `indexed_collection` (a string is an indexed collection of its
+ * grapheme clusters in the type lattice). `indexed_collection<number>` and
+ * every `list<...>` keep the check — no string inhabits them.
+ */
+function isListEntryType(t: Type): boolean {
+  if (isSubtype('string', t)) return false;
+  return (
+    isSubtype(t, 'list<any>') || isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
+  );
+}
+
+/**
+ * The D3 entry plan of the LAMBDA route: parameter `i` is list-shaped when its
+ * annotation proves a JS array, complex-shaped when its annotation is a
+ * non-real number type, real-shaped otherwise (an unannotated parameter is
+ * wide, which the analysis shapes real).
  */
 function lambdaEntryPlan(
   literalParams: ReadonlyArray<Expression>,
@@ -8866,6 +8966,7 @@ function lambdaEntryPlan(
 ): EntryPlan {
   const real: number[] = [];
   const complex: number[] = [];
+  const lists: number[] = [];
   literalParams.forEach((p, i) => {
     let t: Type | undefined;
     if (isFunction(p, 'Typed')) {
@@ -8883,6 +8984,10 @@ function lambdaEntryPlan(
         }
       }
     }
+    if (t !== undefined && isListEntryType(t)) {
+      lists.push(i);
+      return;
+    }
     // Under the complex discipline an unannotated (wide) parameter is
     // complex-shaped too — a number is lifted at entry, an object accepted.
     const isComplex =
@@ -8892,13 +8997,14 @@ function lambdaEntryPlan(
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
   });
-  return { kind: 'args', real, complex };
+  return { kind: 'args', real, complex, lists };
 }
 
 /**
  * The D3 entry plan of the EXPRESSION route: each free symbol emitted as a
- * vars-object lookup (`target.varsObjectRefs`) is complex-shaped when the
- * analysis says so — from its declared type — and real-shaped otherwise.
+ * vars-object lookup (`target.varsObjectRefs`) is list-shaped when its
+ * declared type proves a JS array, complex-shaped when the analysis says so
+ * — from its declared type — and real-shaped otherwise.
  * (A `vars`-option splice binds source text, never passes through `run()`,
  * and is not in the set: it is the caller's responsibility by contract.)
  */
@@ -8910,8 +9016,17 @@ function varsEntryPlan(
   if (refs === undefined || refs.size === 0) return undefined;
   const real: string[] = [];
   const complex: string[] = [];
+  const lists: string[] = [];
   for (const id of refs) {
     const sym = engine.symbol(id);
+    // A symbol whose declared type proves an array is classed as a list
+    // instead of as a number: the real/complex rules read the value as a
+    // scalar, which an array is not.
+    const declared = sym.type?.type;
+    if (declared !== undefined && isListEntryType(declared)) {
+      lists.push(id);
+      continue;
+    }
     // Built OUTSIDE the compilation (the mode latch has been restored), so
     // the complex discipline's wide rule is applied here explicitly.
     const isComplex =
@@ -8919,7 +9034,7 @@ function varsEntryPlan(
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
   }
-  return { kind: 'vars', real, complex };
+  return { kind: 'vars', real, complex, lists };
 }
 
 function compileToTarget(

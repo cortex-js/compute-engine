@@ -229,6 +229,9 @@ function collectParameterDefs(
 ): void {
   if (!isFunction(expr) || visited.has(expr)) return;
   visited.add(expr);
+  // A store-backed list (`ce.list()`) holds numbers only: no parameter to
+  // find, and reading its `ops` would box every element.
+  if (expr._numericStore !== undefined) return;
   if (expr.operator === 'Function') {
     for (let i = 1; i < expr.nops; i++) {
       const op = expr.ops[i];
@@ -614,6 +617,9 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       // Built-in operators have no lambda: no walk, no entry.
       const opDef = e.operatorDefinition;
       if (opDef !== undefined) visitLambdaBody(e, e.operator, opDef, true);
+      // A store-backed list (`ce.list()`) holds numbers only: no dependency
+      // inside it, and reading its `ops` would box every element.
+      if (e._numericStore !== undefined) return;
       for (const op of e.ops) visit(op, skipNames);
     }
   };

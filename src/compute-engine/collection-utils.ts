@@ -18,6 +18,8 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../common/type/primitive.js';
+import { numericStoreTiers } from './boxed-expression/literal-tier.js';
+import { machineNumberOf } from './boxed-expression/machine-number.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
@@ -2824,6 +2826,12 @@ function basicCollectionIndexWhere(
   predicate: (element: Expression) => boolean
 ): number | undefined {
   if (!isFunction(expr)) return undefined;
+  const store = expr._numericStore;
+  if (store !== undefined) {
+    for (let i = 0; i !== store.length; i += 1)
+      if (predicate(expr.engine.number(store[i]))) return i + 1;
+    return undefined;
+  }
   for (let i = 0; i !== expr.nops; i += 1)
     if (predicate(expr.ops[i]!)) return i + 1;
 
@@ -2877,6 +2885,13 @@ function collectionContains(
  * This is the case for List, Tuple, etc.
  */
 export function basicIndexedCollectionHandlers(): CollectionHandlers {
+  // A `List` built by `ce.list()` carries a numeric store instead of boxed
+  // operands (`FunctionInterface._numericStore`). The handlers below answer
+  // from the store when there is one, and box only the element they hand
+  // out, so a 40 000-element list is never boxed whole by a count, an
+  // indexed read or an iteration. Only a `List` can carry a store, so the
+  // `Set` and `Tuple` definitions that share this factory never take these
+  // branches. `nops` itself is store-aware on `BoxedFunction`.
   return {
     isLazy: (_expr) => false,
 
@@ -2886,21 +2901,34 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
 
     isFinite: (_expr) => true,
 
-    contains: (expr, target) =>
-      isFunction(expr) ? expr.ops.some((x) => x.isSame(target)) : false,
+    contains: (expr, target) => {
+      if (!isFunction(expr)) return false;
+      const store = expr._numericStore;
+      if (store !== undefined) {
+        const x = machineNumberOf(target);
+        if (x !== undefined) return storeContains(store, x);
+      }
+      return expr.ops.some((x) => x.isSame(target));
+    },
 
     iterator: (expr) => {
       if (!isFunction(expr))
         return { next: () => ({ value: undefined, done: true as const }) };
       let index = 1;
       const last = expr.nops;
+      const store = expr._numericStore;
 
       return {
         next: () => {
           if (index === last + 1)
             return { value: undefined, done: true as const };
           index += 1;
-          return { value: expr.ops[index - 1 - 1], done: false as const };
+          const i = index - 1 - 1;
+          return {
+            value:
+              store !== undefined ? expr.engine.number(store[i]) : expr.ops[i],
+            done: false as const,
+          };
         },
       };
     },
@@ -2908,9 +2936,19 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     subsetOf: collectionSubset,
 
     at: (expr: Expression, index: number | string): undefined | Expression => {
-      if (typeof index !== 'number' || !isFunction(expr)) return undefined;
+      // A fractional or `NaN` index names no element: the operand array read
+      // below gives `undefined` for it, and the store branch must give the
+      // same rather than box `store[NaN]`.
+      if (
+        typeof index !== 'number' ||
+        !Number.isInteger(index) ||
+        !isFunction(expr)
+      )
+        return undefined;
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;
+      const store = expr._numericStore;
+      if (store !== undefined) return expr.engine.number(store[index - 1]);
       return expr.ops[index - 1];
     },
 
@@ -2920,10 +2958,27 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
 
     elttype: (expr) => {
       if (!isFunction(expr) || expr.nops === 0) return 'unknown';
+      const store = expr._numericStore;
+      if (store !== undefined) {
+        // Parity with the operand walk below: one element answers its own
+        // literal type; more widen. `widen` over the literal types of the
+        // elements equals `widen` over their tiers, so the tiers are
+        // collected once (`numericStoreTiers`) instead of boxing a literal
+        // per element.
+        if (store.length === 1) return expr.engine.number(store[0]).type.type;
+        return widen(...numericStoreTiers(store));
+      }
       if (expr.nops === 1) return expr.ops[0].type.type;
       return widen(...expr.ops.map((op) => op.type.type));
     },
   };
+}
+
+/** Membership of a machine number in a numeric store: `NaN` is found by a
+ * `NaN` entry (as `isSame` finds it), any other value by `===`. */
+function storeContains(store: readonly number[], x: number): boolean {
+  if (Number.isNaN(x)) return store.some((v) => Number.isNaN(v));
+  return store.includes(x);
 }
 
 /**

@@ -49,6 +49,9 @@ export function candidateShape(x: Expression): number[] | null {
   while (isFunction(cur, 'List')) {
     dims.push(cur.nops);
     if (cur.nops === 0) break;
+    // A store-backed list (`ce.list()`) is a flat row of numbers: its
+    // candidate shape ends here, and reading `ops[0]` would box it whole.
+    if (cur._numericStore !== undefined) break;
     cur = cur.ops[0];
   }
   return dims;
@@ -132,6 +135,29 @@ export function packTensor(
   if (elements === undefined) return undefined;
   if (!isSubtype(elements, 'number') && !isSubtype(elements, 'boolean'))
     return undefined;
+
+  // A store-backed list (`ce.list()`) packs from its numbers without boxing
+  // an element: a `float64` tensor over a copy of the store. Under EXACT
+  // evaluation the policy below still applies, so the fast path is taken
+  // only when a float pack is what the operand walk would give too: not for
+  // an all-integer store (an `expression` pack, boxed arithmetic), and not
+  // for a store holding an integer outside the safe range, which the cell
+  // classifier (`getExpressionDatatype`, `tensor-fields.ts`) packs as
+  // `expression` so its products stay exact. Those cases fall through and
+  // box the elements as the operand walk does.
+  const store = x._numericStore;
+  if (
+    store !== undefined &&
+    (numeric ||
+      (!isSubtype(elements, 'integer') &&
+        !store.some((v) => Number.isInteger(v) && !Number.isSafeInteger(v))))
+  )
+    return makeTensor(ce, {
+      shape: [store.length],
+      rank: 1,
+      data: store.slice(),
+      dtype: 'float64',
+    });
 
   const info = expressionTensorInfo(x.ops);
   if (!info?.dtype) return undefined;

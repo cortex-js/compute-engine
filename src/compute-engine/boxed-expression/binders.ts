@@ -337,6 +337,10 @@ export function rewriteWithBinders(
       return ce.function('KeyValuePair', [ce.string(key), next]);
     });
     result = changed ? ce.function('Dictionary', entries) : expr;
+  } else if (isFunction(expr) && expr._numericStore !== undefined) {
+    // A store-backed list (`ce.list()`) holds numbers only: nothing in it
+    // can be rewritten, and reading its `ops` would box every element.
+    result = expr;
   } else {
     let inner = shadowed;
     if (!skipRootBinds) {

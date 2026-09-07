@@ -1222,6 +1222,13 @@ export abstract class _BoxedExpression implements Expression {
     return false;
   }
 
+  /** The elements as machine numbers, for a `List` whose elements all are
+   * machine numbers; `undefined` for every other expression. See
+   * `BoxedFunction.array`. */
+  get array(): readonly number[] | undefined {
+    return undefined;
+  }
+
   get isIndexedCollection(): boolean {
     return false;
   }
@@ -1342,6 +1349,9 @@ function getSymbols(
 
   if (!isFunction(expr) || visited.has(expr)) return;
   visited.add(expr);
+  // A store-backed list (`ce.list()`) holds numbers only: no symbol to
+  // collect, and walking it would box every element.
+  if (expr._numericStore !== undefined) return;
   for (const op of expr.ops) getSymbols(op, result, visited);
 }
 
@@ -1462,6 +1472,9 @@ function getReferences(
   memo: Map<Expression, readonly [Set<string>, Set<string>]> = new Map()
 ): void {
   if (isFunction(expr)) {
+    // A store-backed list (`ce.list()`) holds numbers only: nothing to
+    // reference, and walking it would box every element.
+    if (expr._numericStore !== undefined) return;
     const hit = memo.get(expr);
     if (hit !== undefined) {
       for (const s of hit[0]) freeVars.add(s);

@@ -294,6 +294,21 @@ export function same(
     if (a.operator !== b.operator) return false;
     if (!isFunction(b)) return false;
     if (a.nops !== b.nops) return false;
+    // Two store-backed lists (`ce.list()`) compare their numbers directly,
+    // without boxing: an element is the same when both are `NaN` or when
+    // they are `===` (a store never holds `-0`). This is `BoxedNumber.isSame`
+    // restricted to machine numbers. A list with a store against one
+    // without falls through to the operand walk, which boxes the store.
+    const storeA = a._numericStore;
+    const storeB = b._numericStore;
+    if (storeA !== undefined && storeB !== undefined) {
+      for (let i = 0; i < storeA.length; i++) {
+        const x = storeA[i];
+        const y = storeB[i];
+        if (x !== y && !(Number.isNaN(x) && Number.isNaN(y))) return false;
+      }
+      return true;
+    }
     // What this node binds shadows any outer binding of the same name for the
     // whole subtree. Tracked PER SIDE: `a` and `b` mint their own definitions
     // for the same bound variable (re-boxing does exactly that), so a single

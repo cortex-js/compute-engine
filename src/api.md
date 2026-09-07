@@ -1041,6 +1041,35 @@ tuple(...elements): Expression
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~list()~~ {#list-1}
+
+```ts
+list(values): Expression
+```
+
+A `List` of numbers, built without boxing each element.
+
+The elements are copied into a frozen array of machine numbers that the
+list keeps as its store: `count`, `at`, `type`, `isSame` and `array`
+answer from it, and the boxed operands are built only if `ops` is read.
+The result is an ordinary canonical `List` in every other respect.
+
+`values` may be a `number[]`, a `Float64Array` or any array-like of
+numbers. Its `length` must be a non-negative safe integer and each
+element a JS number; anything else throws a `TypeError`. `-0` is stored
+as `+0`.
+
+Use it to hand a large numeric list to the engine cheaply, and read it
+back with `expr.array`.
+
+####### values
+
+`ArrayLike`\<`number`\>
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~type()~~ {#type-11}
 
 ```ts
@@ -2238,6 +2267,23 @@ readonly ops: readonly Expression[];
 ```ts
 readonly nops: number;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### FunctionInterface.\_numericStore {#_numericstore}
+
+```ts
+readonly _numericStore: readonly number[] | undefined;
+```
+
+Internal. The numeric store of a `List` built by `ce.list()`: its
+elements as frozen machine numbers, from which the operands are boxed on
+the first read of `ops`. `undefined` for every other function
+expression. A walker that only looks for symbols or effects skips a node
+with a store instead of reading `ops`, which would box every element.
+The public view is `array`.
 
 </MemberCard>
 
@@ -10368,6 +10414,35 @@ tuple(...elements): Expression
 
 <MemberCard>
 
+##### IComputeEngine.list() {#list}
+
+```ts
+list(values): Expression
+```
+
+A `List` of numbers, built without boxing each element.
+
+The elements are copied into a frozen array of machine numbers that the
+list keeps as its store: `count`, `at`, `type`, `isSame` and `array`
+answer from it, and the boxed operands are built only if `ops` is read.
+The result is an ordinary canonical `List` in every other respect.
+
+`values` may be a `number[]`, a `Float64Array` or any array-like of
+numbers. Its `length` must be a non-negative safe integer and each
+element a JS number; anything else throws a `TypeError`. `-0` is stored
+as `+0`.
+
+Use it to hand a large numeric list to the engine cheaply, and read it
+back with `expr.array`.
+
+####### values
+
+`ArrayLike`\<`number`\>
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.type() {#type-10}
 
 ```ts
@@ -13478,6 +13553,33 @@ union predicates in `collection-utils.ts` as well:
 `unionMayHoldACollection()` for an ENUMERATION gate (a big op folding its
 body — tuple, string and fixed-shape branches enumerate too), or
 `scalarOrCollectionUnionBranches()` for a BROADCAST gate.
+
+</MemberCard>
+
+<MemberCard>
+
+##### Expression.array {#array-1}
+
+```ts
+readonly array: readonly number[] | undefined;
+```
+
+The elements of a `List` as plain machine numbers, or `undefined`.
+
+Defined for a `List` whose every element is a machine number: an
+integer, a finite double, an infinity or `NaN`. A list built by
+`ce.list()` answers its own frozen array without boxing an element; an
+ordinary list answers a frozen array computed once from its elements.
+An element that is not a machine number — an exact rational such as
+`1/3`, a radical, a bignum with more digits than a double holds, a
+complex number, a symbol, a nested list — makes the answer `undefined`:
+the value is never approximated. Evaluate with `.N()` first to get the
+floats of an exact list.
+
+The array is frozen. It may be passed as is into a compiled function's
+argument bag.
+
+:category: Collections
 
 </MemberCard>
 

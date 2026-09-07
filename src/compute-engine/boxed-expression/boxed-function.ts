@@ -108,6 +108,8 @@ import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
 } from '../../common/type/primitive.js';
+import { numericStoreTiers } from './literal-tier.js';
+import { machineNumberOf } from './machine-number.js';
 import {
   absorbNumericAbsence,
   broadcastElementType,
@@ -355,6 +357,19 @@ function sameComputedEffects(a: ComputedEffects, b: ComputedEffects): boolean {
  *
  */
 
+/**
+ * The type of a store-backed `List`: `list<T^N>`, where `T` widens the
+ * literal tiers present in the store (`numericStoreTiers`) — the same tiers
+ * `numberLiteralTierType` gives the boxed elements.
+ */
+function numericStoreType(store: readonly number[]): Type {
+  return internType({
+    kind: 'list',
+    elements: widen(...numericStoreTiers(store)),
+    dimensions: [store.length],
+  });
+}
+
 export class BoxedFunction
   extends _BoxedExpression
   implements FunctionInterface
@@ -364,8 +379,39 @@ export class BoxedFunction
   // The operator of the function expression
   private readonly _operator: string;
 
-  // The operands of the function expression
-  private readonly _ops: ReadonlyArray<Expression>;
+  // The operands of the function expression. Read through the `_ops`
+  // getter below: a `List` built by `ce.list()` starts with NO boxed
+  // operands and a numeric store instead, and boxes them on the first read.
+  private _opsStorage: ReadonlyArray<Expression> | undefined;
+
+  /**
+   * The numeric store of a `List` built by `ce.list()`: the list's elements
+   * as plain JS numbers, frozen, with `-0` normalized to `+0`. It is the
+   * ORIGIN of the operands, not a cache derived from them: the operand at
+   * position `i` is exactly `engine.number(store[i])`, boxed on the first
+   * read of `.ops`. The facets that need only the numbers (`nops`, `count`,
+   * `at`, `type`, `hash`, `isSame`, `unknowns`, effects, ...) answer from
+   * the store and never box. `undefined` for every other node. Design:
+   * `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
+   */
+  readonly _numericStore: readonly number[] | undefined;
+
+  /** The `array` facet of an ordinary `List` (one without a store), computed
+   * once: the elements as machine numbers, or `null` when some element is
+   * not a machine number. See `get array()`. */
+  private _derivedArray: readonly number[] | null | undefined;
+
+  /** The boxed operands. A store-backed list boxes them here, once, on the
+   * first read; every other node has them from construction. */
+  private get _ops(): ReadonlyArray<Expression> {
+    if (this._opsStorage !== undefined) return this._opsStorage;
+    const store = this._numericStore!;
+    const ops = new Array<Expression>(store.length);
+    for (let i = 0; i < store.length; i++)
+      ops[i] = this.engine.number(store[i]);
+    this._opsStorage = ops;
+    return ops;
+  }
 
   // Only canonical expressions have an associated def (are bound)
   // If `null`, the expression is not bound, if `undefined`, the expression
@@ -588,18 +634,40 @@ export class BoxedFunction
   constructor(
     ce: ComputeEngine,
     operator: string,
-    ops: ReadonlyArray<Expression>,
+    ops: ReadonlyArray<Expression> | undefined,
     options?: {
       metadata?: Metadata;
       canonical?: boolean;
       structural?: boolean;
       scope?: Scope;
+      /** A numeric store in place of boxed operands (`_numericStore`).
+       * Only a `List` may carry one; `ops` is then omitted. */
+      numericStore?: readonly number[];
     }
   ) {
     super(ce, options?.metadata);
 
     this._operator = operator;
-    this._ops = ops;
+    const store = options?.numericStore;
+    if (store !== undefined) {
+      // The store is the list's literal content. Any other head would give
+      // its handlers a node whose facets answer from numbers the handlers
+      // never see, so the restriction is checked here, not documented away.
+      if (operator !== 'List')
+        throw new Error(
+          `A numeric store is only valid on a "List", not on "${operator}"`
+        );
+      if (ops !== undefined)
+        throw new Error(
+          'A numeric store replaces the operands: pass one of the two'
+        );
+      if (!Object.isFrozen(store))
+        throw new Error('A numeric store must be frozen');
+    } else if (ops === undefined) {
+      throw new Error(`"${operator}" has neither operands nor a numeric store`);
+    }
+    this._numericStore = store;
+    this._opsStorage = ops;
     this._localScope = options?.scope;
 
     this._isStructural = options?.structural ?? false;
@@ -622,7 +690,14 @@ export class BoxedFunction
     if (this._hash !== undefined) return this._hash;
 
     let h = 0;
-    for (const op of this._ops) h = ((h << 1) ^ op.hash) | 0;
+    const store = this._numericStore;
+    if (store !== undefined) {
+      // The same fold the boxed operands would give — each element's hash IS
+      // the hash of `engine.number(v)` — computed without keeping the boxes.
+      for (const v of store) h = ((h << 1) ^ this.engine.number(v).hash) | 0;
+    } else {
+      for (const op of this._ops) h = ((h << 1) ^ op.hash) | 0;
+    }
 
     h = (h ^ hashCode(this._operator)) | 0;
     this._hash = h;
@@ -834,6 +909,9 @@ export class BoxedFunction
    * @internal
    */
   _effectsOf(): ComputedEffects {
+    // A store-backed list is a container of numbers: evaluating it has no
+    // effect, and the projection must not box the operands to find that out.
+    if (this._numericStore !== undefined) return undefined;
     const callableVersion = this.engine._callableVersion;
     const scope = this.engine.context?.lexicalScope;
     if (
@@ -923,6 +1001,7 @@ export class BoxedFunction
     // Operands first: the walk stops at the first free variable, which is
     // cheaper than the effect projection `isPure` runs. Same conjunction,
     // both sides side-effect free.
+    if (this._numericStore !== undefined) return this.isPure;
     return this._ops.every((x) => x.isConstant) && this.isPure;
   }
 
@@ -955,7 +1034,42 @@ export class BoxedFunction
   }
 
   get nops(): number {
-    return this._ops.length;
+    return this._numericStore?.length ?? this._ops.length;
+  }
+
+  /**
+   * The elements of a `List` as plain machine numbers, or `undefined`.
+   *
+   * A store-backed list (`ce.list()`) answers its frozen store, without
+   * boxing. An ordinary `List` answers when every operand is a MACHINE
+   * number — a boxed number that is the same as the boxed form of its own
+   * machine value (`engine.number(op.re).isSame(op)`), which admits an
+   * integer, a finite double, an infinity and `NaN`, and rejects an exact
+   * rational, a radical, a bignum with more digits than a double holds, a
+   * complex number, a symbol or a nested list. The answer is computed once
+   * and cached as a frozen DERIVED array; it never becomes a store (the
+   * operands stay the source of truth). It never projects through `.re`
+   * alone, so it never returns an approximation of an exact value: a caller
+   * that wants floats of an exact list evaluates it with `.N()` first.
+   */
+  get array(): readonly number[] | undefined {
+    if (this._numericStore !== undefined) return this._numericStore;
+    if (this._operator !== 'List') return undefined;
+    if (this._derivedArray !== undefined)
+      return this._derivedArray ?? undefined;
+    const ops = this._ops;
+    const out = new Array<number>(ops.length);
+    for (let i = 0; i < ops.length; i++) {
+      const x = machineNumberOf(ops[i]);
+      if (x === undefined) {
+        this._derivedArray = null;
+        return undefined;
+      }
+      // `-0 === 0`, so this stores `+0` for both.
+      out[i] = x === 0 ? 0 : x;
+    }
+    this._derivedArray = Object.freeze(out);
+    return this._derivedArray;
   }
 
   get op1(): Expression {
@@ -978,7 +1092,8 @@ export class BoxedFunction
   get isValid(): boolean {
     if (this._isValid !== undefined) return this._isValid;
     this._isValid =
-      this._operator !== 'Error' && this._ops.every((x) => x?.isValid);
+      this._operator !== 'Error' &&
+      (this._numericStore !== undefined || this._ops.every((x) => x?.isValid));
     return this._isValid;
   }
 
@@ -1400,7 +1515,10 @@ export class BoxedFunction
       if (typeof v === 'string') {
         if (operator === v) return true;
       } else if (v.includes(operator)) return true;
-      // Otherwise ask the operands.
+      // Otherwise ask the operands. A store-backed list has only number
+      // operands, which never match a name, so it is not walked (and not
+      // boxed).
+      if (e instanceof BoxedFunction && e._numericStore !== undefined) continue;
       for (const op of e.ops) pending.push(op);
     }
     return false;
@@ -2155,7 +2273,13 @@ export class BoxedFunction
     // list's cell fold joins them by identity. An interned type is bounded
     // by construction, so the size walk is skipped for it.
     const compute = (): BoxedType => {
-      const derived = type(this);
+      // The `List` type handler receives operand DESCRIPTORS, which the
+      // framework builds from boxed operands, so a store-backed list is typed
+      // here, from its numbers, before the handler would box them.
+      const derived =
+        this._numericStore !== undefined
+          ? numericStoreType(this._numericStore)
+          : type(this);
       const t = derived instanceof BoxedType ? derived.type : derived;
       const stored = isInternedType(t) ? t : internType(boundTypeSize(t));
       return derived instanceof BoxedType && stored === t
@@ -2197,13 +2321,14 @@ export class BoxedFunction
   private _isLiteralListTree(): boolean {
     if (this._literalListTree !== undefined) return this._literalListTree;
     this._literalListTree =
-      this._operator === 'List' &&
-      this._ops.every(
-        (op) =>
-          isNumber(op) ||
-          isString(op) ||
-          (op instanceof BoxedFunction && op._isLiteralListTree())
-      );
+      this._numericStore !== undefined ||
+      (this._operator === 'List' &&
+        this._ops.every(
+          (op) =>
+            isNumber(op) ||
+            isString(op) ||
+            (op instanceof BoxedFunction && op._isLiteralListTree())
+        ));
     return this._literalListTree;
   }
 
@@ -2232,6 +2357,10 @@ export class BoxedFunction
   }
 
   evaluate(options?: Partial<EvaluateOptions>): Expression {
+    // A store-backed list holds machine numbers only: it is already its own
+    // value, under every option (a materialization or a numeric
+    // approximation of it is itself), so it is returned without boxing.
+    if (this._numericStore !== undefined) return this;
     // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
     // when a checkpoint is taken or restored — the snapshot would capture
     // state the evaluation is still about to move, and a later restore would
@@ -2597,6 +2726,8 @@ export class BoxedFunction
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    // Same as `evaluate()`: a store-backed list is its own value.
+    if (this._numericStore !== undefined) return Promise.resolve(this);
     // Checkpoint quiescence (`checkpoint.ts`): an async evaluation suspended
     // at an `await` holds its eval context across the suspension and hands
     // control back to the host, so — unlike a synchronous evaluation, which
