@@ -24,7 +24,6 @@ import {
   overlapsForDeferredValidation,
   resolveTypeAlias,
   stripMissingFromType,
-  typeContainsMissing,
 } from '../../common/type/utils.js';
 import {
   diagnoseNoMatch,

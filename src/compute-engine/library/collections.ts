@@ -87,7 +87,6 @@ import {
   resolveTypeAlias,
   staticCollectionDims,
   stripMissingFromType,
-  stripNumericRanges,
   typeContainsMissing,
   widen,
 } from '../../common/type/utils.js';

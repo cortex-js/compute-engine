@@ -97,7 +97,6 @@ import {
 import type {
   EffectLabel,
   FunctionSignature,
-  TypeString,
 } from '../../common/type/types.js';
 import { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';

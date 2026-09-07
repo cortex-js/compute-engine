@@ -14,7 +14,7 @@ import {
   typeElementCount,
   signOfType,
 } from '../../common/type/utils.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import type { OneOf } from '../../common/one-of.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
