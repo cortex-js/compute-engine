@@ -1516,6 +1516,24 @@ describe('LOGARITHM COMBINATION RULES', () => {
     expect(simplify('\\ln(x) + \\ln(y) + z')).toMatchInlineSnapshot(
       `["Add", "z", ["Ln", ["Multiply", "x", "y"]]]`
     ));
+
+  test('log_e(x) -> ln(x)', () =>
+    expect(simplify('\\log_e(x)')).toMatchInlineSnapshot(`["Ln", "x"]`));
+
+  test('log_e(x) + log_e(x) = 2*ln(x)', () =>
+    expect(simplify('\\log_e(x) + \\log_e(x)')).toMatchInlineSnapshot(
+      `["Multiply", 2, ["Ln", "x"]]`
+    ));
+
+  test('log_e(x) + log_e(y) = ln(xy)', () =>
+    expect(simplify('\\log_e(x) + \\log_e(y)')).toMatchInlineSnapshot(
+      `["Ln", ["Multiply", "x", "y"]]`
+    ));
+
+  test('ln(x) + log_e(y) = ln(xy)', () =>
+    expect(simplify('\\ln(x) + \\log_e(y)')).toMatchInlineSnapshot(
+      `["Ln", ["Multiply", "x", "y"]]`
+    ));
 });
 
 describe('INDETERMINATE FORMS', () => {

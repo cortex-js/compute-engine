@@ -7,6 +7,11 @@ import {
 import { toBigint } from '../boxed-expression/numerics.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
+/** Whether `logBase` is Euler's number — `Log(x, e)` is `Ln(x)`. */
+function isNaturalLogBase(base: Expression): boolean {
+  return sym(base) === 'ExponentialE';
+}
+
 /**
  * Logarithm simplification rules consolidated from simplify-rules.ts.
  * Handles ~30 patterns for simplifying Ln and Log expressions.
@@ -240,6 +245,11 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       const special = logarithmAtExceptionalPoint(ce, arg, logBase, false);
       if (special !== undefined)
         return { value: special, because: 'log at an exceptional point' };
+    }
+
+    // log_e(x) -> ln(x): base-e logarithm is the natural logarithm
+    if (isNaturalLogBase(logBase)) {
+      return { value: ce._fn('Ln', [arg]), because: 'log_e(x) -> ln(x)' };
     }
 
     // log_c(c) -> 1 (an infinite base was answered above: `∞/∞` is NaN)
@@ -659,27 +669,39 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
           innerTerm.op1 &&
           innerTerm.op2
         ) {
-          const baseKey = JSON.stringify(innerTerm.op2.json);
-          if (!logTerms.has(baseKey)) {
-            logTerms.set(baseKey, []);
+          if (isNaturalLogBase(innerTerm.op2)) {
+            lnTerms.push({
+              index: i,
+              arg: innerTerm.op1,
+              positive: false,
+            });
+          } else {
+            const baseKey = JSON.stringify(innerTerm.op2.json);
+            if (!logTerms.has(baseKey)) {
+              logTerms.set(baseKey, []);
+            }
+            logTerms.get(baseKey)!.push({
+              index: i,
+              arg: innerTerm.op1,
+              base: innerTerm.op2,
+              positive: false,
+            });
           }
-          logTerms.get(baseKey)!.push({
-            index: i,
-            arg: innerTerm.op1,
-            base: innerTerm.op2,
-            positive: false,
-          });
         }
       }
       // Direct Log term
       else if (isFunction(term, 'Log') && term.op1 && term.op2) {
-        const baseKey = JSON.stringify(term.op2.json);
-        if (!logTerms.has(baseKey)) {
-          logTerms.set(baseKey, []);
+        if (isNaturalLogBase(term.op2)) {
+          lnTerms.push({ index: i, arg: term.op1, positive: true });
+        } else {
+          const baseKey = JSON.stringify(term.op2.json);
+          if (!logTerms.has(baseKey)) {
+            logTerms.set(baseKey, []);
+          }
+          logTerms
+            .get(baseKey)!
+            .push({ index: i, arg: term.op1, base: term.op2, positive: true });
         }
-        logTerms
-          .get(baseKey)!
-          .push({ index: i, arg: term.op1, base: term.op2, positive: true });
       }
     }
 
