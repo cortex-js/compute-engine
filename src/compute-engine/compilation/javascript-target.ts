@@ -7,6 +7,11 @@ import { typeToString } from '../../common/type/serialize.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
+import { javascriptStatements } from './javascript-statements.js';
+import {
+  canIndexArrayDirectly,
+  recordIntegerRange,
+} from './javascript-value-facts.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
@@ -2148,7 +2153,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // decline, projected as a scalar NaN for the whole result. Only the
   // single-index form over an indexed collection compiles; nested/multi-index
   // access and non-collection operands fail closed (D6).
-  At: (args, compile) => {
+  At: (args, compile, target) => {
     const coll = args[0];
     const index = args[1];
     if (
@@ -2197,6 +2202,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `boolean | indexed_collection | number | string`), so refusing on
     // "not provably real" declined ordinary compilable code such as `P[n]`
     // inside a comprehension. Matching the interpreter beats refusing.
+    // A positive integer needs only the 1-based offset. The nullish fallback
+    // preserves absent positions without a helper call or explicit bounds test.
+    if (canIndexArrayDirectly(coll, index, target))
+      return `((${compile(coll)})[(${compile(index)}) - 1] ?? NaN)`;
     const base = `_SYS.at(${stringBase ? `_SYS.chars(${compile(coll)})` : compile(coll)}, ${compile(index)})`;
     // `_SYS.at` marks an out-of-band SCALAR access with `NaN` (the numeric
     // absence marker). For an OBJECT-domain collection (non-numeric elements),
@@ -4513,7 +4522,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return `_SYS.cneg(${compile(x)})`;
   },
-  Multiply: (args, compile) => {
+  Multiply: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
     const anyComplex = args.some((a) => BaseCompiler.isComplexValued(a));
     if (!anyComplex) {
@@ -4530,21 +4539,34 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `(${nonOne.map((x) => compile(x)).join(' * ')})`;
     }
 
+    const boundResult = (bindings: string, value: string): string =>
+      javascriptStatements(target)?.expression(
+        (exit) => `${bindings} ${exit(value)}`
+      ) ?? `(() => { ${bindings} return ${value}; })()`;
+
     if (args.length === 2) {
-      // Optimize: single IIFE for 2 operands
       const ac = BaseCompiler.isComplexValued(args[0]);
       const bc = BaseCompiler.isComplexValued(args[1]);
       const ca = compile(args[0]);
       const cb = compile(args[1]);
 
       if (ac && bc) {
-        return `(() => { const _a = ${ca}, _b = ${cb}; return { re: _a.re * _b.re - _a.im * _b.im, im: _a.re * _b.im + _a.im * _b.re }; })()`;
+        return boundResult(
+          `const _a = ${ca}, _b = ${cb};`,
+          '{ re: _a.re * _b.re - _a.im * _b.im, im: _a.re * _b.im + _a.im * _b.re }'
+        );
       }
       if (ac && !bc) {
-        return `(() => { const _a = ${ca}, _r = ${cb}; return { re: _a.re * _r, im: _a.im * _r }; })()`;
+        return boundResult(
+          `const _a = ${ca}, _r = ${cb};`,
+          '{ re: _a.re * _r, im: _a.im * _r }'
+        );
       }
       // !ac && bc
-      return `(() => { const _r = ${ca}, _b = ${cb}; return { re: _r * _b.re, im: _r * _b.im }; })()`;
+      return boundResult(
+        `const _r = ${ca}, _b = ${cb};`,
+        '{ re: _r * _b.re, im: _r * _b.im }'
+      );
     }
 
     // 3+ operands: single IIFE, sequential accumulation
@@ -4572,7 +4594,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       parts.push(`_im = _nim${i}`);
     }
 
-    return `(() => { ${parts.join('; ')}; return { re: _re, im: _im }; })()`;
+    return boundResult(`${parts.join('; ')};`, '{ re: _re, im: _im }');
   },
 
   // Factorial and double factorial
@@ -8239,7 +8261,94 @@ function normalizeRunResult(r: unknown): unknown {
     (r as ComplexResult).im === 0
   )
     return (r as ComplexResult).re;
+  // A complex cell is returned as a FRESH object: the value may be part of a
+  // definition the runner evaluated once and keeps for every later call
+  // (`twoStageRunner`), and a caller writing to the returned object's `re`
+  // must not change what the next call answers.
+  if (isComplexObject(r)) return { re: r.re, im: r.im };
   return r;
+}
+
+/**
+ * The preamble definitions of a compilation split into the ones the runner
+ * may evaluate ONCE per compiled artifact (`hoisted`) and the ones that must
+ * run on every call (`perCall`), each in emission order.
+ *
+ * A definition is hoisted when all of the following hold: the compiler
+ * recorded it as built from its own lowerings only
+ * (`userFunctions.hoistable` — a folded symbol value with no caller-supplied
+ * source and no string-valued `vars` mapping in it; a user-function
+ * definition is never on that set and always stays per call); its code reads
+ * no per-call binding — on the expression route the vars object, which the
+ * emitted code reads only as `_.<id>` (`varsObjectAccess`, the one spelling
+ * looked for when `varsObject` is set); on the lambda route a parameter,
+ * read as a bare identifier (`perCallIdentifiers`, which may include a
+ * parameter literally named `_`); and it references no per-call definition
+ * by name. Definitions are emitted after everything they reference, so
+ * walking them in order settles the dependency, and the two lists keep
+ * their relative order. A false positive of a textual test only keeps a
+ * definition per call, which is the behavior every definition had before.
+ *
+ * Rebuilding a call-invariant value per call repeated its whole
+ * construction: a board built by a 22 500-element comprehension was rebuilt
+ * on every sampled pixel of a plot that only indexed into it.
+ */
+function splitPreambleDefs(
+  registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+  perCallIdentifiers: ReadonlyArray<string>,
+  varsObject: boolean
+): { hoisted: string; perCall: string } {
+  const defs = registry.defs;
+  if (defs.size === 0) return { hoisted: '', perCall: '' };
+  const escape = (name: string): string =>
+    name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const identifier = (name: string): RegExp =>
+    new RegExp(`(?<![\\w$.])${escape(name)}(?![\\w$])`, 'u');
+  const readers = perCallIdentifiers.map(identifier);
+  if (varsObject) readers.push(/(?<![\w$])_\.(?=[\p{L}_$])/u);
+  const perCallDefNames: RegExp[] = [];
+  const hoisted: string[] = [];
+  const perCall: string[] = [];
+  for (const [name, code] of defs) {
+    const stays =
+      registry.hoistable?.has(name) !== true ||
+      readers.some((r) => r.test(code)) ||
+      perCallDefNames.some((r) => r.test(code));
+    if (stays) {
+      perCall.push(code);
+      perCallDefNames.push(identifier(name));
+    } else hoisted.push(code);
+  }
+  return {
+    hoisted: hoisted.length > 0 ? hoisted.join('\n') + '\n' : '',
+    perCall: perCall.length > 0 ? perCall.join('\n') + '\n' : '',
+  };
+}
+
+/**
+ * The two-stage form of a compiled runner. `hoisted` is evaluated ONCE, when
+ * the runner is built, in a scope that sees `_SYS` and nothing per call; the
+ * inner function it returns runs on every call with the per-call preamble
+ * and the body. A folded symbol value that reads no per-call binding is the
+ * same on every call (`splitPreambleDefs`), and a plot that sampled `S[k]`
+ * once per pixel rebuilt the whole 22 500-element `S` on each sample before
+ * the split. Any error the hoisted stage raises is raised here, at
+ * construction, instead of on the first call. The caller's own `preamble`
+ * option is never part of `hoisted`: it is arbitrary source that may read
+ * the vars object under another spelling, draw randomness, or hold per-call
+ * state, so it keeps running on every call.
+ */
+function twoStageRunner(
+  sys: SysHelpers,
+  hoisted: string,
+  params: string[],
+  perCallCode: string
+): (...args: unknown[]) => unknown {
+  const stage = new Function(
+    '_SYS',
+    `${hoisted}return function (${params.join(', ')}) { ${perCallCode} };`
+  ) as (sys: SysHelpers) => (...args: unknown[]) => unknown;
+  return stage(sys);
 }
 
 export class ComputeEngineFunction extends Function {
@@ -8248,23 +8357,26 @@ export class ComputeEngineFunction extends Function {
   constructor(
     ce: ComputeEngine,
     body: string,
-    preamble = '',
-    entry?: EntryPlan
+    perCall = '',
+    entry?: EntryPlan,
+    hoisted = '',
+    statementBody?: string
   ) {
-    super(
-      '_SYS',
-      '_',
-      preamble ? `${preamble};return ${body}` : `return ${body}`
-    );
+    const perCallCode = `${perCall}${perCall ? ';' : ''}${statementBody ?? `return ${body}`}`;
+    super('_SYS', '_', perCallCode);
     this.SYS = makeSysHelpers(ce);
+    const inner = hoisted
+      ? twoStageRunner(this.SYS, hoisted, ['_'], perCallCode)
+      : undefined;
     return new Proxy(this, {
-      apply: (target, thisArg, argumentsList) =>
-        normalizeRunResult(
-          super.apply(thisArg, [
-            this.SYS,
-            ...(entry ? checkEntry(entry, argumentsList) : argumentsList),
-          ])
-        ),
+      apply: (target, thisArg, argumentsList) => {
+        const args = entry ? checkEntry(entry, argumentsList) : argumentsList;
+        return normalizeRunResult(
+          inner !== undefined
+            ? inner.apply(thisArg, args)
+            : super.apply(thisArg, [this.SYS, ...args])
+        );
+      },
       get: (target, prop) => {
         if (prop === 'toString') return (): string => body;
         if (prop === 'isCompiled') return true;
@@ -8284,29 +8396,39 @@ export class ComputeEngineFunctionLiteral extends Function {
     ce: ComputeEngine,
     body: string,
     args: string[],
-    preamble = '',
-    entry?: EntryPlan
+    perCall = '',
+    entry?: EntryPlan,
+    hoisted = '',
+    statementBody?: string
   ) {
-    super(
-      '_SYS',
-      ...args,
-      preamble ? `${preamble}return ${body}` : `return ${body}`
-    );
+    const perCallCode = `${perCall}${statementBody ?? `return ${body}`}`;
+    super('_SYS', ...args, perCallCode);
     this.SYS = makeSysHelpers(ce);
+    const inner = hoisted
+      ? twoStageRunner(this.SYS, hoisted, args, perCallCode)
+      : undefined;
+    // The serialized form is self-contained: every definition, hoisted or
+    // not, in emission order inside the single body.
+    const preamble = hoisted + perCall;
     return new Proxy(this, {
-      apply: (target, thisArg, argumentsList) =>
-        normalizeRunResult(
-          super.apply(thisArg, [
-            this.SYS,
-            ...(entry ? checkEntry(entry, argumentsList) : argumentsList),
-          ])
-        ),
+      apply: (target, thisArg, argumentsList) => {
+        const callArgs = entry
+          ? checkEntry(entry, argumentsList)
+          : argumentsList;
+        return normalizeRunResult(
+          inner !== undefined
+            ? inner.apply(thisArg, callArgs)
+            : super.apply(thisArg, [this.SYS, ...callArgs])
+        );
+      },
       get: (target, prop) => {
         if (prop === 'toString')
           return (): string =>
-            preamble
-              ? `(${args.join(', ')}) => { ${preamble}return ${body}; }`
-              : `(${args.join(', ')}) => ${body}`;
+            statementBody
+              ? `(${args.join(', ')}) => { ${preamble}${statementBody} }`
+              : preamble
+                ? `(${args.join(', ')}) => { ${preamble}return ${body}; }`
+                : `(${args.join(', ')}) => ${body}`;
         if (prop === 'isCompiled') return true;
         return Reflect.get(target, prop);
       },
@@ -8329,7 +8451,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
   createTarget(
     options: Partial<CompileTarget<Expression>> = {}
   ): CompileTarget<Expression> {
-    return {
+    const target: CompileTarget<Expression> = {
       language: 'javascript',
       operators: (op) => JAVASCRIPT_OPERATORS[op],
       functions: (id) => JAVASCRIPT_FUNCTIONS[id],
@@ -8355,19 +8477,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       character: (str) => JSON.stringify(str),
       number: (n) => n.toString(),
       complex: (re, im) => `({ re: ${re}, im: ${im} })`,
-      // Evaluate shared middle operands of a chained relation exactly once
-      // (matching the interpreter) by binding them in an IIFE.
+      // Keep an expression spelling for consumers that need one, together
+      // with a statement form for function bodies and local initializers.
       bindExpr: (bindings, body) =>
-        `((${bindings.map((b) => b[0]).join(', ')}) => ${body})(${bindings
-          .map((b) => b[1])
-          .join(', ')})`,
+        javascriptStatements(target)?.parameters(bindings, body) ??
+        `((${bindings.map(([name]) => name).join(', ')}) => ${body})(${bindings.map(([, code]) => code).join(', ')})`,
       // Dependency-ordered CSE temporaries: a sequential-`const` IIFE, so a
       // later right-hand side — and the body — can reference an earlier temp.
       // Flat: no nesting growth with the candidate count.
       cseBind: (bindings, body) =>
-        `(() => { ${bindings
-          .map(([name, code]) => `const ${name} = ${code};`)
-          .join(' ')} return ${body}; })()`,
+        javascriptStatements(target)?.bindings(bindings, body) ??
+        `(() => { ${bindings.map(([name, code]) => `const ${name} = ${code};`).join(' ')} return ${body}; })()`,
       // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
@@ -8417,6 +8537,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
+    return target;
   }
 
   compile(
@@ -8835,19 +8956,33 @@ function compileToTarget(
           dangling.size === 1 ? 'symbol' : 'symbols'
         } ${[...dangling].map((s) => `"${s}"`).join(', ')}: a compiled lambda takes only its declared parameters, so there is no value to bind them to. Assign a value, or pass one via \`vars\`.`
       );
+    // The definitions that read no lambda parameter are evaluated once per
+    // artifact; the rest stay inside the per-call body (see
+    // `splitPreambleDefs`). `toString()` and `code` keep the single-body form.
+    const split = target.userFunctions
+      ? splitPreambleDefs(target.userFunctions, params, false)
+      : { hoisted: '', perCall: '' };
+    const statements = javascriptStatements(target);
+    const statementBody = statements?.has(body)
+      ? statements.functionBody(body)
+      : undefined;
     const fn = new ComputeEngineFunctionLiteral(
       expr.engine,
       body,
       params,
-      userDefs,
-      entryChecks ? lambdaEntryPlan(args.slice(1), mode) : undefined
+      split.perCall,
+      entryChecks ? lambdaEntryPlan(args.slice(1), mode) : undefined,
+      split.hoisted,
+      statementBody
     );
     return {
       target: 'javascript' as const,
       success: true,
-      code: userDefs
-        ? `(${params.join(', ')}) => { ${userDefs}return ${body}; }`
-        : `(${params.join(', ')}) => ${body}`,
+      code: statementBody
+        ? `(${params.join(', ')}) => { ${userDefs}${statementBody} }`
+        : userDefs
+          ? `(${params.join(', ')}) => { ${userDefs}return ${body}; }`
+          : `(${params.join(', ')}) => ${body}`,
       calling: 'lambda' as const,
       run: fn as unknown as CompiledRunner<
         CompiledValue,
@@ -8887,13 +9022,28 @@ function compileToTarget(
       ? `${target.preamble}\n${userDefs}`
       : userDefs
     : target.preamble;
+  // The runner evaluates once per artifact the definitions that read no
+  // per-call binding (`splitPreambleDefs`); the caller's own preamble and
+  // every other definition run on every call, as before. A hoisted
+  // definition never references a name the caller's preamble defines: a
+  // value reaching caller-supplied source is not on `userFunctions.hoistable`.
+  // `preamble` above, the text a consumer splices itself, keeps the
+  // single-body form.
+  const split = target.userFunctions
+    ? splitPreambleDefs(target.userFunctions, [], true)
+    : { hoisted: '', perCall: '' };
+  const perCall = target.preamble
+    ? `${target.preamble}\n${split.perCall}`
+    : split.perCall || undefined;
   const fn = new ComputeEngineFunction(
     expr.engine,
     js,
-    preamble,
+    perCall,
     entryChecks
       ? varsEntryPlan(expr.engine as ComputeEngine, target.varsObjectRefs, mode)
-      : undefined
+      : undefined,
+    split.hoisted,
+    javascriptStatements(target)?.functionBody(js)
   );
   return {
     target: 'javascript' as const,
@@ -10261,6 +10411,14 @@ function emitSumProduct(
   clauses: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): string {
+  const statements = javascriptStatements(target);
+  const expression = (
+    build: (exit: (value: string) => string) => string
+  ): string =>
+    statements?.expression(build) ??
+    `(() => { ${build((v) => `return ${v};`)} })()`;
+  const initialize = (name: string, value: string): string =>
+    statements?.initialize(name, value) ?? `const ${name} = ${value};`;
   // A collection-valued body: element-wise accumulation (the interpreter's
   // zip-broadcast big op — `Σ_k (L + k)` over a 3-list is a 3-list). The body
   // is evaluated WHOLE each iteration and folded through `_SYS.bcast`, so a
@@ -10339,7 +10497,9 @@ function emitSumProduct(
             var: (id) => (id === index ? String(k) : target.var(id)),
             boundVars: BaseCompiler.withBoundNames(target, [index]),
           };
-          terms.push(`(${compileTerm(innerTarget)})`);
+          recordIntegerRange(innerTarget, index, k, k);
+          const term = compileTerm(innerTarget);
+          terms.push(statements?.parenthesize(term) ?? `(${term})`);
         }
         return terms;
       };
@@ -10399,35 +10559,50 @@ function emitSumProduct(
         // NaN either way. Without `canExitEarly` the statement form is still
         // emitted — the hoisted bindings need it — but every term runs.
         const acc = BaseCompiler.tempVar(target);
-        const stmts = [`let ${acc} = ${terms[0]};`];
-        for (let i = 1; i < terms.length; i++) {
-          if (canExitEarly) stmts.push(`if (${acc} !== ${acc}) return NaN;`);
-          stmts.push(`${acc} ${op}= ${terms[i]};`);
-        }
-        return `(() => { ${hoisted}${stmts.join(' ')} return ${acc}; })()`;
+        return expression((exit) => {
+          const stmts = [
+            statements?.initialize(acc, terms[0], 'let') ??
+              `let ${acc} = ${terms[0]};`,
+          ];
+          for (let i = 1; i < terms.length; i++) {
+            if (canExitEarly)
+              stmts.push(`if (${acc} !== ${acc}) ${exit('NaN')}`);
+            stmts.push(
+              statements?.consume(
+                terms[i],
+                (value) => `${acc} ${op}= ${value};`
+              ) ?? `${acc} ${op}= ${terms[i]};`
+            );
+          }
+          return `${hoisted}${stmts.join(' ')} ${exit(acc)}`;
+        });
       }
 
       const temps = terms.map((_, i) => `_t${i}`);
-      const assignments = terms
-        .map((t, i) => `const ${temps[i]} = ${t}`)
-        .join('; ');
+      const assignments = (): string =>
+        terms.map((term, i) => initialize(temps[i], term)).join(' ');
 
       if (isSum) {
         const reSum = temps.map((t) => `${t}.re`).join(' + ');
         const imSum = temps.map((t) => `${t}.im`).join(' + ');
-        return `(() => { ${hoisted}${assignments}; return { re: ${reSum}, im: ${imSum} }; })()`;
+        return expression(
+          (exit) =>
+            `${hoisted}${assignments()} ${exit(`{ re: ${reSum}, im: ${imSum} }`)}`
+        );
       }
 
       let acc = temps[0];
-      const parts = [assignments];
+      const parts: string[] = [];
       for (let i = 1; i < temps.length; i++) {
         const prev = acc;
         acc = `_p${i}`;
         parts.push(
-          `const ${acc} = { re: ${prev}.re * ${temps[i]}.re - ${prev}.im * ${temps[i]}.im, im: ${prev}.re * ${temps[i]}.im + ${prev}.im * ${temps[i]}.re }`
+          `const ${acc} = { re: ${prev}.re * ${temps[i]}.re - ${prev}.im * ${temps[i]}.im, im: ${prev}.re * ${temps[i]}.im + ${prev}.im * ${temps[i]}.re };`
         );
       }
-      return `(() => { ${hoisted}${parts.join('; ')}; return ${acc}; })()`;
+      return expression(
+        (exit) => `${hoisted}${assignments()} ${parts.join(' ')} ${exit(acc)}`
+      );
     }
   }
 
@@ -10455,6 +10630,13 @@ function emitSumProduct(
     var: (id) => (id === index ? index : target.var(id)),
     boundVars: BaseCompiler.withBoundNames(target, [index]),
   };
+  if (BaseCompiler.isEmissionSkippable([body], indices, target)) {
+    // Inspect only a complete numeric spelling, optionally floored by
+    // compileBound; a numeric prefix of runtime code is not a constant.
+    const bound = (code: string): number =>
+      Math.floor(Number(code.replace(/^Math\.floor\(([^()]*)\)$/, '$1')));
+    recordIntegerRange(innerTarget, index, bound(lowerCode), bound(upperCode));
+  }
   const { bindings: hoistedBindings, result: bodyCode } =
     rest.length === 0
       ? BaseCompiler.hoistLoopInvariants(body, [index], target, () =>
@@ -10466,12 +10648,15 @@ function emitSumProduct(
   // evaluate the body's subexpressions either (an error they raise would be
   // new). `empty` is what the loop answers for an empty range — its identity,
   // in the arm's own shape. With no bindings the emission is unchanged.
-  const hoistPrelude = (empty: string): string =>
+  const hoistPrelude = (
+    empty: string,
+    exit: (value: string) => string
+  ): string =>
     hoistedBindings.length === 0
       ? ''
-      : `if (!(${index} <= _upper)) return ${empty}; ` +
+      : `if (!(${index} <= _upper)) ${exit(empty)} ` +
         hoistedBindings
-          .map(([name, code]) => `const ${name} = ${code}; `)
+          .map(([name, code]) => `${initialize(name, code)} `)
           .join('');
 
   const acc = BaseCompiler.tempVar(target);
@@ -10492,11 +10677,11 @@ function emitSumProduct(
   // unchanged.
   const budget = target.iterationBudget;
   const symbolicBound = lowerNum === undefined || upperNum === undefined;
-  const guardNaN = (nan: string): string => {
+  const guardNaN = (nan: string, exit: (value: string) => string): string => {
     if (budget !== undefined)
-      return `if (!(_upper - ${index} < ${budget})) return ${nan}; `;
+      return `if (!(_upper - ${index} < ${budget})) ${exit(nan)} `;
     if (symbolicBound)
-      return `if (!Number.isFinite(_upper) || !Number.isFinite(${index})) return ${nan}; `;
+      return `if (!Number.isFinite(_upper) || !Number.isFinite(${index})) ${exit(nan)} `;
     return '';
   };
 
@@ -10542,22 +10727,33 @@ function emitSumProduct(
     );
     const fold = `${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
     if (elementwiseExit)
-      return `(() => { let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}${hoistPrelude(identity)}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) return NaN; ${index}++; } return ${acc} === null ? ${identity} : ${acc}; })()`;
+      return expression(
+        (exit) =>
+          `let ${acc} = null; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${exit('NaN')} ${index}++; } ${exit(`${acc} === null ? ${identity} : ${acc}`)}`
+      );
     // The flag, not the accumulator, carries the verdict to the end: once the
     // fold has collapsed to a scalar NaN the following iteration broadcasts it
     // back over the next term's shape, so `${acc}` is an array again by the
     // time the loop finishes and cannot be re-tested for it.
     const latched = BaseCompiler.tempVar(target);
-    return `(() => { let ${acc} = null; let ${latched} = false; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}${hoistPrelude(identity)}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${fold} if (${acc} !== ${acc}) ${latched} = true; ${index}++; } return ${latched} ? NaN : (${acc} === null ? ${identity} : ${acc}); })()`;
+    return expression(
+      (exit) =>
+        `let ${acc} = null; let ${latched} = false; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${fold} if (${acc} !== ${acc}) ${latched} = true; ${index}++; } ${exit(`${latched} ? NaN : (${acc} === null ? ${identity} : ${acc})`)}`
+    );
   }
 
   if (bodyIsComplex) {
     const val = BaseCompiler.tempVar(target);
-    const guard = guardNaN('{ re: NaN, im: NaN }');
     if (isSum) {
-      return `(() => { let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}${hoistPrelude('{ re: 0, im: 0 }')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } return ${acc}; })()`;
+      return expression(
+        (exit) =>
+          `let ${acc} = { re: 0, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 0, im: 0 }', exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re + ${val}.re, im: ${acc}.im + ${val}.im }; ${index}++; } ${exit(acc)}`
+      );
     }
-    return `(() => { let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guard}${hoistPrelude('{ re: 1, im: 0 }')}while (${index} <= _upper) { const ${val} = ${bodyCode}; ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } return ${acc}; })()`;
+    return expression(
+      (exit) =>
+        `let ${acc} = { re: 1, im: 0 }; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('{ re: NaN, im: NaN }', exit)}${hoistPrelude('{ re: 1, im: 0 }', exit)}while (${index} <= _upper) { ${initialize(val, bodyCode)} ${acc} = { re: ${acc}.re * ${val}.re - ${acc}.im * ${val}.im, im: ${acc}.re * ${val}.im + ${acc}.im * ${val}.re }; ${index}++; } ${exit(acc)}`
+    );
   }
 
   // The scalar loop's NaN exit, the same one the unrolled statement form and
@@ -10580,11 +10776,14 @@ function emitSumProduct(
     ],
     [index, ...rest.map((c) => extractLimits(c).index)],
     target
-  )
-    ? `if (${acc} !== ${acc}) return NaN; `
-    : '';
+  );
 
-  return `(() => { let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN')}${hoistPrelude(identity)}while (${index} <= _upper) { ${acc} ${op}= ${bodyCode}; ${loopExit}${index}++; } return ${acc}; })()`;
+  return expression((exit) => {
+    const term =
+      statements?.consume(bodyCode, (value) => `${acc} ${op}= ${value};`) ??
+      `${acc} ${op}= ${bodyCode};`;
+    return `let ${acc} = ${identity}; let ${index} = ${lowerCode}; const _upper = ${upperCode}; ${guardNaN('NaN', exit)}${hoistPrelude(identity, exit)}while (${index} <= _upper) { ${term} ${loopExit ? `if (${acc} !== ${acc}) ${exit('NaN')} ` : ''}${index}++; } ${exit(acc)}`;
+  });
 }
 
 /**

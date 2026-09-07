@@ -448,13 +448,11 @@ describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
     tripleParity(at(['List', 'False', 'True', 'True']));
   });
 
-  test('the JS route still lowers through `_SYS.at` (unchanged)', () => {
-    // `constantFold: false`: these accesses are variable-free, so compile-time
-    // constant folding would emit their VALUE as a literal and the `_SYS.at`
-    // lowering this test pins would not appear in the code.
-    expect(compile(at(2), { constantFold: false })!.code).toMatch(/_SYS\.at\(/);
-    expect(
-      compile(at(['List', 1, 3]), { constantFold: false })!.code
-    ).toMatch(/_SYS\.at\(/);
+  test('the JS route specializes positive scalar indices and keeps the gather helper', () => {
+    // Disable folding to inspect the access instead of its constant result.
+    expect(compile(at(2), { constantFold: false })!.code).toContain('?? NaN');
+    expect(compile(at(['List', 1, 3]), { constantFold: false })!.code).toMatch(
+      /_SYS\.at\(/
+    );
   });
 });

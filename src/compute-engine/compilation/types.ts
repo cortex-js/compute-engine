@@ -1160,6 +1160,17 @@ export interface CompileTarget<Expr = unknown> {
      */
     names?: Map<string, string>;
     taken?: Set<string>;
+    /**
+     * Emitted definitions (by local name) whose right-hand side is built from
+     * the compiler's own lowerings only: no caller-supplied source (a
+     * `functions`/`operators` mapping, a caller compile handler) and no
+     * string-valued `vars` mapping, which splice LIVE source whose value may
+     * change between calls. Such a definition is the same on every call
+     * unless it reads a per-call binding, so a runner may evaluate it once
+     * per compiled artifact (see `splitPreambleDefs` in
+     * `javascript-target.ts`). Recorded by `BaseCompiler.ensureFoldedValueEmitted`.
+     */
+    hoistable?: Set<string>;
     /** Symbols proven (this compile) NOT to name a user-defined function, so a
      * repeated bare free symbol in value position doesn't re-hit
      * `lookupDefinition` on every occurrence. Populated lazily. */

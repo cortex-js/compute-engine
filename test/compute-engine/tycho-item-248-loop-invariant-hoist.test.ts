@@ -217,7 +217,7 @@ describe('Tycho item 248 — loop-form Sum', () => {
     ]);
     const { code, run } = js(expr);
     expect(code.indexOf('reduce(')).toBeGreaterThan(code.indexOf('while ('));
-    expect(code).toContain('if (!(j <= _upper)) return 0; const');
+    expect(code).toMatch(/if \(!\(j <= _upper\)\) \{ _js\d+ = 0; break _js\d+; \} const/);
     const [outer, inner] = whileBodies(code);
     expect(outer).toContain('reduce(');
     expect(inner).not.toContain('reduce(');
@@ -311,8 +311,8 @@ describe('Tycho item 248 — Comprehension', () => {
       ['Element', 'k', ['Range', 1, 3]],
     ]);
     const { code, run } = js(expr);
-    const push = code.slice(code.indexOf('result.push('));
-    expect(push).toContain('while (');
+    expect(code.indexOf('while (')).toBeGreaterThan(code.indexOf('for ('));
+    expect(code.indexOf('while (')).toBeLessThan(code.indexOf('result.push('));
     expect(run({ P })).toEqual([3, 4, 6]);
   });
 });

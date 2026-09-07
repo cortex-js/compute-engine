@@ -8,6 +8,14 @@ import type {
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import {
+  clearIntegerRanges,
+  recordIntegerRange,
+} from './javascript-value-facts.js';
+import {
+  javascriptStatements,
+  resetJavaScriptStatements,
+} from './javascript-statements.js';
+import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
@@ -1560,6 +1568,7 @@ export class BaseCompiler {
       if (expr !== undefined)
         for (const n of collectUsedNames(expr)) target.naming.usedNames.add(n);
     } else target.naming = BaseCompiler.newNamingContext(expr);
+    resetJavaScriptStatements(target);
     // (The shared antiderivative budget is NOT reset here: registered
     // targets compile through `compileCseRoot` without passing this entry,
     // so the reset lives at the depth-0 boundary of `compile` below, which
@@ -10180,6 +10189,7 @@ export class BaseCompiler {
 
     const body = args[0];
     const elements = args.slice(1);
+    const statements = javascriptStatements(target);
 
     const lang = target.language ?? '';
     if (lang === 'glsl' || lang === 'wgsl')
@@ -10214,8 +10224,13 @@ export class BaseCompiler {
         return BaseCompiler.compileElementLoops(
           elements,
           target,
-          (bodyTarget) =>
-            `result.push(${BaseCompiler.compileOp(node, 0, bodyTarget, 0, body)});`,
+          (bodyTarget) => {
+            const code = BaseCompiler.compileOp(node, 0, bodyTarget, 0, body);
+            return (
+              statements?.consume(code, (value) => `result.push(${value});`) ??
+              `result.push(${code});`
+            );
+          },
           prelude,
           binders
         );
@@ -10225,7 +10240,12 @@ export class BaseCompiler {
       bindings.length === 0
         ? ''
         : `let ${flag} = false; let ${bindings.map(([name]) => name).join(', ')}; `;
-    return `(() => { const result = []; ${declarations}${inner} return result; })()`;
+    return (
+      statements?.expression(
+        (exit) => `const result = []; ${declarations}${inner} ${exit('result')}`
+      ) ??
+      `(() => { const result = []; ${declarations}${inner} return result; })()`
+    );
   }
 
   /**
@@ -10484,10 +10504,45 @@ export class BaseCompiler {
       boundVars: BaseCompiler.withBoundNames(target, [...loopVarSet]),
     };
 
+    if (target.language === 'javascript') {
+      for (const binder of binders) {
+        const range = binder.clause.ops[1];
+        if (
+          binder.names.length !== 1 ||
+          binders.filter((b) => b.names.includes(binder.names[0])).length !==
+            1 ||
+          !isFunction(range, 'Range')
+        )
+          continue;
+        const [lo, hi, step] = range.ops;
+        if (
+          isNumber(lo) &&
+          lo.im === 0 &&
+          isNumber(hi) &&
+          hi.im === 0 &&
+          Number.isSafeInteger(hi.re - lo.re) &&
+          (step === undefined ||
+            (isNumber(step) && step.im === 0 && Number.isSafeInteger(step.re)))
+        )
+          recordIntegerRange(
+            bodyTarget,
+            binder.names[0],
+            Math.min(lo.re, hi.re),
+            Math.max(lo.re, hi.re)
+          );
+      }
+    }
+
     // Build nested for-of loops from innermost to outermost. Inner collections
     // are compiled with `bodyTarget` so that references to outer loop variables
     // are wrapped consistently.
-    let inner = prelude + makeInner(bodyTarget);
+    let inner: string;
+    try {
+      inner = prelude + makeInner(bodyTarget);
+    } finally {
+      // Source expressions run outside their own iteration binding.
+      clearIntegerRanges(bodyTarget);
+    }
     for (let i = narrowedElements.length - 1; i >= 0; i--) {
       const elem = narrowedElements[i];
       // A destructuring binder spells as an array pattern (`[a, , [b, c]]`,
@@ -15121,7 +15176,22 @@ export class BaseCompiler {
           ),
         true
       );
-      registry.defs.set(name, `const ${name} = ${code};`);
+      registry.defs.set(
+        name,
+        javascriptStatements(root)?.initialize(name, code) ??
+          `const ${name} = ${code};`
+      );
+      // A value emitted from the compiler's own lowerings only — no
+      // caller-supplied source, no string-valued `vars` mapping, both of
+      // which splice live source — is the same on every call unless it reads
+      // a per-call binding, and the runner may evaluate it once per artifact
+      // (`userFunctions.hoistable`). The admissibility walk is the one CSE
+      // uses to decide whether a subtree may be emitted once and read by
+      // name; `undefined` options (no compilation opened a session) fail
+      // closed.
+      const admission = BaseCompiler.cseAdmission(root, new Set());
+      if (admission !== undefined && isCseAdmissible(value, admission))
+        (registry.hoistable ??= new Set()).add(name);
     } finally {
       registry.compiling.delete(name);
     }
@@ -17446,9 +17516,12 @@ export class BaseCompiler {
             ),
           true
         );
+        const statements = javascriptStatements(bodyTarget);
         registry.defs.set(
           name,
-          `const ${name} = (${params.join(', ')}) => ${body};`
+          statements?.has(body)
+            ? `const ${name} = (${params.join(', ')}) => { ${statements.functionBody(body)} };`
+            : `const ${name} = (${params.join(', ')}) => ${body};`
         );
       } finally {
         registry.compiling.delete(name);
@@ -19347,6 +19420,7 @@ export class BaseCompiler {
    */
   static resetNaming(target: CompileTarget<Expression>): void {
     BaseCompiler.namingContext(target).counter = 0;
+    resetJavaScriptStatements(target);
   }
 
   /**

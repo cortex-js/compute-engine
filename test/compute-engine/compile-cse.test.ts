@@ -1047,8 +1047,8 @@ describe('COMPILE CSE — name collisions', () => {
 
     // `_cse1` is free here, so the CSE temp takes it; `_tv1` stays the param.
     expect(result.code).toBe(
-      '(_tv1) => (() => { const _cse1 = Math.sin(6 * _tv1); ' +
-        'return _cse1 + _cse1 + Math.pow(_cse1, 2); })()'
+      '(_tv1) => { { const _cse1 = Math.sin(6 * _tv1); ' +
+        'return _cse1 + _cse1 + Math.pow(_cse1, 2); } }'
     );
     expect((result.run as (x: number) => number)(0.3)).toBeCloseTo(
       compile(expr, { fallback: false, cse: false }).run!(0.3) as number,
@@ -1364,8 +1364,8 @@ describe('COMPILE CSE — user-function body dedup', () => {
     // ONE `Math.sin` in the whole artifact: the definition body deduplicated.
     expect(occurrences(result.code, 'Math.sin')).toBe(1);
     expect(result.code).toContain(
-      'const _fn_f = (x) => (() => { const _cse1 = Math.sin(6 * x); ' +
-        'return _cse1 + _cse1 + Math.pow(_cse1, 2); })()'
+      'const _fn_f = (x) => { { const _cse1 = Math.sin(6 * x); ' +
+        'return _cse1 + _cse1 + Math.pow(_cse1, 2); } }'
     );
     // …and the two call sites are still two calls: `f(t)` and `f(2t)` are
     // different expressions, so there is nothing to merge.

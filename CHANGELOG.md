@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **JavaScript compilation removes unnecessary IIFEs at statement positions.**
+  Runners, lambdas, user functions, and assigned-value initializers can emit
+  temporary bindings, sums, products, and comprehensions as ordinary statements.
+  Nested computations use local blocks for early exits, preserving conditional
+  execution, evaluation order, and variable scope. Standalone expression output
+  retains an outer wrapper when needed; arbitrary caller source is never rewritten.
+
+- **JavaScript array access uses proven index ranges.** Numeric literal lists,
+  including assigned lists, use `array[index - 1] ?? NaN` when the compiler
+  proves a positive integer index from literals, loop bounds, or bounded
+  arithmetic on loop counters. Negative indices, gathers, masks, and caller
+  arrays retain their existing checks; out-of-range reads still return `NaN`.
+
 - **`javascript` target: a list pipeline runs an order of magnitude faster.**
   A Game of Life step over a 40 000-cell board read by reference
   (`Which(n = 3, 1, n = 2, S, True, 0)` with `n` the sum of eight
@@ -36,6 +49,21 @@
     nested array. `_SYS.eq` has a flat numeric path, and `_SYS.select` applies
     a lifted scalar selector without reading cells.
   - **A list result is normalized without a function call per element.**
+
+- **`javascript` target: a baked symbol value is built once per compiled
+  artifact, not once per call.** A symbol whose assigned value is folded into
+  the artifact is emitted as a preamble local (`const _val_S = …;`), and that
+  preamble ran inside the compiled function on every `run()` call. A plot that
+  sampled `S[150·⌊y⌋ + ⌊x⌋ + 1]` per pixel, with `S` a 22 500-element
+  comprehension, rebuilt the whole board on every sample (about 1.2 million
+  iterations per pixel). The runner now evaluates once, when it is built, every
+  definition that is built from the compiler's own lowerings (no
+  caller-supplied `functions`/`operators` source, no string-valued `vars`
+  mapping) and reads no per-call binding — no free symbol from the vars
+  object, no lambda parameter. Every other definition, and the caller's own
+  `preamble`, keeps running on every call. On that plot one sample went from
+  about 180 ms to 1.5 µs. The `code` and `preamble` strings of the result are
+  unchanged, and a complex cell of a result is a fresh object on every call.
 
 ### Resolved Issues
 
