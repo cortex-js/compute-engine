@@ -239,14 +239,15 @@ describe('finite Sum/Product still compiles and runs', () => {
 
 describe('a SYMBOLIC bound is guarded at run time, not at compile time', () => {
   // Compiling cannot decide whether `n` is finite, so the emitted loop checks
-  // both bounds ONCE at entry (never per iteration) and answers NaN. It rejects
-  // no finite range however large — no trip-count policy is imposed.
+  // each dynamic bound ONCE at entry (never per iteration) and answers NaN if
+  // non-finite. Known finite bounds need no check. It rejects no finite range
+  // however large — no trip-count policy is imposed.
   const symbolicUpper = () => compile(ce.parse('\\sum_{i=1}^{n} i'));
   const symbolicLower = () => compile(ce.parse('\\sum_{i=m}^{10} i'));
 
   it('emits the entry guard for a symbolic bound', () => {
     expect(symbolicUpper().code).toMatch(
-      /if \(!Number\.isFinite\(_upper\) \|\| !Number\.isFinite\(i\)\) return NaN;/
+      /if \(!Number\.isFinite\(_upper\)\) return NaN;/
     );
   });
 

@@ -4717,6 +4717,9 @@ export class BaseCompiler {
    * The compile-time integer value of a `Sum`/`Product` bound, or `undefined`
    * when the bound is not a compile-time constant and must instead be emitted
    * as code and evaluated at run time.
+   * With a JavaScript emission target, also reuse eligible constant folds.
+   * Newly folded bounds must floor to safe integers so a counter can advance.
+   * Analysis callers without a target only inspect the expression's value.
    *
    * A bound that mentions a compile-bound name has NO compile-time value, and
    * reading one anyway is not a harmless miss: with the library's single-letter
@@ -4733,14 +4736,40 @@ export class BaseCompiler {
    * which compiles the bound expression in a target that maps the bound name to
    * its emitted local.
    */
-  static bigOpBoundConstant(expr: Expression | undefined): number | undefined {
+  static bigOpBoundConstant(
+    expr: Expression | undefined,
+    target?: CompileTarget<Expression>
+  ): number | undefined {
     if (expr === undefined) return undefined;
     if (BaseCompiler.mentionsCompileBoundName(expr)) return undefined;
+    if (
+      target?.boundVars !== undefined &&
+      BaseCompiler.mentionsExcludedName(expr, target.boundVars, undefined)
+    )
+      return undefined;
     // A nonzero imaginary part leaves no iteration count; folding on the real
     // part alone would silently discard it (`Σ_{n=1}^{i}` → the empty range).
     const im = expr.im;
     if (!isNaN(im) && im !== 0) return undefined;
-    const re = expr.re;
+    let re = expr.re;
+    // Bound emission must use the same folded value as ordinary expression
+    // emission. Otherwise Length(P) can become 53 only after the loop has
+    // already been classified as symbolic, leaving a floor and finite checks.
+    if (
+      isNaN(re) &&
+      target?.language === 'javascript' &&
+      target.constantFold !== false
+    ) {
+      const value = BaseCompiler.constantFoldValue(expr, target)?.value;
+      if (
+        value !== undefined &&
+        isNumber(value) &&
+        value.im === 0 &&
+        !BaseCompiler.isComplexValued(expr) &&
+        Number.isSafeInteger(Math.floor(value.re))
+      )
+        re = value.re;
+    }
     if (isNaN(re) || !Number.isFinite(re)) return undefined;
     return Math.floor(re);
   }

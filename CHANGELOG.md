@@ -2,6 +2,11 @@
 
 ### Improvements
 
+- **JavaScript loop bounds reuse constant-folding results.** Sums and products
+  recognize folded bounds such as the length of an assigned list before choosing
+  a loop or unrolled code. Known finite bounds omit redundant `Math.floor()` and
+  finiteness checks, while dynamic bounds retain their runtime guards.
+
 - **JavaScript compilation removes unnecessary IIFEs at statement positions.**
   Runners, lambdas, user functions, and assigned-value initializers can emit
   temporary bindings, sums, products, and comprehensions as ordinary statements.

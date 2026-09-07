@@ -9086,14 +9086,12 @@ const UNROLL_STATEMENT_MIN_TERMS = 4;
 /**
  * Extract index, lower, and upper from a Limits expression.
  * Returns the raw Expression nodes so they can be compiled (not just evaluated
- * to numbers). Also provides numeric values when bounds are constant.
+ * to numbers).
  */
 function extractLimits(limitsExpr: Expression): {
   index: string;
   lowerExpr: Expression;
   upperExpr: Expression;
-  lowerNum: number | undefined;
-  upperNum: number | undefined;
 } {
   console.assert(limitsExpr.operator === 'Limits');
   const fn = limitsExpr as Expression & {
@@ -9104,17 +9102,10 @@ function extractLimits(limitsExpr: Expression): {
   const index = isSymbol(fn.op1) ? fn.op1.symbol : '_';
   const lowerExpr = fn.op2;
   const upperExpr = fn.op3;
-  // A bound mentioning a compile-bound name (a user function's parameter, an
-  // enclosing binder's index) is NOT a compile-time constant — see
-  // `BaseCompiler.bigOpBoundConstant`, which fails that read closed so the
-  // loop arm below emits the bound as code instead of folding against the
-  // shadowed engine symbol's value.
   return {
     index,
     lowerExpr,
     upperExpr,
-    lowerNum: BaseCompiler.bigOpBoundConstant(lowerExpr),
-    upperNum: BaseCompiler.bigOpBoundConstant(upperExpr),
   };
 }
 
@@ -10441,9 +10432,9 @@ function emitSumProduct(
   const elementwiseBody = isElementwiseBigOpBody(body, indices);
   if (!elementwiseBody) BaseCompiler.assertScalarBigOpBody(kind, body);
 
-  const { index, lowerExpr, upperExpr, lowerNum, upperNum } = extractLimits(
-    clauses[0]
-  );
+  const { index, lowerExpr, upperExpr } = extractLimits(clauses[0]);
+  const lowerNum = BaseCompiler.bigOpBoundConstant(lowerExpr, target);
+  const upperNum = BaseCompiler.bigOpBoundConstant(upperExpr, target);
 
   // Before ANY lowering decision: a statically non-finite bound fails closed.
   // This precedes the unroll path too — `lowerNum`/`upperNum` are `undefined`
@@ -10478,15 +10469,18 @@ function emitSumProduct(
       : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body);
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
+  const budget = target.iterationBudget;
+  const withinBudget =
+    budget === undefined || (bothConstant && upperNum - lowerNum < budget);
 
   // Empty range (only knowable when both bounds are constant)
-  if (bothConstant && lowerNum > upperNum) return identity;
+  if (bothConstant && withinBudget && lowerNum > upperNum) return identity;
 
   // Unroll when both bounds are constant and range is small. The element-wise
   // arm never unrolls: joining array terms with the bare scalar operator
   // would string-concatenate them — it always takes the `_SYS.bcast` fold
   // loop below.
-  if (bothConstant && !elementwiseBody) {
+  if (bothConstant && withinBudget && !elementwiseBody) {
     const termCount = upperNum - lowerNum + 1;
     if (termCount <= UNROLL_LIMIT) {
       const emitTerms = (): string[] => {
@@ -10675,14 +10669,14 @@ function emitSumProduct(
   // imposes no trip-count policy. Constant bounds are statically finite by
   // `assertFiniteBound` above and emit no guard at all: their code is
   // unchanged.
-  const budget = target.iterationBudget;
-  const symbolicBound = lowerNum === undefined || upperNum === undefined;
   const guardNaN = (nan: string, exit: (value: string) => string): string => {
     if (budget !== undefined)
       return `if (!(_upper - ${index} < ${budget})) ${exit(nan)} `;
-    if (symbolicBound)
-      return `if (!Number.isFinite(_upper) || !Number.isFinite(${index})) ${exit(nan)} `;
-    return '';
+    const checks = [
+      ...(upperNum === undefined ? ['!Number.isFinite(_upper)'] : []),
+      ...(lowerNum === undefined ? [`!Number.isFinite(${index})`] : []),
+    ];
+    return checks.length > 0 ? `if (${checks.join(' || ')}) ${exit(nan)} ` : '';
   };
 
   if (elementwiseBody) {
