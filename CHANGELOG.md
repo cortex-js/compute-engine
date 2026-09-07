@@ -37,6 +37,16 @@
     a lifted scalar selector without reading cells.
   - **A list result is normalized without a function call per element.**
 
+### Resolved Issues
+
+- **`simplify()` treats a base-`e` logarithm as the natural logarithm.**
+  `\log_e(x)` now simplifies to `\ln(x)`, and a `Log(x, ExponentialE)`
+  term is combined with `Ln` terms in a sum, so `\ln(x) + \log_e(y)` gives
+  `\ln(xy)` and `\log_e(x^3) - 3\ln(x)` gives `0`. Before, the two
+  spellings were kept apart: the sum stayed as written and the difference
+  did not cancel. Canonicalization is unchanged: `\log_e(x)` still boxes to
+  `["Log", "x", "ExponentialE"]`. Contributed by @yelliver (#332).
+
 ## 0.125.0 _2026-09-06_
 
 ### New Features
