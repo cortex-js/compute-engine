@@ -15,7 +15,7 @@ import { collectBinderNames } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
 
-import { checkDeadline } from '../../common/interruptible.js';
+import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   EXTENDED_REAL_TYPE,
@@ -2138,9 +2138,13 @@ export function assignLoopIndex(
  */
 function* reduceCollectionOrDecline<T>(
   collection: Expression,
-  fn: (acc: T, x: Expression) => T | null,
+  fn: (acc: T, x: Expression) => T | null | PromiseLike<T | null>,
   initial: T
-): Generator<T | undefined, T | typeof NON_ENUMERABLE_DOMAIN | undefined> {
+): Generator<
+  T | undefined | PromiseLike<T | null>,
+  T | typeof NON_ENUMERABLE_DOMAIN | undefined,
+  T | null
+> {
   let walked = 0;
   const result = yield* reduceCollection(
     collection,
@@ -2163,6 +2167,22 @@ function* reduceCollectionOrDecline<T>(
 export type BigOpIndexBindings = ReadonlyArray<
   readonly [index: string, value: Expression | number]
 >;
+
+/**
+ * The per-term callback of a big-operator fold (`reduceBigOp`). It receives
+ * the accumulator, the (unevaluated) body and the index bindings in force,
+ * and answers the next accumulator, `null` to stop the fold, or a PROMISE of
+ * either: an asynchronous callback (one that awaits `evaluateBigOpTermAsync`)
+ * is yielded by the generator to the `runAsync` driver, which awaits it and
+ * hands the settled value back, so the term is evaluated while its index
+ * assignment is still in force. The synchronous `run` driver never receives
+ * a promise, because a synchronous callback never returns one.
+ */
+export type BigOpTermCallback<T> = (
+  acc: T,
+  x: Expression,
+  bindings?: BigOpIndexBindings
+) => T | null | PromiseLike<T | null>;
 
 /**
  * The per-term step of an indexed big operator (`Sum`/`Product` over `Limits`
@@ -2220,29 +2240,72 @@ export function evaluateBigOpTerm(
   if (bindings === undefined || bindings.length === 0) return term;
   const leaked = bindings.filter(([name]) => term.has(name));
   if (leaked.length === 0) return term;
-  const ce = body.engine;
+  const repaired = substituteIndexBindings(term, leaked);
+  if (repaired === undefined) return undefined;
+  return repaired === term ? term : repaired.evaluate({ numericApproximation });
+}
+
+/**
+ * The asynchronous twin of `evaluateBigOpTerm`: the body is awaited with
+ * `evaluateAsync`, so an ASYNCHRONOUS-ONLY application in it (an operator
+ * with only an `evaluateAsync` handler) is evaluated, where `evaluate()`
+ * keeps it as it is. Same leak repair, same capture-unsafe decline
+ * (`undefined`). It is called from the per-term callback of a
+ * `reduceBigOp` fold driven by `runAsync`, while the loop's index
+ * assignment is in force — the generator yields the promise to the driver
+ * and receives the value back.
+ */
+export async function evaluateBigOpTermAsync(
+  body: Expression,
+  bindings: BigOpIndexBindings | undefined,
+  numericApproximation: boolean | undefined,
+  signal?: AbortSignal
+): Promise<Expression | undefined> {
+  const term = await body.evaluateAsync({ numericApproximation, signal });
+  if (bindings === undefined || bindings.length === 0) return term;
+  const leaked = bindings.filter(([name]) => term.has(name));
+  if (leaked.length === 0) return term;
+  const repaired = substituteIndexBindings(term, leaked);
+  if (repaired === undefined) return undefined;
+  return repaired === term
+    ? term
+    : repaired.evaluateAsync({ numericApproximation, signal });
+}
+
+/**
+ * Replace every FREE occurrence of the index names in `bindings` by the
+ * bound value — the substitution step of `evaluateBigOpTerm`, on its own.
+ * Returns the expression itself when nothing was replaced, and `undefined`
+ * when the substitution is not capture-safe: a replacement VALUE whose own
+ * free symbols collide with a binder inside `expr` (see the capture guard in
+ * the doc comment of `evaluateBigOpTerm`).
+ */
+function substituteIndexBindings(
+  expr: Expression,
+  bindings: BigOpIndexBindings
+): Expression | undefined {
+  const ce = expr.engine;
   const subs: Record<string, Expression> = {};
   let anyExpressionValue = false;
-  for (const [name, value] of leaked) {
+  for (const [name, value] of bindings) {
     if (typeof value === 'number') subs[name] = ce.number(value);
     else {
       subs[name] = value;
       anyExpressionValue = true;
     }
   }
-  // Capture guard (see the doc comment): a replacement value's free symbols
-  // must not collide with any binder inside the term. Only expression-valued
-  // bindings can trip this, so the binder collection is skipped entirely for
-  // the numeric (`Limits`) case.
+  // Capture guard (see `evaluateBigOpTerm`): a replacement value's free
+  // symbols must not collide with any binder inside the expression. Only
+  // expression-valued bindings can trip this, so the binder collection is
+  // skipped entirely for the numeric (`Limits`) case.
   if (anyExpressionValue) {
-    const binders = collectBinderNames(term);
+    const binders = collectBinderNames(expr);
     if (binders.size > 0)
       for (const name of Object.keys(subs))
         for (const sym of subs[name].symbols)
           if (binders.has(sym)) return undefined;
   }
-  const repaired = substituteFreeNames(term, subs);
-  return repaired === term ? term : repaired.evaluate({ numericApproximation });
+  return substituteFreeNames(expr, subs);
 }
 
 /**
@@ -2288,10 +2351,16 @@ function substituteFreeNames(
 export function* reduceBigOp<T>(
   body: Expression,
   indexes: ReadonlyArray<Expression>,
-  fn: (acc: T, x: Expression, bindings?: BigOpIndexBindings) => T | null,
+  fn: BigOpTermCallback<T>,
   initial: T
 ): Generator<
-  T | typeof NON_ENUMERABLE_DOMAIN | typeof NON_ENUMERABLE_BOUNDS | undefined
+  | T
+  | typeof NON_ENUMERABLE_DOMAIN
+  | typeof NON_ENUMERABLE_BOUNDS
+  | undefined
+  | PromiseLike<T | null>,
+  any,
+  T | null
 > {
   // If the body is a collection AND there is no indexing set, reduce it
   // i.e. Sum({1, 2, 3}) = 6.
@@ -2369,7 +2438,9 @@ export function* reduceBigOp<T>(
       unionMayHoldACollection(value.type.type)
     )
       return NON_ENUMERABLE_DOMAIN;
-    return fn(initial, value) ?? undefined;
+    let folded = fn(initial, value);
+    if (isThenable(folded)) folded = yield folded;
+    return folded ?? undefined;
   }
 
   const ce = body.engine;
@@ -2389,10 +2460,14 @@ export function* reduceBigOp<T>(
     // them, so nothing was ever yielded, a single `gen.next()` ran the whole
     // (possibly 10⁴-term) reduction to completion, and an infinite or
     // expensive domain would hang past the timeout instead of being cancelled.
+    // The value the driver hands back for a re-yielded promise (the settled
+    // value of an asynchronous callback) is forwarded to the inner
+    // generator, which is waiting for it; for any other yield it is
+    // `undefined`, as before.
     let iterResult = gen.next();
     while (!iterResult.done) {
-      yield iterResult.value;
-      iterResult = gen.next();
+      const sent = yield iterResult.value;
+      iterResult = gen.next(sent);
     }
 
     // The final return value is in iterResult.value when done is true
@@ -2459,7 +2534,9 @@ export function* reduceBigOp<T>(
         bindings.push([x.index, element[i]]);
       }
     });
-    result = fn(result, body, bindings) ?? undefined;
+    let next = fn(result, body, bindings);
+    if (isThenable(next)) next = yield next;
+    result = next ?? undefined;
     yield result;
     if (result === undefined) break;
   }
@@ -2488,14 +2565,20 @@ export type ReduceElementResult<T> =
 function* reduceElementIndexingSets<T>(
   body: Expression,
   indexes: ReadonlyArray<Expression>,
-  fn: (acc: T, x: Expression, bindings?: BigOpIndexBindings) => T | null,
+  fn: BigOpTermCallback<T>,
   initial: T,
   returnReason = false
-  // Yields only accumulator values (`T | undefined`) between iterations; the
-  // detailed `ReduceElementResult` classification is delivered as the *return*
-  // value. Splitting yield/return types lets `reduceBigOp` re-yield each
-  // accumulator (for deadline checks) without widening its own yield type.
-): Generator<T | undefined, T | ReduceElementResult<T> | undefined> {
+  // Yields only accumulator values (`T | undefined`) between iterations —
+  // and the promise of an asynchronous callback, for the driver to await;
+  // the detailed `ReduceElementResult` classification is delivered as the
+  // *return* value. Splitting yield/return types lets `reduceBigOp` re-yield
+  // each accumulator (for deadline checks) without widening its own yield
+  // type.
+): Generator<
+  T | undefined | PromiseLike<T | null>,
+  T | ReduceElementResult<T> | undefined,
+  T | null
+> {
   const ce = body.engine;
 
   // Separate Element and Limits indexing sets
@@ -2593,8 +2676,11 @@ function* reduceElementIndexingSets<T>(
       bindings.push([elementDomains[i].variable, value]);
     }
 
-    // Evaluate and accumulate
-    result = fn(result, body, bindings) ?? undefined;
+    // Evaluate and accumulate. An asynchronous callback's promise is
+    // yielded to the driver, which awaits it and hands the value back.
+    let next = fn(result, body, bindings);
+    if (isThenable(next)) next = yield next;
+    result = next ?? undefined;
     yield result;
     if (result === undefined) break;
 

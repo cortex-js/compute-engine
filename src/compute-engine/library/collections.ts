@@ -1,5 +1,11 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  isThenable,
+  CancellationError,
+  checkDeadline,
+  run,
+} from '../../common/interruptible.js';
+import {
   checkArity,
   checkType,
   checkTypes,
@@ -102,11 +108,6 @@ import { contextualSlotSignature } from '../boxed-expression/generic-instantiati
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
-import {
-  CancellationError,
-  checkDeadline,
-  run,
-} from '../../common/interruptible.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
@@ -12537,12 +12538,16 @@ export function enumerationDeclinedAfterWalk(
  */
 export function* reduceCollection<T>(
   collection: Expression,
-  fn: (acc: T, next: Expression) => T | null,
+  fn: (acc: T, next: Expression) => T | null | PromiseLike<T | null>,
   initial: T
-): Generator<T | undefined> {
+): Generator<T | undefined | PromiseLike<T | null>, T | undefined, T | null> {
   let acc = initial;
   for (const x of collection.each()) {
-    const result = fn(acc, x);
+    // An asynchronous callback answers a promise: it is yielded to the
+    // driver (`runAsync`, `common/interruptible.ts`), which awaits it and
+    // hands the settled value back. A synchronous callback never does.
+    let result = fn(acc, x);
+    if (isThenable(result)) result = yield result;
     if (result === null) return undefined;
     yield acc;
     acc = result;

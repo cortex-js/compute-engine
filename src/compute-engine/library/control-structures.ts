@@ -1,6 +1,7 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   evaluateStatements,
+  evaluateStatementsAsync,
   resolveEscapingLambda,
 } from '../function-utils.js';
 import { checkConditions } from '../boxed-expression/rules.js';
@@ -110,6 +111,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       canonical: canonicalBlock,
       evaluate: evaluateBlock,
+      evaluateAsync: evaluateBlockAsync,
     },
 
     // A condition expression tests for one or more conditions of an expression.
@@ -1657,6 +1659,28 @@ function evaluateWhich(
   return options.engine.Missing;
 }
 
+/**
+ * Remove the canonicalization-time bookkeeping from the block scope that is
+ * the current lexical scope — see the comment in `evaluateBlock`, which is
+ * the reason this sweep exists. Shared by the synchronous and asynchronous
+ * block evaluators.
+ */
+function sweepCanonicalizationBindings(ce: ComputeEngine): void {
+  const scope = ce.context.lexicalScope;
+  for (const [name, def] of [...scope.bindings]) {
+    if (
+      'value' in def &&
+      def.value.value === undefined &&
+      (def as { _declaredByStatement?: boolean })._declaredByStatement !== true
+    ) {
+      // Checkpoint journal (funnel 4): the block-exit sweep removes bindings
+      // by direct map surgery.
+      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
+      scope.bindings.delete(name);
+    }
+  }
+}
+
 /** Evaluate a Block expression. */
 function evaluateBlock(
   ops: ReadonlyArray<Expression>,
@@ -1687,19 +1711,7 @@ function evaluateBlock(
   // shape surfaced it.) Locals from a previous evaluation of this block carry
   // the marker and are still kept — reset by `Declare`'s statement-redeclare
   // path, not here.
-  const scope = ce.context.lexicalScope;
-  for (const [name, def] of [...scope.bindings]) {
-    if (
-      'value' in def &&
-      def.value.value === undefined &&
-      (def as { _declaredByStatement?: boolean })._declaredByStatement !== true
-    ) {
-      // Checkpoint journal (funnel 4): the block-exit sweep removes bindings
-      // by direct map surgery.
-      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
-      scope.bindings.delete(name);
-    }
-  }
+  sweepCanonicalizationBindings(ce);
 
   // If the block's final value is a bare symbol bound to a user-defined
   // function literal (`helper(x) = …` → a block-local operator definition),
@@ -1707,6 +1719,25 @@ function evaluateBlock(
   // block as a first-class value. Resolved here, while the block scope (which
   // holds the operator definition) is still the current lexical scope.
   return resolveEscapingLambda(ce, evaluateStatements(ce, ops));
+}
+
+/**
+ * The asynchronous twin of `evaluateBlock`: the same scope sweep, then the
+ * statements awaited in order (`evaluateStatementsAsync`), so a statement
+ * holding an asynchronous-only application is evaluated instead of staying
+ * inert in the block's value.
+ */
+async function evaluateBlockAsync(
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> & { engine: ComputeEngine }
+): Promise<Expression> {
+  const ce = options.engine;
+  if (ops.length === 0) return ce.Nothing;
+  sweepCanonicalizationBindings(ce);
+  return resolveEscapingLambda(
+    ce,
+    await evaluateStatementsAsync(ce, ops, options.signal)
+  );
 }
 
 /**

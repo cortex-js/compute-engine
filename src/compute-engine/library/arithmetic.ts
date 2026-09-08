@@ -13,6 +13,7 @@ import {
   evidenceAdmissionOf,
   heldNonNumericScalar,
 } from '../boxed-expression/value-membership.js';
+import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
@@ -101,6 +102,7 @@ import {
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
   evaluateBigOpTerm,
+  evaluateBigOpTermAsync,
   canonicalBigop,
   reduceBigOp,
   NON_ENUMERABLE_DOMAIN,
@@ -6424,6 +6426,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const ce = options.engine;
         const numeric = options.numericApproximation;
         const bounds = ops.slice(1);
+        // A body holding an asynchronous-only application is evaluated per
+        // term with `evaluateBigOpTermAsync`, whose promise the fold yields
+        // to `runAsync`; the synchronous term evaluation cannot run such a
+        // handler and would keep the application unevaluated in every term.
+        // The degenerate one-term case awaits its term the same way; the
+        // closed forms and the accelerated infinite product evaluate terms
+        // synchronously, so for such a body they are declined.
+        const asyncTerms = hasAsyncOnlyApplication(ops[0]);
         {
           const mode = classifyBigopDomain(ops[0], bounds, ce);
           if (mode === 'symbolic') {
@@ -6433,11 +6443,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               // A capture-unsafe decline must NOT fall through: the closed
               // forms substitute the same way, without a capture guard.
               if (term === DEGENERATE_CAPTURE_UNSAFE) return undefined;
-              if (term !== undefined) return term;
+              if (term !== undefined)
+                return asyncTerms
+                  ? term.evaluateAsync({
+                      numericApproximation: numeric,
+                      signal: options.signal,
+                    })
+                  : term;
+              if (asyncTerms) return undefined;
               return symbolicProductClosedForm(ops[0], bounds[0], ce);
             }
             return undefined;
           }
+          if (mode === 'numeric' && asyncTerms) return undefined;
           if (mode === 'numeric' && !numeric) {
             if (bounds.length === 1)
               return infiniteProductClosedForm(ops[0], bounds[0], ce);
@@ -6455,18 +6473,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        const accumulate = (
+          acc: Expression,
+          xe: Expression | undefined
+        ): Expression | null => {
+          if (xe === undefined) {
+            captureUnsafe = true;
+            return null;
+          }
+          return productAccumulate(acc, xe, numeric);
+        };
         const result = await runAsync(
           reduceBigOp(
             ops[0],
             bounds,
-            (acc: Expression, x, bindings) => {
-              const xe = evaluateBigOpTerm(x, bindings, numeric);
-              if (xe === undefined) {
-                captureUnsafe = true;
-                return null;
-              }
-              return productAccumulate(acc, xe, numeric);
-            },
+            (acc: Expression, x, bindings) =>
+              asyncTerms
+                ? evaluateBigOpTermAsync(
+                    x,
+                    bindings,
+                    numeric,
+                    options.signal
+                  ).then((xe) => accumulate(acc, xe))
+                : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
             ce.One
           ),
           ce._timeRemaining,
@@ -6621,8 +6650,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         [first, ...rest],
         { engine, signal, numericApproximation }
       ) => {
-        // Arity-1 collection-reducer form: Sum(L).
+        // Arity-1 collection-reducer form: Sum(L). A literal collection
+        // whose elements hold an asynchronous-only application is evaluated
+        // first, which awaits them (`List` evaluates its elements); the
+        // synchronous per-element evaluation below cannot.
         if (rest.length === 0 && first?.isCollection) {
+          if (hasAsyncOnlyApplication(first))
+            first = await first.evaluateAsync({ numericApproximation, signal });
           if (first.isFiniteCollection !== true) return undefined;
           // Decline read off the fold's own walk — see the sync handler.
           let walked = 0;
@@ -6644,6 +6678,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         const numeric = numericApproximation;
+        // Per-term asynchronous evaluation for a body holding an
+        // asynchronous-only application — see the `Product` handler.
+        const asyncTerms = hasAsyncOnlyApplication(first);
         {
           const mode = classifyBigopDomain(first, rest, engine);
           if (mode === 'symbolic') {
@@ -6653,11 +6690,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               // A capture-unsafe decline must NOT fall through: the closed
               // forms substitute the same way, without a capture guard.
               if (term === DEGENERATE_CAPTURE_UNSAFE) return undefined;
-              if (term !== undefined) return term;
+              if (term !== undefined)
+                return asyncTerms
+                  ? term.evaluateAsync({
+                      numericApproximation: numeric,
+                      signal,
+                    })
+                  : term;
+              if (asyncTerms) return undefined;
               return symbolicSumClosedForm(first, rest[0], engine);
             }
             return undefined;
           }
+          if (mode === 'numeric' && asyncTerms) return undefined;
           if (mode === 'numeric' && !numeric) {
             if (rest.length === 1)
               return infiniteSumClosedForm(first, rest[0], engine);
@@ -6675,18 +6720,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
+        const accumulate = (
+          acc: Expression,
+          term: Expression | undefined
+        ): Expression | null => {
+          if (term === undefined) {
+            captureUnsafe = true;
+            return null;
+          }
+          return sumAccumulate(acc, term, numeric);
+        };
         const result = await runAsync(
           reduceBigOp(
             first,
             rest,
-            (acc: Expression, x, bindings) => {
-              const term = evaluateBigOpTerm(x, bindings, numeric);
-              if (term === undefined) {
-                captureUnsafe = true;
-                return null;
-              }
-              return sumAccumulate(acc, term, numeric);
-            },
+            (acc: Expression, x, bindings) =>
+              asyncTerms
+                ? evaluateBigOpTermAsync(x, bindings, numeric, signal).then(
+                    (term) => accumulate(acc, term)
+                  )
+                : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
             engine.Zero
           ),
           engine._timeRemaining,

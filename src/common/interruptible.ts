@@ -209,13 +209,17 @@ export function withAmbientDeadline<T>(
  * @throws CancellationError if the operation is canceled or times out.
  */
 export async function runAsync<T>(
-  gen: Generator<T>,
+  gen: Generator<T, any, any>,
   timeLimitMs: number,
   signal?: AbortSignal,
   attribution?: DeadlineFrame | { owner?: string; spans?: string[] }
-): Promise<T> {
+): Promise<Exclude<T, PromiseLike<unknown>>> {
   // eslint-disable-next-line no-restricted-globals
   const startTime = performance.now();
+
+  // The value handed back to the generator by the next `gen.next(...)`: the
+  // settled value of a thenable it yielded (see below), `undefined` otherwise.
+  let sent: unknown = undefined;
 
   while (true) {
     // eslint-disable-next-line no-restricted-globals
@@ -225,9 +229,18 @@ export async function runAsync<T>(
     // Process a chunk of iterations
     // eslint-disable-next-line no-restricted-globals
     while (performance.now() - chunkStart < chunkDurationMs) {
-      const { done, value } = gen.next();
+      const { done, value } = gen.next(sent);
+      sent = undefined;
 
       if (done) return value; // Exit successfully
+
+      // A generator that must AWAIT in the middle of its work — a fold whose
+      // per-term callback is asynchronous — yields the promise and receives
+      // its settled value from the next `gen.next(...)`; the synchronous
+      // `run` driver never sees one, because a synchronous callback never
+      // returns a promise. The abort signal and the time limit are checked
+      // after the await as after any other step.
+      if (isThenable(value)) sent = await value;
 
       // Check for abort signal within the chunk
       if (signal?.aborted)
@@ -250,11 +263,25 @@ export async function runAsync<T>(
   }
 }
 
+// Both drivers answer the generator's yield type minus any thenable: the
+// asynchronous driver consumes a yielded thenable (awaits it and hands the
+// settled value back to the generator), and a generator run by the
+// synchronous driver never yields one, so a thenable is never the value.
+
+/** Whether `x` is a thenable — a promise, or an object with a `then` method. */
+export function isThenable(x: unknown): x is PromiseLike<unknown> {
+  return (
+    x !== null &&
+    (typeof x === 'object' || typeof x === 'function') &&
+    typeof (x as { then?: unknown }).then === 'function'
+  );
+}
+
 export function run<T>(
-  gen: Generator<T>,
+  gen: Generator<T, any, any>,
   timeLimitMs: number,
   attribution?: DeadlineFrame | { owner?: string; spans?: string[] }
-): T {
+): Exclude<T, PromiseLike<unknown>> {
   const startTime = Date.now();
 
   while (true) {

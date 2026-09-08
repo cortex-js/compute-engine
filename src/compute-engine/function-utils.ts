@@ -1793,6 +1793,38 @@ export function evaluateStatements(
 }
 
 /**
+ * The asynchronous twin of `evaluateStatements`: each statement is awaited
+ * with `evaluateAsync`, so a statement holding an asynchronous-only
+ * application (an operator with only an `evaluateAsync` handler) is
+ * evaluated instead of staying inert. Same debugger hooks, same
+ * short-circuit on a control-flow or `Error` value. Only the abort signal is
+ * forwarded to a statement: the synchronous twin evaluates each statement
+ * with a bare `evaluate()`, so a numeric-approximation request must not
+ * reach the statements on one route and not the other.
+ */
+export async function evaluateStatementsAsync(
+  ce: ComputeEngine,
+  ops: Iterable<Expression>,
+  signal?: AbortSignal
+): Promise<Expression> {
+  let result: Expression = ce.Nothing;
+  for (const op of ops) {
+    if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
+      debugStatementHook(op);
+    result = await op.evaluateAsync({ signal });
+    if (
+      debugStatementResultHook !== undefined &&
+      op.sourceOffsets !== undefined
+    )
+      debugStatementResultHook(op, result);
+    const h = result.operator;
+    if (h === 'Return' || h === 'Break' || h === 'Continue' || h === 'Error')
+      break;
+  }
+  return result;
+}
+
+/**
  * Unwrap a `["Return", value]` expression to its value at a function
  * application boundary. `evaluateStatements` propagates `Return` wrapped so
  * that it can escape nested blocks and loops; the function boundary is where

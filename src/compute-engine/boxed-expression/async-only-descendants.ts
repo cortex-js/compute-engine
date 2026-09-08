@@ -74,3 +74,28 @@ async function awaitAsyncOnlyIn(
   // they would after the handler evaluated the operand itself.
   return x.engine.function(x.operator, ops);
 }
+
+/**
+ * Whether `x` contains an application of an ASYNCHRONOUS-ONLY operator (one
+ * with an `evaluateAsync` handler and no `evaluate` handler), at any depth
+ * except under an operator that QUOTES its operand, which holds it as data.
+ * An engine that has never declared such an operator answers `false` at
+ * once. The scoped operators that own the evaluation of their body (`Sum`,
+ * `Product`, `Block`) ask this before taking their asynchronous per-term
+ * route, so the synchronous fold stays the common path.
+ */
+export function hasAsyncOnlyApplication(x: Expression): boolean {
+  if (!x.engine._hasAsyncOnlyOperator) return false;
+  return containsAsyncOnly(x);
+}
+
+function containsAsyncOnly(x: Expression): boolean {
+  if (!isFunction(x)) return false;
+  const def = x.operatorDefinition;
+  if (def !== undefined) {
+    if (def.evaluateAsync !== undefined && def.evaluate === undefined)
+      return true;
+    if (def.holdClass === 'quote') return false;
+  }
+  return x.ops.some(containsAsyncOnly);
+}

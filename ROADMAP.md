@@ -213,19 +213,6 @@ analysis because every holder of an older value keeps its own prefix) paired
 with an incremental type for the new node, and a per-node descriptor cache on
 the type cache's invalidation axis.
 
-### An asynchronous-only operator inside the body of a big operator or a `Block` statement is not awaited (OPEN, evaluation — found 2026-09-05)
-
-The asynchronous route awaits an asynchronous-only application inside a HELD
-operand of a relation, `Element` or an arithmetic fold before the synchronous
-handler runs (`awaitAsyncOnlyDescendants`,
-`boxed-expression/async-only-descendants.ts`, 2026-09-05). A big operator
-(`Sum`, `Product`, …) and `Block` are kept away from that pass on purpose: they
-scope their operands and evaluate them themselves in their own order, so an
-asynchronous-only application inside a big operator's body or among a block's
-statements still reaches the synchronous handler unawaited. Closing this needs
-an asynchronous reduction of those operators' own. Pins for the covered shapes
-are in `test/compute-engine/async-only-held-operand.test.ts`.
-
 ### Open items from the undecided-condition ruling (2026-09-02)
 
 The ruling ("a compiled `If`/`Which` whose condition is not exactly `true` or
