@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.126.2 _2026-09-08_
 
 ### New Features
@@ -5,58 +7,56 @@
 - **`expr.isMachineNumeric`: does `array` reproduce the list, exactness
   included?** `expr.array` answers the VALUES of a list as doubles, and it
   admits an exact rational a double holds without rounding (`1/2` reads as
-  `0.5`). A consumer that must keep exact values exact could therefore not
-  take the array of a list with a non-integer element without walking the
-  boxed elements first. The new predicate answers whether `ce.list(expr.array)`
-  is the list element for element, as the interpreter computes with it: `true`
-  when every element is a float or an integer a double holds, `false` when
-  some element is an exact non-integer (re-boxing `0.5` gives a float, and
-  `0.5 / 3` is a float where `1/2 ÷ 3` is `1/6`). A list built by `ce.list()`
-  answers `true` in constant time without boxing an element; an ordinary list
-  computes the answer once, with the array. On a number the same rule applies
-  to the number itself. `false` for every other expression.
+  `0.5`). A consumer that must keep exact values exact could therefore not take
+  the array of a list with a non-integer element without walking the boxed
+  elements first. The new predicate answers whether `ce.list(expr.array)` is the
+  list element for element, as the interpreter computes with it: `true` when
+  every element is a float or an integer a double holds, `false` when some
+  element is an exact non-integer (re-boxing `0.5` gives a float, and `0.5 / 3`
+  is a float where `1/2 ÷ 3` is `1/6`). A list built by `ce.list()` answers
+  `true` in constant time without boxing an element; an ordinary list computes
+  the answer once, with the array. On a number the same rule applies to the
+  number itself. `false` for every other expression.
 
 ### Resolved Issues
 
 - **Complex compile mode: a user-function call whose body builds a `{re, im}`
   object is no longer wrapped in `_SYS.cplx` at the call site.** Since the
-  finite-by-default flip, a result typed `number` counts as wide, so every
-  call to such a function paid the idempotent lift-at-use wrap even when the
-  emitted body already returned the object (`b(x) := 2x` on a complex `z`
-  compiled to `_SYS.cplx(_fn_b(_.z))`). The emitter now records which
-  definitions return the object by construction, and their calls are the bare
-  `_fn_b(_.z)`. A body that returns a real (`|x|`) or ends in a selection
-  keeps the wrap. Found on the way: the call-site analysis read a function
-  body's TYPE before its value, and a body `If(x > 0, x, 3)` over an
-  unannotated `x` types `integer` (the placeholder arm is absorbed), so the
-  call was taken for a real while the emitted body returned an object —
-  `b(z) + z` computed `"1[object Object]"`. A block is now judged by the
-  value of its last statement, as `If` and `Which` are by their arms, and the
-  call is wrapped; the sum is `4 + 2i`.
-- **A chained set relation (`A ⊂ B ⊂ C`) or a one-operand `Subset(D)` boxed
-  with an error.** `Subset`, `SubsetEqual`, `Superset` and `SupersetEqual`
-  declared two operands while their canonical handlers passed any operand
-  count through, and the boxing validation seam of a canonical-handler head
-  now checks the handler's result against the declaration: a chain came back
-  with `unexpected-argument` on its third operand, and `IsHolomorphic(f,
-  Subset(D))`, the Fungrim corpus spelling for "on a subset of D", with
-  `missing`. Seven corpus entries regressed at the `--check` gate. The four
-  relations now declare `(any, any*)`, the carrier the comparisons use, and a
-  chain evaluates as the conjunction of its adjacent pairs (`ℤ ⊂ ℚ ⊂ ℝ` is
-  `True`, `ℤ ⊂ ℝ ⊂ ℚ` is `False`); before, a chain evaluated its first pair
-  only. The LaTeX chain `\mathbb{Z} \subset \mathbb{Q} \subset \mathbb{R}`
-  now parses flat, to `Subset(Integers, RationalNumbers, RealNumbers)`, the
-  way `a < b < c` parses to `Less(a, b, c)`; it nested to the right before.
+  finite-by-default flip, a result typed `number` counts as wide, so every call
+  to such a function paid the idempotent lift-at-use wrap even when the emitted
+  body already returned the object (`b(x) := 2x` on a complex `z` compiled to
+  `_SYS.cplx(_fn_b(_.z))`). The emitter now records which definitions return the
+  object by construction, and their calls are the bare `_fn_b(_.z)`. A body that
+  returns a real (`|x|`) or ends in a selection keeps the wrap. Found on the
+  way: the call-site analysis read a function body's TYPE before its value, and
+  a body `If(x > 0, x, 3)` over an unannotated `x` types `integer` (the
+  placeholder arm is absorbed), so the call was taken for a real while the
+  emitted body returned an object — `b(z) + z` computed `"1[object Object]"`. A
+  block is now judged by the value of its last statement, as `If` and `Which`
+  are by their arms, and the call is wrapped; the sum is `4 + 2i`.
+- **A chained set relation (`A ⊂ B ⊂ C`) or a one-operand `Subset(D)` boxed with
+  an error.** `Subset`, `SubsetEqual`, `Superset` and `SupersetEqual` declared
+  two operands while their canonical handlers passed any operand count through,
+  and the boxing validation seam of a canonical-handler head now checks the
+  handler's result against the declaration: a chain came back with
+  `unexpected-argument` on its third operand, and `IsHolomorphic(f, Subset(D))`,
+  the Fungrim corpus spelling for "on a subset of D", with `missing`. Seven
+  corpus entries regressed at the `--check` gate. The four relations now declare
+  `(any, any*)`, the carrier the comparisons use, and a chain evaluates as the
+  conjunction of its adjacent pairs (`ℤ ⊂ ℚ ⊂ ℝ` is `True`, `ℤ ⊂ ℝ ⊂ ℚ` is
+  `False`); before, a chain evaluated its first pair only. The LaTeX chain
+  `\mathbb{Z} \subset \mathbb{Q} \subset \mathbb{R}` now parses flat, to
+  `Subset(Integers, RationalNumbers, RealNumbers)`, the way `a < b < c` parses
+  to `Less(a, b, c)`; it nested to the right before.
 
 - **The Python target no longer binds a repeated bare-symbol square as a
   comprehension.** `(x^2+1)/(x^2-1)` compiled to
   `[(_cse1 + 1) / (_cse1 + -1) for _cse1 in [x ** 2]][0]` since 0.126.0, when
-  generated code started sharing repeated symbol squares. On Python `x ** 2`
-  is a single operation, and binding it as a one-element list comprehension
-  allocates a list and runs a loop, so the sharing cost more than it saved.
-  The code is again `(x ** 2 + 1) / (x ** 2 + -1)`. Larger repeated
-  subexpressions are still shared on Python, and the other targets keep
-  sharing symbol squares.
+  generated code started sharing repeated symbol squares. On Python `x ** 2` is
+  a single operation, and binding it as a one-element list comprehension
+  allocates a list and runs a loop, so the sharing cost more than it saved. The
+  code is again `(x ** 2 + 1) / (x ** 2 + -1)`. Larger repeated subexpressions
+  are still shared on Python, and the other targets keep sharing symbol squares.
 
 - **`interval-js` target: a fixed-N `\sum` body cost 4–5× the `javascript`
   target per call.** A 40-term ring sum of `arccos(max(-1, min(1, …)))` over a
@@ -64,35 +64,34 @@
   interval target against 0.04 ms on the scalar one, because the interval
   codegen lacked three things the scalar codegen has. Every constant subtree
   (`1 + -0.5`, `0.1·π`, a term's whole `1 − 0.6(1 − √(1 − w²))` factor) was
-  re-evaluated with allocating interval operations on every call; the sum
-  body compiled outside its common-subexpression region, so nothing was
-  shared even inside one term; and an index-free subtree of the body (the
-  x-only `√(X² + 0.81)`) was recomputed in every term, twice. The interval
-  target now folds a closed constant subtree at compile time by evaluating
-  its own emitted code with the interval library and inlining the enclosure
-  as a literal of the same shape, so the folded value is bit-for-bit what the
-  run-time evaluation returned (the `.N()`-based fold of the other targets
-  stays off: it would bake a zero-width point). The constant prefix of an
-  n-ary `Add`/`Multiply`/`Divide` chain folds too. An unrolled or looped
-  `Sum`/`Product` body compiles inside its region and hoists every maximal
-  index-free scalar subtree to one binding per call (after the empty-range
-  exit of a symbolic-bound loop, so a range that runs zero times evaluates
-  nothing). On the light curve the ratio drops from 4.6× to 1.2–1.7× and the
-  emitted code from 38 KB to 16 KB; every result is unchanged. A caller's
-  `constantFold: false` keeps the structural lowering of every constant, and a
-  caller's `vars` splice is never folded (only the deterministic `Math`
-  members the target itself emits are admitted).
-- **`interval-js` target: `GCD`, `LCM` and `Binomial` over an integer at or
-  past `2^53` never returned.** The integer enumeration behind the interval
-  kernels of those heads counted with `i++`, which cannot advance past
-  `2^53`; with the compile-time fold above the hang moved from the first call
-  to the compilation itself. The enumeration now declines outside the
-  safe-integer range and the kernel answers its wide fallback enclosure.
+  re-evaluated with allocating interval operations on every call; the sum body
+  compiled outside its common-subexpression region, so nothing was shared even
+  inside one term; and an index-free subtree of the body (the x-only
+  `√(X² + 0.81)`) was recomputed in every term, twice. The interval target now
+  folds a closed constant subtree at compile time by evaluating its own emitted
+  code with the interval library and inlining the enclosure as a literal of the
+  same shape, so the folded value is bit-for-bit what the run-time evaluation
+  returned (the `.N()`-based fold of the other targets stays off: it would bake
+  a zero-width point). The constant prefix of an n-ary `Add`/`Multiply`/`Divide`
+  chain folds too. An unrolled or looped `Sum`/`Product` body compiles inside
+  its region and hoists every maximal index-free scalar subtree to one binding
+  per call (after the empty-range exit of a symbolic-bound loop, so a range that
+  runs zero times evaluates nothing). On the light curve the ratio drops from
+  4.6× to 1.2–1.7× and the emitted code from 38 KB to 16 KB; every result is
+  unchanged. A caller's `constantFold: false` keeps the structural lowering of
+  every constant, and a caller's `vars` splice is never folded (only the
+  deterministic `Math` members the target itself emits are admitted).
+- **`interval-js` target: `GCD`, `LCM` and `Binomial` over an integer at or past
+  `2^53` never returned.** The integer enumeration behind the interval kernels
+  of those heads counted with `i++`, which cannot advance past `2^53`; with the
+  compile-time fold above the hang moved from the first call to the compilation
+  itself. The enumeration now declines outside the safe-integer range and the
+  kernel answers its wide fallback enclosure.
 - **`expr.array` threw on an exact rational past the double range.** A `List`
-  holding an exact rational with a power-of-two denominator and a numerator
-  past `2^1024` made the array read throw a `RangeError` from the double
-  conversion instead of answering `undefined`. The conversion now refuses such
-  a value, and `isMachineNumeric` answers `false` for it.
+  holding an exact rational with a power-of-two denominator and a numerator past
+  `2^1024` made the array read throw a `RangeError` from the double conversion
+  instead of answering `undefined`. The conversion now refuses such a value, and
+  `isMachineNumeric` answers `false` for it.
 - **A user function applied to a collection-typed symbol that has no value yet
   is held, not refused.** With `xs: list<integer>` declared but not assigned,
   `h(n: integer) = n + 1; h(xs)` evaluated to `incompatible-type` (a
@@ -124,14 +123,13 @@
   operands in their own scope, and did so synchronously, so
   `Σ_{i=1}^{3} AsyncOnly(i)` and `{x = 1; AsyncOnly(x)}` answered themselves
   from `evaluateAsync()`. `Block` now has an asynchronous handler that awaits
-  each statement, and the asynchronous handlers of `Sum` and `Product`
-  evaluate each term with `evaluateAsync` when the body holds such an
-  application, while that term's index assignment is in force: the fold's
-  generator yields the term's promise to the asynchronous driver, which
-  awaits it, honors the abort signal and the time limit after the await,
-  and hands the value back. A body without one keeps the synchronous
-  per-term evaluation, and the synchronous route stays inert for such a
-  body, as documented.
+  each statement, and the asynchronous handlers of `Sum` and `Product` evaluate
+  each term with `evaluateAsync` when the body holds such an application, while
+  that term's index assignment is in force: the fold's generator yields the
+  term's promise to the asynchronous driver, which awaits it, honors the abort
+  signal and the time limit after the await, and hands the value back. A body
+  without one keeps the synchronous per-term evaluation, and the synchronous
+  route stays inert for such a body, as documented.
 
 ## 0.126.1 _2026-09-07_
 

@@ -13585,6 +13585,37 @@ argument bag.
 
 <MemberCard>
 
+##### Expression.isMachineNumeric {#ismachinenumeric}
+
+```ts
+readonly isMachineNumeric: boolean;
+```
+
+Does `array` reproduce this expression, exactness included?
+
+For a `List`: `true` when `array` is defined and `ce.list(expr.array)`
+is this list element for element, as the interpreter computes with it.
+A list built by `ce.list()` answers `true` in constant time. An
+ordinary list answers `true` when every element is a float or an
+integer a double holds, and `false` when some element is an exact
+non-integer such as the rational `1/2`: `array` admits it, since a
+double holds `0.5` with no rounding, but re-boxing `0.5` gives a float,
+which computes as one (`0.5 / 3` is `0.1666…` where `1/2 ÷ 3` is
+`1/6`). A consumer that must keep exact values exact takes `array` only
+when this is `true`.
+
+For a number: `true` when the number is a float, an integer a double
+holds, `NaN` or an infinity; `false` for an exact non-integer, a
+radical or a complex number.
+
+`false` for every other expression.
+
+:category: Collections
+
+</MemberCard>
+
+<MemberCard>
+
 ##### Expression.isIndexedCollection {#isindexedcollection}
 
 ```ts
