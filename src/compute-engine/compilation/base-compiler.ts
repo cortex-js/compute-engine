@@ -91,6 +91,7 @@ import {
   functionLiteralParameterType,
   functionLiteralReturnMarker,
   isDestructuringParameter,
+  isRestParameter,
 } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import { multiClauseState } from '../multi-clause.js';
@@ -6197,6 +6198,7 @@ export class BaseCompiler {
 
       // Default: JavaScript arrow function
       BaseCompiler.assertNoDestructuringParams(ops.slice(1));
+      BaseCompiler.assertNoRestParams(ops.slice(1));
       const params = ops
         .slice(1)
         .map((x) => functionLiteralParameterName(x) || '_');
@@ -8965,6 +8967,28 @@ export class BaseCompiler {
             `"${p.toString()}": no compile target lowers the tuple match. ` +
             `Take the tuple as one named parameter and read its components ` +
             `in the body.`
+        );
+  }
+
+  /**
+   * Fail closed on a REST parameter (`(a, ...rest) => …`).
+   *
+   * The same fail-closed rule as {@link assertNoDestructuringParams}, for the
+   * same reason: every target lowers a lambda to one emitted name per
+   * parameter operand, so a rest parameter would emit an ORDINARY positional
+   * name and the compiled function would bind only the first trailing
+   * argument, instead of a tuple of all of them. No target lowers the
+   * argument collection today, so compilation refuses rather than emitting
+   * code that quietly disagrees with the interpreter.
+   */
+  static assertNoRestParams(params: ReadonlyArray<Expression>): void {
+    for (const p of params)
+      if (isRestParameter(p))
+        throw new Error(
+          `Cannot compile a function literal with a rest parameter ` +
+            `"${p.toString()}": no compile target collects the trailing ` +
+            `arguments. Take the trailing arguments as one tuple parameter ` +
+            `and read its components in the body.`
         );
   }
 
@@ -12951,6 +12975,7 @@ export class BaseCompiler {
       return { lambdaVars, bodyExpr: integrand };
     const params = integrand.ops.slice(1);
     BaseCompiler.assertNoDestructuringParams(params);
+    BaseCompiler.assertNoRestParams(params);
     const names = params.map((p) => functionLiteralParameterName(p));
     // `functionLiteralParameterName` returns `''` — never `undefined` — for a
     // parameter operand that is not a name.
@@ -17879,6 +17904,7 @@ export class BaseCompiler {
     bodyTarget: CompileTarget<Expression>;
   } {
     BaseCompiler.assertNoDestructuringParams(literal.ops.slice(1));
+    BaseCompiler.assertNoRestParams(literal.ops.slice(1));
     const declared = literal.ops
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');

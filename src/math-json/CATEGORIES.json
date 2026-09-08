@@ -249,6 +249,7 @@
       "NonPositiveNumbers",
       "Numbers",
       "PositiveIntegers",
+      "Primes",
       "PositiveNumbers",
       "RationalNumbers",
       "RealNumbers"

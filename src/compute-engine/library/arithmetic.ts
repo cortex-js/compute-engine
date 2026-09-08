@@ -1,5 +1,6 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
+import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
@@ -1033,6 +1034,30 @@ function tupleComponentwiseAddType(
   return { kind: 'tuple', elements };
 }
 
+/**
+ * The operand descriptor with any FUNCTION arm dropped from a union type.
+ *
+ * An arithmetic parameter is `number`, and the boxing seam admits an operand
+ * typed `function | number` provisionally (its number arm overlaps the
+ * parameter; a function value would be refused at evaluation). The result
+ * type of the arithmetic must then come from the number arm alone: with the
+ * union passed through, `Add(f(u), 1)` for `f: (T) -> T where T: number |
+ * function` typed `function | number`, a type no sum can have. A union with
+ * no number arm is left as it is — the seam's own rejection covers it.
+ */
+function withoutFunctionArm(x: OperandDescriptor): OperandDescriptor {
+  const t = x.type;
+  if (typeof t === 'string' || t.kind !== 'union') return x;
+  const kept = t.types.filter((arm) => !isSubtype(arm, 'function'));
+  if (kept.length === 0 || kept.length === t.types.length) return x;
+  const type: Type =
+    kept.length === 1 ? kept[0] : { kind: 'union', types: kept };
+  // A synthetic descriptor for the narrowed type (a spread of the source
+  // would copy no facts: they are getters on a class instance), keeping the
+  // source's structural view.
+  return { ...describeType(type, x.facts.closed), structureOf: x.structureOf };
+}
+
 function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
@@ -1586,7 +1611,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // computes on is numeric — §3.A/§5 of the missing-value typing design).
       missingBehavior: 'propagate',
       type: (ops, context) =>
-        BoxedType.forResult(addTypeOnTypes(ops), context.engine._typeResolver),
+        BoxedType.forResult(
+          addTypeOnTypes(ops.map(withoutFunctionArm)),
+          context.engine._typeResolver
+        ),
 
       sgn: (ops) => {
         if (ops.some((x) => x.isNaN)) return 'unsigned';

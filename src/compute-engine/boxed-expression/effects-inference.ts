@@ -55,6 +55,7 @@ import {
   functionLiteralReturnMarker,
   functionLiteralReturnType,
   isDestructuringParameter,
+  isRestParameter,
   isScalarType,
   mentionsQuantifiedVariable,
 } from './function-literal.js';
@@ -686,9 +687,17 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   // `Unknown type` or silently dropped the annotation. Same hazard class as
   // the inferred-signature fix in `boxed-operator-definition.ts`.
   const paramOps = isFunction(expr, 'Function') ? expr.ops.slice(1) : [];
+  // A REST parameter (`(a, ...rest) => …`) is not a positional slot: it
+  // absorbs every argument from its position onwards, so it leaves the
+  // signature's argument list and becomes the variadic slot below. Its
+  // element type is `any` — a rest parameter carries no annotation (a `Typed`
+  // wrapper around one is rejected at canonicalization), so the call may pass
+  // anything, absence markers included.
+  const restOp = paramOps.findIndex((p) => isRestParameter(p));
+  const fixedParams = restOp < 0 ? params : params.slice(0, restOp);
   const args =
-    params.length > 0
-      ? params.map((p, i) => {
+    fixedParams.length > 0
+      ? fixedParams.map((p, i) => {
           if (p.type !== undefined) return { name: p.name, type: p.type };
           // A DESTRUCTURING parameter (`((p, q)) => …`) states its own slot:
           // the tuple shape its pattern will match. See
@@ -792,6 +801,12 @@ export function functionLiteralSignatureType(expr: Expression): Type {
   return {
     kind: 'signature',
     ...(args !== undefined ? { args } : {}),
+    // `variadicMin: 0` — a rest parameter accepts an empty trailing run and
+    // then binds the empty tuple, so `(a, ...rest) => …` types
+    // `(unknown, any*) -> R` rather than `(unknown, any+) -> R`.
+    ...(restOp >= 0
+      ? { variadicArg: { type: 'any' as Type }, variadicMin: 0 as const }
+      : {}),
     ...(effects !== undefined ? { effects } : {}),
     result: bodyType,
   };

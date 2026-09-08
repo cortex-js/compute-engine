@@ -38,7 +38,9 @@ import {
   functionLiteralParameterNames,
   functionLiteralParameterType,
   isDestructuringParameter,
+  isRestParameter,
   mentionsQuantifiedVariable,
+  restParameterSymbol,
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
 import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
@@ -535,8 +537,23 @@ export function canonicalFunctionLiteralArguments(
   // `["Typed", symbol, type]`. Anything else is an error. An annotated
   // parameter keeps its `Typed` wrapper, normalized so the type operand is a
   // string (mirroring how `Declare` keeps its type operand raw).
-  const params = ops.slice(1).map((x) => {
+  const params = ops.slice(1).map((x, i) => {
     if (isSymbol(x)) return x;
+    // A REST parameter — `["Spread", symbol]`, spelled `(a, ...rest) => …` in
+    // Epsil. It binds one name to a `Tuple` of every argument from its own
+    // position onwards, so it is only meaningful as the LAST operand of the
+    // parameter list: a rest parameter anywhere else would leave the
+    // parameters after it with no argument to take. It also has to hold
+    // exactly one symbol — there is no name to bind otherwise — and it carries
+    // no type annotation (`["Typed", ["Spread", …], …]` reaches the
+    // `expected-a-symbol` fallback at the end of this list).
+    if (isFunction(x, 'Spread')) {
+      if (i !== ops.length - 2)
+        return ce.error('unexpected-argument', x.toString());
+      if (x.nops !== 1 || !isSymbol(x.op1))
+        return ce.error('expected-a-symbol', x.toString());
+      return x;
+    }
     // A DESTRUCTURING parameter — a raw `["Tuple", …]` pattern, spelled
     // `((p, q)) => …` in Epsil. It counts as one parameter and binds its leaf
     // names; the pattern operand is kept RAW (`isDestructuringParameter`).
@@ -1124,7 +1141,11 @@ function bindParameterOperands(
     const binding = scope.bindings.get(name);
     if (binding === undefined || !('value' in binding)) return param;
     const def = (binding as { value: BoxedValueDefinition }).value;
-    const site = isFunction(param, 'Typed') ? param.op1 : param;
+    // A REST parameter's name lives on the symbol INSIDE its `Spread` wrapper,
+    // exactly as an annotated parameter's lives inside its `Typed` wrapper, so
+    // both read and rebuild that inner operand rather than the wrapper.
+    const restSym = restParameterSymbol(param);
+    const site = restSym ?? (isFunction(param, 'Typed') ? param.op1 : param);
     if (
       (site as { valueDefinition?: BoxedValueDefinition }).valueDefinition ===
       def
@@ -1136,6 +1157,8 @@ function bindParameterOperands(
     // parameter at all.
     const bound = ce._bindingSymbol(name, scope);
     if (bound === undefined) return param;
+    if (restSym !== undefined)
+      return ce._fn('Spread', [bound], { canonical: false });
     if (!isFunction(param, 'Typed')) return bound;
     return ce._fn('Typed', [bound, param.op2], { canonical: false });
   });
@@ -1976,7 +1999,11 @@ function parameterBindings(
     const param = params[i];
     if (!isDestructuringParameter(param)) {
       const name = functionLiteralParameterName(param);
-      if (name) leaves.push({ name, site: param, value: args[i] });
+      // A REST parameter's site is the symbol inside its `Spread` wrapper:
+      // that node carries the binding the literal's body declares for the
+      // name, which is what `staticParameterBinding` reads off it.
+      const site = restParameterSymbol(param) ?? param;
+      if (name) leaves.push({ name, site, value: args[i] });
       continue;
     }
     const pairs: [name: string, value: Expression][] = [];
@@ -2013,7 +2040,9 @@ function staticParameterBinding(
   name: string,
   bodyScope: Scope | undefined
 ): BoxedValueDefinition | undefined {
-  const site = isFunction(param, 'Typed') ? param.op1 : param;
+  const site =
+    restParameterSymbol(param) ??
+    (isFunction(param, 'Typed') ? param.op1 : param);
   const def = (site as { valueDefinition?: BoxedValueDefinition })
     .valueDefinition;
   if (def !== undefined) return def;
@@ -2625,6 +2654,12 @@ function makeLambda(
     (p) => functionLiteralParameterType(p) !== undefined
   );
 
+  // The index of the REST parameter (`(a, ...rest) => …`), or `-1` when the
+  // literal has none. Canonicalization guarantees there is at most one and
+  // that it is the last operand, so this index is also the number of FIXED
+  // parameters the call must supply before the rest parameter takes over.
+  const restIndex = params.findIndex((p) => isRestParameter(p));
+
   // A GENERIC literal has no annotated parameter to gate on — erasure removed
   // them — yet its polytype marker IS a contract, and an ANONYMOUS application
   // (`Apply(Function(…), …)`) never passes a symbol's boxed-definition seam
@@ -2781,7 +2816,9 @@ function makeLambda(
     //
     // 1/ If there are more arguments than expected, exit
     //
-    if (args.length > params.length) {
+    // A literal with a REST parameter has no upper arity: the surplus is what
+    // the rest parameter collects (below, after the error check).
+    if (restIndex < 0 && args.length > params.length) {
       throw new Error(
         `Too many arguments for function "${expr.toString()}": expected ${
           params.length
@@ -2808,9 +2845,26 @@ function makeLambda(
     }
 
     //
+    // 2b/ A REST parameter collects every argument from its own position
+    //     onwards into ONE `Tuple` argument (empty when the call supplies
+    //     none). After this collapse the call is an ordinary saturated
+    //     `params.length`-ary one, so steps 3 to 5 need no rest-specific case.
+    //     A call with fewer arguments than the FIXED parameters takes the
+    //     currying path below instead, where the rest parameter is carried
+    //     into the residual literal unchanged.
+    //
+    // The collapse itself happens in step 4, AFTER the arguments are
+    // evaluated and checked: packing the raw trailing arguments first hid an
+    // argument that only became an error when evaluated (`boom() |> ((...r)
+    // => 42)` on the held pipe route ran the body), because the error check
+    // does not look inside a tuple.
+    const saturated =
+      restIndex >= 0 ? args.length >= restIndex : args.length >= params.length;
+
+    //
     // 3/ If there are fewer arguments than expected, curry the function
     //
-    if (args.length < params.length) {
+    if (!saturated) {
       // G5 (§2.5): a GENERIC literal is not curried. The residual literal has
       // no honest type — a variable consumed by the supplied prefix occurs
       // nowhere in the remaining arrow, so the clause is unsolvable. Fires on
@@ -2852,8 +2906,15 @@ function makeLambda(
       // opposite case: it re-applies the ORIGINAL literal, which does its own
       // destructuring, so its parameter must be the single fresh symbol that
       // receives the tuple whole (`extraSymbols`).
+      //
+      // An unapplied REST parameter stays a rest parameter in the residual:
+      // its fresh symbol is re-wrapped in `Spread`, so the residual still has
+      // no upper arity and still binds a tuple of whatever the saturating call
+      // supplies.
       const extras = unappliedParams.map((param, i) => {
         if (isDestructuringParameter(param)) return param;
+        if (isRestParameter(param))
+          return ce._fn('Spread', [extraSymbols[i]], { canonical: false });
         return isFunction(param, 'Typed')
           ? ce._fn('Typed', [extraSymbols[i], param.op2], { canonical: false })
           : extraSymbols[i];
@@ -2930,9 +2991,20 @@ function makeLambda(
       // operand is not the body's effect, and eager operands are evaluated at
       // the call that supplies them.
       if (!isPureComputedEffects(effectsOf(body))) {
+        // A fresh symbol standing for an unapplied REST parameter holds the
+        // TUPLE of the trailing arguments, so it is passed on as `Spread(sym)`
+        // — spliced back into an argument run by the enclosing call — rather
+        // than as one tuple argument, which the original literal would have
+        // collected into a tuple of a tuple.
         const deferred = ce._fn(
           'Apply',
-          [fnExpr, ...evaluatedKnownArgs, ...extraSymbols],
+          [
+            fnExpr,
+            ...evaluatedKnownArgs,
+            ...unappliedParams.map((param, i) =>
+              isRestParameter(param) ? extras[i] : extraSymbols[i]
+            ),
+          ],
           { canonical: false }
         );
         return ce.function('Function', [
@@ -3021,6 +3093,15 @@ function makeLambda(
       const err = firstErrorArg(evaluatedArgs);
       if (err !== undefined) return err;
     }
+
+    // The rest collapse announced in step 2b: the evaluated trailing
+    // arguments become ONE `Tuple` argument, so the binding below is an
+    // ordinary `params.length`-ary one.
+    if (restIndex >= 0)
+      evaluatedArgs = [
+        ...evaluatedArgs.slice(0, restIndex),
+        ce.function('Tuple', evaluatedArgs.slice(restIndex)),
+      ];
 
     //
     // 4b/ In strict mode, validate the evaluated arguments against the

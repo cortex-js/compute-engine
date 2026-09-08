@@ -1,4 +1,5 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
 // complex-cartesian (constructor) = re + i * im
 // complex-polar = abs * exp(i * arg)
 
@@ -37,7 +38,10 @@ import { broadcastCellType } from '../../common/type/utils.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralParameterName,
+  isRestParameter,
+} from '../boxed-expression/function-literal.js';
 import { checkNumericArgs } from '../boxed-expression/validate.js';
 
 /**
@@ -266,7 +270,7 @@ const absArgType: OperatorTypeHandlerOnTypes = ([z], context) => {
 
 /**
  * The pointwise conjugate of a function-typed operand of `Conjugate`, as a
- * function literal: `Conjugate(chi)` is `(x) ↦ Conjugate(chi(x))`.
+ * function literal: `Conjugate(chi)` is `(...args) ↦ Conjugate(chi(...args))`.
  *
  * `Conjugate`'s signature is generic over `number`, and the boxing seam
  * re-validates a same-head result against it, so a function operand cannot
@@ -279,12 +283,11 @@ const absArgType: OperatorTypeHandlerOnTypes = ([z], context) => {
  * own parameters (which cannot capture a free variable of the body, since
  * the body already binds those names); a symbol or other function-typed
  * expression gets one parameter per REQUIRED argument of its signature,
- * named so as not to capture a free variable of the operand. A function
- * literal has no optional or rest parameter, so optional and variadic
- * arguments of the operand are not threaded through — a signature with no
- * required argument but optional or variadic ones, and the bare `function`
- * type (`(any*) -> any`), get ONE parameter, the common call shape of such a
- * function (a Dirichlet character is unary).
+ * named so as not to capture a free variable of the operand, plus a REST
+ * parameter when the signature has optional or variadic arguments — the bare
+ * `function` type is `(any*) -> any`, so a function declared without a
+ * signature gets the rest parameter alone. The rest parameter is spread back
+ * into the application, which passes the trailing arguments on unchanged.
  *
  * The literal is built from RAW MathJSON, so that its body canonicalizes
  * inside the literal's own scope, after the parameters are bound. Building
@@ -296,36 +299,55 @@ const absArgType: OperatorTypeHandlerOnTypes = ([z], context) => {
  * symbol head (`chi(x)`).
  */
 function pointwiseConjugate(ce: ComputeEngine, f: Expression): Expression {
-  let params: Expression[] | undefined;
+  // The literal's parameters and the matching arguments of the application,
+  // both as raw MathJSON.
+  let params: MathJsonExpression[] | undefined;
+  let args: MathJsonExpression[] | undefined;
   if (isFunction(f, 'Function')) {
     const own = f.ops.slice(1);
-    if (own.every((p) => functionLiteralParameterName(p) !== '')) params = own;
+    if (own.every((p) => functionLiteralParameterName(p) !== '')) {
+      params = own.map((p) => p.json);
+      args = own.map((p) => {
+        const name = functionLiteralParameterName(p);
+        return isRestParameter(p) ? ['Spread', name] : name;
+      });
+    }
   }
-  if (params === undefined) {
+  if (params === undefined || args === undefined) {
     const t = f.type.type;
-    let arity = 1;
+    let required = 0;
+    let rest = true;
     if (typeof t !== 'string' && t.kind === 'signature') {
-      const required = t.args?.length ?? 0;
-      const hasOthers =
-        (t.optArgs?.length ?? 0) > 0 || t.variadicArg !== undefined;
-      arity = required > 0 || !hasOthers ? required : 1;
+      required = t.args?.length ?? 0;
+      rest = (t.optArgs?.length ?? 0) > 0 || t.variadicArg !== undefined;
     }
-    // `x` for a unary function, `x_1, x_2, …` otherwise; a name the operand
-    // mentions free is skipped so the literal cannot capture it.
+    // `x` for a single required argument, `x_1, x_2, …` otherwise, and
+    // `args` for the rest parameter; a name the operand mentions free is
+    // skipped so the literal cannot capture it.
     const taken = new Set<string>(f.unknowns);
-    params = [];
-    for (let i = 1, k = 1; i <= arity; i++) {
-      let name = arity === 1 ? 'x' : `x_${k++}`;
-      while (taken.has(name)) name = `x_${k++}`;
+    const fresh = (base: string): string => {
+      let name = base;
+      for (let k = 1; taken.has(name); k++) name = `${base}_${k}`;
       taken.add(name);
-      params.push(ce.symbol(name));
+      return name;
+    };
+    params = [];
+    args = [];
+    for (let i = 1; i <= required; i++) {
+      const name = fresh(required === 1 ? 'x' : `x_${i}`);
+      params.push(name);
+      args.push(name);
+    }
+    if (rest) {
+      const name = fresh('args');
+      params.push(['Spread', name]);
+      args.push(['Spread', name]);
     }
   }
-  const names = params.map((p) => functionLiteralParameterName(p));
   return ce.box([
     'Function',
-    ['Conjugate', ['Apply', f.json, ...names]],
-    ...params.map((p) => p.json),
+    ['Conjugate', ['Apply', f.json, ...args]],
+    ...params,
   ]);
 }
 

@@ -18,6 +18,7 @@
 
 Primes:
 
+- Primes: the set of all prime numbers (lazy, infinite; `\mathbb{P}`)
 - NthPrime: gives the nth prime number (the name `Prime` is reserved for
   derivative notation; `PrimeNumber` is an alias for `NthPrime`)
 - NextPrime: the smallest prime larger than `n` (with an optional `k` for the

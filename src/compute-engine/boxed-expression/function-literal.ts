@@ -102,11 +102,37 @@ export function resolveFunctionLiteralTypes(expr: Expression): void {
   functionLiteralReturnType(expr);
 }
 
+/**
+ * True when a `Function` parameter operand is a REST parameter — the
+ * `["Spread", symbol]` node spelled `...rest` in Epsil.
+ *
+ * A rest parameter may only be the LAST operand of the parameter list. It
+ * consumes every argument from its own position onwards and binds ONE name to
+ * a `Tuple` of them, empty when the call supplies no trailing argument.
+ * `canonicalFunctionLiteralArguments` rejects any other placement, a
+ * `["Spread", …]` holding something other than a single symbol, and a `Typed`
+ * annotation wrapped around one.
+ */
+export function isRestParameter(param: Expression): boolean {
+  return isFunction(param, 'Spread');
+}
+
+/** The symbol NODE a rest parameter binds — the operand inside its `Spread`
+ * wrapper — or `undefined` when `param` is not a rest parameter. Consumers
+ * that must reach the parameter's own binding (the site a call frame
+ * activates, the path a binding-site selector reports) read this node, never
+ * the `Spread` wrapper. */
+export function restParameterSymbol(param: Expression): Expression | undefined {
+  return isFunction(param, 'Spread') ? param.op1 : undefined;
+}
+
 /** The name of a single `Function` parameter operand, unwrapping a `Typed`
- * annotation. Returns `''` when the operand is not a symbol (matching the
- * historical `isSymbol(p) ? p.symbol : ''` idiom). */
+ * annotation or a rest parameter's `Spread` wrapper. Returns `''` when the
+ * operand is not a symbol (matching the historical
+ * `isSymbol(p) ? p.symbol : ''` idiom). */
 export function functionLiteralParameterName(param: Expression): string {
   if (isFunction(param, 'Typed')) return sym(param.op1) ?? '';
+  if (isFunction(param, 'Spread')) return sym(param.op1) ?? '';
   return sym(param) ?? '';
 }
 

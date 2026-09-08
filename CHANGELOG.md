@@ -1,7 +1,86 @@
 ## [Unreleased]
 
+### New Features
+
+- **Rest parameters on function literals.** The last parameter of a function
+  literal can now collect every remaining argument: `(a, ...rest) => …` in
+  Epsil, `["Function", body, "a", ["Spread", "rest"]]` in MathJSON. The rest
+  name is bound to a `Tuple` of the trailing arguments — the empty tuple when
+  the call supplies none — so the literal accepts any number of arguments and
+  types as `(unknown, any*) -> R`. Spreading the tuple back into a call passes
+  the collected arguments on unchanged, which is what a wrapper needs:
+  `(...args) => Conjugate(g(...args))` applied to `(1, 2)` evaluates to
+  `Conjugate(g(1, 2))`. Only the last parameter may be a rest parameter and it
+  carries no type annotation; anything else is an error on the literal.
+  `compile()` refuses a function that has one, because no compile target
+  collects the trailing arguments.
+- **`Primes`, the set of all prime numbers.** A lazy, infinite set constant like
+  `Integers`: `Element(7, Primes)` is `True`, iteration yields 2, 3, 5, … on
+  demand, `Primes ⊂ Integers` holds, and a big operator over it
+  (`\sum_{p \in \mathbb{P}} p^{-2}`) binds its index as an integer and stays
+  symbolic. `\mathbb{P}` parses to it and it serializes back.
+
 ### Resolved Issues
 
+- **A canonical-handler operator with a generic numeric signature now types a
+  valueless operand.** The boxing seam re-validates a canonical handler's result
+  with inference off and ran its numeric inference only for concrete numeric
+  parameters, so an operator declared `(T) -> T where T: number` with a
+  `canonical` handler left an undeclared operand `unknown`. The operand is now
+  narrowed to the variable's bound, as it is for an operator without a handler.
+- **A numeric use of a generic call narrows its operand.** For
+  `f: (T) -> T where T: number | function`, `f(u) + 1` now types `u` (and the
+  sum) as `number`; before, `u` kept the whole bound and the sum typed
+  `function | number`. An arithmetic result type now comes from the number arm
+  of a provisionally admitted `function | number` operand.
+
+- **An assumed inequality bound is stored and compared exactly.** The bound
+  was summed in a JavaScript number, so an exact bound the machine cannot
+  represent was rounded to the nearest double in either direction before it
+  was stored, and every reader then took the stored value as exact:
+  `assume(v > 1 - 10^{-30})` stored a strict lower bound of exactly 1, from
+  which `v > 1` was "proven" — refuted by `v = 1 - 10^{-31}` — and
+  `assume(v < 1)` was then refused as a contradiction. The query side rounded
+  too: with `u ≥ 1` assumed, `u ≥ 1 + 10^{-30}` projected its constant to the
+  double 1 and was "proven" as well. The bound is now the exact number
+  expression the inequality carries, and every reader — the relational
+  operators, `isGreater` and the other comparison predicates, the sign of a
+  symbol, the tautology and contradiction checks of `assume()` — compares
+  exactly, without tolerance. `ce.ask(['Greater', 'x', '_k'])` answers the
+  exact bound (`1/3`, not `0.333…`). The ranged type an assumption
+  contributes already projected its bound in the weakening direction.
+- **`Covariance` and `PopulationCovariance` no longer overflow at machine
+  precision on data of machine range.** The sums were taken over the raw
+  deviations, so a product of two deviations around `10²⁰⁰` overflowed while
+  the covariance itself was an ordinary number:
+  `Covariance([1e200, -1e200, 0], [1e200, 1e200, -2e200])` is 0 and answered
+  `NaN`. The deviations are scaled by a power of two per column first, as
+  `Correlation` already did, and the scales are multiplied back exactly. A
+  covariance with no double (`10⁴⁰⁰`) reads as `+oo`, the machine answer for
+  such a value.
+- **`LinearRegression(xs, ys, x)` and `PolynomialFit(xs, ys, n, x)` are typed
+  `number`.** The trailing variable symbol makes both return the fitted
+  expression in that variable, but the declared result described only the
+  coefficient form: `LinearRegression([1,2,3],[2,4,6],x)` was typed
+  `tuple<number, number>` while it evaluates to `2x`.
+- **The LaTeX pipe shorthand has a static type.** `[1,2,3] |> \_^2` typed
+  `unknown` while it evaluates to `[1,4,9]`; the LaTeX parser leaves the
+  stage as the application `Power(_, 2)`, which the `Pipe` type handler did
+  not read (the Epsil parser wraps it as a function literal, which it did).
+  A broadcastable head over a list of scalars is typed element-wise
+  (`list<integer<0..>^3>`), a whole-collection head such as `Length(\_)` or a
+  scalar topic types the applied body, and the shapes the derivation cannot
+  type soundly stay `unknown`.
+- **A second pipe on the same engine no longer throws after an
+  operator-shorthand pipe.** Lifting `\_^2` into a function literal
+  substituted `_` with `_1` through a canonicalizing substitution, which
+  auto-declared `_1` in the caller's scope with the type the body inferred
+  for it. After `xs |> \_^2`, the next lift of `Take(\_, 2)` bound its
+  parameter to that stray `_1: number`, put an `incompatible-type` error in
+  the body, and threw "Function body must be a scoped Block expression";
+  `[1,2,3] |> Sum(\_)` answered the list itself for the same reason. The
+  substitution is no longer canonicalized, and the body is canonicalized
+  inside the literal's own scope, where its parameter is declared.
 - **`f(L) := Sum(L)` infers `L` a collection, so `f([1, 2, 3])` is 6.** The
   body slot of `Sum` and `Product` accepts anything, so the parameter kept the
   type `unknown`, and a call with a list broadcast over its elements — an

@@ -223,7 +223,14 @@ export function lambdaParamSites(op: number): BindingSiteSelector {
       }
       if (functionLiteralParameterName(param) === '') continue;
       sites.push({
-        path: isFunction(param, 'Typed') ? [op, i, 0] : [op, i],
+        // A REST parameter (`(a, ...rest) => …`) is the node
+        // `["Spread", symbol]`, and the name it binds is the symbol INSIDE
+        // that wrapper — the same one-level unwrap a `Typed` annotation
+        // needs, so both report the path of the inner operand.
+        path:
+          isFunction(param, 'Typed') || isFunction(param, 'Spread')
+            ? [op, i, 0]
+            : [op, i],
       });
     }
     return sites.length === 0 ? NO_SITES : sites;

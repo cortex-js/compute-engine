@@ -2700,7 +2700,10 @@ function signImplies(a: Sign | undefined, b: Sign | undefined): boolean {
  * of values as an element type plus a sign constraint — see
  * {@linkcode TypeSaturatedSet}.
  */
-function shapeIncludedIn(a: TypeSaturatedSet, b: TypeSaturatedSet): boolean {
+export function shapeIncludedIn(
+  a: TypeSaturatedSet,
+  b: TypeSaturatedSet
+): boolean {
   return isSubtype(a.elementType, b.elementType) && signImplies(a.sign, b.sign);
 }
 

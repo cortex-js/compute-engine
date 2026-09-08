@@ -7960,6 +7960,12 @@
       "description": "The set of all positive real numbers."
     },
     {
+      "name": "Primes",
+      "category": "Collections",
+      "type": "set<integer>",
+      "description": "The set of all prime numbers."
+    },
+    {
       "name": "RationalNumbers",
       "category": "Collections",
       "type": "set<rational>",

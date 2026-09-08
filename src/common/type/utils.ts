@@ -2111,3 +2111,22 @@ export function containsBroadcastableType(type: Readonly<Type>): boolean {
   if (t.kind === 'union') return t.types.some(containsBroadcastableType);
   return false;
 }
+
+/**
+ * The declared type of the parameter slot that operand `i` of a call fills:
+ * the required parameters first, then the optional ones, then the variadic
+ * parameter for every later operand; `undefined` past the end of a
+ * non-variadic signature. Named arguments are not considered — the callers
+ * read positional calls.
+ */
+export function signatureSlotType(
+  sig: FunctionSignature,
+  i: number
+): Type | undefined {
+  const required = sig.args ?? [];
+  if (i < required.length) return required[i].type;
+  const optional = sig.optArgs ?? [];
+  if (i < required.length + optional.length)
+    return optional[i - required.length].type;
+  return sig.variadicArg?.type;
+}

@@ -76,6 +76,7 @@ import { sortOperands } from './order.js';
 import {
   validateArguments,
   checkNumericArgs,
+  inferGenericBoundArgs,
   inferNumericArgs,
   runtimeCheckExemptParam,
 } from './validate.js';
@@ -2647,6 +2648,11 @@ function applyOperatorDefinition(
         // validation. Collection element validation now belongs to the
         // threadable admission inside `validateArguments()` itself.
         if (numericParams) inferNumericArgs(ce, result.ops);
+        // A parameter that is a type variable with a numeric bound is not
+        // "numeric" to `allParamsNumeric`, yet the handler-less path narrows
+        // a valueless operand to that bound: do the same here.
+        else if (sameHeadValid)
+          inferGenericBoundArgs(ce, opDef.signature.type, result.ops);
         return withSourceOffsets(result, metadata);
       }
     } catch (e) {

@@ -2842,6 +2842,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `Python lambda. Fail closed (D6).`
       );
     BaseCompiler.assertNoDestructuringParams(args.slice(1));
+    BaseCompiler.assertNoRestParams(args.slice(1));
     const params = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');

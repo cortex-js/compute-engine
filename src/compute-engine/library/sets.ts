@@ -38,11 +38,16 @@ import {
   declareTypeSaturatedSet,
   enumerableFromAllSources,
   enumerableFromSource,
+  shapeIncludedIn,
+  typeSaturatedShape,
   typeSaturatedSubsetOf,
   isTextAtom,
   isValuelessCollectionTyped,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
+import { isPrime as isPrimeNumber } from '../numerics/primes.js';
+import { isPrime as isPrimeExpression } from '../boxed-expression/predicates.js';
+import type { TypeSaturatedSet } from '../collection-utils.js';
 import type {
   Expression,
   OperandDescriptor,
@@ -684,6 +689,29 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       isEmpty: () => false,
       isFinite: () => false,
       subsetOf: numberSetSubsetOf('PositiveIntegers', 'integer', 'positive'),
+      eltsgn: () => 'positive',
+      elttype: () => 'integer',
+    },
+  },
+
+  // The prime numbers, as a lazy infinite set: `Element(7, Primes)` is
+  // `True`, iteration yields 2, 3, 5, 7, … on demand, and a big operator
+  // over it (`Sum(p^-2, Element(p, Primes))`) binds its index as an integer
+  // and stays symbolic, as a sum over the integers does. Unlike the sets
+  // above, this set is not saturated by a type and a sign — its elements are
+  // a proper subset of the positive integers — so membership and inclusion
+  // are decided here rather than by `declareTypeSaturatedSet`.
+  Primes: {
+    type: 'set<integer>',
+    isConstant: true,
+    description: 'The set of all prime numbers.',
+    collection: {
+      iterator: (self) => primeIterator(self.engine),
+      contains: (_, x) => primeMembership(x),
+      count: () => Infinity,
+      isEmpty: () => false,
+      isFinite: () => false,
+      subsetOf: primesSubsetOf,
       eltsgn: () => 'positive',
       elttype: () => 'integer',
     },
@@ -1881,6 +1909,53 @@ function* integerRangeIterator(
     yield ce.number(n);
     n += step;
   }
+}
+
+/** The primes in increasing order, by trial division of each candidate
+ * (`isPrime`, `numerics/primes.ts`). Adequate for the lazy uses of `Primes`
+ * — a `Filter`, a `First`, a bounded walk — none of which reads far. */
+function* primeIterator(ce: ComputeEngine): Generator<Expression> {
+  yield ce.number(2);
+  for (let n = 3; ; n += 2) if (isPrimeNumber(n)) yield ce.number(n);
+}
+
+/**
+ * Three-valued membership in `Primes`: decided for an integer literal
+ * (`Element(7, Primes)`) and for a value that is not a positive integer at
+ * all (a non-integer type, a negative or zero value); indeterminate for a
+ * symbol that could be a prime. The primality test is the exact one the
+ * `IsPrime` operator uses (`boxed-expression/predicates.ts`), which reads an
+ * exact integer as a bigint: the double projection `x.re` rounds an integer
+ * above 2^53, and `2^61 - 1` was reported composite through it.
+ */
+function primeMembership(x: Expression): boolean | undefined {
+  if (x.isPositive === false) return false;
+  return isPrimeExpression(x);
+}
+
+/** The shape `Primes` is included in: every prime is a positive integer. */
+const PRIMES_SHAPE: TypeSaturatedSet = {
+  elementType: 'integer',
+  sign: 'positive',
+};
+
+/**
+ * `Primes ⊆ other`. Every prime is a positive integer, so `Primes` is
+ * included in any set saturated by a type that contains `integer` and a sign
+ * that positive values satisfy (`PositiveIntegers`, `Integers`,
+ * `RealNumbers`, …) — strictly, since such a set also holds non-primes. A
+ * finite set cannot hold every prime. Anything else is undecided.
+ */
+function primesSubsetOf(
+  _self: Expression,
+  other: Expression,
+  strict: boolean
+): boolean | undefined {
+  if (isSymbol(other) && other.symbol === 'Primes') return !strict;
+  const target = typeSaturatedShape(other);
+  if (target === undefined)
+    return other.isFiniteCollection === true ? false : undefined;
+  return shapeIncludedIn(PRIMES_SHAPE, target);
 }
 
 function* unionIterator(

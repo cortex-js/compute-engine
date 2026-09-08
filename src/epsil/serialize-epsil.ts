@@ -1739,16 +1739,27 @@ export function serializeEpsil(
     return `(${parts.join(', ')})`;
   };
 
+  /** A REST parameter — `["Spread", symbol]`, written `...rest`. Only the last
+   * parameter of a list may be one, and it must hold exactly one symbol; any
+   * other `Spread` operand has no parameter-list spelling. */
+  const isRestParam = (p: MathJsonExpression): boolean =>
+    operator(p) === 'Spread' && nops(p) === 1 && symbol(operand(p, 1)) !== null;
+
   /** Does every parameter in the list have a spelling? A destructuring pattern
    * whose leaves are not all names (reachable from raw MathJSON, never from
    * the parser) has none, and `serializeParam` would emit it as an empty slot,
    * so a parameter list containing one cannot be reconstructed at all: the
-   * caller falls back to the generic `Function(…)` call form. */
+   * caller falls back to the generic `Function(…)` call form. An ill-formed
+   * rest parameter — a `Spread` of something other than one symbol, or one
+   * that is not last — has no spelling for the same reason. */
   const paramsAreSpellable = (params: readonly MathJsonExpression[]): boolean =>
-    params.every(
-      (p) =>
+    params.every((p, i) => {
+      if (operator(p) === 'Spread')
+        return isRestParam(p) && i === params.length - 1;
+      return (
         operator(p) !== 'Tuple' || serializeDestructuringPattern(p) !== null
-    );
+      );
+    });
 
   const serializeParam = (
     p: MathJsonExpression,
@@ -1761,6 +1772,10 @@ export function serializeEpsil(
     // makes the doubled spelling that distinguishes it from two parameters.
     if (operator(p) === 'Tuple')
       return fmt.text(serializeDestructuringPattern(p) ?? '');
+    // A REST parameter — `(a, ...rest) => …`. It carries no annotation, so it
+    // is spelled from its name alone.
+    if (isRestParam(p))
+      return fmt.text(`...${escapeSymbol(symbol(operand(p, 1))!)}`);
     const typed = operator(p) === 'Typed';
     const nameSym = typed ? symbol(operand(p, 1)) : symbol(p);
     // A BARE operand at a quantified position carries no type of its own (it
@@ -1837,7 +1852,12 @@ export function serializeEpsil(
     // carrying one takes the arrow spelling even with no annotation
     // anywhere.
     const destructuring = params.some((p) => operator(p) === 'Tuple');
-    if (!hasTypedParam && !hasReturn && !destructuring)
+    // A REST parameter takes the arrow spelling for the same reason a
+    // destructuring one does: `Function(body, ...rest)` re-parses correctly
+    // but reads as a call whose argument list was spliced, while
+    // `(...rest) => body` says what the literal is.
+    const rest = params.some((p) => operator(p) === 'Spread');
+    if (!hasTypedParam && !hasReturn && !destructuring && !rest)
       return serializeGenericFunction(expr);
     // A plain return-type ascription has no anonymous-mapsto spelling; drop
     // it (the body is serialized without the ascription), as LaTeX and

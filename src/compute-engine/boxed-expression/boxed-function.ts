@@ -135,6 +135,7 @@ import {
   widenCellsWithMarker,
   widenNumericCellsWithNan,
   widenWithNan,
+  signatureSlotType,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
@@ -722,7 +723,6 @@ export class BoxedFunction
     inferenceMode?: 'narrow' | 'widen' | 'replace'
   ): boolean {
     const def = this.operatorDefinition;
-    if (!def) return false;
 
     // Inside a resolve-only region (`ce._resolveOnly()`: partial forms,
     // serialization) a read must not write inference onto a definition —
@@ -742,7 +742,7 @@ export class BoxedFunction
     // must stay true after a `forget()`. When no operand takes a write, the
     // call falls through to the inferred-signature narrowing below, so an
     // operator that has both mechanisms loses neither.
-    const inferOperandTypes = def.inferOperandTypes;
+    const inferOperandTypes = def?.inferOperandTypes;
     if (
       inferOperandTypes !== undefined &&
       (inferenceMode ?? 'narrow') === 'narrow'
@@ -763,7 +763,53 @@ export class BoxedFunction
       if (written) return true;
     }
 
-    if (!def.inferredSignature) return false;
+    // A GENERIC head with no `inferOperandTypes` hook forwards a requirement
+    // on its result to the operands typed by the SAME type variable: for
+    // `f: (T) -> T where T: number | function`, a use of `f(u)` that requires
+    // a number (`f(u) + 1`) means `T` is a number there, so `u` is one.
+    // Without this, `u` kept the whole bound as its inferred type, and only a
+    // direct numeric use of `u` narrowed it. A requirement that is itself a
+    // function type is dropped by `operandRequirement`, as everywhere.
+    // The head is either an OPERATOR (a library or user operator definition)
+    // or a SYMBOL holding a function value (`ce.declare('f', '(T) -> T …')`),
+    // whose signature is its declared type — or its held value's type when
+    // the declaration is a bare `function`, the rule the type derivation
+    // applies to such a head.
+    const headSignature = (): Type | undefined => {
+      if (def !== undefined) return def.signature.type;
+      const vd = this.valueDefinition;
+      if (vd === undefined) return undefined;
+      const declared = vd.type.type;
+      return isWildcardFunctionType(declared)
+        ? (vd.value?.type.type ?? declared)
+        : declared;
+    };
+    const sig = headSignature();
+    if (
+      inferOperandTypes === undefined &&
+      (inferenceMode ?? 'narrow') === 'narrow' &&
+      sig !== undefined &&
+      isSignatureType(sig)
+    ) {
+      const r = sig.result;
+      if (typeof r !== 'string' && r.kind === 'variable') {
+        const written = this.engine._withoutFacts(() => {
+          const requirement = operandRequirement(t());
+          if (requirement === undefined) return false;
+          let any = false;
+          this._ops.forEach((op, i) => {
+            const pt = signatureSlotType(sig, i);
+            if (pt === undefined || typeof pt === 'string') return;
+            if (pt.kind !== 'variable' || pt.name !== r.name) return;
+            if (op._infer(() => requirement)) any = true;
+          });
+          return any;
+        });
+        if (written) return true;
+      }
+    }
+
+    if (!def || !def.inferredSignature) return false;
 
     // The caller's type computation, the incumbent signature read and the
     // narrow/widen all run with the assumptions hidden: the result is stored
@@ -3643,6 +3689,15 @@ export class BoxedFunction
    * non-tuple value (only tuples spread — a `List` does not).
    */
   private _spliceSpreadOps(): ReadonlyArray<Expression> | Expression | null {
+    // A `Function` literal has no argument list: its operands are the body
+    // and the PARAMETERS, and a `Spread` among them is a REST PARAMETER
+    // (`(a, ...rest) => …`) — the name the application binds a tuple to.
+    // Splicing it would evaluate that name and replace the parameter with
+    // whatever a same-named symbol holds where the literal happens to be
+    // evaluated. A literal is evaluated as the callee operand of the call
+    // that applies it, so an inner rest parameter stopped shadowing an outer
+    // one of the same name.
+    if (this._operator === 'Function') return null;
     if (!this._ops.some((x) => x.operator === 'Spread')) return null;
     const spliced: Expression[] = [];
     for (let i = 0; i < this._ops.length; i++) {

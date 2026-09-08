@@ -7308,13 +7308,33 @@ export class Parser {
       const pops = fnOps(p);
       return pops !== null && pops[0] === 'Tuple';
     };
-    // The name a plain parameter binds: a bare symbol, or the symbol inside a
-    // `["Typed", sym, type]` annotation.
+    // A REST parameter `...rest`, carried from the parameter list as
+    // `["Spread", symbol]`. It binds one name to a tuple of every argument
+    // from its own position onwards, so it is only meaningful LAST; the
+    // caller checks the position and this predicate checks the shape.
+    const isRest = (p: MathJsonExpression): boolean => {
+      const pops = fnOps(p);
+      return (
+        pops !== null &&
+        pops[0] === 'Spread' &&
+        pops.length === 2 &&
+        symbolNameOf(pops[1]) !== null
+      );
+    };
+    const isSpread = (p: MathJsonExpression): boolean =>
+      fnOps(p)?.[0] === 'Spread';
+    // The name a plain parameter binds: a bare symbol, the symbol inside a
+    // `["Typed", sym, type]` annotation, or the symbol inside a rest
+    // parameter's `["Spread", …]` wrapper.
     const boundName = (p: MathJsonExpression): string | null => {
       const s = symbolNameOf(p);
       if (s !== null) return s;
       const pops = fnOps(p);
-      if (pops !== null && pops[0] === 'Typed' && pops[1] !== undefined)
+      if (
+        pops !== null &&
+        (pops[0] === 'Typed' || pops[0] === 'Spread') &&
+        pops[1] !== undefined
+      )
         return symbolNameOf(pops[1]);
       return null;
     };
@@ -7360,6 +7380,15 @@ export class Parser {
       const params: MathJsonExpression[] = [];
       for (const [i, p] of listOps.entries()) {
         if (duplicates.has(i)) continue;
+        if (isSpread(p)) {
+          // A rest parameter takes every remaining argument, so a parameter
+          // written after it could never receive one. Reject the spread in
+          // that position instead of the parameters that follow it: the
+          // spread is the one operand that has to move.
+          if (isRest(p) && i === listOps.length - 1) params.push(p);
+          else emit(p);
+          continue;
+        }
         if (isTuple(p)) {
           if (this.checkDestructuringPattern(p, names)) params.push(p);
         } else if (isParam(p)) params.push(p);
@@ -7370,6 +7399,13 @@ export class Parser {
 
     if (isTuple(left))
       return this.checkDestructuringPattern(left, names) ? [left] : [];
+
+    // `(...rest) => …` — a lambda whose only parameter is the rest parameter.
+    if (isSpread(left)) {
+      if (isRest(left)) return [left];
+      emit(left);
+      return [];
+    }
 
     if (isParam(left)) return [left];
 
@@ -7458,14 +7494,31 @@ export class Parser {
         symbolNameOf(pops[1]) !== null
       );
     };
+    // A rest parameter `...rest`, which only a parameter list can hold: a
+    // `Spread` reaches a `->` operand solely because
+    // `parseParenthesizedBody` admits one for the mapsto list. Without this
+    // arm `(a, ...rest) -> a` produced a silent `KeyValuePair` — neither the
+    // wrong-arrow diagnostic nor a lambda.
+    const isRestParam = (p: MathJsonExpression): boolean => {
+      const pops = fnOps(p);
+      return (
+        pops !== null &&
+        pops[0] === 'Spread' &&
+        pops.length === 2 &&
+        symbolNameOf(pops[1]) !== null
+      );
+    };
     const ops = fnOps(left);
     if (ops !== null && ops[0] === 'Typed') return isTypedParam(left);
+    if (isRestParam(left)) return true;
     // An empty Tuple only ever comes from a `()` parameter list, so it
     // qualifies vacuously (`() -> 42`).
     if (ops !== null && ops[0] === 'Tuple')
       return ops
         .slice(1)
-        .every((p) => symbolNameOf(p) !== null || isTypedParam(p));
+        .every(
+          (p) => symbolNameOf(p) !== null || isTypedParam(p) || isRestParam(p)
+        );
     if (symbolNameOf(left) !== null) {
       const start = this.localStart(left);
       if (start === undefined) return false;
@@ -8104,10 +8157,16 @@ export class Parser {
     // Allow `bare-symbol : Type` elements so a typed mapsto parameter list
     // `(x: integer) => …` parses (a `:` has no infix parselet, so it would
     // otherwise die with `closing-bracket-expected`).
+    //
+    // Spread elements are admitted for the same reason: `(a, ...rest) => …`
+    // is a mapsto parameter list whose last parameter is a REST parameter, and
+    // `...` has no prefix parselet either. A group that turns out NOT to be a
+    // parameter list is diagnosed below, exactly as a stray annotation is.
     const { values, open, end, typed } = this.parseBracketedList(
       'CLOSE_PAREN',
       ')',
-      true
+      true,
+      /* allowSpread */ true
     );
 
     if (values.length === 0) {
@@ -8122,6 +8181,23 @@ export class Parser {
       if (this.diagnostics.length === diagBefore)
         this.error(['expression-expected'], open.start, end);
       return null;
+    }
+    // A spread element is only meaningful in a mapsto parameter list, where it
+    // is the rest parameter. Anywhere else a parenthesized `...x` is a group
+    // with no reading at all — a call argument list and a collection literal
+    // parse their own spreads — so report it and drop the element.
+    if (!this.atLambdaArrow()) {
+      for (let i = values.length - 1; i >= 0; i--) {
+        if (fnOps(values[i])?.[0] !== 'Spread') continue;
+        const o = nodeOffsets(values[i]);
+        this.error(
+          ['unexpected-symbol', '...'],
+          o ? o[0] - this.baseOffset : open.start,
+          o ? o[1] - this.baseOffset : end
+        );
+        values.splice(i, 1);
+      }
+      if (values.length === 0) return null;
     }
     // A type annotation is only meaningful in a mapsto parameter list. If the
     // annotated group is not the LHS of a `=>`, it is a type annotation in an

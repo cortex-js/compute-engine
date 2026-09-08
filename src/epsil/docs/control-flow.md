@@ -303,6 +303,29 @@ arrow:
 () => 42
 ```
 
+The last parameter can be a **rest parameter**, written `...name`. It has no
+position of its own: it binds one name to a tuple of every argument after the
+parameters before it, and that tuple is empty when the call supplies none. So a
+lambda with a rest parameter accepts any number of arguments:
+
+```epsil
+(a, ...rest) => (a, rest)
+```
+
+Applied to `(1, 2, 3)` this yields `(1, (2, 3))`; applied to `(1)` it yields
+`(1, ())`. Spreading the tuple back into a call — the `...` of a call argument
+list — passes the collected arguments on unchanged, which is what a wrapper
+needs:
+
+```epsil
+(...args) => Conjugate(g(...args))
+```
+
+Only the last parameter may be a rest parameter, and it carries no type
+annotation. A rest parameter is an interpreted-only feature: `compile()`
+refuses a function that has one, because no compile target collects the
+trailing arguments.
+
 Writing `->` where a function was meant — `(x, y) -> x + y`,
 `(n: integer) -> n^2` — is a diagnosed typo: the parser suggests `=>` with a
 fixit and recovers as the intended function, so the program still runs. And

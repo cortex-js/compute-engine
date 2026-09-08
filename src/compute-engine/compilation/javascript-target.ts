@@ -9084,6 +9084,7 @@ function compileToTarget(
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
     BaseCompiler.assertNoDestructuringParams(args.slice(1));
+    BaseCompiler.assertNoRestParams(args.slice(1));
     const params = args
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');

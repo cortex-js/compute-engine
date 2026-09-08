@@ -20,16 +20,30 @@ describe('Conjugate of a function', () => {
     ce.declare('chi', 'function');
     const conj = ce.box(['Conjugate', 'chi']);
     expect(conj.isValid).toBe(true);
-    expect(conj.toString()).toBe('(x) => Conjugate(chi(x))');
+    // A bare `function` is `(any*) -> any`: the wrapper takes a rest
+    // parameter and spreads it back into the application.
+    expect(conj.json).toEqual([
+      'Function',
+      ['Block', ['Conjugate', ['Apply', 'chi', ['Spread', 'args']]]],
+      ['Spread', 'args'],
+    ]);
     expect(conj.type.matches('function')).toBe(true);
   });
 
-  it('applies to an argument as the conjugate of the value', () => {
+  it('applies to any number of arguments as the conjugate of the value', () => {
     const ce = new ComputeEngine();
     ce.declare('chi', 'function');
     ce.declare('n', 'integer');
-    const applied = ce.box(['Apply', ['Conjugate', 'chi'], 'n']).evaluate();
-    expect(applied.toString()).toBe('Conjugate(chi(n))');
+    const conj = ['Conjugate', 'chi'];
+    expect(ce.box(['Apply', conj, 'n']).evaluate().toString()).toBe(
+      'Conjugate(chi(n))'
+    );
+    expect(ce.box(['Apply', conj, 1, 2]).evaluate().toString()).toBe(
+      'Conjugate(chi(1, 2))'
+    );
+    expect(ce.box(['Apply', conj]).evaluate().toString()).toBe(
+      'Conjugate(chi())'
+    );
   });
 
   it('evaluates through a held lambda', () => {
@@ -49,6 +63,24 @@ describe('Conjugate of a function', () => {
     expect(ce.box(['Apply', conj, 1]).evaluate().toString()).toBe(
       'Conjugate(y + 1)'
     );
+  });
+
+  it('keeps the rest parameter of a literal operand', () => {
+    const ce = new ComputeEngine();
+    ce.declare('chi', 'function');
+    const conj = ce.box([
+      'Conjugate',
+      ['Function', ['Apply', 'chi', ['Spread', 'r']], ['Spread', 'r']],
+    ]);
+    expect(conj.isValid).toBe(true);
+    expect(ce.box(['Apply', conj, 5]).evaluate().json).toEqual([
+      'Conjugate',
+      ['chi', 5],
+    ]);
+    expect(ce.box(['Apply', conj, 1, 2]).evaluate().json).toEqual([
+      'Conjugate',
+      ['chi', 1, 2],
+    ]);
   });
 
   it('gives one parameter per required argument of a declared signature', () => {
@@ -74,16 +106,20 @@ describe('Conjugate of a function', () => {
     expect(ce.symbol('x').type.toString()).toBe('string');
   });
 
-  it('threads one parameter through an optional-only or variadic signature', () => {
+  it('adds a rest parameter for optional and variadic arguments', () => {
     const ce = new ComputeEngine();
     ce.declare('opt', '(integer?) -> integer');
-    ce.declare('v', '(number*) -> number');
-    expect(ce.box(['Conjugate', 'opt']).toString()).toBe(
-      '(x) => Conjugate(opt(x))'
-    );
-    expect(ce.box(['Conjugate', 'v']).toString()).toBe(
-      '(x) => Conjugate(v(x))'
-    );
+    ce.declare('v', '(complex, real*) -> complex');
+    const params = (e: ReturnType<typeof ce.box>) =>
+      e.ops!.slice(1).map((p) => p.json);
+    expect(params(ce.box(['Conjugate', 'opt']))).toEqual([['Spread', 'args']]);
+    expect(params(ce.box(['Conjugate', 'v']))).toEqual([
+      'x',
+      ['Spread', 'args'],
+    ]);
+    expect(
+      ce.box(['Apply', ['Conjugate', 'v'], 'a', 1, 2]).evaluate().json
+    ).toEqual(['Conjugate', ['v', 'a', 1, 2]]);
   });
 
   it('is accepted where a function-typed argument is expected', () => {

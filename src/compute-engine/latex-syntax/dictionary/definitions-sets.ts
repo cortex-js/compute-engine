@@ -493,6 +493,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
   { name: 'Integers', standaloneSymbol: true, latexTrigger: ['\\Z'] },
   { latexTrigger: '\\mathbb{Z}', parse: 'Integers' },
+  { name: 'Primes', standaloneSymbol: true, latexTrigger: ['\\mathbb{P}'] },
   { name: 'RationalNumbers', standaloneSymbol: true, latexTrigger: ['\\Q'] },
   { latexTrigger: '\\mathbb{Q}', parse: 'RationalNumbers' },
   { name: 'RealNumbers', standaloneSymbol: true, latexTrigger: ['\\R'] },

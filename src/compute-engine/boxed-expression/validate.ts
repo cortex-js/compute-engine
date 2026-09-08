@@ -24,6 +24,7 @@ import {
   overlapsForDeferredValidation,
   resolveTypeAlias,
   stripMissingFromType,
+  signatureSlotType,
 } from '../../common/type/utils.js';
 import {
   diagnoseNoMatch,
@@ -229,6 +230,56 @@ export function inferNumericArgs(
  *
  * Converts the arguments to canonical, and flattens the sequence.
  */
+/**
+ * Post-handler inference for a GENERIC numeric parameter.
+ *
+ * The boxing seam re-validates the same-head result of a canonical handler
+ * with inference switched off, and then runs `inferNumericArgs` only when
+ * every parameter is a concrete numeric type (`allParamsNumeric`, `box.ts`).
+ * A parameter that is a type VARIABLE with a numeric bound — `(T) -> T where
+ * T: number` — is not concrete, so a canonical-handler head with such a
+ * signature inferred nothing for a valueless operand: `Conjugate(z)` left
+ * `z` `unknown` the moment `Conjugate` gained a handler, where the
+ * handler-less path had narrowed `z` to the bound. This is that narrowing:
+ * each operand at a slot whose parameter is a type variable bounded by a
+ * subtype of `number` is narrowed to the bound, exactly as the handler-less
+ * path narrows it (`inferenceTypeAt` in `validateArguments` grounds the
+ * variable to its bound). Collection operands narrow their elements, as
+ * `inferNumericArgs` does. Fact-blind, since the written type outlives the
+ * assumptions in force.
+ */
+export function inferGenericBoundArgs(
+  ce: ComputeEngine,
+  signature: Type,
+  ops: ReadonlyArray<Expression>
+): void {
+  if (typeof signature === 'string' || signature.kind !== 'signature') return;
+  const bounds = new Map<string, Type>();
+  for (const v of signature.typeParams ?? [])
+    if (v.bound !== undefined && isSubtype(v.bound, 'number'))
+      bounds.set(v.name, v.bound);
+  if (bounds.size === 0) return;
+  const boundAt = (i: number): Type | undefined => {
+    const t = signatureSlotType(signature, i);
+    if (t === undefined || typeof t === 'string' || t.kind !== 'variable')
+      return undefined;
+    return bounds.get(t.name);
+  };
+  ce._withoutFacts(() => {
+    ops.forEach((x, i) => {
+      const bound = boundAt(i);
+      if (bound === undefined) return;
+      if (isFiniteIndexedCollection(x)) {
+        if (x.isLazyCollection) return;
+        for (const y of x.each())
+          if (!excludedFromScalarInference(y)) y._infer(() => bound);
+      } else if (!excludedFromScalarInference(x)) {
+        x._infer(() => bound);
+      }
+    });
+  });
+}
+
 export function checkArity(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
