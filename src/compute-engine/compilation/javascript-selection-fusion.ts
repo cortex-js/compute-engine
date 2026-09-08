@@ -86,14 +86,22 @@ export function compileNumericSelection(
       // numeric arrays of one length, so a declared `indexed_collection`
       // bound to anything else takes the generic selection. Gating on the
       // `list` kind alone left an `indexed_collection<number>` carrier on
-      // the generic path (Tycho item 266's neighbour, found 2026-09-07).
+      // the generic path (found 2026-09-07 from Tycho's adoption report).
+      // A carrier declared WITHOUT an element type — the bare `list` or
+      // `indexed_collection`, whose elements are `unknown` — qualifies too:
+      // the declaration does not prove numeric cells, but the runtime guard
+      // establishes them on every call, and a non-numeric cell takes the
+      // generic selection. A bare kind is a common declaration for a
+      // document's lists, and refusing it left those on the generic path.
       const type = resolveTypeForCompilation(expr.type.type);
+      const kind = typeof type === 'string' ? type : type.kind;
       const element = collectionElementType(type);
       const array =
-        typeof type === 'object' &&
-        (type.kind === 'list' || type.kind === 'indexed_collection') &&
+        (kind === 'list' || kind === 'indexed_collection') &&
         element !== undefined &&
-        isSubtype(element, 'number');
+        (isSubtype(element, 'number') ||
+          element === 'unknown' ||
+          element === 'any');
       if (!array && !isSubtype(type, 'number')) return undefined;
       value = { expr, kind: 'input', array, args: [] };
     } else if (isFunction(expr) && !isCallerMapped(expr, options)) {

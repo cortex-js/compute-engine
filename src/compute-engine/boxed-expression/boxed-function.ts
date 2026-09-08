@@ -35,6 +35,7 @@ import { typeHandlerContext } from './derive-application-type.js';
 import {
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
+  isTupleShapedType,
   isBroadcastableCollection,
   isBroadcastCollectionType,
   isDrawFreeBroadcast,
@@ -103,10 +104,11 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
 import { internType, isInternedType } from '../../common/type/intern.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, resolveTypeReference } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
 import { numericStoreTiers } from './literal-tier.js';
 import { machineNumberOf } from './machine-number.js';
@@ -4155,10 +4157,10 @@ export class BoxedFunction
       // Note: tuples are excluded (`!isTuple`) — a `Tuple` is an atomic value
       // (a point/vector), bound whole to the parameter, never mapped over.
       //
+      const scalarUserFunction = isUserFunctionDef(def) && paramsAreScalar(def);
       const lambdaElementwise =
-        isUserFunctionDef(def) &&
-        this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        paramsAreScalar(def);
+        scalarUserFunction &&
+        this.ops!.some((x) => isFiniteBroadcastParticipant(x));
       // Same veto as step 2, for the lambda arm: a collection-TYPED operand
       // with no value yet must not be bound as a per-element scalar. Unlike
       // step 2 this arm HOLDS rather than falling through, because falling
@@ -4168,9 +4170,25 @@ export class BoxedFunction
       // re-evaluates to the tuple of lists `([1,2], [10,20])` once
       // `s := [10, 20]`, where a fresh call zips to the point list
       // `[(1, 10), (2, 20)]`.
+      // The hold does not need a sibling that already HAS a collection value:
+      // with `h(n: integer) = n + 1` and a valueless `xs: list<integer>`,
+      // `h(xs)` alone was applied to the symbol and refused by argument
+      // validation as `incompatible-type` (or by clause dispatch as
+      // `no-matching-clause`), where the argument maps element-wise as soon
+      // as it has a value. The honest answer is the held application, which
+      // a later evaluation broadcasts once `xs` is assigned.
+      // Only a SYMBOL with no value is held on that ground
+      // (`isValuelessCollectionSymbol`): an operand that merely becomes a
+      // collection when evaluated (`k(lst(3))`) is left to the
+      // post-evaluation broadcast (step 4b), and a symbol that holds a
+      // scalar under a `number | list<number>` declaration applies at once.
       if (
-        lambdaElementwise &&
-        hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection)
+        (lambdaElementwise &&
+          hasUnresolvedCollectionOperand(
+            this.ops!,
+            isBroadcastableCollection
+          )) ||
+        (scalarUserFunction && this.ops!.some(isValuelessCollectionSymbol))
       ) {
         // A length disagreement among the operands that DO have values is
         // DEFINITE — no assignment to the unresolved one can reconcile 2
@@ -4973,18 +4991,34 @@ export class BoxedFunction
       // 2b/ Broadcast user-defined function literals over indexed collections.
       // Mirrors the sync path in `_computeValue`.
       //
+      const scalarUserFunction = isUserFunctionDef(def) && paramsAreScalar(def);
       const lambdaElementwise =
-        isUserFunctionDef(def) &&
-        this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
-        paramsAreScalar(def);
+        scalarUserFunction &&
+        this.ops!.some((x) => isFiniteBroadcastParticipant(x));
       // The veto and the hold of the sync step 2b, unchanged — a collection-
       // TYPED operand with no value yet must not be bound as a per-element
       // scalar, and declining alone would let the lambda be applied to the
       // whole operands and its body inlined, which is the same capture one rank
       // up.
+      // The hold does not need a sibling that already HAS a collection value:
+      // with `h(n: integer) = n + 1` and a valueless `xs: list<integer>`,
+      // `h(xs)` alone was applied to the symbol and refused by argument
+      // validation as `incompatible-type` (or by clause dispatch as
+      // `no-matching-clause`), where the argument maps element-wise as soon
+      // as it has a value. The honest answer is the held application, which
+      // a later evaluation broadcasts once `xs` is assigned.
+      // Only a SYMBOL with no value is held on that ground
+      // (`isValuelessCollectionSymbol`): an operand that merely becomes a
+      // collection when evaluated (`k(lst(3))`) is left to the
+      // post-evaluation broadcast (step 4b), and a symbol that holds a
+      // scalar under a `number | list<number>` declaration applies at once.
       if (
-        lambdaElementwise &&
-        hasUnresolvedCollectionOperand(this.ops!, isBroadcastableCollection)
+        (lambdaElementwise &&
+          hasUnresolvedCollectionOperand(
+            this.ops!,
+            isBroadcastableCollection
+          )) ||
+        (scalarUserFunction && this.ops!.some(isValuelessCollectionSymbol))
       ) {
         const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
         if (mismatch) return mismatch;
@@ -7385,6 +7419,42 @@ function operandRequirement(t: Type): Type | undefined {
     return undefined;
   if (isSubtype(r, 'function')) return undefined;
   return r;
+}
+
+/**
+ * A symbol declared with an indexed-collection type that has no value yet,
+ * such as `xs` after `ce.declare('xs', 'list<integer>')`. A user function
+ * with scalar parameters applied to such a symbol is HELD by steps 2b of
+ * `_computeValue` and of its asynchronous twin: the argument maps
+ * element-wise as soon as it has a value, so neither an `incompatible-type`
+ * refusal nor an inlined body is an honest answer before then.
+ *
+ * The shape rule is the one the value-side broadcast applies
+ * (`isFiniteBroadcastParticipant`): an indexed collection — a list, with or
+ * without a fixed shape, an indexed collection, a range — that is neither a
+ * tuple (a point, bound whole to the parameter) nor text (atomic under
+ * broadcast). A set- or dictionary-typed symbol is never mapped over, so it
+ * is not held and is refused now, as it would be with a value.
+ *
+ * A symbol whose value is another symbol carries no value of its own until
+ * that symbol has one (`xs := ys` with `ys` declared but unassigned), so the
+ * chain is followed; a symbol that already holds a value is decided on that
+ * value.
+ */
+function isValuelessCollectionSymbol(x: Expression): boolean {
+  if (!isSymbol(x) || x.isCollection) return false;
+  if (!x.type.matches(INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+  const t = x.type.type;
+  const resolved = resolveTypeReference(t) ?? t;
+  if (isTupleShapedType(resolved) || isSubtype(resolved, 'string'))
+    return false;
+  const seen = new Set<string>([x.symbol]);
+  let v = x.value;
+  while (v !== undefined && isSymbol(v) && !seen.has(v.symbol)) {
+    seen.add(v.symbol);
+    v = v.value;
+  }
+  return v === undefined || isSymbol(v);
 }
 
 export function paramsAreScalar(

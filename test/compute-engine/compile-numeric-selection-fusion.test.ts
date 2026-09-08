@@ -282,17 +282,22 @@ describe('numeric selection fusion — carrier declarations', () => {
   // as a JS array (`isListEntryType`); the fusion gate must agree, or a
   // consumer that declares its lists `indexed_collection` stays on the
   // generic selection with no visible reason.
-  test.each(['list<number>', 'list<integer>', 'indexed_collection<number>'])(
-    'a carrier declared %s fuses',
-    (type) => {
-      const { fused, original } = pair(life, { S: type });
-      expect(fused.code).toContain('_SYS.numericSelectionInputs(');
-      for (const size of [1, 5, 25]) {
-        const S = Array.from({ length: size }, (_, i) => (i % 7 < 3 ? 1 : 0));
-        expect(fused.run!({ S })).toEqual(original.run!({ S }));
-      }
+  test.each([
+    'list<number>',
+    'list<integer>',
+    'indexed_collection<number>',
+    // A bare kind declares `unknown` elements: the runtime guard, not the
+    // declaration, establishes numeric cells.
+    'list',
+    'indexed_collection',
+  ])('a carrier declared %s fuses', (type) => {
+    const { fused, original } = pair(life, { S: type });
+    expect(fused.code).toContain('_SYS.numericSelectionInputs(');
+    for (const size of [1, 5, 25]) {
+      const S = Array.from({ length: size }, (_, i) => (i % 7 < 3 ? 1 : 0));
+      expect(fused.run!({ S })).toEqual(original.run!({ S }));
     }
-  );
+  });
 
   test('an empty carrier takes the generic selection', () => {
     const { fused, original } = pair(life, { S: 'indexed_collection<number>' });

@@ -226,33 +226,6 @@ statements still reaches the synchronous handler unawaited. Closing this needs
 an asynchronous reduction of those operators' own. Pins for the covered shapes
 are in `test/compute-engine/async-only-held-operand.test.ts`.
 
-### A typed scalar user function applied to a VALUELESS collection-typed symbol is an error, not a held call (OPEN, evaluation — found 2026-09-05 while fixing the multi-clause broadcast flag)
-
-With `xs: list<integer>` declared but not assigned, `g(n) = n + 1; g(xs)` is
-held as `xs + 1` and evaluates to `[2, 3]` once `xs = [1, 2]`. The same call
-against a TYPED scalar parameter is an error value instead: `g(n: integer) =
-n + 1; g(xs)` is `incompatible-type: expected integer, got list<integer>`
-(refused by argument validation at the call, `validateArguments` in
-`box.ts`), and the multi-clause spelling `g(0) = 0; g(n: integer) = n + 1;
-g(xs)` is `no-matching-clause` (validation admits the operand because the
-definition is now `broadcastable`, and clause dispatch in `multi-clause.ts`
-then refutes `list<integer>` against `integer`). Both answers are committed
-too early: the argument will map element-wise as soon as it has a value, so
-the honest answer is the held application, as the untyped routes give. A
-FRESH call after the assignment is correct on every route (`[2, 3]`); only a
-call boxed before the assignment is affected.
-
-- The fix belongs in the seam and the selector together: a collection-typed
-  operand with no value at a threadable scalar slot should be HELD, the way
-  step 2b of `_computeValue` (`boxed-function.ts`) already holds a valueless
-  collection-typed operand when a sibling operand is a finite collection
-  (`hasUnresolvedCollectionOperand`), and `triStateSelect` should answer
-  `blocked` rather than `none` for such an operand.
-- Measure the blast radius first: no test pins the valueless-symbol case today
-  (checked 2026-09-05), but `test/compute-engine/broadcastable-param-declaration.test.ts`
-  pins `incompatible-type` for a collection whose ELEMENTS violate the
-  parameter type, and that answer must survive.
-
 ### Open items from the undecided-condition ruling (2026-09-02)
 
 The ruling ("a compiled `If`/`Which` whose condition is not exactly `true` or
@@ -4060,6 +4033,20 @@ is in git history. The only items deliberately left open:
 recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
+
+### One Python-target pin is red at HEAD since the symbol-square sharing landed (OPEN, ruling — found 2026-09-07 by a blast-radius run)
+
+`test/compute-engine/compile-python.test.ts` ("should compile rational
+expressions") pins `(x ** 2 + 1) / (x ** 2 + -1)` and receives
+`[(_cse1 + 1) / (_cse1 + -1) for _cse1 in [x ** 2]][0]` at `883a6b99`: the
+symbol-square sharing of 0.126.0 now harvests the repeated `x ** 2` on the
+Python target too, and the Python target spells a shared value as a one-element
+comprehension (its established let-binding form, pinned in
+`compile-cse.test.ts`). Two readings: (a) the pin is stale and should record
+the shared form — sharing a repeated square is the feature; (b) a bare symbol
+square is too cheap to share on Python, where the comprehension costs a list
+allocation, so the harvest should exempt it there as the JavaScript target
+handles it with a helper. If nothing is decided, the pin stays red.
 
 ### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
 

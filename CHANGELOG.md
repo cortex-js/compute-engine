@@ -1,3 +1,32 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A user function applied to a collection-typed symbol that has no value
+  yet is held, not refused.** With `xs: list<integer>` declared but not
+  assigned, `h(n: integer) = n + 1; h(xs)` evaluated to `incompatible-type`
+  (a multi-clause definition to `no-matching-clause`), where the argument
+  maps element-wise as soon as it has a value. The call now evaluates to
+  itself, `h(xs)`, and to `[2, 3]` once `xs = [1, 2]`, on the box, parse and
+  clause routes alike. An untyped parameter is held the same way instead of
+  inlining the body: `pair(n) = (n, n); pair(xs)` used to become `(xs, xs)`,
+  which re-evaluated to a tuple of lists where a fresh call zips to a list of
+  tuples. The hold follows the broadcast's own shape rule: a list (fixed
+  shape or not), an indexed collection or a range qualifies, and a symbol
+  aliased to such a symbol (`xs := ys`, both unassigned) is held too; a
+  tuple-typed or string-typed symbol is bound whole and applies at once, and
+  a set- or dictionary-typed one is refused now, as it would be with a value.
+  A parameter declared as a collection still binds the symbol whole, and a
+  list whose elements violate the parameter type is still refused once it
+  has a value.
+- **The fused single-loop selection (`javascript` target) admits a carrier
+  declared with a bare `list` or `indexed_collection`.** The 0.126.1 gate
+  required an element type inside `number`, so a symbol declared `list` or
+  `indexed_collection` with no element type stayed on the generic selection.
+  The declaration does not prove numeric cells, but the runtime guard
+  establishes them on every call and a non-numeric cell takes the generic
+  path, so the bare kinds qualify.
+
 ## 0.126.1 _2026-09-07_
 
 ### Resolved Issues
