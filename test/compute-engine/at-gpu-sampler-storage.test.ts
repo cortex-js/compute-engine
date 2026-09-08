@@ -298,30 +298,64 @@ describe('GLSL sampler-backed At — the carrier type', () => {
 // ---------------------------------------------------------------------------
 // 3. What a sampler-backed name may NOT do on the shader targets.
 // ---------------------------------------------------------------------------
-describe('GLSL sampler-backed At — declines that name the storage kind', () => {
-  test('a static (literal) index is not lowered in this version', () => {
+describe('sampler-backed At — the static-index and gather tiers read texels', () => {
+  test('a static (literal) index is the same guarded read with a literal index', () => {
+    // The array form folds to a subscript; a texture has no compile-time
+    // coordinate (its width is read at run time), so the read stays a call.
     const ce = boardEngine();
     expect(glsl.compile(ce.box(['At', 'S', 3]), NO_FOLD).code).toBe('S[2]');
-    const m = message(() =>
-      glsl.compile(ce.box(['At', 'S', 3]), { ...NO_FOLD, ...SAMPLER })
-    );
-    expect(m).toMatch(/sampler2D-backed/);
-    expect(m).toMatch(/static \(literal\) index/);
-    expect(m).toMatch(/not lowered in this version/);
+    expect(
+      glsl.compile(ce.box(['At', 'S', 3]), { ...NO_FOLD, ...SAMPLER }).code
+    ).toBe('_gpu_texat1600(S, 3.0)');
+    expect(
+      glsl.compile(ce.box(['At', 'S', -1]), { ...NO_FOLD, ...SAMPLER }).code
+    ).toBe('_gpu_texat1600(S, -1.0)');
+    // An out-of-range or zero literal folds to the NaN spelling, as it does
+    // for the array form: the base is a symbol, so nothing is discarded.
+    expect(
+      glsl.compile(ce.box(['At', 'S', 0]), { ...NO_FOLD, ...SAMPLER }).code
+    ).toBe('_gpu_nan()');
+    expect(
+      glsl.compile(ce.box(['At', 'S', 2000]), { ...NO_FOLD, ...SAMPLER }).code
+    ).toBe('_gpu_nan()');
   });
 
-  test('a gather and a mask are not lowered in this version', () => {
+  test('a gather is a vector of one guarded read per slot; a mask likewise', () => {
     const ce = boardEngine();
-    for (const index of [
-      ['List', 1, 3],
-      ['List', 'k', 3],
-    ]) {
-      const m = message(() =>
-        glsl.compile(ce.box(['At', 'S', index]), { ...NO_FOLD, ...SAMPLER })
-      );
-      expect(m).toMatch(/sampler2D-backed/);
-      expect(m).toMatch(/gather or mask/);
-    }
+    expect(
+      glsl.compile(ce.box(['At', 'S', ['List', 1, 3]]), {
+        ...NO_FOLD,
+        ...SAMPLER,
+      }).code
+    ).toBe('vec2(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0))');
+    // A negative entry counts from the end; the helper takes the 1-based
+    // index, so the resolved slot is re-spelled 1-based.
+    expect(
+      glsl.compile(ce.box(['At', 'S', ['List', 1, -1, 2, 4]]), {
+        ...NO_FOLD,
+        ...SAMPLER,
+      }).code
+    ).toBe(
+      'vec4(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 1600.0), ' +
+        '_gpu_texat1600(S, 2.0), _gpu_texat1600(S, 4.0))'
+    );
+    // An out-of-range slot is the NaN component, as in the array form.
+    expect(
+      glsl.compile(ce.box(['At', 'S', ['List', 1, 3, 5000]]), {
+        ...NO_FOLD,
+        ...SAMPLER,
+      }).code
+    ).toBe('vec3(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0), _gpu_nan())');
+    // A gather with a runtime-valued entry keeps the array form's decline:
+    // it is a missing tier of the gather, not of the storage kind.
+    const m = message(() =>
+      glsl.compile(ce.box(['At', 'S', ['List', 'k', 3]]), {
+        ...NO_FOLD,
+        ...SAMPLER,
+      })
+    );
+    expect(m).toMatch(/DYNAMIC gather/);
+    expect(m).not.toMatch(/sampler2D-backed/);
   });
 
   test('a reference outside a positional read fails closed, naming the kind', () => {
@@ -354,25 +388,137 @@ describe('GLSL sampler-backed At — declines that name the storage kind', () =>
     expect(m).toMatch(/`S` is sampler2D-backed/);
   });
 
-  test('the WGSL target declines the read, naming the per-binding helper it lacks', () => {
-    const ce = boardEngine();
-    expect(wgsl.compile(read(ce), NO_FOLD).code).toBe('_gpu_at1600(S, k)');
-    const m = message(() => wgsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER }));
-    expect(m).toMatch(/sampler2D-backed/);
-    expect(m).toMatch(/wgsl target has no texture read yet/);
-    expect(m).toMatch(/per binding name/);
-    // The whole-value gate applies on WGSL as well.
-    expect(
-      message(() => wgsl.compile(ce.box('S'), { ...NO_FOLD, ...SAMPLER }))
-    ).toMatch(/`S` is sampler2D-backed/);
-  });
-
   test('`compileToSource()` refuses the option: it has no preamble channel', () => {
     const ce = boardEngine();
     expect(glsl.compileToSource(read(ce), NO_FOLD)).toBe('_gpu_at1600(S, k)');
     expect(() =>
       glsl.compileToSource(read(ce), { ...NO_FOLD, ...SAMPLER })
     ).toThrow(/compileToSource\(\) does not support the `storage` option/);
+  });
+});
+
+describe('WGSL sampler-backed At — the per-binding texel read', () => {
+  test('the read is a call of a helper generated per BINDING, not per length', () => {
+    const ce = boardEngine();
+    expect(wgsl.compile(read(ce), NO_FOLD).code).toBe('_gpu_at1600(S, k)');
+    const r = wgsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER });
+    expect(r.code).toBe('_gpu_texat_S_1600(k)');
+    expect(r.preamble).toContain('fn _gpu_texat_S_1600(_gpu_i: f32) -> f32 {');
+  });
+
+  test('the helper body: guard, 0-based slot, run-time width, bare texture load', () => {
+    const ce = boardEngine();
+    const { preamble } = wgsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER });
+    const body = preamble.slice(preamble.indexOf('fn _gpu_texat_S_1600('));
+    // The texture is named directly: a WGSL texture cannot be a parameter.
+    expect(body).toContain('let _gpu_w = i32(textureDimensions(S, 0).x);');
+    expect(body).toContain(
+      'return textureLoad(S, vec2i(_gpu_k % _gpu_w, _gpu_k / _gpu_w), 0).r;'
+    );
+    expect(body).toContain(
+      '_gpu_k = select(1600 + _gpu_k, _gpu_k - 1, _gpu_k > 0);'
+    );
+    expect(body).not.toContain('sampler');
+    // Same guard text as the array helper of the same length (one source);
+    // only the index variable is spelled with the reserved prefix.
+    const array = wgsl.compile(read(ce), NO_FOLD).preamble;
+    const guard = (p: string, helper: string) =>
+      /\n\s*if \((.*)\) \{\n/.exec(p.slice(p.indexOf(`fn ${helper}(`)))?.[1];
+    expect(guard(preamble, '_gpu_texat_S_1600')!.replace(/_gpu_i/g, 'i')).toBe(
+      guard(array, '_gpu_at1600')
+    );
+  });
+
+  test('a binding named like the helper locals is not shadowed', () => {
+    // The helper's parameter and locals carry the `_gpu_` prefix, so a
+    // binding named `i`, `k` or `w` is still the texture inside the body.
+    for (const name of ['i', 'k', 'w']) {
+      const ce = boardEngine();
+      const r = wgsl.compile(read(ce), {
+        ...NO_FOLD,
+        ...SAMPLER,
+        vars: { S: name, k: 'idx' },
+      });
+      expect(r.code).toBe(`_gpu_texat_${name}_1600(idx)`);
+      expect(r.preamble).toContain(`textureDimensions(${name}, 0)`);
+      expect(r.preamble).toContain(`textureLoad(${name}, vec2i(`);
+      expect(r.preamble).not.toMatch(new RegExp(`\\b(let|var) ${name}\\b`));
+    }
+  });
+
+  test('the binding is the `vars`-mapped identifier, and one helper serves every read of it', () => {
+    const ce = boardEngine();
+    const r = wgsl.compile(ce.box(['Add', ['At', 'S', 'k'], ['At', 'S', 3]]), {
+      ...NO_FOLD,
+      ...SAMPLER,
+      vars: { S: 'u_board' },
+    });
+    expect(r.code).toBe(
+      '_gpu_texat_u_board_1600(3.0) + _gpu_texat_u_board_1600(k)'
+    );
+    expect(r.preamble.match(/fn _gpu_texat_u_board_1600\(/g)).toHaveLength(1);
+    expect(r.preamble).toContain('textureDimensions(u_board, 0)');
+  });
+
+  test('a binding whose identifier carries underscores and digits is read back whole', () => {
+    const ce = boardEngine();
+    const r = wgsl.compile(read(ce), {
+      ...NO_FOLD,
+      ...SAMPLER,
+      vars: { S: 'u_board_2' },
+    });
+    expect(r.code).toBe('_gpu_texat_u_board_2_1600(k)');
+    expect(r.preamble).toContain('fn _gpu_texat_u_board_2_1600(_gpu_i: f32)');
+    expect(r.preamble).toContain('textureLoad(u_board_2, ');
+  });
+
+  test('two sampler-backed lists get two helpers; an array list keeps its own', () => {
+    const ce = engineWith({
+      S: 'list<number^1600>',
+      T: 'list<number^9>',
+      L: 'list<number^5>',
+      k: 'integer',
+    });
+    const r = wgsl.compile(
+      ce.box(['Add', ['At', 'S', 'k'], ['At', 'T', 'k'], ['At', 'L', 'k']]),
+      { ...NO_FOLD, storage: { S: 'sampler2D', T: 'sampler2D' } }
+    );
+    expect(r.code).toContain('_gpu_texat_S_1600(k)');
+    expect(r.code).toContain('_gpu_texat_T_9(k)');
+    expect(r.code).toContain('_gpu_at5(L, k)');
+    expect(r.preamble).toContain('fn _gpu_texat_S_1600(');
+    expect(r.preamble).toContain('fn _gpu_texat_T_9(');
+    expect(r.preamble).toContain('fn _gpu_at5(');
+  });
+
+  test('the static-index and gather tiers read texels on WGSL too', () => {
+    const ce = boardEngine();
+    const O = { ...NO_FOLD, ...SAMPLER };
+    expect(wgsl.compile(ce.box(['At', 'S', 3]), O).code).toBe(
+      '_gpu_texat_S_1600(3.0)'
+    );
+    expect(wgsl.compile(ce.box(['At', 'S', ['List', 1, 3]]), O).code).toBe(
+      'vec2f(_gpu_texat_S_1600(1.0), _gpu_texat_S_1600(3.0))'
+    );
+    expect(wgsl.compile(ce.box(['At', 'S', 0]), O).code).toBe(
+      'bitcast<f32>(0x7fc00000u)'
+    );
+  });
+
+  test('a `vars` mapping that is not a plain identifier declines, naming the kind', () => {
+    const ce = boardEngine();
+    const m = message(() =>
+      wgsl.compile(read(ce), { ...NO_FOLD, ...SAMPLER, vars: { S: 'u.board' } })
+    );
+    expect(m).toMatch(/sampler2D-backed/);
+    expect(m).toMatch(/not a plain identifier/);
+  });
+
+  test('the whole-value gate applies on WGSL as well', () => {
+    const ce = boardEngine();
+    expect(
+      message(() => wgsl.compile(ce.box('S'), { ...NO_FOLD, ...SAMPLER }))
+    ).toMatch(/`S` is sampler2D-backed/);
   });
 });
 

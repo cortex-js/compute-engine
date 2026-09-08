@@ -2,6 +2,20 @@
 
 ### New Features
 
+- **Sampler-backed `At` on the WGSL target, and the static-index and gather
+  tiers over a texture on both shader targets.** With the `storage` compile
+  option (`{ storage: { S: 'sampler2D' } }`) the WGSL target now lowers
+  `At(S, k)` to a helper generated per texture binding,
+  `_gpu_texat_S_1600(k)`, whose body names the module-scope texture
+  (`textureDimensions` for the width, `textureLoad` for the fetch, no
+  sampler); a `vars` mapping picks the binding identifier. On both targets a
+  literal index reads through the same guarded helper
+  (`_gpu_texat1600(S, 3.0)`; an out-of-range literal folds to NaN), and a
+  gather or mask is a vector of one guarded read per selected slot
+  (`vec2(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0))`). These tiers
+  declined before, naming the storage kind, and a consumer fell back to the
+  slower lane for them.
+
 - **Rest parameters on function literals.** The last parameter of a function
   literal can now collect every remaining argument: `(a, ...rest) => …` in
   Epsil, `["Function", body, "a", ["Spread", "rest"]]` in MathJSON. The rest

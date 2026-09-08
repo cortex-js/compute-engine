@@ -3680,19 +3680,41 @@ function compileGPUAt(
   const shape = gpuAtBaseShape(base, target);
   if ('decline' in shape) decline(shape.decline);
   const n = shape.count;
+  const isWGSL = target.language === 'wgsl';
   // The storage kind of a sampler-backed base (`storage` compile option).
-  // Such a base has ONE lowering, the dynamic-index texel read: the gather and
-  // static-index tiers below fold to subscripts and swizzles of a shader
-  // VALUE, which a texture is not, and their texel forms are not lowered in
-  // this version. They decline naming the storage kind, so the reason stays
-  // distinguishable from every value-shape decline.
+  // Such a base has no shader VALUE, so every tier reads it through the
+  // texel-fetch helper: the dynamic index as one guarded call, a static index
+  // as the same call with a literal index (the coordinate is computed at run
+  // time from the texture's width, so nothing folds to a constant), and a
+  // gather or mask as a vector constructor of one call per selected slot —
+  // where the array form folds to subscripts and swizzles.
   const storage = shape.storage;
-  const notLoweredForStorage = (what: string): never =>
-    decline(
-      `the base "${(base as Expression & { symbol: string }).symbol}" is ` +
-        `${storage}-backed (storage hint), and ${what} over a texture is not ` +
-        `lowered in this version — only a scalar runtime-valued index is`
+  // The emitted source of the sampler-backed base, computed once on first
+  // use (a gather reads it once per slot) and never on a path that folds
+  // the access to NaN without emitting the base.
+  let texAtSource: string | undefined;
+  const texAtCall = (floatIndex: string): string => {
+    texAtSource ??= gpuStorageOperandSource(
+      base as Expression & { symbol: string },
+      compile
     );
+    const src = texAtSource;
+    if (!isWGSL) return `_gpu_texat${n}(${src}, ${floatIndex})`;
+    // A WGSL texture cannot be passed to a helper the way a GLSL sampler
+    // can, so the helper is generated per BINDING: it names the module-scope
+    // texture in its body, and carries the binding identifier and the list
+    // length in its own name (`_gpu_texat_S_1600`), which is what the
+    // preamble scan reads back (`gpuTexAtBindings`). A binding is a plain
+    // identifier; a `vars` mapping to anything else has no helper name.
+    if (!/^[A-Za-z_]\w*$/.test(src))
+      decline(
+        `the base "${(base as Expression & { symbol: string }).symbol}" is ` +
+          `${storage}-backed (storage hint) and maps to \`${src}\`, which is ` +
+          `not a plain identifier; a WGSL texture is a module-scope binding ` +
+          `and the texel-read helper names it directly`
+      );
+    return `_gpu_texat_${src}_${n}(${floatIndex})`;
+  };
 
   // Evaluate-once. A shader language does not specify the evaluation ORDER of
   // a call's arguments, so two impure operands could commute between drivers.
@@ -3752,7 +3774,6 @@ function compileGPUAt(
 
   // ---- Collection index: the gather / mask tiers (design § D2) ------------
   if (isFunction(index, 'List')) {
-    if (storage !== undefined) notLoweredForStorage('a gather or mask');
     const entries = index.ops!;
     const kinds = entries.map(gpuAtEntryKind);
 
@@ -3830,6 +3851,18 @@ function compileGPUAt(
           `\`vec${w}\`, and a shader vector holds 2 to 4`
       );
 
+    // A sampler-backed base: one guarded texel read per selected slot (the
+    // base is a symbol, so pure; an out-of-range slot is the NaN spelling,
+    // as in the array form). The helper takes the 1-based index.
+    if (storage !== undefined) {
+      const ctor = isWGSL ? `vec${w}f` : `vec${w}`;
+      const parts = slots.map((slot) =>
+        slot === null
+          ? gpuNaN(target)
+          : texAtCall(formatFloat(slot + 1, target.language))
+      );
+      return `${ctor}(${parts.join(', ')})`;
+    }
     if (isLiteralBase)
       requireLiteralBaseElements(
         slots.filter((s): s is number => s !== null),
@@ -3893,18 +3926,19 @@ function compileGPUAt(
 
   // A literal real index resolves against N at compile time — zero runtime
   // cost, and `0` / out of range / non-integer / non-finite fold straight to
-  // the NaN spelling. Not over a texture: a static index cannot fold to a
+  // the NaN spelling. Over a texture an in-range index cannot fold to a
   // constant texel coordinate, because the texture width is not known at
-  // compile time (it is read at run time inside the helper) — its texel form
-  // is a fetch with a computed coordinate, which is not lowered yet.
+  // compile time (it is read at run time inside the helper): its texel form
+  // is the guarded read with the literal index.
   if (isNumber(index)) {
-    if (storage !== undefined) notLoweredForStorage('a static (literal) index');
     const j = gpuAtSlot(index.re, n);
     if (j === null) {
       // The fold emits neither operand (the index is a literal, so pure).
       requirePureFold('base');
       return gpuNaN(target);
     }
+    if (storage !== undefined)
+      return texAtCall(formatFloat(index.re, target.language));
     if (isLiteralBase) requireLiteralBaseElements([j], 'access');
     return gpuAtElement(base, j, n, compile);
   }
@@ -3980,7 +4014,6 @@ function compileGPUAt(
   // exactly once. The guard inside the helper is what makes both languages'
   // out-of-bounds rules unreachable. A caller-declared INTEGER index is
   // converted at the call site — the guard runs entirely in float space.
-  const isWGSL = target.language === 'wgsl';
   const idx = compile(index);
   const floatIdx =
     framedIndex === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
@@ -3988,20 +4021,9 @@ function compileGPUAt(
     return `_gpu_at${n}(${compile(base)}, ${floatIdx})`;
 
   // A sampler-backed base: the same call shape and the same index contract,
-  // through the texel-fetch helper. WGSL has no lowering yet: a WGSL texture
-  // cannot be an ordinary function parameter the way a GLSL sampler (or an
-  // array) can, so its helper must be generated per BINDING NAME, not per
-  // length — a different helper shape (section 5 of the plan), not a missing
-  // spelling of this one.
-  if (isWGSL)
-    decline(
-      `the base "${base.symbol}" is ` +
-        `${storage}-backed (storage hint), and the wgsl target has no texture ` +
-        `read yet — a WGSL texture cannot be passed to a helper the way a GLSL ` +
-        `sampler can, so the helper must be generated per binding name, which ` +
-        `is not lowered in this version`
-    );
-  return `_gpu_texat${n}(${gpuStorageOperandSource(base, compile)}, ${floatIdx})`;
+  // through the texel-fetch helper (`texAtCall`: per length on GLSL, per
+  // binding on WGSL).
+  return texAtCall(floatIdx);
 }
 
 /**
@@ -4124,11 +4146,12 @@ ${doc}
  */
 function gpuAtIndexGuard(
   n: number,
-  lang: 'glsl' | 'wgsl'
+  lang: 'glsl' | 'wgsl',
+  i = 'i'
 ): { guard: string; doc: string } {
   const b = formatFloat(n, lang);
   return {
-    guard: `!(i >= -${b} && i <= ${b}) || i != floor(i) || i == 0.0`,
+    guard: `!(${i} >= -${b} && ${i} <= ${b}) || ${i} != floor(${i}) || ${i} == 0.0`,
     doc:
       `  // 1-based; negative counts from the end; anything else → NaN.\n` +
       `  // The guard runs entirely in float space: it rejects NaN, ±∞, huge\n` +
@@ -4140,9 +4163,9 @@ function gpuAtIndexGuard(
 
 /**
  * The `_gpu_texatN` positional-access helper for a SAMPLER-BACKED list of N
- * elements, GLSL only (the WGSL form is not lowered yet — see `compileGPUAt`).
- * Generated per N on demand like `_gpu_atN`, and named apart from it so one
- * shader can carry both lowerings for different lists.
+ * elements, GLSL (the WGSL form is `gpuTexAtPreambleWGSL`, generated per
+ * binding). Generated per N on demand like `_gpu_atN`, and named apart from
+ * it so one shader can carry both lowerings for different lists.
  *
  * The storage contract it reads (plan section 3): a single-channel 32-bit
  * float texture, one value per texel, holding the list ROW-MAJOR from texel
@@ -4191,13 +4214,71 @@ function gpuAtHelperWidths(code: string): number[] {
 }
 
 /**
+ * The `_gpu_texat_<binding>_<N>` positional-access helper for a
+ * SAMPLER-BACKED list of N elements on WGSL, generated per BINDING: a WGSL
+ * texture cannot be an ordinary function parameter the way a GLSL sampler or
+ * an array can, so the helper names the module-scope texture `binding`
+ * directly (the host declares it, `var S: texture_2d<f32>`). The read is a
+ * `textureLoad` with integer coordinates and mip level 0 — no sampler — and
+ * the width comes from `textureDimensions`, at run time, exactly as the GLSL
+ * form reads it from `textureSize`. Same storage contract, same guard text
+ * (`gpuAtIndexGuard`), same index contract.
+ */
+function gpuTexAtPreambleWGSL(binding: string, n: number): string {
+  const nan = gpuNonFiniteLiteral(NaN, 'wgsl');
+  // The parameter and the locals carry the reserved `_gpu_` prefix: the
+  // binding is any plain identifier the caller chose, and one named `i`,
+  // `k` or `w` would otherwise be shadowed by the helper's own names, so
+  // the texture reads would name the parameter instead of the texture.
+  const { guard, doc } = gpuAtIndexGuard(n, 'wgsl', '_gpu_i');
+  return `
+fn _gpu_texat_${binding}_${n}(_gpu_i: f32) -> f32 {
+${doc}
+  if (${guard}) {
+    return ${nan};
+  }
+  var _gpu_k = i32(_gpu_i);
+  _gpu_k = select(${n} + _gpu_k, _gpu_k - 1, _gpu_k > 0);
+  // Row-major in a texture of run-time width; the host guarantees at least
+  // ${n} texels, so the coordinate is in range whenever the guard passed.
+  let _gpu_w = i32(textureDimensions(${binding}, 0).x);
+  return textureLoad(${binding}, vec2i(_gpu_k % _gpu_w, _gpu_k / _gpu_w), 0).r;
+}
+`;
+}
+
+/**
  * The widths of the `_gpu_texatN` texture helpers `code` calls, read the
- * same way. The digits follow `_gpu_texat` directly, so a future WGSL helper
- * generated per BINDING NAME (`_gpu_texat_S`, an underscore after the prefix)
- * can share the prefix without ever matching this scan.
+ * same way. The digits follow `_gpu_texat` directly, so the WGSL helper
+ * generated per BINDING (`_gpu_texat_S_1600`, an underscore after the prefix)
+ * shares the prefix without ever matching this scan.
  */
 function gpuTexAtHelperWidths(code: string): number[] {
   return gpuHelperWidths(code, /(?<![\w$])_gpu_texat(\d+)\s*\(/g);
+}
+
+/**
+ * The (binding, length) pairs of the WGSL `_gpu_texat_<binding>_<N>` helpers
+ * `code` calls, in first-use order and deduplicated. Both are read off the
+ * helper's NAME: the preamble is built from the emitted code alone, like
+ * every other helper scan, and a name is the only channel it has. The
+ * binding is a plain identifier (the lowering refuses any other), and the
+ * length is the digits before the call's parenthesis, so the lazy binding
+ * match stops exactly there — `_gpu_texat_u_board_2_1600(` is the binding
+ * `u_board_2` of length 1600.
+ */
+function gpuTexAtBindings(code: string): [binding: string, n: number][] {
+  const seen = new Set<string>();
+  const result: [string, number][] = [];
+  const re = /(?<![\w$])_gpu_texat_([A-Za-z_]\w*?)_(\d+)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const key = `${m[1]}_${m[2]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push([m[1], Number(m[2])]);
+  }
+  return result;
 }
 
 function gpuHelperWidths(code: string, re: RegExp): number[] {
@@ -10825,8 +10906,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // order test in `at-gpu-compile.test.ts` is the tripwire.
     for (const w of atWidths) preamble += gpuAtPreamble(w, isWGSL);
     // The texture helpers call `_gpu_nan()` too, so the same order rule
-    // applies. GLSL only: the WGSL read is not lowered (`compileGPUAt`).
+    // applies. GLSL declares one per length; WGSL one per binding.
     for (const w of texAtWidths) preamble += gpuTexAtPreamble(w);
+    if (isWGSL)
+      for (const [binding, w] of gpuTexAtBindings(code))
+        preamble += gpuTexAtPreambleWGSL(binding, w);
     // The scalar `_gpu_powi` and its per-width `vecN` overloads
     // (`_gpu_powi2`–`_gpu_powi4`) are declared independently: a compilation
     // that only powers a vector needs the vector form alone.

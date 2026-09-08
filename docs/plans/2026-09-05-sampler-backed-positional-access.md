@@ -441,10 +441,22 @@ confirm the scope route by accident: a carrier that was `ce.assign`-ed without
 an explicit `declare` is auto-declared with a counted type, so the right helper
 is emitted for the wrong reason.
 
+**Steps 3 and 4, delivered 2026-09-08.** The WGSL read is a helper generated
+per binding, `_gpu_texat_<binding>_<N>`: it names the module-scope texture in
+its body (`textureDimensions` for the width, `textureLoad` for the fetch, no
+sampler) and carries the binding identifier and the length in its own name,
+which is what the preamble scan reads back, so the preamble stays keyed on
+emitted text. The GLSL scan `_gpu_texat(\d+)(` and the WGSL scan
+`_gpu_texat_<identifier>_(\d+)(` share the prefix and never match each
+other's helpers. A `vars` mapping that is not a plain identifier declines,
+naming the kind. Over a texture a static index is the same guarded read with a
+literal index, and a gather or mask is a vector constructor of one guarded read
+per selected slot, with the NaN spelling for an out-of-range slot — on both
+targets. A gather with a runtime-valued entry keeps the array form's decline,
+which is a missing gather tier, not a storage one.
+
 Not delivered, by design of the staging:
 
-- Step 3, the WGSL read (declines; see question 3).
-- Step 4, gathers and static indices over a texture (decline; see question 4).
 - The hint on the `compileFunction()` and `compileShader()` routes. Those
   routes declare their names with shader type spellings, and a declared name's
   shape comes from its declaration, not from the engine type the hint applies
