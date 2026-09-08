@@ -686,8 +686,7 @@ describe('a discrete pmf or CDF at a symbolic point agrees with the literal rout
   // CDF omitted the `Floor` the literal route applies. The symbolic forms now
   // carry the same support guard (`Which` on integrality and sign, `Floor`
   // in the CDF), and drop each clause the point's type already proves.
-  const at = (form: any, x: number) =>
-    form.subs({ x: x }).N().re as number;
+  const at = (form: any, x: number) => form.subs({ x: x }).N().re as number;
 
   test('Poisson pmf', () => {
     const e = new ComputeEngine();
@@ -726,6 +725,40 @@ describe('a discrete pmf or CDF at a symbolic point agrees with the literal rout
     expect(at(pmf, 6)).toBe(0);
     expect(at(cdf, 6)).toBe(1);
     expect(at(cdf, -1)).toBe(0);
+  });
+
+  test('an assigned point within tolerance of the support boundary agrees too', () => {
+    // The engine's relations are tolerant (`3 = 3 - 10^-12` is True), and
+    // the symbolic guard is spelled with them, so a value assigned to `x`
+    // just off an integer or just off the top of the support looked as if
+    // it could select the integer arm where the literal call, which tests
+    // exactly, answers 0. It does not: the guard decides the way the literal
+    // route does, on both sides of the boundary (ruled closed 2026-09-08).
+    const e = new ComputeEngine();
+    const B = ['BinomialDistribution', 3, 0.5];
+    const forms = {
+      poissonPdf: e.box(['PDF', POISSON, 'x']),
+      poissonCdf: e.box(['CDF', POISSON, 'x']),
+      binomialPdf: e.box(['PDF', B, 'x']),
+      binomialCdf: e.box(['CDF', B, 'x']),
+    };
+    const literal = {
+      poissonPdf: (x: number) => e.box(['PDF', POISSON, x]),
+      poissonCdf: (x: number) => e.box(['CDF', POISSON, x]),
+      binomialPdf: (x: number) => e.box(['PDF', B, x]),
+      binomialCdf: (x: number) => e.box(['CDF', B, x]),
+    };
+    for (const x of [5 - 1e-12, 5 + 1e-12, 3 - 1e-12, 3 + 1e-12, 1 - 1e-12]) {
+      e.assign('x', x);
+      for (const key of Object.keys(forms) as (keyof typeof forms)[]) {
+        const symbolic = forms[key].evaluate().N().re as number;
+        const direct = literal[key](x).N().re as number;
+        expect([key, x, symbolic]).toEqual([key, x, direct]);
+      }
+    }
+    // Off the integers the pmf is 0 on both routes, never the integer arm.
+    e.assign('x', 5 + 1e-12);
+    expect(forms.poissonPdf.evaluate().N().re).toBe(0);
   });
 
   test('a point whose type proves the support keeps the bare closed form', () => {

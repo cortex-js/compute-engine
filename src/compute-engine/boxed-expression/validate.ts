@@ -157,6 +157,18 @@ function collectionCellsProvablyNonNumeric(t: Type): boolean {
  * An unknown/weak element type remains fail-open, as elsewhere in argument
  * validation: the evaluate-time numeric gate decides once values are known,
  * and reports a mismatch per cell with its broadcast context.
+ *
+ * The check tests NUMERICITY, not the declared parameter, by ruling
+ * (2026-09-08): a collection whose numeric cells are provably outside the
+ * parameter's carrier is admitted here and fails per cell at evaluation.
+ * `Sin(zs)` with `zs: list<+oo | -oo>` boxes as valid where the scalar
+ * `Sin(+oo)` is refused, and evaluates to `[Error(incompatible-type)]` once
+ * `zs` holds `[+oo]`; a tuple of strings passes too, because tuples thread
+ * as points and are skipped on purpose. Comparing the element carrier
+ * against the parameter would have to re-apply the scalar path's admission
+ * rules — the exceptional-point policy (`nanPolicyAt`), ranged parameters,
+ * the tuple lift — on the element side, a change to the admission contract
+ * that no consumer has asked for while the evaluation-time failure is loud.
  */
 function validateThreadableOperand(
   ce: ComputeEngine,

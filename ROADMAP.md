@@ -146,50 +146,24 @@ Found during Phase 1 of the numeric-lattice flip
 fixed in that change. One item remains.
 
 - **`liftWideResult` wraps every `finite_number`-typed user-function call in
-  `_SYS.cplx(...)` in complex compile mode.** `complex ⊑ finite_number` is a new
-  edge from the flip, so `finite_number` now counts as WIDE. The wrap is
-  idempotent and values are unchanged — pure code bloat. A redundancy skip
-  ("operand already emitted in the complex lane") is a compiler design change
-  awaiting a decision. Sites: `liftWideResult`/`wideNumericType` in
-  `src/compute-engine/compilation/base-compiler.ts`. Deferred by ruling
-  2026-08-31 (held out of the small-fix release batch: no wrong values, and the
-  fix is a compiler design change, not a small fix).
+  `_SYS.cplx(...)` in complex compile mode (SCHEDULED as its own round, ruled
+  2026-09-08).** `complex ⊑ finite_number` is a new edge from the flip, so
+  `finite_number` now counts as WIDE. The wrap is idempotent and values are
+  unchanged — pure code bloat. The round adds a redundancy skip: an operand
+  already emitted in the complex lane — a value the emitter built as a
+  `{re, im}` record, or a call whose callee body is emitted in complex mode —
+  is not wrapped again. Sites: `liftWideResult`/`wideNumericType` in
+  `src/compute-engine/compilation/base-compiler.ts`. Held out of the
+  2026-08-31 small-fix batch because it is a compiler design change, not a
+  small fix.
 
 ### Open items from the small-fix release batch (2026-08-31)
 
-- **The discrete pmf/CDF guards at a SYMBOLIC point use the tolerant relations,
-  where the literal route is exact at the support boundary (OPEN, ruling — found
-  2026-09-04 while guarding the symbolic forms).**
-  `PDF(PoissonDistribution(2), x)` is `Which(⌊x⌋ = x ∧ x ≥ 0, closed, True, 0)`
-  (`discreteSupportGuard`, `library/distributions.ts`), and its `Equal` and
-  `GreaterEqual` compare within the engine tolerance once `x` holds a value, so
-  `x := 5 - 10^-20` selects the integer arm and the `x ≥ 5` arm of a CDF guard,
-  while the literal route `PDF(PoissonDistribution(2), 5 - 10^-20)` tests
-  exactly and answers 0. Options: make the symbolic guard exact (a
-  tolerance-free relation the guard can name), or accept the tolerant reading as
-  the symbolic route's contract and pin the boundary.
 - **Past the exact-expansion caps a few Γ-ratio points stay symbolic**:
   `Pochhammer(a, k)` with both `Γ(a)` and `Γ(a + k)` on a pole and `|k| > 20`
   (`SYMBOLIC_EXPANSION_CAP`), and `GammaRegularized(n, z)` for `z < 0` and
   `n > 20` (`MAX_GAMMA_Q_SERIES_ORDER`). Honest gaps, never `NaN`.
 
-- **The element-carrier check at a threadable numeric slot tests numericity,
-  not the declared parameter (OPEN, ruling — found 2026-09-04 by the review of
-  the non-numeric collection admission fix).** `validateThreadableOperand`
-  (`boxed-expression/validate.ts`) refuses a collection whose cells are
-  provably NOT NUMBERS (`list<string>`), but admits a collection whose numeric
-  cells are provably outside the parameter's carrier: `Sin(zs)` with
-  `zs: list<+oo | -oo>` is valid at boxing where the scalar `Sin(+oo)` is
-  refused (`Sin` declares a finite `complex` carrier), and a tuple of strings
-  passes because `typeIsProvablyNonNumericCollection` ignores tuples on
-  purpose (tuples thread as points). Closing this means comparing the
-  one-rank element carrier, absence stripped, against the resolved parameter
-  with the same admission rules the scalar path uses — the Contract B
-  exceptional-point policy (`nanPolicyAt`), ranged parameters, and the tuple
-  lift — which is a change to the admission contract, not a local fix.
-  Options: (a) keep the numericity test and accept that a numeric-but-wrong
-  collection fails per cell at evaluation, (b) compare against the parameter.
-  If nothing is decided, (a) stands.
 - **A matrix p-norm for `p ∉ {1, 2, ∞}` stays inert.** The order passes the
   declared precondition (it is a well-formed order at rank 1) and the operand is
   inside the carrier, but the general matrix p-norm has no closed form and would
