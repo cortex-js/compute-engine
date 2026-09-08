@@ -32,6 +32,25 @@ describe('small powers and conditional CSE', () => {
     }
   );
 
+  test('python does not bind a repeated symbol square', () => {
+    // `x ** 2` is a single Python operation, while the target binds a
+    // temporary as a one-element list comprehension (a list allocation and a
+    // loop). The exemption that admits a symbol square below the size
+    // threshold is therefore off on this target (`shareSymbolSquares`).
+    for (const square of forms) {
+      const ce = engine();
+      const expr = ce.expr(['Add', ['Sin', square], ['Cos', square]]);
+      const code = compile(expr, { to: 'python', mode: 'strict' }).code;
+      expect(code).not.toMatch(/_cse\d/);
+    }
+    // A larger repeated subexpression is still bound.
+    const ce = engine();
+    const big = ['Sin', ['Multiply', 6, ['Add', 'x', 'y']]];
+    const expr = ce.expr(['Add', ['Square', big], ['Divide', big, 2]]);
+    const code = compile(expr, { to: 'python', mode: 'strict' }).code;
+    expect(code).toMatch(/for _cse1 in \[np\.sin\(6 \* \(x \+ y\)\)\]/);
+  });
+
   test('caller mappings and impure bases retain evaluation count', () => {
     const ce = engine();
     let calls = 0;

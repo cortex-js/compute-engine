@@ -3421,6 +3421,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
         `[${body} ${bindings
           .map(([name, code]) => `for ${name} in [${code}]`)
           .join(' ')}][0]`,
+      // A repeated bare-symbol square (`x^2` twice) is NOT bound: `x ** 2`
+      // is one operation, and the comprehension above allocates a list and
+      // runs a loop to bind it — more than it saves. Larger repeats are
+      // still bound under the ordinary size and benefit thresholds.
+      shareSymbolSquares: false,
       // A `broadcastable` head over its single collection operand
       // (`Sin([1,2,3])`, `1 + L`) fans out as a LIST COMPREHENSION — always
       // valid Python, and it preserves the element-wise semantics exactly,

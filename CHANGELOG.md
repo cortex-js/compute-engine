@@ -18,6 +18,46 @@
 
 ### Resolved Issues
 
+- **Complex compile mode: a user-function call whose body builds a `{re, im}`
+  object is no longer wrapped in `_SYS.cplx` at the call site.** Since the
+  finite-by-default flip, a result typed `number` counts as wide, so every
+  call to such a function paid the idempotent lift-at-use wrap even when the
+  emitted body already returned the object (`b(x) := 2x` on a complex `z`
+  compiled to `_SYS.cplx(_fn_b(_.z))`). The emitter now records which
+  definitions return the object by construction, and their calls are the bare
+  `_fn_b(_.z)`. A body that returns a real (`|x|`) or ends in a selection
+  keeps the wrap. Found on the way: the call-site analysis read a function
+  body's TYPE before its value, and a body `If(x > 0, x, 3)` over an
+  unannotated `x` types `integer` (the placeholder arm is absorbed), so the
+  call was taken for a real while the emitted body returned an object —
+  `b(z) + z` computed `"1[object Object]"`. A block is now judged by the
+  value of its last statement, as `If` and `Which` are by their arms, and the
+  call is wrapped; the sum is `4 + 2i`.
+- **A chained set relation (`A ⊂ B ⊂ C`) or a one-operand `Subset(D)` boxed
+  with an error.** `Subset`, `SubsetEqual`, `Superset` and `SupersetEqual`
+  declared two operands while their canonical handlers passed any operand
+  count through, and the boxing validation seam of a canonical-handler head
+  now checks the handler's result against the declaration: a chain came back
+  with `unexpected-argument` on its third operand, and `IsHolomorphic(f,
+  Subset(D))`, the Fungrim corpus spelling for "on a subset of D", with
+  `missing`. Seven corpus entries regressed at the `--check` gate. The four
+  relations now declare `(any, any*)`, the carrier the comparisons use, and a
+  chain evaluates as the conjunction of its adjacent pairs (`ℤ ⊂ ℚ ⊂ ℝ` is
+  `True`, `ℤ ⊂ ℝ ⊂ ℚ` is `False`); before, a chain evaluated its first pair
+  only. The LaTeX chain `\mathbb{Z} \subset \mathbb{Q} \subset \mathbb{R}`
+  now parses flat, to `Subset(Integers, RationalNumbers, RealNumbers)`, the
+  way `a < b < c` parses to `Less(a, b, c)`; it nested to the right before.
+
+- **The Python target no longer binds a repeated bare-symbol square as a
+  comprehension.** `(x^2+1)/(x^2-1)` compiled to
+  `[(_cse1 + 1) / (_cse1 + -1) for _cse1 in [x ** 2]][0]` since 0.126.0, when
+  generated code started sharing repeated symbol squares. On Python `x ** 2`
+  is a single operation, and binding it as a one-element list comprehension
+  allocates a list and runs a loop, so the sharing cost more than it saved.
+  The code is again `(x ** 2 + 1) / (x ** 2 + -1)`. Larger repeated
+  subexpressions are still shared on Python, and the other targets keep
+  sharing symbol squares.
+
 - **`interval-js` target: a fixed-N `\sum` body cost 4–5× the `javascript`
   target per call.** A 40-term ring sum of `arccos(max(-1, min(1, …)))` over a
   square root, a cosine and a division compiled to 0.18 ms per call on the

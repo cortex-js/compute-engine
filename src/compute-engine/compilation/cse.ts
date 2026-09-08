@@ -442,6 +442,14 @@ export interface CseHarvestOptions {
    */
   readonly shadowedNames?: ReadonlySet<string>;
 
+  /**
+   * Admit a repeated square of a bare symbol (`x^2`, `x·x`) below the size
+   * and benefit thresholds (`Harvester.isSymbolSquare`). On by default; a
+   * target whose temporary binding costs more than the square it saves
+   * (`CompileTarget.shareSymbolSquares`, the Python target) turns it off.
+   */
+  readonly shareSymbolSquares?: boolean;
+
   // Thresholds — defaulted from the exported constants; overridable so tests
   // and tuning runs need not restate the pipeline.
   readonly minSize?: number;
@@ -688,6 +696,7 @@ class Harvester {
    * eligibility check runs: the admission memos are name-keyed, so the set
    * must be fixed for the whole harvest. */
   private readonly shadowedNames: Set<string>;
+  private readonly shareSymbolSquares: boolean;
   private readonly minSize: number;
   private readonly minScore: number;
   private readonly maxBindingsPerRegion: number;
@@ -744,6 +753,7 @@ class Harvester {
     this.isVarsKey = options.isVarsKey ?? (() => false);
     this.admitPureUserFunctions = options.admitPureUserFunctions === true;
     this.shadowedNames = new Set(options.shadowedNames ?? []);
+    this.shareSymbolSquares = options.shareSymbolSquares !== false;
     this.minSize = options.minSize ?? CSE_MIN_SIZE;
     this.minScore = options.minScore ?? CSE_MIN_SCORE;
     this.maxBindingsPerRegion =
@@ -967,9 +977,13 @@ class Harvester {
 
   /** Repeated symbol squares save two reads and an operation per reuse.
    * Interval lowering also saves a result allocation. Keep other small
-   * arithmetic expressions subject to the ordinary size and benefit limits. */
+   * arithmetic expressions subject to the ordinary size and benefit limits.
+   * A target whose temporary binding costs more than the square it saves
+   * opts out (`CseHarvestOptions.shareSymbolSquares`); the square is then an
+   * ordinary small candidate, below the size threshold. */
   private isSymbolSquare(node: Expression): boolean {
     if (
+      !this.shareSymbolSquares ||
       !isFunction(node) ||
       !isSymbol(node.ops[0]) ||
       !isSubtype(node.ops[0].type.type, 'number')

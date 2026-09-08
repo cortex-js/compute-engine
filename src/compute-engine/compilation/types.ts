@@ -285,6 +285,9 @@ export type CseSession = {
     /** Names an admission decision may not resolve globally (enclosing
      * binder/parameter names). */
     shadowedNames?: ReadonlySet<string>;
+    /** The target's `shareSymbolSquares` setting, carried so a nested
+     * harvest of a user-defined function's body applies it too. */
+    shareSymbolSquares?: boolean;
   };
 
   /** The emission-time region instance stack, innermost last. */
@@ -770,6 +773,20 @@ export interface CompileTarget<Expr = unknown> {
    * cost.
    */
   hoistScalarInvariants?: boolean;
+
+  /**
+   * When `false`, the common-subexpression harvest does not bind a repeated
+   * square of a bare symbol (`x^2`, `x·x`) below the ordinary size and
+   * benefit thresholds. Every target that lowers a square to two reads and a
+   * multiplication, or to an allocating interval routine, gains from the
+   * binding, so the exemption is on by default. The Python target sets
+   * `false`: it spells `x^2` as the single operation `x ** 2`, and it binds a
+   * temporary as a one-element list comprehension, which allocates a list
+   * and runs a loop — more work than the operation it would save. A compound
+   * square (`sin(x)^2`) is not affected by this flag: it is subject to the
+   * ordinary thresholds on every target.
+   */
+  shareSymbolSquares?: boolean;
 
   /**
    * The storage hints of this compilation, validated and normalized from the
