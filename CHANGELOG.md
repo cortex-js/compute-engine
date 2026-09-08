@@ -194,53 +194,6 @@
   pipe shorthand reaches it through its whole-topic branch:
   `[1,2,3] |> \mathrm{Length}(\_^2)` and `[1,2,3] |> \mathrm{Length}(\_) + 1`
   are typed `integer`, where the previous round left them `unknown`.
-- **An assumed inequality bound is stored and compared exactly.** The bound
-  was summed in a JavaScript number, so an exact bound the machine cannot
-  represent was rounded to the nearest double in either direction before it
-  was stored, and every reader then took the stored value as exact:
-  `assume(v > 1 - 10^{-30})` stored a strict lower bound of exactly 1, from
-  which `v > 1` was "proven" — refuted by `v = 1 - 10^{-31}` — and
-  `assume(v < 1)` was then refused as a contradiction. The query side rounded
-  too: with `u ≥ 1` assumed, `u ≥ 1 + 10^{-30}` projected its constant to the
-  double 1 and was "proven" as well. The bound is now the exact number
-  expression the inequality carries, and every reader — the relational
-  operators, `isGreater` and the other comparison predicates, the sign of a
-  symbol, the tautology and contradiction checks of `assume()` — compares
-  exactly, without tolerance. `ce.ask(['Greater', 'x', '_k'])` answers the
-  exact bound (`1/3`, not `0.333…`). The ranged type an assumption
-  contributes already projected its bound in the weakening direction.
-- **`Covariance` and `PopulationCovariance` no longer overflow at machine
-  precision on data of machine range.** The sums were taken over the raw
-  deviations, so a product of two deviations around `10²⁰⁰` overflowed while
-  the covariance itself was an ordinary number:
-  `Covariance([1e200, -1e200, 0], [1e200, 1e200, -2e200])` is 0 and answered
-  `NaN`. The deviations are scaled by a power of two per column first, as
-  `Correlation` already did, and the scales are multiplied back exactly. A
-  covariance with no double (`10⁴⁰⁰`) reads as `+oo`, the machine answer for
-  such a value.
-- **`LinearRegression(xs, ys, x)` and `PolynomialFit(xs, ys, n, x)` are typed
-  `number`.** The trailing variable symbol makes both return the fitted
-  expression in that variable, but the declared result described only the
-  coefficient form: `LinearRegression([1,2,3],[2,4,6],x)` was typed
-  `tuple<number, number>` while it evaluates to `2x`.
-- **The LaTeX pipe shorthand has a static type.** `[1,2,3] |> \_^2` typed
-  `unknown` while it evaluates to `[1,4,9]`; the LaTeX parser leaves the
-  stage as the application `Power(_, 2)`, which the `Pipe` type handler did
-  not read (the Epsil parser wraps it as a function literal, which it did).
-  A broadcastable head over a list of scalars is typed element-wise
-  (`list<integer<0..>^3>`), a whole-collection head such as `Length(\_)` or a
-  scalar topic types the applied body, and the shapes the derivation cannot
-  type soundly stay `unknown`.
-- **A second pipe on the same engine no longer throws after an
-  operator-shorthand pipe.** Lifting `\_^2` into a function literal
-  substituted `_` with `_1` through a canonicalizing substitution, which
-  auto-declared `_1` in the caller's scope with the type the body inferred
-  for it. After `xs |> \_^2`, the next lift of `Take(\_, 2)` bound its
-  parameter to that stray `_1: number`, put an `incompatible-type` error in
-  the body, and threw "Function body must be a scoped Block expression";
-  `[1,2,3] |> Sum(\_)` answered the list itself for the same reason. The
-  substitution is no longer canonicalized, and the body is canonicalized
-  inside the literal's own scope, where its parameter is declared.
 - **A `Sum`/`Product` index over an `Element` clause takes the type of the
   collection's elements.** The index was pinned to `integer` whatever the
   indexing set held, so `Sum(chi(n), Element(chi, G))` over a set of functions
