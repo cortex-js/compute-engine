@@ -989,6 +989,9 @@ function integerPoints(lo: number, hi: number, cap: number): number[] | null {
   const a = Math.round(lo);
   const b = Math.round(hi);
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  // Past the safe-integer range `i++` cannot advance (`2^53 + 1 === 2^53`),
+  // so the enumeration below would never end.
+  if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b)) return null;
   if (b - a + 1 > cap) return null;
   const out: number[] = [];
   for (let i = a; i <= b; i++) out.push(i);

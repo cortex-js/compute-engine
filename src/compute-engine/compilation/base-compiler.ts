@@ -1914,7 +1914,11 @@ export class BaseCompiler {
           }
         }
       }
-      const compiled = BaseCompiler.compileWithCse(expr, target, prec);
+      const compiled = BaseCompiler.foldEmitted(
+        expr,
+        target,
+        BaseCompiler.compileWithCse(expr, target, prec)
+      );
       emitted = true;
       return compiled;
     } finally {
@@ -20282,6 +20286,23 @@ export class BaseCompiler {
           record(node);
         return;
       }
+      // A target that asks for it (`hoistScalarInvariants`, the interval
+      // target) binds every MAXIMAL invariant scalar application as well: the
+      // node is recorded whole and not descended into, so the largest
+      // index-free subtree is the one computed once. A binder or a lambda
+      // never reaches here (returned above), and a node in a conditional
+      // position is reached only by the `attach` pass below. A reduction over
+      // a collection operand is left to the descend-then-record rule at the
+      // end, so the operand is bound before it and shared with any other
+      // consumer of the same collection.
+      if (
+        invariant &&
+        target.hoistScalarInvariants === true &&
+        !node.ops.some(isCollectionShaped)
+      ) {
+        record(node);
+        return;
+      }
       const lazy = lazyOperandRegions(node);
       for (let i = 0; i < node.ops.length; i++)
         if (!lazy.some((site) => site.index === i)) visit(node.ops[i]);
@@ -20577,7 +20598,14 @@ export class BaseCompiler {
       return BaseCompiler._compileInner(expr, target, prec);
 
     top.state.set(candidate, 'defining');
-    const rhs = BaseCompiler._compileInner(expr, target, 0);
+    // The right-hand side is folded like any other emission (`foldEmitted`):
+    // `compile()` folds only what `compileWithCse` RETURNS, and for a bound
+    // candidate that is the temporary's name, never its code.
+    const rhs = BaseCompiler.foldEmitted(
+      expr,
+      target,
+      BaseCompiler._compileInner(expr, target, 0)
+    );
     // A target whose multi-statement constructs are bare statement sequences
     // (Python, GPU) has no expression-position form for such a right-hand
     // side. Leave the candidate `'defining'`: every occurrence then compiles
@@ -20598,6 +20626,28 @@ export class BaseCompiler {
     top.state.set(candidate, 'bound');
     top.names.set(candidate, name);
     return name;
+  }
+
+  /**
+   * A target-owned fold of a function node's emitted code
+   * (`CompileTarget.foldEmittedConstant`): the interval target evaluates a
+   * closed constant subtree's code with its own library at compile time, so
+   * the largest constant subtree folds bottom-up (each level sees its
+   * operands already folded). Applied to what `compile()` returns — after
+   * the CSE walk, where a shared node comes back as its temporary's name,
+   * which the hook declines — and to the right-hand side of a CSE binding,
+   * which that walk compiles itself. A symbol or literal is left alone: the
+   * hook is for applications, whose code is what a run-time call would
+   * evaluate.
+   */
+  private static foldEmitted(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    code: TargetSource
+  ): TargetSource {
+    if (target.foldEmittedConstant === undefined || !isFunction(expr))
+      return code;
+    return target.foldEmittedConstant(expr, code) ?? code;
   }
 
   /**

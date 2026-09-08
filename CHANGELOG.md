@@ -18,6 +18,36 @@
 
 ### Resolved Issues
 
+- **`interval-js` target: a fixed-N `\sum` body cost 4–5× the `javascript`
+  target per call.** A 40-term ring sum of `arccos(max(-1, min(1, …)))` over a
+  square root, a cosine and a division compiled to 0.18 ms per call on the
+  interval target against 0.04 ms on the scalar one, because the interval
+  codegen lacked three things the scalar codegen has. Every constant subtree
+  (`1 + -0.5`, `0.1·π`, a term's whole `1 − 0.6(1 − √(1 − w²))` factor) was
+  re-evaluated with allocating interval operations on every call; the sum
+  body compiled outside its common-subexpression region, so nothing was
+  shared even inside one term; and an index-free subtree of the body (the
+  x-only `√(X² + 0.81)`) was recomputed in every term, twice. The interval
+  target now folds a closed constant subtree at compile time by evaluating
+  its own emitted code with the interval library and inlining the enclosure
+  as a literal of the same shape, so the folded value is bit-for-bit what the
+  run-time evaluation returned (the `.N()`-based fold of the other targets
+  stays off: it would bake a zero-width point). The constant prefix of an
+  n-ary `Add`/`Multiply`/`Divide` chain folds too. An unrolled or looped
+  `Sum`/`Product` body compiles inside its region and hoists every maximal
+  index-free scalar subtree to one binding per call (after the empty-range
+  exit of a symbolic-bound loop, so a range that runs zero times evaluates
+  nothing). On the light curve the ratio drops from 4.6× to 1.2–1.7× and the
+  emitted code from 38 KB to 16 KB; every result is unchanged. A caller's
+  `constantFold: false` keeps the structural lowering of every constant, and a
+  caller's `vars` splice is never folded (only the deterministic `Math`
+  members the target itself emits are admitted).
+- **`interval-js` target: `GCD`, `LCM` and `Binomial` over an integer at or
+  past `2^53` never returned.** The integer enumeration behind the interval
+  kernels of those heads counted with `i++`, which cannot advance past
+  `2^53`; with the compile-time fold above the hang moved from the first call
+  to the compilation itself. The enumeration now declines outside the
+  safe-integer range and the kernel answers its wide fallback enclosure.
 - **`expr.array` threw on an exact rational past the double range.** A `List`
   holding an exact rational with a power-of-two denominator and a numerator
   past `2^1024` made the array read throw a `RangeError` from the double

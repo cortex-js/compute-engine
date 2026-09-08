@@ -678,14 +678,22 @@ describe('COMPILE CSE — capture', () => {
     );
     const code = compile(expr, { to: 'interval-js', fallback: false }).code;
 
-    // The outer occurrences bind; the loop body is emitted unshared, and the
-    // outer temporary never appears inside the loop.
-    expect(code).toContain('const _cse2 = _IA.sin(_IA.mul(_IA.point(6), _.n))');
+    // The outer occurrences bind over the ENCLOSING `n`; the loop body is
+    // the binder's own region, so it shares `sin(6n)` over the loop index
+    // with itself, and the outer temporary never appears inside the loop.
+    const outer =
+      /const (_cse\d+) = _IA\.sin\(_IA\.mul\(_IA\.point\(6\), _\.n\)\)/.exec(
+        code
+      );
+    expect(outer).not.toBeNull();
     const loop = code.slice(
       code.indexOf('for (let n'),
       code.indexOf('return _tv1')
     );
-    expect(loop).not.toContain('_cse');
+    expect(loop).not.toContain(outer![1]);
+    expect(loop).toMatch(
+      /const (_cse\d+) = _IA\.sin\(_IA\.mul\(_IA\.point\(6\), _IA\.point\(n\)\)\)/
+    );
   });
 
   it('never merges across a `Sum` binder on the Python target', () => {

@@ -61,6 +61,7 @@ import type {
 import { compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { IntervalArithmetic } from '../interval/index.js';
+import type { Interval } from '../interval/types.js';
 import {
   INTERVAL_QUADRATURE_BUDGET,
   INTERVAL_QUADRATURE_SUBDIVISIONS,
@@ -493,34 +494,39 @@ const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
 const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Basic arithmetic - using function call syntax
-  Add: (args, compile) => {
+  // The n-ary chains fold each intermediate pair (`foldChainStep`): an
+  // intermediate such as the `0.1·π` of `Multiply(0.1, Pi, x + 5)` is not a
+  // node of the tree, so the per-node fold (`foldEmittedConstant`) never
+  // sees it, and the run-time code would multiply the two points on every
+  // call.
+  Add: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(0)';
     if (args.length === 1) return compile(args[0]);
     // Chain additions: (a + b) + c
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = `_IA.add(${result}, ${compile(args[i])})`;
+      result = foldChainStep(`_IA.add(${result}, ${compile(args[i])})`, target);
     }
     return result;
   },
   // No Subtract handler — canonicalizes to Add+Negate before compilation.
-  Multiply: (args, compile) => {
+  Multiply: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(1)';
     if (args.length === 1) return compile(args[0]);
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = `_IA.mul(${result}, ${compile(args[i])})`;
+      result = foldChainStep(`_IA.mul(${result}, ${compile(args[i])})`, target);
     }
     return result;
   },
-  Divide: (args, compile) => {
+  Divide: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(1)';
     if (args.length === 1) return compile(args[0]);
     if (args.length === 2)
       return `_IA.div(${compile(args[0])}, ${compile(args[1])})`;
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = `_IA.div(${result}, ${compile(args[i])})`;
+      result = foldChainStep(`_IA.div(${result}, ${compile(args[i])})`, target);
     }
     return result;
   },
@@ -1401,25 +1407,59 @@ function compileIntervalSumProduct(
   // Empty range (only knowable when both bounds are constant)
   if (bothConstant && lowerNum > upperNum) return identity;
 
+  const body = args[0];
+  // The body is the binder's own CSE region (design §5.1(a)), hung off the
+  // `Sum`/`Product` node being lowered — this handler is handed only the
+  // operand list. Each term compiles through `compileOp` so the region opens
+  // with a FRESH instance per index value: the same body node objects are
+  // compiled once per term (only the index `var` mapping differs), and a
+  // node-keyed reuse across terms would emit term 1's temporary for every
+  // later term. Before this, the terms compiled outside the region and
+  // shared nothing, not even a subexpression repeated inside one term.
+  const sumNode = BaseCompiler.cseParentNode();
+  const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
+    BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body);
+  // A subexpression of the body that mentions no index — the `√(x²+c)` an
+  // unrolled ring sum repeats in every term — has one value for the whole
+  // sum. `hoistLoopInvariants` binds each such class to a temporary compiled
+  // under the ENCLOSING target and emits the terms against the temporary;
+  // the bindings are placed by the two arms below.
+  const hoistedPrelude = (
+    bindings: ReadonlyArray<[name: string, code: string]>
+  ): string =>
+    bindings.map(([name, code]) => `const ${name} = ${code}; `).join('');
+
   // Unroll when both bounds are constant and range is small
   if (bothConstant) {
     const termCount = upperNum - lowerNum + 1;
     if (termCount <= INTERVAL_UNROLL_LIMIT) {
-      const terms: string[] = [];
-      for (let k = lowerNum; k <= upperNum; k++) {
-        const innerTarget: CompileTarget<Expression> = {
-          ...target,
-          var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
-          boundVars: BaseCompiler.withBoundNames(target, [index]),
-        };
-        terms.push(BaseCompiler.compile(args[0], innerTarget));
-      }
+      const emitTerms = (): string[] => {
+        const terms: string[] = [];
+        for (let k = lowerNum; k <= upperNum; k++) {
+          const innerTarget: CompileTarget<Expression> = {
+            ...target,
+            var: (id) => (id === index ? `_IA.point(${k})` : target.var(id)),
+            boundVars: BaseCompiler.withBoundNames(target, [index]),
+          };
+          terms.push(compileTerm(innerTarget));
+        }
+        return terms;
+      };
+      // Every unrolled term runs, so a binding evaluated before the terms is
+      // evaluated exactly when the body is (the range is non-empty here).
+      const { bindings, result: terms } = BaseCompiler.hoistLoopInvariants(
+        body,
+        [index],
+        target,
+        emitTerms
+      );
 
       let result = terms[terms.length - 1];
       for (let i = terms.length - 2; i >= 0; i--) {
         result = `${iaOp}(${terms[i]}, ${result})`;
       }
-      return result;
+      if (bindings.length === 0) return result;
+      return `(() => { ${hoistedPrelude(bindings)}return ${result}; })()`;
     }
   }
 
@@ -1428,11 +1468,30 @@ function compileIntervalSumProduct(
   const upperCode = compileIntervalBound(upperExpr, upperNum, target);
 
   const acc = BaseCompiler.tempVar(target);
-  const bodyCode = BaseCompiler.compile(args[0], {
-    ...target,
-    var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
-    boundVars: BaseCompiler.withBoundNames(target, [index]),
-  });
+  const { bindings, result: bodyCode } = BaseCompiler.hoistLoopInvariants(
+    body,
+    [index],
+    target,
+    () =>
+      compileTerm({
+        ...target,
+        var: (id) => (id === index ? `_IA.point(${index})` : target.var(id)),
+        boundVars: BaseCompiler.withBoundNames(target, [index]),
+      })
+  );
+  // With SYMBOLIC bounds the bindings follow an EMPTY-RANGE exit: a range
+  // that runs zero iterations never evaluated the body, so it must not
+  // evaluate the body's subexpressions either (an error they raise would be
+  // new). Constant bounds are known non-empty here (the empty case returned
+  // the identity above), so they need no exit. With no bindings the emission
+  // is unchanged.
+  const prelude = (lower: string | undefined): string =>
+    bindings.length === 0
+      ? ''
+      : (lower === undefined
+          ? ''
+          : `if (!(${lower} <= _upper)) return ${identity}; `) +
+        hoistedPrelude(bindings);
 
   // A SYMBOLIC bound can still be `±∞`/`NaN` at run time — the same
   // non-terminating loop. Guard once at loop entry (never per iteration);
@@ -1440,10 +1499,10 @@ function compileIntervalSumProduct(
   // bounds are statically finite by `assertFiniteIntervalBound` above, so they
   // take the unguarded template and their code is unchanged.
   if (lowerNum === undefined || upperNum === undefined) {
-    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isFinite(_upper) || !Number.isFinite(_lower)) return { kind: 'entire' }; for (let ${index} = _lower; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isFinite(_upper) || !Number.isFinite(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${index} = _lower; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
   }
 
-  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+  return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
 }
 
 /**
@@ -1692,6 +1751,216 @@ function compileIntervalIntegrate(
 }
 
 /**
+ * The `_IA` routines a constant subtree may be evaluated through at compile
+ * time (`foldConstantIntervalCode`). Each is a pure, deterministic function of
+ * its interval arguments with bounded cost, so evaluating it once at compile
+ * time and once per call at run time gives the same value. Left out on
+ * purpose: the comparisons and connectives (they answer a `BoolInterval`, a
+ * shape the fold does not re-emit), `piecewise`, the collection accessors
+ * (`at`, `length`, `component`), and the quadrature entry points (a constant
+ * definite integral may take milliseconds per evaluation and returns a thunk
+ * scan, not a plain enclosure).
+ */
+const FOLDABLE_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
+  'point',
+  'add',
+  'sub',
+  'mul',
+  'div',
+  'negate',
+  'sqrt',
+  'square',
+  'pow',
+  'powInterval',
+  'powRational',
+  'nthRoot',
+  'exp',
+  'ln',
+  'log10',
+  'log2',
+  'abs',
+  'floor',
+  'ceil',
+  'round',
+  'fract',
+  'trunc',
+  'min',
+  'max',
+  'mod',
+  'remainder',
+  'heaviside',
+  'sign',
+  'gamma',
+  'gammaln',
+  'factorial',
+  'factorial2',
+  'binomial',
+  'gcd',
+  'lcm',
+  'chop',
+  'erf',
+  'erfc',
+  'exp2',
+  'hypot',
+  'sin',
+  'cos',
+  'tan',
+  'cot',
+  'sec',
+  'csc',
+  'asin',
+  'acos',
+  'atan',
+  'atan2',
+  'sinh',
+  'cosh',
+  'tanh',
+  'asinh',
+  'acosh',
+  'atanh',
+  'acot',
+  'acsc',
+  'asec',
+  'coth',
+  'csch',
+  'sech',
+  'acoth',
+  'acsch',
+  'asech',
+  'sinc',
+  'fresnelS',
+  'fresnelC',
+]);
+
+/**
+ * What may remain of a constant subtree's code once every `_IA.<routine>`
+ * reference, every admitted `Math` member (`FOLDABLE_MATH_MEMBERS`),
+ * `Number.EPSILON`, `Infinity`, `NaN` and the field names of an
+ * already-folded literal (`kind`, `'interval'`, `value`, `lo`, `hi`) are
+ * removed: digits, the exponent letters of a numeric literal, the arithmetic a
+ * constant's own spelling uses (`GoldenRatio` is `(1 + Math.sqrt(5)) / 2`),
+ * and punctuation. Any other letter is a variable, a temporary, a user
+ * function or a caller-spliced source, and the subtree is not closed.
+ */
+const FOLDABLE_INTERVAL_RESIDUE = /^[\s\d.,(){}:+\-*/eE]*$/;
+
+/**
+ * The `Math` members a constant subtree may mention: the constants of
+ * `INTERVAL_JAVASCRIPT_CONSTANTS` and the `Math.sqrt` of `GoldenRatio`'s
+ * spelling. An allowlist, not `Math.*`: a caller's `vars` splice is emitted
+ * verbatim and may read `Math.random()`, which must keep drawing at run time
+ * (the `vars` contract says a mapped symbol is never folded), so an admitted
+ * member has to be deterministic by name.
+ */
+const FOLDABLE_MATH_MEMBERS =
+  /Math\.(?:PI|E|LN2|LN10|LOG2E|LOG10E|SQRT2|SQRT1_2|sqrt)\b/g;
+
+/** Memo of `foldConstantIntervalCode` by code string: the same constant
+ * subtree recurs across the unrolled terms of a sum (`0.1·π`), and a fold
+ * costs one `Function` construction. `null` records a decline. */
+const FOLDED_INTERVAL_CODE = new Map<string, string | null>();
+const FOLDED_INTERVAL_CODE_LIMIT = 4096;
+
+/** The JavaScript spelling of an interval endpoint. `String(-0)` is `"0"`,
+ * which would drop the sign a division or `atan2` reads. */
+function intervalEndpointLiteral(n: number): string {
+  return Object.is(n, -0) ? '-0' : String(n);
+}
+
+/**
+ * Fold the emitted code of a CLOSED constant interval subtree to a literal
+ * (`foldEmittedConstant` on this target). `_IA.mul(_IA.point(0.1),
+ * _IA.point(Math.PI))` becomes `{ kind: 'interval', value: { lo: …, hi: … } }`
+ * — the very object the run-time evaluation of that code returns, computed
+ * once here with the same `IntervalArithmetic` library instead of on every
+ * call (an unrolled 40-term sum re-evaluated every constant factor of every
+ * term per call: Tycho item 269). The enclosure is unchanged, so the fold is
+ * sound where the `.N()`-based `constantFold` is not (see the
+ * `constantFold: false` note in `IntervalJavaScriptTarget.compile`).
+ *
+ * Admissibility is read off the CODE: it must consist only of calls into
+ * `FOLDABLE_INTERVAL_ROUTINES` over numeric literals, `Math` members and
+ * already-folded literals (`FOLDABLE_INTERVAL_RESIDUE`), which rules out
+ * every variable, CSE temporary, bound index, user function and
+ * caller-spliced spelling by construction. The evaluation result must be a
+ * plain enclosure — a bare `{ lo, hi }` (what `_IA.point` returns) or an
+ * `{ kind: 'interval', value }` — and is re-emitted in the SAME shape, so a
+ * root-level fold answers what the structural code answered. `empty`,
+ * `entire` and `singular` results are left to the structural code.
+ */
+function foldConstantIntervalCode(code: string): string | undefined {
+  if (!code.startsWith('_IA.')) return undefined;
+  const memo = FOLDED_INTERVAL_CODE.get(code);
+  if (memo !== undefined) return memo ?? undefined;
+  const folded = evaluateConstantIntervalCode(code);
+  if (FOLDED_INTERVAL_CODE.size >= FOLDED_INTERVAL_CODE_LIMIT)
+    FOLDED_INTERVAL_CODE.clear();
+  FOLDED_INTERVAL_CODE.set(code, folded ?? null);
+  return folded;
+}
+
+function evaluateConstantIntervalCode(code: string): string | undefined {
+  let admissible = true;
+  // A bare `_IA.point(c)` is already the cheapest spelling of its value, and
+  // it is what the accessor folds of this target pin (`At` over a literal
+  // list emits `_IA.point(20)`); only code that APPLIES a routine is worth
+  // replacing.
+  let applies = false;
+  const residue = code
+    .replace(/_IA\.([A-Za-z0-9_]+)/g, (_m, name: string) => {
+      if (!FOLDABLE_INTERVAL_ROUTINES.has(name)) admissible = false;
+      if (name !== 'point') applies = true;
+      return '';
+    })
+    .replace(FOLDABLE_MATH_MEMBERS, '')
+    .replace(/Number\.EPSILON/g, '')
+    .replace(
+      /\bInfinity\b|\bNaN\b|'interval'|\bkind\b|\bvalue\b|\blo\b|\bhi\b/g,
+      ''
+    );
+  if (!admissible || !applies || !FOLDABLE_INTERVAL_RESIDUE.test(residue))
+    return undefined;
+
+  let result: unknown;
+  try {
+    result = new Function('_IA', `return (${code});`)(IntervalArithmetic);
+  } catch {
+    return undefined;
+  }
+  if (isPlainInterval(result))
+    return `{ lo: ${intervalEndpointLiteral(result.lo)}, hi: ${intervalEndpointLiteral(result.hi)} }`;
+  if (
+    isRecord(result) &&
+    result.kind === 'interval' &&
+    Object.keys(result).length === 2 &&
+    isPlainInterval(result.value)
+  )
+    return `{ kind: 'interval', value: { lo: ${intervalEndpointLiteral(result.value.lo)}, hi: ${intervalEndpointLiteral(result.value.hi)} } }`;
+  return undefined;
+}
+
+/** One step of an n-ary `Add`/`Multiply`/`Divide` chain, folded when the
+ * target folds emitted constants (`foldEmittedConstant` is unset under the
+ * caller's `constantFold: false`). */
+function foldChainStep(
+  code: string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  if (target?.foldEmittedConstant === undefined) return code;
+  return foldConstantIntervalCode(code) ?? code;
+}
+
+/** A bare `{ lo, hi }` with numeric endpoints and nothing else. */
+function isPlainInterval(value: unknown): value is Interval {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === 2 &&
+    typeof value.lo === 'number' &&
+    typeof value.hi === 'number'
+  );
+}
+
+/**
  * JavaScript function that wraps compiled interval arithmetic code.
  *
  * Injects the _IA library and provides input conversion from various formats.
@@ -1913,6 +2182,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       indent: 0,
       ws: (s?: string) => s ?? '',
       preamble: '',
+      // Sound compile-time folding of closed constant subtrees, by evaluating
+      // their emitted code with the interval library (see
+      // `foldConstantIntervalCode`). Distinct from `constantFold`, which is
+      // the `.N()` fold and stays off on this target.
+      foldEmittedConstant: (_expr, code) => foldConstantIntervalCode(code),
+      // Bind index-free scalar subexpressions of a `Sum`/`Product` body once
+      // per call rather than once per term (see `CompileTarget`).
+      hoistScalarInvariants: true,
       // Per-compilation naming state for generated temporaries (see the
       // JavaScript target).
       naming: { counter: 0, usedNames: new Set<string>() },
@@ -2073,6 +2350,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // `k²/2`). The constant-fold consumer of this set is moot here — this
       // target sets `constantFold: false` unconditionally, just above.
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
+      // The SOUND fold — evaluating a closed constant subtree's own interval
+      // code at compile time (`foldConstantIntervalCode`) — is on by default
+      // and honors the caller's `constantFold: false`, which promises the
+      // structural lowering of every constant (codegen inspection).
+      foldEmittedConstant:
+        options.constantFold === false
+          ? undefined
+          : (_expr, code) => foldConstantIntervalCode(code),
       constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : guardedIntervalFunction(id),

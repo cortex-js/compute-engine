@@ -738,6 +738,40 @@ export interface CompileTarget<Expr = unknown> {
   constantFold?: boolean;
 
   /**
+   * A target-owned fold of an EMITTED constant subtree. Called after a
+   * function node has been lowered, with the node and its code; a defined
+   * answer replaces the code. The hook exists for a target whose emitted
+   * code is the only sound value: the interval target evaluates the code
+   * itself with its interval library at compile time, so the folded literal
+   * is bit-for-bit the enclosure the run-time evaluation of that code would
+   * produce, where `constantFold` (the `.N()` fold) would bake a zero-width
+   * point and lose the outward rounding. The hook decides admissibility from
+   * the code alone: it must decline any code that names a variable, a
+   * temporary, a caller-mapped spelling, or an impure or expensive routine.
+   * Unset on every other target.
+   */
+  foldEmittedConstant?: (
+    expr: Expr,
+    code: TargetSource
+  ) => TargetSource | undefined;
+
+  /**
+   * When `true`, the loop-invariant hoisting of a `Sum`/`Product` body
+   * (`BaseCompiler.hoistLoopInvariants`) binds every maximal invariant
+   * SCALAR application too, not only the collection-valued nodes and the
+   * reductions over them that every target hoists. A scalar subexpression
+   * of the body that mentions no index (`√(x²+c)` in a ring sum over `n`)
+   * is then computed once per call instead of once per term. Set by the
+   * interval target, where each interval operation allocates and the
+   * unrolled terms of a fixed-N sum repeat such a subexpression N times
+   * (Tycho item 269). Off on the JavaScript target, whose codegen for
+   * unrolled sums is pinned by snapshots and whose scalar operations are
+   * cheap enough that the per-term recomputation was never measured as a
+   * cost.
+   */
+  hoistScalarInvariants?: boolean;
+
+  /**
    * The storage hints of this compilation, validated and normalized from the
    * caller's `storage` option (`resolveStorageHints`): the free symbols whose
    * values live in shader storage of the given kind. Stamped per call by the
