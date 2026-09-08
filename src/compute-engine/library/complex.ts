@@ -37,6 +37,8 @@ import { broadcastCellType } from '../../common/type/utils.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
+import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { checkNumericArgs } from '../boxed-expression/validate.js';
 
 /**
  * The most roots `ComplexRoots(z, n)` materializes: one element per root, so
@@ -262,6 +264,71 @@ const absArgType: OperatorTypeHandlerOnTypes = ([z], context) => {
   return undefined;
 };
 
+/**
+ * The pointwise conjugate of a function-typed operand of `Conjugate`, as a
+ * function literal: `Conjugate(chi)` is `(x) ↦ Conjugate(chi(x))`.
+ *
+ * `Conjugate`'s signature is generic over `number`, and the boxing seam
+ * re-validates a same-head result against it, so a function operand cannot
+ * stay as an inert `Conjugate(chi)` node: the canonical handler returns this
+ * literal instead. It is exactly what the conjugate of a function IS, and it
+ * applies (`Apply(Conjugate(chi), n)` is `Conjugate(chi(n))`) without a
+ * dedicated composition operator.
+ *
+ * The parameter list mirrors the operand's: a `Function` literal keeps its
+ * own parameters (which cannot capture a free variable of the body, since
+ * the body already binds those names); a symbol or other function-typed
+ * expression gets one parameter per REQUIRED argument of its signature,
+ * named so as not to capture a free variable of the operand. A function
+ * literal has no optional or rest parameter, so optional and variadic
+ * arguments of the operand are not threaded through — a signature with no
+ * required argument but optional or variadic ones, and the bare `function`
+ * type (`(any*) -> any`), get ONE parameter, the common call shape of such a
+ * function (a Dirichlet character is unary).
+ *
+ * The literal is built from RAW MathJSON, so that its body canonicalizes
+ * inside the literal's own scope, after the parameters are bound. Building
+ * the `Apply` canonical first validated `f(x)` against whatever the
+ * ENCLOSING scope held under the parameter's name — an outer `x: string`
+ * embedded an `incompatible-type` error in the wrapper, and an undeclared
+ * outer `x` was inferred `complex` by a call that never concerned it. The
+ * application is `Apply`, whose canonical form is the ordinary call for a
+ * symbol head (`chi(x)`).
+ */
+function pointwiseConjugate(ce: ComputeEngine, f: Expression): Expression {
+  let params: Expression[] | undefined;
+  if (isFunction(f, 'Function')) {
+    const own = f.ops.slice(1);
+    if (own.every((p) => functionLiteralParameterName(p) !== '')) params = own;
+  }
+  if (params === undefined) {
+    const t = f.type.type;
+    let arity = 1;
+    if (typeof t !== 'string' && t.kind === 'signature') {
+      const required = t.args?.length ?? 0;
+      const hasOthers =
+        (t.optArgs?.length ?? 0) > 0 || t.variadicArg !== undefined;
+      arity = required > 0 || !hasOthers ? required : 1;
+    }
+    // `x` for a unary function, `x_1, x_2, …` otherwise; a name the operand
+    // mentions free is skipped so the literal cannot capture it.
+    const taken = new Set<string>(f.unknowns);
+    params = [];
+    for (let i = 1, k = 1; i <= arity; i++) {
+      let name = arity === 1 ? 'x' : `x_${k++}`;
+      while (taken.has(name)) name = `x_${k++}`;
+      taken.add(name);
+      params.push(ce.symbol(name));
+    }
+  }
+  const names = params.map((p) => functionLiteralParameterName(p));
+  return ce.box([
+    'Function',
+    ['Conjugate', ['Apply', f.json, ...names]],
+    ...params.map((p) => p.json),
+  ]);
+}
+
 export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
   {
     Real: {
@@ -483,11 +550,13 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
     },
 
     Conjugate: {
-      description: 'Complex conjugate of a number.',
+      description:
+        'Complex conjugate of a number, or the pointwise conjugate of a function.',
       broadcastable: true,
       complexity: 1200,
       // Generic so that the result keeps the operand's own type (the
-      // conjugate of an integer is an integer). The mathematical carrier is
+      // conjugate of an integer is an integer, the conjugate of a function
+      // is a function with the same signature). The mathematical carrier is
       // every number but NaN — every finite complex number and every
       // infinity has a conjugate (`Conjugate(±∞) = ±∞`, `Conjugate(~oo) =
       // ~oo`, `Conjugate(∞ + i) = ∞ − i`) — so the only Contract B fact to
@@ -500,8 +569,29 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // carrier admits such an operand provisionally and leaves the
       // refutation to the runtime. Until the polytype route gains that
       // parity, the bound stays `number`.
+      //
+      // A FUNCTION operand is admitted by the canonical handler, not by the
+      // signature: widening the bound to `number | function` made every
+      // valueless operand infer that union, and `Conjugate(u) + 1` then typed
+      // `function | number` instead of narrowing `u` to a number. The handler
+      // rewrites `Conjugate(f)` to the pointwise literal `(x) ↦ Conjugate(f(x))`
+      // (`pointwiseConjugate`), which is what the conjugate Dirichlet
+      // character `Conjugate(chi)` in `DirichletLambda(1 - s, Conjugate(chi))`
+      // denotes (Fungrim entry `288207`). A number operand takes the numeric
+      // path: the boxing seam re-validates a same-head result against the
+      // declaration but never infers on it — a canonical-handler head types
+      // its own operands, as `Sin(x)` gives `x` the `number` of its numeric
+      // check — so `checkNumericArgs` supplies the arity check, the
+      // threading over a collection operand and the `number` narrowing of a
+      // valueless symbol that the handler-less path used to provide.
       signature: '(T) -> T where T: number',
       nanBehavior: 'propagate',
+      canonical: (ops, { engine: ce }) => {
+        const [f] = ops;
+        if (ops.length === 1 && f !== undefined && f.type.matches('function'))
+          return pointwiseConjugate(ce, f);
+        return ce._fn('Conjugate', checkNumericArgs(ce, ops, 1));
+      },
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
         // See `Real`: the conjugate of a complex Measurement.

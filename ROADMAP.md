@@ -308,39 +308,7 @@ here.
   (`src/compute-engine/function-utils.ts:2761`) rather than returning an error
   value. Wanted: an unknown protocol name should say so.
 
-### Four Fungrim Dirichlet entries are not representable: a `Sum` index is always `integer`, and `Conjugate` refuses a function-typed symbol (OPEN, type-system — found 2026-08-29 by `validate.ts --check`)
-
-**Context.** Since 2026-08-18 (commit 00405934) the engine reports
-`expected-function` when a symbol declared with a non-function type is applied.
-The Fungrim Stage-1 tool (`scripts/fungrim/load.ts`) declared every entry
-variable `complex` by default, so `chi(m)` with a Dirichlet character `chi`
-failed. Fixed 2026-08-29: a variable that appears in head position is declared
-`function`. The committed report (`scripts/fungrim/validation-report.json`) was
-regenerated; 32 of the 36 regressions closed. The four that remain
-(`data/fungrim/corpus/dirichlet.json` ids `288207`, `3ab92d`, `4c3678`,
-`f4de66`) are engine limits:
-
-1. **`Sum`/`Product` pin their index to `integer` whatever the indexing set
-   holds.** `Sum` and `Product` declare their bound variable with
-   `scoped: indexingSetSites(1, 'integer')` (`library/arithmetic.ts`), and the
-   numeric iteration in `reduceBigOp` relies on that declaration to `assign` the
-   index. So `Sum(chi(n), Element(chi, DirichletGroup(q)))` — or any
-   `Sum(f(x), Element(x, S))` with `S: set<function>` — declares `chi: integer`,
-   and the body `chi(n)` is then an `expected-function` error. The index of an
-   `Element` clause should take the element type of the set (`S: set<T>` → index
-   `T`, falling back to `integer` only for range-shaped clauses
-   `Limits`/`Tuple`/bare symbol). The assign in `reduceBigOp` is range-only, so
-   the pin is only needed on those shapes.
-
-2. **`Conjugate` accepts only numbers.** Entry `288207` writes
-   `DirichletLambda(1 - s, Conjugate(chi))` — the conjugate character. With
-   `chi: function` the argument check reports
-   `incompatible-type number function`. Either `Conjugate` gains a function arm
-   (pointwise conjugate, a function literal `x ↦ Conjugate(chi(x))`), or the
-   corpus entry stays listed as a Stage-1 failure in the report.
-
-Until both are decided the report lists these four as known Stage-1 failures,
-and `--check` is green against that baseline.
+### Fungrim Stage-2 residues: `Fibonacci` growth class, the corpus manifest fork id, `CartesianPower` (OPEN, low — Stage-2 triage of 2026-08-29)
 
 **Left from the Stage-2 triage of 2026-08-29.** (With the deadline restored,
 Stage 2 finished in 47 s and reported 16 False instances in 6 entries. The

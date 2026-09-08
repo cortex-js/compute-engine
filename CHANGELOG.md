@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **A `Sum`/`Product` index over an `Element` clause takes the type of the
+  collection's elements.** The index was pinned to `integer` whatever the
+  indexing set held, so `Sum(chi(n), Element(chi, G))` over a set of functions
+  bound `chi` as an integer and the body `chi(n)` was an `expected-function`
+  error, and `Sum(2x, Element(x, [0.5, 1.5]))` threw at evaluation when the
+  element `0.5` was assigned to the integer index. The index now takes the
+  element type of the collection (`function`, `real`, …), and stays `unknown`
+  for a collection whose element type is not known. A range-shaped clause
+  (`Limits`, a bounds tuple, a bare symbol) still binds an integer.
+- **`Conjugate` accepts a function.** `Conjugate(f)` for a function-typed `f` is
+  the pointwise conjugate, the function literal `(x) ↦ Conjugate(f(x))`; applied
+  to an argument it evaluates as the conjugate of the value. A number operand is
+  unchanged. With both fixes the four Fungrim Dirichlet entries that were not
+  representable (ids `288207`, `3ab92d`, `4c3678`, `f4de66`) box, and Stage 1 of
+  the corpus check passes every entry.
+
 ## 0.126.2 _2026-09-08_
 
 ### New Features

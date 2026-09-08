@@ -1306,7 +1306,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Complex conjugate of a number."
+      "description": "Complex conjugate of a number, or the pointwise conjugate of a function."
     },
     {
       "name": "ConjugateTranspose",

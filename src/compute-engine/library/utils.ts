@@ -10,6 +10,12 @@ import {
   isSymbol,
   isFunction,
 } from '../boxed-expression/type-guards.js';
+import type { Type } from '../../common/type/types.js';
+import {
+  collectionElementType,
+  resolveTypeForCompilation,
+} from '../../common/type/utils.js';
+import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
@@ -1805,6 +1811,47 @@ function checkBound(bound: Expression | null): Expression | null {
   return bound.engine.typeError('number', t, bound);
 }
 
+/**
+ * Type the fresh binding of a loop or big-operator index from the collection
+ * it iterates, as a CONTRACT rather than a guess.
+ *
+ * The binder hook declares an `Element` index as an inferred `unknown`
+ * binding; `._infer(…, 'narrow')` accepts that binding and carries the
+ * machinery a raw `def.type` write skips (the resolve-only guard, the
+ * inference state event, the same-type no-op that preserves `BoxedType`
+ * identity).
+ *
+ * The write lands in the fresh-inference set, which exists for one repair —
+ * `repairFreshMatrixInference` (`boxed-expression/validate.ts`) rewrites a
+ * symbol the scalar fast path guessed `real` for to `matrix` when a later
+ * operand slot wants a collection. Left in the set, the binder took that
+ * repair: `[q.x + 1 for q in L]` over `L: list<number>` boxed VALID with
+ * `q: matrix`, while `PointX(q)` over a `number`-typed `q` is a type error
+ * anywhere else. Removing the binding from the set makes a body use that
+ * contradicts the element type an error. Membership of that set is journaled
+ * state: an open rollback frame (the Epsil static-checking pass wraps a whole
+ * canonicalization in one) must be able to undo this removal exactly as it
+ * undoes the repair's own add, so the undo re-adds the definition.
+ *
+ * Callers: `canonicalIndexingSet` below (a `Sum`/`Product` `Element` clause)
+ * and `canonicalLoopLike` (`library/control-structures.ts`, a `Loop` or
+ * `Comprehension` clause).
+ */
+export function bindIndexAuthoritatively(
+  ce: ComputeEngine,
+  binding: Expression,
+  type: Type
+): void {
+  binding._infer(() => type, 'narrow');
+  const def = binding.valueDefinition;
+  const fresh = ce._freshlyInferred;
+  if (def !== undefined && fresh?.has(def)) {
+    const frame = activeRollbackFrame(ce);
+    if (frame !== undefined) frame.record({ undo: () => void fresh.add(def) });
+    fresh.delete(def);
+  }
+}
+
 export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   const ce = expr.engine;
   let index: Expression;
@@ -1821,19 +1868,44 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     if (!isSymbol(indexExpr)) return undefined;
     // Guarded like every other branch below: the binder hook may already have
     // declared the index in this scope, and `ce.declare` throws on a redeclare.
+    // The index of an `Element` clause is NOT pinned to `integer` the way a
+    // range index is: it takes the collection's element type, below. The
+    // fallback declaration is therefore an inferred `unknown`, the same
+    // binding the binder hook (`indexingSetSite`, `binding-sites.ts`) makes.
     if (
       indexExpr.symbol !== 'Nothing' &&
       !ce.context.lexicalScope.bindings.has(indexExpr.symbol)
     )
-      ce.declare(indexExpr.symbol, 'integer');
+      ce.declare(indexExpr.symbol, { type: 'unknown', inferred: true });
+    const canonicalCollection = collection.canonical;
+    const canonicalIndex = indexExpr.canonical;
+    // Narrow the index to the collection's ELEMENT type when it is known,
+    // before the body canonicalizes against it: `Sum(chi(n), Element(chi,
+    // G))` over `G: set<function>` needs `chi` bound as a function for the
+    // body's application to type, and `Sum(2x, Element(x, [0.5, 1.5]))`
+    // needs `x` real for the per-iteration assignment to accept `0.5`. The
+    // `Element` canonical handler does not do this for a binder's index (its
+    // own inference is confined to function parameters, `library/sets.ts`).
+    // Read fact-blind: the collection's EFFECTIVE type can be narrowed by an
+    // assumption, and the binding written here is a contract the next
+    // statement must not be able to retract. An element type that is unknown
+    // leaves the index `unknown`, to be typed by its use in the body.
+    if (isSymbol(canonicalIndex) && canonicalIndex.symbol !== 'Nothing')
+      ce._withoutFacts(() => {
+        const elt = collectionElementType(
+          resolveTypeForCompilation(canonicalCollection.type.type)
+        );
+        if (elt === undefined || elt === 'any' || elt === 'unknown') return;
+        bindIndexAuthoritatively(ce, canonicalIndex, elt);
+      });
     if (condition) {
       return ce.function('Element', [
-        indexExpr.canonical,
-        collection.canonical,
+        canonicalIndex,
+        canonicalCollection,
         condition.canonical,
       ]);
     }
-    return ce.function('Element', [indexExpr.canonical, collection.canonical]);
+    return ce.function('Element', [canonicalIndex, canonicalCollection]);
   }
 
   // If this is already a canonical Limits expression, return it (after

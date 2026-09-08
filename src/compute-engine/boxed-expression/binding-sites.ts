@@ -88,11 +88,11 @@ export function operandsFrom(
   };
 }
 
-/** The operand shapes `canonicalIndexingSet`/`canonicalLimits` recognize as
- * carrying an index in their first position. */
+/** The RANGE-shaped operand shapes `canonicalIndexingSet`/`canonicalLimits`
+ * recognize as carrying an index in their first position. An `Element`
+ * clause is handled before this set is consulted (see `indexingSetSite`). */
 const INDEXING_SET_OPERATORS = new Set([
   'Limits',
-  'Element',
   'Tuple',
   'Triple',
   'Pair',
@@ -137,6 +137,21 @@ function indexingSetSite(
     walk(op.ops[0], [i, 0]);
     return sites;
   }
+  // The `type` pin is for RANGE-shaped clauses only (`Limits`, a bounds
+  // `Tuple`, a bare symbol): their index walks integers between two bounds.
+  // An `Element` clause iterates a collection, and its index takes that
+  // collection's ELEMENT type instead — `Sum(chi(n), Element(chi, G))` over
+  // `G: set<function>` binds `chi` as a function, and `Sum(2x, Element(x,
+  // [0.5, 1.5]))` binds `x` as a real. The site is left untyped here (an
+  // inferred `unknown` binding), and the binder's canonical handler narrows
+  // it from the collection once that is canonical (`canonicalIndexingSet`,
+  // `library/utils.ts`). Pinning `integer` on that shape made the body
+  // `chi(n)` an `expected-function` error and the float element an
+  // `incompatible-type` throw at the per-iteration assignment.
+  if (isFunction(op, 'Element')) {
+    const site = siteFor(op.ops[0], [i, 0], undefined);
+    return site === undefined ? [] : [{ ...site, clauseLocal: true }];
+  }
   const site =
     isFunction(op) && INDEXING_SET_OPERATORS.has(op.operator)
       ? siteFor(op.ops[0], [i, 0], type)
@@ -151,7 +166,9 @@ function indexingSetSite(
  * (`Limits`/`Element`/`Tuple`/`Triple`/`Pair`/`Single`/`Set`, a bare symbol,
  * or any of those held).
  *
- * `Sum`/`Product`: `{ scoped: indexingSetSites(1, 'integer') }`.
+ * `Sum`/`Product`: `{ scoped: indexingSetSites(1, 'integer') }` — the
+ * `integer` applies to the range-shaped clauses; an `Element` clause's index
+ * is typed from its collection (see `indexingSetSite`).
  */
 export function indexingSetSites(
   first: number,

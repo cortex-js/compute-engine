@@ -6333,7 +6333,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
 
       // The index of each indexing-set operand (from operand 1) is this
-      // operator's BOUND variable, declared `integer` in its own scope.
+      // operator's BOUND variable, declared in its own scope: `integer` for a
+      // range-shaped clause (`Limits`, a bounds tuple, a bare symbol), and
+      // the collection's element type for an `Element` clause
+      // (`canonicalIndexingSet`, `library/utils.ts`).
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',
@@ -6522,7 +6525,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastable: false,
 
       // The index of each indexing-set operand (from operand 1) is this
-      // operator's BOUND variable, declared `integer` in its own scope.
+      // operator's BOUND variable, declared in its own scope: `integer` for a
+      // range-shaped clause (`Limits`, a bounds tuple, a bare symbol), and
+      // the collection's element type for an `Element` clause
+      // (`canonicalIndexingSet`, `library/utils.ts`).
       scoped: indexingSetSites(1, 'integer'),
       lazy: true,
       signature: '(any, tuple*) -> number',

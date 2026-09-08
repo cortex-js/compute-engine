@@ -64,9 +64,8 @@ import {
   ELEMENT_MEMO_CAP,
 } from '../boxed-expression/collection-element-memo.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
-import { assignLoopIndex } from './utils.js';
+import { assignLoopIndex, bindIndexAuthoritatively } from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
-import { activeRollbackFrame } from '../inference-rollback.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
@@ -2168,30 +2167,12 @@ function canonicalLoopLike(
       );
       if (elt === undefined || elt === 'any' || elt === 'unknown') return;
       // The binding site is AUTHORITATIVE for the index's type: the element
-      // type is evidence from the collection, not a guess. The write lands in the fresh-inference set, which exists
-      // for one repair — `repairFreshMatrixInference` (`validate.ts`)
-      // rewrites a symbol the scalar fast path guessed `real` for to
-      // `matrix` when a later operand slot wants a collection. Left in the
-      // set, the binder took that repair: `[q.x + 1 for q in L]` over
-      // `L: list<number>` boxed VALID with `q: matrix`, while `PointX(q)`
-      // over a `number`-typed `q` is a type error anywhere else. Removing
-      // the binding from the set makes a body use that contradicts the
-      // element type an error, as it is for a `Sum` index. Membership of
-      // that set is journaled state: an open rollback frame (the Epsil
-      // static-checking pass wraps a whole canonicalization in one) must be
-      // able to undo this removal exactly as it undoes the repair's own add,
-      // so the undo re-adds the definition.
-      const bindAuthoritatively = (binding: Expression, type: Type): void => {
-        binding._infer(() => type, 'narrow');
-        const def = binding.valueDefinition;
-        const fresh = ce._freshlyInferred;
-        if (def !== undefined && fresh?.has(def)) {
-          const frame = activeRollbackFrame(ce);
-          if (frame !== undefined)
-            frame.record({ undo: () => void fresh.add(def) });
-          fresh.delete(def);
-        }
-      };
+      // type is evidence from the collection, not a guess. The helper also
+      // takes the binding out of the fresh-inference set, so a body use that
+      // contradicts the element type is an error (`bindIndexAuthoritatively`,
+      // `library/utils.ts`, says why and how the removal is journaled).
+      const bindAuthoritatively = (binding: Expression, type: Type): void =>
+        bindIndexAuthoritatively(ce, binding, type);
       if (isSymbol(idxCanonical)) {
         bindAuthoritatively(idxCanonical, elt);
         return;
