@@ -35,3 +35,32 @@ export function machineNumberOf(target: Expression): number | undefined {
   const x = target.re;
   return target.engine.number(x).isSame(target) ? x : undefined;
 }
+
+/**
+ * Whether a boxed number that `machineNumberOf` answered `x` for is an
+ * EXACT value that is not an integer: an exact rational with a power-of-two
+ * denominator, such as `1/2` or `-7/8` (the only exact non-integers a
+ * double holds). `false` for an integer in any representation (a machine
+ * integer, an integer-valued bignum, an exact bigint such as `2^70`), for a
+ * float, for `NaN` and the infinities, and for a non-number.
+ *
+ * This is the one test that separates the `array` facet from the
+ * `isMachineNumeric` predicate. `array` answers the VALUES: `1/2` is in it
+ * as `0.5`, with no rounding. But re-boxing that array does not reproduce
+ * the list: `ce.number(0.5)` is a float, and the interpreter then computes
+ * `0.5 / 3` as a float where the list computed `1/2 ÷ 3 = 1/6` exactly. An
+ * integer has no such residue — `ce.number()` of an integer-valued double
+ * is an exact integer, a bigint when the double is past the safe range —
+ * so an integer is never counted, whatever its representation.
+ *
+ * The integer test is on the admitted double `x`, not on the numeric
+ * value's fields: `x` holds the exact value with no rounding, so
+ * `Number.isInteger(x)` is exact, where a reduced-denominator test would
+ * repeat the reduction `exactDoubleValue` already did.
+ */
+export function isExactNonInteger(target: Expression, x: number): boolean {
+  if (!isNumber(target)) return false;
+  const nv = target.numericValue;
+  if (typeof nv === 'number') return false;
+  return nv.isExact && !Number.isInteger(x);
+}

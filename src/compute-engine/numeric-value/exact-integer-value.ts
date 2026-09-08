@@ -66,9 +66,11 @@ export function exactDoubleValue(num: NumericValue): number | undefined {
   // A reduced denominator that is not a power of two has no finite binary
   // expansion.
   if ((d & (d - 1n)) !== 0n) return undefined;
-  // The numerator is odd here, so it must fit the significand as it is.
+  // The numerator is odd here, so it must fit the significand as it is. A
+  // numerator past the double range converts to an infinity, which
+  // `BigInt()` refuses with a `RangeError`, so it is tested for first.
   const numerator = Number(n);
-  if (BigInt(numerator) !== n) return undefined;
+  if (!Number.isFinite(numerator) || BigInt(numerator) !== n) return undefined;
   // Dividing by a power of two is exact unless the result underflows into
   // the subnormal range and loses bits; scaling back detects that. The
   // scale is applied in two steps because a power of two past `2^1023` is

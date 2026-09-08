@@ -111,7 +111,7 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
 import { numericStoreTiers } from './literal-tier.js';
-import { machineNumberOf } from './machine-number.js';
+import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import {
   absorbNumericAbsence,
   broadcastElementType,
@@ -402,6 +402,11 @@ export class BoxedFunction
    * once: the elements as machine numbers, or `null` when some element is
    * not a machine number. See `get array()`. */
   private _derivedArray: readonly number[] | null | undefined;
+
+  /** Computed with `_derivedArray`: does the array reproduce the list,
+   * exactness included? `false` when some element is an exact non-integer
+   * a double holds (`1/2`), which `array` admits. See `get isMachineNumeric()`. */
+  private _derivedArrayIsMachine: boolean | undefined;
 
   /** The boxed operands. A store-backed list boxes them here, once, on the
    * first read; every other node has them from construction. */
@@ -1061,17 +1066,43 @@ export class BoxedFunction
       return this._derivedArray ?? undefined;
     const ops = this._ops;
     const out = new Array<number>(ops.length);
+    let machine = true;
     for (let i = 0; i < ops.length; i++) {
       const x = machineNumberOf(ops[i]);
       if (x === undefined) {
         this._derivedArray = null;
+        this._derivedArrayIsMachine = false;
         return undefined;
       }
+      if (machine && isExactNonInteger(ops[i], x)) machine = false;
       // `-0 === 0`, so this stores `+0` for both.
       out[i] = x === 0 ? 0 : x;
     }
     this._derivedArray = Object.freeze(out);
+    this._derivedArrayIsMachine = machine;
     return this._derivedArray;
+  }
+
+  /**
+   * Does `array` reproduce this list, exactness included — is
+   * `engine.list(this.array)` this list element for element, as the
+   * interpreter computes with it?
+   *
+   * A store-backed list (`ce.list()`) answers `true` in constant time: its
+   * operands ARE `engine.number(store[i])`. An ordinary `List` answers
+   * `true` when `array` is defined and no element is an exact non-integer:
+   * `array` admits the exact rationals a double holds without rounding
+   * (`1/2`, `3/4`), but re-boxing `0.5` gives a float that computes as one
+   * (`0.5 / 3` is `0.1666…` where `1/2 ÷ 3` is `1/6`). An integer is
+   * reproduced in every representation, so it never counts against the
+   * answer. The answer is computed once, with the array. `false` for every
+   * other expression, including a nested list.
+   */
+  get isMachineNumeric(): boolean {
+    if (this._numericStore !== undefined) return true;
+    if (this._operator !== 'List') return false;
+    if (this._derivedArrayIsMachine === undefined) void this.array;
+    return this._derivedArrayIsMachine!;
   }
 
   get op1(): Expression {

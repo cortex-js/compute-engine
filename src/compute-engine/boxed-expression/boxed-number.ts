@@ -71,6 +71,7 @@ import type {
   NumberLiteralInterface,
 } from '../global-types.js';
 import { isNumber, isSymbol } from './type-guards.js';
+import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import {
   hasInfiniteComponent,
   logarithmAtExceptionalPoint,
@@ -1185,6 +1186,21 @@ export class BoxedNumber
       this._value.isPositiveInfinity ||
       this._value.isNegativeInfinity
     );
+  }
+
+  /**
+   * Is this number a machine number, exactness included — does
+   * `engine.number(x)` of its machine value reproduce it? `true` for a
+   * float (machine or bignum, when the double is the same value), for an
+   * integer a double holds (`3`, `2^70`; not `2^53 + 1`), for `NaN` and the
+   * infinities. `false` for an exact non-integer, even one a double holds:
+   * `1/2` re-boxes as the float `0.5`, which computes as a float where
+   * `1/2` computes exactly. `false` for a radical and a complex number.
+   * This is the per-element rule of `BoxedFunction.isMachineNumeric`.
+   */
+  get isMachineNumeric(): boolean {
+    const x = machineNumberOf(this);
+    return x !== undefined && !isExactNonInteger(this, x);
   }
 
   get isExact(): boolean {

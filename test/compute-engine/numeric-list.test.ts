@@ -378,6 +378,111 @@ describe('array on an ordinary list', () => {
   });
 });
 
+describe('isMachineNumeric — does array reproduce the list, exactness included', () => {
+  test('a store-backed list answers true without boxing an element', () => {
+    const l = ce.list([0.5, 1, NaN, Infinity]);
+    expect(boxedNumbersDuring(() => l.isMachineNumeric)).toBe(0);
+    expect(l.isMachineNumeric).toBe(true);
+  });
+
+  test('a list of floats and integers answers true', () => {
+    const l = ce.box(['List', 1, 2.5, -3, NaN, 'PositiveInfinity']);
+    expect(l.array).toEqual([1, 2.5, -3, NaN, Infinity]);
+    expect(l.isMachineNumeric).toBe(true);
+  });
+
+  test('an exact rational a double holds is in the array but answers false', () => {
+    // `array` is the VALUES: `1/2` is `0.5` with no rounding. But re-boxing
+    // `0.5` gives a float, and `1/2 ÷ 3` is `1/6` where `0.5 / 3` is a float.
+    const l = ce.box(['List', ['Rational', 1, 2], 1]);
+    expect(l.array).toEqual([0.5, 1]);
+    expect(l.isMachineNumeric).toBe(false);
+    expect(isNumber(l.ops[0]) && l.ops[0].isExact).toBe(true);
+    const reboxed = ce.list(l.array!);
+    expect(isNumber(reboxed.ops[0]) && reboxed.ops[0].isExact).toBe(false);
+    expect(ce.box(['List', ['Rational', 3, 4]]).isMachineNumeric).toBe(false);
+  });
+
+  test('a list without an array answers false', () => {
+    expect(ce.box(['List', 1, ['Rational', 1, 3]]).isMachineNumeric).toBe(
+      false
+    );
+    expect(ce.box(['List', ['Sqrt', 2]]).isMachineNumeric).toBe(false);
+    expect(ce.box(['List', 1, 'x']).isMachineNumeric).toBe(false);
+    expect(ce.box(['List', ['List', 1, 2]]).isMachineNumeric).toBe(false);
+    expect(
+      ce.function('List', [ce.number(1), ce.parse('2 + 3i')]).isMachineNumeric
+    ).toBe(false);
+    // An exact non-integer followed by an element with no machine number:
+    // the loop stops at the second element, and the answer is still false.
+    const l = ce.box(['List', ['Rational', 1, 2], 'x']);
+    expect(l.isMachineNumeric).toBe(false);
+    expect(l.array).toBeUndefined();
+  });
+
+  test('an exact rational past the double range answers false, not a throw', () => {
+    // `Number(2^1024 + 1)` is `Infinity`, which `BigInt()` refuses; the
+    // conversion must refuse the value instead of throwing.
+    const huge = ce.number(
+      ce._numericValue({ rational: [2n ** 1024n + 1n, 2n] })
+    );
+    expect(huge.isMachineNumeric).toBe(false);
+    const l = ce.function('List', [huge]);
+    expect(l.array).toBeUndefined();
+    expect(l.isMachineNumeric).toBe(false);
+  });
+
+  test('an exact integer counts as a machine number when a double holds it', () => {
+    // `ce.number(2 ** 70)` is the exact bigint `2^70`: re-boxing the double
+    // reproduces the element, so the answer stays true.
+    expect(
+      ce.function('List', [ce.number(2n ** 70n), ce.number(1)]).isMachineNumeric
+    ).toBe(true);
+    expect(
+      ce.function('List', [ce.number(2n ** 53n + 1n)]).isMachineNumeric
+    ).toBe(false);
+  });
+
+  test('a non-List answers false', () => {
+    expect(ce.box(['Tuple', 1, 2]).isMachineNumeric).toBe(false);
+    expect(ce.symbol('x').isMachineNumeric).toBe(false);
+    expect(ce.string('a').isMachineNumeric).toBe(false);
+    expect(ce.function('List', []).isMachineNumeric).toBe(true);
+  });
+
+  test('a number answers by the per-element rule', () => {
+    expect(ce.number(0.5).isMachineNumeric).toBe(true);
+    expect(ce.number(3).isMachineNumeric).toBe(true);
+    expect(ce.number(NaN).isMachineNumeric).toBe(true);
+    expect(ce.number(-Infinity).isMachineNumeric).toBe(true);
+    expect(ce.number(2n ** 70n).isMachineNumeric).toBe(true);
+    expect(ce.number(2n ** 53n + 1n).isMachineNumeric).toBe(false);
+    expect(ce.parse('\\frac{1}{2}').isMachineNumeric).toBe(false);
+    expect(ce.parse('\\frac{1}{3}').isMachineNumeric).toBe(false);
+    expect(ce.parse('\\sqrt{2}').isMachineNumeric).toBe(false);
+    expect(ce.parse('2 + 3i').isMachineNumeric).toBe(false);
+    expect(ce.parse('\\pi').N().isMachineNumeric).toBe(false);
+  });
+
+  test('the answer is the same whichever of array and isMachineNumeric is read first', () => {
+    const a = ce.box(['List', ['Rational', 1, 2], 1]);
+    expect(a.isMachineNumeric).toBe(false);
+    expect(a.array).toEqual([0.5, 1]);
+    const b = ce.box(['List', 1, 2.5]);
+    expect(b.isMachineNumeric).toBe(true);
+    expect(b.array).toEqual([1, 2.5]);
+    expect(b.isMachineNumeric).toBe(true);
+  });
+
+  test('at machine precision an exact rational still answers false', () => {
+    const machine = new ComputeEngine({ precision: 'machine' });
+    const l = machine.box(['List', ['Rational', 1, 2], 1]);
+    expect(l.array).toEqual([0.5, 1]);
+    expect(l.isMachineNumeric).toBe(false);
+    expect(machine.box(['List', 0.5, 1]).isMachineNumeric).toBe(true);
+  });
+});
+
 describe('ce.list() — assign, interpreter parity and the compiled round trip', () => {
   test('assign stores the given object and keeps its identity', () => {
     const l = ce.list([1, 0, 1, 0]);

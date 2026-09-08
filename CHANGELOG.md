@@ -1,7 +1,28 @@
 ## [Unreleased]
 
+### New Features
+
+- **`expr.isMachineNumeric`: does `array` reproduce the list, exactness
+  included?** `expr.array` answers the VALUES of a list as doubles, and it
+  admits an exact rational a double holds without rounding (`1/2` reads as
+  `0.5`). A consumer that must keep exact values exact could therefore not
+  take the array of a list with a non-integer element without walking the
+  boxed elements first. The new predicate answers whether `ce.list(expr.array)`
+  is the list element for element, as the interpreter computes with it: `true`
+  when every element is a float or an integer a double holds, `false` when
+  some element is an exact non-integer (re-boxing `0.5` gives a float, and
+  `0.5 / 3` is a float where `1/2 ÷ 3` is `1/6`). A list built by `ce.list()`
+  answers `true` in constant time without boxing an element; an ordinary list
+  computes the answer once, with the array. On a number the same rule applies
+  to the number itself. `false` for every other expression.
+
 ### Resolved Issues
 
+- **`expr.array` threw on an exact rational past the double range.** A `List`
+  holding an exact rational with a power-of-two denominator and a numerator
+  past `2^1024` made the array read throw a `RangeError` from the double
+  conversion instead of answering `undefined`. The conversion now refuses such
+  a value, and `isMachineNumeric` answers `false` for it.
 - **A user function applied to a collection-typed symbol that has no value yet
   is held, not refused.** With `xs: list<integer>` declared but not assigned,
   `h(n: integer) = n + 1; h(xs)` evaluated to `incompatible-type` (a

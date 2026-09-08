@@ -1229,6 +1229,15 @@ export abstract class _BoxedExpression implements Expression {
     return undefined;
   }
 
+  /** Whether re-boxing the machine value reproduces this expression,
+   * exactness included: `true` for a number that is a float, an integer a
+   * double holds, `NaN` or an infinity, and for a `List` of such numbers.
+   * `false` for every other expression. See `BoxedFunction.isMachineNumeric` and
+   * `BoxedNumber.isMachineNumeric`. */
+  get isMachineNumeric(): boolean {
+    return false;
+  }
+
   get isIndexedCollection(): boolean {
     return false;
   }
