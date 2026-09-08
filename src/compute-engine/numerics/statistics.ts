@@ -350,14 +350,24 @@ export function bigQuartiles(
  * data of machine range (`[10²⁰⁰, 2·10²⁰⁰, 3·10²⁰⁰]`, `[10⁻¹⁵⁰, …]`). A
  * power of two is exact to divide by, so the scaling adds no rounding of
  * its own (a two-point sample keeps r = ±1 exactly). Pearson's r is
- * invariant under that scaling, so `correlation` asks for it; a covariance
- * is not, so the covariance kernels take the unscaled sums.
+ * invariant under that scaling; a covariance is not, so the covariance
+ * kernel multiplies the scales back into its result (`covImpl`). The scales
+ * are returned for that purpose.
  */
 function pairedCenteredSums(
   xs: readonly number[],
   ys: readonly number[],
   scaled = false
-): { dx: number; dy: number; dxy: number; dx2: number; dy2: number } {
+): {
+  dx: number;
+  dy: number;
+  dxy: number;
+  dx2: number;
+  dy2: number;
+  /** The binary exponents of the two scales (`sx = 2^ex`, `sy = 2^ey`). */
+  ex: number;
+  ey: number;
+} {
   const n = xs.length;
   let mx = 0;
   let my = 0;
@@ -367,8 +377,8 @@ function pairedCenteredSums(
   }
   mx /= n;
   my /= n;
-  let sx = 1;
-  let sy = 1;
+  let ex = 0;
+  let ey = 0;
   if (scaled) {
     let ax = 0;
     let ay = 0;
@@ -378,9 +388,11 @@ function pairedCenteredSums(
     }
     // A constant column (all deviations 0) keeps the scale 1: its sums are
     // 0 either way, and the caller reports the zero variance.
-    if (ax > 0 && Number.isFinite(ax)) sx = 2 ** Math.floor(Math.log2(ax));
-    if (ay > 0 && Number.isFinite(ay)) sy = 2 ** Math.floor(Math.log2(ay));
+    if (ax > 0 && Number.isFinite(ax)) ex = Math.floor(Math.log2(ax));
+    if (ay > 0 && Number.isFinite(ay)) ey = Math.floor(Math.log2(ay));
   }
+  const sx = 2 ** ex;
+  const sy = 2 ** ey;
   let dx = 0;
   let dy = 0;
   let dxy = 0;
@@ -395,7 +407,7 @@ function pairedCenteredSums(
     dx2 += a * a;
     dy2 += b * b;
   }
-  return { dx, dy, dxy, dx2, dy2 };
+  return { dx, dy, dxy, dx2, dy2, ex, ey };
 }
 
 function bigPairedCenteredSums(
@@ -444,8 +456,38 @@ function covImpl(
   const ys = [...ysI];
   const n = xs.length;
   if (n !== ys.length || n < 2) return NaN;
-  const { dx, dy, dxy } = pairedCenteredSums(xs, ys);
-  return (dxy - (dx * dy) / n) / (population ? n : n - 1);
+  // The sums are taken over the SCALED deviations, so a product of two
+  // deviations cannot overflow while the covariance itself is of machine
+  // range: with deviations `[10²⁰⁰, −10²⁰⁰, 0]` and `[10²⁰⁰, 10²⁰⁰, −2·10²⁰⁰]`
+  // the covariance is 0, but the unscaled products are `±10⁴⁰⁰` and their
+  // sum was `NaN`. The scales are powers of two, so scaling back is exact;
+  // the result overflows only when the covariance has no double, which then
+  // reads `±Infinity`, the machine answer for such a value.
+  const { dx, dy, dxy, ex, ey } = pairedCenteredSums(xs, ys, true);
+  const scaled = (dxy - (dx * dy) / n) / (population ? n : n - 1);
+  return scaleByPowerOfTwo(scaled, ex + ey);
+}
+
+/**
+ * `x · 2^e`, applied in steps of at most 2^±512 so that no step overflows or
+ * underflows unless the result itself does. The two scales are applied
+ * TOGETHER: applying one at a time overflowed an intermediate for a first
+ * column near the double maximum and a second near the double minimum
+ * (`[2¹⁰²³, −2¹⁰²³]` against `[2⁻¹⁰²³, −2⁻¹⁰²³]`, a covariance of 2), and
+ * their product `2^ex · 2^ey` as one factor overflows when both are large
+ * while the covariance is small.
+ */
+function scaleByPowerOfTwo(x: number, e: number): number {
+  let r = x;
+  while (e > 512) {
+    r *= 2 ** 512;
+    e -= 512;
+  }
+  while (e < -512) {
+    r *= 2 ** -512;
+    e += 512;
+  }
+  return r * 2 ** e;
 }
 
 function bigCovImpl(

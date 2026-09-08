@@ -37,6 +37,7 @@ import {
   matchesSubject,
   boundsFromNormalizedInequality,
   containsPartTerm,
+  exactCompareNumbers,
   mergeTightestBounds,
   partBoundSubject,
   signFromBounds,
@@ -907,138 +908,21 @@ function assumeInequality(proposition: Expression): AssumeResult {
   }
 
   // Check if the new inequality is implied by or contradicts existing bounds
-  // (for single-symbol inequalities)
+  // (for single-symbol inequalities). The candidate bound is read from the
+  // NORMALIZED inequality by the same reader the fact index uses, and
+  // compared exactly: a hand-rolled check here read the machine projection
+  // of the stored bound and only recognized a literal backed by a JavaScript
+  // number, so an exact stored bound (`4` after evaluation, `1/3`) was
+  // invisible to it and a tautology was recorded as a new fact.
   if (unknowns.length === 1) {
-    const symbol = unknowns[0];
-    const bounds = boundsForCurrentDefinition(ce, toSubject(symbol));
-
-    // The normalized form is Less(p, 0) or LessEqual(p, 0) where p = lhs - rhs
-    // For a simple symbol case like "x > k", this becomes Less(-x + k, 0) meaning k - x < 0, i.e., x > k
-    // For "x < k", this becomes Less(x - k, 0) meaning x - k < 0, i.e., x < k
-
-    // Check if this is a simple "symbol > value" or "symbol < value" case
-    const originalOp = proposition.operator;
-    const propOp1 = proposition.op1;
-    const propOp2 = proposition.op2;
-    const isSymbolOnLeft = isSymbol(propOp1, symbol);
-    const otherSide = isSymbolOnLeft ? propOp2 : propOp1;
-
-    // Only do bounds checking for simple comparisons like "x > k" where k is numeric
-    const otherNumericValue = isNumber(otherSide)
-      ? otherSide.numericValue
-      : undefined;
-    if (otherNumericValue !== undefined) {
-      const k = otherNumericValue;
-
-      if (typeof k === 'number' && isFinite(k)) {
-        // Determine the EFFECTIVE relationship based on operator and symbol position
-        // Less(a, b) means a < b:
-        //   - if a is symbol: symbol < b, effective is "less"
-        //   - if b is symbol: a < symbol, so symbol > a, effective is "greater"
-        // Greater(a, b) means a > b:
-        //   - if a is symbol: symbol > b, effective is "greater"
-        //   - if b is symbol: a > symbol, so symbol < a, effective is "less"
-        let effectiveOp: 'greater' | 'greaterEqual' | 'less' | 'lessEqual';
-        if (originalOp === 'Greater') {
-          effectiveOp = isSymbolOnLeft ? 'greater' : 'less';
-        } else if (originalOp === 'GreaterEqual') {
-          effectiveOp = isSymbolOnLeft ? 'greaterEqual' : 'lessEqual';
-        } else if (originalOp === 'Less') {
-          effectiveOp = isSymbolOnLeft ? 'less' : 'greater';
-        } else {
-          // LessEqual
-          effectiveOp = isSymbolOnLeft ? 'lessEqual' : 'greaterEqual';
-        }
-
-        // Check for tautologies and contradictions based on existing bounds
-        if (effectiveOp === 'greater' || effectiveOp === 'greaterEqual') {
-          // We're asserting symbol > k or symbol >= k
-          const isStrict = effectiveOp === 'greater';
-
-          if (bounds.lower !== undefined) {
-            const lowerVal = isNumber(bounds.lower)
-              ? bounds.lower.numericValue
-              : undefined;
-            if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
-              // We already know symbol > lowerVal (or >=)
-              if (isStrict) {
-                // Assuming symbol > k: tautology if existing lower bound implies this
-                // If lowerVal > k, then symbol > lowerVal > k, so symbol > k (tautology)
-                // If lowerVal == k and bound is strict, then symbol > lowerVal = k (tautology)
-                if (lowerVal > k) return 'tautology';
-                if (bounds.lowerStrict && lowerVal >= k) return 'tautology';
-              } else {
-                // Assuming symbol >= k: tautology if lowerVal >= k (with strict bound) or lowerVal > k
-                if (lowerVal > k) return 'tautology';
-                if (bounds.lowerStrict && lowerVal >= k) return 'tautology';
-                if (!bounds.lowerStrict && lowerVal >= k) return 'tautology';
-              }
-            }
-          }
-
-          if (bounds.upper !== undefined) {
-            const upperVal = isNumber(bounds.upper)
-              ? bounds.upper.numericValue
-              : undefined;
-            if (typeof upperVal === 'number' && isFinite(upperVal)) {
-              // We know symbol < upperVal (or <=), now checking symbol > k
-              if (isStrict) {
-                // Contradiction if upperVal <= k
-                if (upperVal < k) return 'contradiction';
-                if (bounds.upperStrict && upperVal <= k) return 'contradiction';
-                if (!bounds.upperStrict && upperVal <= k)
-                  return 'contradiction';
-              } else {
-                // symbol >= k: contradiction if upperVal < k
-                if (upperVal < k) return 'contradiction';
-                if (bounds.upperStrict && upperVal <= k) return 'contradiction';
-              }
-            }
-          }
-        } else {
-          // effectiveOp is 'less' or 'lessEqual'
-          // We're asserting symbol < k or symbol <= k
-          const isStrict = effectiveOp === 'less';
-
-          if (bounds.upper !== undefined) {
-            const upperVal = isNumber(bounds.upper)
-              ? bounds.upper.numericValue
-              : undefined;
-            if (typeof upperVal === 'number' && isFinite(upperVal)) {
-              // We already know symbol < upperVal (or <=)
-              if (isStrict) {
-                // Assuming symbol < k: tautology if existing upper bound implies this
-                if (upperVal < k) return 'tautology';
-                if (bounds.upperStrict && upperVal <= k) return 'tautology';
-              } else {
-                // symbol <= k: tautology if upperVal <= k
-                if (upperVal < k) return 'tautology';
-                if (upperVal <= k) return 'tautology';
-              }
-            }
-          }
-
-          if (bounds.lower !== undefined) {
-            const lowerVal = isNumber(bounds.lower)
-              ? bounds.lower.numericValue
-              : undefined;
-            if (typeof lowerVal === 'number' && isFinite(lowerVal)) {
-              // We know symbol > lowerVal (or >=), now checking symbol < k
-              if (isStrict) {
-                // Contradiction if lowerVal >= k
-                if (lowerVal > k) return 'contradiction';
-                if (bounds.lowerStrict && lowerVal >= k) return 'contradiction';
-                if (!bounds.lowerStrict && lowerVal >= k)
-                  return 'contradiction';
-              } else {
-                // symbol <= k: contradiction if lowerVal > k
-                if (lowerVal > k) return 'contradiction';
-                if (bounds.lowerStrict && lowerVal > k) return 'contradiction';
-              }
-            }
-          }
-        }
-      }
+    const subject = toSubject(unknowns[0]);
+    const newBounds = boundsFromNormalizedInequality(result, subject);
+    if (newBounds !== undefined) {
+      const status = checkBoundsAgainst(
+        boundsForCurrentDefinition(ce, subject),
+        newBounds
+      );
+      if (status !== undefined) return status;
     }
   }
 
@@ -1385,57 +1269,64 @@ function assumeBound(
   return assumeInequality(ce.function(op, [ce.symbol(symbol), bound]));
 }
 
-/** The numeric (finite, real) value of a bound expression, or undefined. */
-function numericBoundValue(b: Expression | undefined): number | undefined {
-  if (b === undefined || !isNumber(b)) return undefined;
-  const v = b.numericValue;
-  const n = typeof v === 'number' ? v : v?.re;
-  return typeof n === 'number' && isFinite(n) ? n : undefined;
-}
-
 /**
  * Check a candidate bound against the existing bounds for the same subject
  * (design §4.3 — bounds-level consistency only, per subject).
  *
  * Returns `'tautology'` if the new bound is already implied,
  * `'contradiction'` if it is incompatible, `undefined` otherwise (store it).
+ *
+ * The bounds are compared EXACTLY (`exactCompareNumbers`): read as machine
+ * numbers, an existing strict lower bound `1 − 10⁻³⁰` and a candidate upper
+ * bound `1` were the same double, and `v < 1` was refused as a
+ * contradiction of `v > 1 − 10⁻³⁰`, which it is not.
  */
 function checkBoundsAgainst(
   existing: IntervalBounds,
   candidate: IntervalBounds
 ): 'tautology' | 'contradiction' | undefined {
   // New lower bound: subject > k (strict) or subject >= k
-  const newLower = numericBoundValue(candidate.lower);
-  if (newLower !== undefined) {
+  if (candidate.lower !== undefined) {
     const strict = candidate.lowerStrict === true;
-    const upper = numericBoundValue(existing.upper);
+    const upper =
+      existing.upper === undefined
+        ? undefined
+        : exactCompareNumbers(existing.upper, candidate.lower);
     if (upper !== undefined) {
-      if (upper < newLower) return 'contradiction';
-      if (upper === newLower && (strict || existing.upperStrict === true))
+      if (upper < 0) return 'contradiction';
+      if (upper === 0 && (strict || existing.upperStrict === true))
         return 'contradiction';
     }
-    const lower = numericBoundValue(existing.lower);
+    const lower =
+      existing.lower === undefined
+        ? undefined
+        : exactCompareNumbers(existing.lower, candidate.lower);
     if (lower !== undefined) {
-      if (lower > newLower) return 'tautology';
-      if (lower === newLower && (existing.lowerStrict === true || !strict))
+      if (lower > 0) return 'tautology';
+      if (lower === 0 && (existing.lowerStrict === true || !strict))
         return 'tautology';
     }
   }
 
   // New upper bound: subject < k (strict) or subject <= k
-  const newUpper = numericBoundValue(candidate.upper);
-  if (newUpper !== undefined) {
+  if (candidate.upper !== undefined) {
     const strict = candidate.upperStrict === true;
-    const lower = numericBoundValue(existing.lower);
+    const lower =
+      existing.lower === undefined
+        ? undefined
+        : exactCompareNumbers(existing.lower, candidate.upper);
     if (lower !== undefined) {
-      if (lower > newUpper) return 'contradiction';
-      if (lower === newUpper && (strict || existing.lowerStrict === true))
+      if (lower > 0) return 'contradiction';
+      if (lower === 0 && (strict || existing.lowerStrict === true))
         return 'contradiction';
     }
-    const upper = numericBoundValue(existing.upper);
+    const upper =
+      existing.upper === undefined
+        ? undefined
+        : exactCompareNumbers(existing.upper, candidate.upper);
     if (upper !== undefined) {
-      if (upper < newUpper) return 'tautology';
-      if (upper === newUpper && (existing.upperStrict === true || !strict))
+      if (upper < 0) return 'tautology';
+      if (upper === 0 && (existing.upperStrict === true || !strict))
         return 'tautology';
     }
   }
@@ -1445,13 +1336,19 @@ function checkBoundsAgainst(
 
 /** True if the bounds imply the subject is non-zero (e.g. `Im(x) > 0`). */
 function boundsExcludeZero(bounds: IntervalBounds): boolean {
-  const lower = numericBoundValue(bounds.lower);
+  const lower =
+    bounds.lower === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.lower, 0);
   if (
     lower !== undefined &&
     (lower > 0 || (lower === 0 && bounds.lowerStrict === true))
   )
     return true;
-  const upper = numericBoundValue(bounds.upper);
+  const upper =
+    bounds.upper === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.upper, 0);
   if (
     upper !== undefined &&
     (upper < 0 || (upper === 0 && bounds.upperStrict === true))

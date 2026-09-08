@@ -455,8 +455,16 @@ export function canonicalFunctionLiteralOperands(
 function anonymousParameters(
   expr: Expression
 ): [body: Expression, params: Expression[]] {
-  // Replace '_' with '_1'
-  const body = expr.subs({ _: '_1' });
+  // Replace '_' with '_1'. The substitution is NOT canonicalized: a
+  // canonical substitute is canonicalized in the CALLER's lexical scope,
+  // which auto-declares `_1` there with the type the body infers for it.
+  // The stray declaration outlived the lift: after `xs |> _^2` the global
+  // scope held `_1: number`, and the next lift of `Take(_, 2)` bound its
+  // parameter to that declaration, put an `incompatible-type` error in the
+  // body, and threw in `makeLambda`. The body is canonicalized by
+  // `canonicalFunctionLiteralArguments`, inside the literal's own scope,
+  // where the parameters are declared.
+  const body = expr.subs({ _: '_1' }, { canonical: false });
 
   const params: Expression[] = [];
   for (let i = 1; i < 10; i++)

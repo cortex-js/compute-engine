@@ -205,7 +205,7 @@ import {
   shallowApplicationEffects,
 } from '../boxed-expression/effects-of.js';
 import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
-import { canEnumerateOperand } from '../collection-utils.js';
+import { canEnumerateOperand, isTupleShapedType } from '../collection-utils.js';
 import { numericDerivativeOfApply } from './calculus.js';
 import {
   isNumber,
@@ -647,6 +647,130 @@ function pipeImplicitMapType(
     functionResult(stage.type) ??
     'unknown';
   return pipeMapResultType(topicType, cell);
+}
+
+/**
+ * The static type of a `Pipe` whose stage is a raw APPLICATION mentioning
+ * the topic placeholder — `xs |> Take(_, 2)`, `xs |> Fold(f, 0, _)`, and,
+ * on the LaTeX route, the operator shorthand `[1, 2, 3] |> \_^2`, which
+ * that parser leaves as the application `Power(_, 2)` (the Epsil parser
+ * wraps it as a function literal, the mapped case above). Returns
+ * `undefined` for any other stage, and for a stage this derivation cannot
+ * type soundly; the pipe then keeps the stage's declared result type, or
+ * `unknown`. Without this, `[1, 2, 3] |> \_^2` typed `unknown` while it
+ * evaluates to a `vector<integer^3>`.
+ *
+ * The evaluate route binds the piped value to the placeholder and applies
+ * the stage to the whole topic, so over a SCALAR topic the type is the
+ * body's type with the placeholder bound to the topic's type — the
+ * derivation `pipeStageBodyType` performs for the mapped case, with the
+ * topic in the place of its element.
+ *
+ * Over a COLLECTION topic the descriptor derivation (`context.derive`) is
+ * not enough on its own: it calls an operator's `type` handler directly,
+ * without the element-wise lift the expression route applies to a
+ * broadcastable operator over a collection operand, so `Power(list, 2)`
+ * would type as the scalar `number`. Two cases are typed here:
+ *
+ * - a BROADCASTABLE head over a collection of scalar numbers applies
+ *   element-wise, so the pipe is typed like the mapped stage: the body over
+ *   the ELEMENT type, wrapped back in the topic's collection shape;
+ * - a NON-broadcastable head (`Length`, `Take`, `Reverse`) takes the
+ *   collection whole, so the body is typed over the topic's type — but only
+ *   when the placeholder is a DIRECT operand of the head, since an inner
+ *   application over the placeholder would meet the same lift gap.
+ *
+ * Only `_` and `_1` name the first argument, the one a pipe supplies; a
+ * stage mentioning another placeholder, or several, is not decided here.
+ */
+function pipeShorthandApplicationType(
+  context: TypeHandlerContext,
+  topic: OperandDescriptor | undefined,
+  stage: OperandDescriptor
+): Type | undefined {
+  if (topic === undefined) return undefined;
+  const st = stage.structureOf?.();
+  if (st?.kind !== 'application') return undefined;
+  const placeholders = new Set<string>();
+  collectPlaceholderNames(st, placeholders);
+  if (placeholders.size !== 1) return undefined;
+  const name = [...placeholders][0];
+  if (name !== '_' && name !== '_1') return undefined;
+
+  const topicType = heldOperandType(context, topic);
+  // A topic whose held type is a top type gives the body nothing to type
+  // against; the derivation would answer the handler's fallback for an
+  // unknown operand (`number` for `Power`), which is not a fact about the
+  // topic.
+  if (topicType === 'unknown' || topicType === 'any') return undefined;
+  // A tuple topic broadcasts component-wise through a scalar head
+  // (`(1, 2) |> \_^2` is `(1, 4)`), a shape this derivation does not
+  // reproduce; it is left undecided.
+  if (isTupleShapedType(topicType)) return undefined;
+  const collectionTopic =
+    topic.facts.collection === true ||
+    isSubtype(topicType, PIPE_COLLECTION_SHAPE_TYPE);
+  if (!collectionTopic || isSubtype(topicType, 'string'))
+    return pipeStageBodyType(context, st, name, topicType);
+
+  if (isBroadcastableHead(context, st.head)) {
+    // Element-wise only if every application on the path from the head to
+    // the placeholder broadcasts: in `Add(Length(_), 1)` the inner `Length`
+    // takes the topic whole and the pipe is the scalar `4`, not a list.
+    if (!placeholderUnderBroadcastableHeads(context, st, name))
+      return undefined;
+    const elementType =
+      topic.facts.elementType ?? collectionElementType(topicType) ?? 'unknown';
+    if (!isSubtype(elementType, 'number')) return undefined;
+    const cell = pipeStageBodyType(context, st, name, elementType);
+    return cell === undefined ? undefined : pipeMapResultType(topicType, cell);
+  }
+
+  const placeholderIsDirectOperand = st.children.every((child) => {
+    const cs = child.structureOf?.();
+    if (cs?.kind === 'symbol') return true;
+    const inner = new Set<string>();
+    collectPlaceholderNames(cs, inner);
+    return !inner.has(name);
+  });
+  if (!placeholderIsDirectOperand) return undefined;
+  return pipeStageBodyType(context, st, name, topicType);
+}
+
+/** Whether the operator named `head` broadcasts element-wise over a
+ * collection operand. */
+function isBroadcastableHead(
+  context: TypeHandlerContext,
+  head: string
+): boolean {
+  return (
+    context.engine.lookupDefinition(head)?.operator?.broadcastable === true
+  );
+}
+
+/**
+ * Whether every application between `st`'s head and each occurrence of the
+ * placeholder `name` has a broadcastable head, so that the whole stage
+ * applies element-wise over a collection bound to the placeholder. An
+ * operand that does not mention the placeholder does not matter.
+ */
+function placeholderUnderBroadcastableHeads(
+  context: TypeHandlerContext,
+  st: OperandStructure & { kind: 'application' },
+  name: string
+): boolean {
+  return st.children.every((child) => {
+    const cs = child.structureOf?.();
+    if (cs?.kind === 'symbol') return true;
+    const inner = new Set<string>();
+    collectPlaceholderNames(cs, inner);
+    if (!inner.has(name)) return true;
+    return (
+      cs?.kind === 'application' &&
+      isBroadcastableHead(context, cs.head) &&
+      placeholderUnderBroadcastableHeads(context, cs, name)
+    );
+  });
 }
 
 /**
@@ -3481,6 +3605,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(
           f
             ? (pipeImplicitMapType(context, x, f) ??
+                pipeShorthandApplicationType(context, x, f) ??
                 functionResult(f.type) ??
                 'unknown')
             : undefined,

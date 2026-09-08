@@ -5,7 +5,11 @@ import type {
   Expression,
 } from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
-import { compareBounds, relationFromChains } from './constraint-subject.js';
+import {
+  compareBounds,
+  exactCompareNumbers,
+  relationFromChains,
+} from './constraint-subject.js';
 import {
   isNumber,
   isFunction,
@@ -762,45 +766,32 @@ export function cmp(
             : a.numericValue.re;
 
         if (aNum !== undefined && Number.isFinite(aNum)) {
-          // We're comparing a (number) to b (symbol)
+          // We're comparing a (number) to b (symbol). The bound is compared
+          // with `a` EXACTLY: read as doubles, a lower bound of `1 − 10⁻³⁰`
+          // equalled `a = 1`, and `1 < b` was ordered from a bound that does
+          // not entail it.
           // If b has a lower bound > a, then a < b
           if (bounds.lower !== undefined) {
-            const lb = bounds.lower;
-            const lowerNum = isNumber(lb)
-              ? typeof lb.numericValue === 'number'
-                ? lb.numericValue
-                : lb.numericValue.re
-              : undefined;
-
-            if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
-              // b > lowerBound (if strict) or b >= lowerBound (if not strict)
-              // If lowerBound > a, then b > a, so a < b
-              if (lowerNum > aNum) return '<';
-              // If lowerBound = a and strict (b > a), then a < b
-              if (lowerNum === aNum && bounds.lowerStrict) return '<';
-              // If lowerBound = a and not strict (b >= a), then a <= b
-              if (lowerNum === aNum && !bounds.lowerStrict) return '<=';
-            }
+            const order = exactCompareNumbers(bounds.lower, a);
+            // b > lowerBound (if strict) or b >= lowerBound (if not strict)
+            // If lowerBound > a, then b > a, so a < b
+            if (order === 1) return '<';
+            // If lowerBound = a and strict (b > a), then a < b
+            if (order === 0 && bounds.lowerStrict) return '<';
+            // If lowerBound = a and not strict (b >= a), then a <= b
+            if (order === 0 && !bounds.lowerStrict) return '<=';
           }
 
           // If b has an upper bound < a, then a > b
           if (bounds.upper !== undefined) {
-            const ub = bounds.upper;
-            const upperNum = isNumber(ub)
-              ? typeof ub.numericValue === 'number'
-                ? ub.numericValue
-                : ub.numericValue.re
-              : undefined;
-
-            if (upperNum !== undefined && Number.isFinite(upperNum)) {
-              // b < upperBound (if strict) or b <= upperBound (if not strict)
-              // If upperBound < a, then b < a, so a > b
-              if (upperNum < aNum) return '>';
-              // If upperBound = a and strict (b < a), then a > b
-              if (upperNum === aNum && bounds.upperStrict) return '>';
-              // If upperBound = a and not strict (b <= a), then a >= b
-              if (upperNum === aNum && !bounds.upperStrict) return '>=';
-            }
+            const order = exactCompareNumbers(bounds.upper, a);
+            // b < upperBound (if strict) or b <= upperBound (if not strict)
+            // If upperBound < a, then b < a, so a > b
+            if (order === -1) return '>';
+            // If upperBound = a and strict (b < a), then a > b
+            if (order === 0 && bounds.upperStrict) return '>';
+            // If upperBound = a and not strict (b <= a), then a >= b
+            if (order === 0 && !bounds.upperStrict) return '>=';
           }
 
           // Fall back to the symbol's known numeric value.
@@ -852,45 +843,30 @@ export function cmp(
     if (isSymbol(a)) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
 
-      // We're comparing a (symbol) to b (number)
+      // We're comparing a (symbol) to b (number). The bound is compared
+      // with `b` exactly, as in the number-to-symbol branch above.
       // If a has a lower bound >= b, then a > b (or a >= b)
       if (bounds.lower !== undefined) {
-        const lb = bounds.lower;
-        const lowerNum = isNumber(lb)
-          ? typeof lb.numericValue === 'number'
-            ? lb.numericValue
-            : lb.numericValue.re
-          : undefined;
-
-        if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
-          // a > lowerBound (if strict) or a >= lowerBound (if not strict)
-          // If lowerBound > b, then a > b
-          if (lowerNum > b) return '>';
-          // If lowerBound = b and strict (a > b), then a > b
-          if (lowerNum === b && bounds.lowerStrict) return '>';
-          // If lowerBound = b and not strict (a >= b), then a >= b
-          if (lowerNum === b && !bounds.lowerStrict) return '>=';
-        }
+        const order = exactCompareNumbers(bounds.lower, b);
+        // a > lowerBound (if strict) or a >= lowerBound (if not strict)
+        // If lowerBound > b, then a > b
+        if (order === 1) return '>';
+        // If lowerBound = b and strict (a > b), then a > b
+        if (order === 0 && bounds.lowerStrict) return '>';
+        // If lowerBound = b and not strict (a >= b), then a >= b
+        if (order === 0 && !bounds.lowerStrict) return '>=';
       }
 
       // If a has an upper bound <= b, then a < b (or a <= b)
       if (bounds.upper !== undefined) {
-        const ub = bounds.upper;
-        const upperNum = isNumber(ub)
-          ? typeof ub.numericValue === 'number'
-            ? ub.numericValue
-            : ub.numericValue.re
-          : undefined;
-
-        if (upperNum !== undefined && Number.isFinite(upperNum)) {
-          // a < upperBound (if strict) or a <= upperBound (if not strict)
-          // If upperBound < b, then a < b
-          if (upperNum < b) return '<';
-          // If upperBound = b and strict (a < b), then a < b
-          if (upperNum === b && bounds.upperStrict) return '<';
-          // If upperBound = b and not strict (a <= b), then a <= b
-          if (upperNum === b && !bounds.upperStrict) return '<=';
-        }
+        const order = exactCompareNumbers(bounds.upper, b);
+        // a < upperBound (if strict) or a <= upperBound (if not strict)
+        // If upperBound < b, then a < b
+        if (order === -1) return '<';
+        // If upperBound = b and strict (a < b), then a < b
+        if (order === 0 && bounds.upperStrict) return '<';
+        // If upperBound = b and not strict (a <= b), then a <= b
+        if (order === 0 && !bounds.upperStrict) return '<=';
       }
 
       // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
@@ -1005,49 +981,30 @@ export function cmp(
     // and its bounds relationship is indeterminate).
     if (isNumber(b) && b.im === 0) {
       const bounds = getInequalityBoundsFromAssumptions(a.engine, a.symbol);
-      const bNum =
-        typeof b.numericValue === 'number' ? b.numericValue : b.numericValue.re;
+      // The bound is compared with `b` exactly, as in the number-to-symbol
+      // branch above.
+      // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
+      if (bounds.lower !== undefined) {
+        const order = exactCompareNumbers(bounds.lower, b);
+        // symbol > lowerBound (if strict) or symbol >= lowerBound (if not strict)
+        // If lowerBound > b, then symbol > b
+        if (order === 1) return '>';
+        // If lowerBound = b and strict (symbol > b), then symbol > b
+        if (order === 0 && bounds.lowerStrict) return '>';
+        // If lowerBound = b and not strict (symbol >= b), then symbol >= b
+        if (order === 0 && !bounds.lowerStrict) return '>=';
+      }
 
-      if (bNum !== undefined && Number.isFinite(bNum)) {
-        // If symbol has a lower bound >= b, then symbol > b (or symbol >= b)
-        if (bounds.lower !== undefined) {
-          const lb = bounds.lower;
-          const lowerNum = isNumber(lb)
-            ? typeof lb.numericValue === 'number'
-              ? lb.numericValue
-              : lb.numericValue.re
-            : undefined;
-
-          if (lowerNum !== undefined && Number.isFinite(lowerNum)) {
-            // symbol > lowerBound (if strict) or symbol >= lowerBound (if not strict)
-            // If lowerBound > b, then symbol > b
-            if (lowerNum > bNum) return '>';
-            // If lowerBound = b and strict (symbol > b), then symbol > b
-            if (lowerNum === bNum && bounds.lowerStrict) return '>';
-            // If lowerBound = b and not strict (symbol >= b), then symbol >= b
-            if (lowerNum === bNum && !bounds.lowerStrict) return '>=';
-          }
-        }
-
-        // If symbol has an upper bound <= b, then symbol < b (or symbol <= b)
-        if (bounds.upper !== undefined) {
-          const ub = bounds.upper;
-          const upperNum = isNumber(ub)
-            ? typeof ub.numericValue === 'number'
-              ? ub.numericValue
-              : ub.numericValue.re
-            : undefined;
-
-          if (upperNum !== undefined && Number.isFinite(upperNum)) {
-            // symbol < upperBound (if strict) or symbol <= upperBound (if not strict)
-            // If upperBound < b, then symbol < b
-            if (upperNum < bNum) return '<';
-            // If upperBound = b and strict (symbol < b), then symbol < b
-            if (upperNum === bNum && bounds.upperStrict) return '<';
-            // If upperBound = b and not strict (symbol <= b), then symbol <= b
-            if (upperNum === bNum && !bounds.upperStrict) return '<=';
-          }
-        }
+      // If symbol has an upper bound <= b, then symbol < b (or symbol <= b)
+      if (bounds.upper !== undefined) {
+        const order = exactCompareNumbers(bounds.upper, b);
+        // symbol < upperBound (if strict) or symbol <= upperBound (if not strict)
+        // If upperBound < b, then symbol < b
+        if (order === -1) return '<';
+        // If upperBound = b and strict (symbol < b), then symbol < b
+        if (order === 0 && bounds.upperStrict) return '<';
+        // If upperBound = b and not strict (symbol <= b), then symbol <= b
+        if (order === 0 && !bounds.upperStrict) return '<=';
       }
     }
 

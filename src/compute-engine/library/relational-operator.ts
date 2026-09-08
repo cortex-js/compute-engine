@@ -105,29 +105,27 @@ function compareFromAssumedBounds(
   // Fast gate: engines with no assumptions do no subject or index work.
   if (!hasAssumptions(ce)) return undefined;
 
+  // The comparison constant is handed over as the exact expression, never
+  // as its machine projection: `u ≥ 1` does not entail `u ≥ 1 + 10⁻³⁰`,
+  // and both constants are the double 1.
+
   // subject < k / subject ≤ k
   let subject = subjectOf(lhs);
-  if (subject !== undefined) {
-    const k = finiteNumericValue(rhs);
-    if (k !== undefined)
-      return decideComparisonFromBounds(
-        getInequalityBoundsFromAssumptions(ce, subject),
-        k,
-        strict ? 'less' : 'lessEqual'
-      );
-  }
+  if (subject !== undefined && finiteNumericValue(rhs) !== undefined)
+    return decideComparisonFromBounds(
+      getInequalityBoundsFromAssumptions(ce, subject),
+      rhs,
+      strict ? 'less' : 'lessEqual'
+    );
 
   // k < subject / k ≤ subject ⇔ subject > k / subject ≥ k
   subject = subjectOf(rhs);
-  if (subject !== undefined) {
-    const k = finiteNumericValue(lhs);
-    if (k !== undefined)
-      return decideComparisonFromBounds(
-        getInequalityBoundsFromAssumptions(ce, subject),
-        k,
-        strict ? 'greater' : 'greaterEqual'
-      );
-  }
+  if (subject !== undefined && finiteNumericValue(lhs) !== undefined)
+    return decideComparisonFromBounds(
+      getInequalityBoundsFromAssumptions(ce, subject),
+      lhs,
+      strict ? 'greater' : 'greaterEqual'
+    );
 
   // Symbol/expression comparison via assumed inequality chains and the sign of
   // the difference `rhs - lhs` (transitive ≥-closure, and even-power

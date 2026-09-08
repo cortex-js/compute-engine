@@ -537,59 +537,32 @@ are indistinguishable to a descriptor; a symbol's held tuple behind a scalar
 declaration is invisible to `Abs`; a point accessor over a symbol whose declared
 element type is wider than its held content answers `unknown`). What remains:
 
-- **A LaTeX shorthand pipe stage types `unknown`.** `[1,2,3] |> \_^2` reaches
-  the `Pipe` type handler as a bare application mentioning `_`, not as a
-  function literal, so the static type is `unknown` while evaluation maps to
-  `vector<integer^3>`; the static handler could read such a stage as the
-  shorthand literal the evaluate route treats it as (`pipeImplicitMap`,
-  `library/core.ts`).
-- **Bignum division underflow.** `Divide` of two bignum operands returns NaN
-  when both machine projections underflow to `-0`. With `ce.precision = 500`, dividing two bignum values
-  around `-3.18…e-401` — each carrying its full decimal expansion, but with
-  `.re === -0` — evaluates to NaN: the division takes the machine fast path off
-  the `.re` projection instead of the bignum channel the operands actually
-  hold. This makes relative-error computations on sub-`1e-324` bignums
-  unusable. The fix belongs in the division fast-path gate (the
-  `arithmetic-mul-div` machine-path selection): a machine projection that has
-  underflowed must not be allowed to stand in for a bignum operand. Found while
-  writing the high-precision Fresnel regression tests, which work around it by
-  comparing decimal expansions instead of dividing.
-- **Overload-blind result declarations.** A declared result can be plainly
-  contradicted by an overload the signature does not distinguish:
-  `LinearRegression` declares `-> tuple<number, number>` and `PolynomialFit`
-  declares `-> list<number>`, but both accept an optional trailing variable
-  symbol and then return the FITTED EXPRESSION —
-  `LinearRegression([1, 2, 3], [2, 4, 6], x)` is `2x`, typed
-  `tuple<number, number>` before evaluation and `finite_number` after. The
-  declaration describes only the no-variable overload.
-- **`Covariance` and `PopulationCovariance` overflow on machine-range data.**
-  Both declare a `finite_real` result whenever the operand types prove every
-  datum a finite real (`pairedStatisticType`, `library/statistics.ts`), and the
-  declaration is sound by convention (a declared type describes the
-  MATHEMATICAL value; `Exp(1000)` is typed `finite_real<0..> & !0` while its
-  `.N()` at machine precision is `+oo`), but at machine precision
-  `Covariance([1.5e200, 2.5e200, 3.5e200], [1.5e200, 2.5e200, 3.5e200])`
-  evaluates to `+oo` because the sums of squares overflow. `Correlation` was
-  closed on 2026-09-04 by scaling each column by a power of two, which r is
-  invariant under; a covariance is not scale-invariant, so only routing the
-  machine path through the bignum lane would close this half.
-- **Direction-blind assumption bounds.** An assumption's bound is recorded
-  with machine rounding that ignores direction.
-  `boundsFromNormalizedInequality` (`constraint-subject.ts`) accumulates an
-  inequality's constant terms in a JavaScript number, so an exact bound the
-  machine cannot represent is rounded to nearest in EITHER direction before it
-  is stored — and every consumer (the `cmp` comparison predicates,
-  `signFromBounds`, the descriptor `bounds` fact) then treats the stored value
-  as exact. A lower bound rounded UP over-proves: canonicalization already
-  folds `assume(v > 1 − 10⁻³⁰)` to a stored strict bound of exactly 1, from
-  which every channel "proves" `v > 1` — refuted by `v = 1 − 10⁻³¹`. Sound
-  recording rounds a lower bound DOWN and an upper bound UP (weakening only),
-  or stores the exact bound expression and lets each consumer project it with
-  its own direction awareness. The descriptor fact already refuses a STORED
-  bound whose machine projection is inexact (`describe()`'s `machine` gate),
-  but it cannot see rounding that happened before storage. Both handler shapes
-  read the same store, so this predates the descriptor channel and is not a
-  conversion regression.
+### Two findings of the 2026-09-08 small-fix round (OPEN)
+
+- **The descriptor derivation of an application skips the broadcast lift.**
+  `context.derive('Power', [d, 2])`, with `d` a descriptor of type
+  `list<integer^3>`, answers `number`; `derive('Sin', [d])` answers `number`
+  too. The expression route types `v^2` for a `v: list<integer^3>` as
+  `vector<3>`, because after the `type` handler it lifts a broadcastable
+  operator over a collection operand element-wise
+  (`boxed-function.ts`, "Honest typing for list broadcast"). The descriptor
+  route (`deriveApplicationType`, `derive-application-type.ts`) calls the
+  handler and stops, so every handler that derives a body over a
+  collection-typed operand through `context.derive` — the pipe's mapped
+  and shorthand stages, a `Map` body over a collection element — gets a
+  scalar type for a collection value. The pipe shorthand typing declines
+  those shapes for now (`pipeShorthandApplicationType`, `library/core.ts`);
+  the fix is to port the lift, or its arms 0–2, to the descriptor route.
+
+- **An `unknown`-typed parameter given a list broadcasts the call
+  element-wise.** `f(L) := Sum(L)` leaves `L` typed `unknown` (`Sum` takes
+  `any`), and `f([1, 2, 3])` evaluates to `[1, 2, 3]`: the call maps `f` over
+  the elements and `Sum(1)`, `Sum(2)`, `Sum(3)` are the terms. `g(L) :=
+  Length(L)` infers `L: collection` and `g([1, 2, 3])` is `3`, as expected.
+  Whether a list argument at an `unknown` parameter should broadcast or
+  bind whole is a ruling to ask for; the pipe `[1, 2, 3] |> Sum(\_)`, which
+  looked the same, was the placeholder leak fixed in this round and now
+  answers `6`.
 
 ### Ranged types — remaining design tasks (OPEN; the interval arithmetic and open-bound halves shipped 2026-08-27 and 2026-08-28)
 
@@ -2345,13 +2318,12 @@ Still open, in rough priority:
   `isCollection === false` and so route through it:
   `Add(P: vector<real^3>, Q: vector<real^2>)` still emits `P + Q`, and WGSL
   `Add(Matrix, 2)` emits `2.0 + mat2x2f(…)` (invalid WGSL, valid GLSL). Gating
-  it is a perf-sensitive change and wants its own scoped pass. New JavaScript
-  witness (found 2026-08-30 by the tuple-broadcast round): `Add(Sin((1, 2)), 1)`
-  compiles to a runtime STRING — the `+` operator concatenates the array-valued
-  left operand — where the interpreter answers
-  `Error(incompatible-type, tuple, number)`. The tuple broadcast made this shape
-  easy to reach, so the JS lane of this gate has a live silent-wrong-value
-  repro, not only the GPU shape mismatches.
+  it is a perf-sensitive change and wants its own scoped pass. The JavaScript
+  witness `Add(Sin((1, 2)), 1)` (a runtime STRING from the `+` operator over an
+  array-valued operand, found 2026-08-30) no longer reaches the compiler:
+  canonicalization folds it to `Error(incompatible-type, tuple, number)` and the
+  compile falls back (re-measured 2026-09-08). The gap remains for typed
+  SYMBOLS, which canonicalization cannot fold.
 - **Complex-element collections** — `gpuOperandShape` reads a list of complex
   elements as `scalar` (via `isComplexValued`'s operand fallback), so the
   generic gate is inert for them. The fan-out path declines them explicitly; the

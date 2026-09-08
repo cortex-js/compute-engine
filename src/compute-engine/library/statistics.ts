@@ -243,6 +243,10 @@ const FINITE_REAL_DATA = parseType('collection<real>')!;
 
 /** The pair form of the same data: one collection of (x, y) points. */
 const FINITE_REAL_PAIRS = parseType('collection<tuple<real, real>>')!;
+/** The declared results of the coefficient forms of `LinearRegression` and
+ * `PolynomialFit` (`fitResultType`). */
+const LINEAR_FIT_COEFFICIENTS = parseType('tuple<number, number>')!;
+const POLYNOMIAL_FIT_COEFFICIENTS = parseType('list<number>')!;
 
 /**
  * Result type of `Covariance`, `PopulationCovariance` and `Correlation`,
@@ -1456,6 +1460,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '(any+) -> tuple<number, number>',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          fitResultType(ops, LINEAR_FIT_COEFFICIENTS),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluateLinearRegression(ce, ops, !!numericApproximation),
     },
@@ -1468,6 +1477,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       complexity: 1200,
       broadcastable: false,
       signature: '(any+) -> list<number>',
+      type: (ops, context) =>
+        BoxedType.forResult(
+          fitResultType(ops, POLYNOMIAL_FIT_COEFFICIENTS),
+          context.engine._typeResolver
+        ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
         evaluatePolynomialFit(ce, ops, !!numericApproximation),
     },
@@ -2434,6 +2448,29 @@ type FitArgs =
       variable?: string;
     }
   | { ok: false; dataOps: Expression[]; walked: Expression[] };
+
+/**
+ * The result type of `LinearRegression` and `PolynomialFit`.
+ *
+ * The two heads have an overload their signature cannot distinguish: a
+ * trailing variable SYMBOL makes them return the fitted expression in that
+ * variable instead of the coefficients (`parseFitArgs`). `coefficients` is
+ * the declared result of the coefficient form; the expression form is a
+ * polynomial with numeric coefficients, a `number` — `NaN` data give `NaN`
+ * coefficients, so no finite tier is claimed. Before this handler the
+ * declaration described only the coefficient form, and
+ * `LinearRegression([1, 2, 3], [2, 4, 6], x)` was typed `tuple<number,
+ * number>` while it evaluates to `2x`.
+ */
+function fitResultType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  coefficients: Type
+): Type {
+  const last = ops[ops.length - 1];
+  if (last !== undefined && last.structureOf?.()?.kind === 'symbol')
+    return 'number';
+  return coefficients;
+}
 
 function parseFitArgs(
   ops: ReadonlyArray<Expression>,

@@ -6,8 +6,10 @@ import type {
   FactSubject,
   IComputeEngine as ComputeEngine,
   IntervalBounds,
+  NumberLiteralInterface,
   Sign,
 } from '../global-types.js';
+import type { NumericValue } from '../numeric-value/types.js';
 import type { Type } from '../../common/type/types.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -108,6 +110,63 @@ export function finiteNumericValue(
   return undefined;
 }
 
+/** True when `term` is a number literal holding a finite real value. */
+function isFiniteRealNumber(
+  term: Expression
+): term is Expression & NumberLiteralInterface {
+  return isNumber(term) && term.isFinite === true && term.im === 0;
+}
+
+/**
+ * Order two finite real number literals EXACTLY: `-1`, `0` or `1`, or
+ * `undefined` when either side is not a finite real number literal.
+ *
+ * Two exact values (integers, rationals, radicals) compare exactly. An
+ * inexact value compares at the engine's working precision, which is the
+ * value it holds. No tolerance is applied: the engine's `cmp` orders two
+ * numbers within `ce.tolerance` as EQUAL, and a reader that decides whether
+ * a bound ENTAILS a comparison must not take `1 + 10⁻¹²` for `1`.
+ *
+ * This is the comparison every reader of the assumption bounds uses in
+ * place of comparing machine projections, which rounded an exact bound to
+ * the nearest double in either direction.
+ */
+export function exactCompareNumbers(
+  a: Expression,
+  b: Expression | number
+): -1 | 0 | 1 | undefined {
+  if (!isFiniteRealNumber(a)) return undefined;
+  const av = a.numericValue;
+  let bv: number | NumericValue;
+  if (typeof b === 'number') {
+    if (!Number.isFinite(b)) return undefined;
+    bv = b;
+  } else {
+    if (!isFiniteRealNumber(b)) return undefined;
+    bv = b.numericValue;
+  }
+  if (typeof av === 'number' && typeof bv === 'number')
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  // The order is read from `lt` and `gt` only, never from `eq`: an exact
+  // value's `eq(number)` answers `true` for an INTEGER only, so `1/2`
+  // against the double `0.5` was "not equal", and the fallthrough ordered
+  // it strictly greater — after `assume(x ≥ 1/2)`, `x.isGreater(0.5)` was
+  // `true`. `lt` and `gt` both go through the exact ordering.
+  const order = (x: NumericValue, y: number | NumericValue) => {
+    const lt = x.lt(y);
+    if (lt === undefined) return undefined;
+    if (lt) return -1;
+    const gt = x.gt(y);
+    if (gt === undefined) return undefined;
+    return gt ? 1 : 0;
+  };
+  if (typeof av === 'number') {
+    const o = order(bv as NumericValue, av);
+    return o === undefined ? undefined : (-o as -1 | 0 | 1);
+  }
+  return order(av, bv);
+}
+
 /**
  * Extract the bound contribution of a single normalized inequality
  * assumption — `Less(lhs, 0)` or `LessEqual(lhs, 0)` — for `subject`.
@@ -124,10 +183,15 @@ export function finiteNumericValue(
  *
  * Returns `undefined` if the assumption carries no bound for `subject`.
  *
- * NOTE: as in the historical implementation, non-numeric extra terms in an
- * `Add` are ignored when summing the constant. Callers should treat the
- * result as a best-effort bound (this matches the pre-existing behavior of
- * `getInequalityBoundsFromAssumptions`).
+ * The bound is stored EXACTLY, as the number expression the inequality
+ * carries (`1/3`, `1 − 10⁻³⁰`), never as its machine projection. Summing the
+ * constant terms in a JavaScript number rounded the bound to the nearest
+ * double in EITHER direction, and every reader then took the stored value
+ * as exact: `assume(v > 1 − 10⁻³⁰)` stored a strict lower bound of exactly
+ * 1, from which `v > 1` was "proven" — refuted by `v = 1 − 10⁻³¹`. A reader
+ * that needs a machine number projects the stored expression itself, in
+ * the direction that weakens the bound (`boundRange`), or compares exactly
+ * (`exactCompareNumbers`).
  */
 export function boundsFromNormalizedInequality(
   assumption: Expression,
@@ -164,8 +228,8 @@ export function boundsFromNormalizedInequality(
   if (isFunction(lhs, 'Add')) {
     let hasSubject = false;
     let hasNegatedSubject = false;
-    let constantSum = 0;
-    // A term that is neither the subject nor a finite numeric constant —
+    const constants: Expression[] = [];
+    // A term that is neither the subject nor a finite real constant —
     // another symbol, an application — makes the inequality relate the
     // subject to an UNKNOWN quantity, so no numeric bound is entailed.
     // Dropping such a term used to record a bound anyway: `b > y + 1`
@@ -179,23 +243,35 @@ export function boundsFromNormalizedInequality(
         hasNegatedSubject = true;
       } else if (matchesSubject(term, subject)) {
         hasSubject = true;
+      } else if (isFiniteRealNumber(term)) {
+        constants.push(term);
       } else {
-        const val = finiteNumericValue(term);
-        if (val !== undefined) constantSum += val;
-        else hasForeignTerm = true;
+        hasForeignTerm = true;
       }
     }
 
-    // Case 3: Add(Negate(subject), k) < 0 => k - subject < 0 => subject > k
-    if (!hasForeignTerm && hasNegatedSubject && constantSum !== 0) {
-      result.lower = ce.expr(constantSum);
-      result.lowerStrict = isStrict;
-    }
+    // The constant is kept as an exact number expression. A stored fact has
+    // been evaluated, so its constant terms are normally already folded into
+    // one literal; several literals are summed by the engine's own
+    // arithmetic, which folds exact literals exactly.
+    const k =
+      hasForeignTerm || constants.length === 0
+        ? undefined
+        : constants.length === 1
+          ? constants[0]
+          : ce.function('Add', constants);
+    if (k !== undefined && isFiniteRealNumber(k) && !k.isSame(0)) {
+      // Case 3: Add(Negate(subject), k) < 0 => k - subject < 0 => subject > k
+      if (hasNegatedSubject) {
+        result.lower = k;
+        result.lowerStrict = isStrict;
+      }
 
-    // Case 4: Add(subject, k) < 0 => subject < -k
-    if (!hasForeignTerm && hasSubject && constantSum !== 0) {
-      result.upper = ce.expr(-constantSum);
-      result.upperStrict = isStrict;
+      // Case 4: Add(subject, k) < 0 => subject < -k
+      if (hasSubject) {
+        result.upper = k.neg();
+        result.upperStrict = isStrict;
+      }
     }
   }
 
@@ -1105,35 +1181,45 @@ export function hasAssumptions(ce: ComputeEngine): boolean {
  */
 export function decideComparisonFromBounds(
   bounds: IntervalBounds,
-  k: number,
+  k: Expression | number,
   query: 'less' | 'lessEqual' | 'greater' | 'greaterEqual'
 ): boolean | undefined {
-  const lower = finiteNumericValue(bounds.lower);
-  const upper = finiteNumericValue(bounds.upper);
+  // The order of each bound against `k`, decided exactly: a bound and a
+  // query constant that differ by less than a double's spacing (`1 − 10⁻³⁰`
+  // against `1`) are DIFFERENT values, and reading them as equal doubles
+  // proved comparisons the assumption does not entail.
+  const lower =
+    bounds.lower === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.lower, k);
+  const upper =
+    bounds.upper === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.upper, k);
   const lowerStrict = bounds.lowerStrict === true;
   const upperStrict = bounds.upperStrict === true;
 
   switch (query) {
     case 'less': // subject < k
       // Entailed by subject < upper ≤ k (or ≤ upper < k)
-      if (upper !== undefined && (upper < k || (upper === k && upperStrict)))
+      if (upper !== undefined && (upper < 0 || (upper === 0 && upperStrict)))
         return true;
       // Refuted by subject ≥ lower ≥ k (strictness immaterial)
-      if (lower !== undefined && lower >= k) return false;
+      if (lower !== undefined && lower >= 0) return false;
       return undefined;
     case 'lessEqual': // subject ≤ k
-      if (upper !== undefined && upper <= k) return true;
-      if (lower !== undefined && (lower > k || (lower === k && lowerStrict)))
+      if (upper !== undefined && upper <= 0) return true;
+      if (lower !== undefined && (lower > 0 || (lower === 0 && lowerStrict)))
         return false;
       return undefined;
     case 'greater': // subject > k
-      if (lower !== undefined && (lower > k || (lower === k && lowerStrict)))
+      if (lower !== undefined && (lower > 0 || (lower === 0 && lowerStrict)))
         return true;
-      if (upper !== undefined && upper <= k) return false;
+      if (upper !== undefined && upper <= 0) return false;
       return undefined;
     case 'greaterEqual': // subject ≥ k
-      if (lower !== undefined && lower >= k) return true;
-      if (upper !== undefined && (upper < k || (upper === k && upperStrict)))
+      if (lower !== undefined && lower >= 0) return true;
+      if (upper !== undefined && (upper < 0 || (upper === 0 && upperStrict)))
         return false;
       return undefined;
   }
@@ -1153,22 +1239,19 @@ export function compareBounds(
   a: IntervalBounds,
   b: IntervalBounds
 ): '<' | '>' | '<=' | '>=' | undefined {
-  const aLower = finiteNumericValue(a.lower);
-  const aUpper = finiteNumericValue(a.upper);
-  const bLower = finiteNumericValue(b.lower);
-  const bUpper = finiteNumericValue(b.upper);
-
   // a > b (or a ≥ b): a's lower bound sits at/above b's upper bound.
-  if (aLower !== undefined && bUpper !== undefined) {
-    if (aLower > bUpper) return '>';
-    if (aLower === bUpper)
+  if (a.lower !== undefined && b.upper !== undefined) {
+    const order = exactCompareNumbers(a.lower, b.upper);
+    if (order === 1) return '>';
+    if (order === 0)
       return a.lowerStrict === true || b.upperStrict === true ? '>' : '>=';
   }
 
   // a < b (or a ≤ b): a's upper bound sits at/below b's lower bound.
-  if (aUpper !== undefined && bLower !== undefined) {
-    if (aUpper < bLower) return '<';
-    if (aUpper === bLower)
+  if (a.upper !== undefined && b.lower !== undefined) {
+    const order = exactCompareNumbers(a.upper, b.lower);
+    if (order === -1) return '<';
+    if (order === 0)
       return a.upperStrict === true || b.lowerStrict === true ? '<' : '<=';
   }
 
@@ -1182,13 +1265,19 @@ export function compareBounds(
  * Returns a sign only when the bounds entail it; `undefined` otherwise.
  */
 export function signFromBounds(bounds: IntervalBounds): Sign | undefined {
-  const lower = finiteNumericValue(bounds.lower);
+  const lower =
+    bounds.lower === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.lower, 0);
   if (lower !== undefined) {
     if (lower > 0 || (lower === 0 && bounds.lowerStrict === true))
       return 'positive';
     if (lower === 0) return 'non-negative';
   }
-  const upper = finiteNumericValue(bounds.upper);
+  const upper =
+    bounds.upper === undefined
+      ? undefined
+      : exactCompareNumbers(bounds.upper, 0);
   if (upper !== undefined) {
     if (upper < 0 || (upper === 0 && bounds.upperStrict === true))
       return 'negative';
