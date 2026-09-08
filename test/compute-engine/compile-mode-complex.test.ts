@@ -92,25 +92,24 @@ describe('complex mode — one emission per user function, lift at use (design �
     expect(ba.code).toContain('_SYS.cplx(_.a)');
     expect(ba.code).not.toContain('$z');
     expect(ba.run!({ a: -2 })).toBe(-4);
-    // The call's RESULT is wrapped in the idempotent `_SYS.cplx` by the
-    // lift-at-use rule (`liftWideResult`): `b`'s declared result is
-    // `number`, and since the finite-by-default flip `complex` sits
-    // below that name, so `wideNumericType` reports it wide — a node that may
-    // hold a complex value and whose lowering hands back whatever it holds.
-    // The wrap is redundant here (the single `_fn_b` is emitted in the complex
-    // lane and already returns `{re, im}`), and idempotent, so the value is
-    // unchanged. The call site carries no runtime broadcast guard: `z` is
-    // EXPLICITLY declared, and an explicit scalar declaration is the caller's
-    // input contract (user ruling 2026-09-07), so the call is the bare
-    // `_fn_b(_.z)`.
+    // The call's RESULT is not wrapped: `b`'s declared result `number` is
+    // wide (since the finite-by-default flip `complex` sits below that
+    // name), and the lift-at-use rule (`liftWideResult`) wraps a wide value
+    // in the idempotent `_SYS.cplx` — but the single `_fn_b` is emitted in
+    // the complex lane and its body `2x` returns `{re, im}` by construction,
+    // which the emitter records (`userFunctions.complexShaped`), so the call
+    // site skips the redundant wrap. The call site carries no runtime
+    // broadcast guard either: `z` is EXPLICITLY declared, and an explicit
+    // scalar declaration is the caller's input contract (user ruling
+    // 2026-09-07), so the call is the bare `_fn_b(_.z)`.
     const bz = compile(ce.parse('b(z)'), CX);
-    expect(bz.code).toBe('_SYS.cplx(_fn_b(_.z))');
+    expect(bz.code).toBe('_fn_b(_.z)');
     expect(bz.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
     const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
     expect(bs.code).toBe(
-      '_SYS.cplx(((_tv1) => Array.isArray(_tv1) ? ' +
+      '((_tv1) => Array.isArray(_tv1) ? ' +
         '_SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))' +
-        '(_SYS.csqrt(_SYS.cplx(_.a))))'
+        '(_SYS.csqrt(_SYS.cplx(_.a)))'
     );
     expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });
   });

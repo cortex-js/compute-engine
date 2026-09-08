@@ -3792,7 +3792,19 @@ export class BaseCompiler {
       // This costs the common case nothing: every real collection reports
       // `isComplexValued === false` (measured over Map/Range/Filter/list
       // literals), so only genuinely complex-ish aggregates are turned away.
+      //
+      // The evaluated ELEMENTS are checked too: the static analysis reads a
+      // callback body's value under the same carve-outs the emitter applies
+      // (an unknown-sign `Sqrt` is real in strict mode), so it can call the
+      // collection real while `.N()` produced `[2i, 3i, 4i]` — and a folded
+      // literal of complex objects would then stand where the structural
+      // lowering emits the real kernel's `NaN`s. Undirected infinity `~oo`
+      // carries an infinite imaginary part but is real-shaped at run time
+      // (the non-finite typing convention `isComplexValued` follows), so it
+      // does not count.
       if (BaseCompiler.isComplexValued(expr)) return undefined;
+      if (elements.some((e) => isNumber(e) && e.im !== 0 && !e.isInfinity))
+        return undefined;
       return BaseCompiler.emitFoldedValue(
         engine.function(isTuple(value) ? 'Tuple' : 'List', elements),
         target,
@@ -5189,7 +5201,61 @@ export class BaseCompiler {
     if (t === undefined || isNonRealNumber(t)) return code;
     if (!BaseCompiler.wideNumericType(t)) return code;
     if (!BaseCompiler.isComplexValued(node)) return code;
+    // A call to an emitted user function whose body returns a `{re, im}`
+    // object by construction (`userFunctions.complexShaped`, recorded when
+    // the definition was emitted in this compilation) is already
+    // complex-shaped: the wrap would be idempotent, so it is skipped. A
+    // function whose body's value position is real-valued (`x ↦ |x|`), a
+    // control-flow body, or a multi-clause definition is not recorded, and
+    // its call keeps the wrap.
+    if (target.userFunctions?.complexShaped?.has(h)) return code;
     return target.complexLift(code);
+  }
+
+  /**
+   * Whether the value `node` emits in the complex lane is a `{re, im}`
+   * object by construction — the same decision `liftWideResult` makes for
+   * one node, read on the VALUE position of a user function's body so its
+   * call sites can skip the idempotent wrap (`userFunctions.complexShaped`).
+   *
+   * `true` for a complex number literal; for a node typed non-real (its
+   * emission is complex-shaped by contract); for a complex-propagating head,
+   * a promotable radical or `Power` that the analysis calls complex (its
+   * complex-lane lowering builds the object); and for a wide-typed node the
+   * analysis calls complex, which `liftWideResult` wrapped. A `Block` is read
+   * at its last statement, the value the emitted function returns — unless
+   * an earlier statement can `Return` first: that value is whatever the
+   * `Return` carries, so such a block answers `false`. Every other shape —
+   * a real-typed value, a bare parameter or local, another control-flow
+   * head — answers `false`, and the call site keeps its wrap. Must be called
+   * inside the shape frame the body was compiled under, so the analysis sees
+   * the parameters as the body did.
+   */
+  static complexShapedEmission(node: Expression): boolean {
+    if (!BaseCompiler.complexDiscipline) return false;
+    if (isNumber(node)) return node.im !== 0 && !node.isInfinity;
+    if (!isFunction(node)) return false;
+    const h = node.operator;
+    if (h === 'Block') {
+      const last = node.ops[node.ops.length - 1];
+      if (last === undefined) return false;
+      for (let i = 0; i < node.ops.length - 1; i++)
+        if (BaseCompiler.containsReturn(node.ops[i])) return false;
+      return BaseCompiler.complexShapedEmission(last);
+    }
+    if (BaseCompiler.CONTROL_FLOW_HEADS.has(h)) return false;
+    const t = node.type?.type;
+    if (t === undefined) return false;
+    if (isNonRealNumber(t)) return true;
+    if (
+      BaseCompiler.COMPLEX_PROPAGATING_HEADS.has(h) ||
+      BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h) ||
+      h === 'Power'
+    )
+      return BaseCompiler.isComplexValued(node);
+    return (
+      BaseCompiler.wideNumericType(t) && BaseCompiler.isComplexValued(node)
+    );
   }
 
   /**
@@ -12035,6 +12101,28 @@ export class BaseCompiler {
       return expr.ops.some(
         (a, i) => i % 2 === 1 && BaseCompiler.isComplexValued(a)
       );
+    // A `Block`'s value is its LAST statement, not any of them: an interior
+    // statement that binds a complex LOCAL says nothing about the value the
+    // block produces. Under the conservative recursion it did — a body such as
+    // `{ s ⩴ 0; z ⩴ t + i; s ⩴ s + |z|; s }` reported complex even though it
+    // yields the real `s`, and the GPU user-function emission (whose return
+    // type is `gpuTypeOfValue` of the body) declared `vec2 _fn_a(float t)`
+    // around a `return s;` — source no driver accepts, behind
+    // `success: true`.
+    //
+    // Answered HERE, with the selections, and never from the block's type:
+    // the type joins the last statement's arms with `widen`, where an
+    // `unknown` arm is a placeholder that the other arm absorbs
+    // (`If(0 < x, x, 3)` over an unannotated parameter `x` types `integer`),
+    // so the type-based branches below would call the block real while the
+    // emitter lifts the wide arm to a `{re, im}` object. A user function
+    // `b(x) := If(x > 0, x, 3)` called on a complex `z` then compiled
+    // `(_.z).re + _fn_b(_.z)` around that object — `"1[object Object]"`
+    // at run time — because its call site read the body's type. The block's
+    // own arm reads the last statement's VALUE under the block's locals, the
+    // same analysis `compileBlock` emits from.
+    if (expr.operator === 'Block')
+      return BaseCompiler.isBlockValueComplexValued(expr);
     // An indexed read answers for the ELEMENT it selects, not for the whole
     // collection: a list is emitted element by element, so its run-time array is
     // heterogeneous and the generic `ops.some(…)` recursion at the bottom of
@@ -12191,17 +12279,6 @@ export class BaseCompiler {
       return BaseCompiler.withBinderMask(binder, () =>
         binder.bodies.some((b) => BaseCompiler.isComplexValued(b))
       );
-
-    // A `Block`'s value is its LAST statement, not any of them: an interior
-    // statement that binds a complex LOCAL says nothing about the value the
-    // block produces. Under the conservative recursion it did — a body such as
-    // `{ s ⩴ 0; z ⩴ t + i; s ⩴ s + |z|; s }` reported complex even though it
-    // yields the real `s`, and the GPU user-function emission (whose return
-    // type is `gpuTypeOfValue` of the body) declared `vec2 _fn_a(float t)`
-    // around a `return s;` — source no driver accepts, behind
-    // `success: true`.
-    if (expr.operator === 'Block')
-      return BaseCompiler.isBlockValueComplexValued(expr);
 
     if (expr.ops.some((arg) => BaseCompiler.isComplexValued(arg))) return true;
     // A head whose emitter chooses its lowering from the OPERANDS' shapes
@@ -17666,6 +17743,11 @@ export class BaseCompiler {
           vector: new Map<string, number>(),
         };
         BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
+        // Whether the emitted body returns a `{re, im}` object by
+        // construction, decided inside the same frames the body compiled
+        // under (`complexShapedEmission`), so a call site can skip the
+        // idempotent lift-at-use wrap (`liftWideResult`).
+        let complexShaped = false;
         const body = BaseCompiler.withLocalShapeFrame(
           frames.complex,
           frames.vector,
@@ -17675,11 +17757,16 @@ export class BaseCompiler {
                 bodyExpr,
                 bodyTarget,
                 params,
-                () => BaseCompiler.compile(bodyExpr, bodyTarget)
+                () => {
+                  const code = BaseCompiler.compile(bodyExpr, bodyTarget);
+                  complexShaped = BaseCompiler.complexShapedEmission(bodyExpr);
+                  return code;
+                }
               )
             ),
           true
         );
+        if (complexShaped) (registry.complexShaped ??= new Set()).add(h);
         const statements = javascriptStatements(bodyTarget);
         registry.defs.set(
           name,

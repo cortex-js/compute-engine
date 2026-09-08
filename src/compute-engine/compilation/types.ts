@@ -1239,6 +1239,17 @@ export interface CompileTarget<Expr = unknown> {
      * `javascript-target.ts`). Recorded by `BaseCompiler.ensureFoldedValueEmitted`.
      */
     hoistable?: Set<string>;
+    /**
+     * The ids of the emitted user functions whose body was compiled in the
+     * complex lane and returns a `{re, im}` object by construction — its
+     * value position is a complex-propagating head, a non-real-typed node,
+     * or a node the lift-at-use rule wrapped inside the body. A call to such
+     * a function is not wrapped again at the call site
+     * (`BaseCompiler.liftWideResult`): the wrap is idempotent, so skipping it
+     * changes no value, only the emitted code. Recorded by
+     * `BaseCompiler.emitFunctionLiteralDefinition`.
+     */
+    complexShaped?: Set<string>;
     /** Symbols proven (this compile) NOT to name a user-defined function, so a
      * repeated bare free symbol in value position doesn't re-hit
      * `lookupDefinition` on every occurrence. Populated lazily. */

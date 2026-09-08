@@ -182,14 +182,15 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     // the complex discipline (compile-mode step 4, 2026-08-16), so there is a
     // single `_fn_b` and the mismatch is reported as the escalation cause.
     expect(auto.success).toBe(true);
-    // The call's result carries the idempotent `_SYS.cplx` of the
-    // lift-at-use rule: `b`'s declared result `number` counts as a
-    // WIDE numeric type since the finite-by-default flip put `complex` below
-    // that name. The wrap does not change the value, and `_fn_b` is still
-    // emitted once. The call site carries no runtime broadcast guard: `z` is
-    // EXPLICITLY declared, and an explicit scalar declaration is the caller's
-    // input contract (user ruling 2026-09-07).
-    expect(auto.code).toBe('_SYS.cplx(_fn_b(_.z))');
+    // The call's result is not wrapped in the lift-at-use `_SYS.cplx`:
+    // `b`'s declared result `number` is a WIDE numeric type since the
+    // finite-by-default flip put `complex` below that name, but the one
+    // `_fn_b` is emitted in the complex lane and its body `2x` returns
+    // `{re, im}` by construction, so the call site skips the idempotent wrap
+    // (`userFunctions.complexShaped`). The call site carries no runtime
+    // broadcast guard: `z` is EXPLICITLY declared, and an explicit scalar
+    // declaration is the caller's input contract (user ruling 2026-09-07).
+    expect(auto.code).toBe('_fn_b(_.z)');
     expect(auto.mode).toBe('complex');
     expect(auto.escalation?.boundary).toBe('user-function parameter');
     expect(auto.escalation?.binding).toBe('the parameter `x` of `b`');
@@ -202,7 +203,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
       mode: 'complex',
       fallback: false,
     });
-    expect(cx.code).toBe('_SYS.cplx(_fn_b(_.z))');
+    expect(cx.code).toBe('_fn_b(_.z)');
     expect(cx.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
   });
 
