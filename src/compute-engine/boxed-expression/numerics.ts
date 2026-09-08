@@ -13,6 +13,7 @@ import { bigint } from '../numerics/bigint.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { bigintValue } from '../numerics/expression.js';
+import { exactIntegerValue } from '../numeric-value/exact-integer-value.js';
 import { MathJsonExpression } from '../types.js';
 import { isNumber } from './type-guards.js';
 
@@ -49,31 +50,6 @@ export function asRational(expr: Expression): Rational | undefined {
   if (Number.isInteger(re)) return [re, 1];
 
   return undefined;
-}
-
-/**
- * Extract the exact integer value of a `NumericValue`, or `null` if it does
- * not represent an exact integer.
- *
- * This reads the exact underlying representation directly — the integer
- * numerator of an `ExactNumericValue`, or the integer-valued `BigDecimal` of a
- * `BigNumericValue` (via its exact significand) — and never round-trips through
- * `bignumRe`, which is rendered at the engine's working precision and would
- * silently round any integer with more digits than `ce.precision` (corrupting
- * large-integer number theory: `IsPrime`, `FactorInteger`, `Mod`, …).
- */
-function exactIntegerValue(num: NumericValue): bigint | null {
-  if (num.im !== 0) return null;
-  const exact = num.asExact;
-  if (!(exact instanceof ExactNumericValue)) return null;
-  // A value of the form a/b·√c is an integer only when c = 1 (no radical).
-  if (exact.radical !== 1) return null;
-  const [n, d] = exact.rational;
-  const bn = typeof n === 'bigint' ? n : BigInt(n);
-  const bd = typeof d === 'bigint' ? d : BigInt(d);
-  if (bd === BigInt(0)) return null;
-  if (bn % bd !== BigInt(0)) return null; // a non-integer rational
-  return bn / bd;
 }
 
 export function asBigint(

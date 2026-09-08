@@ -7,9 +7,8 @@
  * the numbers does so without boxing, and every answer must agree with the
  * boxed list built by `ce.box(['List', ...])`.
  */
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, isFunction, isNumber } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { isFunction, isNumber } from '../../src/compute-engine';
 
 const ce = new ComputeEngine();
 
@@ -458,5 +457,78 @@ describe('ce.list() — assign, interpreter parity and the compiled round trip',
       ce.box(['List', ...expected]).type.toString()
     );
     ce.forget('S');
+  });
+});
+
+// Last in the file on purpose: constructing an engine at another precision
+// writes the module-global `BigDecimal.precision`, which the shared engine
+// above reads at use; `afterAll` puts it back for any later block.
+describe('array at machine precision', () => {
+  const saved = ce.precision;
+  afterAll(() => {
+    ce.precision = saved;
+  });
+
+  test('an exact rational or radical element is not approximated', () => {
+    const machine = new ComputeEngine({ precision: 'machine' });
+    // At machine precision `isSame` compares by machine value, which is not
+    // the admission test: the exact `1/3` has no machine number.
+    expect(machine.number(1 / 3).isSame(machine.box(['Rational', 1, 3]))).toBe(
+      true
+    );
+    expect(machine.box(['List', 1, ['Rational', 1, 3]]).array).toBeUndefined();
+    expect(machine.box(['List', ['Sqrt', 2], 1]).array).toBeUndefined();
+    expect(machine.box(['List', 1, 2.5]).array).toEqual([1, 2.5]);
+  });
+
+  test('an exact rational with a power-of-two denominator is a machine number', () => {
+    const machine = new ComputeEngine({ precision: 'machine' });
+    const L = (...xs: Parameters<typeof machine.function>[1]) =>
+      machine.function('List', xs).array;
+    // `0.5` is not an approximation of `1/2`: a double holds it exactly.
+    expect(L(machine.box(['Rational', 1, 2]))).toEqual([0.5]);
+    expect(L(machine.box(['Rational', 3, 4]))).toEqual([0.75]);
+    expect(L(machine.box(['Rational', -7, 8]))).toEqual([-0.875]);
+    // A subnormal is held exactly too, up to the smallest one.
+    expect(L(machine.box(['Rational', 1, 2n ** 1030n]))).toEqual([2 ** -1030]);
+    expect(L(machine.box(['Rational', 1, 2n ** 1074n]))).toEqual([2 ** -1074]);
+    expect(L(machine.box(['Rational', 1, 2n ** 1075n]))).toBeUndefined();
+    // An odd numerator past the significand rounds, so it is refused.
+    expect(
+      L(machine.box(['Rational', 2n ** 53n + 1n, 2n ** 60n]))
+    ).toBeUndefined();
+  });
+
+  test('an unreduced exact rational is tested on its reduced value', () => {
+    const machine = new ComputeEngine({ precision: 'machine' });
+    // `n/d` with both parts past the significand: converting them to doubles
+    // separately and dividing lands one double away from the exact quotient,
+    // which is itself a double.
+    const d = 26210383204970023963898n;
+    const v = 5046685196530323137966149325553664n;
+    expect(BigInt(Number(v))).toBe(v);
+    const nv = machine._numericValue({ rational: [d * v, d] });
+    expect(machine.function('List', [machine.number(nv)]).array).toEqual([
+      Number(v),
+    ]);
+  });
+
+  test('an exact integer is a machine number only when a double holds it', () => {
+    const machine = new ComputeEngine({ precision: 'machine' });
+    expect(machine.function('List', [machine.number(2n ** 70n)]).array).toEqual(
+      [2 ** 70]
+    );
+    expect(
+      machine.function('List', [machine.number(2n ** 53n + 2n)]).array
+    ).toEqual([2 ** 53 + 2]);
+    expect(
+      machine.function('List', [machine.number(2n ** 53n + 1n)]).array
+    ).toBeUndefined();
+    expect(
+      machine.function('List', [machine.number(-(2n ** 70n))]).array
+    ).toEqual([-(2 ** 70)]);
+    expect(
+      machine.function('List', [machine.number(-(2n ** 53n + 1n))]).array
+    ).toBeUndefined();
   });
 });

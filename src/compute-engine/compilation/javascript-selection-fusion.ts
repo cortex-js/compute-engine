@@ -79,11 +79,19 @@ export function compileNumericSelection(
         expr.engine._getSymbolValue(expr.symbol) !== undefined
       )
         return undefined;
+      // A carrier is an input whose declared type is a list or an indexed
+      // collection of numbers — the same two shapes the entry plan classes
+      // as a JS array (`isListEntryType`, `javascript-target.ts`). The
+      // runtime guard (`_SYS.numericSelectionInputs`) then establishes flat
+      // numeric arrays of one length, so a declared `indexed_collection`
+      // bound to anything else takes the generic selection. Gating on the
+      // `list` kind alone left an `indexed_collection<number>` carrier on
+      // the generic path (Tycho item 266's neighbour, found 2026-09-07).
       const type = resolveTypeForCompilation(expr.type.type);
       const element = collectionElementType(type);
       const array =
         typeof type === 'object' &&
-        type.kind === 'list' &&
+        (type.kind === 'list' || type.kind === 'indexed_collection') &&
         element !== undefined &&
         isSubtype(element, 'number');
       if (!array && !isSubtype(type, 'number')) return undefined;

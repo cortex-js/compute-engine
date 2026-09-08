@@ -2,6 +2,26 @@
 
 ### Resolved Issues
 
+- **`expr.array` no longer approximates an exact element at
+  `precision: "machine"`.** `["List", 1, ["Rational", 1, 3]]` answered
+  `[1, 0.3333333333333333]` and `["List", ["Sqrt", 2], 1]` answered
+  `[1.414…, 1]` on a machine-precision engine, where the same lists answer
+  `undefined` at any other precision, as documented. The admission test used
+  `isSame`, which at machine precision compares by machine value; an exact
+  value is now admitted only when a double holds it with no rounding: an
+  integer inside the significand's reach (`2^70` is, `2^53 + 1` is not) or a
+  rational with a power-of-two denominator (`1/2`, `3/4`, down to the
+  smallest subnormal). The numeric-store fast paths (`Contains` on a
+  `ce.list()` list, tensor packing) use the same test.
+- **The fused single-loop selection (`javascript` target) admits a carrier
+  declared `indexed_collection<number>`.** The gate tested the `list` type
+  kind alone, so a selection over a symbol declared `indexed_collection` — the
+  shape the compiled entry already classes as a JS array — compiled the
+  generic `_SYS.select` path and ran at the 0.125.1 speed (1.73 ms per
+  200×200 Life step against 0.4 ms fused). A carrier is now any input whose
+  declared type is a list or an indexed collection of numbers; the runtime
+  guard still decides per call.
+
 - **A function literal with wildcard parameters now round-trips through
   LaTeX.** `()\mapsto…` is the LaTeX spelling of a literal whose
   parameters are the wildcards of its body: the parser read `()` as a
