@@ -869,3 +869,72 @@ describe('PARSING SET SUPERSCRIPTS (signed sets, not PseudoInverse)', () => {
     ce.popScope();
   });
 });
+
+describe('CHAINED SET RELATIONS', () => {
+  // A repeated set relation folds into one call, the way `a < b < c` parses
+  // to `Less(a, b, c)`. The relation heads declare `(any, any*)`, so the
+  // chain boxes as a valid call and evaluates pair by pair.
+  it('parses a chain flat', () => {
+    expect(parse('\\mathbb{Z} \\subset \\mathbb{Q} \\subset \\mathbb{R}').json)
+      .toMatchInlineSnapshot(`
+      [
+        Subset,
+        Integers,
+        RationalNumbers,
+        RealNumbers,
+      ]
+    `);
+    expect(parse('A \\subseteq B \\subseteq C').json).toEqual([
+      'SubsetEqual',
+      'A',
+      'B',
+      'C',
+    ]);
+    expect(parse('A \\supset B \\supset C').json).toEqual([
+      'Superset',
+      'A',
+      'B',
+      'C',
+    ]);
+    expect(parse('A \\supseteq B \\supseteq C').json).toEqual([
+      'SupersetEqual',
+      'A',
+      'B',
+      'C',
+    ]);
+    // Interval operands keep their bracket reading inside a chain.
+    expect(parse('[0,1] \\subset [0,2] \\subset [0,3]').json).toEqual([
+      'Subset',
+      ['Interval', 0, 1],
+      ['Interval', 0, 2],
+      ['Interval', 0, 3],
+    ]);
+  });
+
+  it('keeps an explicit grouping nested', () => {
+    expect(parse('(A \\subset B) \\subset C').json).toEqual([
+      'Subset',
+      ['Subset', 'A', 'B'],
+      'C',
+    ]);
+  });
+
+  // The relation heads admit one operand (`Subset(D)`). An infix spelling
+  // would drop the head, so the form is written in function notation.
+  it('serializes a one-operand relation in function notation', () => {
+    expect(latex(['Subset', 'D'])).toMatchInlineSnapshot(`\\mathrm{Subset}(D)`);
+    expect(parse('\\mathrm{Subset}(D)').json).toEqual(['Subset', 'D']);
+    expect(latex(['Subset', ['Interval', 'a', 'b']])).toMatchInlineSnapshot(
+      `\\mathrm{Subset}(\\mathrm{Interval}(a, b))`
+    );
+  });
+
+  it('serializes a chain and evaluates it', () => {
+    expect(latex(['Subset', 'A', 'B', 'C'])).toMatchInlineSnapshot(
+      `A\\subset B\\subset C`
+    );
+    expect(
+      parse('\\mathbb{Z} \\subset \\mathbb{Q} \\subset \\mathbb{R}').evaluate()
+    ).toMatchInlineSnapshot(`True`);
+  });
+});

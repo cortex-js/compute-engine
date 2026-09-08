@@ -324,6 +324,10 @@ function serializeSetOperator(
   return (serializer: Serializer, expr: MathJsonExpression): LatexString => {
     const n = nops(expr);
     if (n === 0) return '';
+    // An infix spelling needs two operands. The relation heads admit one
+    // (`Subset(D)`, see `library/sets.ts`); spelled infix it would lose its
+    // head (`D`), so it is written in function notation instead.
+    if (n === 1) return serializer.serializeFunction(expr);
     return joinLatex(
       [...operands(expr)].flatMap((val, i) => {
         const arg =
@@ -337,11 +341,24 @@ function serializeSetOperator(
 }
 
 /**
- * The default infix parse (associativity `none`), reading ambiguous bracket
- * pairs among the operands as intervals (`sides` selects which operands are
- * set-valued: both for `\cup`, only the rhs for `\in`).
+ * The default infix parse, reading ambiguous bracket pairs among the
+ * operands as intervals (`sides` selects which operands are set-valued: both
+ * for `\cup`, only the rhs for `\in`).
+ *
+ * With `sides: 'chain'` both operands are set-valued and a repeated operator
+ * folds into one call, the way the comparison chain `a < b < c` parses to
+ * `Less(a, b, c)`: `A \subset B \subset C` parses to `Subset(A, B, C)`. The
+ * right operand is then read one precedence level up, so the next `\subset`
+ * is left to the caller's infix loop and `_appendAssociativeOperand()`
+ * extends the chain in place. The other modes parse the right operand at the
+ * operator's own precedence (associativity `none`), so `A \setminus B
+ * \setminus C` nests to the right as before.
  */
-function parseSetOperator(name: string, prec: number, sides: 'both' | 'rhs') {
+function parseSetOperator(
+  name: string,
+  prec: number,
+  sides: 'both' | 'rhs' | 'chain'
+) {
   return (
     parser: Parser,
     lhs: MathJsonExpression,
@@ -352,12 +369,26 @@ function parseSetOperator(name: string, prec: number, sides: 'both' | 'rhs') {
     // (see `serializeSetOperand()`); only a bracket/paren pair is ambiguous
     // enough to be re-read as an interval there. Both probes have to be taken
     // BEFORE the rhs is parsed: they move the parser index.
-    const newLhs = sides === 'both' ? parsedIntervalLhs(parser, lhs) : lhs;
+    // On the second and later links of a chain the left operand is the
+    // chain built so far (or an explicit `(A \subset B)` group), never a
+    // bracket pair, and `parser.operandStartIndex` still points at the
+    // FIRST operand of the expression. The probe is skipped there rather
+    // than run against the wrong tokens.
+    const newLhs =
+      sides === 'rhs' || operator(lhs) === name
+        ? lhs
+        : parsedIntervalLhs(parser, lhs);
     const ambiguousRhs = atAmbiguousOpenDelimiter(parser);
-    const rhs = missingIfEmpty(
-      parser.parseExpression({ ...until, minPrec: prec })
+    const rawRhs = missingIfEmpty(
+      parser.parseExpression({
+        ...until,
+        minPrec: sides === 'chain' ? prec + 1 : prec,
+      })
     );
-    return [name, newLhs, ambiguousRhs ? parsedIntervalOperand(rhs)! : rhs!];
+    const rhs = ambiguousRhs ? parsedIntervalOperand(rawRhs)! : rawRhs!;
+    if (sides === 'chain')
+      return parser._appendAssociativeOperand(name, newLhs, rhs);
+    return [name, newLhs, rhs];
   };
 }
 
@@ -1401,7 +1432,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('Subset', 240, 'both'),
+    parse: parseSetOperator('Subset', 240, 'chain'),
     serialize: serializeSetOperator('\\subset', 240, 'both'),
   },
   {
@@ -1409,14 +1440,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('Subset', 240, 'both'),
+    parse: parseSetOperator('Subset', 240, 'chain'),
   },
   {
     latexTrigger: ['\\varsubsetneqq'],
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('Subset', 240, 'both'),
+    parse: parseSetOperator('Subset', 240, 'chain'),
   },
   {
     name: 'SubsetEqual',
@@ -1424,7 +1455,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('SubsetEqual', 240, 'both'),
+    parse: parseSetOperator('SubsetEqual', 240, 'chain'),
     serialize: serializeSetOperator('\\subseteq', 240, 'both'),
   },
   {
@@ -1433,7 +1464,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('Superset', 240, 'both'),
+    parse: parseSetOperator('Superset', 240, 'chain'),
     serialize: serializeSetOperator('\\supset', 240, 'both'),
   },
   {
@@ -1441,14 +1472,14 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('Superset', 240, 'both'),
+    parse: parseSetOperator('Superset', 240, 'chain'),
   },
   {
     latexTrigger: ['\\varsupsetneq'],
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('Superset', 240, 'both'),
+    parse: parseSetOperator('Superset', 240, 'chain'),
   },
   {
     name: 'SupersetEqual',
@@ -1456,7 +1487,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     kind: 'infix',
     associativity: 'none',
     precedence: 240,
-    parse: parseSetOperator('SupersetEqual', 240, 'both'),
+    parse: parseSetOperator('SupersetEqual', 240, 'chain'),
     serialize: serializeSetOperator('\\supseteq', 240, 'both'),
   },
 ];

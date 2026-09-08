@@ -1,6 +1,6 @@
 {
-  "generated": "2026-09-03T18:18:03.129Z",
-  "corpus": "/Users/arno/dev/ce-wt-sign/data/fungrim",
+  "generated": "2026-09-08T15:31:53.832Z",
+  "corpus": "/Users/arno/dev/compute-engine/data/fungrim",
   "stage1": {
     "total": 2551,
     "ok": 2547,
@@ -8,7 +8,7 @@
     "unknownSymbol": 0,
     "timeout": 0,
     "passRate": 0.9984,
-    "elapsedMs": 15470,
+    "elapsedMs": 1638,
     "failureBuckets": [
       {
         "error": "[\"Error\",[\"ErrorCode\",\"'expected-function'\",\"'chi'\",\"'integer'\"],\"'chi'\"]",

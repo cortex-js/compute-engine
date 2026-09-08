@@ -317,10 +317,10 @@ To search the library by concept rather than by name, use
 | `slice` | `Slice` | `((value: T, span: range) -> T where T: string) & ((value: T, span: nothing \| range) -> T \| nothing where T: string) & ((value: T, start: number, end: number) -> T where T: string) & ((value: indexed_collection<T>, span: range) -> list<T> where T) & ((value: indexed_collection<T>, span: nothing \| range) -> list<T> \| nothing where T) & ((value: indexed_collection<T>, start: number, end: number) -> list<T> where T)` | Return a contiguous run of elements from an indexed collection. |
 | `sort` | `Sort` | `((T, order: (((character) any -> unknown) \| ((character, character) any -> boolean \| number))?) -> T where T: string) & ((indexed_collection<T>, order: (((T) any -> unknown) \| ((any, any) any -> boolean \| number))?) -> list<T> where T)` | Return the elements of the collection sorted according to the given comparison function. |
 | `startsWith` | `StartsWith` | `(indexed_collection<T>, prefix: indexed_collection<T>) -> boolean where T` | Return `True` when the indexed collection begins with `prefix` as a contiguous subsequence. |
-| `subset` | `Subset` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a strict subset of the second. |
-| `subsetEqual` | `SubsetEqual` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a subset (possibly equal) of the second. |
-| `superset` | `Superset` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a strict superset of the second. |
-| `supersetEqual` | `SupersetEqual` | `(lhs: any, rhs: any) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
+| `subset` | `Subset` | `(any, any*) -> boolean` | Test whether the first collection is a strict subset of the second. |
+| `subsetEqual` | `SubsetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a subset (possibly equal) of the second. |
+| `superset` | `Superset` | `(any, any*) -> boolean` | Test whether the first collection is a strict superset of the second. |
+| `supersetEqual` | `SupersetEqual` | `(any, any*) -> boolean` | Test whether the first collection is a superset (possibly equal) of the second. |
 | `symmetricDifference` | `SymmetricDifference` | `(set<any>, set<any>) -> set` | Return the symmetric difference of two sets (elements in either set but not both). |
 | `table` | `Table` | `(function, integer, integer?) -> collection` | An alias for `Tabulate` (the preferred name) that additionally accepts |
 | `tabulate` | `Tabulate` | `(generator: function, integer, integer?) -> indexed_collection` | Create a collection by applying a function to each index in the specified dimensions. |

@@ -885,17 +885,28 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
   },
 
+  // `Subset`, `SubsetEqual`, `Superset` and `SupersetEqual` declare
+  // `(any, any*)`, the carrier the comparison operators use (`Less`,
+  // `relational-operator.ts`): a chain `A ⊂ B ⊂ C` is one call with three
+  // operands, evaluated as the conjunction of its adjacent pairs
+  // (`subsetChain()`). The boxing validation seam checks the operands a
+  // canonical handler returns against this declaration, so a binary
+  // `(any, any)` would refuse the chain with `unexpected-argument` and a
+  // one-operand form (the Fungrim corpus writes `IsHolomorphic(f, Subset(D))`
+  // for "on a subset of D") with `missing`. The negated relations have no
+  // canonical handler and no chain form; they keep `(any, any)`.
   Subset: {
     complexity: 11200,
-    signature: '(lhs:any, rhs: any) -> boolean',
+    signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a strict subset of the second.',
-    canonical: (args, { engine: ce }) => {
-      if (args.length !== 2) return ce._fn('Subset', args);
-      return ce._fn('Subset', [args[0].canonical, args[1].canonical]);
-    },
-    evaluate: ([lhs, rhs], { engine: ce }) => {
-      const result = subset(lhs, rhs);
+    canonical: (args, { engine: ce }) =>
+      ce._fn(
+        'Subset',
+        args.map((x) => x.canonical)
+      ),
+    evaluate: (ops, { engine: ce }) => {
+      const result = subsetChain(ops, true);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -904,15 +915,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SubsetEqual: {
     complexity: 11200,
-    signature: '(lhs:any, rhs: any) -> boolean',
+    signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a subset (possibly equal) of the second.',
-    canonical: (args, { engine: ce }) => {
-      if (args.length !== 2) return ce._fn('SubsetEqual', args);
-      return ce._fn('SubsetEqual', [args[0].canonical, args[1].canonical]);
-    },
-    evaluate: ([lhs, rhs], { engine: ce }) => {
-      const result = subset(lhs, rhs, false);
+    canonical: (args, { engine: ce }) =>
+      ce._fn(
+        'SubsetEqual',
+        args.map((x) => x.canonical)
+      ),
+    evaluate: (ops, { engine: ce }) => {
+      const result = subsetChain(ops, false);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -934,15 +946,16 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   Superset: {
     complexity: 11200,
-    signature: '(lhs:any, rhs: any) -> boolean',
+    signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a strict superset of the second.',
-    canonical: (args, { engine: ce }) => {
-      if (args.length !== 2) return ce._fn('Superset', args);
-      return ce._fn('Superset', [args[0].canonical, args[1].canonical]);
-    },
-    evaluate: ([lhs, rhs], { engine: ce }) => {
-      const result = subset(rhs, lhs); // reversed
+    canonical: (args, { engine: ce }) =>
+      ce._fn(
+        'Superset',
+        args.map((x) => x.canonical)
+      ),
+    evaluate: (ops, { engine: ce }) => {
+      const result = subsetChain(ops, true, true);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -951,16 +964,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
 
   SupersetEqual: {
     complexity: 11200,
-    signature: '(lhs:any, rhs: any) -> boolean',
+    signature: '(any, any*) -> boolean',
     description:
       'Test whether the first collection is a superset (possibly equal) of the second.',
-    canonical: (args, { engine: ce }) => {
-      if (args.length !== 2) return ce._fn('SupersetEqual', args);
-      return ce._fn('SupersetEqual', [args[0].canonical, args[1].canonical]);
-    },
-    evaluate: ([lhs, rhs], { engine: ce }) => {
+    canonical: (args, { engine: ce }) =>
+      ce._fn(
+        'SupersetEqual',
+        args.map((x) => x.canonical)
+      ),
+    evaluate: (ops, { engine: ce }) => {
       // Not strict: "superset, possibly equal" is the mirror of `SubsetEqual`.
-      const result = subset(rhs, lhs, false); // reversed
+      const result = subsetChain(ops, false, true);
       if (result === true) return ce.True;
       if (result === false) return ce.False;
       return undefined;
@@ -1281,6 +1295,28 @@ function subset(
     return typesOverlap(op.type.type, 'collection') ? undefined : false;
   }
   return lhs.subsetOf(rhs, strict);
+}
+
+/**
+ * Evaluate a set-relation chain: `Subset(A, B, C)` is `A ⊂ B` and `B ⊂ C`.
+ * The verdict is the Kleene conjunction of the adjacent pairs, so one
+ * `false` pair decides the chain and an undecided pair leaves it symbolic.
+ * With `reversed`, each pair is tested the other way round (`Superset`).
+ * A single operand is an incomplete relation: `undefined`, so the call
+ * stays symbolic rather than answering for a relation it cannot test.
+ */
+function subsetChain(
+  ops: ReadonlyArray<Expression>,
+  strict: boolean,
+  reversed = false
+): boolean | undefined {
+  if (ops.length < 2) return undefined;
+  const pairs: (boolean | undefined)[] = [];
+  for (let i = 0; i + 1 < ops.length; i++) {
+    const [lhs, rhs] = reversed ? [ops[i + 1], ops[i]] : [ops[i], ops[i + 1]];
+    pairs.push(subset(lhs, rhs, strict));
+  }
+  return kleeneAnd(pairs);
 }
 
 function union(

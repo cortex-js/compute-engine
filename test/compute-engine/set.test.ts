@@ -523,6 +523,82 @@ describe('SUBSET', () => {
       engine.expr(['Subset', 3, ['Set', 1]]).evaluate()
     ).toMatchInlineSnapshot(`False`);
   });
+
+  // The four relations with a canonical handler declare `(any, any*)`: a
+  // chain is one call, and the boxing validation seam (which checks the
+  // operands a canonical handler returns against the declaration) admits
+  // it. A binary declaration refused a chain with `unexpected-argument` and
+  // a one-operand form with `missing` (Fungrim corpus entries 4fd123 and
+  // 78bb08, `scripts/fungrim/validate.ts --check`).
+  test('a chain boxes as one valid call', () => {
+    const chain = ce.expr([
+      'Subset',
+      'Integers',
+      'RationalNumbers',
+      'RealNumbers',
+      'ComplexNumbers',
+    ]);
+    expect(chain.isValid).toBe(true);
+    expect(chain.json).toEqual([
+      'Subset',
+      'Integers',
+      'RationalNumbers',
+      'RealNumbers',
+      'ComplexNumbers',
+    ]);
+    // A one-operand relation stays symbolic; it is not refused.
+    const unary = ce.expr(['Subset', ['Interval', 'a', 'b']]);
+    expect(unary.isValid).toBe(true);
+    expect(unary.evaluate().json).toEqual(['Subset', ['Interval', 'a', 'b']]);
+  });
+
+  test('a chain evaluates as the conjunction of its adjacent pairs', () => {
+    expect(
+      ce
+        .expr(['Subset', 'Integers', 'RationalNumbers', 'RealNumbers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // The first pair holds, the second does not.
+    expect(
+      ce
+        .expr(['Subset', 'Integers', 'RealNumbers', 'RationalNumbers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    // Strictness applies pair by pair.
+    expect(
+      ce.expr(['Subset', 'Integers', 'Integers', 'RealNumbers']).evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce
+        .expr(['SubsetEqual', 'Integers', 'Integers', 'RealNumbers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // `Superset` tests each pair the other way round.
+    expect(
+      ce
+        .expr(['Superset', 'ComplexNumbers', 'RealNumbers', 'Integers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    expect(
+      ce
+        .expr(['Superset', 'ComplexNumbers', 'Integers', 'RealNumbers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`False`);
+    expect(
+      ce
+        .expr(['SupersetEqual', 'RealNumbers', 'RealNumbers', 'Integers'])
+        .evaluate()
+    ).toMatchInlineSnapshot(`True`);
+    // An undecided pair (a set-typed symbol not yet assigned) leaves the
+    // chain symbolic.
+    const engine = new ComputeEngine();
+    engine.declare('unassignedSet', 'set<number>');
+    expect(
+      engine
+        .expr(['Subset', 'unassignedSet', 'RealNumbers', 'ComplexNumbers'])
+        .evaluate().json
+    ).toEqual(['Subset', 'unassignedSet', 'RealNumbers', 'ComplexNumbers']);
+  });
 });
 
 describe('UPPER HALF-PLANE (\\mathbb{C}^+)', () => {
