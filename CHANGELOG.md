@@ -1,3 +1,23 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A function literal with wildcard parameters now round-trips through
+  LaTeX.** `()\mapsto…` is the LaTeX spelling of a literal whose
+  parameters are the wildcards of its body: the parser read `()` as a
+  parameter named `Nothing`, so `() \mapsto 2` was a one-parameter function
+  and `() \mapsto \_ + 1` applied to `3` answered `_ + 1`. Both are read as
+  `["Function", body]` now, so `ce.parse(f.latex)` is `f` for
+  `f = ["Function", ["Add", "_1", 1]]` and applies. Two pretty-MathJSON
+  shorthands were lossy and are gone: `["Function", "Add"]` for
+  `_1, _2 \mapsto _1 + _2` boxed as a function of no argument whose body is
+  the symbol `Add`, and the parameter list was dropped for any parameter whose
+  name contains `_` (`x_1`, an unused `_2`, the renamed `_1_0` of a partial
+  application), which printed `()\mapsto x_1+1` for `x_1 \mapsto x_1 + 1`.
+  The parameter-less form is now written only when the parameters are
+  exactly `_1`, `_2`, …, `_n`, each mentioned by the body, so boxing reads
+  the same list back.
+
 ## 0.126.0 _2026-09-07_
 
 ### New Features

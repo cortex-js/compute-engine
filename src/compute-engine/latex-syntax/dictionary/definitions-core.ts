@@ -1539,10 +1539,27 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         params.push(operator(x) === 'Typed' ? x : name);
         return true;
       };
-      if (operator(lhs) === 'Delimiter') lhs = operand(lhs, 1) ?? 'Nothing';
-      if (operator(lhs) === 'Sequence') {
-        for (const x of operands(lhs)) if (!addParam(x)) return null;
-      } else if (!addParam(lhs)) return null;
+      // An empty parameter list, `() \mapsto …`, declares NO parameter: the
+      // literal is `["Function", body]`, and canonicalization reads the
+      // parameters off the wildcards of the body (`_`, `_1`, `_2`, …), so
+      // `() \mapsto \_ + 1` is the one-parameter function `_1 \mapsto _1 + 1`
+      // and `() \mapsto 2` takes no argument. Pushing the empty group's
+      // `Nothing` as a parameter instead made `() \mapsto 2` a ONE-parameter
+      // function whose parameter was named `Nothing`, and left the `_` of
+      // `() \mapsto \_ + 1` unbound. The `Function` serializer below writes
+      // the wildcard-parameter form as `()\mapsto…`, which this reads back.
+      let explicitParams = true;
+      if (operator(lhs) === 'Delimiter') {
+        const inner = operand(lhs, 1);
+        if (inner === undefined || inner === null || inner === 'Nothing')
+          explicitParams = false;
+        else lhs = inner;
+      }
+      if (explicitParams) {
+        if (operator(lhs) === 'Sequence') {
+          for (const x of operands(lhs)) if (!addParam(x)) return null;
+        } else if (!addParam(lhs)) return null;
+      }
 
       // The body extends as far as possible — through comparisons and logical
       // connectives (`n \mapsto n > 102`, `n \mapsto n > 2 \wedge n < 5`) —
@@ -1597,6 +1614,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         return type === null ? name : joinLatex([name, '\\colon', type]);
       };
       if (args.length < 1) return '()\\mapsto()';
+      // A literal with no parameter operand, `["Function", body]`, is
+      // written `()\mapsto body`. That is not an empty parameter list: the
+      // parser above reads `()` as "the parameters are the wildcards of the
+      // body", so `()\mapsto\operatorname{\_1}+1` is the one-parameter
+      // function `_1 \mapsto _1 + 1`. The pretty MathJSON serializer
+      // (`serializePrettyJsonFunction`, `boxed-expression/serialize.ts`)
+      // only drops a parameter list that this rule reconstructs, so the
+      // LaTeX round-trips. A body with no wildcard, `()\mapsto 2`, is a
+      // function of no argument.
       if (args.length === 1)
         return joinLatex([
           '()',

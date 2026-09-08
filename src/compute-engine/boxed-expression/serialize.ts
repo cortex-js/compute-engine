@@ -451,32 +451,42 @@ function serializePrettyJsonFunction(
       const block = args[0];
       if (block.nops === 1) {
         const params = args.slice(1);
-        if (params.every((x) => isSymbol(x) && /_\d?/.test(x.symbol))) {
-          if (
-            isFunction(block.op1) &&
-            block.op1.ops?.every(
-              (x, i) =>
-                isSymbol(x) &&
-                isSymbol(params[i]) &&
-                x.symbol === params[i].symbol
-            )
-          ) {
-            // [`["Function", ["Block", ["Add", "_1", "_2"]], "_1", "_2"]`] -> `["Function", "Add"]`
-            return serializeJsonFunction(
-              ce,
-              'Function',
-              [ce.symbol(block.op1.operator, { canonical: false })],
-              options,
-              metadata
-            );
-          }
-
-          // [`["Function", ["Block", ["Add", "_1", 2]], "_1"]`] -> `["Function", ["Add", "_1", 2]]`
-
+        // `["Function", ["Block", ["Add", "_1", 2]], "_1"]` is written
+        // `["Function", ["Add", "_1", 2]]`: with no parameter operand,
+        // boxing reads the parameters off the wildcards of the body
+        // (`anonymousParameters`, `function-utils.ts`), which takes `_1`,
+        // `_2`, … in order for every wildcard the body mentions. The
+        // shorthand is therefore used only when the parameter list is
+        // exactly what that reading gives back: the parameters are `_1`,
+        // `_2`, …, `_n` in order, and the wildcards the body mentions are
+        // exactly those. That reading renames a bare `_` to `_1` and stops
+        // at `_9`, so a body with a bare `_`, a free wildcard outside the
+        // list (`_2` in `["Function", ["Add", "_1", "_2"], "_1"]`), or a
+        // list past `_9` keeps its parameters. A parameter list that differs
+        // (a named parameter such as `x_1`, an unused `_2`, a gap, a list
+        // starting at `_2`) is kept too, or the shorthand would change the
+        // arity or drop the parameter. The former `["Function", "Add"]`
+        // spelling for `_1, _2 \mapsto Add(_1, _2)` was dropped: boxed, it is
+        // a function of no argument whose body is the symbol `Add`.
+        const body = block.op1;
+        const bodyWildcards = new Set(
+          body.symbols.filter((s) => /^_[1-9]$/.test(s))
+        );
+        const wildcardParams =
+          params.length <= 9 &&
+          !body.has('_') &&
+          bodyWildcards.size === params.length &&
+          params.every(
+            (x, i) =>
+              isSymbol(x) &&
+              x.symbol === `_${i + 1}` &&
+              bodyWildcards.has(x.symbol)
+          );
+        if (wildcardParams) {
           return serializeJsonFunction(
             ce,
             'Function',
-            [block.op1],
+            [body],
             options,
             metadata
           );

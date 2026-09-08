@@ -102,7 +102,7 @@ describe('Anonymous function with missing param', () => {
     ));
   test('Missing Param Expression', () =>
     expect(evaluate(['f2'])).toMatchInlineSnapshot(
-      `["Function", ["Add", "_1_0", 1]]`
+      `["Function", ["Add", "_1_0", 1], "_1_0"]`
     )); // @fixme
   test('Missing Param JS Function', () =>
     expect(evaluate(['f3'])).toMatchInlineSnapshot(`NaN`)); // NaN is correct
@@ -209,8 +209,12 @@ describe('Anonymous function with anonymous parameters', () => {
 
 describe('Currying', () => {
   test('f7 expects two arguments. Only one provided', () =>
+    // The renamed parameters are printed: the parameter-less shorthand is
+    // reserved for `_1`, `_2`, … (what boxing reads back off the body), and
+    // `["Function", ["Add", "_2_0", …]]` alone would box as a function of no
+    // argument.
     expect(evaluate(['f10', 5])).toMatchInlineSnapshot(
-      `["Function", ["Add", "_2_0", ["Divide", 5, "_1_0"]]]`
+      `["Function", ["Add", "_2_0", ["Divide", 5, "_1_0"]], "_1_0", "_2_0"]`
     ));
 });
 

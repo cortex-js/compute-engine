@@ -526,18 +526,6 @@ serialized type needs a cap the way the ordering key got one. Probe:
 then time `e.type` and `ce.function('Add', [e, ce.symbol('z')])` against
 depth 16.
 
-### A function literal with wildcard parameters prints as `()\mapsto …` (OPEN, serialization — found 2026-09-05)
-
-`ce.box(['Function', ['Add', '_1', 1]]).latex` is `()\mapsto\operatorname{\_1}+1`:
-the pretty MathJSON serializer collapses `_1`-style parameters to the
-`["Function", body]` shorthand, and the LaTeX serializer then prints an empty
-parameter list although the body reads `_1`. The canonical MathJSON has the
-parameter (`["Function", ["Block", ["Add", "_1", 1]], "_1"]`). Seen on the
-element function of a lazy broadcast `Map` (`lazyBroadcastMap`) once its
-synthesized annotations stopped printing (they used to defeat the shorthand).
-Either print the wildcard parameters (`\_1\mapsto …`) or keep the shorthand
-out of the LaTeX route. Repro: the expression above.
-
 ### A recursive function with a function-typed parameter is rebuilt at every application — exponential time, and a type that overflows the stack (OPEN, evaluation — found 2026-08-22)
 
 `tw(n, v, f) := If(n ≤ 0, v, tw(n-1, f(v), f) + tw(n-1, f(v), f))` applied to
