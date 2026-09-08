@@ -19777,7 +19777,11 @@ export class BaseCompiler {
   ): TargetSource {
     const top = BaseCompiler.cseTop(target);
     if (top === undefined) return fn();
-    return BaseCompiler.withCseRegion(target, BaseCompiler.cseRegionOf(top), fn);
+    return BaseCompiler.withCseRegion(
+      target,
+      BaseCompiler.cseRegionOf(top),
+      fn
+    );
   }
 
   /**

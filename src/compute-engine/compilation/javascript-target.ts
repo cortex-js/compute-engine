@@ -3910,10 +3910,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Element-wise binary max/min and clamp. These are the scalar codegen; a
   // collection operand is handled by `tryCompileBroadcast` (they are
   // `broadcastable`), which wraps this body in `_SYS.bcast`.
-  ElementMax: (args, compile) =>
-    `Math.max(${args.map(compile).join(', ')})`,
-  ElementMin: (args, compile) =>
-    `Math.min(${args.map(compile).join(', ')})`,
+  ElementMax: (args, compile) => `Math.max(${args.map(compile).join(', ')})`,
+  ElementMin: (args, compile) => `Math.min(${args.map(compile).join(', ')})`,
   Clamp: (args, compile) =>
     `Math.min(Math.max(${compile(args[0])}, ${compile(args[1])}), ${compile(
       args[2]

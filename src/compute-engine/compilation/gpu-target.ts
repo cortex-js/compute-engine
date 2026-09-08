@@ -5086,7 +5086,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const armed = (f: () => string): string =>
         i === 0 ? f() : compileGPUConditionalArm('Which', f, target);
       // `True` marks the default branch.
-      if (isSymbol(cond, 'True')) return `(${armed(() => compile(val, i + 1))})`;
+      if (isSymbol(cond, 'True'))
+        return `(${armed(() => compile(val, i + 1))})`;
       return gpuConditional(
         armed(() => compile(cond, i)),
         compileGPUConditionalArm('Which', () => compile(val, i + 1), target),
