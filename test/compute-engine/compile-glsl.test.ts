@@ -63,23 +63,27 @@ describe('GLSL COMPILATION', () => {
         );
       });
 
-      it('exponent 4 (at inline cutoff) → repeated multiplication', () => {
+      it('exponent 4 → repeated multiplication', () => {
         expect(glsl.compile(ce.parse('x^4')).code).toMatchInlineSnapshot(
           `(x * x * x * x)`
         );
       });
 
-      it('larger exponent → sign-preserving helper, not pow', () => {
-        const r = glsl.compile(ce.parse('x^7'));
-        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x, 7.0)`);
+      it('exponent 8 (at inline cutoff) → repeated multiplication', () => {
+        // Eight multiplies of a variable beat the helper call, whose only
+        // arm past exponent 4 is `pow(abs(x), n)` with a sign correction.
+        const r = glsl.compile(ce.parse('x^8'));
+        expect(r.code).toMatchInlineSnapshot(
+          `(x * x * x * x * x * x * x * x)`
+        );
         expect(r.code).not.toContain('pow(');
-        expect(r.preamble).toContain('_gpu_powi');
       });
 
-      it('exponent 12 → helper', () => {
-        expect(glsl.compile(ce.parse('x^{12}')).code).toMatchInlineSnapshot(
-          `_gpu_powi(x, 12.0)`
-        );
+      it('larger exponent → sign-preserving helper, not pow', () => {
+        const r = glsl.compile(ce.parse('x^{12}'));
+        expect(r.code).toMatchInlineSnapshot(`_gpu_powi(x, 12.0)`);
+        expect(r.code).not.toContain('pow(');
+        expect(r.preamble).toContain('_gpu_powi');
       });
 
       it('negative integer exponent → reciprocal of positive form', () => {

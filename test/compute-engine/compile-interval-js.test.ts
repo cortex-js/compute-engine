@@ -24,7 +24,10 @@ describe('INTERVAL JS COMPILATION - BASIC', () => {
   test('compiles Pi', () => {
     const expr = ce.parse('\\pi');
     const fn = compile(expr, { to: 'interval-js' });
-    expect(fn.code).toContain('_IA.point(Math.PI)');
+    // An irrational constant is emitted as the two-ulp ENCLOSURE of its
+    // value, not as a point at the nearest double: no double is π, so a
+    // point would exclude the constant it claims to bound.
+    expect(fn.code).toBe('{ lo: 3.1415926535897927, hi: 3.1415926535897936 }');
   });
 });
 

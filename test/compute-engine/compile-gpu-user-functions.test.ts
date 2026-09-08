@@ -93,7 +93,7 @@ describe('GPU USER FUNCTIONS — one definition, called by name', () => {
 
   it('a helper used only INSIDE the definition body is still declared', () => {
     const ce = new ComputeEngine();
-    ce.assign('f', ce.parse('x \\mapsto x^7'));
+    ce.assign('f', ce.parse('x \\mapsto x^{12}'));
     const r = glsl.compile(ce.parse('f(u)'));
     expect(r.code).toBe('_fn_f(u)');
     // `_gpu_powi` appears only in the definition, and the preamble scan sees
@@ -238,7 +238,7 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     // helpers the definition bodies reference too — otherwise the emitted
     // source calls `_gpu_powi` with no `_gpu_powi` declared.
     const ce = new ComputeEngine();
-    ce.assign('f', ce.parse('x \\mapsto x^7'));
+    ce.assign('f', ce.parse('x \\mapsto x^{12}'));
     const src = glsl.compileFunction(ce.parse('f(u)'), 'myFn', 'float', [
       ['u', 'float'],
     ]);
@@ -247,14 +247,16 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     expect(src.indexOf('float _gpu_powi(')).toBeLessThan(
       src.indexOf('float _fn_f(')
     );
-    expect(src.indexOf('float _fn_f(')).toBeLessThan(src.indexOf('float myFn('));
+    expect(src.indexOf('float _fn_f(')).toBeLessThan(
+      src.indexOf('float myFn(')
+    );
     // …and the definition is delivered EXACTLY once.
     expect(count(src, 'float _fn_f(')).toBe(1);
   });
 
   it('WGSL compileFunction declares the definition-only helper too', () => {
     const ce = new ComputeEngine();
-    ce.assign('f', ce.parse('x \\mapsto x^7'));
+    ce.assign('f', ce.parse('x \\mapsto x^{12}'));
     const src = wgsl.compileFunction(ce.parse('f(u)'), 'myFn', 'float', [
       ['u', 'float'],
     ]);
@@ -440,7 +442,7 @@ describe('GPU USER FUNCTIONS — the JS target is unchanged', () => {
     // the behavior a shader has no analog for, and the reason the GPU
     // call-site hook fails closed instead.
     expect(r.code).toMatchInlineSnapshot(
-      `_SYS.bcastFn((_tv1) => _fn_f(_tv1), _.u) + ((_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn((_tv3) => _fn_f(_tv3), _tv2) : _fn_f(_tv2))(2 * _.u)`
+      `_SYS.bcastFn(_fn_f, _.u) + ((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn(_fn_f, _tv1) : _fn_f(_tv1))(2 * _.u)`
     );
     // The JS lowering keeps its arrow-function definition form, spliced into
     // the generated function's own body; the result also reports it as the
@@ -482,10 +484,7 @@ describe('GPU USER FUNCTIONS — the JS target is unchanged', () => {
 describe('GPU USER FUNCTIONS — a reserved word as a PARAMETER fails closed', () => {
   it('GLSL: `discard` as a parameter name', () => {
     const ce = new ComputeEngine();
-    ce.assign(
-      'f',
-      ce.expr(['Function', ['Add', 'discard', 1], 'discard'])
-    );
+    ce.assign('f', ce.expr(['Function', ['Add', 'discard', 1], 'discard']));
     // Without the check this emitted `float _fn_f(float discard)` — source no
     // driver accepts — behind a reported success.
     expect(() => glsl.compile(ce.parse('f(u)'))).toThrow(
@@ -531,7 +530,9 @@ describe('GPU USER FUNCTIONS — a nested definition is scoped to the ROOT, not 
       const ce = engineWithNestedG(param);
       const preamble = glsl.compile(ce.parse('f(u)'), NO_FOLD).preamble!;
       // `g` sees the GLOBAL `z` (folded to 10.0), never `f`'s parameter.
-      expect(preamble).toContain('float _fn_g(float w) {\n  return w + 10.0;\n}');
+      expect(preamble).toContain(
+        'float _fn_g(float w) {\n  return w + 10.0;\n}'
+      );
       expect(preamble).toContain(`float _fn_f(float ${param})`);
     }
   });
@@ -611,10 +612,21 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
 });
 
 describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', () => {
-  /** `\sum_{i=1}^{2} i · \sum_{j=1}^{m} j·x` — two terms, each hoisting a loop. */
+  /**
+   * `\sum_{i=1}^{2} i · \sum_{j=1}^{m} i·j·x` — two terms, each hoisting a
+   * loop of its own.
+   *
+   * The inner sum mentions the OUTER index `i`, which is what keeps the two
+   * loops separate: an inner sum free of `i` has the same value in both terms
+   * and is now emitted once, ahead of them (the loop-invariant hoist).
+   */
   function twoTermUnroll(ce: ComputeEngine) {
-    const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
-    return ce.box(['Sum', ['Multiply', 'i', inner], ['Limits', 'i', 1, 2]] as any);
+    const inner = ['Sum', ['Multiply', 'i', 'j', 'x'], ['Limits', 'j', 1, 'm']];
+    return ce.box([
+      'Sum',
+      ['Multiply', 'i', inner],
+      ['Limits', 'i', 1, 2],
+    ] as any);
   }
 
   it('GLSL: term 1 is finished off BEFORE term 2 starts', () => {
@@ -627,7 +639,10 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
     // reordered the unroll (loop1, loop2, rest1, rest2), which moves a
     // `_gpu_rnd_draw` in term 2 ahead of one in term 1's remainder.
     const term1 = code.search(/^float _\w+ = 1\.0 \* _\w+;$/m);
-    const term2Loop = code.indexOf('for (int j =', code.indexOf('for (int j =') + 1);
+    const term2Loop = code.indexOf(
+      'for (int j =',
+      code.indexOf('for (int j =') + 1
+    );
     expect(term1).toBeGreaterThan(0);
     expect(term1).toBeLessThan(term2Loop);
     expect(code).toMatch(/return \(\(_\w+\) \+ \(_\w+\)\);$/m);
@@ -638,7 +653,10 @@ describe('GPU SUM/PRODUCT — an unrolled term keeps its own statement order', (
     const code = wgsl.compile(twoTermUnroll(ce)).code;
     expect(code.match(/for \(var j:/g)?.length).toBe(2);
     const term1 = code.search(/^var _\w+: f32 = 1\.0 \* _\w+;$/m);
-    const term2Loop = code.indexOf('for (var j:', code.indexOf('for (var j:') + 1);
+    const term2Loop = code.indexOf(
+      'for (var j:',
+      code.indexOf('for (var j:') + 1
+    );
     expect(term1).toBeGreaterThan(0);
     expect(term1).toBeLessThan(term2Loop);
   });
@@ -660,7 +678,9 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
     ).code;
     // The loop lands ahead of the ternary — it runs on every path anyway.
     expect(code).toContain('for (int i = 1; i <= 1000; i++)');
-    expect(code).toMatch(/return \(\(_\w+ == 1\.0\) \? \(10\.0\) : \(-1\.0\)\);$/m);
+    expect(code).toMatch(
+      /return \(\(_\w+ == 1\.0\) \? \(10\.0\) : \(-1\.0\)\);$/m
+    );
   });
 
   it('a loop-form Sum inside a case BODY still fails closed', () => {

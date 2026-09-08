@@ -1,10 +1,12 @@
 import type { Expression } from '../global-types.js';
 import type { CompiledFunctions } from './types.js';
+import { tryGetConstant } from './constant-folding.js';
 import {
   GPUShaderTarget,
   compileGPUMatrix,
   assertGPUScalarComponents,
   gpuAssertExpressionBody,
+  gpuOperandShape,
   type GPUShapeRules,
 } from './gpu-target.js';
 
@@ -42,7 +44,24 @@ function compileGLSLList(
 const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   Inversesqrt: 'inversesqrt',
-  Mod: 'mod',
+  Mod: ([a, b], compile) => {
+    if (a === null || b === null) throw new Error('Mod: missing argument');
+    // A divisor of exactly one is the fractional part. GLSL ES 3.00 §8.3
+    // defines `mod(x, y)` as `x - y * floor(x / y)` and `fract(x)` as
+    // `x - floor(x)`, so the two agree for every dividend, negative ones
+    // included (`mod(-0.25, 1.0)` and `fract(-0.25)` both answer 0.75 — the
+    // floored convention the interpreter's `Mod` uses as well). `fract` is a
+    // single hardware instruction and needs no second operand.
+    //
+    // A SCALAR dividend only: `fract` takes one argument, and the operand-
+    // shape gate reads the emitted call against the head's operands, so a
+    // `vecN` dividend beside the scalar divisor would be judged a genType
+    // mismatch on the one-argument call and decline. The vector form keeps
+    // `mod(v, 1.0)`, which the gate knows takes its scalar last.
+    if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
+      return `fract(${compile(a)})`;
+    return `mod(${compile(a)}, ${compile(b)})`;
+  },
 
   List: compileGLSLList,
   Matrix: (args, compile) =>

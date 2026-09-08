@@ -24,6 +24,8 @@ import {
   gpuNonFiniteLiteral,
   negativeBaseRealPow,
   principalComplexPow,
+  foldEmittedGPUCode,
+  callerSpliceSources,
 } from './constant-folding.js';
 
 import type {
@@ -46,6 +48,7 @@ import {
   pointHasBroadcastComponent,
   statementBodyHead,
 } from './base-compiler.js';
+import type { LoopInvariantBinding } from './base-compiler.js';
 import {
   finitePartOfType,
   isNonRealNumber,
@@ -719,6 +722,48 @@ function gpuOperandOnce(
 }
 
 /**
+ * Compile an operand whose code IS the whole lowering of its parent head — an
+ * IDENTITY passthrough, such as `Floor` of an integer-valued operand, `Abs` of
+ * a non-negative one, or `Real` of a real one.
+ *
+ * The shared compiler splices the emission of a function head into its parent
+ * WITHOUT parentheses of its own, because a head normally emits a CALL, and a
+ * call binds tighter than every infix operator. An identity lowering breaks
+ * that assumption: it hands the parent the OPERAND's code, so when the operand
+ * is itself an infix expression the parent's operator captures only its last
+ * term. `3·⌊n + 1⌋` over an integer `n` emitted `3.0 * n + 1.0`, which is
+ * `3n + 1` — a wrong value behind a reported success.
+ *
+ * The operand is therefore parenthesized whenever its head has an infix
+ * spelling on this target. A symbol, a number literal or a call is a primary
+ * already and stays bare, so those emissions are unchanged.
+ */
+function gpuIdentityPassthrough(
+  x: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  return gpuParenthesizeIdentity(x, compile(x), target);
+}
+
+/**
+ * The already-compiled form of `gpuIdentityPassthrough`, for a caller that
+ * must compile its operand exactly once for its own reasons (a `Random`
+ * operand redraws on a second `compile()`) and so cannot hand the operand
+ * over. Same rule: parenthesize `code` when the head of `x` has an infix
+ * spelling on this target.
+ */
+function gpuParenthesizeIdentity(
+  x: Expression,
+  code: string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  if (!isFunction(x)) return code;
+  const op = target?.operators?.(x.operator) ?? GPU_OPERATORS[x.operator];
+  return op === undefined ? code : `(${code})`;
+}
+
+/**
  * The complex lowering of a RECIPROCAL inverse head (`Arcsec`, `Arccsc`,
  * `Arsech`, `Arcoth`), as `helper(1 / z)`.
  *
@@ -1020,6 +1065,11 @@ function compileGPUConditionalArm(
  *
  * GLSL has the ternary operator; WGSL does not and uses
  * `select(false_value, true_value, condition)` instead.
+ *
+ * A conditional that chooses between one and zero is the boolean itself: both
+ * languages convert a `bool` to a float with the scalar constructor
+ * (`float(b)` in GLSL, `f32(b)` in WGSL), and both specify that conversion as
+ * `true → 1.0` and `false → 0.0`. The cast needs no branch.
  */
 function gpuConditional(
   cond: string,
@@ -1027,9 +1077,22 @@ function gpuConditional(
   whenFalse: string,
   target?: CompileTarget<Expression>
 ): string {
-  if (target?.language === 'wgsl')
-    return `select(${whenFalse}, ${whenTrue}, ${cond})`;
+  const isWGSL = target?.language === 'wgsl';
+  if (whenTrue === '1.0' && whenFalse === '0.0')
+    return `${isWGSL ? 'f32' : 'float'}(${cond})`;
+  if (isWGSL) return `select(${whenFalse}, ${whenTrue}, ${cond})`;
   return `((${cond}) ? (${whenTrue}) : (${whenFalse}))`;
+}
+
+/**
+ * The two-argument arc tangent of the target language.
+ *
+ * GLSL overloads `atan` on arity (`atan(y_over_x)` and `atan(y, x)`); WGSL
+ * declares the two-argument form under its own name, `atan2`, and has no
+ * two-argument `atan` at all, so the GLSL spelling is a compile error there.
+ */
+function gpuAtan2(target?: CompileTarget<Expression>): string {
+  return target?.language === 'wgsl' ? 'atan2' : 'atan';
 }
 
 /** Componentwise comparison builtins (GLSL) / operators (WGSL). */
@@ -2770,8 +2833,14 @@ function compileGPUExtremum(
     return acc;
   };
   // Every operand a scalar: the componentwise variadic fold, byte-identical to
-  // what `foldNaryBuiltin` emitted.
-  if (!isAggregate.some((x) => x)) return fold(codes);
+  // what `foldNaryBuiltin` emitted. With ONE operand the fold emits no call at
+  // all — the lowering is the operand's own code — so it is parenthesized on
+  // the identity-passthrough rule (see `gpuParenthesizeIdentity`): `2·max(x +
+  // 1)` emitted `2.0 * x + 1.0`, which is `2x + 1`.
+  if (!isAggregate.some((x) => x))
+    return codes.length === 1
+      ? gpuParenthesizeIdentity(args[0], codes[0], target)
+      : fold(codes);
 
   const parts: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -4196,8 +4265,13 @@ function assertFiniteGPUBound(
  * base subexpression can be safely repeated). Larger exponents — or any
  * compound base — route through the `_gpu_powi` preamble helper instead, which
  * evaluates the base once and keeps the sign correct for a negative base.
+ *
+ * Eight multiplications of a variable are cheaper than the helper call the
+ * exponent would otherwise reach, and the helper has no unrolled arm past 4:
+ * it falls back to `pow(abs(x), n)` with a sign correction, which is a
+ * transcendental pair on the hardware where the unroll is plain multiplies.
  */
-const GPU_POWI_INLINE_LIMIT = 4;
+const GPU_POWI_INLINE_LIMIT = 8;
 
 /** Keep small constant powers branch-free while evaluating the base once.
  * Invalid aggregate shapes retain the general helper and its shape diagnostic. */
@@ -4334,6 +4408,21 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
 };
 
 /**
+ * The base of a SQUARE — the `b` of `b²`, written either as `Power(b, 2)` or
+ * as `Square(b)` — or `undefined` when the expression is not a square.
+ */
+function gpuSquaredBase(expr: Expression): Expression | undefined {
+  if (isFunction(expr, 'Square') && expr.ops.length === 1) return expr.ops[0];
+  if (
+    isFunction(expr, 'Power') &&
+    expr.ops.length === 2 &&
+    tryGetConstant(expr.ops[1]) === 2
+  )
+    return expr.ops[0];
+  return undefined;
+}
+
+/**
  * Compile the COLLECTION (reduce) form of `Sum`/`Product` — no indexing set,
  * the operand itself is the collection (`Sum([3, 4, 5])`, `Sum(v)` for a
  * `vector<3>`). This is what `.total` and a bare list product canonicalize to,
@@ -4363,6 +4452,49 @@ function compileGPUCollectionReduce(
   const identity = kind === 'Sum' ? '0.0' : '1.0';
   const op = kind === 'Sum' ? ' + ' : ' * ';
   if (operand.isCollection && operand.count === 0) return identity;
+
+  // Summing the components of a SQUARED vector is that vector's dot product
+  // with itself: `v.x² + v.y²` is `dot(v, v)`, one builtin in both languages
+  // where the component fold writes the square out and then reads each
+  // component back out of it. Only a PURE base takes this route, because the
+  // emission names the vector twice — a repeated draw from an impure one
+  // would shift every later value in the shader — and the width is bounded at
+  // 2–4 because WGSL declares `dot` over `vecN` alone.
+  //
+  // The rewrite reads the square STRUCTURALLY and then compiles the base
+  // alone, so it is valid only while the square head still means the builtin
+  // one. A caller that supplies its own `Square`/`Power` through `functions`,
+  // or excludes that head from folding, keeps the ordinary component fold,
+  // which calls the caller's implementation.
+  const squared = kind === 'Sum' ? gpuSquaredBase(operand) : undefined;
+  const squaredWidth =
+    squared === undefined ? undefined : gpuOperandShape(squared);
+  if (
+    squared !== undefined &&
+    squared.isPure &&
+    typeof squaredWidth === 'number' &&
+    !BaseCompiler.isComplexValued(operand) &&
+    !isCallerMapped(operand, target.cse?.harvestOptions) &&
+    !target.foldExcludedOps?.has(operand.operator)
+  ) {
+    let v = compile(squared);
+    // A bare identifier is free to name twice. Anything else is bound to a
+    // hoisted `vecN` temporary where there is a statement sink, so the vector
+    // is built once; with no sink the pure source is written twice, which is
+    // what the operand-once convention does everywhere else in this target.
+    if (!gpuIsAtomicEmission(v) && BaseCompiler.canHoist(target)) {
+      const tv = BaseCompiler.tempVar(target);
+      const type =
+        target.language === 'wgsl'
+          ? `vec${squaredWidth}f`
+          : `vec${squaredWidth}`;
+      const decl =
+        target.language === 'wgsl' ? `var ${tv}: ${type}` : `${type} ${tv}`;
+      BaseCompiler.hoistStatement(target, `${decl} = ${v};`);
+      v = tv;
+    }
+    return `dot(${v}, ${v})`;
+  }
 
   const shape = gpuOperandShape(operand);
   const code = compile(operand);
@@ -4475,6 +4607,73 @@ function gpuBoundConstant(
 }
 
 /**
+ * Is this compiled loop bound already ONE READ at run time, so that binding it
+ * to a local would cost a line and save nothing?
+ *
+ * True for a numeric literal, a bare identifier, and any nesting of the
+ * CONVERSION and ROUNDING spellings around one of those — `K`, `int(K)`,
+ * `i32(K)`, `int(floor(K))`. Those are the spellings `boundCode` produces for
+ * a caller-declared parameter or a bare symbolic bound; each is a register
+ * read plus at most a conversion, which every driver folds.
+ *
+ * False as soon as the bound holds an operator, a second argument, or any
+ * other call (`int(floor(K + -1.0))`, `int(floor(_fn_g(x)))`): the loop
+ * condition would otherwise re-evaluate the whole expression on every
+ * iteration.
+ */
+const GPU_BOUND_ONE_READ_CALLS = new Set([
+  'int',
+  'i32',
+  'u32',
+  'uint',
+  'float',
+  'f32',
+  'floor',
+]);
+
+function gpuBoundIsOneRead(code: string): boolean {
+  const s = code.trim();
+  if (/^-?\d+(?:\.\d*)?$/.test(s)) return true;
+  if (/^[A-Za-z_]\w*$/.test(s)) return true;
+  const call = /^([A-Za-z_]\w*)\((.*)\)$/.exec(s);
+  if (call === null || !GPU_BOUND_ONE_READ_CALLS.has(call[1])) return false;
+  // The matched parentheses must be the call's OWN: without this check
+  // `int(a) + int(b)` would read as a call whose argument is `a) + int(b`.
+  const inner = call[2];
+  let depth = 0;
+  for (const ch of inner) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') {
+      if (depth === 0) return false;
+      depth -= 1;
+    }
+  }
+  return depth === 0 && gpuBoundIsOneRead(inner);
+}
+
+/**
+ * The declaration of one loop-invariant binding
+ * (`BaseCompiler.hoistLoopInvariants`) in the shader language.
+ *
+ * The type is read from the NODE the binding was compiled from, not guessed
+ * from its code. `gpuTypeOfValue` answers `undefined` for a value with no
+ * static shader shape; such a class is refused before a binding is minted (the
+ * `accept` predicate the callers pass), so it never reaches here — the
+ * fallback keeps the scalar spelling rather than emit nothing.
+ */
+function gpuInvariantDeclaration(
+  name: string,
+  code: string,
+  node: Expression,
+  isWGSL: boolean
+): string {
+  const type = gpuTypeOfValue(node, isWGSL) ?? (isWGSL ? 'f32' : 'float');
+  return isWGSL
+    ? `let ${name}: ${type} = ${code};`
+    : `${type} ${name} = ${code};`;
+}
+
+/**
  * Compile a Sum or Product expression for GPU targets.
  *
  * Two compilation strategies:
@@ -4544,56 +4743,80 @@ function compileGPUSumProduct(
 
   // Unroll small constant ranges — pure inline expression
   if (bothConstant && upperNum - lowerNum + 1 <= GPU_UNROLL_LIMIT) {
-    const terms: string[] = [];
-    // Statements a term hoists (a nested loop-form Sum with a symbolic bound)
-    // are drained into the ENCLOSING sink: the index is substituted as a
-    // literal in `var` below, so nothing a term emits refers to the bound name,
-    // and the statements are valid where the unrolled expression itself is.
-    // Without an enclosing sink they have nowhere to go, and the term falls
-    // back to the legacy multi-line block — which `compileValueOperand` then
-    // rejects, as before (fail closed, D6).
-    //
-    // A term that hoists is drained IMMEDIATELY and its remaining value bound
-    // to a temporary, which is what enters the combined expression. Collecting
-    // every term's statements first and draining them at the end reordered the
-    // unroll — term1-loop, term2-loop, term1-rest, term2-rest — and
-    // `_gpu_rnd_draw` advances a runtime counter, so a draw in term2's loop
-    // would move ahead of a draw in term1's remainder and every later value in
-    // the shader would shift.
-    for (let k = lowerNum; k <= upperNum; k++) {
-      const kStr = formatGPUNumber(k);
-      const termBoundVars = BaseCompiler.withBoundNames(target, [index]);
-      const termSink = { stmts: [] as string[], boundVars: termBoundVars };
-      const innerTarget: CompileTarget<Expression> = {
-        ...target,
-        var: (id) => (id === index ? kStr : target.var(id)),
-        boundVars: termBoundVars,
-        hoist: BaseCompiler.canHoist(target) ? termSink : undefined,
-      };
-      if (canProveCounter)
-        recordGPUCounter(innerTarget, index, k, k, String(k));
-      let code: string;
-      try {
-        code = BaseCompiler.compile(args[0], innerTarget);
-      } finally {
-        clearGPUCounters(innerTarget);
+    const emitTerms = (
+      invariants: ReadonlyArray<LoopInvariantBinding>
+    ): string => {
+      // A subexpression the terms all share because it mentions no index is
+      // declared once, ahead of them. Every unrolled term runs, so the local is
+      // evaluated exactly when the terms are.
+      for (const [name, code, node] of invariants)
+        BaseCompiler.hoistStatement(
+          target,
+          gpuInvariantDeclaration(name, code, node, isWGSL)
+        );
+      const terms: string[] = [];
+      // Statements a term hoists (a nested loop-form Sum with a symbolic bound)
+      // are drained into the ENCLOSING sink: the index is substituted as a
+      // literal in `var` below, so nothing a term emits refers to the bound name,
+      // and the statements are valid where the unrolled expression itself is.
+      // Without an enclosing sink they have nowhere to go, and the term falls
+      // back to the legacy multi-line block — which `compileValueOperand` then
+      // rejects, as before (fail closed, D6).
+      //
+      // A term that hoists is drained IMMEDIATELY and its remaining value bound
+      // to a temporary, which is what enters the combined expression. Collecting
+      // every term's statements first and draining them at the end reordered the
+      // unroll — term1-loop, term2-loop, term1-rest, term2-rest — and
+      // `_gpu_rnd_draw` advances a runtime counter, so a draw in term2's loop
+      // would move ahead of a draw in term1's remainder and every later value in
+      // the shader would shift.
+      for (let k = lowerNum; k <= upperNum; k++) {
+        const kStr = formatGPUNumber(k);
+        const termBoundVars = BaseCompiler.withBoundNames(target, [index]);
+        const termSink = { stmts: [] as string[], boundVars: termBoundVars };
+        const innerTarget: CompileTarget<Expression> = {
+          ...target,
+          var: (id) => (id === index ? kStr : target.var(id)),
+          boundVars: termBoundVars,
+          hoist: BaseCompiler.canHoist(target) ? termSink : undefined,
+        };
+        if (canProveCounter)
+          recordGPUCounter(innerTarget, index, k, k, String(k));
+        let code: string;
+        try {
+          code = BaseCompiler.compile(args[0], innerTarget);
+        } finally {
+          clearGPUCounters(innerTarget);
+        }
+        if (termSink.stmts.length === 0) {
+          terms.push(`(${code})`);
+          continue;
+        }
+        // The sink is non-empty only when `canHoist(target)` held above.
+        const tv = BaseCompiler.tempVar(target);
+        const scalar = isWGSL ? 'f32' : 'float';
+        const decl = isWGSL ? `var ${tv}: ${scalar}` : `${scalar} ${tv}`;
+        BaseCompiler.hoistStatement(
+          target,
+          ...termSink.stmts,
+          `${decl} = ${code};`
+        );
+        terms.push(`(${tv})`);
       }
-      if (termSink.stmts.length === 0) {
-        terms.push(`(${code})`);
-        continue;
-      }
-      // The sink is non-empty only when `canHoist(target)` held above.
-      const tv = BaseCompiler.tempVar(target);
-      const scalar = isWGSL ? 'f32' : 'float';
-      const decl = isWGSL ? `var ${tv}: ${scalar}` : `${scalar} ${tv}`;
-      BaseCompiler.hoistStatement(
-        target,
-        ...termSink.stmts,
-        `${decl} = ${code};`
-      );
-      terms.push(`(${tv})`);
-    }
-    return `(${terms.join(` ${op} `)})`;
+      return `(${terms.join(` ${op} `)})`;
+    };
+    // The bindings are STATEMENTS, so they can only be emitted where the
+    // enclosing position accepts hoisted statements. Without a sink the
+    // unrolled expression stands alone and every term keeps its own copy of
+    // the shared subexpression, exactly as before.
+    if (!BaseCompiler.canHoist(target)) return emitTerms([]);
+    return BaseCompiler.hoistLoopInvariants(
+      args[0],
+      [index],
+      target,
+      emitTerms,
+      (node) => gpuTypeOfValue(node, isWGSL) !== undefined
+    ).result;
   }
 
   // For-loop form. A shader has no expression-level loop, so this emits
@@ -4622,19 +4845,40 @@ function compileGPUSumProduct(
   };
   if (canProveCounter && bothConstant)
     recordGPUCounter(bodyTarget, index, lowerNum, upperNum, index);
-  let body: string;
-  try {
-    if (target.cse?.enabled) {
-      BaseCompiler.openCseSession(
-        args[0],
-        bodyTarget,
-        target.cse.harvestOptions
-      );
-      body = BaseCompiler.compileCseRoot(args[0], bodyTarget);
-    } else body = BaseCompiler.compile(args[0], bodyTarget);
-  } finally {
-    clearGPUCounters(bodyTarget);
-  }
+  // A subexpression of the body that mentions the index nowhere has the same
+  // value in every iteration, so it is computed ONCE, in a local declared
+  // ahead of the loop, and the body reads that local. Without this the body's
+  // own temporaries are all declared INSIDE the loop and re-evaluated per
+  // iteration — the Tycho code-generation audit of 2026-09-08 measured a
+  // heat-map body whose fifteen locals were index-free to the last one.
+  //
+  // Unlike the JavaScript and interval targets this needs no empty-range
+  // exit. Those guard against an error a binding raises when the loop body
+  // never ran; shader arithmetic raises nothing (a division by zero answers an
+  // infinity, an out-of-domain call a NaN), so evaluating an invariant whose
+  // loop turns out to run zero times computes a value nobody reads.
+  const { bindings: invariants, result: body } =
+    BaseCompiler.hoistLoopInvariants(
+      args[0],
+      [index],
+      target,
+      () => {
+        try {
+          if (target.cse?.enabled) {
+            BaseCompiler.openCseSession(
+              args[0],
+              bodyTarget,
+              target.cse.harvestOptions
+            );
+            return BaseCompiler.compileCseRoot(args[0], bodyTarget);
+          }
+          return BaseCompiler.compile(args[0], bodyTarget);
+        } finally {
+          clearGPUCounters(bodyTarget);
+        }
+      },
+      (node) => gpuTypeOfValue(node, isWGSL) !== undefined
+    );
 
   // Compiled BEFORE the loop statements are pushed, so anything the bounds
   // themselves hoist lands ahead of the loop that consumes them.
@@ -4695,9 +4939,34 @@ function compileGPUSumProduct(
   const accDecl = isWGSL ? `var ${acc}: ${floatType}` : `${floatType} ${acc}`;
   const indexDecl = isWGSL ? `var ${index}: ${intType}` : `${intType} ${index}`;
 
+  // A COMPUTED upper bound is bound to a local first. Both languages evaluate
+  // the loop condition on every iteration, so leaving the expression there
+  // recomputes it once per step — `n <= int(floor(K + -1.0))` runs the
+  // addition and the `floor` as many times as the loop runs. A bound that is
+  // already ONE READ (a literal, a bare name, a conversion around one of
+  // those) is left in place: a local would only add a line and hide which
+  // name the header tests.
+  const boundVar =
+    upperNum === undefined && !gpuBoundIsOneRead(upperStr)
+      ? BaseCompiler.tempVar(target)
+      : '';
+  const boundDecl =
+    boundVar === ''
+      ? []
+      : [
+          isWGSL
+            ? `let ${boundVar}: ${intType} = ${upperStr};`
+            : `${intType} ${boundVar} = ${upperStr};`,
+        ];
+  const upperRef = boundVar === '' ? upperStr : boundVar;
+
   const loop = [
+    ...boundDecl,
+    ...invariants.map(([name, code, node]) =>
+      gpuInvariantDeclaration(name, code, node, isWGSL)
+    ),
     `${accDecl} = ${identity};`,
-    `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperStr}; ${index}++) {`,
+    `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperRef}; ${index}++) {`,
     ...bodySink.stmts.map((s) =>
       s
         .split('\n')
@@ -4909,10 +5178,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Note: `Abs` of a fixed-arity point never reaches this handler — the
   // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so the
   // point compiles through the `Norm` codegen below (Tycho item 74).
-  Abs: (args, compile) => {
+  Abs: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `length(${compile(args[0])})`;
-    if (BaseCompiler.isNonNegative(args[0])) return compile(args[0]);
+    if (BaseCompiler.isNonNegative(args[0]))
+      return gpuIdentityPassthrough(args[0], compile, target);
     return `abs(${compile(args[0])})`;
   },
   Arccos: (args, compile, target) => {
@@ -4947,8 +5217,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   At: markAggregateConsuming((args, compile, target) =>
     compileGPUAt(args, compile, target)
   ),
-  Ceil: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Ceil: (args, compile, target) => {
+    if (BaseCompiler.isIntegerValued(args[0]))
+      return gpuIdentityPassthrough(args[0], compile, target);
     return `ceil(${compile(args[0])})`;
   },
   Clamp: 'clamp',
@@ -4985,8 +5256,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     compilePointSwizzle(args[0], 'y', compile, target),
   PointZ: (args, compile, target) =>
     compilePointSwizzle(args[0], 'z', compile, target),
-  Floor: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Floor: (args, compile, target) => {
+    if (BaseCompiler.isIntegerValued(args[0]))
+      return gpuIdentityPassthrough(args[0], compile, target);
     return `floor(${compile(args[0])})`;
   },
   Fract: 'fract',
@@ -5088,10 +5360,39 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // `True` marks the default branch.
       if (isSymbol(cond, 'True'))
         return `(${armed(() => compile(val, i + 1))})`;
+      // CONSECUTIVE clauses that answer the same value collapse into one
+      // clause whose condition is their disjunction: `c1 ? v : (c2 ? v : e)`
+      // is `(c1 || c2) ? v : e`. Both languages short-circuit `||`, so a
+      // later condition is still evaluated only when every earlier one is
+      // false — the evaluation order and count of the nested form, kept
+      // exactly. The clauses must be PURE: merging writes the value once
+      // where the nested form wrote it twice, so an impure value would lose
+      // one of two distinct draws from the shader's random stream, and a pure
+      // condition is required for the same conservative reason.
+      let last = i;
+      while (
+        last + 3 < args.length &&
+        !isSymbol(args[last + 2], 'True') &&
+        args[i + 1].isPure &&
+        args[last + 2].isPure &&
+        args[last + 3].isPure &&
+        args[last + 3].isSame(args[i + 1])
+      )
+        last += 2;
+      const first = armed(() => compile(cond, i));
+      const merged: string[] = [];
+      for (let k = i + 2; k <= last; k += 2)
+        merged.push(
+          compileGPUConditionalArm('Which', () => compile(args[k], k), target)
+        );
+      const condCode =
+        merged.length === 0
+          ? first
+          : [first, ...merged].map((c) => `(${c})`).join(' || ');
       return gpuConditional(
-        armed(() => compile(cond, i)),
+        condCode,
         compileGPUConditionalArm('Which', () => compile(val, i + 1), target),
-        build(i + 2),
+        build(last + 2),
         target
       );
     };
@@ -5199,6 +5500,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     )
       return `exp(${compile(exp)})`;
     if (eConst === 0.5) return `sqrt(${compile(base)})`;
+    // Base two is the hardware's own exponential: both languages declare
+    // `exp2` over the genType, and `pow(2.0, y)` is itself specified as
+    // `exp2(y * log2(2.0))`, so this drops a logarithm the compiler would
+    // otherwise have to fold.
+    //
+    // A SCALAR exponent only: the base is consumed, so the emitted call has
+    // one argument where the head has two operands, and the operand-shape
+    // gate reads the two against each other. A `vecN` exponent beside the
+    // scalar base would be judged a genType mismatch and decline, where the
+    // `pow` form below widens the base into the vector itself.
+    if (bConst === 2 && gpuOperandShape(exp) === 'scalar')
+      return `exp2(${compile(exp)})`;
     // Literal integer exponent: emit sign-preserving code. GLSL/WGSL `pow(x, y)`
     // is spec-defined as `exp2(y·log2(x))` and is undefined for a negative base
     // even when `y` is an integer-valued literal — on a real GPU `pow(-2.0, 3.0)`
@@ -5249,15 +5562,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // GLSL/WGSL `round()` rounds half to even (implementation-defined ties);
     // the interpreter rounds half away from zero (Round(-2.5) = -3).
     // Reconstruct half-away as `sign(x)·floor(|x| + 0.5)`.
-    // `halfAway` splices its operand TWICE, so the operand goes through
-    // `gpuOperandOnce`: an impure (Random-family) operand is bound to a
-    // hoisted temporary instead of re-drawn, a pure one compiles directly
-    // (byte-identical).
+    //
+    // A SCALAR operand goes through the `_gpu_round` preamble helper, which
+    // holds that expression and so writes the operand once. A `vecN` operand
+    // keeps the expression inline: the helper is declared over `float`/`f32`
+    // and the operand-shape gate declines a vector handed to a scalar-only
+    // helper, while every piece of the inline form (`sign`, `floor`, `abs`,
+    // `*`, `+`) is componentwise and valid on a vector. The inline form
+    // splices its operand TWICE, so it goes through `gpuOperandOnce`: an
+    // impure (Random-family) operand is bound to a hoisted temporary instead
+    // of re-drawn, a pure one compiles directly (byte-identical).
+    const isScalar = gpuOperandShape(args[0]) === 'scalar';
     const halfAway = (c: string): string =>
-      `(sign(${c}) * floor(abs(${c}) + 0.5))`;
+      isScalar ? `_gpu_round(${c})` : `(sign(${c}) * floor(abs(${c}) + 0.5))`;
     if (args.length < 2) {
-      if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
-      return halfAway(gpuOperandOnce('Round', args[0], compile, target));
+      if (BaseCompiler.isIntegerValued(args[0]))
+        return gpuIdentityPassthrough(args[0], compile, target);
+      return halfAway(
+        isScalar
+          ? compile(args[0])
+          : gpuOperandOnce('Round', args[0], compile, target)
+      );
     }
     // The SECOND operand is a precision: `Round(x, n)` rounds to `n` DECIMAL
     // places (the Desmos/spreadsheet form the signature `(number, integer?)`
@@ -5292,11 +5617,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // number of decimal places (it is not, for a negative `n`, which rounds
     // to tens, hundreds, …).
     if (n >= 0 && BaseCompiler.isIntegerValued(args[0]))
-      return compile(args[0]);
+      return gpuIdentityPassthrough(args[0], compile, target);
     const factor = formatFloat(Math.pow(10, n), target.language);
-    // The SCALED operand is what `halfAway` splices twice — bind the operand
-    // itself once, then build the scaled string from it.
-    const c0 = gpuOperandOnce('Round', args[0], compile, target);
+    // The SCALED operand is what the inline `halfAway` splices twice — bind
+    // the operand itself once, then build the scaled string from it. The
+    // helper form writes it once, so a scalar operand needs no binding.
+    const c0 = isScalar
+      ? compile(args[0])
+      : gpuOperandOnce('Round', args[0], compile, target);
     return `(${halfAway(`(${c0} * ${factor})`)} / ${factor})`;
   },
   Sign: 'sign',
@@ -5341,15 +5669,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_ctan(${compile(args[0])})`;
     return `tan(${compile(args[0])})`;
   },
-  Truncate: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Truncate: (args, compile, target) => {
+    if (BaseCompiler.isIntegerValued(args[0]))
+      return gpuIdentityPassthrough(args[0], compile, target);
     return `trunc(${compile(args[0])})`;
   },
 
   // Complex-specific functions
-  Real: (args, compile) => {
+  Real: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).x`;
-    return compile(args[0]);
+    return gpuIdentityPassthrough(args[0], compile, target);
   },
   Imaginary: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0])) return `(${compile(args[0])}).y`;
@@ -5361,7 +5690,24 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // (Random-family) one to a hoisted `vec2` temporary; a pure one compiles
       // directly (byte-identical).
       const code = gpuOperandOnce('Argument', args[0], compile, target, true);
-      return `atan(${code}.y, ${code}.x)`;
+      // An operand that lowers to a `vec2` CONSTRUCTOR carries its two
+      // components in the source already, so the vector is read back apart
+      // instead of being built twice: `atan(vec2(a, b).y, vec2(a, b).x)`
+      // becomes `atan(b, a)`. The constructor's arguments are the components
+      // in order, so no swizzle is needed.
+      const built = gpuTopLevelCall(code);
+      if (
+        built !== undefined &&
+        /^vec2f?$/.test(built.callee) &&
+        built.operands.length === 2
+      )
+        return `${gpuAtan2(target)}(${built.operands[1]}, ${built.operands[0]})`;
+      // `gpuSwizzle`, not a bare `${code}.y`: a postfix swizzle binds tighter
+      // than every infix operator, so an operand that lowered to an infix
+      // expression — the promote-and-add form of a complex `Add`, which joins
+      // its operands with ` + ` — would take the suffix on its LAST term
+      // alone.
+      return `${gpuAtan2(target)}(${gpuSwizzle(code, 'y')}, ${gpuSwizzle(code, 'x')})`;
     }
     // A real value's argument is 0 (x ≥ 0) or π (x < 0). Use the
     // target-appropriate conditional: WGSL has no `?:`, so this becomes
@@ -5378,9 +5724,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       // Spliced TWICE (`.x` and `.y`) — see `Argument`.
       const code = gpuOperandOnce('Conjugate', args[0], compile, target, true);
-      return `${v2}(${code}.x, -${code}.y)`;
+      // `gpuSwizzle` for the same reason as `Argument` above: a bare
+      // `${code}.x` binds the suffix to the last term of an infix emission.
+      return `${v2}(${gpuSwizzle(code, 'x')}, -${gpuSwizzle(code, 'y')})`;
     }
-    return compile(args[0]);
+    return gpuIdentityPassthrough(args[0], compile, target);
   },
 
   Remainder: ([a, b], compile, target) => {
@@ -5602,9 +5950,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Trigonometric (additional)
-  Arctan2: (args, compile) => {
+  Arctan2: (args, compile, target) => {
     if (args.length < 2) throw new Error('Arctan2: need two arguments');
-    return `atan(${compile(args[0])}, ${compile(args[1])})`;
+    return `${gpuAtan2(target)}(${compile(args[0])}, ${compile(args[1])})`;
   },
   Hypot: ([x, y], compile) => {
     if (x === null || y === null) throw new Error('Hypot: need two arguments');
@@ -5990,9 +6338,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // components in the named space, equivalent to ColorToColorspace(c, 'x').
   // ---------------------------------------------------------------------------
 
-  AsOklch: ([c], compile) => {
+  AsOklch: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklch: no argument');
-    return compile(c);
+    return gpuIdentityPassthrough(c, compile, target);
   },
 
   AsOklab: ([c], compile) => {
@@ -6391,7 +6739,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const counter = allocGPURandomCounter(state);
     state.frames.push({ seed, counter });
     try {
-      return compile(args[1]);
+      return gpuIdentityPassthrough(args[1], compile, target);
     } finally {
       state.frames.pop();
     }
@@ -8442,6 +8790,60 @@ fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
 `;
 
 /**
+ * The sRGB round trip (GLSL syntax) — a colour already inside the sRGB gamut
+ * is returned unchanged, and one outside it is mapped back through OKLCh.
+ *
+ * It stands apart from the colour preamble above only because it is a later
+ * addition to the same library; it calls three of that library's functions,
+ * so it is appended to it (`GPU_COLOR_LIBRARY_GLSL`) and the per-function
+ * inclusion pass pulls in whatever it needs.
+ */
+const GPU_SRGB_ROUNDTRIP_GLSL = `
+vec3 _gpu_srgb_roundtrip(vec3 rgb) {
+  // Bound positive contributions before checking the cube-root domain.
+  if (all(lessThanEqual(rgb, vec3(2.0)))) {
+    if (all(greaterThanEqual(rgb, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
+    float r = _gpu_srgb_to_linear(rgb.x);
+    float g = _gpu_srgb_to_linear(rgb.y);
+    float b = _gpu_srgb_to_linear(rgb.z);
+    vec3 lms = vec3(
+      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    );
+    if (all(greaterThanEqual(lms, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
+  }
+  return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
+}
+`;
+
+/** The sRGB round trip (WGSL syntax). See `GPU_SRGB_ROUNDTRIP_GLSL`. */
+const GPU_SRGB_ROUNDTRIP_WGSL = `
+fn _gpu_srgb_roundtrip(rgb: vec3f) -> vec3f {
+  // Bound positive contributions before checking the cube-root domain.
+  if (all(rgb <= vec3f(2.0))) {
+    if (all(rgb >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
+    let r = _gpu_srgb_to_linear(rgb.x);
+    let g = _gpu_srgb_to_linear(rgb.y);
+    let b = _gpu_srgb_to_linear(rgb.z);
+    let lms = vec3f(
+      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    );
+    if (all(lms >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
+  }
+  return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
+}
+`;
+
+/** The whole colour library, round trip included, in one dependency order. */
+const GPU_COLOR_LIBRARY_GLSL =
+  GPU_COLOR_PREAMBLE_GLSL + GPU_SRGB_ROUNDTRIP_GLSL;
+const GPU_COLOR_LIBRARY_WGSL =
+  GPU_COLOR_PREAMBLE_WGSL + GPU_SRGB_ROUNDTRIP_WGSL;
+
+/**
  * Per-function complex arithmetic definitions with dependency metadata.
  *
  * Each entry maps a helper function name to its GLSL source, WGSL source,
@@ -8701,6 +9103,123 @@ function buildComplexPreamble(code: string, language: string): string {
   return '\n' + parts.join('\n\n') + '\n';
 }
 
+/** One helper function definition, cut out of a multi-function library. */
+interface GpuLibraryDefinition {
+  /** The declared function name, e.g. `_gpu_hsv_to_rgb`. */
+  name: string;
+  /** Its whole source, comments above it included, with no final newline. */
+  source: string;
+  /**
+   * The blank lines that separate this definition from the one before it, kept
+   * verbatim so that a subset containing EVERY definition reproduces the
+   * library string byte for byte.
+   */
+  lead: string;
+  /** Matches this definition's name as a whole word. */
+  reference: RegExp;
+  /**
+   * The indices of the definitions this one CALLS. Computed once, when the
+   * library is split, because it is a property of the library text and never
+   * of the compilation asking for a subset.
+   */
+  calls: number[];
+}
+
+/**
+ * The split of each library string, kept so a library is parsed once per
+ * process rather than once per compilation. The key is the library text
+ * itself, which is a module constant and never changes.
+ */
+const GPU_LIBRARY_DEFINITIONS = new Map<string, GpuLibraryDefinition[]>();
+
+/**
+ * The head of a top-level function definition, anchored at column 0 — `fn
+ * _gpu_x(` in WGSL, `vec3 _gpu_x(` or `float _gpu_x(` in GLSL. Every
+ * definition in these library strings starts in column 0 and everything
+ * inside a body is indented, so the anchor is what tells a declaration apart
+ * from a local variable of the same shape.
+ */
+const GPU_LIBRARY_DEFINITION_HEAD =
+  /^(?:fn[^\S\n]+([A-Za-z_]\w*)|[A-Za-z_]\w*(?:\[\d+\])?[^\S\n]+([A-Za-z_]\w*))[^\S\n]*\(/;
+
+/** Cut a multi-function library string into its individual definitions. */
+function gpuLibraryDefinitions(library: string): GpuLibraryDefinition[] {
+  const cached = GPU_LIBRARY_DEFINITIONS.get(library);
+  if (cached !== undefined) return cached;
+  const defs: GpuLibraryDefinition[] = [];
+  let lines: string[] = [];
+  let lead = '';
+  let name: string | undefined;
+  let depth = 0;
+  for (const line of library.split('\n')) {
+    // A blank line between two definitions belongs to neither; it is kept as
+    // the next definition's separator.
+    if (lines.length === 0 && line.trim() === '') {
+      lead += '\n';
+      continue;
+    }
+    lines.push(line);
+    // A line comment can hold a brace, and one of these libraries does hold a
+    // comment with braces in it, so the depth count reads the code only.
+    const code = line.replace(/\/\/.*$/, '');
+    if (name === undefined) {
+      const head = GPU_LIBRARY_DEFINITION_HEAD.exec(code);
+      if (head !== null) name = head[1] ?? head[2];
+    }
+    for (const c of code) {
+      if (c === '{') depth += 1;
+      else if (c === '}') depth -= 1;
+    }
+    if (name !== undefined && depth === 0 && code.includes('}')) {
+      defs.push({
+        name,
+        source: lines.join('\n'),
+        lead,
+        reference: new RegExp(`(?<![\\w$])${name}(?![\\w$])`),
+        calls: [],
+      });
+      lines = [];
+      lead = '';
+      name = undefined;
+    }
+  }
+  // A definition can only call one declared BEFORE it: both languages require
+  // a declaration to precede its use, so a library string is written in
+  // dependency order and the search is over the earlier entries alone.
+  for (let i = 0; i < defs.length; i++)
+    for (let j = 0; j < i; j++)
+      if (defs[j].reference.test(defs[i].source)) defs[i].calls.push(j);
+  GPU_LIBRARY_DEFINITIONS.set(library, defs);
+  return defs;
+}
+
+/**
+ * The definitions of `library` that `code` actually needs — the ones it names,
+ * plus everything those call, in the library's own order.
+ *
+ * A shader preamble is compiled by the driver with the shader, once per
+ * program, so an unused definition is paid for on every first draw. Before
+ * this pass a single `hsv` conversion carried all fourteen colour-space
+ * functions (6.1 KB), and a Mandelbrot row carried the Julia iteration.
+ * (Measured by the Tycho code-generation audit of 2026-09-08.)
+ *
+ * The pass runs BACKWARD because a library's source order is already its
+ * dependency order: both languages require a function to be declared before
+ * it is called, so a definition can only be called by a LATER one. One
+ * backward sweep therefore closes the set, and emitting the survivors in
+ * source order keeps the declaration-before-use property.
+ */
+export function gpuLibrarySubset(code: string, library: string): string {
+  const defs = gpuLibraryDefinitions(library);
+  const keep: boolean[] = defs.map((d) => d.reference.test(code));
+  for (let i = defs.length - 1; i >= 0; i--)
+    if (keep[i]) for (const j of defs[i].calls) keep[j] = true;
+  let preamble = '';
+  for (const d of defs.filter((_d, i) => keep[i]))
+    preamble += `${preamble === '' ? d.lead || '\n' : d.lead}${d.source}\n`;
+  return preamble;
+}
+
 /**
  * GLSL NaN helper preamble. Centralizes the masked/else-branch NaN (`When` /
  * `Which` fall-through) into a single overridable symbol.
@@ -8766,6 +9285,27 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
   let r = pow(abs(x), n);
   if (x < 0.0 && (n % 2.0) == 1.0) { return -r; }
   return r;
+}
+`;
+
+/**
+ * Round half AWAY FROM ZERO (GLSL syntax) — the rule the interpreter's `Round`
+ * follows (`Round(-2.5)` is -3, `Round(-0.5)` is -1, `Round(2.5)` is 3).
+ *
+ * Neither language's own `round()` can be used: both round a half to the EVEN
+ * neighbour. The helper exists so that the operand is written once; the
+ * expression it holds was previously inlined with the operand spliced twice.
+ */
+const GPU_ROUND_PREAMBLE_GLSL = `
+float _gpu_round(float x) {
+  return sign(x) * floor(abs(x) + 0.5);
+}
+`;
+
+/** Round half away from zero (WGSL syntax). See `GPU_ROUND_PREAMBLE_GLSL`. */
+const GPU_ROUND_PREAMBLE_WGSL = `
+fn _gpu_round(x: f32) -> f32 {
+  return sign(x) * floor(abs(x) + 0.5);
 }
 `;
 
@@ -9452,6 +9992,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // source both times (§7). Target-specific: only the GPU languages number
       // anything per compilation.
       beginCompilation: resetGPURandomNumbering,
+      // Bind an index-free scalar subexpression of a `Sum`/`Product` body once
+      // ahead of the loop instead of recomputing it per iteration (see
+      // `CompileTarget`). A shader runs its loop per fragment, so the cost of
+      // an invariant `floor`, `sin` or `dot` inside one is paid millions of
+      // times per frame.
+      hoistScalarInvariants: true,
       cseMaterialize: (expr, name, code, current) => {
         if (
           !BaseCompiler.canHoist(current) ||
@@ -9594,6 +10140,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
+    // Fold the literal arithmetic the EMISSION creates, which the tree-level
+    // fold cannot see: an unrolled `Sum` substitutes its index at the variable
+    // level, so every term carries `(1.0 + -0.5)` and `_gpu_pow2(0.025 * (1.0
+    // + -0.5))`. Every step of the fold rounds to single, so the folded
+    // literal is the value the shader computes (`foldEmittedGPUCode`).
+    // Installed after the spread so a caller's `constantFold: false` — which
+    // promises the structural lowering of every constant, and which the
+    // code-generation tests rely on — turns this fold off as well.
+    if (
+      target.constantFold !== false &&
+      target.foldEmittedConstant === undefined
+    ) {
+      const splices = callerSpliceSources(target.varsKeys, target.var);
+      target.foldEmittedConstant = (_expr, code) =>
+        foldEmittedGPUCode(code, splices);
+    }
     // Per-compilation random state (§7 of the Random family redesign),
     // installed EAGERLY: the base compiler recurses through `{ ...target }`
     // spreads, which copy the identity token by reference, so a
@@ -10276,16 +10838,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             ? GPU_POWI_PREAMBLE_WGSL
             : GPU_POWI_PREAMBLE_GLSL
           : gpuPowiVecPreamble(form, isWGSL);
-    if (code.includes('_gpu_gamma'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_GAMMA_PREAMBLE_WGSL
-          : GPU_GAMMA_PREAMBLE_GLSL;
-    if (code.includes('_gpu_erf'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_ERF_PREAMBLE_WGSL
-          : GPU_ERF_PREAMBLE_GLSL;
+    // Every library goes through `gpuLibrarySubset`, which keeps only the
+    // definitions this compilation names and the ones those call. A shader
+    // preamble is compiled by the driver once per program, so an unused
+    // definition costs first-draw time on every program that carries it.
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_ROUND_PREAMBLE_WGSL : GPU_ROUND_PREAMBLE_GLSL
+    );
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_GAMMA_PREAMBLE_WGSL : GPU_GAMMA_PREAMBLE_GLSL
+    );
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_ERF_PREAMBLE_WGSL : GPU_ERF_PREAMBLE_GLSL
+    );
     if (code.includes('_gpu_heaviside'))
       preamble +=
         this.languageId === 'wgsl'
@@ -10311,17 +10879,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         this.languageId === 'wgsl'
           ? GPU_FRESNELS_PREAMBLE_WGSL
           : GPU_FRESNELS_PREAMBLE_GLSL;
-    if (code.includes('_gpu_besselJ'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_BESSELJ_PREAMBLE_WGSL
-          : GPU_BESSELJ_PREAMBLE_GLSL;
-    if (code.includes('_fractal_')) {
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_FRACTAL_PREAMBLE_WGSL
-          : GPU_FRACTAL_PREAMBLE_GLSL;
-    }
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_BESSELJ_PREAMBLE_WGSL : GPU_BESSELJ_PREAMBLE_GLSL
+    );
+    // A Mandelbrot row carried the Julia iteration and a Julia row carried the
+    // Mandelbrot one before the per-function pass.
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_FRACTAL_PREAMBLE_WGSL : GPU_FRACTAL_PREAMBLE_GLSL
+    );
     if (code.includes('_gpu_rnd_draw')) {
       // One invocation-local u32 counter per frame (plus one shared by the
       // unframed spatial-noise draws). A shader global / WGSL `var<private>`
@@ -10345,72 +10912,27 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               : `uint ${n} = 0u;\n`
           )
           .join('');
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_PCG3D_PREAMBLE_WGSL
-          : GPU_PCG3D_PREAMBLE_GLSL;
+      preamble += gpuLibrarySubset(
+        code,
+        isWGSL ? GPU_PCG3D_PREAMBLE_WGSL : GPU_PCG3D_PREAMBLE_GLSL
+      );
     }
     if (code.includes('_gpu_gcd'))
       preamble +=
         this.languageId === 'wgsl'
           ? GPU_GCD_PREAMBLE_WGSL
           : GPU_GCD_PREAMBLE_GLSL;
-    if (code.includes('_gpu_median_'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_MEDIAN_PREAMBLE_WGSL
-          : GPU_MEDIAN_PREAMBLE_GLSL;
-    if (
-      code.includes('_gpu_srgb_to') ||
-      code.includes('_gpu_srgb_roundtrip(') ||
-      code.includes('_gpu_oklab') ||
-      code.includes('_gpu_oklch') ||
-      code.includes('_gpu_color_mix') ||
-      code.includes('_gpu_apca')
-    ) {
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_COLOR_PREAMBLE_WGSL
-          : GPU_COLOR_PREAMBLE_GLSL;
-    }
-    if (code.includes('_gpu_srgb_roundtrip('))
-      preamble += isWGSL
-        ? `
-fn _gpu_srgb_roundtrip(rgb: vec3f) -> vec3f {
-  // Bound positive contributions before checking the cube-root domain.
-  if (all(rgb <= vec3f(2.0))) {
-    if (all(rgb >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
-    let r = _gpu_srgb_to_linear(rgb.x);
-    let g = _gpu_srgb_to_linear(rgb.y);
-    let b = _gpu_srgb_to_linear(rgb.z);
-    let lms = vec3f(
-      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
-      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
-      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_MEDIAN_PREAMBLE_WGSL : GPU_MEDIAN_PREAMBLE_GLSL
     );
-    if (all(lms >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
-  }
-  return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
-}
-`
-        : `
-vec3 _gpu_srgb_roundtrip(vec3 rgb) {
-  // Bound positive contributions before checking the cube-root domain.
-  if (all(lessThanEqual(rgb, vec3(2.0)))) {
-    if (all(greaterThanEqual(rgb, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
-    float r = _gpu_srgb_to_linear(rgb.x);
-    float g = _gpu_srgb_to_linear(rgb.y);
-    float b = _gpu_srgb_to_linear(rgb.z);
-    vec3 lms = vec3(
-      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
-      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
-      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    // The colour library and the sRGB round trip that calls three of its
+    // functions are subset together, so a row that converts one colour space
+    // no longer carries the other twelve conversions.
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_COLOR_LIBRARY_WGSL : GPU_COLOR_LIBRARY_GLSL
     );
-    if (all(greaterThanEqual(lms, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
-  }
-  return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
-}
-`;
     if (!userDefs) return preamble;
     return preamble ? `${preamble}\n${userDefs}` : userDefs;
   }

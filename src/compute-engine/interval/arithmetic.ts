@@ -84,6 +84,24 @@ function _prod(x: number, y: number): number {
 }
 
 /**
+ * Endpoint quotient. It answers exactly what `_prod(x, 1 / y)` answers —
+ * the annihilations included — but divides instead of multiplying by the
+ * reciprocal, so an exact quotient stays exact.
+ *
+ * `1 / y` is an exact zero for an infinite `y` and for nothing else, so the
+ * two annihilation conditions of `_prod` (`x === 0` or the reciprocal is
+ * zero) become `x === 0` or `y` is infinite. Without them `[1, ∞) / [2, ∞)`
+ * would produce a `NaN` corner and `Math.min`/`Math.max` would collapse the
+ * whole interval to `NaN`. A `NaN` endpoint falls through to the division
+ * and stays `NaN`, as it did through the product.
+ */
+function _quot(x: number, y: number): number {
+  if (x === 0) return 0;
+  if (y === Infinity || y === -Infinity) return 0;
+  return x / y;
+}
+
+/**
  * Multiply two intervals (or IntervalResults).
  *
  * All four endpoint products are computed and the result
@@ -127,7 +145,20 @@ function divRaw(
 function _div(a: Interval, b: Interval): IntervalResult {
   // Case 1: Divisor entirely positive or negative - safe division
   if (b.lo > 0 || b.hi < 0) {
-    return ok(_mul(a, { lo: 1 / b.hi, hi: 1 / b.lo }));
+    // Divide the endpoints. The previous form multiplied by the RECIPROCAL
+    // interval `[1/b.hi, 1/b.lo]`, which rounds twice: `[49, 49] / [49, 49]`
+    // answered `[0.9999999999999999, …]`, so `floor(x / 49)` at `x = 49`
+    // was 0 where the interpreter answers 1. IEEE division is correctly
+    // rounded, so an exact quotient comes out exact. Division is monotone
+    // in each argument over a sign-constant divisor, so the range is still
+    // the hull of the four corner quotients.
+    const quotients = [
+      _quot(a.lo, b.lo),
+      _quot(a.lo, b.hi),
+      _quot(a.hi, b.lo),
+      _quot(a.hi, b.hi),
+    ];
+    return ok({ lo: Math.min(...quotients), hi: Math.max(...quotients) });
   }
 
   // Case 2: Divisor strictly contains zero - singularity

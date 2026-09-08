@@ -191,13 +191,16 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
 
   describe('scalar conditions are untouched', () => {
     // Pinned from the output BEFORE the selection hook was added to the GPU
-    // targets: a scalar `Which`/`If` must stay byte-identical.
+    // targets: a scalar `Which`/`If` must stay byte-identical. The one later
+    // change is the separate one-or-zero peephole: a conditional choosing
+    // between `1.0` and `0.0` is written as a cast of its condition, which is
+    // the same value with no branch.
     it('GLSL scalar Which / If', () => {
       expect(g(['Which', ['Less', 'x', 3], 1, 'True', 0])).toBe(
         '((x < 3.0) ? (1.0) : ((0.0)))'
       );
       expect(g(['If', ['Less', 'x', 3], 1, 0])).toBe(
-        '((x < 3.0) ? (1.0) : (0.0))'
+        'float(x < 3.0)'
       );
     });
 
@@ -206,7 +209,7 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
         'select((0.0), 1.0, x < 3.0)'
       );
       expect(w(['If', ['Less', 'x', 3], 1, 0])).toBe(
-        'select(0.0, 1.0, x < 3.0)'
+        'f32(x < 3.0)'
       );
     });
   });

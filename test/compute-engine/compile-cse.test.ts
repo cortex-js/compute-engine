@@ -38,15 +38,20 @@ const occurrences = (code: string, needle: string): number =>
  * artifact `code` holds.
  *
  * A call site is emitted in one of three forms: a bare `name(…)`; an
- * unconditional `_SYS.bcastFn((_p) => name(_p), …)` dispatch; or a runtime
- * broadcast guard, which holds BOTH of those —
- * `((_t) => Array.isArray(_t) ? _SYS.bcastFn((_p) => name(_p), _t) : name(_t))(arg)`
- * — and therefore spells the callee TWICE for one site. Discounting the guard's
- * direct branch recovers the number of sites, which is what the CSE tests
- * measure: whether a repeated call was bound once or left duplicated.
+ * unconditional `_SYS.bcastFn(name, …)` dispatch, which is handed the callee
+ * itself (a closure would only eta-expand it; one is emitted only when an
+ * argument needs a complex coercion, and then it spells `name(` too); or a
+ * runtime broadcast guard, which holds BOTH of those —
+ * `((_t) => Array.isArray(_t) ? _SYS.bcastFn(name, _t) : name(_t))(arg)` — and
+ * therefore names the callee twice for one site. Counting both spellings and
+ * discounting the guard's direct branch recovers the number of sites, which is
+ * what the CSE tests measure: whether a repeated call was bound once or left
+ * duplicated.
  */
 const callSites = (code: string, name: string): number =>
-  occurrences(code, `${name}(`) - occurrences(code, `) : ${name}(`);
+  occurrences(code, `${name}(`) +
+  occurrences(code, `_SYS.bcastFn(${name},`) -
+  occurrences(code, `) : ${name}(`);
 
 /** The `sin(6·v)` atom of the probe, as raw MathJSON. */
 const sin6 = (v: string | number): any => ['Sin', ['Multiply', 6, v]];
@@ -681,10 +686,13 @@ describe('COMPILE CSE — capture', () => {
     // The outer occurrences bind over the ENCLOSING `n`; the loop body is
     // the binder's own region, so it shares `sin(6n)` over the loop index
     // with itself, and the outer temporary never appears inside the loop.
-    const outer =
-      /const (_cse\d+) = _IA\.sin\(_IA\.mul\(_IA\.point\(6\), _\.n\)\)/.exec(
-        code
-      );
+    // The constant factor 6 occurs on both sides of the binder, so it may be
+    // bound once as a preamble local (`_k1`) instead of being spelled
+    // `_IA.point(6)` at each site.
+    const six = '(?:_IA\\.point\\(6\\)|_k\\d+)';
+    const outer = new RegExp(
+      `const (_cse\\d+) = _IA\\.sin\\(_IA\\.mul\\(${six}, _\\.n\\)\\)`
+    ).exec(code);
     expect(outer).not.toBeNull();
     const loop = code.slice(
       code.indexOf('for (let n'),
@@ -692,7 +700,9 @@ describe('COMPILE CSE — capture', () => {
     );
     expect(loop).not.toContain(outer![1]);
     expect(loop).toMatch(
-      /const (_cse\d+) = _IA\.sin\(_IA\.mul\(_IA\.point\(6\), _IA\.point\(n\)\)\)/
+      new RegExp(
+        `const (_cse\\d+) = _IA\\.sin\\(_IA\\.mul\\(${six}, _IA\\.point\\(n\\)\\)\\)`
+      )
     );
   });
 
@@ -1546,7 +1556,7 @@ describe('COMPILE CSE — repeated pure calls in definition bodies (item 120)', 
     const def = result.code
       .split('\n')
       .find((l) => l.includes('const _fn_g_1'))!;
-    expect(occurrences(def, '_fn_f_1(')).toBe(2);
+    expect(callSites(def, '_fn_f_1')).toBe(2);
     expect(def).not.toContain('_cse');
   });
 

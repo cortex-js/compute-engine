@@ -696,6 +696,12 @@ class Harvester {
    * eligibility check runs: the admission memos are name-keyed, so the set
    * must be fixed for the whole harvest. */
   private readonly shadowedNames: Set<string>;
+  /**
+   * The structural hashes of the applications a `Negate` wraps somewhere in
+   * the tree. Filled by the same prepass that collects the shadow set — see
+   * {@link isNegationCredited}.
+   */
+  private readonly negatedInnerHashes = new Set<number>();
   private readonly shareSymbolSquares: boolean;
   private readonly minSize: number;
   private readonly minScore: number;
@@ -772,7 +778,7 @@ class Harvester {
    * subtree must be known before the first verdict is cached.
    */
   admits(node: Expression): boolean {
-    this.collectShadowedNames(this.root, new Set<Expression>());
+    this.prepass(this.root, new Set<Expression>());
     return this.isEligible(node);
   }
 
@@ -790,7 +796,7 @@ class Harvester {
   }
 
   run(): CseHarvest {
-    this.collectShadowedNames(this.root, new Set<Expression>());
+    this.prepass(this.root, new Set<Expression>());
 
     const rootRegion = this.createRegion(undefined, 'root', false, undefined, [
       // no bound names at the root
@@ -821,21 +827,28 @@ class Harvester {
   }
 
   /**
-   * Collect every binder-bound name occurring ANYWHERE in the tree into
-   * {@link shadowedNames} — the same two sources the walk uses to compute a
-   * region's `boundNames` (a `Function` literal's parameters, a `scoped:`
-   * definition's binding sites; see `walkOperands`/`operandPlans`).
+   * The whole-tree prepass. It collects two facts the main walk needs to
+   * already have when it reaches its FIRST node:
    *
-   * Deliberately a prepass rather than an incremental collection during the
-   * main walk: eligibility (and with it `isAdmissibleUserFnCallee`, whose
-   * verdicts are memoized per NAME) runs at node exit, so a name bound in a
-   * region visited later must already be known when the first verdict for it
-   * is cached. Whole-tree, not scope-accurate: over-approximating the shadow
-   * set only ever refuses a merge.
+   * 1. Every binder-bound name occurring ANYWHERE in the tree, into
+   *    {@link shadowedNames} — the same two sources the walk uses to compute a
+   *    region's `boundNames` (a `Function` literal's parameters, a `scoped:`
+   *    definition's binding sites; see `walkOperands`/`operandPlans`).
+   *    Eligibility (and with it `isAdmissibleUserFnCallee`, whose verdicts are
+   *    memoized per NAME) runs at node exit, so a name bound in a region
+   *    visited later must already be known when the first verdict for it is
+   *    cached. Whole-tree, not scope-accurate: over-approximating the shadow
+   *    set only ever refuses a merge.
+   * 2. The structural hash of every application a `Negate` wraps, into
+   *    {@link negatedInnerHashes} — see {@link isNegationCredited}. The
+   *    negation and the application it wraps can be far apart in the walk
+   *    order, so the fact has to be whole-tree too.
    */
-  private collectShadowedNames(node: Expression, seen: Set<Expression>): void {
+  private prepass(node: Expression, seen: Set<Expression>): void {
     if (!isFunction(node) || seen.has(node)) return;
     seen.add(node);
+    if (node.operator === 'Negate' && isFunction(node.ops[0]))
+      this.negatedInnerHashes.add(node.ops[0].hash);
     if (node.operator === 'Function') {
       for (const name of functionLiteralParamNames(node))
         this.shadowedNames.add(name);
@@ -845,7 +858,7 @@ class Harvester {
         for (const name of binderSplit(def, node).boundNames)
           this.shadowedNames.add(name);
     }
-    for (const op of node.ops) this.collectShadowedNames(op, seen);
+    for (const op of node.ops) this.prepass(op, seen);
   }
 
   // -------------------------------------------------------------------------
@@ -960,6 +973,7 @@ class Harvester {
       !underMapped &&
       node.isPure &&
       (this.sizeOf(node) >= this.minSize ||
+        this.isNegationCredited(node) ||
         this.isAdmittedUserFnApp(node) ||
         this.isExpensiveBuiltin(node) ||
         this.isSymbolSquare(node)) &&
@@ -999,6 +1013,35 @@ class Harvester {
       node.operator === 'Multiply' &&
       isSymbol(node.ops[1]) &&
       node.ops[0].isSame(node.ops[1])
+    );
+  }
+
+  /**
+   * Does the size threshold have to credit this application with the `Negate`
+   * that wraps it?
+   *
+   * A negation is one token applied to a value; the work is in the
+   * application under it. Without this rule the threshold sees `Negate(f)` and
+   * `f` as different sizes, so where `f` is one node short of the minimum the
+   * NEGATION becomes the candidate and the bare occurrences of `f` elsewhere
+   * are left emitting the structure again: a body with `-mod(x, 1)` twice and
+   * `mod(x, 1)` three more times bound `-mod(x, 1)` and re-emitted `mod(x, 1)`
+   * at the other three sites (measured by the Tycho code-generation audit of
+   * 2026-09-08). Crediting the wrapper makes `f` the candidate instead, the
+   * three bare sites join its class, and the negated sites emit `-<temp>`.
+   *
+   * The credit is granted per STRUCTURE, not per occurrence: the negation may
+   * wrap the application anywhere in the tree, so the fact is collected by the
+   * whole-tree {@link prepass}. Hash-keyed, so a hash collision can credit an
+   * application no negation actually wraps — which costs nothing: the score
+   * gate still applies with the application's real size, so an unprofitable
+   * candidate is dropped there as before.
+   */
+  private isNegationCredited(node: Expression): boolean {
+    return (
+      isFunction(node) &&
+      this.negatedInnerHashes.has(node.hash) &&
+      this.sizeOf(node) + 1 >= this.minSize
     );
   }
 
@@ -2103,7 +2146,10 @@ class Harvester {
         this.isSymbolSquare(c.representative)
       )
         return true;
-      if (c.size < this.minSize || (count - 1) * c.size < this.minScore) {
+      if (
+        (c.size < this.minSize && !this.isNegationCredited(c.representative)) ||
+        (count - 1) * c.size < this.minScore
+      ) {
         this.droppedByThreshold += 1;
         return false;
       }

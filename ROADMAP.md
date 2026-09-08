@@ -139,6 +139,129 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
+### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
+
+The audit (`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md`,
+CE 0.126.2, 862 records over 71 documents) was worked in eight slices; what
+follows is what the slices measured and did not change. Each line names the
+decision or the work that remains.
+
+- **Ruling: the per-region CSE binding cap.** `CSE_MAX_BINDINGS_PER_REGION`
+  is 32 (`compilation/cse.ts`). On the Voronoi body of the audit (record #745,
+  3.1 KB GLSL) the harvest finds 208 candidates that pass the threshold and
+  discards 167 of them at the cap, so `floor(n * x)` is recomputed nine times.
+  The cap protects register pressure in a shader and code size everywhere; a
+  larger cap, or a cap proportional to the region's candidate count, is a
+  tuning decision with snapshot churn on every target. Nothing changes until
+  it is decided.
+- **The interval-js runtime library does not round outward.** Only the
+  constants the compiler emits, and the constants it folds at compile time,
+  are enclosures now (this round). A run-time `_IA.mul(x, y)` with
+  non-degenerate operands still rounds to nearest, so an enclosure computed
+  from a sampled cell can exclude the true value by an ulp. Making the
+  library round outward (error-free transformations, as the compile-time
+  fold does, or `nextUp`/`nextDown` on every inexact endpoint) costs several
+  flops per operation; Tycho item 269 was about the cost of this target.
+  Decide before doing. Also on this target: `Round(x, n)` with a negative
+  `n` bakes its scale `10^n` as a degenerate point (`interval-javascript-target.ts`,
+  the `Round` handler).
+- **`Subtract` on interval-js is still `add(negate(b))`.** The library's
+  `sub` has identical endpoints, but `liftJump` propagates a `singular` right
+  operand whose enclosure is a point differently through the two spellings
+  (`sub` keeps the jump tag, `add(negate(…))` drops it). No library kernel
+  produces such a value today, so the divergence looks unreachable; adopting
+  `sub` (three lines in the interval `Add` handler) is a decision, not a fix.
+- **Identity lowerings that return their operand's code, other targets.** The
+  JavaScript handlers were fixed this round (`identityPassthrough`,
+  `javascript-target.ts`). The same pattern — `return compile(op)` spliced
+  bare into an infix parent — is likely in `python-target.ts` and
+  `gpu-target.ts` and was not checked; the arithmetic passthroughs of the
+  JavaScript target (`Add`/`Multiply` with one operand left after filtering
+  identities, `Power(x, 1)`, `Divide(x, 1)`) are reachable only from
+  non-canonical input, and non-canonical `Multiply(3, Multiply(Add(x, 1)))`
+  emits `3 * * _.x + 1`, a syntax error. One sweep across the three targets,
+  or threading the caller's precedence into `OperandCompiler` (it compiles at
+  precedence 0 today), closes the family.
+- **`_SYS.cabs` squares before the square root**, so `|3e-200 + 4e-200 i|`
+  answers 0 where `Math.hypot` answers `5e-200`. The split real-part lowering
+  added this round uses `Math.hypot`; the object form still goes through
+  `cabs`. Consider `Math.hypot(z.re, z.im)` in the helper.
+- **Ruling: the call guard inside a user-function body whose parameter types
+  were inferred.** Inside a compiled body, a call that passes the body's own
+  parameter is wrapped in a runtime shape test (`_SYS.bcastFn(_fn_r, x, y)`)
+  unless the parameter's scalar type is explicitly declared (this round). For
+  `r(a, b) := a + b`, `q(x, y) := r(x, y) + 1` with nothing declared, the
+  body is `_SYS.bcastFn(_fn_r, x, y) + 1` today and would be `_fn_r(x, y) + 1`
+  if the inferred type were trusted. Every emitted call site of a
+  scalar-parameter function already maps a list argument element-wise, so the
+  body only ever sees a scalar — but that is a property of the emitter, not a
+  declaration. Options: keep as is (default), trust inferred scalar parameter
+  types (removes 297 wrappers in the audit corpus), or trust them only for
+  functions with no `run()`-reachable call site. The 09-07 amendment of the
+  call-guard rule (`docs/COMPILATION-MODEL.md` § Collections) is the
+  precedent.
+- **Audit item J3 is not reproducible at HEAD.** The 496 `_SYS.bcast` sites
+  over user-function results needed the call to type top; every construction
+  tried (assign, declared `-> unknown`, `Block`, `If`, `Which`, piecewise)
+  types `number` at HEAD — the Block analysis moved to value-before-type on
+  2026-09-08, after the 0.126.2 run. The constructed-scalar arm added this
+  round is a guard for weaker inference. Re-run the audit against HEAD before
+  spending more here.
+- **`Sum(At(P, Range(a, b)))` materializes the range.** The 24 `Array.from`
+  range sites in the corpus are all places where the range is needed as a
+  list (7 gather indices, 15 spread elements, 2 broadcast operands); a
+  counting loop has no site. The 7 gather sites would take a gather/reduce
+  fusion in `emitCollectionReduce` (`javascript-target.ts`) — a new lowering.
+- **GLSL `fract` and `exp2` apply to scalar operands only.** The peepholes
+  consume an operand, so the emitted call has fewer arguments than the head
+  has operands and `gpuCheckOperandShapes` declines a vector (`Mod(v, 1)`
+  stays `mod(v, 1.0)`). Teaching the gate about operand-consuming lowerings
+  (`markAggregateConsuming` exists) lifts the restriction.
+- **GPU literal spelling.** Folded GPU literals are spelled with the full
+  double `toString` through `formatFloat` (`0.00015625001105945557`); the
+  shortest float32 round-trip spelling would be about 9 digits and shrink
+  shaders further. `formatFloat` is shared by every GPU emission.
+- **Interval preamble constants are per call, not per compile.** The
+  interval-js wrapper builds one function whose body is `preamble; return
+  expression`, so a hoisted constant is allocated once per call (40 → 21 on a
+  20-term sum), not once per compiled artifact. Once-ever needs an outer
+  closure around the wrapper (`toString`, the Proxy and the arity all read
+  the wrapper).
+- **Audit item J6a (the 200-character index lambda, 211 sites) is Tycho's.**
+  The lambda is emitted by Tycho's own `At` override
+  (`~/dev/tycho/src/graph-paper/graph/at-index-semantics.ts`, `atDef.compile`),
+  not by the engine. Its semantics differ from `_SYS.at` (no
+  negative-from-the-end indexing; a per-position absence marker for a list
+  index). The engine now ships `_SYS.atNoWrap(base, index)` with exactly the
+  lambda's semantics; the 42 KB is recovered when Tycho's override calls it.
+  Hand off to Tycho.
+- **Audit item I4 (interval piecewise arms as per-call closures; the `Sum`
+  bound read through an inline shape probe) was not worked** this round.
+- **An accepted hoist binding can be left unread on GLSL.** For
+  `\sum_{i=1}^{200}(i x + \min([1,2,3]))` the list literal is hoisted as its
+  own class (`vec3 _tv2 = vec3(1.0, 2.0, 3.0);`) and the `Min` class then
+  folds to `1.0` without reading the override, so the declaration has no
+  reader. Valid shader source (dead code the driver drops), not a miscompile.
+  The fix is in the hoist contract or in `gpu-target.ts` (the caller writes
+  the declarations into the returned string), found by the review of this
+  round.
+- **Plain arithmetic over a captured symbol whose scalar type was inferred
+  does not broadcast at run time.** `compile(2y)` emits `2 * _.y` and
+  `run({ y: [1, 2, 3] })` answers NaN where the interpreter answers
+  `[2, 4, 6]`. This is the compile target's standing contract for a free
+  symbol (a number unless typed as a collection), not a regression of this
+  round; the user-function call guard covers only call sites. Recorded so the
+  contract is decided knowingly if a consumer asks.
+- **Not this round, noted by the slices:** `vars: { g: '…' }` does not
+  override a user-function head — the call still emits `_fn_g` from the
+  engine definition (head resolution); `ColorMix((1,0,0), (0,0,1), 0.5)`
+  compiles the tuples as OKLCh components, which may not be the intended
+  reading of a bare tuple (colour lowering owner); compiled `\arg(x - iy)` at
+  `x = -3, y = 0` is `atan2(-0, -3) = -π` where the interpreter answers `+π`
+  (pre-existing signed-zero seam); JavaScript unrolled sums below four terms
+  have no statement form and do not hoist; the Python target does not hoist
+  at all.
+
 ### Open items from the small-fix release batch (2026-08-31)
 
 - **Past the exact-expansion caps a few Γ-ratio points stay symbolic**:

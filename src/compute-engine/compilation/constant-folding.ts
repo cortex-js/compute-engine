@@ -361,3 +361,601 @@ export function isOpaqueComplexOperand(expr: Expression): boolean {
     return false;
   return BaseCompiler.isComplexValued(expr);
 }
+
+// ---------------------------------------------------------------------------
+// Emitted-code constant folding
+//
+// The folds above run on the EXPRESSION tree, before anything is emitted. Some
+// literal arithmetic is created by the emission itself and is out of their
+// reach: a `Sum`/`Product` with literal bounds is unrolled by substituting the
+// index at the VARIABLE level (`target.var`), so the tree is never rewritten
+// and the emitted terms carry `(1 + -0.5)`, `0.025 * (1 + -0.5)` and
+// `-Math.sqrt(-_SYS.pow2(0.025 * (1 + -0.5)) + 1) + 1` — one such term per
+// unrolled step. The folder below reads the emitted CODE instead and replaces
+// a closed literal expression with the literal it computes. (The Tycho
+// code-generation audit of 2026-09-08 measured a 35.9 KB JavaScript preamble
+// and 80 such sites for one 20-term sum.)
+// ---------------------------------------------------------------------------
+
+/**
+ * How one target's emitted code is read, evaluated and re-spelled by
+ * `foldEmittedCode`.
+ *
+ * The fold is a source-to-source transformation of the TARGET language: it
+ * evaluates exactly the operations the emitted code names, with the same
+ * rounding and in the same order, so the folded literal is the value that code
+ * would have computed at run time. It is therefore independent of what
+ * expression produced the code — a caller-supplied lowering folds as
+ * faithfully as a built-in one. The one thing it must assume is that an
+ * allowlisted NAME still means what the target's own emission means by it: a
+ * caller who maps an operator onto a routine spelled `sqrt` and supplies a
+ * different implementation would have that call folded with the IEEE square
+ * root. Every other spelling declines by construction.
+ */
+interface EmittedFoldDialect {
+  /** Names that stand for a numeric constant (`Math.PI`). An exact spelling:
+   * a name that is not listed is a variable, a temporary or a caller-spliced
+   * source, and it stops the fold. */
+  readonly constants: Readonly<Record<string, number>>;
+  /** Names that may be CALLED, each with the value it computes from its
+   * arguments. An entry answers `undefined` for an argument list its routine
+   * does not take. Deterministic routines only: `Math.random` and any other
+   * impure or drawing routine must keep running at run time. */
+  readonly calls: Readonly<
+    Record<string, (args: readonly number[]) => number | undefined>
+  >;
+  /** The rounding of ONE arithmetic step. The identity on a target whose
+   * arithmetic is IEEE double (JavaScript); `Math.fround` on a shader target,
+   * whose arithmetic is IEEE single — a double operation rounded once to
+   * single is the correctly rounded single result for `+`, `-`, `*`, `/` and
+   * `sqrt`, so folding this way is bit-identical to the shader. */
+  readonly round: (x: number) => number;
+  /** Whether `%` is an operator of the language. JavaScript's `%` on doubles
+   * is exact (the remainder after a truncated division), so it folds like any
+   * other operator. Neither shader language has it. */
+  readonly remainder: boolean;
+  /** Whether a numeric literal must carry a decimal point or an exponent to be
+   * read as a number. Set on the shader targets: every float literal they emit
+   * is spelled with a point (`formatFloat`), so a BARE integer literal marks
+   * an integer context — a loop bound, an index, a conversion argument — where
+   * re-emitting a float literal would not even be the same type. */
+  readonly decimalPointRequired: boolean;
+  /** The literal spelling of a folded value, parenthesized when the caller
+   * asks. */
+  readonly literal: (value: number, parenthesize: boolean) => string;
+  /** Memo by code string: the same constant subtree recurs across the unrolled
+   * terms of a sum, and the fold is called on every emitted function node.
+   * `null` records a decline. Cleared wholesale at `EMITTED_FOLD_MEMO_LIMIT`
+   * entries. */
+  readonly memo: Map<string, string | null>;
+}
+
+/** Entries kept in a dialect's fold memo before it is cleared. */
+const EMITTED_FOLD_MEMO_LIMIT = 4096;
+
+/** A decimal numeric literal, anchored at the scan position. */
+const EMITTED_NUMBER = /(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/y;
+
+/** A dotted name (`Math.PI`, `_SYS.pow2`, `sqrt`), anchored at the scan
+ * position. Read whole: a reader that matched only `Math.` would admit
+ * `Math.random`. */
+const EMITTED_NAME = /[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*/y;
+
+/**
+ * A recursive-descent reader over emitted code, evaluating the part of the
+ * target language that is closed arithmetic on literals: numeric literals,
+ * parentheses, unary `-`/`+`, the binary operators of `EmittedFoldDialect`,
+ * and the allowlisted constant names and calls. Anything else — an identifier
+ * that is not allowlisted, `?:`, a comparison, a string, `_.x`, `_cse1`, `x` —
+ * makes the reader answer `undefined` and leave its position where the last
+ * complete operand ended, which is what lets a caller fold a PREFIX of a
+ * chain.
+ *
+ * No `new Function`: the grammar is small, and evaluating emitted code through
+ * the JavaScript engine would run whatever a caller spliced into it.
+ */
+class EmittedCodeReader {
+  /** The scan position: after a successful parse, one past the last character
+   * consumed; after a failed one, back where that parse started. */
+  pos = 0;
+
+  /** Whether the consumed text APPLIES something — an operator or a call —
+   * rather than merely naming a value. A lone literal or constant is already
+   * the cheapest spelling of what it denotes, and re-spelling it is pure
+   * churn: on a shader target it would also replace the source literal by its
+   * single-precision expansion (`0.025` → `0.02500000037252903`), which is the
+   * same float32 value written at eight times the length. */
+  applied = false;
+
+  constructor(
+    private readonly code: string,
+    private readonly dialect: EmittedFoldDialect
+  ) {}
+
+  private skipWhitespace(): void {
+    while (this.pos < this.code.length) {
+      const c = this.code[this.pos];
+      if (c !== ' ' && c !== '\t' && c !== '\n' && c !== '\r') return;
+      this.pos += 1;
+    }
+  }
+
+  /** Whether nothing but whitespace remains. */
+  atEnd(): boolean {
+    this.skipWhitespace();
+    return this.pos >= this.code.length;
+  }
+
+  private number(): number | undefined {
+    EMITTED_NUMBER.lastIndex = this.pos;
+    const match = EMITTED_NUMBER.exec(this.code);
+    if (match === null) return undefined;
+    const text = match[0];
+    const next = this.code[this.pos + text.length];
+    // A literal that continues into a letter, a digit, a second point or an
+    // identifier character is not a decimal double: `0x7f800000u` (a shader
+    // bit pattern), `1f` (a WGSL suffix), `2.0f`. `parseFloat` reads a PREFIX
+    // of such text and answers a different value.
+    if (next !== undefined && /[A-Za-z0-9_$.]/.test(next)) return undefined;
+    if (this.dialect.decimalPointRequired && !/[.eE]/.test(text))
+      return undefined;
+    this.pos += text.length;
+    // Round the literal itself: on a shader target the source literal is read
+    // as a single, so `0.025` is not the double `0.025`.
+    return this.dialect.round(parseFloat(text));
+  }
+
+  /** Undo a parse that failed part way: an abandoned branch must leave
+   * neither its position nor its `applied` mark behind, or a later fold reads
+   * an application that is not in the text it consumed. */
+  private backtrack(pos: number, applied: boolean): undefined {
+    this.pos = pos;
+    this.applied = applied;
+    return undefined;
+  }
+
+  private call(name: string): number | undefined {
+    const start = this.pos;
+    const applied = this.applied;
+    this.pos += name.length;
+    this.skipWhitespace();
+    if (this.code[this.pos] !== '(') return this.backtrack(start, applied);
+    this.pos += 1;
+    const args: number[] = [];
+    this.skipWhitespace();
+    if (this.code[this.pos] === ')') this.pos += 1;
+    else {
+      for (;;) {
+        const arg = this.additive();
+        if (arg === undefined) return this.backtrack(start, applied);
+        args.push(arg);
+        this.skipWhitespace();
+        const c = this.code[this.pos];
+        this.pos += 1;
+        if (c === ',') continue;
+        if (c === ')') break;
+        return this.backtrack(start, applied);
+      }
+    }
+    const value = this.dialect.calls[name](args);
+    if (value === undefined) return this.backtrack(start, applied);
+    this.applied = true;
+    return value;
+  }
+
+  private primary(): number | undefined {
+    this.skipWhitespace();
+    const start = this.pos;
+    const applied = this.applied;
+    if (this.code[this.pos] === '(') {
+      this.pos += 1;
+      const value = this.additive();
+      if (value !== undefined) {
+        this.skipWhitespace();
+        if (this.code[this.pos] === ')') {
+          this.pos += 1;
+          return value;
+        }
+      }
+      return this.backtrack(start, applied);
+    }
+    const literal = this.number();
+    if (literal !== undefined) return literal;
+    EMITTED_NAME.lastIndex = this.pos;
+    const match = EMITTED_NAME.exec(this.code);
+    if (match === null) return undefined;
+    const name = match[0];
+    if (Object.hasOwn(this.dialect.calls, name)) return this.call(name);
+    if (Object.hasOwn(this.dialect.constants, name)) {
+      this.pos += name.length;
+      return this.dialect.constants[name];
+    }
+    return undefined;
+  }
+
+  private unary(): number | undefined {
+    this.skipWhitespace();
+    const c = this.code[this.pos];
+    if (c !== '-' && c !== '+') return this.primary();
+    const start = this.pos;
+    const applied = this.applied;
+    this.pos += 1;
+    const operand = this.unary();
+    if (operand === undefined) return this.backtrack(start, applied);
+    // Negation is exact in both IEEE formats, so there is no rounding step.
+    return c === '-' ? -operand : operand;
+  }
+
+  /** A `*` / `/` / `%` chain, folded left to right — the association the
+   * emitted code itself has, so each step sees the operands it would see at
+   * run time. */
+  multiplicative(): number | undefined {
+    let value = this.unary();
+    if (value === undefined) return undefined;
+    for (;;) {
+      const end = this.pos;
+      const applied = this.applied;
+      this.skipWhitespace();
+      const op = this.code[this.pos];
+      const isOperator =
+        op === '*' || op === '/' || (op === '%' && this.dialect.remainder);
+      // `**` is exponentiation, which binds TIGHTER than multiplication: the
+      // operand before it belongs to the power, not to this chain.
+      if (!isOperator || (op === '*' && this.code[this.pos + 1] === '*')) {
+        this.backtrack(end, applied);
+        return value;
+      }
+      this.pos += 1;
+      const rhs = this.unary();
+      if (rhs === undefined) {
+        this.backtrack(end, applied);
+        return value;
+      }
+      value = this.dialect.round(
+        op === '*' ? value * rhs : op === '/' ? value / rhs : value % rhs
+      );
+      this.applied = true;
+    }
+  }
+
+  /** A `+` / `-` chain over multiplicative operands, folded left to right. */
+  additive(): number | undefined {
+    let value = this.multiplicative();
+    if (value === undefined) return undefined;
+    for (;;) {
+      const end = this.pos;
+      const applied = this.applied;
+      this.skipWhitespace();
+      const op = this.code[this.pos];
+      if (op !== '+' && op !== '-') {
+        this.backtrack(end, applied);
+        return value;
+      }
+      this.pos += 1;
+      const rhs = this.multiplicative();
+      if (rhs === undefined) {
+        this.backtrack(end, applied);
+        return value;
+      }
+      value = this.dialect.round(op === '+' ? value + rhs : value - rhs);
+      this.applied = true;
+    }
+  }
+}
+
+/**
+ * The characters an emitted expression may be FOLLOWED by for a folded prefix
+ * to keep its meaning: the binary operators, and the punctuation that closes
+ * an operand. A `.`, a `(`, a `[` or an identifier character would bind to the
+ * literal spliced in (`(1 + 2).toFixed` must not become `3.toFixed`), and `**`
+ * binds tighter than the multiplication the prefix was folded over.
+ */
+const EMITTED_SAFE_FOLLOWER = /^[-+*/%<>=!&|^?:,)\]};]/;
+
+/**
+ * Fold the literal arithmetic in one emitted code string, or `undefined` when
+ * there is nothing to fold or the code is not closed.
+ *
+ * Two folds, in order:
+ *
+ * 1. The WHOLE code, when it is a closed literal expression:
+ *    `-Math.sqrt(-_SYS.pow2(0.025 * (1 + -0.5)) + 1) + 1` becomes one literal.
+ * 2. Failing that, the LEADING run of a multiplicative chain: `2 * Math.PI *
+ *    _.s` becomes `6.283185307179586 * _.s`. The run is a prefix of the
+ *    expression and folds in the source's own left-to-right order, so every
+ *    operation and every rounding is one the code already had — which is also
+ *    why the run may not be extended across a non-literal operand. A chain
+ *    whose FIRST operand is not literal, such as `(2 * Math.PI * s) / 100`,
+ *    folds nothing: turning it into `0.0628… * s` would divide before
+ *    multiplying and round differently.
+ *
+ * A non-finite result declines: `1 / 0` keeps its structural code, whose pole
+ * semantics the target chose deliberately. Code that APPLIES nothing declines
+ * too (see `EmittedCodeReader.applied`) — a lone literal or named constant is
+ * already the cheapest spelling of its value.
+ */
+function foldEmittedCode(
+  code: string,
+  dialect: EmittedFoldDialect,
+  splices: readonly string[]
+): string | undefined {
+  let folded = dialect.memo.get(code);
+  if (folded === undefined) {
+    folded = evaluateEmittedCode(code, dialect) ?? null;
+    if (dialect.memo.size >= EMITTED_FOLD_MEMO_LIMIT) dialect.memo.clear();
+    dialect.memo.set(code, folded);
+  }
+  // The memo is keyed by code alone; the caller's splices are a property of
+  // the compilation, so they are checked outside it.
+  if (folded === null) return undefined;
+  return preservesMappedSplices(code, folded, splices) ? folded : undefined;
+}
+
+function evaluateEmittedCode(
+  code: string,
+  dialect: EmittedFoldDialect
+): string | undefined {
+  const whole = new EmittedCodeReader(code, dialect);
+  const value = whole.additive();
+  if (value !== undefined && whole.atEnd())
+    return whole.applied ? emitFolded(value, code, '', dialect) : undefined;
+
+  const prefix = new EmittedCodeReader(code, dialect);
+  const head = prefix.multiplicative();
+  if (head === undefined || !prefix.applied) return undefined;
+  const consumed = code.slice(0, prefix.pos);
+  const rest = code.slice(prefix.pos);
+  const follower = rest.trimStart();
+  if (
+    !EMITTED_SAFE_FOLLOWER.test(follower) ||
+    follower.startsWith('**') ||
+    follower.startsWith('?.')
+  )
+    return undefined;
+  return emitFolded(head, consumed, rest, dialect);
+}
+
+/** The folded `value` spelled for `dialect`, followed by the unfolded `rest`.
+ * Declines when the folded text repeats what `consumed` already said. */
+function emitFolded(
+  value: number,
+  consumed: string,
+  rest: string,
+  dialect: EmittedFoldDialect
+): string | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  // A NEGATIVE literal spliced where the code did not already begin with a
+  // minus sign keeps parentheses: the parent chose its parentheses for the
+  // unfolded code, and a bare leading `-` can glue to a preceding operator
+  // (`a - -3`) or bind unexpectedly under a tighter one.
+  const negative = value < 0 || Object.is(value, -0);
+  const text = dialect.literal(
+    value,
+    negative && !consumed.trimStart().startsWith('-')
+  );
+  if (text === consumed.trim()) return undefined;
+  return text + rest;
+}
+
+/** `String(-0)` is `"0"`, which loses a sign that a division or an `atan2`
+ * reads. */
+function javascriptNumberLiteral(value: number, parenthesize: boolean): string {
+  const text = Object.is(value, -0) ? '-0' : String(value);
+  return parenthesize ? `(${text})` : text;
+}
+
+/** Shader float literals always carry a decimal point (`formatFloat`), and
+ * `formatFloat(-0)` would spell it `0.0`. */
+function gpuNumberLiteral(value: number, parenthesize: boolean): string {
+  const text = Object.is(value, -0) ? `-${formatFloat(0)}` : formatFloat(value);
+  return parenthesize ? `(${text})` : text;
+}
+
+/** A routine of one argument. */
+function unaryFold(
+  fn: (x: number) => number
+): (args: readonly number[]) => number | undefined {
+  return (args) => (args.length === 1 ? fn(args[0]) : undefined);
+}
+
+/** A routine of two arguments. */
+function binaryFold(
+  fn: (x: number, y: number) => number
+): (args: readonly number[]) => number | undefined {
+  return (args) => (args.length === 2 ? fn(args[0], args[1]) : undefined);
+}
+
+/** A routine of one or more arguments (`Math.min`, `Math.max`,
+ * `Math.hypot`). */
+function variadicFold(
+  fn: (...args: number[]) => number
+): (args: readonly number[]) => number | undefined {
+  return (args) => (args.length >= 1 ? fn(...args) : undefined);
+}
+
+/**
+ * The JavaScript emitted-code dialect.
+ *
+ * The constants and routines are the ones this target's own lowerings emit
+ * (`JAVASCRIPT_CONSTANTS`, `JAVASCRIPT_FUNCTIONS` and the `_SYS` runtime
+ * object), all deterministic and all evaluated here in IEEE double — the same
+ * arithmetic the emitted code runs. `Math.random` and the rest of the `Math`
+ * object are deliberately absent: an admitted name has to be deterministic BY
+ * NAME, because a caller's `vars` spelling is spliced into the code verbatim.
+ *
+ * `_SYS.pow2` and `_SYS.pow3` fold as the products their runtime definitions
+ * compute (`x * x`, `x * x * x`), not through `Math.pow`.
+ */
+const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
+  constants: {
+    'Math.PI': Math.PI,
+    'Math.E': Math.E,
+    'Math.LN2': Math.LN2,
+    'Math.LN10': Math.LN10,
+    'Math.LOG2E': Math.LOG2E,
+    'Math.LOG10E': Math.LOG10E,
+    'Math.SQRT2': Math.SQRT2,
+    'Math.SQRT1_2': Math.SQRT1_2,
+  },
+  calls: {
+    'Math.sqrt': unaryFold(Math.sqrt),
+    'Math.cbrt': unaryFold(Math.cbrt),
+    'Math.abs': unaryFold(Math.abs),
+    'Math.floor': unaryFold(Math.floor),
+    'Math.ceil': unaryFold(Math.ceil),
+    'Math.round': unaryFold(Math.round),
+    'Math.trunc': unaryFold(Math.trunc),
+    'Math.sign': unaryFold(Math.sign),
+    'Math.sin': unaryFold(Math.sin),
+    'Math.cos': unaryFold(Math.cos),
+    'Math.tan': unaryFold(Math.tan),
+    'Math.asin': unaryFold(Math.asin),
+    'Math.acos': unaryFold(Math.acos),
+    'Math.atan': unaryFold(Math.atan),
+    'Math.atan2': binaryFold(Math.atan2),
+    'Math.sinh': unaryFold(Math.sinh),
+    'Math.cosh': unaryFold(Math.cosh),
+    'Math.tanh': unaryFold(Math.tanh),
+    'Math.asinh': unaryFold(Math.asinh),
+    'Math.acosh': unaryFold(Math.acosh),
+    'Math.atanh': unaryFold(Math.atanh),
+    'Math.exp': unaryFold(Math.exp),
+    'Math.expm1': unaryFold(Math.expm1),
+    'Math.log': unaryFold(Math.log),
+    'Math.log1p': unaryFold(Math.log1p),
+    'Math.log2': unaryFold(Math.log2),
+    'Math.log10': unaryFold(Math.log10),
+    'Math.pow': binaryFold(Math.pow),
+    'Math.hypot': variadicFold(Math.hypot),
+    'Math.min': variadicFold(Math.min),
+    'Math.max': variadicFold(Math.max),
+    '_SYS.pow2': unaryFold((x) => x * x),
+    '_SYS.pow3': unaryFold((x) => x * x * x),
+  },
+  round: (x) => x,
+  remainder: true,
+  decimalPointRequired: false,
+  literal: javascriptNumberLiteral,
+  memo: new Map<string, string | null>(),
+};
+
+/**
+ * The GLSL / WGSL emitted-code dialect.
+ *
+ * Every step rounds to single (`Math.fround`), so a folded literal is
+ * bit-identical to what the shader computes. Only `sqrt` and the fixed-power
+ * helpers are admitted: `+`, `-`, `*`, `/` and `sqrt` are correctly rounded in
+ * IEEE single, so a double computation rounded once reproduces them exactly,
+ * while a shader `sin`, `cos`, `exp` or `pow` is NOT correctly rounded and its
+ * value is the driver's, not one this compiler may predict. There are no
+ * constants: neither shader language has a named numeric constant, so a bare
+ * name in shader code is always a variable, a uniform or a helper.
+ *
+ * `_gpu_pow2` and `_gpu_pow3` fold as the products the preamble helpers
+ * compute (`x * x`, `x * x * x`), each product rounded like the shader's. The
+ * per-width vector overloads (`_gpu_pow2_v2`) are absent on purpose: their
+ * argument is a vector, which this reader has no value for.
+ */
+const GPU_EMITTED_FOLD: EmittedFoldDialect = {
+  constants: {},
+  calls: {
+    sqrt: unaryFold((x) => Math.fround(Math.sqrt(x))),
+    _gpu_pow2: unaryFold((x) => Math.fround(x * x)),
+    _gpu_pow3: unaryFold((x) => Math.fround(Math.fround(x * x) * x)),
+  },
+  round: Math.fround,
+  remainder: false,
+  decimalPointRequired: true,
+  literal: gpuNumberLiteral,
+  memo: new Map<string, string | null>(),
+};
+
+/**
+ * The SOURCE each `vars`-mapped symbol is spliced into the emitted code as.
+ *
+ * A mapped symbol is the caller's live binding: the `vars` contract says it is
+ * never folded, and the emitted-code folds honour that by leaving each splice
+ * where it stands (`preservesMappedSplices`). A caller who maps `u` to
+ * `'Math.PI/4'` keeps `Math.sin(6 * Math.PI/4)` in the code — arithmetic the
+ * fold could otherwise evaluate, since the splice is spelled entirely in the
+ * dialect's own grammar.
+ *
+ * Collected once, when the target is built. `resolve` is the target's `var`
+ * hook, which answers a mapped key from the caller's map before it records
+ * anything, so reading it here has no effect on the compilation.
+ *
+ * A splice that is a bare numeric literal is left out: a NON-string `vars`
+ * value is a constant the caller asked to BAKE, so folding through it is what
+ * the caller wanted, and protecting the literal would stop every fold whose
+ * code merely contains that digit.
+ */
+export function callerSpliceSources(
+  keys: ReadonlySet<string> | undefined,
+  resolve: ((id: string) => string | undefined) | undefined
+): string[] {
+  if (keys === undefined || resolve === undefined) return [];
+  const sources: string[] = [];
+  for (const key of keys) {
+    const source = resolve(key);
+    if (typeof source !== 'string' || source.length === 0) continue;
+    if (Number.isFinite(Number(source))) continue;
+    sources.push(source);
+  }
+  return sources;
+}
+
+/** Occurrences of `needle` in `text`, counted without overlap. */
+function countOccurrences(text: string, needle: string): number {
+  let count = 0;
+  for (
+    let at = text.indexOf(needle);
+    at >= 0;
+    at = text.indexOf(needle, at + needle.length)
+  )
+    count += 1;
+  return count;
+}
+
+/**
+ * Whether `folded` still spells every caller splice as often as `code` did.
+ *
+ * This is what keeps the fold inside the `vars` contract: a fold that merely
+ * stands NEXT to a splice is fine (`2 * Math.PI * _.s` → `6.283185307179586 *
+ * _.s` leaves `_.s` untouched), while one that would consume it is refused.
+ */
+export function preservesMappedSplices(
+  code: string,
+  folded: string,
+  splices: readonly string[]
+): boolean {
+  for (const splice of splices)
+    if (countOccurrences(code, splice) > countOccurrences(folded, splice))
+      return false;
+  return true;
+}
+
+/**
+ * Fold the literal arithmetic in a JavaScript emission
+ * (`CompileTarget.foldEmittedConstant` on the JavaScript target). `splices`
+ * are the caller's `vars` sources, which the fold leaves in place — see
+ * `callerSpliceSources`.
+ */
+export function foldEmittedJavaScriptCode(
+  code: string,
+  splices: readonly string[] = []
+): string | undefined {
+  return foldEmittedCode(code, JAVASCRIPT_EMITTED_FOLD, splices);
+}
+
+/**
+ * Fold the literal arithmetic in a GLSL or WGSL emission
+ * (`CompileTarget.foldEmittedConstant` on the shader targets). The two
+ * languages share one dialect: they agree on the spelling of a float literal,
+ * on `sqrt`, and on the fixed-power helper names the GPU target declares.
+ */
+export function foldEmittedGPUCode(
+  code: string,
+  splices: readonly string[] = []
+): string | undefined {
+  return foldEmittedCode(code, GPU_EMITTED_FOLD, splices);
+}

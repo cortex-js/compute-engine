@@ -77,7 +77,10 @@ describe('COMPILE a block-local function definition', () => {
       'const g = (k) => Sum(Take(Map( _ => _^2, 1..oo), k))\ng(n)',
       { vars: { n: 3 } }
     );
-    expect(code).toContain('g(');
+    // `n` is a caller-supplied variable, so the call takes the runtime
+    // broadcast dispatch, which is handed the local `g` itself — with no
+    // argument to coerce inside it, a closure would only eta-expand `g`.
+    expect(code).toContain('_SYS.bcastFn(g,');
     expect(code).not.toContain('return 14');
     expect(compiled).toBe(14);
   });

@@ -11,6 +11,8 @@ import { javascriptStatements } from './javascript-statements.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   canIndexArrayDirectly,
+  isConstructedScalar,
+  numericArrayCells,
   recordIntegerRange,
 } from './javascript-value-facts.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
@@ -27,6 +29,8 @@ import {
   tryGetConstant,
   negativeBaseRealPow,
   principalComplexPow,
+  foldEmittedJavaScriptCode,
+  callerSpliceSources,
 } from './constant-folding.js';
 import {
   collectionElementType,
@@ -302,6 +306,25 @@ const JS_SUPPORTED_MODES: readonly CompileMode[] = [
   'complex',
   'auto',
 ];
+
+/**
+ * A value computed after some local `const` bindings: the statement sink's
+ * form when this compilation has one (so the bindings become plain statements
+ * at a statement position), and an immediately-invoked arrow function
+ * otherwise. `bindings` is one or more complete statements, `value` the
+ * expression they feed.
+ */
+function boundJSResult(
+  target: CompileTarget<Expression>,
+  bindings: string,
+  value: string
+): string {
+  return (
+    javascriptStatements(target)?.expression(
+      (exit) => `${bindings} ${exit(value)}`
+    ) ?? `(() => { ${bindings} return ${value}; })()`
+  );
+}
 
 // Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
 // name is arbitrary user text. A plain object literal inherits
@@ -602,6 +625,41 @@ function assertNoMixedStringOrdering(
 }
 
 /**
+ * May the `operands` of an equality be compared with the exact `===`/`!==`
+ * instead of the tolerance test on their difference?
+ *
+ * Yes when every one of them is PROVABLY integer-valued and none is
+ * complex-shaped. Two distinct integers differ by at least 1, and equal
+ * integers differ by exactly 0, so for any tolerance below 1 the tolerance
+ * test and `===` accept exactly the same pairs — while `===` needs neither a
+ * subtraction nor a `Math.abs` call. A tolerance of 1 or more is a deliberate
+ * coarsening the user asked for (it makes 3 and 4 equal), so the exact form is
+ * not used there.
+ *
+ * The two forms also agree on `NaN`, the value an `integer`-typed lowering can
+ * still produce at run time (an out-of-range element read, a `0/0`):
+ * `NaN === NaN` is false, and `Math.abs(NaN - NaN) <= tol` is false as well,
+ * because every comparison against `NaN` is false. They agree on the two
+ * signed zeros too: `-0 === 0` is true, and `Math.abs(-0 - 0) <= tol` is true.
+ *
+ * The heads that carry an `integer` result type — and so take this form — are
+ * `Sign`, `Floor`, `Ceil`, `Round`, `Length`, an integer literal, and a
+ * `Sum`/`Product` index. The Tycho code-generation audit of 2026-09-08
+ * measured 49 tolerance tests between such operands.
+ */
+function exactIntegerComparison(
+  operands: ReadonlyArray<Expression>,
+  tolerance: number
+): boolean {
+  return (
+    tolerance < 1 &&
+    operands.every(
+      (a) => BaseCompiler.isIntegerValued(a) && !BaseCompiler.isComplexValued(a)
+    )
+  );
+}
+
+/**
  * Emit a JavaScript equality test with the engine's numeric tolerance baked in
  * at compile time. The interpreter treats two numbers as equal when
  * `|a − b| <= engine.tolerance` (default 1e-10) — so `0.1 + 0.2 === 0.3` is
@@ -771,7 +829,9 @@ function compileJSEquality(
     return `_SYS.cabs({ re: ${pa.re} - ${pb.re}, im: ${pa.im} - ${pb.im} })`;
   };
   const pair = (i: number, j: number): string =>
-    `(${distance(i, j)} ${cmp} ${tol})`;
+    exactIntegerComparison([args[i], args[j]], tol)
+      ? `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`
+      : `(${distance(i, j)} ${cmp} ${tol})`;
   let body: string;
   if (args.length === 2) body = pair(0, 1);
   else {
@@ -1638,7 +1698,15 @@ function compileJSPointList(
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (isPointListSource(a)) {
+    // A component the emission proves scalar by CONSTRUCTION — an explicitly
+    // declared scalar input, scalar arithmetic over such values, or a call of
+    // a user function whose body yields a scalar under scalar parameters — is
+    // a slot, whatever its static type says. It is decided before the type
+    // reading below because a top-typed (`unknown`) component would otherwise
+    // read as a zip SOURCE (`matches` answers "could be a collection" for a
+    // top type).
+    const constructedScalarSlot = isConstructedScalar(a, target);
+    if (!constructedScalarSlot && isPointListSource(a)) {
       if (a.isCollection && a.isFiniteCollection === false)
         throw new Error(
           `PointList: source component ${i + 1} is an infinite collection — ` +
@@ -1657,7 +1725,7 @@ function compileJSPointList(
       parts.push(`${name}[${idx}]`);
       continue;
     }
-    if (isProvablyNonScalarType(jsType(a)))
+    if (!constructedScalarSlot && isProvablyNonScalarType(jsType(a)))
       throw new Error(
         `PointList: cannot compile — component ${i + 1} (type ` +
           `\`${a.type.toString()}\`) is neither a scalar slot nor a list ` +
@@ -1666,8 +1734,12 @@ function compileJSPointList(
       );
     const name = BaseCompiler.tempVar(target);
     const t = jsType(a);
-    if (a.type.matches('number')) {
-      // Provably scalar numeric: the slot value, verbatim.
+    if (a.type.matches('number') || constructedScalarSlot) {
+      // Provably scalar numeric: the slot value, verbatim. A constructed
+      // scalar cannot hold an array either, so it needs neither the run-time
+      // `Array.isArray` role dispatch below nor the guard that projects an
+      // array to NaN. (The Tycho code-generation audit of 2026-09-08 measured
+      // 43 point lists ending in such a run-time role dispatch.)
       bindings.push(`const ${name} = ${compile(a)};`);
     } else if (containsBroadcastableType(t)) {
       // A `broadcastable<T>` component is a `T` OR an indexed collection of
@@ -1795,6 +1867,119 @@ function spreadIfSequence(
   return code;
 }
 
+/**
+ * The compiled operand of an IDENTITY lowering — a head whose emitted value is
+ * simply its operand's, such as `Abs` of a provably non-negative value, or
+ * `Real`/`Conjugate` of a real one — parenthesized when the operand emits an
+ * INFIX expression.
+ *
+ * The compiler splices a function head's emission into its parent WITHOUT
+ * parentheses, because a call binds tighter than every operator. An identity
+ * lowering breaks that assumption: it hands back the operand's own code, which
+ * may be a sum. `3·Re(x + 1)` was emitted as `3 * _.x + 1` and ran as
+ * `3x + 1`. The heads whose emission is infix are the ones this target lists
+ * in `JAVASCRIPT_OPERATORS`, plus any head the CALLER maps to an infix form
+ * through the `operators` compilation option; the caller's mapping wins where
+ * both name a head, because it is the mapping the emission used.
+ */
+function identityPassthrough(
+  x: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const code = compile(x);
+  if (!isFunction(x)) return code;
+  const op =
+    target?.operators?.(x.operator) ?? JAVASCRIPT_OPERATORS[x.operator];
+  return op === undefined ? code : `(${code})`;
+}
+
+/**
+ * The real and imaginary parts of a complex-valued expression as two pieces of
+ * JavaScript source, or `undefined` when the expression cannot be taken apart
+ * structurally.
+ *
+ * `Argument`, `Abs`, `Real` and `Imaginary` each read ONE scalar off a complex
+ * value. When the value is built in the expression — the shape
+ * `a + i·b` that `Complex(a, b)` and an authored `x + iy` both canonicalize to
+ * — the emitter can read that scalar straight from the parts and never build
+ * the `{ re, im }` object: `Math.atan2(b, a)` in place of
+ * `_SYS.carg({ re: a, im: b })`. The GPU target has done this for the same
+ * shape all along (it emits `atan(v.y, v.x)`).
+ *
+ * Recognized: a real sub-expression (imaginary part zero), a number literal,
+ * the imaginary unit, a product with exactly one purely-imaginary factor and
+ * real remaining factors, and a sum of those. Anything else — an opaque complex
+ * call such as `Sin(z)`, a complex-typed symbol, a product of two complex
+ * factors — returns `undefined` and the caller keeps its object-building
+ * lowering.
+ *
+ * Every operand is compiled exactly once, and each contributes its code to
+ * only one of the two parts, so no sub-expression is duplicated. An operand
+ * with observable effects declines the split: the parts are emitted
+ * imaginary-first in `Math.atan2`, which would run the effects in an order the
+ * interpreter does not.
+ *
+ * Each part is parenthesized unless it is a single symbol or number, so a part
+ * is safe to splice into any surrounding expression.
+ */
+function tryGetJSComplexParts(
+  expr: Expression,
+  compile: (e: Expression) => string
+): { re: string; im: string } | undefined {
+  if (expr.isPure === false) return undefined;
+  const join = (terms: ReadonlyArray<string>, separator: string): string =>
+    terms.length === 1 ? terms[0] : `(${terms.join(separator)})`;
+  if (!BaseCompiler.isComplexValued(expr)) {
+    const code = compile(expr);
+    return {
+      re: isSymbol(expr) || isNumber(expr) ? code : `(${code})`,
+      im: '0',
+    };
+  }
+  if (isNumber(expr)) return { re: String(expr.re), im: String(expr.im) };
+  if (isSymbol(expr, 'ImaginaryUnit')) return { re: '0', im: '1' };
+  if (isFunction(expr, 'Multiply')) {
+    // The one purely-imaginary factor: the `ImaginaryUnit` symbol, or the
+    // number literal `Complex(0, k)` that canonicalization puts in its place.
+    const ops = expr.ops;
+    const scaleOf = (op: Expression): number | undefined =>
+      isSymbol(op, 'ImaginaryUnit')
+        ? 1
+        : isNumber(op) && op.re === 0 && op.im !== 0
+          ? op.im
+          : undefined;
+    const i = ops.findIndex((op) => scaleOf(op) !== undefined);
+    if (i < 0) return undefined;
+    const rest = ops.filter((_op, k) => k !== i);
+    if (rest.some((op) => BaseCompiler.isComplexValued(op))) return undefined;
+    const scale = scaleOf(ops[i])!;
+    const factors = rest.map((op) =>
+      isSymbol(op) || isNumber(op) ? compile(op) : `(${compile(op)})`
+    );
+    if (scale !== 1) factors.unshift(String(scale));
+    return {
+      re: '0',
+      im: factors.length === 0 ? '1' : join(factors, ' * '),
+    };
+  }
+  if (isFunction(expr, 'Add')) {
+    const reTerms: string[] = [];
+    const imTerms: string[] = [];
+    for (const op of expr.ops) {
+      const p = tryGetJSComplexParts(op, compile);
+      if (p === undefined) return undefined;
+      if (p.re !== '0') reTerms.push(p.re);
+      if (p.im !== '0') imTerms.push(p.im);
+    }
+    return {
+      re: reTerms.length === 0 ? '0' : join(reTerms, ' + '),
+      im: imTerms.length === 0 ? '0' : join(imTerms, ' + '),
+    };
+  }
+  return undefined;
+}
+
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
@@ -1824,10 +2009,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Note: `Abs` of a fixed-arity point never reaches this handler — the
   // shared compiler rewrites `Abs(Tuple)` → `Norm` (base-compiler.ts) so the
   // point compiles through the `Norm` codegen below (Tycho item 74).
-  Abs: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+  Abs: (args, compile, target) => {
+    if (BaseCompiler.isComplexValued(args[0])) {
+      // A modulus read off a sum of a real and an imaginary part is
+      // `Math.hypot` of the two parts — no `{ re, im }` object is built. See
+      // `tryGetJSComplexParts`.
+      const parts = tryGetJSComplexParts(args[0], compile);
+      if (parts !== undefined) return `Math.hypot(${parts.re}, ${parts.im})`;
       return `_SYS.cabs(${compile(args[0])})`;
-    if (BaseCompiler.isNonNegative(args[0])) return compile(args[0]);
+    }
+    if (BaseCompiler.isNonNegative(args[0]))
+      return identityPassthrough(args[0], compile, target);
     return `Math.abs(${compile(args[0])})`;
   },
   Add: (args, compile, target) => {
@@ -1954,8 +2146,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.catanh(${complexOperandCode(args[0], compile)})`;
     return `Math.atanh(${compile(args[0])})`;
   },
-  Ceil: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Ceil: (args, compile, target) => {
+    if (BaseCompiler.isIntegerValued(args[0]))
+      return identityPassthrough(args[0], compile, target);
     return `Math.ceil(${compile(args[0])})`;
   },
   // Bake the engine's configured tolerance, like compiled `Equal`
@@ -2016,8 +2209,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     isProvablyStringOperand(args[0])
       ? `_SYS.chars(${compile(args[0])})[0]`
       : `${compile(args[0])}[0]`,
-  Floor: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Floor: (args, compile, target) => {
+    if (BaseCompiler.isIntegerValued(args[0]))
+      return identityPassthrough(args[0], compile, target);
     return `Math.floor(${compile(args[0])})`;
   },
   Fract: ([x], compile, target) => {
@@ -2227,8 +2421,41 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // inside a comprehension. Matching the interpreter beats refusing.
     // A positive integer needs only the 1-based offset. The nullish fallback
     // preserves absent positions without a helper call or explicit bounds test.
-    if (canIndexArrayDirectly(coll, index, target))
-      return `((${compile(coll)})[(${compile(index)}) - 1] ?? NaN)`;
+    if (canIndexArrayDirectly(coll, index, target)) {
+      const indexCode = compile(index);
+      // The index is often a COMPILE-TIME CONSTANT even though the tree says
+      // otherwise: a `Sum` that unrolls substitutes its index at the emitted-
+      // VARIABLE level, so the operand here is still the bound symbol while
+      // its compiled code is the literal turn number. Read the code, then,
+      // rather than the tree — this is the only place the constant is
+      // visible. The whole-subtree fold cannot do it: it declines any
+      // expression that mentions a compile-bound name, which the operand
+      // still does before the unroll.
+      //
+      // With the cell list and the offset both known, the read has one value.
+      // Emitting that value drops the array reference, and with it the
+      // preamble local that would hold the list when no other site reads it
+      // (a 53-term Game-of-Life seed compiled to 53 reads of a 53-element
+      // literal list; the Tycho code-generation audit of 2026-09-08 measured
+      // the emitted list at 15.7 KB).
+      //
+      // Baking the cell is a constant fold, so the caller's opt-out
+      // (`constantFold: false`, which the code-generation tests use to
+      // inspect the access itself) suppresses it like any other.
+      const offset = Number(indexCode);
+      if (
+        target.constantFold !== false &&
+        Number.isSafeInteger(offset) &&
+        offset > 0
+      ) {
+        const cells = numericArrayCells(coll, target);
+        // Past the end reads no cell. `?? NaN` is what the array form yields
+        // there — the numeric absence marker — so fold to it directly.
+        if (cells !== undefined)
+          return offset <= cells.length ? compile(cells[offset - 1]) : 'NaN';
+      }
+      return `((${compile(coll)})[(${indexCode}) - 1] ?? NaN)`;
+    }
     const base = `_SYS.at(${stringBase ? `_SYS.chars(${compile(coll)})` : compile(coll)}, ${compile(index)})`;
     // `_SYS.at` marks an out-of-band SCALAR access with `NaN` (the numeric
     // absence marker). For an OBJECT-domain collection (non-numeric elements),
@@ -3586,9 +3813,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0 || args[0] == null)
       throw new Error('KroneckerDelta: missing argument');
     const tol = args[0].engine.tolerance ?? 1e-10;
+    // All-integer arguments compare exactly, for the reason given in
+    // `exactIntegerComparison`: integers are one apart or identical, so below
+    // a tolerance of 1 the two tests accept the same pairs, and they agree on
+    // `NaN` as well. The single-argument form compares against the integer 0.
+    const exact = exactIntegerComparison(args, tol);
     if (args.length === 1)
-      return `(Math.abs(${compile(args[0])}) <= ${tol} ? 1 : 0)`;
-    return `((..._v) => _v.every((_x) => Math.abs(_x - _v[0]) <= ${tol}) ? 1 : 0)(${args.map((a) => compile(a)).join(', ')})`;
+      return exact
+        ? `(${compile(args[0])} === 0 ? 1 : 0)`
+        : `(Math.abs(${compile(args[0])}) <= ${tol} ? 1 : 0)`;
+    const test = exact ? '_x === _v[0]' : `Math.abs(_x - _v[0]) <= ${tol}`;
+    return `((..._v) => _v.every((_x) => ${test}) ? 1 : 0)(${args.map((a) => compile(a)).join(', ')})`;
   },
   // Membership of a value in an indexed collection — `Contains` with the
   // operands flipped. Same primitive-element restriction; a domain (e.g.
@@ -3600,9 +3835,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = collArg('Element', args[1], compile);
     return `(${coll}).includes(${compile(args[0])})`;
   },
-  Identity: (args, compile) => {
+  Identity: (args, compile, target) => {
     if (args[0] == null) throw new Error('Identity: missing argument');
-    return compile(args[0]);
+    return identityPassthrough(args[0], compile, target);
   },
   // Apply a function literal to arguments. (`Apply` with a *symbol* head
   // canonicalizes to a direct call, so only the function-literal form
@@ -4115,6 +4350,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     )
       return `_SYS.pow${eConst}(${compile(base)})`;
     if (eConst === -1) return `(1 / (${compile(base)}))`;
+    if (
+      eConst === -2 &&
+      (isSymbol(base) || isNumber(base)) &&
+      !(isSymbol(base) && target.varsKeys?.has(base.symbol))
+    ) {
+      // A reciprocal square is two divisions — much cheaper than the
+      // transcendental `Math.pow`, and the same value on every base. The
+      // divisions must be SEPARATE: `1 / (t * t)` squares first, and the
+      // square overflows to `Infinity` for a base above about 1.3e154, where
+      // the reciprocal is then 0 instead of the subnormal `Math.pow`
+      // returns (at `t = 1e155` the true value is 1e-310). Dividing twice
+      // scales down between the two steps and keeps that value. The two
+      // spellings also agree on the poles: a base of 0 or -0 gives
+      // `Infinity` both ways, and a base small enough to overflow the
+      // reciprocal gives `Infinity` both ways.
+      //
+      // Only a SYMBOL or a NUMBER may be spliced twice: any other base is a
+      // sub-expression whose code would be duplicated, and a `vars`-mapped
+      // symbol may itself expand to arbitrary target source. Those keep the
+      // `Math.pow(base, -2)` emission of the general branch below, which
+      // splices the base once. Same guard as the `Power(x, 2)` expansion
+      // above.
+      const code = compile(base);
+      return `(1 / ${code} / ${code})`;
+    }
     if (eConst === 0.5) return `Math.sqrt(${compile(base)})`;
     if (eConst === 1 / 3) return `Math.cbrt(${compile(base)})`;
     if (eConst === -0.5) return `(1 / Math.sqrt(${compile(base)}))`;
@@ -4350,7 +4610,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `Math.round` rounds half toward +∞ (Round(-2.5) = -2). Reconstruct
     // half-away as `sign(x)·round(|x|)`.
     if (args.length < 2) {
-      if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+      if (BaseCompiler.isIntegerValued(args[0]))
+        return identityPassthrough(args[0], compile, target);
       return BaseCompiler.inlineExpression(
         target,
         '(Math.sign(${x}) * Math.round(Math.abs(${x})))',
@@ -4471,30 +4732,52 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     compileJSPointList(args, compile, target),
   Mod: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
-    // An IMPURE operand (the Random family) must be evaluated exactly once:
-    // the floored-modulo template splices `b` three times, so a spliced draw
-    // re-draws at run time (`Mod(x, Random())` consumed three draws). Bind
-    // both operands to temps, preserving the interpreter's a-then-b draw
-    // order. Pure operands keep the direct emission byte-identical.
-    const impure = a.isPure === false || b.isPure === false;
-    const ta = impure ? BaseCompiler.tempVar(target) : '';
-    const tb = impure ? BaseCompiler.tempVar(target) : '';
-    // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
-    // and `%` binds tighter than `+` — wrap before splicing next to `%`.
-    const ca = impure ? ta : `(${compile(a)})`;
-    const cb = impure ? tb : `(${compile(b)})`;
-    // For non-negative integers, plain % is correct Euclidean modulo
-    const core =
+    // For non-negative integers, plain `%` is correct Euclidean modulo, and it
+    // splices each operand once. Every other pair needs the floored-modulo
+    // template, which splices the DIVISOR three times.
+    const fastPath =
       BaseCompiler.isIntegerValued(a) &&
       BaseCompiler.isIntegerValued(b) &&
-      BaseCompiler.isNonNegative(a)
-        ? `(${ca} % ${cb})`
-        : `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
-    if (!impure) return core;
-    return `(() => { const ${ta} = ${compile(a)}, ${tb} = ${compile(b)}; return ${core}; })()`;
+      BaseCompiler.isNonNegative(a);
+    // An IMPURE operand (the Random family) must be evaluated exactly once:
+    // a spliced draw re-draws at run time (`Mod(x, Random())` consumed three
+    // draws).
+    const impure = a.isPure === false || b.isPure === false;
+    // A divisor the floored template splices three times is also COMPUTED
+    // three times when it is spliced directly. A symbol reference and a
+    // number literal cost nothing to repeat; anything else — a call such as
+    // `Mod(2, Sin(0.2·theta))`, an arithmetic sub-expression — is bound to a
+    // temporary so the emitted code evaluates it once. The Tycho
+    // code-generation audit of 2026-09-08 found the three-times shape in the
+    // emitted JavaScript of a plotted curve.
+    const repeatedDivisor =
+      !fastPath && !isSymbol(b) && !isNumber(b) && !impure;
+    const bind = impure || repeatedDivisor;
+    // The dividend is spliced once by both templates, so it needs a temporary
+    // only to keep the interpreter's a-then-b evaluation order. That order is
+    // at risk as soon as EITHER operand is impure: the divisor is then bound
+    // to a temporary, and the binding runs it before the spliced dividend.
+    // Binding the dividend as well puts the two back in order.
+    const bindA = impure;
+    const ta = bindA ? BaseCompiler.tempVar(target) : '';
+    const tb = bind ? BaseCompiler.tempVar(target) : '';
+    // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
+    // and `%` binds tighter than `+` — wrap before splicing next to `%`.
+    const ca = bindA ? ta : `(${compile(a)})`;
+    const cb = bind ? tb : `(${compile(b)})`;
+    const core = fastPath
+      ? `(${ca} % ${cb})`
+      : `(((${ca} % ${cb}) + ${cb}) % ${cb})`;
+    if (!bind) return core;
+    const bindings = [
+      ...(bindA ? [`${ta} = ${compile(a)}`] : []),
+      `${tb} = ${compile(b)}`,
+    ];
+    return boundJSResult(target, `const ${bindings.join(', ')};`, core);
   },
-  Truncate: (args, compile) => {
-    if (BaseCompiler.isIntegerValued(args[0])) return compile(args[0]);
+  Truncate: (args, compile, target) => {
+    if (BaseCompiler.isIntegerValued(args[0]))
+      return identityPassthrough(args[0], compile, target);
     return `Math.trunc(${compile(args[0])})`;
   },
   Remainder: ([a, b], compile, target) => {
@@ -4574,9 +4857,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
 
     const boundResult = (bindings: string, value: string): string =>
-      javascriptStatements(target)?.expression(
-        (exit) => `${bindings} ${exit(value)}`
-      ) ?? `(() => { ${bindings} return ${value}; })()`;
+      boundJSResult(target, bindings, value);
 
     if (args.length === 2) {
       const ac = BaseCompiler.isComplexValued(args[0]);
@@ -4810,25 +5091,40 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Fibonacci: '_SYS.fibonacci',
 
   // Complex-specific functions
-  Real: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+  // `Real`, `Imaginary` and `Argument` each read one scalar off a complex
+  // value. When the value is a sum of a real part and an imaginary part, that
+  // scalar is one of the two parts (or `Math.atan2` of them), so the
+  // `{ re, im }` object is never built. See `tryGetJSComplexParts`.
+  Real: (args, compile, target) => {
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const parts = tryGetJSComplexParts(args[0], compile);
+      if (parts !== undefined) return parts.re;
       return `(${compile(args[0])}).re`;
-    return compile(args[0]);
+    }
+    return identityPassthrough(args[0], compile, target);
   },
   Imaginary: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const parts = tryGetJSComplexParts(args[0], compile);
+      if (parts !== undefined) return parts.im;
       return `(${compile(args[0])}).im`;
+    }
     return '0';
   },
   Argument: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      // `_SYS.carg` is `Math.atan2(im, re)` — the argument order is
+      // imaginary part first, as in every `atan2`.
+      const parts = tryGetJSComplexParts(args[0], compile);
+      if (parts !== undefined) return `Math.atan2(${parts.im}, ${parts.re})`;
       return `_SYS.carg(${compile(args[0])})`;
+    }
     return `(${compile(args[0])} >= 0 ? 0 : Math.PI)`;
   },
-  Conjugate: (args, compile) => {
+  Conjugate: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_SYS.cconj(${compile(args[0])})`;
-    return compile(args[0]);
+    return identityPassthrough(args[0], compile, target);
   },
 
   // Color functions
@@ -7581,6 +7877,41 @@ const SYS_HELPERS = {
         `with the interpreter.`
     );
   },
+  // Positional access WITHOUT the from-the-end convention: the index must be
+  // an integer in `1..length`, and every other index — zero, negative,
+  // fractional, past the end, a non-number — reads the collection's absence
+  // marker. It exists for a HOST that replaces the `At` lowering because its
+  // own source language has no from-the-end indexing: there a computed
+  // negative index means "undefined", and `_SYS.at` would hand back a real
+  // element from the far end instead. `_SYS.at` stays the lowering the
+  // compiler itself emits, and the two differ in four ways: this one takes no
+  // negative index, reads no boolean mask, marks each out-of-band position of
+  // a LIST index rather than refusing the whole read, and ignores the `.re` of
+  // a complex index instead of indexing through it.
+  //
+  // The absence marker is decided at RUN time, from the first cell: `NaN` for
+  // a numeric collection (and for an empty one, where every read is out of
+  // band anyway and `NaN` propagates where `null` would coerce to 0),
+  // `undefined` for any other domain — the target null the object discharge
+  // (`Coalesce`, `IsMissing`) reads. The compiled `At` decides the same thing
+  // from the static element type; a host lowering has no such type for a
+  // symbolic base, and `matrix<number>` matches `list<number>` yet holds its
+  // absences as `Missing`, so the type test would misclassify it.
+  //
+  // A base that is not an array has no elements to index, so it reads `NaN`.
+  // The guard is load-bearing rather than defensive: a STRING has both
+  // `.length` and `[k - 1]`, so without it an accidental string base would
+  // silently answer CHARACTERS.
+  atNoWrap: (arr: unknown, i: unknown): unknown => {
+    if (!Array.isArray(arr)) return NaN;
+    const hole =
+      arr.length === 0 || typeof arr[0] === 'number' ? NaN : undefined;
+    const pick = (k: unknown): unknown =>
+      Number.isInteger(k) && (k as number) >= 1 && (k as number) <= arr.length
+        ? arr[(k as number) - 1]
+        : hole;
+    return Array.isArray(i) ? i.map((k) => pick(k)) : pick(i);
+  },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
   // machine precision on smooth integrands, µs-scale. On non-convergence
   // (pathological integrand), fall back to the Monte-Carlo estimator — but only
@@ -8621,6 +8952,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       cseBind: (bindings, body) =>
         javascriptStatements(target)?.bindings(bindings, body) ??
         `(() => { ${bindings.map(([name, code]) => `const ${name} = ${code};`).join(' ')} return ${body}; })()`,
+      // Bind an index-free scalar subexpression of a `Sum`/`Product` body once
+      // ahead of the loop (or ahead of the unrolled terms) instead of
+      // recomputing it per iteration — see `CompileTarget`. A loop body reading
+      // `Math.sin(_.x)` at every step evaluated it once per iteration; an
+      // unrolled body repeated it once per term.
+      hoistScalarInvariants: true,
       // A non-boolean Which/When condition (e.g. NaN) fails closed at run time,
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
@@ -8671,6 +9008,20 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       naming: { counter: 0, usedNames: new Set<string>() },
       ...options,
     };
+    // Fold the literal arithmetic the EMISSION creates, which the tree-level
+    // fold cannot see: an unrolled `Sum` substitutes its index at the variable
+    // level, so every term carries `(1 + -0.5)` and `_SYS.pow2(0.025 * (1 +
+    // -0.5))`. Installed after the spread so a caller's `constantFold: false`
+    // — which promises the structural lowering of every constant, and which
+    // the code-generation tests rely on — turns this fold off as well.
+    if (
+      target.constantFold !== false &&
+      target.foldEmittedConstant === undefined
+    ) {
+      const splices = callerSpliceSources(target.varsKeys, target.var);
+      target.foldEmittedConstant = (_expr, code) =>
+        foldEmittedJavaScriptCode(code, splices);
+    }
     return target;
   }
 

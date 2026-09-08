@@ -231,7 +231,9 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
   it('the scalar emissions are unchanged', () => {
     const ce = fresh();
     expect(g(['Power', 'x', 2], ce)).toBe('(x * x)');
-    expect(g(['Power', 'x', 7], ce)).toBe('_gpu_powi(x, 7.0)');
+    // A simple base unrolls up to exponent 8; the helper takes over above it.
+    expect(g(['Power', 'x', 7], ce)).toBe('(x * x * x * x * x * x * x)');
+    expect(g(['Power', 'x', 9], ce)).toBe('_gpu_powi(x, 9.0)');
     expect(g(['Power', ['Add', 'x', 1], 7], ce)).toBe(
       '_gpu_powi(x + 1.0, 7.0)'
     );

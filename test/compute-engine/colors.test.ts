@@ -714,9 +714,12 @@ describe('GPU color compilation', () => {
     const compiled = compile(expr, { to: 'glsl' });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_color_mix');
-    expect(compiled.preamble).toContain('_gpu_srgb_to_linear');
-    // GLSL uses vec3
-    expect(compiled.preamble).toContain('vec3 _gpu_srgb_to_oklab');
+    // The preamble carries the definitions this row reaches and no others:
+    // `_gpu_color_mix` interpolates in OKLCh and calls no converter, so the
+    // sRGB and OKLab conversions stay out of the shader.
+    // GLSL uses vec3.
+    expect(compiled.preamble).toContain('vec3 _gpu_color_mix(');
+    expect(compiled.preamble).not.toContain('_gpu_srgb_to_oklab');
   });
 
   test('compile ColorContrast to WGSL', () => {

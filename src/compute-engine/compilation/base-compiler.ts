@@ -10,6 +10,7 @@ import type {
 import {
   clearIntegerRanges,
   isConstructedScalar,
+  recordDeclaredScalarParams,
   recordIntegerRange,
 } from './javascript-value-facts.js';
 import {
@@ -83,6 +84,7 @@ import {
   isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
+import { asRational } from '../boxed-expression/numerics.js';
 import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
@@ -163,6 +165,10 @@ import {
   builtinOperatorDefinition,
   isRefusableBuiltinCallback,
 } from './builtin-callback.js';
+import {
+  exactDoubleValue,
+  exactValueDoubleRoundings,
+} from '../numeric-value/exact-integer-value.js';
 
 /**
  * A `_tv`/`_cse`-prefixed identifier token, as it appears inside a
@@ -552,6 +558,52 @@ export interface ElementBinder {
 
 export function compilationType(expr: Expression): Type {
   return resolveTypeForCompilation(expr.type.type);
+}
+
+/**
+ * Is the value of this number literal held EXACTLY by the engine while no
+ * double represents it?
+ *
+ * `expr.re` is then the nearest double, which is a rounded value: `1/49` is
+ * `0.02040816326530612`, `√2` is `1.4142135623730951`, and the difference is
+ * real to a target that promises an enclosure. The test is
+ * `exactDoubleValue`, the same one the machine-number admission uses: an
+ * integer inside the significand's reach and a rational with a power-of-two
+ * denominator DO have a double and answer `false` here, as does every
+ * inexact literal — a machine float is its own exact value, and the
+ * interpreter computes with that same double.
+ *
+ * Read by the number-literal lowering to decide between `target.number` and
+ * `target.inexactNumber`.
+ */
+function literalHasNoDoubleValue(expr: Expression): boolean {
+  if (!isNumber(expr)) return false;
+  const nv = expr.numericValue;
+  // A machine float carries no exact value beyond the double it already is.
+  if (typeof nv === 'number') return false;
+  if (!nv.isExact || nv.im !== 0) return false;
+  // An infinity and a NaN have no enclosure to widen; they are emitted as
+  // themselves.
+  if (!Number.isFinite(expr.re)) return false;
+  return exactDoubleValue(nv) === undefined;
+}
+
+/**
+ * How many double roundings stand between this literal's exact value and the
+ * `expr.re` a target is handed, for a target that emits an ENCLOSURE
+ * (`CompileTarget.inexactNumber`).
+ *
+ * A target steps one ulp out per rounding. `1/49` and `√2` are one rounding
+ * and keep the narrowest enclosure; a rational whose numerator or denominator
+ * is past the reach of the significand is three, because the two integer
+ * conversions round before the division does. See
+ * `exactValueDoubleRoundings`, which reads the exact representation.
+ */
+function literalDoubleRoundings(expr: Expression): number {
+  if (!isNumber(expr)) return 1;
+  const nv = expr.numericValue;
+  if (typeof nv === 'number') return 1;
+  return exactValueDoubleRoundings(nv);
 }
 
 /**
@@ -1099,6 +1151,23 @@ function isRuntimePointShaped(a: Expression): boolean {
 }
 
 /**
+ * The finite real number a piece of EMITTED code denotes when it is a bare
+ * numeric literal — `undefined` for anything else.
+ *
+ * `Number`, NOT `parseFloat`: `parseFloat` reads a LEADING NUMERIC PREFIX and
+ * ignores the rest, so it reports `0.333` for the compiled bound
+ * `0.3333333333333333 * (_.L).length` and a caller would fold a constant out
+ * of an expression that has none. `Number` requires the WHOLE string to be
+ * numeric. The empty string is excluded explicitly, since `Number('')` is 0.
+ */
+function numericLiteralSource(code: string): number | undefined {
+  const trimmed = code.trim();
+  if (trimmed === '') return undefined;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+/**
  * Does a point-or-other union (`isRuntimePointShaped` above) also admit a
  * FLAT NUMERIC LIST — a run-time array of plain numbers that is NOT a point?
  * True when one of its non-tuple arms is a collection whose element type is
@@ -1141,7 +1210,70 @@ function isPointSumOperand(a: Expression): boolean {
   return isFunction(a, 'Add') && a.ops.some((o) => isNumericTuple(o));
 }
 
-function isBoundPossiblyCollectionTyped(a: Expression): boolean {
+/**
+ * The `p / q` of an operand that is an EXACT rational number literal whose
+ * denominator is neither 1 nor a power of two — the shape that must be
+ * lowered as a target DIVISION rather than as a multiplication by the
+ * reciprocal.
+ *
+ * Canonicalization turns `x / 49` into `Multiply(Rational(1, 49), x)`, and
+ * emitting that literal directly gives `fl(1/49) * x`. IEEE division is
+ * correctly rounded, so `x / 49` is exactly `k` at `x = 49k`, while
+ * `x * fl(1/49)` is not: `floor`, `mod 1` and `= 1` then answer one less
+ * than the interpreter at every exact multiple. A denominator that IS a
+ * power of two is exempt: its reciprocal is exact in binary floating point,
+ * so `0.5 * x` and `x / 2` agree bit for bit and the shorter product is
+ * kept.
+ *
+ * Returns `undefined` for anything else: an inexact (float) literal, a
+ * complex one, a value with a radical part (`√2 / 49` is not a plain
+ * rational), and any numerator or denominator too large to survive the round
+ * trip through a target `number` literal.
+ *
+ * The Tycho code-generation audit of 2026-09-08 measured 82 divisors below
+ * 1000 for which the reciprocal product misses an exact multiple.
+ */
+export function exactRationalDivisor(
+  x: Expression
+): { p: number; q: number } | undefined {
+  if (!isNumber(x) || !x.isExact) return undefined;
+  const r = asRational(x);
+  if (r === undefined) return undefined;
+  const p = Number(r[0]);
+  const q = Number(r[1]);
+  if (!Number.isSafeInteger(p) || !Number.isSafeInteger(q)) return undefined;
+  if (q <= 1) return undefined;
+  // A power-of-two denominator has an exact reciprocal, so the product is
+  // already correctly rounded. The test must NOT use the JavaScript bitwise
+  // operators: they truncate their operand to 32 bits, so a denominator such
+  // as `49 · 2^32` — well inside the safe-integer range — would pass as a
+  // power of two and keep the reciprocal product.
+  if (2 ** Math.round(Math.log2(q)) === q) return undefined;
+  return { p, q };
+}
+
+/**
+ * `target` is optional, and passing it can only make the answer NARROWER: a
+ * value the JavaScript emission proves scalar by CONSTRUCTION — a literal, an
+ * explicitly declared scalar input, scalar arithmetic over those, or a call of
+ * a user function whose body yields a scalar under scalar parameters — is not
+ * a collection at run time whatever its static type says. Only the callers
+ * that DECIDE an emitted broadcast pass it (the arithmetic broadcast in
+ * `tryCompileBroadcast`); the callers that merely classify an operand of a
+ * broadcast someone else decided keep the conservative reading, which for them
+ * costs nothing: `_SYS.bcast` applies its closure directly to a scalar
+ * operand.
+ */
+function isBoundPossiblyCollectionTyped(
+  a: Expression,
+  target?: CompileTarget<Expression>
+): boolean {
+  if (
+    target !== undefined &&
+    target.language === 'javascript' &&
+    isConstructedScalar(a, target)
+  )
+    return false;
   // A declared scalar-or-collection union is reliable on any node, bound or
   // not — see `unionAdmitsIndexedCollection`. The RAW type is passed: the
   // helper refuses a nominal reference before resolving it, and
@@ -1233,6 +1365,19 @@ export function statementBodyHead(
  * `BaseCompiler.operandElementLane`.
  */
 type ElementLane = boolean | 'mixed' | undefined;
+
+/**
+ * One binding minted by {@link BaseCompiler.hoistLoopInvariants}: the local
+ * name, the code its right-hand side compiled to, and the representative node
+ * that code came from. The node is carried so a target whose local
+ * declarations are typed (the shader languages need `float x = …;`) can read
+ * the static type off the expression instead of guessing it from the code.
+ */
+export type LoopInvariantBinding = [
+  name: string,
+  code: string,
+  node: Expression,
+];
 
 /**
  * Base compiler class containing language-agnostic compilation logic
@@ -2517,14 +2662,21 @@ export class BaseCompiler {
    * (`operandElementLane`) and the element-wise runtime rule
    * (`realOperandGuard`): the three must agree on which operands are seen
    * element-wise.
+   *
+   * `target` narrows the last disjunct to a value the JavaScript emission
+   * proves scalar by construction — see {@link isBoundPossiblyCollectionTyped}
+   * for which callers pass it and why the others need not.
    */
-  private static isArrayOperand(a: Expression): boolean {
+  private static isArrayOperand(
+    a: Expression,
+    target?: CompileTarget<Expression>
+  ): boolean {
     return (
       !isProvablyStringOperand(a) &&
       (a.isCollection ||
         a.type.matches('list<any>') ||
         a.type.matches('indexed_collection<any>') ||
-        isBoundPossiblyCollectionTyped(a))
+        isBoundPossiblyCollectionTyped(a, target))
     );
   }
 
@@ -5097,13 +5249,25 @@ export class BaseCompiler {
           throw new Error('Complex numbers are not supported by this target');
         return target.complex(expr.re, expr.im);
       }
-      const code = target.number(expr.re);
+      // A literal the engine holds EXACTLY but that no double represents —
+      // `1/49`, `√2` — reaches the target through `inexactNumber` when the
+      // target defines one, because `expr.re` is then a rounded value, not
+      // the literal. The interval target spells such a literal as an
+      // enclosure of the true value instead of a point at the rounded one.
+      const inexact =
+        target.inexactNumber !== undefined && literalHasNoDoubleValue(expr);
+      const code = inexact
+        ? target.inexactNumber!(expr.re, literalDoubleRoundings(expr))
+        : target.number(expr.re);
       // A negative numeric literal (e.g. `-2`) has a leading unary minus, so it
       // must be parenthesized wherever a unary `Negate(...)` would be: when
       // spliced as an operand that binds tighter than unary negation. Otherwise
       // Python `Power(-2, x)` emits `-2 ** x`, which parses as `-(2 ** x)`
       // (sign-flipped). Mirror the Negate operator's own `op[1] < prec` wrap.
-      if (expr.re < 0) {
+      // An `inexactNumber` spelling is exempt: it is a target-chosen
+      // aggregate (the interval target emits an object literal), not a
+      // number with a leading sign.
+      if (expr.re < 0 && !inexact) {
         const negPrec = target.operators?.('Negate')?.[1] ?? 14;
         if (negPrec < prec) return `(${code})`;
       }
@@ -6055,6 +6219,11 @@ export class BaseCompiler {
             }
 
             let resultStr: string;
+            // The precedence of the operator that ends up at the ROOT of
+            // `resultStr`. It is `op[1]` except when a `Multiply` is rewritten
+            // as a division below, where the root becomes `Divide` (or the
+            // unary `Negate` above it).
+            let resultPrec = op[1];
             if (args.length === 1) {
               // Unary operator, assume prefix. Word operators get a space.
               const operandCode = BaseCompiler.compileValueOperand(
@@ -6109,16 +6278,21 @@ export class BaseCompiler {
               // Fold only a leading run of emitted numeric literals. It has
               // the same left-to-right rounding as the original product and
               // also catches constants introduced by lowering, such as degrees.
-              if (
-                target.language === 'javascript' &&
-                target.constantFold !== false &&
-                h === 'Multiply' &&
-                op[0] === '*'
-              ) {
+              const foldLeadingNumericRun = (codes: string[]): void => {
+                // The fold MULTIPLIES the literals it absorbs, so it applies
+                // to a product only. Running it over an `Add` would collapse
+                // `2k + 1` at `k = 0` to `0`.
+                if (
+                  target.language !== 'javascript' ||
+                  target.constantFold === false ||
+                  h !== 'Multiply' ||
+                  op[0] !== '*'
+                )
+                  return;
                 const numeric = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
                 let count = 0;
                 let product = 1;
-                for (const code of operandCodes) {
+                for (const code of codes) {
                   if (!numeric.test(code) || !Number.isFinite(Number(code)))
                     break;
                   const next = product * Number(code);
@@ -6127,13 +6301,81 @@ export class BaseCompiler {
                   count++;
                 }
                 if (count > 1)
-                  operandCodes.splice(
+                  codes.splice(
                     0,
                     count,
                     Object.is(product, -0) ? '-0' : String(product)
                   );
+              };
+              // A product with an exact rational factor `p/q` is lowered as a
+              // DIVISION by the integer `q`, not as a multiplication by the
+              // rounded reciprocal — see `exactRationalDivisor` for why the
+              // reciprocal is wrong at exact multiples of `q`. The division
+              // comes FIRST and the numerator `p` multiplies the quotient
+              // afterwards (`x / q * p`, not `(p * x) / q`): the product
+              // `p * x` overflows to infinity for a large `x` where the
+              // quotient does not, and on a 32-bit shader float that limit is
+              // only about 1e38. The exactness the rewrite exists for is kept:
+              // at `x = k·q` the quotient is exactly `k`, and `k * p` is exact
+              // for safe integers. A `p` of −1 becomes a unary negation of the
+              // whole quotient, which is exact (IEEE negation is exact and
+              // round-to-nearest is sign-symmetric, so `-(a / q)` and
+              // `(-a) / q` are the same float).
+              const divOp =
+                h === 'Multiply' && op[0] === '*'
+                  ? target.operators?.('Divide')
+                  : undefined;
+              const ratIndex =
+                divOp === undefined
+                  ? -1
+                  : args.findIndex(
+                      (arg) => exactRationalDivisor(arg) !== undefined
+                    );
+              const rat =
+                ratIndex < 0 ? undefined : exactRationalDivisor(args[ratIndex]);
+              if (rat !== undefined && divOp !== undefined) {
+                const factors = operandCodes.filter((_, i) => i !== ratIndex);
+                foldLeadingNumericRun(factors);
+                // A leading factor of exactly one is the multiplicative
+                // identity for every IEEE value, so it is dropped. It appears
+                // when a `Sum` unroll substitutes the index value 1 into the
+                // body; before the division rewrite the numeric fold above
+                // absorbed it into the reciprocal literal.
+                if (factors.length > 1 && factors[0] === target.number(1))
+                  factors.shift();
+                const numerator =
+                  factors.length > 1
+                    ? `(${factors.join(` ${op[0]} `)})`
+                    : factors[0];
+                resultStr = `${numerator} ${divOp[0]} ${target.number(rat.q)}`;
+                resultPrec = divOp[1];
+                if (rat.p !== 1 && rat.p !== -1) {
+                  // Division binds at least as tightly as multiplication on
+                  // every target, so the quotient needs no parentheses as the
+                  // left operand of the `p` factor.
+                  const quotient =
+                    resultPrec < op[1] ? `(${resultStr})` : resultStr;
+                  resultStr = `${quotient} ${op[0]} ${target.number(rat.p)}`;
+                  resultPrec = op[1];
+                }
+                if (rat.p === -1) {
+                  const negOp = target.operators?.('Negate');
+                  if (negOp !== undefined) {
+                    const quotient =
+                      resultPrec < negOp[1] ? `(${resultStr})` : resultStr;
+                    resultStr = `${negOp[0]}${quotient}`;
+                    resultPrec = negOp[1];
+                  } else {
+                    // No unary negation on this target: fall back to an
+                    // explicit `-1` factor.
+                    resultStr = `${target.number(-1)} ${op[0]} ${resultStr}`;
+                    resultPrec = op[1];
+                  }
+                }
+              } else {
+                foldLeadingNumericRun(operandCodes);
+                resultStr = operandCodes.join(` ${op[0]} `);
               }
-              resultStr = operandCodes.join(` ${op[0]} `);
             }
             // Same shape gate as the function-codegen and string-helper paths
             // (see `CompileTarget.checkOperandShapes`): the infix arithmetic
@@ -6144,7 +6386,7 @@ export class BaseCompiler {
             // `2.0 + mat2x2f(…)` on WGSL). Throws to fail closed (D6).
             // No hook (JavaScript, Python, interval-js): unchanged.
             target.checkOperandShapes?.(h, args, resultStr, target);
-            return op[1] < prec ? `(${resultStr})` : resultStr;
+            return resultPrec < prec ? `(${resultStr})` : resultStr;
           }
         }
       }
@@ -7942,7 +8184,7 @@ export class BaseCompiler {
           isNumericTuple(a) ||
           a.type.matches('list<any>') ||
           a.type.matches('indexed_collection<any>') ||
-          isBoundPossiblyCollectionTyped(a));
+          isBoundPossiblyCollectionTyped(a, target));
       const collection = args.filter(isArrayish);
       if (collection.length >= 2) {
         const isMatrix = (a: Expression): boolean =>
@@ -8000,7 +8242,7 @@ export class BaseCompiler {
         // admitted the shape or declined it.)
         if (
           atomicTuple === undefined &&
-          collection.some(isBoundPossiblyCollectionTyped)
+          collection.some((a) => isBoundPossiblyCollectionTyped(a, target))
         ) {
           if (
             args.some(
@@ -8039,7 +8281,15 @@ export class BaseCompiler {
     // If none is, this is ordinary scalar code — leave it be.
     // (A string matches `indexed_collection` but is not array-shaped — see
     // `compilesToArray` above; `isArrayOperand` excludes it.)
-    const isArrayOperand = BaseCompiler.isArrayOperand;
+    // The target is passed: a value this emission proves scalar by
+    // CONSTRUCTION — an explicitly declared scalar input, scalar arithmetic
+    // over such values, or a call of a user function whose body yields a
+    // scalar under scalar parameters — is never an array at run time, so the
+    // head compiles as ordinary scalar code instead of dispatching through
+    // `_SYS.bcast`. (The Tycho code-generation audit of 2026-09-08 measured
+    // 496 such dispatches over user-function results.)
+    const isArrayOperand = (a: Expression): boolean =>
+      BaseCompiler.isArrayOperand(a, target);
     if (!args.some(isArrayOperand)) return null;
 
     // A numeric tuple SUMMED with, or DIVIDED by/into, a list is not a
@@ -9106,6 +9356,22 @@ export class BaseCompiler {
         coll.ops[0] !== undefined &&
         BaseCompiler.elementsRealByConstruction(coll.ops[0])
       );
+    // A GATHER — `At` with a collection of indices, the `P_{a..b}` spelling —
+    // takes its elements from the source collection, exactly as `Take` and
+    // `Slice` do; an out-of-range index contributes `NaN`, which is real. The
+    // index has to be a COLLECTION for that to hold: `At` with a scalar index
+    // over a nested list answers a ROW, whose elements are one level deeper
+    // than the ones this question is about. Without this arm a sum over a
+    // slice of a real list took the shape-agnostic fold, so `|Sum(P_{a..b})|`
+    // was emitted as `_SYS.cabs(_SYS.cplx(…))` for a real list (measured by
+    // the Tycho code-generation audit of 2026-09-08).
+    if (h === 'At' && coll.ops.length === 2) {
+      const index = coll.ops[1];
+      return (
+        (index.isCollection || index.type.matches('collection<any>')) &&
+        BaseCompiler.elementsRealByConstruction(coll.ops[0])
+      );
+    }
     return false;
   }
 
@@ -10802,6 +11068,32 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): string {
     const [loExpr, hiExpr, stepExpr] = range.ops;
+
+    /** The element count of the range, using the runtime rule. */
+    const countOf = (lo: number, hi: number, step: number): number =>
+      step === 0 ? 0 : Math.max(0, Math.floor((hi - lo) / step) + 1);
+
+    /** The loop for a range whose start, step and count are all known at
+     * compile time: no bound temporaries, no length test, no prologue. */
+    const constantLoop = (
+      lo: number,
+      step: number,
+      count: number
+    ): string | undefined => {
+      if (
+        !Number.isFinite(count) ||
+        count > 4294967295 ||
+        !Number.isFinite(lo) ||
+        !Number.isFinite(step)
+      )
+        return undefined;
+      const index = BaseCompiler.tempVar(target);
+      return (
+        `for (let ${index} = 0; ${index} < ${count}; ${index}++) { ` +
+        `const ${name} = ${lo} + (${step}) * ${index}; ${body} }`
+      );
+    };
+
     if (
       isNumber(loExpr) &&
       loExpr.im === 0 &&
@@ -10815,22 +11107,40 @@ export class BaseCompiler {
             ? 1
             : -1
           : stepExpr.re;
-      const length =
-        stepValue === 0
-          ? 0
-          : Math.max(0, Math.floor((hiExpr.re - loExpr.re) / stepValue) + 1);
-      if (
-        Number.isFinite(length) &&
-        length <= 4294967295 &&
-        Number.isFinite(loExpr.re) &&
-        Number.isFinite(stepValue)
-      ) {
-        const index = BaseCompiler.tempVar(target);
-        return (
-          `for (let ${index} = 0; ${index} < ${length}; ${index}++) { ` +
-          `const ${name} = ${loExpr.re} + (${stepValue}) * ${index}; ${body} }`
-        );
-      }
+      const loop = constantLoop(
+        loExpr.re,
+        stepValue,
+        countOf(loExpr.re, hiExpr.re, stepValue)
+      );
+      if (loop !== undefined) return loop;
+    }
+
+    const loCode = BaseCompiler.compile(loExpr, target);
+    const hiCode = BaseCompiler.compile(hiExpr, target);
+    const stepLiteralCode =
+      stepExpr === undefined
+        ? undefined
+        : BaseCompiler.compile(stepExpr, target);
+
+    // A bound whose EXPRESSION is not a literal can still COMPILE to one: a
+    // symbol with an assigned value, or arithmetic the constant fold reduced
+    // (`1..W^2` with `W ⩴ 150` compiles its upper bound to `22500`). The
+    // check above cannot see that, so repeat it on the emitted code — where
+    // the constant finally is — and skip the whole runtime prologue.
+    const loValue = numericLiteralSource(loCode);
+    const hiValue = numericLiteralSource(hiCode);
+    const stepValue =
+      stepLiteralCode === undefined
+        ? undefined
+        : numericLiteralSource(stepLiteralCode);
+    if (
+      loValue !== undefined &&
+      hiValue !== undefined &&
+      (stepExpr === undefined || stepValue !== undefined)
+    ) {
+      const s = stepValue ?? (hiValue >= loValue ? 1 : -1);
+      const loop = constantLoop(loValue, s, countOf(loValue, hiValue, s));
+      if (loop !== undefined) return loop;
     }
 
     const lo = BaseCompiler.tempVar(target);
@@ -10838,16 +11148,18 @@ export class BaseCompiler {
     const step = BaseCompiler.tempVar(target);
     const count = BaseCompiler.tempVar(target);
     const index = BaseCompiler.tempVar(target);
-    const loCode = BaseCompiler.compile(loExpr, target);
-    const hiCode = BaseCompiler.compile(hiExpr, target);
-    const stepCode =
-      stepExpr === undefined
-        ? `(${hi} >= ${lo} ? 1 : -1)`
-        : BaseCompiler.compile(stepExpr, target);
+    const stepCode = stepLiteralCode ?? `(${hi} >= ${lo} ? 1 : -1)`;
+    // A zero step yields the empty range, and the count expression says so.
+    // That test earns its place only when the step could BE zero at run time:
+    // an OMITTED step is ±1 by construction, and an explicit one that
+    // compiled to a non-zero literal is not zero either.
+    const stepCouldBeZero =
+      stepExpr !== undefined && (stepValue === undefined || stepValue === 0);
+    const countCode = `Math.max(0, Math.floor((${hi} - ${lo}) / ${step}) + 1)`;
     return (
       `{ const ${lo} = ${loCode}; const ${hi} = ${hiCode}; ` +
       `const ${step} = ${stepCode}; ` +
-      `const ${count} = ${step} === 0 ? 0 : Math.max(0, Math.floor((${hi} - ${lo}) / ${step}) + 1); ` +
+      `const ${count} = ${stepCouldBeZero ? `${step} === 0 ? 0 : ${countCode}` : countCode}; ` +
       // Array.from treats NaN as a zero length and rejects lengths that
       // exceed the maximum Array length. Preserve both behaviors.
       `if (${count} > 4294967295) throw new RangeError('Invalid array length'); ` +
@@ -16468,6 +16780,15 @@ export class BaseCompiler {
      * is emitted. Anything else takes `_SYS.cplx`.
      */
     const dispatchCall = (codes: ReadonlyArray<string>) => {
+      // With no argument to coerce, the closure would be an ETA-EXPANSION of
+      // the callee — `(a, b) => _fn_f(a, b)` — so hand `_SYS.bcastFn` the
+      // function itself. The broadcast never reads the closure's `length`
+      // (`bcastWith` and its generated kernels spread the cell array into
+      // `f(...)`), so a named function behaves exactly as the arrow did, and
+      // one closure per call site is saved. (The Tycho code-generation audit
+      // of 2026-09-08 measured 297 such eta-expanded dispatches.)
+      if (!coerceToComplex.some((c) => c))
+        return `_SYS.bcastFn(${name}, ${codes.join(', ')})`;
       const params = args.map(() => BaseCompiler.tempVar(target));
       const callParams = params.map((p, i) =>
         coerceToComplex[i] ? complexWrap(p, args[i], target) : p
@@ -16481,10 +16802,18 @@ export class BaseCompiler {
       BaseCompiler.certainlyScalarArg(a) ||
       (target.language === 'javascript' && isConstructedScalar(a, target));
 
-    if (
-      mayBroadcast &&
-      !args.every(alwaysDispatch ? scalarArg : provablyScalarArg)
-    )
+    // A CONSTRUCTED scalar settles the call form on both routes. On the
+    // generic route it is the only admissible evidence (`alwaysDispatch`:
+    // the static type came from a type variable's bound, not from the
+    // caller). On the ordinary route it stands beside the static type, so an
+    // argument whose type is wider than `number` — a call of a user function
+    // whose result type is open — still keeps the direct call form its
+    // construction proves sound, instead of forcing the whole application
+    // through the runtime broadcast.
+    const directCallArg = (a: Expression): boolean =>
+      alwaysDispatch ? scalarArg(a) : provablyScalarArg(a) || scalarArg(a);
+
+    if (mayBroadcast && !args.every(directCallArg))
       return dispatchCall(compiledArgs);
 
     // A statically scalar argument is still not a run-time scalar. Reaching
@@ -17664,6 +17993,7 @@ export class BaseCompiler {
       try {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(literal, target, registry);
+        BaseCompiler.recordDeclaredScalarParams(h, literal, bodyTarget);
         // A target with its own definition lowering (the shader targets)
         // synthesizes the signature and compiles the body itself — a shader
         // function body is a STATEMENT position and its declaration needs
@@ -17673,15 +18003,32 @@ export class BaseCompiler {
         // requires declaration before use).
         const lowering = registry.lowering;
         if (lowering) {
+          // The body of a target-lowered definition gets its OWN nested
+          // harvest scope, exactly as the JavaScript arrow form below does:
+          // the body is not part of the root tree, so without a harvest of
+          // its own nothing inside it is ever a candidate and a subexpression
+          // repeated in the body is emitted — and evaluated — once per
+          // occurrence. A shader function body is a statement position with a
+          // hoist sink, which is where the temporaries land
+          // (`CompileTarget.cseMaterialize`). The Tycho code-generation audit
+          // of 2026-09-08 measured this on the GLSL corpus: no `_fn_*` body
+          // carried a single temporary, while bodies calling the same
+          // function twice were common.
           const def = BaseCompiler.withEnforcedParams(literal, () =>
-            lowering.define({
-              id: h,
-              name,
+            BaseCompiler.withNestedCseHarvest(
+              bodyExpr,
+              bodyTarget,
               params,
-              body: bodyExpr,
-              literal,
-              target: bodyTarget,
-            })
+              () =>
+                lowering.define({
+                  id: h,
+                  name,
+                  params,
+                  body: bodyExpr,
+                  literal,
+                  target: bodyTarget,
+                })
+            )
           );
           // Wave 3 of the 2026-08-12 contradicted-declaration ruling, as a
           // BACKSTOP on what `define` was willing to emit. A lowering that
@@ -17936,6 +18283,80 @@ export class BaseCompiler {
     };
     BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
     return { params, bodyExpr, bodyTarget };
+  }
+
+  /**
+   * Record, for the body about to compile under `bodyTarget`, which of `h`'s
+   * parameters hold a run-time SCALAR because the author DECLARED them one.
+   * A call that passes such a parameter on then compiles as a direct call
+   * instead of a runtime broadcast dispatch. (The Tycho code-generation audit
+   * of 2026-09-08 measured 297 broadcast dispatches inside function bodies.)
+   *
+   * Two conditions, both necessary.
+   *
+   * The parameter's type must be DECLARED, never inferred. An inferred scalar
+   * says only how the body USES the parameter, which is no promise about the
+   * value a call passes; a declaration is the author's contract, exactly as a
+   * caller's `ce.declare('u', 'number')` is at a top-level call site (user
+   * ruling 2026-09-07). The two declaration spellings are read together: a
+   * `Typed(x, "number")` annotation on the literal, and a pinned signature on
+   * the definition (`ce.declare(h, '(number) -> number')` then assign), which
+   * the definition marks with `inferredType: false` / `inferredSignature:
+   * false`.
+   *
+   * And EVERY parameter of `h` must be scalar, so that every emitted call
+   * site of `h` is broadcast-aware: a call whose argument is not provably a
+   * scalar is dispatched element-wise or guarded by `Array.isArray`, and the
+   * body sees one element either way. A callee with a collection-typed
+   * parameter binds its arguments whole (`paramsAreScalar` is false) and
+   * emits a bare direct call, which would pass an array straight into a
+   * scalar-declared sibling parameter.
+   */
+  private static recordDeclaredScalarParams(
+    h: string,
+    literal: Expression & FunctionInterface,
+    bodyTarget: CompileTarget<Expression>
+  ): void {
+    if (bodyTarget.language !== 'javascript') return;
+    const engine = literal.engine as unknown as ComputeEngine;
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return;
+    const signature = BaseCompiler.userFunctionSignatureIsDeclared(engine, h)
+      ? BaseCompiler.userFunctionSignature(engine, h)
+      : undefined;
+    const names = new Set<string>();
+    literal.ops.slice(1).forEach((p, i) => {
+      const name = functionLiteralParameterName(p);
+      if (!name) return;
+      const declared =
+        BaseCompiler.declaredParamType(p) ??
+        BaseCompiler.signatureParamType(signature, i);
+      if (declared === undefined || declared === 'never') return;
+      if (
+        isSubtype(declared, 'number') ||
+        isSubtype(declared, 'boolean') ||
+        isSubtype(declared, 'string')
+      )
+        names.add(name);
+    });
+    recordDeclaredScalarParams(bodyTarget, names);
+  }
+
+  /**
+   * Is the signature of user-defined function `h` the author's DECLARATION
+   * rather than an inference from its body? Read from the same definition
+   * `userFunctionSignature` reads the signature itself from, so the two agree
+   * about which signature the flag describes.
+   */
+  private static userFunctionSignatureIsDeclared(
+    engine: ComputeEngine,
+    h: string
+  ): boolean {
+    const def = engine.lookupDefinition(h);
+    if (!def) return false;
+    if ('value' in def && def.value !== undefined)
+      return def.value.inferredType === false;
+    if ('operator' in def) return def.operator.inferredSignature === false;
+    return false;
   }
 
   /**
@@ -20091,7 +20512,10 @@ export class BaseCompiler {
    * Returns the bindings in DEPENDENCY order — a binding whose right-hand
    * side references an earlier binding comes after it — together with
    * `emit`'s result; `emit` receives the same list, so a caller that places
-   * the bindings inside the code it emits can do so. The caller emits them
+   * the bindings inside the code it emits can do so. Each binding carries the
+   * representative NODE it was compiled from as well as its name and code, so
+   * a target whose declarations are typed (the shader languages) can ask the
+   * node for its static type. The caller emits them
    * where its own construct declares locals, in the returned order, and must
    * emit them ALL: a binding whose name the emitted code references but
    * nothing declares is not valid source. A caller whose loop may run ZERO
@@ -20099,13 +20523,18 @@ export class BaseCompiler {
    * (an early return before them, or a first-iteration initialization): the
    * loop body never ran them, so evaluating them anyway could raise an error
    * the unhoisted code never raised.
+   *
+   * `accept` lets a caller refuse a class it could not declare — a shader
+   * local needs a static type, and a value that has none must keep emitting
+   * inline. Refusing costs the optimization and nothing else.
    */
   static hoistLoopInvariants<T>(
     expr: Expression,
     varyingNames: ReadonlyArray<string>,
     target: CompileTarget<Expression>,
-    emit: (bindings: ReadonlyArray<[name: string, code: string]>) => T
-  ): { bindings: Array<[name: string, code: string]>; result: T } {
+    emit: (bindings: ReadonlyArray<LoopInvariantBinding>) => T,
+    accept?: (node: Expression, code: string) => boolean
+  ): { bindings: Array<LoopInvariantBinding>; result: T } {
     const classes = BaseCompiler.loopInvariantHoistCandidates(
       expr,
       new Set(varyingNames),
@@ -20113,7 +20542,7 @@ export class BaseCompiler {
     );
     if (classes.length === 0) return { bindings: [], result: emit([]) };
 
-    const bindings: Array<[name: string, code: string]> = [];
+    const bindings: Array<LoopInvariantBinding> = [];
     const installed: Expression[] = [];
     try {
       for (const nodes of classes) {
@@ -20128,14 +20557,58 @@ export class BaseCompiler {
         // the candidate leaves the repetitions emitting it exactly as they did
         // before, and if their emission does reach the same lowering it raises
         // the decline itself.
+        // Compiling the representative can leave state behind that only the
+        // BINDING makes sense of: statements pushed into the target's
+        // statement-hoisting sink (`CompileTarget.hoist`, how a shader target
+        // lowers a nested loop) and an advanced temporary-name counter. When
+        // the class is then thrown away, those statements declare a value
+        // nothing reads while the occurrences compile the subtree again — and
+        // emit the same statements a second time. Snapshot both and roll them
+        // back on a discard, the way `_codeOverrides` are unwound below.
+        const naming = BaseCompiler.namingContext(target);
+        const sink = target.hoist?.stmts;
+        const sinkLength = sink?.length ?? 0;
+        const counterBefore = naming.counter;
+        const discardCompiled = (): void => {
+          if (sink !== undefined && sink.length > sinkLength)
+            sink.length = sinkLength;
+          naming.counter = counterBefore;
+        };
         let code: TargetSource;
         try {
           code = BaseCompiler.compile(nodes[0], target);
         } catch {
+          discardCompiled();
+          continue;
+        }
+        // Code that is ALREADY a bare name needs no binding of its own: the
+        // value sits in a local the enclosing emission declared (a hoisted
+        // loop's accumulator, a temporary bound above), and that local is in
+        // scope wherever this pass places its bindings. Point the occurrences
+        // straight at it instead of declaring `const t2 = t1;`. Nothing is
+        // rolled back here: the occurrences emit that very name, so the
+        // statements the compilation pushed into the sink are the ones that
+        // give the name its value and must stay — this is how a nested loop
+        // is lifted out of the loop that contains it.
+        if (/^[A-Za-z_$][\w$]*$/.test(code)) {
+          for (const node of nodes) {
+            BaseCompiler._codeOverrides.set(node, code);
+            installed.push(node);
+          }
+          continue;
+        }
+        // A caller that cannot DECLARE every value declines here — a shader
+        // local needs a static type, and a class whose value has none would
+        // leave the body referencing a name nothing declares. A declined class
+        // is simply not hoisted: its occurrences emit inline, exactly as they
+        // did before this pass ran. The compiled code is dropped whole here,
+        // so whatever it pushed into the statement sink goes with it.
+        if (accept !== undefined && !accept(nodes[0], code)) {
+          discardCompiled();
           continue;
         }
         const name = BaseCompiler.tempVar(target);
-        bindings.push([name, code]);
+        bindings.push([name, code, nodes[0]]);
         // Every node of the structural class emits as the one name: the class
         // members are distinct node objects with the same structure, and the
         // pass never descends into a lambda or a binder, so they all sit in
@@ -20327,6 +20800,48 @@ export class BaseCompiler {
 
     const seen = new Set<Expression>();
 
+    /**
+     * May a maximal invariant SCALAR application be recorded WHOLE, or does
+     * its subtree hold something one of the other rules owns?
+     *
+     * Recording a node whole compiles its right-hand side from its operands
+     * and never descends into it, so anything inside it that another rule
+     * would have handled is lost. Two things qualify, and skipping either
+     * costs more than the scalar binding saves:
+     *
+     * - A COLLECTION-valued node. The collection rules bind the collection
+     *   first and let every reduction over it read that binding; a scalar
+     *   recorded above them rebuilds the collection once per reduction
+     *   instead (`Min(L)·Max(L)` built `L` twice).
+     * - A node an ENCLOSING CSE instance has already bound. Inside the loop
+     *   it emits as that temporary, but this right-hand side is compiled
+     *   while that instance is the INNERMOST one, and `availableCseBinding`
+     *   deliberately does not look at the innermost instance (its own
+     *   candidates go through the occurrence state machine instead). So the
+     *   structure would be emitted a second time, next to the temporary that
+     *   already holds it.
+     *
+     * Answering `false` simply descends, which is what lets the collection
+     * rule and the already-bound check at the top of `visit` see the node.
+     * Memoized per node object: engine and instance state do not change while
+     * this pass runs.
+     */
+    const wholeMemo = new Map<Expression, boolean>();
+    const scalarHoistIsWhole = (node: Expression): boolean => {
+      const cached = wholeMemo.get(node);
+      if (cached !== undefined) return cached;
+      let result: boolean;
+      if (isCollectionShaped(node)) result = false;
+      else if (
+        target.cse !== undefined &&
+        BaseCompiler.availableCseBinding(target.cse, node, true) !== undefined
+      )
+        result = false;
+      else result = !isFunction(node) || node.ops.every(scalarHoistIsWhole);
+      wholeMemo.set(node, result);
+      return result;
+    };
+
     const visit = (node: Expression): void => {
       if (seen.has(node)) return;
       seen.add(node);
@@ -20415,7 +20930,7 @@ export class BaseCompiler {
       if (
         invariant &&
         target.hoistScalarInvariants === true &&
-        !node.ops.some(isCollectionShaped)
+        scalarHoistIsWhole(node)
       ) {
         record(node);
         return;

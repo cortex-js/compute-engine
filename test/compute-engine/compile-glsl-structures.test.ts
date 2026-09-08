@@ -46,12 +46,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
 
     it('should emit for-loop for large Sum range inside compileFunction', () => {
-      const expr = ce.expr([
-        'Sum',
-        ['Sin', 'i'],
-        ['Limits', 'i', 1, 1000],
-      ]);
-      const fn = glsl.compileFunction(expr, 'sumSin', 'float', [], { constantFold: false });
+      const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 1000]]);
+      const fn = glsl.compileFunction(expr, 'sumSin', 'float', [], {
+        constantFold: false,
+      });
       expect(fn).toContain('float sumSin()');
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
       expect(fn).toContain('+= sin(float(i))');
@@ -79,7 +77,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       e.parse(
         'h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)'
       ).evaluate();
-      const expr = e.parse('\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))');
+      const expr = e.parse(
+        '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
+      );
       expect(() => glsl.compile(expr)).toThrow(
         /collection-valued body.*Fail closed/s
       );
@@ -203,8 +203,15 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
 
     it('scopes a NESTED loop inside its enclosing loop body', () => {
-      // Symbolic bounds: constant bounds under the unroll limit inline.
-      const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
+      // Symbolic bounds: constant bounds under the unroll limit inline. The
+      // inner body multiplies by the OUTER index `i`, which is what makes the
+      // scoping question real — an inner sum free of `i` has one value for the
+      // whole outer loop and is now emitted once, ahead of it.
+      const inner = [
+        'Sum',
+        ['Multiply', 'i', 'j', 'x'],
+        ['Limits', 'j', 1, 'm'],
+      ];
       const outer = ['Sum', ['Multiply', 'i', inner], ['Limits', 'i', 1, 'n']];
       const code = glsl.compile(ce.box(outer as any)).code;
       const outerAt = code.indexOf('for (int i =');
@@ -228,7 +235,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {
-      const fn = glsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', [], { constantFold: false });
+      const fn = glsl.compileFunction(ce.box(bigSum), 'sumSin', 'float', [], {
+        constantFold: false,
+      });
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
       expect(fn).toContain('sin(float(i))');
     });
@@ -236,7 +245,13 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('scopes a nested loop inside an UNROLLED outer term', () => {
       // The outer bounds are constant and small, so it unrolls; each term's
       // hoisted loop must still be emitted (once per term) ahead of the value.
-      const inner = ['Sum', ['Multiply', 'j', 'x'], ['Limits', 'j', 1, 'm']];
+      // The inner body mentions the outer index `i`, so the two terms have
+      // different inner sums — an `i`-free inner sum is emitted once for both.
+      const inner = [
+        'Sum',
+        ['Multiply', 'i', 'j', 'x'],
+        ['Limits', 'j', 1, 'm'],
+      ];
       const outer = ['Sum', ['Multiply', 'i', inner], ['Limits', 'i', 1, 2]];
       const code = glsl.compile(ce.box(outer as any)).code;
       expect(code.match(/for \(int j =/g)?.length).toBe(2);
@@ -287,15 +302,16 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       });
 
       it('names the impure-temporary cause too, not just a loop', () => {
-        // The same escape detector now fires for a hoisted impure temporary
-        // (`Round(Random())` binds its operand to a `_tv`), so the message
-        // must not blame a loop-form Sum/Product exclusively.
+        // The same escape detector fires for a hoisted impure temporary —
+        // `Coth` splices its operand twice and so binds an impure one to a
+        // `_tv` — so the message must not blame a loop-form Sum/Product
+        // exclusively.
         expect(() =>
           glsl.compile(
             ce.box([
               'WithRandomSeed',
               7,
-              ['Which', ['Less', 'x', 1], ['Round', ['Random']], 'True', 2],
+              ['Which', ['Less', 'x', 1], ['Coth', ['Random']], 'True', 2],
             ] as any)
           )
         ).toThrow(/or an impure operand bound to a hoisted temporary/);
@@ -354,11 +370,12 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       });
     }
     it('rejects a reserved word used as a Sum index', () => {
-      expect(() =>
-        glsl.compile(
-          ce.box(['Sum', 'sample', ['Tuple', 'sample', 1, 1000]]),
-          NO_FOLD
-        ).code
+      expect(
+        () =>
+          glsl.compile(
+            ce.box(['Sum', 'sample', ['Tuple', 'sample', 1, 1000]]),
+            NO_FOLD
+          ).code
       ).toThrow(/reserved word/);
     });
     it('still accepts a non-reserved variable', () => {
@@ -726,7 +743,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `mod(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y))), 1.0)`
+      `fract(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y))))`
     );
   });
 
@@ -738,31 +755,27 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `mod(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0), 1.0)`
+      `fract(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0))`
     );
   });
 
   it('compiles a comparison over a wide-typed operand (leak 2)', () => {
     const expr = e.box([
       'Mod',
-      [
-        'Which',
-        ['Less', ['Multiply', 2, radical], 0],
-        'x',
-        'True',
-        'y',
-      ],
+      ['Which', ['Less', ['Multiply', 2, radical], 0], 'x', 'True', 'y'],
       1,
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `mod(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y))), 1.0)`
+      `fract(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y))))`
     );
   });
 
   it('still fails closed on a provably complex operand', () => {
-    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)).toThrow(
-      /real-only target helper "mod" cannot represent a complex-valued argument/
+    expect(() =>
+      glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
+    ).toThrow(
+      /Mod: the target's lowering for this head is real-only/
     );
     // `Mod` declares the finite real carrier (Contract B), so a non-real
     // LITERAL operand is already an `incompatible-type` error at boxing and
@@ -777,7 +790,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
     ).toThrow(
-      /real-only target helper "mod" cannot represent a complex-valued argument/
+      /Mod: the target's lowering for this head is real-only/
     );
   });
 });
@@ -794,13 +807,13 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
 
   it('compiles Mod over Imaginary/Real/Argument of a complex symbol', () => {
     expect(glsl.compile(e.box(['Mod', ['Imaginary', 'z'], 1])).code).toBe(
-      'mod((z).y, 1.0)'
+      'fract((z).y)'
     );
     expect(glsl.compile(e.box(['Mod', ['Real', 'z'], 1])).code).toBe(
-      'mod((z).x, 1.0)'
+      'fract((z).x)'
     );
     expect(glsl.compile(e.box(['Mod', ['Argument', 'z'], 1])).code).toBe(
-      'mod(atan(z.y, z.x), 1.0)'
+      'fract(atan(z.y, z.x))'
     );
   });
 
@@ -812,30 +825,32 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
 
   it('still compiles Mod over Abs (the head that already worked)', () => {
     expect(glsl.compile(e.box(['Mod', ['Abs', 'z'], 1])).code).toBe(
-      'mod(length(z), 1.0)'
+      'fract(length(z))'
     );
   });
 
   it('survives enclosing arithmetic (the propagating-heads path)', () => {
     expect(
       glsl.compile(e.box(['Mod', ['Multiply', 2, ['Imaginary', 'z']], 1])).code
-    ).toBe('mod(2.0 * (z).y, 1.0)');
+    ).toBe('fract(2.0 * (z).y)');
   });
 
   it('still fails closed on a genuinely complex-shaped operand', () => {
     // `Conjugate` is complex → complex (it emits a `vec2`), so it is
     // deliberately NOT a real-by-definition head.
     expect(() => glsl.compile(e.box(['Mod', ['Conjugate', 'z'], 1]))).toThrow(
-      /real-only target helper "mod" cannot represent a complex-valued argument/
+      /Mod: the target's lowering for this head is real-only/
     );
     // The item-144 pins are unchanged.
-    expect(() => glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)).toThrow(
-      /real-only target helper "mod" cannot represent a complex-valued argument/
+    expect(() =>
+      glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
+    ).toThrow(
+      /Mod: the target's lowering for this head is real-only/
     );
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
     ).toThrow(
-      /real-only target helper "mod" cannot represent a complex-valued argument/
+      /Mod: the target's lowering for this head is real-only/
     );
   });
 });

@@ -64,16 +64,21 @@ cen.declare('k', 'integer');
  *  `Round` lowering uses have exact `Math` counterparts. */
 function evalShader(code: string): number {
   const js = code.replace(/\b(sign|floor|abs)\(/g, 'Math.$1(');
+  // `_gpu_round` is a preamble helper, so the evaluated source has to be
+  // given a definition for it. It mirrors the emitted GLSL body, which is
+  // `GPU_ROUND_PREAMBLE_GLSL` in `gpu-target.ts`: round half AWAY from zero.
+  const round = (x: number) => Math.sign(x) * Math.floor(Math.abs(x) + 0.5);
   // eslint-disable-next-line no-new-func
-  return Function(`"use strict"; return (${js});`)() as number;
+  return Function(
+    '_gpu_round',
+    `"use strict"; return (${js});`
+  )(round) as number;
 }
 
 describe('GPU ARITY — `Round(x, n)` rounds to `n` decimal places', () => {
   it('lowers the two-operand form to a value matching the interpreter', () => {
     const code = g(['Round', 3.14159, 2]);
-    expect(code).toBe(
-      '((sign((3.14159 * 100.0)) * floor(abs((3.14159 * 100.0)) + 0.5)) / 100.0)'
-    );
+    expect(code).toBe('(_gpu_round((3.14159 * 100.0)) / 100.0)');
     // The emitted source, EVALUATED — not merely inspected. Before the fix it
     // computed 3, where the interpreter answers 157/50.
     expect(evalShader(code)).toBeCloseTo(
@@ -101,16 +106,21 @@ describe('GPU ARITY — `Round(x, n)` rounds to `n` decimal places', () => {
   });
 
   it('the unary form is unchanged', () => {
-    expect(g(['Round', 3.14159])).toBe(
-      '(sign(3.14159) * floor(abs(3.14159) + 0.5))'
-    );
-    expect(w(['Round', 'x'], cen)).toBe('(sign(x) * floor(abs(x) + 0.5))');
-    // An integer-valued operand still short-circuits.
-    expect(g(['Round', ['Multiply', 2, 'k']], cen)).toBe('2.0 * k');
+    expect(g(['Round', 3.14159])).toBe('_gpu_round(3.14159)');
+    expect(w(['Round', 'x'], cen)).toBe('_gpu_round(x)');
+    // An integer-valued operand still short-circuits. The lowering is then the
+    // OPERAND's own code, with no call wrapped around it, so an operand with
+    // an infix head is parenthesized: the shared compiler splices a head's
+    // emission into its parent without parentheses (a head normally emits a
+    // call), and an enclosing `3 * …` would otherwise capture only the last
+    // term. Here the emission is the whole expression, so the pair is merely
+    // redundant.
+    expect(g(['Round', ['Multiply', 2, 'k']], cen)).toBe('(2.0 * k)');
   });
 
   it('an integer-valued operand short-circuits only for `n >= 0`', () => {
-    expect(g(['Round', ['Multiply', 2, 'k'], 2], cen)).toBe('2.0 * k');
+    // Parenthesized for the reason given above.
+    expect(g(['Round', ['Multiply', 2, 'k'], 2], cen)).toBe('(2.0 * k)');
     expect(g(['Round', ['Multiply', 2, 'k'], -2], cen)).toContain('* 0.01');
   });
 

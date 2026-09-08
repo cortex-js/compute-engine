@@ -4452,7 +4452,7 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
     const r = compile(engineWithA(true).box(['a', 'u']));
     expect(r?.success).toBe(true);
     expect(r!.code).toBe(
-      '((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn((_tv2) => _fn_a(_tv2), _tv1) : _fn_a(_tv1))(_.u)'
+      '((_tv1) => Array.isArray(_tv1) ? _SYS.bcastFn(_fn_a, _tv1) : _fn_a(_tv1))(_.u)'
     );
     expect(r!.run!({ u: 3 })).toBeCloseTo(EXPECTED, 12);
   });

@@ -10,7 +10,9 @@
  *    on this target (it bakes a zero-width point), so the fold here evaluates
  *    the emitted CODE with the interval library at compile time
  *    (`foldConstantIntervalCode`) and re-emits the enclosure as a literal of
- *    the same shape — bit-for-bit what the run-time evaluation returned.
+ *    the same shape. Each endpoint the fold cannot prove exact is moved one
+ *    ulp outward first, so the baked literal contains the real value where
+ *    the run-time library's round-to-nearest answer may not.
  * 2. No common-subexpression elimination inside an unrolled term: the Sum
  *    body compiled outside its CSE region.
  * 3. No loop-invariant hoisting: the x-only `√(X² + 0.81)` was recomputed in
@@ -49,6 +51,38 @@ function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
+/**
+ * The folded result ENCLOSES the structurally computed one, and is no more
+ * than a few ulps wider.
+ *
+ * The two are not identical, and must not be: the fold evaluates the
+ * emitted code through a wrapper that moves every endpoint it cannot prove
+ * exact one ulp outward, so the literal it bakes CONTAINS the real value.
+ * The run-time library rounds to nearest instead, so the enclosure it
+ * computes for an irrational — `ln(2)`, `√(2π)` — can exclude the very
+ * value it claims to bound. See `compile-interval-constant-enclosure.test.ts`
+ * for the soundness properties this widening buys.
+ */
+function expectEncloses(folded: unknown, reference: unknown): void {
+  const boundOf = (v: unknown): { lo: number; hi: number } => {
+    const r = v as {
+      value?: { lo: number; hi: number };
+      lo: number;
+      hi: number;
+    };
+    return r.value ?? r;
+  };
+  expect((folded as { kind?: string }).kind).toEqual(
+    (reference as { kind?: string }).kind
+  );
+  const f = boundOf(folded);
+  const s = boundOf(reference);
+  expect(f.lo).toBeLessThanOrEqual(s.lo);
+  expect(f.hi).toBeGreaterThanOrEqual(s.hi);
+  const scale = Math.max(1, Math.abs(s.lo), Math.abs(s.hi));
+  expect(f.hi - f.lo - (s.hi - s.lo)).toBeLessThan(scale * 1e-12);
+}
+
 describe('Tycho item 269: sound constant folding on the interval target', () => {
   test('a closed constant subtree folds to the literal its code evaluates to', () => {
     const r = compileInterval('\\ln(2) x');
@@ -64,11 +98,11 @@ describe('Tycho item 269: sound constant folding on the interval target', () => 
       { lo: 0.25, hi: 0.3 },
       { lo: 2, hi: 2 },
     ]) {
-      expect(r.run({ x })).toEqual(structural.run({ x }));
+      expectEncloses(r.run({ x }), structural.run({ x }));
     }
   });
 
-  test('the fold is bit-for-bit the run-time enclosure, not a .N() point', () => {
+  test('the fold encloses the run-time enclosure, and is not a .N() point', () => {
     // `arccos(0.5)` and `1 - 0.6(1 - √(1 - 0.25))` are exact-argument
     // transcendentals: the `.N()` fold would emit one double as a point, this
     // fold emits whatever enclosure the interval routine computes.
@@ -86,7 +120,7 @@ describe('Tycho item 269: sound constant folding on the interval target', () => 
         { lo: 0, hi: 0.001 },
         { lo: 7, hi: 7 },
       ]) {
-        expect(folded.run({ x })).toEqual(structural.run({ x }));
+        expectEncloses(folded.run({ x }), structural.run({ x }));
       }
     }
   });
@@ -99,7 +133,7 @@ describe('Tycho item 269: sound constant folding on the interval target', () => 
     expect(count(r.code, '_IA.mul(')).toBe(1);
     const structural = compileStructural('\\frac{\\pi (x + 5)}{10}');
     const x = { lo: 1, hi: 1.5 };
-    expect(r.run({ x })).toEqual(structural.run({ x }));
+    expectEncloses(r.run({ x }), structural.run({ x }));
   });
 
   test('a CSE temporary bound to a constant is folded too', () => {
@@ -206,10 +240,16 @@ describe('Tycho item 269: CSE and loop-invariant hoisting in an interval Sum', (
     expect(count(r.code, '_IA.cos(')).toBeLessThanOrEqual(2);
     expect(count(structural.code, '_IA.cos(')).toBe(80);
     expect(count(r.code, '_IA.acos(')).toBe(40);
-    expect(r.code.length).toBeLessThan(structural.code.length / 2);
+    // Counted in interval OPERATIONS, not in characters: a folded literal
+    // spells two 17-digit endpoints where the call it replaces spelled one
+    // short constant, so the folded source can be longer than the code it
+    // replaced while doing a fraction of the work.
+    expect(count(r.code, '_IA.')).toBeLessThan(
+      count(structural.code, '_IA.') / 2
+    );
     for (const lo of [-5, -2.3, 0, 1.7, 4.9]) {
       const x = { lo, hi: lo + 0.001 };
-      expect(r.run({ x })).toEqual(structural.run({ x }));
+      expectEncloses(r.run({ x }), structural.run({ x }));
     }
   });
 
@@ -227,7 +267,10 @@ describe('Tycho item 269: CSE and loop-invariant hoisting in an interval Sum', (
     const latex = '\\sum_{n=1}^{m} \\frac{\\sqrt{x+1}}{n^2}';
     const r = compileInterval(latex);
     expect(r.code).toMatch(
-      /if \(!\(_lower <= _upper\)\) return _IA\.point\(0\); const _tv\d+ = _IA\.sqrt\(/
+      // The zero the empty range answers is a constant interval, so it may
+      // read a hoisted preamble local (`_k1`) instead of building the point
+      // at the site.
+      /if \(!\(_lower <= _upper\)\) return (?:_IA\.point\(0\)|_k\d+); const _tv\d+ = _IA\.sqrt\(/
     );
     // Empty range: the identity, whatever `x` is (the radical of a negative
     // `x + 1` is never evaluated).

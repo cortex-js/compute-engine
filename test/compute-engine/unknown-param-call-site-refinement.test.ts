@@ -382,7 +382,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
       ['Multiply', 1e5, ['Sqrt', ['Subtract', 'x', 1]]],
       1,
     ]);
-    const expected = 'mod(100000.0 * sqrt(x + -1.0), 1.0)';
+    const expected = 'fract(100000.0 * sqrt(x + -1.0))';
 
     const plain = ce._getCompilationTarget('glsl')!.createTarget();
     expect(compile(expr, { target: plain }).code).toBe(expected);

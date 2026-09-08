@@ -467,9 +467,9 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
     });
 
     it('Round is half-away-from-zero', () => {
-      expect(glsl.compile(ce.expr(['Round', 'x'])).code).toBe(
-        '(sign(x) * floor(abs(x) + 0.5))'
-      );
+      // The rule lives in the `_gpu_round` preamble helper, which writes its
+      // operand once where the inline expression wrote it twice.
+      expect(glsl.compile(ce.expr(['Round', 'x'])).code).toBe('_gpu_round(x)');
     });
 
     it('odd root of a negative constant folds to the real value', () => {

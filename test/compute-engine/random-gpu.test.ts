@@ -639,8 +639,15 @@ describe('end-to-end emission (drift guard)', () => {
       ce.box(['Add', ['Random', ['Interval', 0, 1]], ['Random']])
     );
     const r = glsl.compile(expr, NO_FOLD);
+    // `WithRandomSeed` emits its BODY's code — the frame exists only as the
+    // counter the enclosed draws consume — so the body is parenthesized: the
+    // shared compiler splices a head's emission into its parent without
+    // parentheses of its own (a head normally emits a call, which binds
+    // tighter than every infix operator), and an enclosing `3 * …` would
+    // otherwise capture only the last term of this sum. The body is the whole
+    // emission here, so the outer pair is redundant rather than load-bearing.
     expect(r.code).toMatchInlineSnapshot(
-      `"_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) + (0.0 + _gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) * 1.0)"`
+      `"(_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) + (0.0 + _gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0) * 1.0))"`
     );
     expect(r.preamble).toMatchInlineSnapshot(`
 "

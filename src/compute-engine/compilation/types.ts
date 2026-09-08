@@ -362,6 +362,36 @@ export interface CompileTarget<Expr = unknown> {
   /** Format numeric literals for the target language */
   number: (n: number) => string;
 
+  /**
+   * Format a numeric literal whose EXACT value is not a double, given the
+   * nearest double to it.
+   *
+   * Called instead of `number()` for a literal that the engine holds
+   * exactly but that no double represents: a rational whose reduced
+   * denominator is not a power of two (`1/49`, `1/3`), a radical (`√2`), or
+   * an integer past the reach of the 53-bit significand. For every other
+   * literal — an integer, a dyadic rational such as `0.5` or `3/8`, and any
+   * machine float the user typed — the double IS the value and `number()`
+   * is called as before.
+   *
+   * A target defines this only when the difference matters to it. The
+   * interval target does: it must emit an ENCLOSURE of the true value, and
+   * a degenerate point at the nearest double excludes the constant the
+   * caller asked about. Every other target computes in doubles anyway, so
+   * leaving this unset keeps the single `number()` spelling.
+   *
+   * `roundings` is how many double roundings stand between the exact value
+   * and `n`, so a target that widens knows how far it must go: one ulp per
+   * rounding bounds the distance. It is 1 for the literals the engine
+   * converts in a single step — `1/49`, `√2`, an integer past the
+   * significand — and more when `NumericValue.re` composed several
+   * operations: it converts the numerator and the denominator to doubles
+   * SEPARATELY, divides, and multiplies by a square root, so a rational whose
+   * parts do not convert exactly is three roundings and can be more than two
+   * ulps from its exact value. See `exactValueDoubleRoundings`.
+   */
+  inexactNumber?: (n: number, roundings: number) => string;
+
   /** Format a complex numeric literal for the target language.
    *  Only called when the imaginary part is non-zero. */
   complex?: (re: number, im: number) => string;
@@ -764,13 +794,13 @@ export interface CompileTarget<Expr = unknown> {
    * SCALAR application too, not only the collection-valued nodes and the
    * reductions over them that every target hoists. A scalar subexpression
    * of the body that mentions no index (`√(x²+c)` in a ring sum over `n`)
-   * is then computed once per call instead of once per term. Set by the
-   * interval target, where each interval operation allocates and the
-   * unrolled terms of a fixed-N sum repeat such a subexpression N times
-   * (Tycho item 269). Off on the JavaScript target, whose codegen for
-   * unrolled sums is pinned by snapshots and whose scalar operations are
-   * cheap enough that the per-term recomputation was never measured as a
-   * cost.
+   * is then computed once per call instead of once per term. Set by every
+   * target that can declare a local where the bindings belong: the interval
+   * target, where each interval operation allocates; the JavaScript target,
+   * whose loop otherwise re-evaluates the invariant once per iteration; and
+   * the shader targets, whose loop runs per fragment. The Python target does
+   * not set it — its unrolled sum is a single generator expression with no
+   * statement position ahead of the terms.
    */
   hoistScalarInvariants?: boolean;
 
@@ -1250,6 +1280,17 @@ export interface CompileTarget<Expr = unknown> {
      * `BaseCompiler.emitFunctionLiteralDefinition`.
      */
     complexShaped?: Set<string>;
+    /**
+     * Whether the body of user function `id` yields a single scalar when
+     * every parameter holds a scalar — the memo of the result-shape oracle in
+     * `javascript-value-facts.ts`. The answer depends on the callee's own
+     * function literal alone, never on the arguments of any one call site, so
+     * it is computed once per compilation. A call of a function recorded
+     * `true`, with constructed-scalar arguments, is itself a constructed
+     * scalar: the arithmetic around it compiles as ordinary scalar code
+     * instead of dispatching through the runtime broadcast.
+     */
+    scalarShaped?: Map<string, boolean>;
     /** Symbols proven (this compile) NOT to name a user-defined function, so a
      * repeated bare free symbol in value position doesn't re-hit
      * `lookupDefinition` on every occurrence. Populated lazily. */

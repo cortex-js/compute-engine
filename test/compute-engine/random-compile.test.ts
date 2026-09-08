@@ -717,7 +717,9 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   // --- GPU: Round, Root, Variance, Argument, Conjugate --------------------
 
-  test('GLSL: Round hoists an impure operand (both forms)', () => {
+  // `Round` writes its operand ONCE, inside the `_gpu_round` helper call, so
+  // an impure operand needs no hoisted temporary to be drawn a single time.
+  test('GLSL: Round draws an impure operand once (both forms)', () => {
     expect(gpuDraws(['Round', ['Random']])).toBe(1);
     expect(gpuDraws(['Round', ['Random'], 2])).toBe(1);
   });
@@ -780,9 +782,9 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   });
 
   test('GPU: pure operands keep the direct emission (byte-identical pins)', () => {
-    expect(gpuCode(['Round', 'x'])).toBe('(sign(x) * floor(abs(x) + 0.5))');
+    expect(gpuCode(['Round', 'x'])).toBe('_gpu_round(x)');
     expect(gpuCode(['Round', 'x', 2])).toBe(
-      '((sign((x * 100.0)) * floor(abs((x * 100.0)) + 0.5)) / 100.0)'
+      '(_gpu_round((x * 100.0)) / 100.0)'
     );
     expect(gpuCode(['Root', 'x', 3])).toBe(
       '(sign(x) * pow(abs(x), 0.3333333333333333))'
@@ -792,7 +794,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
         '(y - ((x + y) / 2.0)) * (y - ((x + y) / 2.0))) / 1.0)'
     );
     expect(gpuCode(['Argument', ['Complex', 'x', 'y']])).toBe(
-      'atan(vec2(x, y).y, vec2(x, y).x)'
+      'atan(y, x)'
     );
     expect(gpuCode(['Conjugate', ['Complex', 'x', 'y']])).toBe(
       'vec2(vec2(x, y).x, -vec2(x, y).y)'

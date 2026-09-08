@@ -97,8 +97,15 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
       to: 'interval-js',
     });
     expect(r.success).toBe(true);
-    // 0.64² + 0.77² = 1.0025, the interpreter's value.
-    expect(pointOf(r.run({}))).toBeCloseTo(1.0025, 12);
+    // 0.64² + 0.77² = 1.0025, the interpreter's value. The compile-time
+    // fold widens each endpoint it cannot prove exact by one ulp (neither
+    // square is exact in binary), so the answer is a narrow enclosure of
+    // that value rather than a point.
+    const v: any = r.run({});
+    const iv = v.value ?? v;
+    expect(iv.lo).toBeLessThanOrEqual(1.0025);
+    expect(iv.hi).toBeGreaterThanOrEqual(1.0025);
+    expect(iv.hi - iv.lo).toBeLessThan(1e-12);
   });
 
   test('index-less Sum over Map(fn, Range) — the Range-as-collection form', () => {

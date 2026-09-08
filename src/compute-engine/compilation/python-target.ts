@@ -938,6 +938,37 @@ const PYTHON_OPERATORS: CompiledOperators = {
   Not: ['not', 14], // Unary operator
 };
 
+/**
+ * Compile an operand whose code IS the whole lowering of its parent head — an
+ * IDENTITY passthrough, such as `Identity(x)` or a one-operand `Max`.
+ *
+ * The shared compiler splices the emission of a function head into its parent
+ * WITHOUT parentheses of its own, because a head normally emits a CALL, and a
+ * call binds tighter than every Python operator. An identity lowering breaks
+ * that assumption: it hands the parent the OPERAND's code, so when the operand
+ * is itself an infix or prefix expression the parent's operator regroups it.
+ * `2·Identity(x + 1)` emitted `2 * x + 1`, which is `2x + 1`, and
+ * `Identity(-x)^2` would emit `-x ** 2`, which is `-(x²)`.
+ *
+ * The operand is therefore parenthesized whenever its head has an operator
+ * spelling on this target, and also whenever its code opens with a sign. A
+ * NEGATIVE number literal is not a primary in Python: `**` binds tighter than
+ * unary minus, so an unparenthesized `-2` under a power emits `-2 ** 2`, which
+ * is −4. A symbol, a non-negative number literal or a call is a primary
+ * already and stays bare, so those emissions are unchanged.
+ */
+function pyIdentityPassthrough(
+  x: Expression,
+  code: string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const trimmed = code.trim();
+  if (trimmed.startsWith('-') || trimmed.startsWith('+')) return `(${code})`;
+  if (!isFunction(x)) return code;
+  const op = target?.operators?.(x.operator) ?? PYTHON_OPERATORS[x.operator];
+  return op === undefined ? code : `(${code})`;
+}
+
 /** Whether an operand compiles to a NumPy array at run time — a concrete
  * collection or a statically list/collection-typed value. Mirrors the JS
  * target's `isIndexedCollectionOperand`. */
@@ -1458,12 +1489,19 @@ function compilePythonExtremum(
   reduce: 'np.max' | 'np.min',
   pairwise: 'np.maximum' | 'np.minimum',
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression> | undefined
 ): string {
   const parts = args.map((a) =>
     isPyCollectionOperand(a) ? `${reduce}(${compile(a)})` : compile(a)
   );
   if (parts.length === 0) return reduce === 'np.max' ? '-np.inf' : 'np.inf';
+  // ONE scalar operand emits no call at all — the lowering is the operand's
+  // own code — so it is parenthesized on the identity-passthrough rule (see
+  // `pyIdentityPassthrough`): `2·max(x + 1)` emitted `2 * x + 1`, which is
+  // `2x + 1`. A collection operand already carries its `np.max(…)` call.
+  if (parts.length === 1 && !isPyCollectionOperand(args[0]))
+    return pyIdentityPassthrough(args[0], parts[0], target);
   let result = parts[0];
   for (let i = 1; i < parts.length; i++)
     result = `${pairwise}(${result}, ${parts[i]})`;
@@ -2349,10 +2387,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // to a single value. `np.maximum`/`np.minimum` are element-wise and strictly
   // binary, so a bare mapping mis-handled a collection operand (element-wise
   // instead of reduced) and errored on 1 or 3+ arguments.
-  Min: (args, compile) =>
-    compilePythonExtremum('np.min', 'np.minimum', args, compile),
-  Max: (args, compile) =>
-    compilePythonExtremum('np.max', 'np.maximum', args, compile),
+  Min: (args, compile, target) =>
+    compilePythonExtremum('np.min', 'np.minimum', args, compile, target),
+  Max: (args, compile, target) =>
+    compilePythonExtremum('np.max', 'np.maximum', args, compile, target),
   // Element-wise max/min and clamp, matching the interpreter's broadcasting.
   //
   // When every operand is a scalar (statically), a length mismatch is
@@ -3293,9 +3331,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     requirePrimitiveElements('Element', args[1]);
     return `(${compile(args[0])} in ${pyCollArg('Element', args[1], compile)})`;
   },
-  Identity: (args, compile) => {
+  Identity: (args, compile, target) => {
     if (args[0] == null) throw new Error('Identity: missing argument');
-    return compile(args[0]);
+    return pyIdentityPassthrough(args[0], compile(args[0]), target);
   },
   Apply: (args, compile) => {
     if (args[0] == null) throw new Error('Apply: missing function');

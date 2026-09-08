@@ -9,6 +9,7 @@ import {
   type GPUShapeRules,
 } from './gpu-target.js';
 import { BaseCompiler } from './base-compiler.js';
+import { tryGetConstant } from './constant-folding.js';
 
 /**
  * WGSL-specific function overrides.
@@ -50,6 +51,21 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
 
   Mod: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Mod: missing argument');
+    // A divisor of exactly one is the fractional part: WGSL defines `fract(x)`
+    // as `x - floor(x)`, which is the floored convention the interpreter's
+    // `Mod` uses, so the two agree for a negative dividend as well
+    // (`fract(-0.25)` is 0.75). It replaces the three splices of the divisor
+    // below with one instruction, and it needs no impurity guard: the
+    // dividend is emitted once.
+    //
+    // A SCALAR dividend only: `fract` takes one argument, and the operand-
+    // shape gate reads the emitted call against the head's operands, so a
+    // `vecN` dividend beside the scalar divisor would be judged a genType
+    // mismatch on the one-argument call and decline. The vector form keeps
+    // the `%` expression below, whose mixed scalar/vector arithmetic WGSL
+    // defines.
+    if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
+      return `fract(${compile(a)})`;
     // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
     // the interpreter's `Mod` is *floored* (sign of the divisor, D1). Convert
     // truncated → floored with `((a % b) + b) % b`, matching the JS target.

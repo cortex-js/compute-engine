@@ -129,8 +129,10 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     expect(g(['Arctan2', V3, W3])).toBe(
       'atan(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
+    // WGSL has no two-argument `atan`; its two-argument arc tangent is
+    // `atan2`, which is declared over the same genType.
     expect(w(['Arctan2', V3, W3])).toBe(
-      'atan(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0))'
+      'atan2(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0))'
     );
     expect(g(['Power', V3, W3])).toBe(
       'pow(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'

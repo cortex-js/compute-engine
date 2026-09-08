@@ -33,9 +33,11 @@ import { collectionElementType } from '../../common/type/utils.js';
 import {
   BaseCompiler,
   compilationType,
+  exactRationalDivisor,
   isProvablyStringOperand,
   pointHasBroadcastComponent,
 } from './base-compiler.js';
+import type { LoopInvariantBinding } from './base-compiler.js';
 import {
   couldBeIndexedCollectionOperand,
   couldBeStringOperand,
@@ -61,12 +63,18 @@ import type {
 import { compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { IntervalArithmetic } from '../interval/index.js';
-import type { Interval } from '../interval/types.js';
+import type { Interval, IntervalResult } from '../interval/types.js';
+import { nextDown, nextUp } from '../numerics/numeric.js';
+import { exactSum, prodExact } from '../numerics/interval-arithmetic.js';
 import {
   INTERVAL_QUADRATURE_BUDGET,
   INTERVAL_QUADRATURE_SUBDIVISIONS,
 } from '../interval/integrate.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import {
+  callerSpliceSources,
+  preservesMappedSplices,
+} from './constant-folding.js';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.
@@ -460,10 +468,28 @@ function guardedIntervalFunction(
   return wrapped;
 }
 
+/**
+ * The inlined spelling of a mathematical constant this target emits.
+ *
+ * An IRRATIONAL constant has no double, so it is spelled as the two-ulp
+ * enclosure of its value (`intervalEnclosureLiteral`) rather than as a
+ * point: a degenerate `{ lo: 3.141592653589793, hi: 3.141592653589793 }`
+ * for `π` does NOT contain `π`, and this target exists to answer with
+ * intervals a caller can trust — a plotter uses one to PROVE that a curve
+ * misses a cell. The two constants a double holds exactly (`Half`,
+ * `MachineEpsilon`) stay points, as does every number literal a double
+ * holds (`number` below).
+ *
+ * The enclosure is computed here, once per process, from the same double
+ * the point spelling used. `GoldenRatio` keeps its arithmetic spelling
+ * `(1 + √5) / 2` as the value to enclose; each of the five enclosures is
+ * pinned against a 40-digit value of its constant in
+ * `test/compute-engine/compile-interval-constant-enclosure.test.ts`.
+ */
 const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
   __proto__: null as never,
-  Pi: '_IA.point(Math.PI)',
-  ExponentialE: '_IA.point(Math.E)',
+  Pi: intervalEnclosureLiteral(Math.PI),
+  ExponentialE: intervalEnclosureLiteral(Math.E),
   // The boolean literals are constants, not free symbols: without them a bare
   // `True` compiled to a dangling `_.True` vars-object lookup that throws at
   // run time. This target's boolean domain is `BoolInterval`
@@ -475,9 +501,9 @@ const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
   ImaginaryUnit: '{ lo: NaN, hi: NaN }',
   Half: '_IA.point(0.5)',
   MachineEpsilon: '_IA.point(Number.EPSILON)',
-  GoldenRatio: '_IA.point((1 + Math.sqrt(5)) / 2)',
-  CatalanConstant: '_IA.point(0.91596559417721901)',
-  EulerGamma: '_IA.point(0.57721566490153286)',
+  GoldenRatio: intervalEnclosureLiteral((1 + Math.sqrt(5)) / 2),
+  CatalanConstant: intervalEnclosureLiteral(0.91596559417721901),
+  EulerGamma: intervalEnclosureLiteral(0.57721566490153286),
 };
 
 /**
@@ -513,6 +539,45 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Multiply: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(1)';
     if (args.length === 1) return compile(args[0]);
+    // A product with an exact rational factor `p/q` becomes a DIVISION by
+    // the integer `q` — see `exactRationalDivisor` for why multiplying by
+    // the rounded reciprocal misses at exact multiples of `q`. The division
+    // comes FIRST and the numerator `p` multiplies the quotient afterwards:
+    // the product `p * x` overflows to infinity for a large `x` where the
+    // quotient does not. At `x = k·q` the quotient is still exactly `k`, and
+    // `k * p` is exact for safe integers, so the reason for the rewrite
+    // survives the reordering.
+    const ratIndex = args.findIndex(
+      (arg) => exactRationalDivisor(arg) !== undefined
+    );
+    const rat = ratIndex < 0 ? undefined : exactRationalDivisor(args[ratIndex]);
+    if (rat !== undefined) {
+      const codes = args
+        .filter((_, i) => i !== ratIndex)
+        .map((arg) => compile(arg));
+      // A factor of exactly one is the multiplicative identity for every
+      // IEEE value, so it is dropped rather than compiled into a run-time
+      // `_IA.mul` call. It appears when a `Sum` unroll substitutes the index
+      // value 1 into the body. Keep it when it is the only factor left.
+      const unitFree = codes.filter((code) => code !== '_IA.point(1)');
+      const rest = unitFree.length > 0 ? unitFree : codes;
+      // The seed, the quotient and the numerator factor all go through the
+      // fold as well as each chain step: without the rational factor in front
+      // of it, a leading constant such as the enclosure literal that `Pi`
+      // emits in `pi (x + 5) / 10` has no pair to fold with, and a product of
+      // constants alone folds only once the division closes over it.
+      let numerator = foldChainStep(rest[0], target, true);
+      if (rat.p === -1) numerator = `_IA.negate(${numerator})`;
+      for (let i = 1; i < rest.length; i++) {
+        numerator = foldChainStep(`_IA.mul(${numerator}, ${rest[i]})`, target);
+      }
+      const quotient = foldChainStep(
+        `_IA.div(${numerator}, _IA.point(${rat.q}))`,
+        target
+      );
+      if (rat.p === 1 || rat.p === -1) return quotient;
+      return foldChainStep(`_IA.mul(${quotient}, _IA.point(${rat.p}))`, target);
+    }
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
       result = foldChainStep(`_IA.mul(${result}, ${compile(args[i])})`, target);
@@ -1425,7 +1490,7 @@ function compileIntervalSumProduct(
   // under the ENCLOSING target and emits the terms against the temporary;
   // the bindings are placed by the two arms below.
   const hoistedPrelude = (
-    bindings: ReadonlyArray<[name: string, code: string]>
+    bindings: ReadonlyArray<LoopInvariantBinding>
   ): string =>
     bindings.map(([name, code]) => `const ${name} = ${code}; `).join('');
 
@@ -1855,6 +1920,11 @@ const FOLDABLE_INTERVAL_RESIDUE = /^[\s\d.,(){}:+\-*/eE]*$/;
 const FOLDABLE_MATH_MEMBERS =
   /Math\.(?:PI|E|LN2|LN10|LOG2E|LOG10E|SQRT2|SQRT1_2|sqrt)\b/g;
 
+/** A whole `_IA.point(…)` call over a plain numeric literal — the spelling
+ * that a fold would only make longer. */
+const NUMERIC_POINT_CODE =
+  /^_IA\.point\(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\)$/;
+
 /** Memo of `foldConstantIntervalCode` by code string: the same constant
  * subtree recurs across the unrolled terms of a sum (`0.1·π`), and a fold
  * costs one `Function` construction. `null` records a decline. */
@@ -1867,16 +1937,432 @@ function intervalEndpointLiteral(n: number): string {
   return Object.is(n, -0) ? '-0' : String(n);
 }
 
+/** The JavaScript spelling of the interval `[lo, hi]`. */
+function intervalLiteral(lo: number, hi: number): string {
+  return `{ lo: ${intervalEndpointLiteral(lo)}, hi: ${intervalEndpointLiteral(hi)} }`;
+}
+
+/**
+ * The enclosure of the real value `v` stands for, as emitted code, stepping
+ * `steps` ulps out on each side.
+ *
+ * With one step (the default) `v` must be the CORRECTLY ROUNDED double of
+ * that real value: the value is then at most half an ulp away and
+ * `[nextDown(v), nextUp(v)]` contains it — strictly, since the value is not
+ * `v` itself in every case this is used for. That is the narrowest enclosure
+ * an emitter can write from a double alone.
+ *
+ * A caller whose double was reached by MORE than one rounding asks for more
+ * steps: half an ulp per rounding is then not a bound, and one step could
+ * name an interval the value is outside of.
+ *
+ * Used for the irrational constants (`INTERVAL_JAVASCRIPT_CONSTANTS`) and
+ * for a number literal whose exact value no double holds (`inexactNumber`).
+ * A non-finite `v` has no neighbours to step to and is emitted as the
+ * degenerate interval it already is.
+ */
+function intervalEnclosureLiteral(v: number, steps = 1): string {
+  if (!Number.isFinite(v)) return intervalLiteral(v, v);
+  let lo = v;
+  let hi = v;
+  for (let i = 0; i < steps; i++) {
+    lo = nextDown(lo);
+    hi = nextUp(hi);
+  }
+  return intervalLiteral(lo, hi);
+}
+
+/**
+ * Which endpoints of a folded result its operation produced with NO
+ * rounding — the true real value, not a neighbour of it.
+ */
+type FoldExactness = { readonly lo: boolean; readonly hi: boolean };
+const FOLD_INEXACT: FoldExactness = { lo: false, hi: false };
+const FOLD_EXACT: FoldExactness = { lo: true, hi: true };
+
+/**
+ * The `_IA` routines whose answer is exact whenever their operands are, so
+ * the fold must never widen it.
+ *
+ * Each one only selects, negates or truncates endpoints; none computes a
+ * new real number that a double might have to round. `point` returns the
+ * literal the emitter wrote; `negate`, `abs`, `min`, `max`, `chop`, `sign`
+ * and `heaviside` select or flip endpoints (or answer one of the constants
+ * -1, 0, 0.5, 1); `floor`, `ceil`, `round` and `trunc` answer integers; and
+ * `fract` answers `x − floor(x)`, which a double holds exactly because it
+ * has fewer significant bits than `x`.
+ */
+const EXACT_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
+  'point',
+  'negate',
+  'abs',
+  'floor',
+  'ceil',
+  'round',
+  'trunc',
+  'fract',
+  'min',
+  'max',
+  'sign',
+  'heaviside',
+  'chop',
+]);
+
+/**
+ * How many ulps the fold steps an inexact endpoint outward, per routine.
+ *
+ * One step covers ONE correctly rounded double operation: the true value is
+ * then within half an ulp of the computed endpoint. The one-step default is a
+ * PROOF only for the routines whose endpoint is one correctly rounded
+ * operation — the arithmetic of `interval/arithmetic.ts` (`div` divides the
+ * endpoints directly, through `_quot`, instead of multiplying by a rounded
+ * reciprocal) and `Math.sqrt`. For every other routine it is the minimum
+ * outward step, as the note on `WIDENING_INTERVAL_LIBRARY` says.
+ *
+ * The entries below are the composite routines of `interval/elementary.ts`,
+ * which round more than once per endpoint even before the approximation
+ * error of the underlying `Math` member:
+ * - `hypot` calls `Math.hypot`, which the language spec lets an
+ *   implementation approximate, and which scales, sums and takes a root
+ *   internally.
+ * - `nthRoot` of an ODD degree computes `Math.pow(|x|, 1/n)`: the reciprocal
+ *   `1/n` rounds, and the power rounds on top of it.
+ * - `powRational` rounds the exponent `p/q` and then powers with it, on each
+ *   of the endpoint candidates it takes the extremum over.
+ */
+const FOLD_WIDENING_ULPS: Readonly<Record<string, number>> = {
+  __proto__: null as never,
+  hypot: 2,
+  nthRoot: 3,
+  powRational: 3,
+};
+const FOLD_DEFAULT_WIDENING_ULPS = 1;
+
+/** The enclosure an `_IA` operand or answer carries, or `undefined` when it
+ * carries none (`empty`, `entire`, a pole) or is not interval-shaped at all
+ * (a number exponent, a `BoolInterval`). */
+function foldIntervalOf(value: unknown): Interval | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return undefined;
+  return IntervalArithmetic.unwrap(value as Interval | IntervalResult);
+}
+
+/** `x` moved `steps` ulps in the direction `dir`. A non-finite endpoint has
+ * no neighbour to move to and is returned as it is. */
+function widenEndpoint(x: number, dir: -1 | 1, steps: number): number {
+  if (!Number.isFinite(x)) return x;
+  let v = x;
+  for (let i = 0; i < steps; i++) v = dir < 0 ? nextDown(v) : nextUp(v);
+  return v;
+}
+
+/**
+ * Was the result endpoint `e` reached from `pairs` — the operand-endpoint
+ * pairs an interval multiplication takes the extremum over — with no
+ * rounding on any pair that reaches it?
+ *
+ * Every pair whose product equals `e` has to be exact, not just one of
+ * them: a second pair that rounded TO `e` may have a true product below it
+ * (for a lower endpoint), in which case `e` is not a bound. A pair whose
+ * product is any other double is at least one ulp away, so its true product
+ * cannot cross `e`. A zero operand gives the exact product zero — the
+ * `0 · ±∞ = 0` convention of `interval/arithmetic.ts` included.
+ */
+function productEndpointExact(
+  pairs: ReadonlyArray<readonly [number, number]>,
+  e: number
+): boolean {
+  let reached = false;
+  for (const [x, y] of pairs) {
+    const zero = x === 0 || y === 0;
+    const p = zero ? 0 : x * y;
+    if (p !== e) continue;
+    reached = true;
+    if (!zero && !prodExact(x, y, p)) return false;
+  }
+  return reached;
+}
+
+/** How many factors an integer power is checked through before the fold
+ * gives up and widens. A power of a constant in emitted code is small; the
+ * bound only keeps the check from walking a huge exponent. */
+const MAX_PROVEN_POWER = 64;
+
+/**
+ * The exact value of `v` raised to the non-negative integer `n`, or `NaN`
+ * when no double holds it.
+ *
+ * The power is built one multiplication at a time and every product is
+ * checked with Dekker's TwoProduct, so a single rounded factor makes the
+ * whole answer `NaN`. This is what keeps an alternating sign sum
+ * `Σ (−1)^k` folding to the exact point 0: `Math.pow` is not a correctly
+ * rounded operation, so its answer cannot be trusted on its own, but here
+ * it only has to AGREE with the exact chain.
+ */
+function exactIntegerPower(v: number, n: number): number {
+  if (!Number.isInteger(n) || n < 0 || n > MAX_PROVEN_POWER) return NaN;
+  let acc = 1;
+  for (let i = 0; i < n; i++) {
+    const p = acc * v;
+    if (acc !== 0 && v !== 0 && !prodExact(acc, v, p)) return NaN;
+    acc = p;
+  }
+  return acc;
+}
+
+/** Was the power endpoint `e` reached from an endpoint of `x` with no
+ * rounding on any endpoint that reaches it? The same "every reaching
+ * candidate must be exact" rule as `productEndpointExact`, over the two
+ * endpoint powers `intPow` (`interval/elementary.ts`) takes the extremum
+ * of. */
+function powEndpointExact(x: Interval, n: number, e: number): boolean {
+  let reached = false;
+  for (const v of [x.lo, x.hi]) {
+    const p = Math.pow(v, n);
+    if (p !== e) continue;
+    reached = true;
+    if (exactIntegerPower(v, n) !== p) return false;
+  }
+  return reached;
+}
+
+/** The exactness of an interval power's two endpoints. An even power of an
+ * interval that straddles zero has the exact lower bound 0 (no such power
+ * is below it); the exemption is restricted to a NON-NEGATIVE exponent,
+ * because a zero lower bound of a negative power comes from an infinite
+ * intermediate, where zero does not bound the values below the axis. */
+function powExactness(x: Interval, n: number, value: Interval): FoldExactness {
+  return {
+    lo: (n >= 0 && value.lo === 0) || powEndpointExact(x, n, value.lo),
+    hi: powEndpointExact(x, n, value.hi),
+  };
+}
+
+/**
+ * Per-routine proofs that a folded endpoint is the exact real value.
+ *
+ * A routine with no entry here is treated as inexact and widened. The
+ * proofs read the operands the routine was called with and the enclosure it
+ * answered, and repeat the endpoint rule of `interval/arithmetic.ts` and
+ * `interval/elementary.ts` — which endpoints of the operands produce which
+ * endpoint of the answer — so a change to those rules must be mirrored
+ * here. Being wrong in the direction of "exact" would emit an enclosure
+ * that excludes the value, so every arm answers `false` when it cannot
+ * decide.
+ */
+/**
+ * The prover shared by the routines that answer an INTEGER over an integer
+ * grid (`gcd`, `lcm`, `factorial`, `factorial2`, `binomial`, `mod`,
+ * `remainder`, `exp2`). Their answer is the true value — not a neighbour of
+ * it — when it is a degenerate point at a SAFE integer and every operand is a
+ * degenerate point at an integer: every integer below 2^53 is a double, so a
+ * result in that range was reached with no rounding, and a result that WAS
+ * rounded (a factorial past 18, say) lands outside the safe range and stays
+ * conservative.
+ *
+ * The operand condition is not decoration. `exp2` is `Math.pow(2, x)`, which
+ * answers exactly 3 for the double nearest `log2(3)` even though the true
+ * value there is not 3; calling that endpoint exact would emit a point the
+ * value is outside of. With an integer exponent the power is exact.
+ */
+function exactIntegerGridPoint(
+  args: unknown[],
+  value: Interval
+): FoldExactness {
+  if (value.lo !== value.hi || !Number.isSafeInteger(value.lo))
+    return FOLD_INEXACT;
+  for (const arg of args) {
+    const a = foldIntervalOf(arg);
+    if (a === undefined || a.lo !== a.hi || !Number.isInteger(a.lo))
+      return FOLD_INEXACT;
+  }
+  return FOLD_EXACT;
+}
+
+const FOLD_EXACTNESS_PROVERS: Readonly<
+  Record<string, (args: unknown[], value: Interval) => FoldExactness>
+> = {
+  __proto__: null as never,
+  gcd: exactIntegerGridPoint,
+  lcm: exactIntegerGridPoint,
+  factorial: exactIntegerGridPoint,
+  factorial2: exactIntegerGridPoint,
+  binomial: exactIntegerGridPoint,
+  mod: exactIntegerGridPoint,
+  remainder: exactIntegerGridPoint,
+  exp2: exactIntegerGridPoint,
+  // `[a.lo + b.lo, a.hi + b.hi]`: one addition per endpoint, and Knuth's
+  // TwoSum decides each one.
+  add: (args) => {
+    const a = foldIntervalOf(args[0]);
+    const b = foldIntervalOf(args[1]);
+    if (a === undefined || b === undefined) return FOLD_INEXACT;
+    return { lo: exactSum(a.lo, b.lo), hi: exactSum(a.hi, b.hi) };
+  },
+  // `[a.lo − b.hi, a.hi − b.lo]`. Negation is exact, so the subtraction is
+  // the same TwoSum test on the negated operand.
+  sub: (args) => {
+    const a = foldIntervalOf(args[0]);
+    const b = foldIntervalOf(args[1]);
+    if (a === undefined || b === undefined) return FOLD_INEXACT;
+    return { lo: exactSum(a.lo, -b.hi), hi: exactSum(a.hi, -b.lo) };
+  },
+  // The extremum over the four endpoint products.
+  mul: (args, value) => {
+    const a = foldIntervalOf(args[0]);
+    const b = foldIntervalOf(args[1]);
+    if (a === undefined || b === undefined) return FOLD_INEXACT;
+    const pairs = [
+      [a.lo, b.lo],
+      [a.lo, b.hi],
+      [a.hi, b.lo],
+      [a.hi, b.hi],
+    ] as const;
+    return {
+      lo: productEndpointExact(pairs, value.lo),
+      hi: productEndpointExact(pairs, value.hi),
+    };
+  },
+  // Two endpoint products, plus the exact lower bound 0 an interval that
+  // straddles zero gets (no square is below it).
+  square: (args, value) => {
+    const x = foldIntervalOf(args[0]);
+    if (x === undefined) return FOLD_INEXACT;
+    const pairs = [
+      [x.lo, x.lo],
+      [x.hi, x.hi],
+    ] as const;
+    return {
+      lo: value.lo === 0 || productEndpointExact(pairs, value.lo),
+      hi: productEndpointExact(pairs, value.hi),
+    };
+  },
+  // `Math.sqrt` is correctly rounded, so an endpoint `s` is the true root
+  // of an operand endpoint exactly when `s·s` reproduces that endpoint with
+  // no rounding. The lower bound 0 of a radicand that straddles zero is
+  // exact on its own (the clipped domain starts there).
+  sqrt: (args, value) => {
+    const x = foldIntervalOf(args[0]);
+    if (x === undefined) return FOLD_INEXACT;
+    const rootExact = (s: number, radicand: number): boolean =>
+      prodExact(s, s, s * s) && s * s === radicand;
+    return {
+      lo: value.lo === 0 || rootExact(value.lo, x.lo),
+      hi: rootExact(value.hi, x.hi),
+    };
+  },
+  // A NON-NEGATIVE INTEGER exponent only: the endpoint is then a product
+  // chain that either reproduces exactly or does not. A negative exponent
+  // goes through a reciprocal and a fractional one through `Math.pow`, and
+  // neither is decided here.
+  pow: (args, value) => {
+    const x = foldIntervalOf(args[0]);
+    const n = args[1];
+    if (x === undefined || typeof n !== 'number') return FOLD_INEXACT;
+    return powExactness(x, n, value);
+  },
+  // The same proof through the interval-exponent entry point, which hands a
+  // point integer exponent straight to `pow` (`interval/elementary.ts`).
+  // This is the spelling an unrolled `Σ (−1)^k` compiles to, where the
+  // exponent is the loop index rather than a literal.
+  powInterval: (args, value) => {
+    const x = foldIntervalOf(args[0]);
+    const e = foldIntervalOf(args[1]);
+    if (x === undefined || e === undefined) return FOLD_INEXACT;
+    if (e.lo !== e.hi || !Number.isInteger(e.lo)) return FOLD_INEXACT;
+    return powExactness(x, e.lo, value);
+  },
+  // Only the point/point case is decided: the quotient `q` of two point
+  // operands is the true one exactly when `q · b` reproduces `a` with no
+  // rounding. For wider operands the answer is the extremum over four
+  // quotients, each of them computed through a reciprocal, and no cheap
+  // test decides it — those are widened.
+  div: (args, value) => {
+    const a = foldIntervalOf(args[0]);
+    const b = foldIntervalOf(args[1]);
+    if (a === undefined || b === undefined) return FOLD_INEXACT;
+    if (a.lo !== a.hi || b.lo !== b.hi || value.lo !== value.hi)
+      return FOLD_INEXACT;
+    const q = value.lo;
+    const exact = prodExact(q, b.lo, q * b.lo) && q * b.lo === a.lo;
+    return { lo: exact, hi: exact };
+  },
+};
+
+/**
+ * The `_IA` the compile-time fold evaluates against: every routine of the
+ * run-time library, wrapped so that an inexact endpoint of its answer is
+ * moved one ulp OUTWARD.
+ *
+ * The run-time library rounds to nearest, not outward (see the note in
+ * `interval/integrate.ts`), so the enclosure it computes for `√(2π)` is the
+ * degenerate point `2.5066282746310002` — which does not contain `√(2π)`.
+ * Baking that point into the emitted code would hand a caller a bound the
+ * true value is outside of, and this target exists to answer bounds a
+ * caller can act on. The widening applies to the FOLD only: it changes what
+ * the compiler writes, never what the run-time library computes, and it
+ * costs nothing at run time.
+ *
+ * An endpoint is left alone when the routine proves it exact
+ * (`EXACT_INTERVAL_ROUTINES`, `FOLD_EXACTNESS_PROVERS`), so an integer fold
+ * such as `1 + (−0.5)` or `2 · 0.5` still emits a point.
+ *
+ * One ulp is a proof only for the correctly rounded routines (the
+ * arithmetic and `Math.sqrt`). For a transcendental routine — `exp`, `ln`,
+ * the trigonometry, `gamma`, `erf` — it is the minimum outward step, not a
+ * proof: those are approximations whose own error can exceed an ulp, and
+ * the run-time library has the same limitation. Widening the fold keeps the
+ * folded constant no worse than the code it replaces.
+ */
+const WIDENING_INTERVAL_LIBRARY: Record<string, unknown> =
+  makeWideningIntervalLibrary();
+
+function makeWideningIntervalLibrary(): Record<string, unknown> {
+  const wrapped: Record<string, unknown> = Object.create(null);
+  for (const [name, member] of Object.entries(IntervalArithmetic)) {
+    if (typeof member !== 'function' || EXACT_INTERVAL_ROUTINES.has(name)) {
+      wrapped[name] = member;
+      continue;
+    }
+    const prove = FOLD_EXACTNESS_PROVERS[name];
+    const steps = FOLD_WIDENING_ULPS[name] ?? FOLD_DEFAULT_WIDENING_ULPS;
+    const routine = member as (...args: unknown[]) => unknown;
+    wrapped[name] = (...args: unknown[]): unknown => {
+      const result = routine(...args);
+      const value = foldIntervalOf(result);
+      if (value === undefined) return result;
+      const exact = prove ? prove(args, value) : FOLD_INEXACT;
+      const widened = {
+        lo: exact.lo ? value.lo : widenEndpoint(value.lo, -1, steps),
+        hi: exact.hi ? value.hi : widenEndpoint(value.hi, 1, steps),
+      };
+      // A bare `{ lo, hi }` answer (the shape `point` and the collection
+      // accessors return) is replaced wholesale; an `IntervalResult` keeps
+      // its `kind` and its jump/clip markers with the widened enclosure.
+      if (!('kind' in (result as object))) return widened;
+      return { ...(result as object), value: widened };
+    };
+  }
+  return wrapped;
+}
+
 /**
  * Fold the emitted code of a CLOSED constant interval subtree to a literal
  * (`foldEmittedConstant` on this target). `_IA.mul(_IA.point(0.1),
  * _IA.point(Math.PI))` becomes `{ kind: 'interval', value: { lo: …, hi: … } }`
- * — the very object the run-time evaluation of that code returns, computed
- * once here with the same `IntervalArithmetic` library instead of on every
- * call (an unrolled 40-term sum re-evaluated every constant factor of every
- * term per call: Tycho item 269). The enclosure is unchanged, so the fold is
- * sound where the `.N()`-based `constantFold` is not (see the
- * `constantFold: false` note in `IntervalJavaScriptTarget.compile`).
+ * — what the run-time evaluation of that code returns, computed once here
+ * with the same `IntervalArithmetic` library instead of on every call (an
+ * unrolled 40-term sum re-evaluated every constant factor of every term per
+ * call: Tycho item 269). The fold is sound where the `.N()`-based
+ * `constantFold` is not (see the `constantFold: false` note in
+ * `IntervalJavaScriptTarget.compile`): it computes in the interval domain
+ * rather than baking a `.N()` point.
+ *
+ * The evaluation goes through `WIDENING_INTERVAL_LIBRARY`, not through the
+ * library itself, so an endpoint the library rounded to nearest is moved
+ * outward and the folded literal ENCLOSES the value. The folded enclosure
+ * is therefore at least as wide as the one the run-time code computes, and
+ * never narrower.
  *
  * Admissibility is read off the CODE: it must consist only of calls into
  * `FOLDABLE_INTERVAL_ROUTINES` over numeric literals, `Math` members and
@@ -1887,25 +2373,76 @@ function intervalEndpointLiteral(n: number): string {
  * `{ kind: 'interval', value }` — and is re-emitted in the SAME shape, so a
  * root-level fold answers what the structural code answered. `empty`,
  * `entire` and `singular` results are left to the structural code.
+ *
+ * `splices` are the sources the caller's `vars` symbols are emitted as
+ * (`callerSpliceSources`). A mapped symbol is the caller's LIVE binding and
+ * the `vars` contract says it is never folded, so a fold that would consume
+ * one is refused — a caller who maps `s` to `_IA.point(0.5)` keeps
+ * `_IA.mul(_IA.point(2), _IA.point(0.5))` in the code, even though every
+ * character of it is spelled in this target's own dialect. The residue
+ * charset cannot tell a splice from the emitter's own text, so the test is
+ * on the RESULT, exactly as on the JavaScript and shader targets.
  */
-function foldConstantIntervalCode(code: string): string | undefined {
+function foldConstantIntervalCode(
+  code: string,
+  admitBarePoint = false,
+  splices: readonly string[] = []
+): string | undefined {
   if (!code.startsWith('_IA.')) return undefined;
-  const memo = FOLDED_INTERVAL_CODE.get(code);
+  // The two admissibility policies answer differently for the same code, so
+  // they cannot share a memo entry — and neither can two compilations whose
+  // caller splices differ, since a splice the fold must preserve is part of
+  // the decision.
+  const key = JSON.stringify([admitBarePoint, splices, code]);
+  const memo = FOLDED_INTERVAL_CODE.get(key);
   if (memo !== undefined) return memo ?? undefined;
-  const folded = evaluateConstantIntervalCode(code);
+  let folded = evaluateConstantIntervalCode(code, admitBarePoint);
+  if (folded !== undefined && !preservesMappedSplices(code, folded, splices))
+    folded = undefined;
   if (FOLDED_INTERVAL_CODE.size >= FOLDED_INTERVAL_CODE_LIMIT)
     FOLDED_INTERVAL_CODE.clear();
-  FOLDED_INTERVAL_CODE.set(code, folded ?? null);
+  FOLDED_INTERVAL_CODE.set(key, folded ?? null);
   return folded;
 }
 
-function evaluateConstantIntervalCode(code: string): string | undefined {
+/**
+ * The sources this compilation's caller-mapped `vars` symbols are spliced
+ * into the emitted code as, computed once per target.
+ *
+ * The chain-step fold (`foldChainStep`) reaches the fold with the target in
+ * hand rather than through `CompileTarget.foldEmittedConstant`, so it resolves
+ * the list here instead of closing over the caller's map. Reading the `var`
+ * hook has no effect on the compilation: it answers a mapped key from the
+ * caller's map before it records anything.
+ */
+const INTERVAL_SPLICE_SOURCES = new WeakMap<object, readonly string[]>();
+function intervalSpliceSources(
+  target: CompileTarget<Expression> | undefined
+): readonly string[] {
+  if (target === undefined) return [];
+  const memo = INTERVAL_SPLICE_SOURCES.get(target);
+  if (memo !== undefined) return memo;
+  const sources = callerSpliceSources(target.varsKeys, target.var);
+  INTERVAL_SPLICE_SOURCES.set(target, sources);
+  return sources;
+}
+
+function evaluateConstantIntervalCode(
+  code: string,
+  admitBarePoint = false
+): string | undefined {
   let admissible = true;
   // A bare `_IA.point(c)` is already the cheapest spelling of its value, and
   // it is what the accessor folds of this target pin (`At` over a literal
   // list emits `_IA.point(20)`); only code that APPLIES a routine is worth
-  // replacing.
-  let applies = false;
+  // replacing. The caller lifts this rule for a position with no
+  // neighbouring routine to fold into, and then only for a point that wraps
+  // a NAMED constant. `MachineEpsilon` is the one such constant left —
+  // `_IA.point(Number.EPSILON)` costs a call on every evaluation, and the
+  // literal that replaces it costs none — while the irrational constants
+  // (`Pi`, `ExponentialE`, `GoldenRatio`, …) are emitted as enclosure
+  // literals already and `_IA.point(2)` is as short as its replacement.
+  let applies = admitBarePoint && !NUMERIC_POINT_CODE.test(code);
   const residue = code
     .replace(/_IA\.([A-Za-z0-9_]+)/g, (_m, name: string) => {
       if (!FOLDABLE_INTERVAL_ROUTINES.has(name)) admissible = false;
@@ -1923,19 +2460,20 @@ function evaluateConstantIntervalCode(code: string): string | undefined {
 
   let result: unknown;
   try {
-    result = new Function('_IA', `return (${code});`)(IntervalArithmetic);
+    result = new Function('_IA', `return (${code});`)(
+      WIDENING_INTERVAL_LIBRARY
+    );
   } catch {
     return undefined;
   }
-  if (isPlainInterval(result))
-    return `{ lo: ${intervalEndpointLiteral(result.lo)}, hi: ${intervalEndpointLiteral(result.hi)} }`;
+  if (isPlainInterval(result)) return intervalLiteral(result.lo, result.hi);
   if (
     isRecord(result) &&
     result.kind === 'interval' &&
     Object.keys(result).length === 2 &&
     isPlainInterval(result.value)
   )
-    return `{ kind: 'interval', value: { lo: ${intervalEndpointLiteral(result.value.lo)}, hi: ${intervalEndpointLiteral(result.value.hi)} } }`;
+    return `{ kind: 'interval', value: ${intervalLiteral(result.value.lo, result.value.hi)} }`;
   return undefined;
 }
 
@@ -1944,10 +2482,178 @@ function evaluateConstantIntervalCode(code: string): string | undefined {
  * caller's `constantFold: false`). */
 function foldChainStep(
   code: string,
-  target: CompileTarget<Expression> | undefined
+  target: CompileTarget<Expression> | undefined,
+  admitBarePoint = false
 ): string {
   if (target?.foldEmittedConstant === undefined) return code;
-  return foldConstantIntervalCode(code) ?? code;
+  return (
+    foldConstantIntervalCode(
+      code,
+      admitBarePoint,
+      intervalSpliceSources(target)
+    ) ?? code
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hoisting repeated constant intervals out of the emitted expression.
+// ---------------------------------------------------------------------------
+
+/**
+ * The constant interval spellings this target emits, longest form first.
+ *
+ * Three shapes: the wrapped result of a fold
+ * (`{ kind: 'interval', value: { lo, hi } }`), a bare enclosure
+ * (`{ lo, hi }` — a fold answer, an emitted constant, an inexact literal)
+ * and a point (`_IA.point(0.5)`). The alternation is ordered so that the
+ * wrapped form is consumed whole and its inner enclosure is not matched
+ * separately.
+ *
+ * Every capture is checked against `INTERVAL_CONSTANT_ENDPOINT` before it is
+ * used: `_IA.point(k)` over a loop index and `_IA.point(ops.length)` are
+ * spelled the same way and must not be hoisted.
+ */
+const HOISTABLE_INTERVAL_CONSTANT =
+  /\{ kind: 'interval', value: \{ lo: ([^,{}]+), hi: ([^,{}]+) \} \}|\{ lo: ([^,{}]+), hi: ([^,{}]+) \}|_IA\.point\(([^(),]*)\)/g;
+
+/** A numeric endpoint as the emitters spell one, plus the named constants
+ * they inline. Anything else in the same syntactic position is a variable,
+ * a bound index or a length read, and is not a constant. */
+const INTERVAL_CONSTANT_ENDPOINT =
+  /^(?:-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|Infinity)|NaN|Math\.PI|Math\.E|Number\.EPSILON)$/;
+
+/**
+ * The source with the CONTENT of every string literal replaced by `.`
+ * fillers of the same length, so the copy addresses the same positions as
+ * the original.
+ *
+ * The search itself runs over the ORIGINAL source — the fold's own
+ * `{ kind: 'interval', … }` spelling contains a string literal, so a search
+ * over the masked copy would not find it. The mask is read only to REJECT a
+ * match that starts inside caller text (a `String` operand, a spliced
+ * `vars` entry): both spellings start with `{` or `_`, and masking turns
+ * either into a `.`, so comparing the first character decides it.
+ */
+function maskStringLiterals(code: string): string {
+  let out = '';
+  let quote: string | undefined;
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (quote === undefined) {
+      out += c;
+      if (c === "'" || c === '"' || c === '`') quote = c;
+      continue;
+    }
+    if (c === '\\') {
+      out += '..';
+      i++;
+      continue;
+    }
+    out += c === quote ? c : '.';
+    if (c === quote) quote = undefined;
+  }
+  return out;
+}
+
+/**
+ * Bind each constant interval that appears more than once in `sources` to a
+ * preamble local, and rewrite the sources to read that local.
+ *
+ * Every constant interval in the emitted code is an object LITERAL, so the
+ * expression allocates one object per occurrence per call — 913 point
+ * intervals across the corpus the Tycho code-generation audit of 2026-09-08
+ * measured. A constant bound once in the preamble is allocated once per
+ * call instead of once per occurrence, which is what an unrolled sum of
+ * twenty terms sharing the factor `1/2` needs.
+ *
+ * The preamble of this target is evaluated on every call (see
+ * `ComputeEngineIntervalFunction`, which builds ONE function whose body is
+ * `preamble; return expression`), so the binding removes the repetition,
+ * not the allocation itself.
+ *
+ * The pass runs AFTER the constant fold, deliberately. The fold decides
+ * admissibility by reading the emitted code (`foldConstantIntervalCode`),
+ * and a hoisted name is a bare identifier the fold cannot resolve — it
+ * would refuse to fold `_IA.mul(_k1, _k2)` and every chain step above it,
+ * losing more than the hoist gains. Running last also means the hoist sees
+ * the FINAL spelling of every constant, including the ones the fold
+ * produced.
+ *
+ * Sharing one object between occurrences is safe because no `_IA` routine
+ * writes to its operands: every one of them builds a fresh result object
+ * (`interval/arithmetic.ts`, `interval/util.ts`). That guarantee covers this
+ * compiler's own emission only, which is why the pass turns itself off for a
+ * compilation carrying a caller-supplied function (see below).
+ */
+function hoistIntervalConstants(
+  sources: readonly string[],
+  target: CompileTarget<Expression>
+): { declarations: string; sources: string[] } {
+  // A caller-supplied function (the `functions` compilation option) is code
+  // this compiler never sees. It receives an interval object as an argument
+  // and may keep or write to it, and the rewrite below is textual: it would
+  // hand that function the SAME object at every occurrence of the constant,
+  // so one mutation would be visible at all of them. The names the caller
+  // overrode are `foldExcludedOps`; when there is any, no constant is
+  // hoisted, because an occurrence's position in the emitted text does not
+  // say whose argument it is.
+  if ((target.foldExcludedOps?.size ?? 0) > 0)
+    return { declarations: '', sources: [...sources] };
+  type Match = { source: number; start: number; end: number; text: string };
+  const matches: Match[] = [];
+  const counts = new Map<string, number>();
+  for (let s = 0; s < sources.length; s++) {
+    const source = sources[s];
+    const masked = maskStringLiterals(source);
+    HOISTABLE_INTERVAL_CONSTANT.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = HOISTABLE_INTERVAL_CONSTANT.exec(source)) !== null) {
+      // Inside caller text, not code.
+      if (masked[m.index] !== source[m.index]) continue;
+      const parts = [m[1], m[2], m[3], m[4], m[5]].filter(
+        (p): p is string => p !== undefined
+      );
+      if (!parts.every((p) => INTERVAL_CONSTANT_ENDPOINT.test(p.trim())))
+        continue;
+      matches.push({
+        source: s,
+        start: m.index,
+        end: m.index + m[0].length,
+        text: m[0],
+      });
+      counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
+    }
+  }
+
+  const used = target.naming?.usedNames;
+  const names = new Map<string, string>();
+  const declarations: string[] = [];
+  let counter = 0;
+  for (const { text } of matches) {
+    if ((counts.get(text) ?? 0) < 2 || names.has(text)) continue;
+    let name: string;
+    do {
+      name = `_k${++counter}`;
+    } while (used?.has(name) === true);
+    used?.add(name);
+    names.set(text, name);
+    declarations.push(`const ${name} = ${text};`);
+  }
+  if (names.size === 0) return { declarations: '', sources: [...sources] };
+
+  const rewritten = sources.map((source, s) => {
+    let out = '';
+    let at = 0;
+    for (const match of matches) {
+      if (match.source !== s) continue;
+      const name = names.get(match.text);
+      if (name === undefined) continue;
+      out += source.slice(at, match.start) + name;
+      at = match.end;
+    }
+    return out + source.slice(at);
+  });
+  return { declarations: declarations.join('\n'), sources: rewritten };
 }
 
 /** A bare `{ lo, hi }` with numeric endpoints and nothing else. */
@@ -2155,6 +2861,19 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       },
       string: (str) => JSON.stringify(str),
       number: (n) => `_IA.point(${n})`,
+      // A literal the engine holds exactly but no double does — `1/49`,
+      // `√2` — is emitted as an enclosure of its value, not as a point at the
+      // nearest double. A point there excludes the very number the caller
+      // wrote, which defeats the guarantee this target answers with. A
+      // machine float the user typed (`0.329`) is NOT such a literal: the
+      // interpreter computes with that same double, so it stays a point (see
+      // `CompileTarget.inexactNumber`). `roundings` says how many roundings
+      // stand between the exact value and that double, and the enclosure
+      // steps out one ulp for each: a rational whose numerator or denominator
+      // is past the reach of the significand is converted, converted and
+      // divided, and its true value can sit more than two ulps from the
+      // double — outside a one-ulp enclosure.
+      inexactNumber: (n, roundings) => intervalEnclosureLiteral(n, roundings),
       // Evaluate a shared middle operand of a chained relation exactly once
       // (matching the interpreter) by binding it in an IIFE. Net-new here: the
       // interval target used to inline every operand, so `a < m < b` evaluated
@@ -2350,6 +3069,16 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // `k²/2`). The constant-fold consumer of this set is moot here — this
       // target sets `constantFold: false` unconditionally, just above.
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
+      // The names the caller re-mapped through the `functions` option. Such a
+      // name emits code this compiler never sees, so a pass that rewrites,
+      // binds or shares a subexpression must stop at it — here that is the
+      // preamble constant hoist (`hoistIntervalConstants`), which would
+      // otherwise hand the caller's function the same interval object at
+      // every occurrence of a shared constant.
+      foldExcludedOps:
+        Object.keys(namedFunctions).length > 0
+          ? new Set(Object.keys(namedFunctions))
+          : undefined,
       // The SOUND fold — evaluating a closed constant subtree's own interval
       // code at compile time (`foldConstantIntervalCode`) — is on by default
       // and honors the caller's `constantFold: false`, which promises the
@@ -2357,7 +3086,12 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       foldEmittedConstant:
         options.constantFold === false
           ? undefined
-          : (_expr, code) => foldConstantIntervalCode(code),
+          : (_expr, code) =>
+              foldConstantIntervalCode(
+                code,
+                false,
+                intervalSpliceSources(target)
+              ),
       constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : guardedIntervalFunction(id),
@@ -2451,16 +3185,26 @@ function compileToIntervalTarget(
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // to the preamble so their named local functions are in scope.
   const userDefs = BaseCompiler.userFunctionsPreamble(target);
-  const preamble = userDefs
-    ? target.preamble
-      ? `${target.preamble}\n${userDefs}`
-      : userDefs
-    : target.preamble;
-  const fn = new ComputeEngineIntervalFunction(js, preamble);
+  // Bind every constant interval that occurs more than once to a preamble
+  // local, so the expression reads a name instead of building the same
+  // object at each occurrence. The declarations go AFTER the caller's own
+  // preamble (which this pass never rewrites) and BEFORE the user-function
+  // definitions, which may read them.
+  const hoisted = hoistIntervalConstants([userDefs, js], target);
+  const [hoistedDefs, hoistedJs] = hoisted.sources;
+  const preamble = [target.preamble, hoisted.declarations, hoistedDefs]
+    .filter((part) => part)
+    .join('\n');
+  const fn = new ComputeEngineIntervalFunction(hoistedJs, preamble);
   return {
     target: 'interval-js',
     success: true,
-    code: js,
+    code: hoistedJs,
+    // `code` reads names the preamble binds — a hoisted constant, a
+    // user-function definition — so the two halves are reported together
+    // (`CompilationResult.preamble`). A reader that only takes `code` sees
+    // undefined identifiers.
+    ...(preamble ? { preamble } : {}),
     calling: 'expression',
     run: fn as unknown as CompiledRunner<IntervalValue, IntervalInput>,
   };

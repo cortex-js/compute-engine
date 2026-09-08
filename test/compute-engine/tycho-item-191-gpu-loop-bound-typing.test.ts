@@ -9,6 +9,14 @@
  * `success: true`. The header now converts every non-literal bound to the
  * counter's type, flooring first (`int(floor(K + -1.0))`) so a non-integer
  * bound reads the way the JavaScript target's `Math.floor(bound)` does.
+ *
+ * A bound whose conversion wraps a COMPUTED expression is additionally bound
+ * to an integer local ahead of the loop, because both languages evaluate the
+ * loop condition on every iteration. The bound is then the local's name and
+ * the conversion is on that local's declaration; a bound that is already one
+ * read (a literal, a bare name, a conversion around one of those) stays in
+ * the header. `headerIsIntTyped` follows a local back to its declaration, so
+ * the typing rule is checked wherever the conversion ended up.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
@@ -22,14 +30,33 @@ ce.assign('L', ce.box(['List', 1, 2, 3]));
 const glsl = new GLSLTarget();
 const wgsl = new WGSLTarget();
 
-/** Every loop-header bound is either an integer literal or an int-cast. */
+/**
+ * Every loop-header bound is either an integer literal or an int-cast.
+ *
+ * A bound the emitter lifted into a local reads as that local's NAME in the
+ * header, so the name is resolved back through its `int _tvN = …;` (GLSL) or
+ * `let _tvN: i32 = …;` (WGSL) declaration and the declaration's right-hand
+ * side is checked instead.
+ */
 function headerIsIntTyped(code: string, lang: 'glsl' | 'wgsl'): boolean {
   const m = code.match(/for \((.*?)\) \{/);
   if (!m) return false;
   const [init, cond] = m[1].split(';').map((s) => s.trim());
   const cast = lang === 'glsl' ? 'int(floor(' : 'i32(floor(';
   const rhs = (s: string) => s.slice(s.indexOf('=') + 1).trim();
-  const ok = (s: string) => /^-?\d+$/.test(s) || s.startsWith(cast);
+  const declared = (name: string): string | undefined => {
+    const decl =
+      lang === 'glsl'
+        ? new RegExp(`^int ${name} = (.*);$`, 'm')
+        : new RegExp(`^let ${name}: i32 = (.*);$`, 'm');
+    return decl.exec(code)?.[1];
+  };
+  const ok = (s: string): boolean => {
+    if (/^-?\d+$/.test(s)) return true;
+    if (s.startsWith(cast)) return true;
+    const value = /^_\w+$/.test(s) ? declared(s) : undefined;
+    return value !== undefined && ok(value);
+  };
   return ok(rhs(init)) && ok(cond.replace(/^\S+ <= /, ''));
 }
 
@@ -39,7 +66,10 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
     ['bare symbolic upper bound', '\\sum_{j=1}^{K}jx'],
     ['Product with symbolic upper bound', '\\prod_{i=1}^{N}(x+i)'],
     ['symbolic LOWER bound', '\\sum_{j=K}^{9}jx'],
-    ['folded float constant bound', '\\sum_{i=1}^{\\mathrm{Length}(L)+100}\\frac{x}{i}'],
+    [
+      'folded float constant bound',
+      '\\sum_{i=1}^{\\mathrm{Length}(L)+100}\\frac{x}{i}',
+    ],
   ];
 
   for (const [name, latex] of cases) {
@@ -56,18 +86,38 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
   }
 
   it('emits the exact GLSL header for the filed witness', () => {
+    // The conversion moved to the bound's own declaration; the header tests
+    // that local. Both lines are pinned so the pair stays consistent.
     const r = glsl.compile(ce.parse('\\sum_{j=0}^{K-1}jx'));
-    expect(r.code).toContain(
-      'for (int j = 0; j <= int(floor(K + -1.0)); j++) {'
-    );
+    const bound = /^int (_\w+) = int\(floor\(K \+ -1\.0\)\);$/m.exec(
+      r.code!
+    )?.[1];
+    expect(bound).toBeDefined();
+    expect(r.code).toContain(`for (int j = 0; j <= ${bound}; j++) {`);
     expect(r.code).toContain('_tv1 += float(j) * x;');
+  });
+
+  // Only the conversion and rounding spellings (`int`, `i32`, `u32`, `uint`,
+  // `float`, `f32`, `floor`) count as one read. A bound that CALLS a user
+  // function is real work, so it is lifted to a local instead of staying in
+  // the loop condition, where both languages would re-evaluate it on every
+  // iteration.
+  it('GLSL: a user-function call bound is lifted to a local', () => {
+    const cef = new ComputeEngine();
+    cef.declare('x', 'number');
+    cef.assign('g', cef.parse('t \\mapsto 2t'));
+    const r = glsl.compile(cef.parse('\\sum_{j=1}^{g(x)}2j'));
+    expect(r.success).toBe(true);
+    const bound = /^int (_\w+) = int\(floor\(_fn_g\(x\)\)\);$/m.exec(
+      r.code!
+    )?.[1];
+    expect(bound).toBeDefined();
+    expect(r.code).toContain(`for (int j = 1; j <= ${bound}; j++) {`);
   });
 
   it('emits the exact WGSL header for a symbolic lower bound', () => {
     const r = wgsl.compile(ce.parse('\\sum_{j=K}^{9}jx'));
-    expect(r.code).toContain(
-      'for (var j: i32 = i32(floor(K)); j <= 9; j++) {'
-    );
+    expect(r.code).toContain('for (var j: i32 = i32(floor(K)); j <= 9; j++) {');
   });
 
   // A bound the caller declared as a shader INTEGER (a `compileFunction`
@@ -75,9 +125,12 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
   // takes only a float in both languages, so wrapping it would be a driver
   // type error from the other direction. Such a bound is used bare.
   it('GLSL: an `int`-declared parameter bound is used bare', () => {
-    const code = glsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'float', [
-      ['K', 'int'],
-    ]);
+    const code = glsl.compileFunction(
+      ce.parse('\\sum_{j=1}^{K}2j'),
+      'f',
+      'float',
+      [['K', 'int']]
+    );
     expect(code).toContain('for (int j = 1; j <= K; j++) {');
     const lower = glsl.compileFunction(
       ce.parse('\\sum_{j=K}^{9}2j'),
@@ -89,16 +142,22 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
   });
 
   it('WGSL: an `i32`-declared parameter bound is used bare', () => {
-    const code = wgsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'f32', [
-      ['K', 'i32'],
-    ]);
+    const code = wgsl.compileFunction(
+      ce.parse('\\sum_{j=1}^{K}2j'),
+      'f',
+      'f32',
+      [['K', 'i32']]
+    );
     expect(code).toContain('for (var j: i32 = 1; j <= K; j++) {');
   });
 
   it('an unsigned-declared bound is converted without flooring', () => {
-    const g = glsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'float', [
-      ['K', 'uint'],
-    ]);
+    const g = glsl.compileFunction(
+      ce.parse('\\sum_{j=1}^{K}2j'),
+      'f',
+      'float',
+      [['K', 'uint']]
+    );
     expect(g).toContain('j <= int(K);');
     const w = wgsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'f32', [
       ['K', 'u32'],
@@ -107,9 +166,12 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
   });
 
   it('a `float`-declared parameter bound is floored and cast', () => {
-    const code = glsl.compileFunction(ce.parse('\\sum_{j=1}^{K}2j'), 'f', 'float', [
-      ['K', 'float'],
-    ]);
+    const code = glsl.compileFunction(
+      ce.parse('\\sum_{j=1}^{K}2j'),
+      'f',
+      'float',
+      [['K', 'float']]
+    );
     expect(code).toContain('for (int j = 1; j <= int(floor(K)); j++) {');
   });
 
@@ -127,18 +189,33 @@ describe('Tycho item 191 — GPU Sum/Product loop bounds are int-typed', () => {
   // (User-ruled 2026-08-15: cast at the reference site rather than fail
   // closed; found while fixing item 191.)
   it('an `int`-declared parameter in a bound EXPRESSION is converted', () => {
-    const g = glsl.compileFunction(ce.parse('\\sum_{j=1}^{K-1}2j'), 'f', 'float', [
-      ['K', 'int'],
-    ]);
-    expect(g).toContain('j <= int(floor(float(K) + -1.0));');
-    const w = wgsl.compileFunction(ce.parse('\\sum_{j=1}^{K-1}2j'), 'f', 'f32', [
-      ['K', 'i32'],
-    ]);
-    expect(w).toContain('j <= i32(floor(f32(K) + -1.0));');
+    // Computed, so the conversion sits on the hoisted bound's declaration.
+    const g = glsl.compileFunction(
+      ce.parse('\\sum_{j=1}^{K-1}2j'),
+      'f',
+      'float',
+      [['K', 'int']]
+    );
+    const gBound =
+      /^ *int (_\w+) = int\(floor\(float\(K\) \+ -1\.0\)\);$/m.exec(g)?.[1];
+    expect(gBound).toBeDefined();
+    expect(g).toContain(`j <= ${gBound};`);
+    const w = wgsl.compileFunction(
+      ce.parse('\\sum_{j=1}^{K-1}2j'),
+      'f',
+      'f32',
+      [['K', 'i32']]
+    );
+    const wBound =
+      /^ *let (_\w+): i32 = i32\(floor\(f32\(K\) \+ -1\.0\)\);$/m.exec(w)?.[1];
+    expect(wBound).toBeDefined();
+    expect(w).toContain(`j <= ${wBound};`);
   });
 
   it('an `int`-declared parameter in plain float arithmetic is converted', () => {
-    const g = glsl.compileFunction(ce.parse('K+1'), 'f', 'float', [['K', 'int']]);
+    const g = glsl.compileFunction(ce.parse('K+1'), 'f', 'float', [
+      ['K', 'int'],
+    ]);
     expect(g).toContain('return float(K) + 1.0;');
     const w = wgsl.compileFunction(ce.parse('K+1'), 'f', 'f32', [['K', 'i32']]);
     expect(w).toContain('return f32(K) + 1.0;');

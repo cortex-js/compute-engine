@@ -151,6 +151,23 @@ a list for a `number`-declared symbol. A symbol whose scalar type was inferred
 from its use in a scalar parameter keeps the guard, because that inference is
 not a promise about the value the caller passes.
 
+Two values inherit that same "scalar by construction" standing. A call of an
+engine-defined function whose every argument is such a value is one, when the
+callee's body yields a single scalar under scalar parameters — the body's
+static type says so, or its `Block`, `If`/`Which` arms and nested calls all
+do. And inside an emitted body, a parameter whose type the AUTHOR declared
+scalar is one: every emitted call site of such a function hands that parameter
+a scalar, because a call whose argument is not provably scalar is dispatched
+element-wise or guarded, and the only form that passes an argument straight
+through is the one an explicit caller declaration already exempts. A parameter
+whose scalar type was inferred from the body carries no such promise and keeps
+its dispatch.
+
+The runtime broadcast of a user-function call is handed the emitted function
+itself (`_SYS.bcastFn(_fn_f, …)`). A closure is emitted only when an argument
+needs the `{ re, im }` coercion inside it; otherwise the closure would be an
+eta-expansion of the callee.
+
 Implicit Map compilation obeys the engine-wide `jit` gate. Exact-mode Map
 compilation requires an explicit proof that native-number execution preserves
 the requested exact result. Structural or ABI failures are cached at the

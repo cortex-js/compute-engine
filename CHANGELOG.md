@@ -81,6 +81,47 @@
   `[1,2,3] |> Sum(\_)` answered the list itself for the same reason. The
   substitution is no longer canonicalized, and the body is canonicalized
   inside the literal's own scope, where its parameter is declared.
+- **A product with an exact rational factor compiles as a division.** The
+  canonical form of `x/49` is `Multiply(Rational(1, 49), x)`, and every compile
+  target emitted the rounded reciprocal, `0.02040816326530612 * x`. That
+  product is not correctly rounded, so `floor(x/49)` compiled to 0 at
+  `x = 49` where the interpreter answers 1; 82 of the divisors below 1000
+  miss at some exact multiple. The JavaScript, GLSL, WGSL, Python and
+  interval-js targets now emit `x / 49` (`x / 49 * 3` for `3x/49`, the
+  division first so the product cannot overflow before it), which
+  IEEE division rounds correctly. A power-of-two denominator (`x/2`) keeps the
+  exact product `0.5 * x`, and a decimal divisor (`x/1.6`) is unchanged. The
+  interval-js runtime library divided by multiplying with a rounded
+  reciprocal, so `49/49` was not 1 there either; it now divides the endpoints
+  directly (a subnormal divisor no longer overflows to an unsound `+oo`
+  lower bound).
+- **The interval-js target emits enclosures for irrational constants and for
+  exact literals that have no double.** `\pi`, `e`, the golden ratio and the
+  other irrational constants, an exact rational with a denominator that is not
+  a power of two (`1/49`, `1/3`) and an exact radical (`\sqrt{2}`) compiled to
+  a degenerate point `{lo: v, hi: v}` that excludes the real value; they are
+  now two-ulp enclosures `{lo: nextDown(v), hi: nextUp(v)}`. The compile-time
+  fold of a constant interval subtree evaluates through a wrapper that widens
+  every inexact endpoint outward by one ulp (an exact endpoint — proven by an
+  error-free transformation for `+`, `-`, `*`, `/`, `sqrt` and small integer
+  powers — stays exact, so `(1 + -0.5)` still folds to the point `0.5`). The
+  runtime library itself still does not round outward; see ROADMAP.
+- **Identity lowerings kept their operand's parentheses.** A compile handler
+  that returns its operand's own code — `Abs` of a provably non-negative
+  operand, `Floor`/`Ceil`/`Round`/`Truncate` of an integer, `Re`/`Conjugate`
+  of a real, `Identity`, a one-operand `Max`/`Min` — spliced an infix operand
+  bare on every target, so `3·Re(x + 1)` compiled to `3 * _.x + 1` and ran
+  to 7 where the interpreter answers 9, GLSL `3·⌊n + 1⌋` emitted
+  `3.0 * n + 1.0`, and Python `Identity(-x)^2` emitted `-x ** 2`. Such an
+  operand is now parenthesized on the JavaScript, GLSL, WGSL and Python
+  targets. The GLSL/WGSL argument and conjugate of a complex sum spliced a
+  swizzle onto the last term only (`atan(w + z.y, w + z.x)`); they now read
+  the whole value.
+- **WGSL emitted a two-argument `atan`, which WGSL does not have.**
+  `Arctan2` and the argument of a complex value now emit `atan2`.
+- **A compiled `Mod` with a compound divisor evaluated it three times.** The
+  floored-modulo template splices the divisor three times; a non-literal
+  divisor (`2 mod sin(0.2θ)`, or `Random()`) is now bound to one temporary.
 - **`f(L) := Sum(L)` infers `L` a collection, so `f([1, 2, 3])` is 6.** The
   body slot of `Sum` and `Product` accepts anything, so the parameter kept the
   type `unknown`, and a call with a list broadcast over its elements — an
@@ -170,6 +211,44 @@
   unchanged. With both fixes the four Fungrim Dirichlet entries that were not
   representable (ids `288207`, `3ab92d`, `4c3678`, `f4de66`) box, and Stage 1 of
   the corpus check passes every entry.
+
+### Improvements
+
+- **Code generation, after the Tycho code-generation audit of 2026-09-08.**
+  The JavaScript, GLSL and WGSL targets now fold the literal arithmetic their
+  own emission creates (an unrolled `Sum` substitutes the index at the
+  variable level, so `(1 + -0.5)` and `0.025 * (1 + -0.5)` reached the output;
+  a leading run of literal factors such as `2 * Math.PI * s` folds too, and
+  GPU folds are computed in float32 so they match what the shader computes).
+  Scalar loop-invariant subexpressions of a `Sum`/`Product` body are computed
+  once before the loop on the JavaScript and GPU targets, and a computed loop
+  bound is bound to a local. GPU user-function bodies get their own
+  common-subexpression locals, and a shared term wrapped in a negation is
+  keyed on the inner term. The GPU preamble now includes only the helper
+  functions the shader references, with their transitive callees (an
+  `hsv` row no longer carries the full colour library, a Mandelbrot row no
+  longer carries the Julia kernel). GLSL peepholes: `mod(x, 1.0)` → `fract(x)`,
+  `(c ? 1.0 : 0.0)` → `float(c)`, `pow(2.0, n)` → `exp2(n)`, small integer
+  powers up to 8 inline, a summed square of a vector → `dot(v, v)`, a
+  `_gpu_round` helper (round half away from zero, as the interpreter), an
+  argument over a `vec2` constructor reads the components, and consecutive
+  `Which` arms with identical pure values merge into one disjunction.
+  JavaScript peepholes: an equality between provably integer operands
+  compiles to `===` instead of a tolerance test; `\arg(a + i b)`, `|a + i b|`,
+  `Re`, `Im` over real parts compile to `Math.atan2`, `Math.hypot` and the
+  parts; `1/t^2` compiles to `1 / (t * t)`; a literal index into a symbol
+  bound to a literal list folds to the element; the counted-range prologue
+  drops its dead zero-step arm and folds when the bounds compile to literals.
+  User-function calls: `_SYS.bcastFn((a, b) => _fn_f(a, b), x, y)` is
+  eta-reduced to `_SYS.bcastFn(_fn_f, x, y)`; a call whose arguments are
+  constructed scalars, and whose callee's body is scalar under scalar
+  parameters, is itself a constructed scalar, so arithmetic over it and a
+  `PointList` component built from it skip the runtime shape dispatch; inside
+  a body whose parameter types are explicitly declared scalar, calls that pass
+  those parameters are direct. A runtime helper `_SYS.atNoWrap` provides the
+  Desmos-style positional access (no negative-from-the-end indexing) as one
+  call for hosts that replace the `At` lowering. Repeated interval constants
+  are hoisted into the interval-js preamble.
 
 ## 0.126.2 _2026-09-08_
 

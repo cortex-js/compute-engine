@@ -466,13 +466,35 @@ function withFlags(iv: Interval, loOpen: boolean, hiOpen: boolean): Interval {
 function sumExact(a: number, b: number, r: number): boolean {
   return Number.isFinite(r) && r === a + b && exactSum(a, b);
 }
-function exactSum(a: number, b: number): boolean {
+/**
+ * Was the double sum `a + b` the exact real sum — no rounding at all?
+ *
+ * Knuth's TwoSum computes the rounding error of a double addition exactly
+ * for every finite pair of operands, subnormals included, so a zero error
+ * term is a proof of exactness rather than a heuristic.
+ *
+ * Also read by the compile-time constant fold of the interval-js target
+ * (`compilation/interval-javascript-target.ts`), which widens a folded
+ * endpoint by one ulp unless the operation that produced it is provably
+ * exact.
+ */
+export function exactSum(a: number, b: number): boolean {
   const s = a + b;
   if (!Number.isFinite(s)) return false;
   const bb = s - a;
   return a - (s - bb) + (b - bb) === 0;
 }
-function prodExact(a: number, b: number, r: number): boolean {
+
+/**
+ * Was `r` the exact real product of `a` and `b` — the double multiplication
+ * rounded nothing away?
+ *
+ * Dekker's TwoProduct (the Veltkamp split behind `productError`) answers
+ * exactly inside its validity window; outside it the answer is a
+ * conservative `false`. Also read by the interval-js target's compile-time
+ * constant fold — see `exactSum`.
+ */
+export function prodExact(a: number, b: number, r: number): boolean {
   if (!Number.isFinite(r) || r !== a * b) return false;
   if (r === 0) return a === 0 || b === 0;
   if (!inDekkerWindow(a, b, r)) return false;

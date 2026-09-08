@@ -86,9 +86,11 @@ describe('complex mode — one emission per user function, lift at use (design �
   it('b(a), b(z), b(√a): the same `_fn_b`, no `$z` specialization', () => {
     const ce = engineWith();
     // `a` is `unknown` (possibly a collection), so the call takes the runtime
-    // broadcast dispatch — with the lifted argument and the ONE `_fn_b`.
+    // broadcast dispatch — with the lifted argument and the ONE `_fn_b`,
+    // which the dispatch takes as its function value: with no argument to
+    // coerce inside it, a closure would only eta-expand `_fn_b`.
     const ba = compile(ce.parse('b(a)'), CX);
-    expect(ba.code).toContain('_fn_b(');
+    expect(ba.code).toContain('_SYS.bcastFn(_fn_b,');
     expect(ba.code).toContain('_SYS.cplx(_.a)');
     expect(ba.code).not.toContain('$z');
     expect(ba.run!({ a: -2 })).toBe(-4);
@@ -108,7 +110,7 @@ describe('complex mode — one emission per user function, lift at use (design �
     const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
     expect(bs.code).toBe(
       '((_tv1) => Array.isArray(_tv1) ? ' +
-        '_SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))' +
+        '_SYS.bcastFn(_fn_b, _tv1) : _fn_b(_tv1))' +
         '(_SYS.csqrt(_SYS.cplx(_.a)))'
     );
     expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });

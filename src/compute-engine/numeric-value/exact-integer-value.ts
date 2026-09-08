@@ -83,6 +83,51 @@ export function exactDoubleValue(num: NumericValue): number | undefined {
   return x * 2 ** low * 2 ** high === numerator ? x : undefined;
 }
 
+/** Does the double conversion of `v` lose nothing? */
+function convertsExactly(v: bigint): boolean {
+  const x = Number(v);
+  return Number.isFinite(x) && BigInt(x) === v;
+}
+
+/**
+ * How many double roundings stand between the exact value of `num` and the
+ * double `num.re` reports — what a target that must emit an ENCLOSURE of the
+ * value has to step out by, one ulp per rounding.
+ *
+ * `ExactNumericValue.re` is `(Number(n) / Number(d)) * Math.sqrt(radical)`,
+ * so the count is: one for each of the two integer conversions that loses
+ * bits, one for the division when the denominator is not 1, and — when there
+ * is a radical — one for the square root plus one for the product, unless the
+ * rational factor is exactly 1 and the product is therefore exact.
+ *
+ * One ulp per rounding is a bound, not an estimate: each rounding costs at
+ * most half an ulp OF ITS OWN result, and an ulp is never more than twice the
+ * relative weight of the final one. `1/49` and `√2` are one rounding, and
+ * their value is inside `[nextDown(re), nextUp(re)]`; `p/q` with a numerator
+ * and a denominator past the reach of the significand is three, and a
+ * measured sweep of random 70-bit pairs put the true value as far as 2.3
+ * ulps from `re`.
+ *
+ * Never answers 0: a value reached with no rounding has a double
+ * (`exactDoubleValue`) and the enclosure callers do not ask about it.
+ */
+export function exactValueDoubleRoundings(num: NumericValue): number {
+  const exact = num.asExact;
+  if (!(exact instanceof ExactNumericValue)) return 1;
+  const [n0, d0] = exact.rational;
+  const n = typeof n0 === 'bigint' ? n0 : BigInt(n0);
+  const d = typeof d0 === 'bigint' ? d0 : BigInt(d0);
+  let roundings = 0;
+  if (!convertsExactly(n)) roundings += 1;
+  if (!convertsExactly(d)) roundings += 1;
+  if (d !== 1n) roundings += 1;
+  if (exact.radical !== 1) {
+    roundings += 1;
+    if (n !== 1n || d !== 1n) roundings += 1;
+  }
+  return Math.max(roundings, 1);
+}
+
 function bigintGcd(a: bigint, b: bigint): bigint {
   while (b !== 0n) [a, b] = [b, a % b];
   return a;
