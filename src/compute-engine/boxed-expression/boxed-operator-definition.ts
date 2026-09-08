@@ -48,6 +48,8 @@ import { isFunction } from './type-guards.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,
+  restParameterIndex,
+  restParameterSignatureTail,
 } from './function-literal.js';
 import {
   broadcastCellType,
@@ -1672,6 +1674,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           // installed at — serializing it to `"(unknown) -> inner"` and
           // re-parsing here threw "Unknown type". The `TypeReference` object
           // carries its own `def`, so it stays usable wherever it escapes to.
+          //
+          // A REST parameter (`f(a, ...rest) = …`) has no positional slot: it
+          // absorbs every argument from its own position onwards, so it is cut
+          // from the argument list here and re-enters as the variadic tail —
+          // the same shape the literal's own arrow carries
+          // (`restParameterSignatureTail`). Counting it as one ordinary slot
+          // gave an assigned `(a, ...rest) => Length(rest)` the arrow
+          // `(unknown, unknown) -> integer`, a fixed arity the function does
+          // not have.
+          const restAt = restParameterIndex(params);
+          const fixedParams = restAt < 0 ? params : params.slice(0, restAt);
           const signature: Type = {
             kind: 'signature',
             // A parameter slot is `unknown` unless the body's uses inferred a
@@ -1680,13 +1693,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // list argument is applied to the function rather than broadcast
             // element-wise over it. Same rule, same helper as the literal's
             // own arrow (`functionLiteralSignatureType`).
-            ...(params.length > 0
+            ...(fixedParams.length > 0
               ? {
-                  args: params.map((p) => ({
+                  args: fixedParams.map((p) => ({
                     type: inferredCollectionParameterType(p) ?? 'unknown',
                   })),
                 }
               : {}),
+            ...restParameterSignatureTail(params),
             result: body.type.type,
           };
           return new BoxedType(signature, this.engine._typeResolver);

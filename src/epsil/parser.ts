@@ -5603,17 +5603,26 @@ export class Parser {
     span: [number, number],
     whereText?: string
   ): string | null {
-    const parts = params.map((p) => {
-      if (operator(p) === 'Typed') {
-        const t = operand(p, 2);
-        return {
-          name: symbol(operand(p, 1)),
-          type:
-            (t !== null ? (stringValue(t) ?? symbol(t)) : null) ?? 'unknown',
-        };
-      }
-      return { name: symbol(p), type: 'unknown' };
-    });
+    // A REST parameter has no positional slot in the marker: it stands for the
+    // whole trailing run, so it leaves the argument list and comes back as the
+    // variadic tail below. Spelling it as one ordinary `unknown` slot made the
+    // marker claim a fixed arity — `function h<T>(x: T, ...rest) -> T { … }`
+    // typed `h` as `(T, unknown) -> T where T`, so a one-argument call
+    // reported a missing argument and a three-argument call an unexpected one.
+    const hasRest = params.some((p) => operator(p) === 'Spread');
+    const parts = params
+      .filter((p) => operator(p) !== 'Spread')
+      .map((p) => {
+        if (operator(p) === 'Typed') {
+          const t = operand(p, 2);
+          return {
+            name: symbol(operand(p, 1)),
+            type:
+              (t !== null ? (stringValue(t) ?? symbol(t)) : null) ?? 'unknown',
+          };
+        }
+        return { name: symbol(p), type: 'unknown' };
+      });
 
     const effects = spec !== null ? ` ${spec.words.join(' ')}` : '';
     const suffix =
@@ -5624,12 +5633,16 @@ export class Parser {
               .map((d) => (d.bound !== null ? `${d.name}: ${d.bound}` : d.name))
               .join(', ')}`
           : '';
-    const build = (named: boolean): string =>
-      `(${parts
-        .map((p) =>
-          named && p.name !== null ? `${p.name}: ${p.type}` : p.type
-        )
-        .join(', ')})${effects} -> ${retText}${suffix}`;
+    // `any*` — the widest element type and an admissible empty tail, matching
+    // what the rest parameter binds and what the literal's own arrow states
+    // (`restParameterSignatureTail`, `boxed-expression/function-literal.ts`).
+    const build = (named: boolean): string => {
+      const args = parts.map((p) =>
+        named && p.name !== null ? `${p.name}: ${p.type}` : p.type
+      );
+      if (hasRest) args.push('any*');
+      return `(${args.join(', ')})${effects} -> ${retText}${suffix}`;
+    };
 
     // A generated literal-parameter name must not leak into the marker
     // signature: fall back to the all-positional spelling.
@@ -5687,6 +5700,56 @@ export class Parser {
     if (!this.check('CLOSE_PAREN')) {
       for (;;) {
         const tok = this.current;
+        // `...rest` — a REST parameter. It binds one name to a tuple of every
+        // argument from its own position onwards, so it is only meaningful as
+        // the LAST parameter: anything written after it could never receive an
+        // argument. Lowered to the engine's `["Spread", sym]` parameter
+        // operand, the same node the mapsto form produces for
+        // `(a, ...rest) => …`, so a named definition and a lambda agree.
+        if (tok.type === 'OPERATOR' && tok.text === '...') {
+          const dots = this.advance();
+          const restTok = this.current;
+          if (restTok.type !== 'SYMBOL' && restTok.type !== 'VERBATIM_SYMBOL') {
+            this.error(['symbol-expected'], dots.start, restTok.end);
+            this.recoverInBracket();
+            break;
+          }
+          this.advance();
+          this.harvest(restTok);
+          const rname =
+            restTok.type === 'VERBATIM_SYMBOL'
+              ? (restTok.value ?? '')
+              : restTok.text;
+          if (isLiteralParamName(rname))
+            this.error(['reserved-word', rname], restTok.start, restTok.end);
+          const restNode = this.wrap(
+            [
+              'Spread',
+              this.wrap({ sym: rname }, restTok.start, restTok.end),
+            ] as MathJsonExpression[],
+            dots.start,
+            restTok.end
+          );
+          // A rest parameter states no type: its name is bound to a tuple the
+          // CALL shapes, and the engine rejects an annotated one outright.
+          if (this.check('OPERATOR') && this.current.text === ':') {
+            this.error(['symbol-expected'], dots.start, restTok.end);
+            this.recoverInBracket(true);
+          }
+          // Nothing after it, or only a trailing comma before the `)`: the
+          // rest parameter is last, which is the only position it may take.
+          if (!this.match('COMMA') || this.check('CLOSE_PAREN')) {
+            params.push(restNode);
+            quantified?.push(false);
+            break;
+          }
+          // A parameter follows, so the rest parameter is not last. Report the
+          // spread — it is the operand that has to move — and drop it, keeping
+          // the parameters after it so the rest of the head still parses. This
+          // is what the mapsto parameter list does for the same mistake.
+          this.error(['symbol-expected'], dots.start, restTok.end);
+          continue;
+        }
         if (this.startsLiteralParam()) {
           const p = this.parseLiteralParam(params.length + 1);
           if (p === null) {

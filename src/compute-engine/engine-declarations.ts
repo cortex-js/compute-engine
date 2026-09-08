@@ -123,12 +123,14 @@ import {
 } from './boxed-expression/type-guards.js';
 import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import {
+  functionLiteralArity,
   functionLiteralDeclaredEffects,
   functionLiteralDeclaredSignature,
   functionLiteralParameters,
   functionLiteralReturnType,
   isScalarType,
   mentionsQuantifiedVariable,
+  restParameterIndex,
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
@@ -3180,16 +3182,37 @@ function assertFunctionLiteralArity(
   const arms = signatureArms(declaredType);
   if (!arms) return;
 
-  const literalArity = functionLiteralParameters(literal).length;
+  // The arities the LITERAL accepts. A rest parameter (`(a, ...rest) => …`)
+  // makes the literal accept its fixed count or more, so counting the
+  // parameter operands would answer with a fixed arity the literal does not
+  // have.
+  const { fixed: literalFixed, variadic: literalVariadic } =
+    functionLiteralArity(literal);
+  const literalArity = literalVariadic
+    ? `${literalFixed} or more`
+    : `${literalFixed}`;
 
-  /** The arities `sig` accepts, as a description, plus whether `literalArity`
-   * is the ONLY one — a literal is a valid implementation of an arm only when
-   * that arm accepts exactly one call arity and it is the literal's. */
+  /** Whether the literal is a valid implementation of `sig`: the arm and the
+   * literal must accept the SAME set of call arities. A fixed-arity literal
+   * therefore needs an arm with exactly one arity, and a literal with a rest
+   * parameter needs a variadic arm that starts where the rest parameter does
+   * and, like the rest parameter, admits an empty tail. */
   const armFits = (sig: FunctionSignature): boolean => {
     const required = sig.args?.length ?? 0;
     const optional = sig.optArgs?.length ?? 0;
-    if (sig.variadicArg !== undefined || optional > 0) return false;
-    return required === literalArity;
+    if (optional > 0) return false;
+    if (literalVariadic) {
+      if (sig.variadicArg === undefined) return false;
+      // Both sides accept "N arguments or more", so they agree exactly when
+      // the two N's agree. The arm's N is its MINIMUM call arity, which a
+      // non-empty tail (`any+`) raises by one: `(any+) -> R` and
+      // `(a, ...rest) => …` both accept one argument or more, while
+      // `(integer, any+) -> R` needs two and `(a, ...rest) => …` cannot
+      // promise that.
+      return required + (sig.variadicMin ?? 0) === literalFixed;
+    }
+    if (sig.variadicArg !== undefined) return false;
+    return required === literalFixed;
   };
 
   if (arms.every(armFits)) return;
@@ -3459,17 +3482,27 @@ export function ascribeDeclaredParameterTypes(
 
   const args = declaredType.args;
   if (args === undefined || args.length === 0) return literal;
-  // An optional or variadic signature is not a valid declaration for a
-  // fixed-arity literal at all — `assertFunctionLiteralArity` rejects it
-  // upstream. Bail rather than mis-align a positional ascription.
+  // An optional signature is not a valid declaration for any literal —
+  // `assertFunctionLiteralArity` rejects it upstream. Bail rather than
+  // mis-align a positional ascription.
   if ((declaredType.optArgs?.length ?? 0) > 0) return literal;
-  if (declaredType.variadicArg !== undefined) return literal;
 
   const params = literal.ops.slice(1);
-  if (params.length !== args.length) return literal;
+  // A declared VARIADIC tail pairs with the literal's REST parameter and with
+  // nothing else: the two must be present together, and the positional
+  // `args` then align with the FIXED parameters before the rest parameter.
+  // The rest parameter itself is never ascribed — it takes no annotation, and
+  // its argument type is the tail's, not one slot's.
+  const restAt = restParameterIndex(params);
+  const declarationIsVariadic = declaredType.variadicArg !== undefined;
+  const literalIsVariadic = restAt >= 0;
+  if (declarationIsVariadic !== literalIsVariadic) return literal;
+  const fixedCount = restAt < 0 ? params.length : restAt;
+  if (fixedCount !== args.length) return literal;
 
   let changed = false;
   const rebuilt = params.map((p, i) => {
+    if (i >= fixedCount) return p.json;
     if (isFunction(p, 'Typed')) return p.json;
     if (!isSymbol(p)) return p.json;
     const t = args[i].type;

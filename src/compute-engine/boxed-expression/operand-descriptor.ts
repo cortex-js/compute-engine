@@ -18,7 +18,9 @@ import { numberLiteralTierType } from './literal-tier.js';
 import { COUNT_STATS } from '../../common/cache-stats.js';
 import {
   functionLiteralBody,
-  functionLiteralParameters,
+  functionLiteralParameterName,
+  functionLiteralParameterType,
+  isRestParameter,
 } from './function-literal.js';
 
 /**
@@ -201,9 +203,16 @@ function structureOfExpression(
     if (bodyStructure === undefined) return undefined;
     return {
       kind: 'function-literal',
-      parameters: functionLiteralParameters(op).map(({ name, type }) =>
-        type === undefined ? { name } : { name, annotated: type }
-      ),
+      parameters: op.ops.slice(1).map((param) => {
+        // The rest parameter is reported as such rather than as one more
+        // positional slot, so a consumer reading the descriptor for arity
+        // sees the same "N or more" contract the literal's arrow states.
+        if (isRestParameter(param))
+          return { name: functionLiteralParameterName(param), rest: true };
+        const type = functionLiteralParameterType(param);
+        const name = functionLiteralParameterName(param);
+        return type === undefined ? { name } : { name, annotated: type };
+      }),
       body: bodyStructure,
     };
   }

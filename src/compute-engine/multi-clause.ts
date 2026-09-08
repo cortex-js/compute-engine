@@ -486,11 +486,22 @@ function assertClauseFitsDeclared(
   };
 
   const params = clause.args ?? [];
-  if (
-    (clause.optArgs?.length ?? 0) > 0 ||
-    clause.variadicArg !== undefined ||
-    params.length < (declared.args?.length ?? 0)
-  )
+  if ((clause.optArgs?.length ?? 0) > 0)
+    reject('the clause does not cover the declared parameters');
+  if (clause.variadicArg !== undefined) {
+    // The clause's variadic tail is its REST parameter (`f(a, ...rest) = …`).
+    // It covers a declaration that is variadic too, and only when the two
+    // agree on the MINIMUM call arity — both then accept "N arguments or
+    // more" for the same N. This mirrors the arity reconciliation of the
+    // single-function route (`assertFunctionLiteralArity`,
+    // `engine-declarations.ts`).
+    if (
+      declared.variadicArg === undefined ||
+      params.length + (clause.variadicMin ?? 0) !==
+        (declared.args?.length ?? 0) + (declared.variadicMin ?? 0)
+    )
+      reject('the clause does not cover the declared parameters');
+  } else if (params.length < (declared.args?.length ?? 0))
     reject('the clause does not cover the declared parameters');
 
   for (let i = 0; i < params.length; i++) {

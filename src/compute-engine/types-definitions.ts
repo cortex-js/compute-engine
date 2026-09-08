@@ -531,7 +531,17 @@ export type OperandStructure =
     }
   | {
       kind: 'function-literal';
-      parameters: ReadonlyArray<{ name: string; annotated?: Type }>;
+      /** One entry per parameter operand, in order. `rest` marks the REST
+       * parameter (`(a, ...rest) => …`): it is always the last entry, it
+       * takes no annotation, and it binds a tuple of every argument from its
+       * own position onwards rather than occupying one positional slot. A
+       * consumer reading arity must therefore treat the entries before it as
+       * the required count and admit any number after. */
+      parameters: ReadonlyArray<{
+        name: string;
+        annotated?: Type;
+        rest?: boolean;
+      }>;
       body: OperandStructure;
     }
   | {

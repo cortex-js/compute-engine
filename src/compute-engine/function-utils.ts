@@ -40,6 +40,7 @@ import {
   isDestructuringParameter,
   isRestParameter,
   mentionsQuantifiedVariable,
+  restParameterIndex,
   restParameterSymbol,
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
@@ -1347,10 +1348,22 @@ function eraseGenericParameters(
   const sig = marker.sig!;
 
   const args = sig.args ?? [];
+  // A REST parameter is the one variadic shape a marker may state, and it MUST
+  // state it: the marker mirrors the parameter list, so `(a, ...rest) => …`
+  // carries `(…, any*) -> R` with one positional entry per FIXED parameter and
+  // the variadic tail standing for the rest parameter. Without this the Epsil
+  // lowering of `function h<T>(x: T, ...rest) -> T { … }` either had to spell
+  // the rest parameter as an ordinary slot — which typed `h` as fixed-arity
+  // binary, so `h(1)` reported a missing argument and `h(1, 2, 3)` an
+  // unexpected one — or be rejected here as ill-formed.
+  const restAt = restParameterIndex(params);
+  const fixedCount = restAt < 0 ? params.length : restAt;
+  const markerIsVariadic = sig.variadicArg !== undefined;
+  const literalIsVariadic = restAt >= 0;
   if (
     sig.optArgs !== undefined ||
-    sig.variadicArg !== undefined ||
-    args.length !== params.length
+    markerIsVariadic !== literalIsVariadic ||
+    args.length !== fixedCount
   )
     return {
       error: ce._fn('Function', [

@@ -13,7 +13,11 @@
   `Conjugate(g(1, 2))`. Only the last parameter may be a rest parameter and it
   carries no type annotation; anything else is an error on the literal.
   `compile()` refuses a function that has one, because no compile target
-  collects the trailing arguments.
+  collects the trailing arguments. A NAMED Epsil definition takes one too, in
+  the equation form and the braced form alike — `h(a, ...rest) = Length(rest)`
+  and `function h(a, ...rest) { Length(rest) }` both behave exactly like
+  `let h = (a, ...rest) => Length(rest)`, and a misplaced or malformed spread
+  in a definition head is diagnosed the way it is in a lambda's parameter list.
 - **`Primes`, the set of all prime numbers.** A lazy, infinite set constant like
   `Integers`: `Element(7, Primes)` is `True`, iteration yields 2, 3, 5, … on
   demand, `Primes ⊂ Integers` holds, and a big operator over it
@@ -22,6 +26,33 @@
 
 ### Resolved Issues
 
+- **A symbol holding a function with a rest parameter reports a variadic
+  signature.** The arrow inferred for a user function was assembled from the
+  parameter OPERANDS, one positional slot each, so `f := (a, ...rest) =>
+  Length(rest)` declared `(unknown, unknown) -> integer` — a fixed arity the
+  function does not have — while the literal's own arrow already said
+  `(unknown, any*) -> integer`. The rest parameter now leaves the argument list
+  and becomes the variadic tail on every derivation, so a type-strict call site
+  accepts `f(1)` and `f(1, 2, 3)` and still reports the missing argument of
+  `f()`. Reconciling a literal against a DECLARED signature follows the same
+  rule: a literal with a rest parameter implements a variadic declaration whose
+  MINIMUM call arity is the literal's fixed count — `(integer, any*)` and
+  `(unknown+)` both fit `(a, ...rest) => …` — and never implements a
+  fixed-arity one. The declared argument types are ascribed onto the fixed
+  parameters as they are for a fixed-arity literal, and the same minimum-arity
+  rule governs the Epsil clause route, so `let f: (integer, any*) -> integer`
+  followed by `f(a, ...rest) = …` installs. Operand descriptors mark the
+  parameter with `rest: true` rather than reporting it as one more positional
+  slot.
+- **An Epsil definition that carries an effect specifier or a type-parameter
+  clause states its rest parameter as a variadic tail.** Such a definition
+  lowers a full-signature marker mirroring its parameter list, and the marker
+  gave the rest parameter an ordinary fixed slot: `function h<T>(x: T, ...rest)
+  -> T { … }` typed `h` as `(T, unknown) -> T where T`, so `h(1)` reported a
+  missing argument and `h(1, 2, 3)` an unexpected one. The marker now spells the
+  tail (`(x: T, any*) -> T where T`), and a literal's marker is well-formed
+  exactly when its variadic tail and its rest parameter are both present or both
+  absent.
 - **A canonical-handler operator with a generic numeric signature now types a
   valueless operand.** The boxing seam re-validates a canonical handler's result
   with inference off and ran its numeric inference only for concrete numeric

@@ -321,6 +321,23 @@ needs:
 (...args) => Conjugate(g(...args))
 ```
 
+A named definition takes a rest parameter in the same position and with the
+same meaning, in the equation form and in the braced form alike:
+
+```epsil
+h(a, ...rest) = Length(rest)
+```
+
+```epsil
+function h(a, ...rest) {
+  Length(rest)
+}
+```
+
+Either one behaves exactly like `let h = (a, ...rest) => Length(rest)`, and the
+name it declares reports the arity it really accepts — `h` above has the type
+`(unknown, any*) -> integer`, "one argument or more".
+
 Only the last parameter may be a rest parameter, and it carries no type
 annotation. A rest parameter is an interpreted-only feature: `compile()`
 refuses a function that has one, because no compile target collects the

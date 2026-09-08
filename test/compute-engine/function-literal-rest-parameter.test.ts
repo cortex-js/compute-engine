@@ -3,6 +3,7 @@ import { compile } from '../../src/compute-engine/free-functions';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import type { MathJsonExpression } from '../../src/math-json/types';
+import { describe as describeOperand } from '../../src/compute-engine/boxed-expression/operand-descriptor';
 
 /**
  * REST PARAMETERS of a function literal.
@@ -30,6 +31,17 @@ function stripOffsets(x: unknown): unknown {
     return out;
   }
   return x;
+}
+
+/** Evaluate an Epsil program and return the result as a string, asserting
+ * that it parsed without a diagnostic. */
+function epsilValue(source: string): string {
+  const [ast, diagnostics] = parseEpsil(source);
+  expect(diagnostics).toEqual([]);
+  return new ComputeEngine()
+    .box(ast as MathJsonExpression)
+    .evaluate()
+    .toString();
 }
 
 /** Apply `fn` to `args` (numbers), evaluated. */
@@ -396,5 +408,331 @@ describe('Rest parameter — argument errors', () => {
       .evaluate();
     expect(viaParam.operator).toBe('Error');
     expect(viaRest.json).toEqual(viaParam.json);
+  });
+});
+
+describe('Rest parameter — named definitions', () => {
+  // A rest parameter is part of a definition's parameter list, not only of an
+  // anonymous lambda's: the arrow a NAMED definition installs must state the
+  // same "N arguments or more" contract the literal's own arrow does.
+
+  test('an assigned symbol carries the variadic tail in its signature', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']])
+    );
+    expect(ce.symbol('f').type.toString()).toBe('(unknown, any*) -> integer');
+  });
+
+  test('the Assign box route agrees with ce.assign', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'Assign',
+      'g',
+      ['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']],
+    ]).evaluate();
+    expect(ce.symbol('g').type.toString()).toBe('(unknown, any*) -> integer');
+  });
+
+  test('a rest-only definition has an all-variadic signature', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box(['Function', ['Length', 'args'], ['Spread', 'args']])
+    );
+    expect(ce.symbol('f').type.toString()).toBe('(any*) -> integer');
+  });
+
+  test('call arities on the box route', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'f',
+      ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']])
+    );
+    expect(ce.box(['f', 1]).evaluate().toString()).toBe('0');
+    expect(ce.box(['f', 1, 2]).evaluate().toString()).toBe('1');
+    expect(ce.box(['f', 1, 2, 3, 4]).evaluate().toString()).toBe('3');
+  });
+
+  test('a type-strict definition accepts the variadic tail and refuses a short call', () => {
+    // An annotated fixed parameter turns apply-time validation on. The tail
+    // stays unchecked (a rest parameter is `any*`), so extra arguments are
+    // accepted, while the missing FIXED argument is reported as it is for any
+    // other annotated parameter.
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Length', 'rest'],
+        ['Typed', 'a', "'integer'"],
+        ['Spread', 'rest'],
+      ])
+    );
+    expect(ce.symbol('g').type.toString()).toBe(
+      '(a: integer, any*) -> integer'
+    );
+    expect(ce.box(['g', 1]).evaluate().toString()).toBe('0');
+    expect(ce.box(['g', 1, 2, 3]).evaluate().toString()).toBe('2');
+    expect(ce.box(['g']).toString()).toContain('missing');
+  });
+
+  test('a declared signature must be variadic where the literal is', () => {
+    const literal = () =>
+      ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']]);
+    let ce = new ComputeEngine();
+    ce.declare('f', '(integer, any*) -> integer');
+    expect(() => ce.assign('f', literal())).not.toThrow();
+
+    ce = new ComputeEngine();
+    ce.declare('f', '(integer, integer) -> integer');
+    expect(() => ce.assign('f', literal())).toThrow(/1 or more/);
+
+    // `any+` requires a non-empty tail; a rest parameter admits an empty one.
+    ce = new ComputeEngine();
+    ce.declare('f', '(integer, any+) -> integer');
+    expect(() => ce.assign('f', literal())).toThrow(/1 or more/);
+  });
+
+  test('the operand descriptor marks the rest parameter', () => {
+    const ce = new ComputeEngine();
+    const s = describeOperand(
+      ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']])
+    ).structureOf?.();
+    expect(s?.kind).toBe('function-literal');
+    if (s?.kind === 'function-literal') {
+      expect(s.parameters).toEqual([
+        { name: 'a' },
+        { name: 'rest', rest: true },
+      ]);
+    }
+  });
+
+  test('Epsil: the equation form accepts a rest parameter', () => {
+    expect(epsilValue('h(a, ...rest) = Length(rest)\nh(1, 2, 3)')).toBe('2');
+    expect(epsilValue('h(a, ...rest) = Length(rest)\nh(1)')).toBe('0');
+    expect(epsilValue('h(...all) = Length(all)\nh(1, 2, 3)')).toBe('3');
+  });
+
+  test('Epsil: the `function` form accepts a rest parameter', () => {
+    expect(
+      epsilValue('function h(a, ...rest) { Length(rest) }\nh(1, 2, 3, 4)')
+    ).toBe('3');
+  });
+
+  test('Epsil: a named definition behaves like the equivalent lambda', () => {
+    const named = epsilValue('h(a, ...rest) = Length(rest)\nh(1, 2, 3)');
+    const lambda = epsilValue(
+      'let h = (a, ...rest) => Length(rest)\nh(1, 2, 3)'
+    );
+    expect(named).toBe(lambda);
+  });
+
+  test('Epsil: a definition with a rest parameter and literal clauses dispatches', () => {
+    expect(
+      epsilValue(
+        'h(0, ...rest) = 0\nh(n, ...rest) = Length(rest)\n(h(0, 9, 9), h(5, 9, 9), h(5))'
+      )
+    ).toBe('(0, 2, 0)');
+  });
+
+  test.each([
+    'h(a, ...rest) = Length(rest)',
+    'h(...all) = Length(all)',
+    'function h(a, ...rest) {Length(rest)}',
+  ])('Epsil round-trips the named form %p', (source) => {
+    const [ast, diagnostics] = parseEpsil(source);
+    expect(diagnostics).toEqual([]);
+    const text = serializeEpsil(ast as MathJsonExpression);
+    expect(text).toBe(source);
+    expect(stripOffsets(parseEpsil(text)[0])).toEqual(stripOffsets(ast));
+  });
+
+  test('Epsil rejects a misplaced or malformed spread in a definition head', () => {
+    // The same diagnostic the mapsto parameter list reports, and the same
+    // recovery: the spread is dropped, the other parameters survive.
+    const [ast, diagnostics] = parseEpsil('h(a, ...rest, b) = a');
+    expect(diagnostics.map((d) => d.message)).toEqual([['symbol-expected']]);
+    expect(stripOffsets(ast)).toEqual({
+      fn: [
+        'DefineFunction',
+        { sym: 'h' },
+        { fn: ['Function', { sym: 'a' }, { sym: 'a' }, { sym: 'b' }] },
+      ],
+    });
+    expect(parseEpsil('h(...1) = 2')[1].map((d) => d.message)).toEqual([
+      ['symbol-expected'],
+    ]);
+    expect(
+      parseEpsil('h(a, ...rest: integer) = a')[1].map((d) => d.message)
+    ).toEqual([['symbol-expected']]);
+  });
+});
+
+describe('Rest parameter — signature markers on named definitions', () => {
+  /** The marker signature text an Epsil definition lowered, or `undefined`. */
+  function markerOf(source: string): string | undefined {
+    const [ast, diagnostics] = parseEpsil(source);
+    expect(diagnostics).toEqual([]);
+    const found = JSON.stringify(ast).match(/"str":"(\([^"]*)"/);
+    return found?.[1];
+  }
+
+  // A definition that carries an effect specifier or a type-parameter clause
+  // lowers a FULL SIGNATURE marker mirroring its parameter list. The rest
+  // parameter has no positional slot there either: it is the variadic tail.
+
+  test('a generic definition states the tail, not an extra fixed slot', () => {
+    expect(markerOf('function h<T>(x: T, ...rest) -> T { x }')).toBe(
+      '(x: T, any*) -> T where T'
+    );
+  });
+
+  test('an effect-annotated definition states the tail', () => {
+    expect(markerOf('function h(x, ...rest) scope -> integer { x }')).toBe(
+      '(x: unknown, any*) scope -> integer'
+    );
+    expect(markerOf('h(x, ...rest) scope -> integer = x')).toBe(
+      '(x: unknown, any*) scope -> integer'
+    );
+  });
+
+  test('a generic definition with a rest parameter accepts any tail length', () => {
+    expect(epsilValue('function h<T>(x: T, ...rest) -> T { x }\nh(1)')).toBe(
+      '1'
+    );
+    expect(
+      epsilValue('function h<T>(x: T, ...rest) -> T { x }\nh(1, 2, 3)')
+    ).toBe('1');
+  });
+
+  test('an effect-annotated definition accepts any tail length, both forms', () => {
+    expect(
+      epsilValue(
+        'function h(a, ...rest) pure -> integer { Length(rest) }\n(h(1), h(1, 2, 3))'
+      )
+    ).toBe('(0, 2)');
+    expect(
+      epsilValue(
+        'h(a, ...rest) scope -> integer = Length(rest)\n(h(1), h(1, 2))'
+      )
+    ).toBe('(0, 1)');
+  });
+});
+
+describe('Rest parameter — declared signatures', () => {
+  const restLiteral = (ce: ComputeEngine) =>
+    ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']]);
+
+  /** Assign the one-fixed-parameter rest literal under `declared`; return the
+   * thrown arity message, or `undefined` when the assignment was accepted. */
+  function assignUnder(declared: string): string | undefined {
+    const ce = new ComputeEngine();
+    ce.declare('f', declared);
+    try {
+      ce.assign('f', restLiteral(ce));
+      return undefined;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  }
+
+  test('a variadic declaration fits when the MINIMUM call arities agree', () => {
+    // `(a, ...rest) => …` accepts one argument or more. So does `(unknown+)`:
+    // no required argument, but a non-empty tail. Comparing `variadicMin` to
+    // zero instead of comparing minimum arities refused this.
+    expect(assignUnder('(unknown+) -> integer')).toBeUndefined();
+    expect(assignUnder('(number+) -> integer')).toBeUndefined();
+    expect(assignUnder('(integer, any*) -> integer')).toBeUndefined();
+  });
+
+  test('a variadic declaration with a different minimum does not fit', () => {
+    // `(integer, any+)` and `(integer, integer, any*)` both need two arguments;
+    // the literal promises only one.
+    expect(assignUnder('(integer, any+) -> integer')).toMatch(
+      /takes 1 or more parameter\(s\).*accepts 2 or more/s
+    );
+    expect(assignUnder('(integer, integer, any*) -> integer')).toMatch(
+      /takes 1 or more parameter\(s\).*accepts 2 or more/s
+    );
+    // `(any*)` admits a zero-argument call, which the literal cannot serve.
+    expect(assignUnder('(any*) -> integer')).toMatch(/accepts 0 or more/);
+  });
+
+  test('a fixed-arity declaration never fits a literal with a rest parameter', () => {
+    expect(assignUnder('(integer, integer) -> integer')).toMatch(
+      /accepts exactly 2/
+    );
+  });
+
+  test('`(any+)` is refused by the ordinary any/unknown rule, not by arity', () => {
+    // The arity check now passes; what remains is the pre-existing rule that
+    // `any` is not assignable to an `unknown` parameter slot — a fixed literal
+    // under `(any) -> integer` is refused in exactly the same way.
+    const message = assignUnder('(any+) -> integer');
+    expect(message).toBeDefined();
+    expect(message).not.toMatch(/parameter\(s\)/);
+    expect(message).toMatch(/not compatible with the type/);
+  });
+
+  test('a rest-only literal matches a declaration that admits an empty call', () => {
+    const restOnly = ['Function', ['Length', 'rest'], ['Spread', 'rest']];
+    let ce = new ComputeEngine();
+    ce.declare('f', '(unknown*) -> integer');
+    expect(() => ce.assign('f', ce.box(restOnly))).not.toThrow();
+    ce = new ComputeEngine();
+    ce.declare('f', '(unknown+) -> integer');
+    expect(() => ce.assign('f', ce.box(restOnly))).toThrow(
+      /takes 0 or more parameter\(s\)/
+    );
+  });
+
+  test('the declared argument types are ascribed onto the FIXED parameters', () => {
+    // A non-scalar declared type is stamped onto the parameter it governs, as
+    // it is for a fixed-arity literal; the rest parameter is left alone.
+    const ce = new ComputeEngine();
+    ce.declare('g', '(list<integer>, any*) -> integer');
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Length', 'a'], 'a', ['Spread', 'rest']])
+    );
+    const stored = (
+      ce.lookupDefinition('g') as { value?: { value?: { json: unknown } } }
+    ).value?.value;
+    expect(stored?.json).toEqual([
+      'Function',
+      ['Block', ['Length', 'a']],
+      ['Typed', 'a', "'list<integer>'"],
+      ['Spread', 'rest'],
+    ]);
+  });
+
+  test('the Epsil clause route accepts a variadic declaration', () => {
+    // `declare` then `define` is the prescribed form for a recursive
+    // definition, and it stamps SCALAR declared types too, so the body reads
+    // `a` as an integer here.
+    expect(
+      epsilValue(
+        'let f: (integer, any*) -> integer\nf(a, ...rest) = a + Length(rest)\n(f(1), f(1, 2, 3))'
+      )
+    ).toBe('(1, 3)');
+    expect(
+      epsilValue(
+        'let f: (any*) -> integer\nf(...rest) = Length(rest)\n(f(), f(1, 2))'
+      )
+    ).toBe('(0, 2)');
+  });
+
+  test('the clause route still refuses a fixed declaration', () => {
+    const [ast] = parseEpsil(
+      'let f: (integer, integer) -> integer\nf(a, ...rest) = a\nf(1, 2)'
+    );
+    expect(
+      new ComputeEngine()
+        .box(ast as MathJsonExpression)
+        .evaluate()
+        .toString()
+    ).toContain('invalid-clause-definition');
   });
 });

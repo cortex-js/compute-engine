@@ -2,6 +2,7 @@ import type { Expression, FunctionInterface } from '../global-types.js';
 import type {
   EffectSet,
   FunctionSignature,
+  NamedElement,
   Type,
   TypeReference,
 } from '../../common/type/types.js';
@@ -115,6 +116,64 @@ export function resolveFunctionLiteralTypes(expr: Expression): void {
  */
 export function isRestParameter(param: Expression): boolean {
   return isFunction(param, 'Spread');
+}
+
+/**
+ * The index of the REST parameter within a `Function` literal's parameter
+ * list, or `-1` when the list has none.
+ *
+ * Canonicalization admits at most one rest parameter and only in the last
+ * position, so this index is also the number of FIXED parameters an
+ * application must supply before the rest parameter takes over.
+ */
+export function restParameterIndex(params: ReadonlyArray<Expression>): number {
+  return params.findIndex((p) => isRestParameter(p));
+}
+
+/**
+ * The variadic tail a rest parameter contributes to a `Function` literal's
+ * arrow, ready to be spread into a signature object. An empty object when the
+ * parameter list has no rest parameter.
+ *
+ * The element type is `any` — the widest contract, absence markers included —
+ * because a rest parameter carries no annotation of its own (a `Typed` wrapper
+ * around one is rejected at canonicalization), so the call may pass anything.
+ * `variadicMin` is `0` because the tail may be empty: the application then
+ * binds the empty tuple.
+ *
+ * EVERY derivation of a literal's arrow must spread this in. A derivation that
+ * does not counts the rest parameter as one ordinary positional slot, and the
+ * arrow then claims a fixed arity the function does not have — which is what
+ * made an assigned `(a, ...rest) => …` report `(unknown, unknown) -> integer`.
+ */
+export function restParameterSignatureTail(params: ReadonlyArray<Expression>): {
+  variadicArg?: NamedElement;
+  variadicMin?: 0;
+} {
+  return restParameterIndex(params) < 0
+    ? {}
+    : { variadicArg: { type: 'any' }, variadicMin: 0 };
+}
+
+/**
+ * The call arities a `Function` literal accepts: the number of FIXED
+ * parameters it requires, and whether a rest parameter leaves the tail
+ * unbounded.
+ *
+ * `(a, b) => …` is `{ fixed: 2, variadic: false }` — it accepts exactly two
+ * arguments. `(a, ...rest) => …` is `{ fixed: 1, variadic: true }` — one
+ * argument or more. This is the reading every arity check owes a literal;
+ * counting the parameter OPERANDS answers `2` for both.
+ */
+export function functionLiteralArity(expr: Expression): {
+  fixed: number;
+  variadic: boolean;
+} {
+  const params = isFunction(expr, 'Function') ? expr.ops.slice(1) : [];
+  const rest = restParameterIndex(params);
+  return rest < 0
+    ? { fixed: params.length, variadic: false }
+    : { fixed: rest, variadic: true };
 }
 
 /** The symbol NODE a rest parameter binds — the operand inside its `Spread`
