@@ -190,7 +190,7 @@ describe('COMPILE CSE — dedup', () => {
     expect(occurrences(result.code, 'Math.sin')).toBe(1);
     expect(occurrences(result.code, '_cse1')).toBe(4); // 1 binding + 3 uses
     expect(result.code).toMatchInlineSnapshot(
-      `(() => { const _cse1 = Math.sin(6 * _.u); return Math.pow(_cse1, 2) + _cse1 / (_cse1 + 2); })()`
+      `(() => { const _cse1 = Math.sin(6 * _.u); return _SYS.pow2(_cse1) + _cse1 / (_cse1 + 2); })()`
     );
 
     for (const u of [0.3, -1.25, 2]) {
@@ -227,7 +227,7 @@ describe('COMPILE CSE — dedup', () => {
     const result = compile(expr, { fallback: false });
 
     expect(result.code).toMatchInlineSnapshot(
-      `(() => { const _cse1 = Math.sin(6 * _.u); const _cse2 = Math.cos(_.u) * Math.pow(_cse1, 2); return _cse1 + _cse2 / (_cse2 + 1); })()`
+      `(() => { const _cse1 = Math.sin(6 * _.u); const _cse2 = Math.cos(_.u) * _SYS.pow2(_cse1); return _cse1 + _cse2 / (_cse2 + 1); })()`
     );
     // The outer binding references the inner temp, and is bound after it.
     expect(result.code.indexOf('const _cse1')).toBeLessThan(
@@ -248,7 +248,7 @@ describe('COMPILE CSE — dedup', () => {
     expect(off.code).not.toContain('_cse');
     expect(occurrences(off.code, 'Math.sin')).toBe(3);
     expect(off.code).toMatchInlineSnapshot(
-      `Math.pow(Math.sin(6 * _.u), 2) + Math.sin(6 * _.u) / (Math.sin(6 * _.u) + 2)`
+      `_SYS.pow2(Math.sin(6 * _.u)) + Math.sin(6 * _.u) / (Math.sin(6 * _.u) + 2)`
     );
   });
 });
@@ -282,7 +282,7 @@ describe('COMPILE CSE — conditionality', () => {
     // arm. It sits OUTSIDE the ternary and binds no temporary of its own, so
     // the arm-only CSE binding this test is about is unaffected.
     expect(result.code).toMatchInlineSnapshot(
-      `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return Math.pow(_cse1, 2) + _cse1 / (_cse1 + 2); })()) : (0)) : NaN)`
+      `((_.x === _.x && _.x !== undefined) ? ((0 < _.x) ? ((() => { const _cse1 = Math.sin(6 * _.u); return _SYS.pow2(_cse1) + _cse1 / (_cse1 + 2); })()) : (0)) : NaN)`
     );
 
     // The unselected arm evaluates NOTHING: a getter on the vars object counts
@@ -617,7 +617,7 @@ describe('COMPILE CSE — determinism', () => {
 
     expect(second).toBe(first);
     expect(first).toMatchInlineSnapshot(
-      `(() => { const _cse1 = Math.sin(6 * _.u); return ((_tv2) => (0 < _tv2) && (_tv2 < 10))(Math.pow(_cse1, 2) + _cse1 / (_cse1 + 2)); })()`
+      `(() => { const _cse1 = Math.sin(6 * _.u); return ((_tv2) => (0 < _tv2) && (_tv2 < 10))(_SYS.pow2(_cse1) + _cse1 / (_cse1 + 2)); })()`
     );
   });
 });
@@ -1053,7 +1053,7 @@ describe('COMPILE CSE — name collisions', () => {
     // `_cse1` is free here, so the CSE temp takes it; `_tv1` stays the param.
     expect(result.code).toBe(
       '(_tv1) => { { const _cse1 = Math.sin(6 * _tv1); ' +
-        'return _cse1 + _cse1 + Math.pow(_cse1, 2); } }'
+        'return _cse1 + _cse1 + _SYS.pow2(_cse1); } }'
     );
     expect((result.run as (x: number) => number)(0.3)).toBeCloseTo(
       compile(expr, { fallback: false, cse: false }).run!(0.3) as number,
@@ -1371,7 +1371,7 @@ describe('COMPILE CSE — user-function body dedup', () => {
     expect(occurrences(result.code, 'Math.sin')).toBe(1);
     expect(result.code).toContain(
       'const _fn_f = (x) => { { const _cse1 = Math.sin(6 * x); ' +
-        'return _cse1 + _cse1 + Math.pow(_cse1, 2); } }'
+        'return _cse1 + _cse1 + _SYS.pow2(_cse1); } }'
     );
     // …and the two call sites are still two calls: `f(t)` and `f(2t)` are
     // different expressions, so there is nothing to merge.

@@ -24,6 +24,11 @@
 
 ### Improvements
 
+- **Generated code shares repeated symbol squares**, including interval
+  operations. JavaScript uses a single-argument helper for compound squares,
+  and GLSL/WGSL reuse previously computed values inside conditional branches
+  without moving new computations outside their branches.
+
 - **Code generation specializes more numeric operations.** GLSL and WGSL use
   branch-free helpers for small constant powers of compound expressions and
   skip sRGB/OKLCh round trips for bounded colors after checking the conversion

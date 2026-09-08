@@ -5039,11 +5039,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     // The condition is evaluated unconditionally, so it may hoist; the two arms
-    // are selected and must not (see `compileGPUConditionalArm`).
+    // are selected and must not (see `compileGPUConditionalArm`). Operand
+    // indices preserve their CSE regions, allowing reuse of outer bindings.
     return gpuConditional(
-      compile(args[0]),
-      compileGPUConditionalArm('If', () => compile(args[1]), target),
-      compileGPUConditionalArm('If', () => compile(args[2]), target),
+      compile(args[0], 0),
+      compileGPUConditionalArm('If', () => compile(args[1], 1), target),
+      compileGPUConditionalArm('If', () => compile(args[2], 2), target),
       target
     );
   },
@@ -5054,13 +5055,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // §5): its condition must be a scalar boolean. A provably collection-valued
     // condition would otherwise emit garbage (`(vec2(True, False)) ? …`).
     BaseCompiler.assertScalarCondition(args[1]);
-    if (isSymbol(args[1], 'True')) return `(${compile(args[0])})`;
+    if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
     // The masked branch's NaN must match the value's SHAPE (a tuple-valued
     // body compiles to a vecN) — see `gpuNaNFor` (Tycho item 49).
     if (isSymbol(args[1], 'False')) return gpuNaNFor(args[0], target);
     return gpuConditional(
-      compile(args[1]),
-      compileGPUConditionalArm('When', () => compile(args[0]), target),
+      compile(args[1], 1),
+      compileGPUConditionalArm('When', () => compile(args[0], 0), target),
       gpuNaNFor(args[0], target),
       target
     );
@@ -5085,10 +5086,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const armed = (f: () => string): string =>
         i === 0 ? f() : compileGPUConditionalArm('Which', f, target);
       // `True` marks the default branch.
-      if (isSymbol(cond, 'True')) return `(${armed(() => compile(val))})`;
+      if (isSymbol(cond, 'True')) return `(${armed(() => compile(val, i + 1))})`;
       return gpuConditional(
-        armed(() => compile(cond)),
-        compileGPUConditionalArm('Which', () => compile(val), target),
+        armed(() => compile(cond, i)),
+        compileGPUConditionalArm('Which', () => compile(val, i + 1), target),
         build(i + 2),
         target
       );

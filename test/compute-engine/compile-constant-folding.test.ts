@@ -418,9 +418,9 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       expect(js.compile(ce.expr(['Power', 'x', 2])).code).toBe('(_.x * _.x)');
     });
 
-    it('JS: Power(Sin(x), 2) uses Math.pow for complex operand', () => {
+    it('JS: Power(Sin(x), 2) uses a helper for a compound operand', () => {
       expect(js.compile(ce.expr(['Power', ['Sin', 'x'], 2])).code).toBe(
-        'Math.pow(Math.sin(_.x), 2)'
+        '_SYS.pow2(Math.sin(_.x))'
       );
     });
 
@@ -436,9 +436,9 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       expect(js.compile(ce.expr(['Square', 'x'])).code).toBe('(_.x * _.x)');
     });
 
-    it('JS: Square(Sin(x)) uses Math.pow for complex operand', () => {
+    it('JS: Square(Sin(x)) uses a helper for a compound operand', () => {
       expect(js.compile(ce.expr(['Square', ['Sin', 'x']])).code).toBe(
-        'Math.pow(Math.sin(_.x), 2)'
+        '_SYS.pow2(Math.sin(_.x))'
       );
     });
   });

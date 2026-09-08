@@ -21,6 +21,7 @@ import type {
 
 import {
   isFunction,
+  isNumber,
   isSymbol,
   isString,
 } from '../boxed-expression/type-guards.js';
@@ -33,6 +34,7 @@ import {
 } from './builtin-callback.js';
 import { symbolAtSite } from '../boxed-expression/binding-sites.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
 
 // ---------------------------------------------------------------------------
 // Tunable thresholds are exported so tests can pin the named policy values.
@@ -949,7 +951,8 @@ class Harvester {
       node.isPure &&
       (this.sizeOf(node) >= this.minSize ||
         this.isAdmittedUserFnApp(node) ||
-        this.isExpensiveBuiltin(node)) &&
+        this.isExpensiveBuiltin(node) ||
+        this.isSymbolSquare(node)) &&
       this.isEligible(node)
     ) {
       this.occurrences.push({
@@ -960,6 +963,29 @@ class Harvester {
         size: this.sizeOf(node),
       });
     }
+  }
+
+  /** Repeated symbol squares save two reads and an operation per reuse.
+   * Interval lowering also saves a result allocation. Keep other small
+   * arithmetic expressions subject to the ordinary size and benefit limits. */
+  private isSymbolSquare(node: Expression): boolean {
+    if (
+      !isFunction(node) ||
+      !isSymbol(node.ops[0]) ||
+      !isSubtype(node.ops[0].type.type, 'number')
+    )
+      return false;
+    if (node.operator === 'Square' && node.ops.length === 1) return true;
+    if (node.ops.length !== 2) return false;
+    if (node.operator === 'Power')
+      return (
+        isNumber(node.ops[1]) && node.ops[1].re === 2 && node.ops[1].im === 0
+      );
+    return (
+      node.operator === 'Multiply' &&
+      isSymbol(node.ops[1]) &&
+      node.ops[0].isSame(node.ops[1])
+    );
   }
 
   /** A native transcendental call can pay for a temporary even when its
@@ -2059,7 +2085,8 @@ class Harvester {
       if (count < 2) return false;
       if (
         this.isAdmittedUserFnApp(c.representative) ||
-        this.isExpensiveBuiltin(c.representative)
+        this.isExpensiveBuiltin(c.representative) ||
+        this.isSymbolSquare(c.representative)
       )
         return true;
       if (c.size < this.minSize || (count - 1) * c.size < this.minScore) {

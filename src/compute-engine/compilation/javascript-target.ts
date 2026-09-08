@@ -4111,7 +4111,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `Math.exp(${compile(exp)})`;
     if (
       eConst !== undefined &&
-      eConst >= 3 &&
+      eConst >= 2 &&
       eConst <= 5 &&
       Number.isInteger(eConst)
     )
@@ -4378,7 +4378,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const code = compile(arg);
       return `(${code} * ${code})`;
     }
-    return `Math.pow(${compile(arg)}, 2)`;
+    return `_SYS.pow2(${compile(arg)})`;
   },
   Sec: (args, compile) => {
     const arg = args[0];
@@ -6965,6 +6965,7 @@ const SYS_HELPERS = {
       centeredDiffHigherOrder(realFn(f), x, order),
   // Fixed exponents avoid repeated base evaluation and the general power
   // kernel. Keep multiplication order explicit for small real powers.
+  pow2: (x: number) => x * x,
   pow3: (x: number) => x * x * x,
   pow4: (x: number) => {
     const s = x * x;
