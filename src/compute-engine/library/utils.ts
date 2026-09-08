@@ -2074,6 +2074,27 @@ export function canonicalBigop(
   // the bound index leaking out free (Tycho item 121, witness check 5: it is
   // what let a Sum body reach the emitters with its index unbound, hence
   // `NaN + "ab"`).
+  //
+  // A no-index big op over a SYMBOL with no type evidence yet reads the
+  // symbol as the collection it reduces: `Sum(L)` is a use of `L` at a
+  // collection slot, as `Length(L)` is, and a valueless symbol is narrowed by
+  // its uses (the asymmetric inference rule, `docs/INFERENCE_ROADMAP.md`).
+  // Without this `f(L) := Sum(L)` left `L` typed `unknown` — the body slot
+  // of `Sum` is `any` — and `f([1, 2, 3])` broadcast the call over the list
+  // (an unknown parameter is scalar by default), answering `[1, 2, 3]`. A
+  // symbol that already carries evidence (`x + 1` before `Sum(x)`, a declared
+  // type) is not touched: narrowing `number` by `collection` would empty it,
+  // and `Sum(x)` over a scalar is the identity spelling. Ruled 2026-09-08
+  // (option A2: use-site evidence, not a new default for `unknown`).
+  //
+  if (
+    indexes.length === 0 &&
+    isSymbol(body) &&
+    !body.isCollection &&
+    body.type.isUnknown
+  )
+    body._infer(() => 'collection');
+
   if (indexes.length === 0 && body.isCollection) {
     if (bigOp === 'Sum') return ce.expr(['Reduce', body, 'Add', 0]);
 

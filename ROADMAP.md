@@ -537,33 +537,6 @@ are indistinguishable to a descriptor; a symbol's held tuple behind a scalar
 declaration is invisible to `Abs`; a point accessor over a symbol whose declared
 element type is wider than its held content answers `unknown`). What remains:
 
-### Two findings of the 2026-09-08 small-fix round (OPEN)
-
-- **The descriptor derivation of an application skips the broadcast lift.**
-  `context.derive('Power', [d, 2])`, with `d` a descriptor of type
-  `list<integer^3>`, answers `number`; `derive('Sin', [d])` answers `number`
-  too. The expression route types `v^2` for a `v: list<integer^3>` as
-  `vector<3>`, because after the `type` handler it lifts a broadcastable
-  operator over a collection operand element-wise
-  (`boxed-function.ts`, "Honest typing for list broadcast"). The descriptor
-  route (`deriveApplicationType`, `derive-application-type.ts`) calls the
-  handler and stops, so every handler that derives a body over a
-  collection-typed operand through `context.derive` — the pipe's mapped
-  and shorthand stages, a `Map` body over a collection element — gets a
-  scalar type for a collection value. The pipe shorthand typing declines
-  those shapes for now (`pipeShorthandApplicationType`, `library/core.ts`);
-  the fix is to port the lift, or its arms 0–2, to the descriptor route.
-
-- **An `unknown`-typed parameter given a list broadcasts the call
-  element-wise.** `f(L) := Sum(L)` leaves `L` typed `unknown` (`Sum` takes
-  `any`), and `f([1, 2, 3])` evaluates to `[1, 2, 3]`: the call maps `f` over
-  the elements and `Sum(1)`, `Sum(2)`, `Sum(3)` are the terms. `g(L) :=
-  Length(L)` infers `L: collection` and `g([1, 2, 3])` is `3`, as expected.
-  Whether a list argument at an `unknown` parameter should broadcast or
-  bind whole is a ruling to ask for; the pipe `[1, 2, 3] |> Sum(\_)`, which
-  looked the same, was the placeholder leak fixed in this round and now
-  answers `6`.
-
 ### Ranged types — remaining design tasks (OPEN; the interval arithmetic and open-bound halves shipped 2026-08-27 and 2026-08-28)
 
 Each of these is a separate design task left over from the ranged-types line

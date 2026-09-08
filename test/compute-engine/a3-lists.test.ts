@@ -335,19 +335,16 @@ describe('A3.6 — Function-application broadcasting', () => {
     expect(result.ops!.map((x) => x.re)).toEqual([11, 22, 33]);
   });
 
-  test('lambda with list-consuming body still broadcasts (intentional design)', () => {
-    // Inferred lambda params have type `unknown`, which `paramsAreScalar`
-    // treats as scalar — so any list argument broadcasts pointwise, even
-    // when the body is itself a reducer. Users who want the whole list
-    // passed through should call the reducer directly (`Sum(L)`) rather
-    // than wrapping it in a lambda. This test pins the current behavior
-    // so any future narrowing of broadcasting must revisit it.
+  test('lambda with a reducer body binds the list whole', () => {
+    // A no-index `Sum(L)` over a parameter with no type evidence yet infers
+    // `L: collection` (use-site evidence, ruled 2026-09-08), so the list is
+    // bound whole and reduced, exactly as `Sum(L)` called directly. Before
+    // that ruling the inferred parameter kept the type `unknown`, which
+    // `paramsAreScalar` treats as scalar, and the call broadcast pointwise
+    // to `[Sum(1), Sum(2), Sum(3)]`.
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('L \\mapsto \\operatorname{Sum}(L)'));
     const result = ce.expr(['f', ['List', 1, 2, 3]]).evaluate();
-    expect(result.operator).toEqual('List');
-    // Pointwise: [Sum(1), Sum(2), Sum(3)]. Each Sum(scalar) stays symbolic
-    // (scalar is not a collection) so we just check the broadcast shape.
-    expect(result.nops).toEqual(3);
+    expect(result.re).toEqual(6);
   });
 });

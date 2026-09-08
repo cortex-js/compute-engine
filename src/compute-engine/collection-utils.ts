@@ -1346,7 +1346,7 @@ export function unionHasGenuineScalarBranch(t: Readonly<Type>): boolean {
  * scalar, and typing them through the scalar lift would describe a tuple
  * value by a scalar cell.
  */
-function dimensionlessIndexedElement(
+export function dimensionlessIndexedElement(
   t: Type,
   seen?: AliasDescent,
   inUnion = false

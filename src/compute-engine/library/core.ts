@@ -656,29 +656,33 @@ function pipeImplicitMapType(
  * that parser leaves as the application `Power(_, 2)` (the Epsil parser
  * wraps it as a function literal, the mapped case above). Returns
  * `undefined` for any other stage, and for a stage this derivation cannot
- * type soundly; the pipe then keeps the stage's declared result type, or
- * `unknown`. Without this, `[1, 2, 3] |> \_^2` typed `unknown` while it
- * evaluates to a `vector<integer^3>`.
+ * type; the pipe then keeps the stage's declared result type, or `unknown`.
+ * Without this, `[1, 2, 3] |> \_^2` typed `unknown` while it evaluates to
+ * a `vector<integer^3>`.
  *
- * The evaluate route binds the piped value to the placeholder and applies
- * the stage to the whole topic, so over a SCALAR topic the type is the
- * body's type with the placeholder bound to the topic's type — the
- * derivation `pipeStageBodyType` performs for the mapped case, with the
- * topic in the place of its element.
+ * The evaluate route lifts the stage into a function literal whose
+ * parameter type is inferred from the body, binds the piped value to it,
+ * and applies it. A parameter the body uses as a SCALAR (`_^2`, `_ + 1`)
+ * broadcasts over a collection argument element-wise, all the way down:
+ * `[[1, 2], [3, 4]] |> \_^2` is `[[1, 4], [9, 16]]`, where the matrix
+ * power `M^2` would be the product. A parameter the body hands to a
+ * whole-collection operator (`Length(_)`, `Take(_, 2)`, `Add(Length(_), 1)`)
+ * is inferred a collection and bound whole. So:
  *
- * Over a COLLECTION topic the descriptor derivation (`context.derive`) is
- * not enough on its own: it calls an operator's `type` handler directly,
- * without the element-wise lift the expression route applies to a
- * broadcastable operator over a collection operand, so `Power(list, 2)`
- * would type as the scalar `number`. Two cases are typed here:
+ * - when the placeholder reaches the head through BROADCASTABLE operators
+ *   only, the pipe is typed like the mapped stage: the body over the topic's
+ *   scalar ELEMENT type, wrapped back in the topic's collection shape;
+ * - otherwise the body is typed over the topic's whole type, the derivation
+ *   `pipeStageBodyType` performs for the mapped case with the topic in the
+ *   place of its element; an inner broadcastable application over the
+ *   placeholder (`Length(_^2)`) is lifted by the derivation itself.
  *
- * - a BROADCASTABLE head over a collection of scalar numbers applies
- *   element-wise, so the pipe is typed like the mapped stage: the body over
- *   the ELEMENT type, wrapped back in the topic's collection shape;
- * - a NON-broadcastable head (`Length`, `Take`, `Reverse`) takes the
- *   collection whole, so the body is typed over the topic's type — but only
- *   when the placeholder is a DIRECT operand of the head, since an inner
- *   application over the placeholder would meet the same lift gap.
+ * Left undecided: a top-typed topic, which gives the body nothing to type
+ * against (the derivation would answer a handler's fallback for an unknown
+ * operand); a tuple topic, which broadcasts component-wise through a scalar
+ * head in a shape the mapped typing does not name; and a nested list under a
+ * broadcastable head, whose per-row cell does not fit the topic's full
+ * shape.
  *
  * Only `_` and `_1` name the first argument, the one a pipe supplies; a
  * stage mentioning another placeholder, or several, is not decided here.
@@ -698,14 +702,7 @@ function pipeShorthandApplicationType(
   if (name !== '_' && name !== '_1') return undefined;
 
   const topicType = heldOperandType(context, topic);
-  // A topic whose held type is a top type gives the body nothing to type
-  // against; the derivation would answer the handler's fallback for an
-  // unknown operand (`number` for `Power`), which is not a fact about the
-  // topic.
   if (topicType === 'unknown' || topicType === 'any') return undefined;
-  // A tuple topic broadcasts component-wise through a scalar head
-  // (`(1, 2) |> \_^2` is `(1, 4)`), a shape this derivation does not
-  // reproduce; it is left undecided.
   if (isTupleShapedType(topicType)) return undefined;
   const collectionTopic =
     topic.facts.collection === true ||
@@ -713,27 +710,19 @@ function pipeShorthandApplicationType(
   if (!collectionTopic || isSubtype(topicType, 'string'))
     return pipeStageBodyType(context, st, name, topicType);
 
-  if (isBroadcastableHead(context, st.head)) {
-    // Element-wise only if every application on the path from the head to
-    // the placeholder broadcasts: in `Add(Length(_), 1)` the inner `Length`
-    // takes the topic whole and the pipe is the scalar `4`, not a list.
-    if (!placeholderUnderBroadcastableHeads(context, st, name))
-      return undefined;
+  if (
+    isBroadcastableHead(context, st.head) &&
+    placeholderUnderBroadcastableHeads(context, st, name)
+  ) {
     const elementType =
       topic.facts.elementType ?? collectionElementType(topicType) ?? 'unknown';
+    // An element that is itself a collection (a nested list) is not typed
+    // here: the map re-wraps the cell in the topic's full shape, which a
+    // per-row cell does not fit.
     if (!isSubtype(elementType, 'number')) return undefined;
     const cell = pipeStageBodyType(context, st, name, elementType);
     return cell === undefined ? undefined : pipeMapResultType(topicType, cell);
   }
-
-  const placeholderIsDirectOperand = st.children.every((child) => {
-    const cs = child.structureOf?.();
-    if (cs?.kind === 'symbol') return true;
-    const inner = new Set<string>();
-    collectPlaceholderNames(cs, inner);
-    return !inner.has(name);
-  });
-  if (!placeholderIsDirectOperand) return undefined;
   return pipeStageBodyType(context, st, name, topicType);
 }
 
@@ -750,8 +739,8 @@ function isBroadcastableHead(
 
 /**
  * Whether every application between `st`'s head and each occurrence of the
- * placeholder `name` has a broadcastable head, so that the whole stage
- * applies element-wise over a collection bound to the placeholder. An
+ * placeholder `name` has a broadcastable head, so that the lifted stage's
+ * parameter is used as a scalar and a collection bound to it broadcasts. An
  * operand that does not mention the placeholder does not matter.
  */
 function placeholderUnderBroadcastableHeads(

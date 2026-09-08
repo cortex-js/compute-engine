@@ -1184,10 +1184,16 @@ describe('a big op over a body that MIGHT be a collection stays inert', () => {
     ).toBe('9');
   });
 
-  it('still folds a scalar body, including a bare undeclared symbol', () => {
+  it('still folds a scalar body; a bare undeclared symbol is read as a collection', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Sum', 5]).evaluate().toString()).toBe('5');
-    expect(ce.box(['Sum', 'y']).evaluate().toString()).toBe('y');
+    // A no-index `Sum(y)` over a symbol with no type evidence yet infers
+    // `y: collection` (use-site evidence, ruled 2026-09-08), so the sum is a
+    // valueless collection reduction and stays inert, exactly as the cases
+    // above; before that ruling `y` kept the type `unknown` and the sum
+    // folded to the scalar identity `y`.
+    expect(ce.box(['Sum', 'y']).evaluate().toString()).toBe('sum(y)');
+    expect(ce.symbol('y').type.toString()).toBe('collection');
     ce.declare('k', 'number');
     expect(
       ce

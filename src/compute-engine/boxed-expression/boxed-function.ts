@@ -9,7 +9,6 @@ import type {
   Expression,
   BoxedBaseDefinition,
   BoxedOperatorDefinition,
-  BroadcastExemption,
   BoxedRuleSet,
   BoxedSubstitution,
   CanonicalOptions,
@@ -31,7 +30,15 @@ import {
   type DescriptorMemo,
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
-import { typeHandlerContext } from './derive-application-type.js';
+import {
+  installBroadcastLiftHooks,
+  typeHandlerContext,
+} from './derive-application-type.js';
+import {
+  broadcastLiftType,
+  skipBroadcastForVectorOpsOnViews,
+  type BroadcastOperandView,
+} from './broadcast-lift-type.js';
 import {
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
@@ -43,7 +50,6 @@ import {
   isFiniteBroadcastParticipant,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
-  isLinearAlgebraCollection,
   isTextAtom,
   loneUnionBroadcastResultType,
   isNumericTuple,
@@ -114,19 +120,15 @@ import { numericStoreTiers } from './literal-tier.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import {
   absorbNumericAbsence,
-  broadcastElementType,
   broadcastResultType,
   broadcastShapedResultType,
   functionResult,
   staticMembership,
-  isNumericScalarType,
   isSignatureType,
   isWildcardFunctionType,
-  resolveTypeAlias,
   narrow,
   numericMissingSlot,
   codomainMarkerType,
-  staticCollectionDims,
   stripMissingFromType,
   typeHasNanFreeNumericCell,
   widen,
@@ -5720,7 +5722,7 @@ function pointIsOneLegOf(
  *   predicate at all only because `broadcastable` is derived from
  *   `paramsAreScalar` for an annotated literal assigned bare.
  */
-function broadcastsOverTuples(
+export function broadcastsOverTuples(
   operator: string,
   def: BoxedOperatorDefinition
 ): boolean {
@@ -5732,168 +5734,6 @@ function broadcastsOverTuples(
     !isLambdaDef(def) &&
     !isUserFunctionDef(def)
   );
-}
-
-/**
- * How many components the component-wise tuple broadcast of `ops` produces,
- * read from the operand TYPES, or `undefined` when the application does not
- * statically take that arm.
- *
- * The type-level companion of {@link tupleBroadcastCells}, which decides the
- * same question on evaluated VALUES. It answers only for the shape the type
- * arm can name honestly: at least one operand is a tuple of statically-known
- * arity, every tuple operand agrees on that arity, and no operand supplies
- * cells of its own — a list operand makes the result a `List` instead, and an
- * operand whose collection-ness is unknown makes it unknowable.
- *
- * Three outcomes, so the type arm can stay in step with the value arm:
- *
- * - a NUMBER is the component count of a tuple whose components are all
- *   scalars. The result is a tuple of that many copies of the per-component
- *   type, which the type arm spells exactly;
- * - `'unknown-components'` says the broadcast does happen but its component
- *   types cannot be spelled: at least one tuple component is collection-shaped,
- *   so the per-component results differ in shape and a tuple of identical
- *   component types cannot describe them. `tupleBroadcastCells` broadcasts this
- *   case all the same, so the type arm must claim the wide bare `tuple` instead
- *   of the scalar type the operator handler computed;
- * - `undefined` says this application is not a component-wise tuple broadcast.
- *   An EMPTY tuple answers `undefined` as well: there is no component to map,
- *   and `tupleBroadcastCells` declines a zero-length operand and leaves the
- *   application inert, so an empty-tuple type here would describe a value that
- *   never becomes a tuple.
- */
-/**
- * The point arity at the LEAVES of the broadcasting operands, when they are
- * COLLECTIONS OF POINTS: at least one operand is a list (of any rank) whose
- * leaf element type is a tuple of scalar components, every other operand is
- * either such a collection of the same arity or a collection of scalar
- * numbers, and — when a scalar-element collection is among them — every
- * operand is rank 1, so the value zips the collections element-wise and
- * pairs each point with a scalar (`Power(P, E)` for `P: list<tuple<number,
- * number>>`, `E: list<number>` is a list of points; a scalar-element
- * operand imposes no inner shape). `undefined` in every other case: no
- * point collection at all, disagreeing arities, a union whose arms
- * disagree, a tuple component that could itself be a collection (a nested
- * point of lists has no single component type — the could-be predicate, so
- * a `number | list<number>` component declines too), or a point with no
- * components. A scalar operand imposes no shape and is not consulted, so
- * `ops` must be the broadcasting operands only.
- */
-function pointListArity(ops: ReadonlyArray<Expression>): number | undefined {
-  let arity: number | undefined = undefined;
-  let scalarSibling = false;
-  let maxRank = 0;
-  for (const op of ops) {
-    const leaf = pointLeafArity(op.type.type, 0);
-    if (leaf === null) return undefined;
-    maxRank = Math.max(maxRank, leaf.rank);
-    if (leaf.arity === undefined) {
-      scalarSibling = true;
-      continue;
-    }
-    if (arity !== undefined && arity !== leaf.arity) return undefined;
-    arity = leaf.arity;
-  }
-  if (arity === undefined) return undefined;
-  if (scalarSibling && maxRank > 1) return undefined;
-  return arity;
-}
-
-/**
- * The leaf of a collection type for {@link pointListArity}: its rank (list
- * levels peeled, a dimensioned list counting one per dimension) and the point
- * arity at the leaf — a number for a tuple of scalar components, `undefined`
- * for a scalar-number leaf. `null` when the type is not a collection of
- * either, or a union whose arms disagree.
- */
-function pointLeafArity(
-  t: Type,
-  rank: number
-): { arity: number | undefined; rank: number } | null {
-  t = resolveTypeAlias(t);
-  if (typeof t === 'string') return null;
-  if (t.kind === 'union') {
-    let result: { arity: number | undefined; rank: number } | null = null;
-    for (const arm of t.types) {
-      const a = pointLeafArity(arm, rank);
-      if (a === null) return null;
-      if (result === null) result = a;
-      else if (result.arity !== a.arity || result.rank !== a.rank) return null;
-    }
-    return result;
-  }
-  if (t.kind !== 'list' && t.kind !== 'indexed_collection') return null;
-  const dims = t.kind === 'list' ? (t.dimensions?.length ?? 1) : 1;
-  const elt = resolveTypeAlias(t.elements);
-  if (typeof elt === 'string') {
-    return isSubtype(elt, 'number')
-      ? { arity: undefined, rank: rank + dims }
-      : null;
-  }
-  if (
-    elt.kind === 'list' ||
-    elt.kind === 'indexed_collection' ||
-    elt.kind === 'union'
-  )
-    return pointLeafArity(elt, rank + dims);
-  if (elt.kind === 'tuple') {
-    if (elt.elements.length === 0) return null;
-    if (elt.elements.some((c) => typeCouldBeCollection(c.type))) return null;
-    return { arity: elt.elements.length, rank: rank + dims };
-  }
-  return isSubtype(elt, 'number')
-    ? { arity: undefined, rank: rank + dims }
-    : null;
-}
-
-function tupleBroadcastArity(
-  ops: ReadonlyArray<Expression>
-): number | 'unknown-components' | undefined {
-  let arity: number | undefined;
-  let unknownComponents = false;
-  let bareTuple = false;
-  for (const op of ops) {
-    // A transparent alias of a tuple supplies its components like the tuple
-    // it names (`Sin(p)` for `p: pt`, an alias of `tuple<number, number>`).
-    const t = resolveTypeAlias(op.type.type);
-    // A literal or an application of numeric scalar type supplies no cells:
-    // it is neither a tuple nor a collection, and it has no value binding
-    // that the value-level predicates below could read past its type. (A
-    // SYMBOL of numeric type may still hold a collection — a lambda
-    // parameter inferred `number` from its body and applied to a list — so
-    // it takes the full test.)
-    if (!isSymbol(op) && isNumericScalarType(t)) continue;
-    // A symbol declared with the bare `tuple` type names neither its arity
-    // nor its component types, but every value it can hold is a tuple, and
-    // once it holds one the value arm broadcasts over its components
-    // (`Sin(w)` for `w := (1, 2)` is `(sin 1, sin 2)`). The scalar handler
-    // type would therefore be a lie; the wide bare `tuple` is the honest
-    // claim, the same one an unnameable-component tuple gets below. The scan
-    // goes on, because a list sibling still supplies the cells and makes the
-    // result a list whatever the operand order (`Power(w, L)`).
-    if (t === 'tuple') {
-      bareTuple = true;
-      continue;
-    }
-    if (typeof t !== 'string' && t.kind === 'tuple') {
-      if (t.elements.some((el) => isSubtype(el.type, COLLECTION_SHAPE_TYPE)))
-        unknownComponents = true;
-      if (arity === undefined) arity = t.elements.length;
-      else if (t.elements.length !== arity) return undefined;
-      continue;
-    }
-    if (
-      isFiniteBroadcastParticipant(op) ||
-      isBroadcastCollectionType(op) ||
-      isFixedShapeCollection(op) ||
-      isPossiblyCollectionTyped(op)
-    )
-      return undefined;
-  }
-  if (bareTuple) return 'unknown-components';
-  if (arity === undefined || arity === 0) return undefined;
-  return unknownComponents ? 'unknown-components' : arity;
 }
 
 /**
@@ -6098,110 +5938,54 @@ function skipBroadcastForVectorOps(
   hasTensors: boolean,
   ops: ReadonlyArray<Expression>
 ): boolean {
-  const exemptions = def?.broadcastExemptions;
-  if (exemptions === undefined || exemptions.length === 0) return false;
-  const exempt = (label: BroadcastExemption) => exemptions.includes(label);
+  return skipBroadcastForVectorOpsOnViews(
+    def,
+    hasTensors,
+    ops.map(viewOfExpression)
+  );
+}
 
-  // `'tensors'`: tensor and matrix operands route to the operator's own
-  // tensor arms (e.g. `addTensors`/`mulTensors`, which CONTRACT a matrix
-  // product where element-wise broadcasting would Hadamard). The second
-  // disjunct catches a matrix-valued operand that is NOT a raw tensor node —
-  // most often a SYMBOL whose value is a matrix (`isTensor` keys on the node
-  // kind, so `hasTensors` misses it), or any expression statically typed
-  // `matrix`. Keyed on the static type, so no value is resolved on the
-  // scalar hot path; a `vector<n>` operand does not match `matrix`, so
-  // vector Hadamard is unchanged.
-  if (exempt('tensors')) {
-    if (hasTensors) return true;
-    // A `never`-typed operand matches `matrix` vacuously (the bottom type
-    // matches everything) but has no shape to broadcast over; exclude it.
-    if (ops.some((x) => x.type.type !== 'never' && x.type.facts.matrix))
-      return true;
-  }
-
-  // `'tuples'`: numeric tuples (points/vectors in ℝⁿ) are combined
-  // component-wise by the operator's own handlers (`add`/`mul`/`negate`/
-  // `canonicalDivide`) and must not be fanned into a `List`. See
-  // `docs/plans/2026-07-07-tuple-point-semantics.md`.
-  if (exempt('tuples') && ops.some((x) => isTuple(x))) return true;
-
-  // `'whole-collection-compare'`: the operator broadcasts only in the
-  // collection-vs-scalar case (Desmos `L[d=4]`). When two or more operands
-  // are collections, the operator's own evaluate handler applies whole-value
-  // semantics — `Equal(L, M)` is a scalar boolean, not a list of element-wise
-  // comparisons. Any collection counts, not just finite indexed ones:
-  // `Equal(Set(…), List(…))` must not broadcast over the list either. See
-  // docs/COLLECTIONS-MODEL.md (highest-risk item).
-  //
-  // An operand that may only BECOME a collection at evaluation — a top-typed
-  // application such as `q(2)` declared `(number) -> unknown`, or a
-  // `broadcastable<T>` node — counts too (Tycho item 41): fanning the literal
-  // out pre-evaluation while the opaque operand later evaluates to a
-  // collection compounded two broadcasts into a cartesian nest
-  // (`L(1) = [1,2]` → 2×2 lists of booleans) instead of the documented
-  // whole-collection boolean. Skipping defers to the operator's evaluate
-  // handler, which sees EVALUATED operands and re-applies the same rule with
-  // full information (element-wise for list-vs-scalar via
-  // `broadcastComparison`, whole-collection equality for two collections) —
-  // so a possibly-collection operand that turns out scalar still broadcasts
-  // element-wise, unchanged.
-  //
-  // An operand DEFINITELY typed as a collection counts as well: an
-  // application such as `L(1)` under `L: (number) -> vector<2>` is a
-  // collection VALUE the moment it evaluates, but it is not a collection NODE
-  // (`isCollection` is false on an application) and its concrete type is
-  // neither top nor `broadcastable`, so both predicates above miss it and the
-  // pre-evaluation broadcast fanned `L(1) = [1,2]` elementwise. Surfaced when
-  // placeholder-signature refinement (2026-08-15) started giving such
-  // applications their concrete collection types.
-  if (
-    exempt('whole-collection-compare') &&
-    ops.filter(
-      (x) =>
-        // A STRING is a collection of its characters in the lattice, but it is
-        // ATOMIC here: `Equal(["a","b"], "a")` must keep broadcasting the list
-        // against the whole string (`["True","False"]`), which counting the
-        // string as a second collection would turn into the whole-collection
-        // `False`.
-        !isTextAtom(x) &&
-        (x.isCollection ||
-          isPossiblyCollectionTyped(x) ||
-          x.type.matches('collection<any>'))
-    ).length >= 2
-  )
-    return true;
-
-  // `'single-collection-join'`: called with EXACTLY ONE collection argument,
-  // the operator's evaluate handler consumes that collection WHOLE instead
-  // of mapping over it — `String` JOINS the elements, which is what makes
-  // the conversion law `String(Characters(s)) == s` hold. Broadcasting first
-  // would fan the call out element-wise (a `list<string>`), so the handler
-  // would never see the collection. Multi-argument calls
-  // (`String("x=", [1,2])`) keep the coercing-join-with-broadcast semantics
-  // and are deliberately not skipped. See `docs/STRING_ROADMAP.md` design
-  // constraint 3.
-  //
-  // The collection-typed disjunct is what makes the TYPE path agree with the
-  // value path. An EAGER collection operator — `Characters(s)`,
-  // `UnicodeScalars(s)` — only becomes a collection VALUE when it evaluates,
-  // so `isCollection` is `false` on the un-evaluated node the type path reads,
-  // and `String(Characters(s))` reported `list<character>` for a value that is
-  // a plain `string`. Its declared result type still proves it will be a
-  // collection. `unknown`/`any` are deliberately excluded: they match
-  // `collection` without proving anything, and a call on an untyped operand
-  // must keep the broadcast lift.
-  if (
-    exempt('single-collection-join') &&
-    ops.length === 1 &&
-    !isTextAtom(ops[0]) &&
-    (ops[0].isCollection ||
-      (!ops[0].type.isUnknown &&
-        ops[0].type.type !== 'any' &&
-        ops[0].type.type !== 'never' &&
-        ops[0].type.matches('collection<any>')))
-  )
-    return true;
-  return false;
+/**
+ * The broadcast lift's view of an operand EXPRESSION: each fact is read
+ * lazily through the value-level predicate this route always used, so a
+ * predicate runs only when the arm that needs it does.
+ */
+export function viewOfExpression(x: Expression): BroadcastOperandView {
+  return {
+    // Lazy too: the value path asks `skipBroadcastForVectorOps` before it
+    // needs any type, and an operator without exemptions answers without
+    // reading one — a type read is a derivation, possibly recursive.
+    get type() {
+      return x.type.type;
+    },
+    get isSymbol() {
+      return isSymbol(x);
+    },
+    get isApplication() {
+      return isFunction(x);
+    },
+    get isCollection() {
+      return x.isCollection;
+    },
+    get finiteBroadcastParticipant() {
+      return isFiniteBroadcastParticipant(x);
+    },
+    get tuple() {
+      return isTuple(x);
+    },
+    get textAtom() {
+      return isTextAtom(x);
+    },
+    get tensorShape() {
+      return candidateShape(x) !== null;
+    },
+    get matrixFact() {
+      return x.type.facts.matrix;
+    },
+    get typeIsUnknown() {
+      return x.type.isUnknown;
+    },
+  };
 }
 
 /**
@@ -6765,308 +6549,24 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // WEAKER (bare `unknown`) than the `(number)` one it is meant to refine.
     // (`declaredSlots` is computed above, next to the arm resolution.)
     if ((def.broadcastable || declaredSlots) && !isLambdaDef(def)) {
-      // O(rank) candidate check — see the §D4.2 note at the sibling sites.
-      const hasTensors = expr.ops.some((x) => candidateShape(x) !== null);
-      // An operator with the `'whole-collection-compare'` exemption over TWO
-      // OR MORE definite collections applies whole-value semantics — a scalar
-      // `boolean`, never a broadcast (see `skipBroadcastForVectorOps`). That
-      // skip tests value-level `isCollection`, which an unevaluated
-      // `Multiply`/`Add` intermediate (typed `vector<n>` but with no
-      // collection handler) does not satisfy — so mirror the same ≥2 rule at
-      // the TYPE level here, or `Equal(10⁴·[1,2,3], 10⁴·[4,5,6])` would type
-      // `list<boolean>` while evaluating to the scalar `False`. A SINGLE
-      // collection operand keeps the lift (a collection-vs-scalar comparison
-      // genuinely broadcasts to a boolean mask), and possibly-collection
-      // operands keep arm 2's `broadcastable<boolean>` (sound for every
-      // outcome, including the whole-value one).
-      const typeLevelWholeCompareSkip =
-        def.broadcastExemptions.includes('whole-collection-compare') &&
-        expr.ops.filter((x) => x.isCollection || isLinearAlgebraCollection(x))
-          .length >= 2;
-      if (
-        !typeLevelWholeCompareSkip &&
-        !skipBroadcastForVectorOps(def, hasTensors, expr.ops)
-      ) {
-        // Arm 0 (tuple) — the TYPING twin of the component-wise tuple
-        // broadcast (step 4t in `_computeValue`). The value is a `Tuple` of
-        // one per-component result, so the declared type must be a tuple of
-        // that many copies of the per-component type rather than the scalar
-        // the handler computed. Only a statically-sized tuple of scalar
-        // components can be named this way; anything else falls through to
-        // the list arms below and keeps the handler's own answer.
-        //
-        // A tuple whose components are collection-shaped is the one case where
-        // this arm cannot name the components but must still not fall through:
-        // the value arm broadcasts it (a nested tuple of a list component and
-        // a scalar component is what the compiled lane produces too), so the
-        // scalar handler type would be a lie. The wide bare `tuple` is claimed
-        // instead — unspecific, but true of every value that arm produces.
-        // The two guards move together on purpose: whatever the value arm
-        // broadcasts, this arm must describe as a tuple of some shape.
-        if (broadcastsOverTuples(expr.operator, def)) {
-          const arity = tupleBroadcastArity(expr.ops);
-          if (arity === 'unknown-components') return maybeAbsorb('tuple');
-          if (arity !== undefined) {
-            const element = broadcastElementType(sigResult);
-            return maybeAbsorb({
-              kind: 'tuple',
-              elements: Array.from({ length: arity }, () => ({
-                type: element as Type,
-              })),
-            });
-          }
-        }
-
-        // Arm 1 (statically-visible collection) — PRIORITY. A materialized
-        // finite indexed collection, an operand whose declared type is an
-        // unbounded list / indexed-collection, or — when the handler's own
-        // result COLLAPSED to a scalar — an operand whose type is a
-        // FIXED-SHAPE (dimensioned) `vector<n>`/`matrix` unevaluated
-        // intermediate such as `10^4·[1,2,3]` (`isFixedShapeCollection`; Tycho
-        // 19.2's inlined-broadcast probe: without this trigger `sin(10^4·[…])`
-        // collapsed to scalar `number` and `At` hard-rejected a provably-list
-        // base). The fixed-shape trigger is deliberately NARROWER than
-        // `isLinearAlgebraCollection` — a generic `collection`-kind operand may
-        // be a non-indexed `set` the value path never broadcasts, and the
-        // dimensionless list/indexed-collection case is already covered by the
-        // `isBroadcastCollectionType` disjunct above. All matched operands
-        // definitely produce a `List` at evaluation, so the honest type is the
-        // concrete `list<E>`.
-        //
-        // The fixed-shape trigger DEFERS to a handler that GENUINELY computes
-        // collection results — declared with the `'collection-result'`
-        // exemption, never inferred from the result's shape: such a handler's
-        // own matrix/vector branches type `matrix + scalar` as `matrix` and
-        // keep the honest widen only for possibly-non-indexed
-        // `collection`/`set` operands (see `addType`), or pass `x.type`
-        // through (`Negate`). Re-wrapping those would collapse an honest
-        // `matrix` to an unbounded `list<…>` (it broke `-M → matrix` and
-        // `det(M+N)`). A handler WITHOUT the exemption that produces a
-        // collection-bearing type over a collection operand did so by naive
-        // `widen(…)` — e.g. `Remainder(10⁴·[1,2,3], 7)` widening to
-        // `integer | vector<3>` while the value ALWAYS broadcasts to a
-        // list — and must be repaired to the definite `list<E>`, so the
-        // declared exemption is the ONLY thing that defers (a shape test on
-        // `sigResult` cannot tell a deliberate union from a widen artifact).
-        //
-        // For the two pre-existing triggers the handler computed the scalar
-        // per-element result. Some handlers leak the collection type or a
-        // `scalar | list<E>` union (a naive `widen(…)` over a collection
-        // operand); `broadcastElementType` unwraps both so the wrapper does
-        // not nest a list or a union inside the broadcast result.
-        // The per-cell result the lift re-shapes. `broadcastElementType`
-        // unwraps ONE rank — the handler-leaked `list<E>` and the
-        // `scalar | list<E>` union above — but a declared TUPLE result is
-        // not a leaked rank: it is the structured value each cell holds
-        // (`AbsArg([1, 2])` is `[(1, 0), (2, 0)]`,
-        // `NumeratorDenominator([1/2, 3/4])` is `[(1, 2), (3, 4)]`), and
-        // unwrapping it typed those lists as lists of NUMBERS. A tuple
-        // result — or a union with a tuple branch, such as
-        // `NumeratorDenominator`'s `tuple<number, number> | nothing` —
-        // stays the cell.
-        //
-        // ALIAS POLICY of the lift (one rule at every seam of this path —
-        // the triggers, the cell readers, this cell result, the handler
-        // echo below, and the shaped re-wrap): a transparent alias is
-        // unfolded before its structure is read, and the lifted result is
-        // typed by the structure it builds, never by an operand's alias
-        // name. `Sin(L)` for `L: nums` (an alias of `list<number>`) is
-        // `list<number>`, as `Sin(M)` is for `M: list<number>`; the
-        // evaluated value carries the structure and no name either. A
-        // handler that echoes the aliased operand (`Negate`, `Multiply`)
-        // answers the alias, so its echo is unfolded here too, or the
-        // valued case re-wrapped it to `list<nums>` — a list of lists the
-        // value contradicts. Pinned in
-        // `test/compute-engine/alias-broadcast-lift.test.ts`.
-        const hasTupleBranch = (t: Type): boolean => {
-          t = resolveTypeAlias(t);
-          return (
-            typeof t !== 'string' &&
-            (t.kind === 'tuple' ||
-              (t.kind === 'union' && t.types.some((m) => hasTupleBranch(m))))
-          );
-        };
-        const cellResult = hasTupleBranch(sigResult)
-          ? resolveTypeAlias(sigResult)
-          : broadcastElementType(sigResult);
-        const handlerOwnsCollectionTyping =
-          def.broadcastExemptions.includes('collection-result');
-        const deferToHandler =
-          handlerOwnsCollectionTyping &&
-          (isSubtype(sigResult, COLLECTION_SHAPE_TYPE) ||
-            (typeof sigResult !== 'string' &&
-              sigResult.kind === 'union' &&
-              sigResult.types.some((m) =>
-                isSubtype(m, COLLECTION_SHAPE_TYPE)
-              )));
-        const broadcastingOps = expr.ops.filter(
-          (x, i) =>
-            // Per-slot when the signature DECLARES `broadcastable<T>` slots: an
-            // operand a collection-typed slot binds WHOLE never lifts the
-            // result (the value path binds it whole too).
-            (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
-            (isFiniteBroadcastParticipant(x) ||
-              isBroadcastCollectionType(x) ||
-              (!deferToHandler && isFixedShapeCollection(x)))
-        );
-        if (broadcastingOps.length > 0) {
-          // Every broadcast trigger is a LONE scalar-or-collection union — a
-          // valueless symbol declared `number | list<number>`, with no operand
-          // that is definitely a collection. Such an operand is not a
-          // collection, so the result carries the union through
-          // (`number | list<number>` for `2u`) instead of
-          // claiming the definite `list<E>` the same expression contradicts
-          // once `u := 5` makes it evaluate to the scalar `10`. See
-          // `loneUnionBroadcastResultType` for the rule and for why a definite
-          // collection sibling (`Add([1, 2], u)`) keeps the `list<E>` typing.
-          const loneUnionResult = loneUnionBroadcastResultType(
-            broadcastingOps.map((x) => x.type.type),
-            cellResult
-          );
-          if (loneUnionResult !== undefined)
-            return maybeAbsorb(loneUnionResult);
-
-          // The wrapper below assumes `sigResult` is the SCALAR per-element
-          // result, and unwraps one rank off it before re-shaping. ONE case
-          // breaks that assumption — `sigResult` is already the WHOLE
-          // broadcast result — producing a mixed encoding, a rank-2
-          // `list<vector<E^2>^(2x2)>` where the value is a plain
-          // `matrix<E^(2x2)>` (rank 1 round-tripped by luck, which is why this
-          // only ever showed at rank ≥ 2):
-          //
-          //  An ALLOWLISTED handler that owns its own collection typing
-          //  (`deferToHandler`): `Negate` passes `x.type` through, so
-          //  `Negate([[1,2],[3,4]])` IS the operand's matrix. The gate
-          //  already existed but only dropped the `isFixedShapeCollection`
-          //  disjunct, which covers a matrix-TYPED symbol (`-M → matrix`)
-          //  and misses a matrix LITERAL — that one still entered
-          //  `broadcastingOps` via `isFiniteIndexedCollection` and got
-          //  re-wrapped.
-          //
-          // What keeps a `sigResult` ON the wrapper path is a SHAPELESS
-          // collection (`staticCollectionDims` is `null`) — this conjunct
-          // decides alone (a union is never a `kind: 'list'` object, so it is
-          // shapeless too): the `indexed_collection<integer>` of
-          // `-Range(1,5)` is upgraded by the wrapper to the definite
-          // `list<integer>`, and `Add(S, 1)`'s union is the widen artifact the
-          // wrapper repairs. Note this arm is `Negate`-only today:
-          // `Add`/`Multiply` are diverted by `skipBroadcastForVectorOps`
-          // before arm 1 ever sees a shape-bearing operand.
-          //
-          // A POLYTYPE arm needs no second case any more (D10, re-ruled
-          // 2026-08-04): the solver binds a lift-admitted operand's ELEMENT
-          // type, so a `Chop`/`Conjugate` echo instantiates to the per-element
-          // result and the wrapper below re-lifts it — the answer the retired
-          // `liftedEchoPositions` short-circuit used to hand back verbatim,
-          // and the correct one for a variable-MENTIONING result too. Ground
-          // non-allowlisted operators (`Sin`, `Sqrt`) have neither an echo nor
-          // a collection `sigResult` and fall through unchanged.
-          if (
-            deferToHandler &&
-            isSubtype(sigResult, COLLECTION_SHAPE_TYPE) &&
-            staticCollectionDims(sigResult) !== null
-          )
-            return maybeAbsorb(resolveTypeAlias(sigResult));
-
-          // A LIST OF POINTS under a head that broadcasts component-wise
-          // over a tuple (the same predicate as arm 0 above): the value is
-          // a list of points, one per element, each the tuple of
-          // per-component results — `Sqrt(P)` for `P := [(1, 4), (9, 16)]`
-          // evaluates to `[(1, 2), (3, 4)]`. The cell the handler was asked
-          // about is the tuple's COMPONENT type (`broadcastCellType` unwraps
-          // through the tuple, which is atomic under broadcast), so the
-          // scalar `cellResult` is the per-component result and the
-          // per-element result is a tuple of `arity` copies of it, exactly
-          // as arm 0 builds for one point. Without this the lift re-wrapped
-          // the scalar as `list<number>`: a list of points typed as a list
-          // of numbers, which a consumer that routes on the type (the
-          // JavaScript target's `PointX` lowering) read as a flat list. A
-          // head whose tuple semantics is whole-point (`Abs` of a point is
-          // its norm) fails the predicate and keeps the scalar cell. The
-          // tuple cell goes through the same shape-aware re-wrap as a
-          // scalar cell below, so a fixed-length or rank-2 collection of
-          // points keeps its dimensions (`list<tuple<…>^2x3>`).
-          if (
-            broadcastsOverTuples(expr.operator, def) &&
-            !hasTupleBranch(cellResult) &&
-            !isSubtype(cellResult, COLLECTION_SHAPE_TYPE)
-          ) {
-            const arity = pointListArity(broadcastingOps);
-            if (arity !== undefined)
-              return maybeAbsorb(
-                broadcastShapedResultType(
-                  broadcastingOps.map((x) => x.type.type),
-                  {
-                    kind: 'tuple',
-                    elements: Array.from({ length: arity }, () => ({
-                      type: cellResult as Type,
-                    })),
-                  }
-                )
-              );
-          }
-
-          // Rank/shape-aware lift (§D6.1): mirror the operands'
-          // statically-provable structure — `Sqrt(M)` with `M: matrix<2x2>`
-          // types `list<number^2x2>`, statically compatible with
-          // `matrix` signature parameters. Falls back to the plain unbounded
-          // `list<E>` whenever the shape is not provable from every
-          // broadcasting operand (see `broadcastShapedResultType`).
-          return maybeAbsorb(
-            broadcastShapedResultType(
-              broadcastingOps.map((x) => x.type.type),
-              cellResult
-            )
-          );
-        }
-
-        // Arm 2 (possibly-collection, step 2 phase C). No operand is a
-        // statically-visible collection, but some operand's collection-ness is
-        // not statically knowable — an application typed `unknown`/`any`/`value`
-        // (e.g. an undeclared `h(x)`), or an already-`broadcastable<…>` node
-        // (nested arithmetic). It might broadcast at runtime or stay scalar, so
-        // the honest result is `broadcastable<E>` (not a definite `list<E>`).
-        // `broadcastElementType(sigResult)` unwraps an already-broadcastable
-        // `sigResult` (Add/Multiply handlers compute their own broadcastable
-        // type), keeping the arm idempotent — never `broadcastable<broadcastable<…>>`.
-        if (
-          expr.ops.some(
-            (x, i) =>
-              (declaredSlots === undefined || declaredSlots.at(i).mappable) &&
-              isPossiblyCollectionTyped(x)
-          )
-        )
-          return maybeAbsorb({
-            kind: 'broadcastable',
-            elements: cellResult,
-          });
-      }
+      // The lift itself is shared with the descriptor route
+      // (`broadcastLiftType`, `broadcast-lift-type.ts`); the operands are
+      // viewed through the value-level predicates this route always read.
+      const lifted = broadcastLiftType({
+        def,
+        views: expr.ops.map(viewOfExpression),
+        sigResult,
+        mappable:
+          declaredSlots === undefined
+            ? undefined
+            : (i: number) => declaredSlots.at(i).mappable,
+        broadcastsOverTuples: broadcastsOverTuples(expr.operator, def),
+        // O(rank) candidate check — see the §D4.2 note at the sibling sites.
+        hasTensors: expr.ops.some((x) => candidateShape(x) !== null),
+      });
+      if (lifted !== undefined) return maybeAbsorb(lifted);
     }
 
-    // Honest typing for user function-literal broadcast (Tycho 19.2). A lambda
-    // operator definition (`ce.assign('g', x ↦ …)`) with scalar parameters:
-    //  - Applied to a statically-visible finite collection argument, the runtime
-    //    broadcasts element-wise (step 2b in `_computeValue`), producing a
-    //    `List` — so the honest type is the concrete `list<E>`, not the scalar
-    //    signature result computed above.
-    //  - Applied to a POSSIBLY-collection argument (`broadcastable<…>` or a
-    //    top-typed call, `isPossiblyCollectionTyped`), NO pre-evaluation step 2b
-    //    fires (that gate only matches statically-visible finite indexed
-    //    collections). The static type stays `broadcastable<E>` — NOT a definite
-    //    `List` — because collection-ness is not statically provable here. At
-    //    RUNTIME, however, the post-eval lambda-broadcast arm (step 4b sync /
-    //    step 3b async in `_computeValue`) maps EVERY body element-wise — not
-    //    only arithmetic bodies that broadcast internally — once the argument
-    //    evaluates to a finite indexed collection, producing a `List`. So a
-    //    non-arithmetic body (`x ↦ If(x > 0, 1, -1)`) applied to something that
-    //    evaluates to a list is now mapped, not left inert.
-    // The scalar-ness gate mirrors the runtime (declared signature authoritative
-    // via `paramsAreScalar`; tuples atomic, bound whole, never mapped). A
-    // collection-typed PARAMETER makes `paramsAreScalar` false, so a lambda that
-    // consumes a whole collection keeps its scalar result unchanged.
-    // A DECLARED `broadcastable<T>` slot enters here too (Option A): the
-    // declaration is the gate, in place of `paramsAreScalar`'s all-or-nothing
-    // inference verdict, and it lifts exactly the slots it marks.
     if (
       def instanceof _BoxedOperatorDefinition &&
       def._isLambda &&
@@ -8427,3 +7927,19 @@ function materialize(
 
   return expr.engine.function('Set', [...materialized]);
 }
+
+// The descriptor route's broadcast lift reads three things about an
+// operator definition that are defined in this module (see
+// `installBroadcastLiftHooks` for why they are installed rather than
+// imported).
+installBroadcastLiftHooks({
+  mappableSlot: (def) => {
+    const slots = broadcastableParamSlots(def);
+    return slots === undefined ? 'no-plan' : (i) => slots.at(i).mappable;
+  },
+  broadcastsOverTuples,
+  // The same gate as the expression route's: only a lambda-literal
+  // definition is kept out of the shared arms (it has its own broadcast arm
+  // there); a user-defined operator goes through them.
+  isLambda: (def) => isLambdaDef(def),
+});

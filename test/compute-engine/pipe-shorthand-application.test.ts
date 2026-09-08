@@ -40,18 +40,25 @@ describe('LaTeX pipe shorthand: static type', () => {
     expect(valueOf(ce, '5 |> \\_^2')).toBe('25');
   });
 
+  test('a whole-collection head with an inner broadcast is typed', () => {
+    // `Length` takes the topic whole; the inner `\_^2` broadcasts over it
+    // and is lifted by the derivation, so the pipe is the scalar length.
+    expect(typeOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_^2)')).toBe('integer');
+    expect(valueOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_^2)')).toBe('3');
+    // A broadcastable head over an inner whole-collection application: the
+    // parameter is inferred a collection and bound whole, so the value is
+    // the scalar 4 and the element-wise typing must not apply.
+    expect(typeOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_) + 1')).toBe('integer');
+    expect(valueOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_) + 1')).toBe('4');
+  });
+
   test('shapes this derivation cannot type stay undecided, never wrong', () => {
-    // A tuple topic broadcasts component-wise; a nested list needs a lift the
-    // descriptor derivation does not perform; a placeholder inside an inner
-    // application of a whole-collection head meets the same gap.
+    // A held tuple topic has no pure type; a nested list under a scalar head
+    // broadcasts all the way down, a shape the mapped typing does not name.
     expect(typeOf(ce, '(1,2) |> \\_^2')).toBe('unknown');
     expect(valueOf(ce, '(1,2) |> \\_^2')).toBe('(1, 4)');
     expect(typeOf(ce, '[[1,2],[3,4]] |> \\_^2')).toBe('unknown');
-    expect(typeOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_^2)')).toBe('unknown');
-    // A broadcastable head over an inner whole-collection application: the
-    // value is the scalar 4, so the element-wise typing must not apply.
-    expect(typeOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_) + 1')).toBe('unknown');
-    expect(valueOf(ce, '[1,2,3] |> \\mathrm{Length}(\\_) + 1')).toBe('4');
+    expect(valueOf(ce, '[[1,2],[3,4]] |> \\_^2')).toBe('[[1,4],[9,16]]');
   });
 });
 

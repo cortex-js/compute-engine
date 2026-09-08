@@ -2,6 +2,33 @@
 
 ### Resolved Issues
 
+- **`f(L) := Sum(L)` infers `L` a collection, so `f([1, 2, 3])` is 6.** The
+  body slot of `Sum` and `Product` accepts anything, so the parameter kept the
+  type `unknown`, and a call with a list broadcast over its elements — an
+  unknown parameter is scalar by default — answering `[1, 2, 3]`
+  (`Sum(1)`, `Sum(2)`, `Sum(3)`). A no-index `Sum(L)` or `Product(L)` over a
+  symbol with no type evidence yet now reads the symbol as the collection it
+  reduces, as `Length(L)` does through its signature: `f` is typed
+  `(collection) -> number` and binds the list whole. A symbol that already
+  carries evidence, or a declared type, is not touched, and a user function
+  over an unannotated scalar parameter (`h(x) := [x, -x]` maps each element)
+  is unchanged. The same reading applies to a global sum written without
+  limits: after `\sum x`, the symbol `x` is typed `collection`.
+- **A `type` handler's `context.derive` applies the broadcast lift.** The
+  descriptor derivation called an operator's `type` handler and stopped, so
+  `derive('Power', [d, 2])` with `d` typed `list<integer^3>` answered the
+  scalar `number` while `v^2` for such a `v` types `vector<3>`: the expression
+  route re-shapes a broadcastable operator's per-element result over a
+  collection operand after the handler, the descriptor route did not. Every
+  handler that types a body over a collection operand through `derive` — a
+  `Map` body over a collection element, a pipe stage — got a scalar type for a
+  collection value. The lift is now one shared function over the few facts an
+  operand supplies (`broadcast-lift-type.ts`), read through the expression
+  route's own predicates on one side and a descriptor's type, facts and
+  structure on the other, so the two routes agree by construction. The LaTeX
+  pipe shorthand reaches it through its whole-topic branch:
+  `[1,2,3] |> \mathrm{Length}(\_^2)` and `[1,2,3] |> \mathrm{Length}(\_) + 1`
+  are typed `integer`, where the previous round left them `unknown`.
 - **An assumed inequality bound is stored and compared exactly.** The bound
   was summed in a JavaScript number, so an exact bound the machine cannot
   represent was rounded to the nearest double in either direction before it

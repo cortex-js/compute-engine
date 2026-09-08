@@ -1,4 +1,5 @@
 import type {
+  BoxedOperatorDefinition,
   IComputeEngine as ComputeEngine,
   OperandDescriptor,
   TypeHandlerContext,
@@ -17,6 +18,35 @@ import {
   instantiatedResultTypeOverActuals,
   type SolveActual,
 } from './generic-instantiation.js';
+import { broadcastLiftType, viewOfDescriptor } from './broadcast-lift-type.js';
+
+/**
+ * The three readings of an operator definition the broadcast lift needs,
+ * installed by `boxed-function.ts` at module load
+ * (`installBroadcastLiftHooks`). They live there, next to the value-path
+ * code that shares their private helpers, and `boxed-function.ts` already
+ * imports this module for `typeHandlerContext`: importing them here would
+ * close a cycle, which the module graph forbids. Until they are installed —
+ * only while `boxed-function.ts` itself is still loading — the descriptor
+ * route derives without the lift, as it did before the lift was shared.
+ */
+export interface BroadcastLiftHooks {
+  /** The declared `broadcastable<T>` slot plan of a definition. */
+  readonly mappableSlot: (
+    def: BoxedOperatorDefinition
+  ) => ((i: number) => boolean) | undefined | 'no-plan';
+  /** `broadcastsOverTuples(operator, def)`. */
+  readonly broadcastsOverTuples: (
+    operator: string,
+    def: BoxedOperatorDefinition
+  ) => boolean;
+  /** A lambda-literal definition, typed by its own broadcast arm. */
+  readonly isLambda: (def: BoxedOperatorDefinition) => boolean;
+}
+let broadcastLiftHooks: BroadcastLiftHooks | undefined;
+export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
+  broadcastLiftHooks = hooks;
+}
 
 /**
  * The type of applying `operator` to operands a handler holds only as
@@ -100,21 +130,47 @@ export function deriveApplicationType(
       def.type!(handlerOperands, typeHandlerContext(engine))
     );
     const answered = BoxedType.forResult(raw, engine._typeResolver)?.type;
-    if (answered !== undefined) return absorb(answered);
+    if (answered !== undefined) return absorb(lift(answered));
   }
 
   const sig = def.signature.type;
   const actuals: SolveActual[] = operands.map(actualOfDescriptor);
   return absorb(
-    instantiatedResultTypeOverActuals(sig, actuals, {
-      threadable: def.broadcastable,
-      stripMissing: (i) => def.stripsMissingAt(i),
-      lazy: def.lazy,
-      resolver: engine._typeResolver,
-    }) ??
-      functionResult(sig) ??
-      'unknown'
+    lift(
+      instantiatedResultTypeOverActuals(sig, actuals, {
+        threadable: def.broadcastable,
+        stripMissing: (i) => def.stripsMissingAt(i),
+        lazy: def.lazy,
+        resolver: engine._typeResolver,
+      }) ??
+        functionResult(sig) ??
+        'unknown'
+    )
   );
+
+  // The broadcast lift the expression route applies after its handler
+  // (`BoxedFunction.type`, "Honest typing for list broadcast"): a
+  // broadcastable operator over a collection operand evaluates element-wise,
+  // so the handler's scalar per-element result is re-shaped to the
+  // collection. Shared logic, `broadcast-lift-type.ts`.
+  function lift(perElement: Type): Type {
+    const hooks = broadcastLiftHooks;
+    if (hooks === undefined) return perElement;
+    const mappable = hooks.mappableSlot(def);
+    if (!(def.broadcastable || mappable !== 'no-plan')) return perElement;
+    if (hooks.isLambda(def)) return perElement;
+    const views = operands.map(viewOfDescriptor);
+    return (
+      broadcastLiftType({
+        def,
+        views,
+        sigResult: perElement,
+        mappable: mappable === 'no-plan' ? undefined : mappable,
+        broadcastsOverTuples: hooks.broadcastsOverTuples(operator, def),
+        hasTensors: views.some((v) => v.tensorShape),
+      }) ?? perElement
+    );
+  }
 }
 
 /** The context every `'types'`-shape handler call receives. */
