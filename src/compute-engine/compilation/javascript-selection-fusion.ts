@@ -258,7 +258,9 @@ export function compileNumericSelection(
           rhs = `(${operands[0]} / ${operands[1]})`;
           break;
         case 'Negate':
-          rhs = `(-${operands[0]})`;
+          // The operand is parenthesized: a negative literal compiles to
+          // `-2`, and `--2` is a decrement, not a negation.
+          rhs = `(-(${operands[0]}))`;
           break;
         case 'Power': {
           const n = value.args[1].expr.re;

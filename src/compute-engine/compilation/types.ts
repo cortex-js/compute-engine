@@ -489,11 +489,20 @@ export interface CompileTarget<Expr = unknown> {
    * interval domain is scalar — one interval per quantity — so it has no
    * element-wise selection convention). Targets that leave it undefined keep
    * the fail-closed scalar-condition guard.
+   *
+   * `compileUnder(derived)` builds the same operand compiler — same clause
+   * positions, same lazy-region wiring — for a DERIVED target. A target that
+   * emits a guarded fast path compiles the generic selection behind that
+   * guard under a derived target (captured input names, its own CSE instance).
+   * Building that branch's operand compiler through `compileUnder` keeps its
+   * lazy positions attached to their region instances, so a subexpression
+   * shared by a condition and an arm is still bound once.
    */
   selection?: (
     args: ReadonlyArray<Expr>,
     compile: OperandCompiler<Expr>,
-    target: CompileTarget<Expr>
+    target: CompileTarget<Expr>,
+    compileUnder?: (derived: CompileTarget<Expr>) => OperandCompiler<Expr>
   ) => TargetSource | null;
 
   /**

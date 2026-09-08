@@ -186,13 +186,10 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
     // lift-at-use rule: `b`'s declared result `number` counts as a
     // WIDE numeric type since the finite-by-default flip put `complex` below
     // that name. The wrap does not change the value, and `_fn_b` is still
-    // emitted once — reached from both branches of the runtime broadcast guard
-    // the call site carries, since `z`'s complex type is no proof that `run()`
-    // will not supply an array.
-    expect(auto.code).toBe(
-      '_SYS.cplx(((_tv1) => Array.isArray(_tv1) ? ' +
-        '_SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))(_.z))'
-    );
+    // emitted once. The call site carries no runtime broadcast guard: `z` is
+    // EXPLICITLY declared, and an explicit scalar declaration is the caller's
+    // input contract (user ruling 2026-09-07).
+    expect(auto.code).toBe('_SYS.cplx(_fn_b(_.z))');
     expect(auto.mode).toBe('complex');
     expect(auto.escalation?.boundary).toBe('user-function parameter');
     expect(auto.escalation?.binding).toBe('the parameter `x` of `b`');
@@ -205,10 +202,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
       mode: 'complex',
       fallback: false,
     });
-    expect(cx.code).toBe(
-      '_SYS.cplx(((_tv1) => Array.isArray(_tv1) ? ' +
-        '_SYS.bcastFn((_tv2) => _fn_b(_tv2), _tv1) : _fn_b(_tv1))(_.z))'
-    );
+    expect(cx.code).toBe('_SYS.cplx(_fn_b(_.z))');
     expect(cx.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
   });
 

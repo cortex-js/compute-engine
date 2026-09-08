@@ -112,7 +112,10 @@ describe('TYCHO 261–264 — the Life step end to end', () => {
 
   test('262 — every rotation is an in-place view of the carrier; nothing is copied', () => {
     const c = code(stepExpr);
-    expect(occurrences(c, '_SYS.rotv(_.S,')).toBe(8);
+    // The fused numeric loop reads the carrier by index arithmetic; the
+    // generic branch behind its guard reads eight views of the carrier
+    // (captured under a temporary name at the artifact's entry).
+    expect(occurrences(c, '_SYS.rotv(')).toBe(8);
     expect(c).not.toContain('_SYS.rotl(');
     expect(c).not.toContain('.slice(');
   });

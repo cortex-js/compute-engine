@@ -1009,7 +1009,10 @@ function compileJSCollectionBoolean(
 function compileJSSelection(
   args: ReadonlyArray<Expression>,
   compile: OperandCompiler<Expression>,
-  target?: CompileTarget<Expression>
+  target?: CompileTarget<Expression>,
+  compileUnder?: (
+    derived: CompileTarget<Expression>
+  ) => OperandCompiler<Expression>
 ): string | null {
   const conds = args.filter((_x, i) => i % 2 === 0);
   const collectionish = (a: Expression): boolean =>
@@ -1018,12 +1021,19 @@ function compileJSSelection(
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
   if (target) {
+    // The generic branch behind the fused loop's guard keeps the operand
+    // indices (`compileUnder`), so its lazy positions get their CSE region
+    // instances and a subexpression shared by a condition and an arm is still
+    // bound once. A caller that hands no factory compiles the branch without
+    // indices, which inlines such a subexpression at each position.
     const fused = compileNumericSelection(
       args,
       target,
       (fallbackTarget) =>
-        compileJSSelection(args, (expr) =>
-          BaseCompiler.compileValueOperand(expr, fallbackTarget)
+        compileJSSelection(
+          args,
+          compileUnder?.(fallbackTarget) ??
+            ((expr) => BaseCompiler.compileValueOperand(expr, fallbackTarget))
         )!
     );
     if (fused !== undefined) return fused;
@@ -3901,9 +3911,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // collection operand is handled by `tryCompileBroadcast` (they are
   // `broadcastable`), which wraps this body in `_SYS.bcast`.
   ElementMax: (args, compile) =>
-    `Math.max(${args.map((x) => compile(x)).join(', ')})`,
+    `Math.max(${args.map(compile).join(', ')})`,
   ElementMin: (args, compile) =>
-    `Math.min(${args.map((x) => compile(x)).join(', ')})`,
+    `Math.min(${args.map(compile).join(', ')})`,
   Clamp: (args, compile) =>
     `Math.min(Math.max(${compile(args[0])}, ${compile(args[1])}), ${compile(
       args[2]
@@ -3912,17 +3922,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Mean: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.mean(${compile(args[0])})`;
-    return `_SYS.mean([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.mean([${args.map(compile).join(', ')}])`;
   },
   Median: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.median(${compile(args[0])})`;
-    return `_SYS.median([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.median([${args.map(compile).join(', ')}])`;
   },
   Variance: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.variance(${compile(args[0])})`;
-    return `_SYS.variance([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.variance([${args.map(compile).join(', ')}])`;
   },
   PopulationVariance: (args, compile) => {
     if (args.length === 0) return 'NaN';
@@ -3950,22 +3960,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Kurtosis: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.kurtosis(${compile(args[0])})`;
-    return `_SYS.kurtosis([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.kurtosis([${args.map(compile).join(', ')}])`;
   },
   Skewness: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.skewness(${compile(args[0])})`;
-    return `_SYS.skewness([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.skewness([${args.map(compile).join(', ')}])`;
   },
   Mode: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.mode(${compile(args[0])})`;
-    return `_SYS.mode([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.mode([${args.map(compile).join(', ')}])`;
   },
   Quartiles: (args, compile) => {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) return `_SYS.quartiles(${compile(args[0])})`;
-    return `_SYS.quartiles([${args.map((x) => compile(x)).join(', ')}])`;
+    return `_SYS.quartiles([${args.map(compile).join(', ')}])`;
   },
   InterquartileRange: (args, compile) => {
     if (args.length === 0) return 'NaN';
@@ -8616,8 +8626,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // matching the interpreter's throw (D6).
       assertBoolean: (code) => `_SYS.cond(${code})`,
       // Element-wise `Which`/`If` selection over a collection-valued condition.
-      selection: (args, compile, target) =>
-        compileJSSelection(args, compile, target),
+      selection: (args, compile, target, compileUnder) =>
+        compileJSSelection(args, compile, target, compileUnder),
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
       // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
       absence: {
@@ -10350,7 +10360,7 @@ function compileExtremum(
     });
     return guardedReduce(`[${parts.join(', ')}]`);
   }
-  return `${fn}(${args.map((x) => compile(x)).join(', ')})`;
+  return `${fn}(${args.map(compile).join(', ')})`;
 }
 
 /**

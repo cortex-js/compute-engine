@@ -6421,21 +6421,24 @@ export class BaseCompiler {
       // The clause list handed to `selection` is in `Which` shape, so its
       // positions are NOT the `If` node's operand indices: 0 → 0 (condition),
       // 1 → 1 (then), 2 is the synthesized `True` (no edge), 3 → 2 (else).
-      const selectionOperand: OperandCompiler<Expression> = (expr, opIndex) => {
-        if (opIndex === undefined || opIndex === 2)
-          return BaseCompiler.compileValueOperand(expr, target);
-        return BaseCompiler.compileOpValue(
-          node,
-          opIndex === 3 ? 2 : opIndex,
-          target,
-          0,
-          expr
-        );
-      };
+      const selectionOperandUnder =
+        (t: CompileTarget<Expression>): OperandCompiler<Expression> =>
+        (expr, opIndex) => {
+          if (opIndex === undefined || opIndex === 2)
+            return BaseCompiler.compileValueOperand(expr, t);
+          return BaseCompiler.compileOpValue(
+            node,
+            opIndex === 3 ? 2 : opIndex,
+            t,
+            0,
+            expr
+          );
+        };
       const selection = target.selection?.(
         [args[0], args[1], engine.True, args[2]],
-        selectionOperand,
-        target
+        selectionOperandUnder(target),
+        target,
+        selectionOperandUnder
       );
       if (selection !== null && selection !== undefined) return selection;
       BaseCompiler.assertScalarCondition(args[0]);
@@ -6512,7 +6515,8 @@ export class BaseCompiler {
       const selection = target.selection?.(
         args,
         BaseCompiler.operandCompiler(node, target),
-        target
+        target,
+        (derived) => BaseCompiler.operandCompiler(node, derived)
       );
       if (selection !== null && selection !== undefined) return selection;
       const fn = target.functions?.(h);

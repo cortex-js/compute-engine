@@ -1431,23 +1431,21 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
   // that claim: a regression degenerating to `_SYS.cplx(…)` would still
   // contain the static substring.
   //
-  // The call site does carry a runtime broadcast guard, which is a separate
-  // question — `u` is declared `real`, but `run()` is free to supply an array
-  // and the interpreter broadcasts there. The argument is bound to a temporary
-  // by that guard, so the static wrap reads the temporary rather than `_.u`.
+  // The call site carries no runtime broadcast guard: `u` is EXPLICITLY
+  // declared `real`, and an explicit scalar declaration is the caller's input
+  // contract (user ruling 2026-09-07, amending the 2026-08-30 guard ruling), so
+  // the static wrap reads `_.u` directly. A `run()` caller that supplies an
+  // array for `u` is outside the contract; only a symbol whose scalar type was
+  // INFERRED from use keeps the guard.
   it('a provably REAL argument is wrapped statically, with no runtime test', () => {
     const engine = makeEngine();
     engine.declare('u', 'real');
     const r = compile(engine.box(['Q', 'u']), { constantFold: false });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_fn_Q(({ re: _tv1, im: 0 }))');
+    expect(r.code).toContain('_fn_Q(({ re: _.u, im: 0 }))');
     expect(r.code).not.toContain('_SYS.cplx(');
+    expect(r.code).not.toContain('Array.isArray(');
     expect(r.run!({ u: 2 })).toEqual({ re: 2, im: 1 });
-    // The broadcast branch wraps the ELEMENT statically for the same reason.
-    expect(r.run!({ u: [2, 3] })).toEqual([
-      { re: 2, im: 1 },
-      { re: 3, im: 1 },
-    ]);
   });
 
   // FORM 3 — everything else takes the runtime coercion, and it is the branch

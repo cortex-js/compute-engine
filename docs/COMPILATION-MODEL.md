@@ -140,6 +140,17 @@ Compiled pairing preserves shortest-input semantics. `PointList`, elementwise
 selection, Map lowering/fusion, exact-map proof, and collection callbacks must
 retain evaluation-once and effect ordering.
 
+A compiled user-function call whose parameters are all scalar carries a
+runtime `Array.isArray` guard around each argument that is not a literal, so
+a `run()` caller that supplies a list gets the interpreter's broadcast instead
+of a silent wrong answer (user ruling 2026-08-30). The guard is not emitted
+for an argument whose scalar type is an explicit declaration or is constructed
+from such values by scalar arithmetic (user ruling 2026-09-07): the
+declaration is the caller's input contract, and the interpreter itself refuses
+a list for a `number`-declared symbol. A symbol whose scalar type was inferred
+from its use in a scalar parameter keeps the guard, because that inference is
+not a promise about the value the caller passes.
+
 Implicit Map compilation obeys the engine-wide `jit` gate. Exact-mode Map
 compilation requires an explicit proof that native-number execution preserves
 the requested exact result. Structural or ABI failures are cached at the

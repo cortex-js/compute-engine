@@ -30,7 +30,13 @@
   domain, retaining final channel clipping. JavaScript combines leading
   numeric factors introduced during lowering, including degree conversion,
   and omits user-call array checks for explicitly declared scalar inputs.
-  Inferred and caller-mapped inputs retain runtime broadcasting.
+  Inferred and caller-mapped inputs retain runtime broadcasting. This changes
+  what a `run()` caller sees when it passes a list for a symbol declared with
+  a scalar type: with `u` declared `number` and `f(x) = 2x + 1`, `f(u)` now
+  compiles to the bare `_fn_f(_.u)` and `run({ u: [1, 2, 3] })` is outside
+  the declaration's contract (it answered `[3, 5, 7]` before). A symbol whose
+  scalar type was inferred from use keeps the `Array.isArray` guard and still
+  broadcasts.
 
 - **Numeric array selections can execute in one element loop.** JavaScript
   fuses eligible pure arithmetic, rotations, and comparisons into selection,
