@@ -13,12 +13,7 @@ import {
   liftJump,
   jump,
 } from './util.js';
-import {
-  div,
-  subUnrounded,
-  mulUnrounded,
-  divUnrounded,
-} from './arithmetic.js';
+import { div, subUnrounded, mulUnrounded, divUnrounded } from './arithmetic.js';
 import {
   outward,
   outwardUnlessExact,

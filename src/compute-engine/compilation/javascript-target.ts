@@ -10904,8 +10904,9 @@ function hoistedCallbackLambda(
   const holder =
     statements?.initialize(held, lambda) ?? `const ${held} = ${lambda};`;
   return (
-    statements?.expression((exit) => `${declarations}${holder} ${exit(shim)}`) ??
-    `(() => { ${declarations}${holder} return ${shim}; })()`
+    statements?.expression(
+      (exit) => `${declarations}${holder} ${exit(shim)}`
+    ) ?? `(() => { ${declarations}${holder} return ${shim}; })()`
   );
 }
 

@@ -1,6 +1,9 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { factsOf } from '../../common/type/facts.js';
-import { describeType } from '../boxed-expression/operand-descriptor.js';
+import {
+  describeType,
+  typeFact,
+} from '../boxed-expression/operand-descriptor.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
@@ -215,7 +218,6 @@ import {
   absFunctionType as absFunctionTypeOnTypes,
   broadcastOperandType,
 } from './type-handlers.js';
-import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import {
   infinitePoint,
   isRealLiteral,
