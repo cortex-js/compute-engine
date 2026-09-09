@@ -203,6 +203,25 @@ Two candidate resolutions, one of which the user has to choose:
   changes what `AsRgb(c)` evaluates to for a caller that reads the compiled
   array directly, which Tycho does.
 
+Consumer constraint, measured with the Tycho team on 2026-09-09: Tycho reads a
+compiled `AsRgb(...)` result DIRECTLY as three sRGB 0-1 channels, on the
+JavaScript and the GLSL route alike (`style-expressions.ts`, `channelsToHex`),
+wraps every scalar colour expression once as `AsRgb(...)` before compiling it,
+never passes a conversion result to another colour operator, and reads no other
+conversion's output. So `AsRgb` output = sRGB channels is a terminal contract
+for them, and the second resolution above would need a Tycho change to keep
+colours right. That constraint suggests a third resolution:
+
+- Keep every `_SYS.as*` answer as it is for the consumer, and mark it with a
+  NON-ENUMERABLE property naming its space (`Object.defineProperty(channels,
+  '__space', …)`). A consumer indexing the array sees nothing; a `_SYS` colour
+  helper handed a marked array converts it back to the canonical OKLCh triple
+  (or refuses) before operating, so a conversion result reaching a second
+  colour operator through a variable becomes CORRECT instead of misread, and
+  the static nested-conversion decline can be lifted. Costs one property
+  definition per conversion result. The shader targets have no such tag; there
+  the static decline stays.
+
 If nothing is decided, the static decline stands: the nested forms fall back
 to the interpreter, and the fallback answers `NaN` for them until
 `interpretedRunValue` learns to serialize a colour.
