@@ -445,7 +445,7 @@ describe('Python: unknown-typed comparisons compile unchanged', () => {
     expect(python.compileFunction(ce.box(['Equal', 'u', 1]), 'f', ['u']))
       .toMatchInlineSnapshot(`
       "def f(u):
-          return (abs((u) - (1)) <= 1e-10)
+          return ((u) is not None and ((u) == (1) or abs((u) - (1)) <= 1e-10))
       "
     `);
   });

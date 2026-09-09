@@ -323,9 +323,25 @@ function atan2Raw(
   const unwrapped = unwrapOrPropagate(y, x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [yVal, xVal] = unwrapped;
+
+  // An interval is a set of REAL numbers, and +0 and −0 are the same real
+  // number, so an endpoint of −0 stands for the same point of the plane as
+  // an endpoint of +0. IEEE gives the two zeros different angles —
+  // `Math.atan2(-0, -1)` is −π where `Math.atan2(0, -1)` is +π, and
+  // `Math.atan2(0, -0)` is π where `Math.atan2(0, 0)` is 0 — so reading the
+  // endpoints as they come would make the answer depend on which zero an
+  // operand happens to hold. Every zero endpoint is therefore made positive
+  // below, which picks the PRINCIPAL angle: the argument of a negative real
+  // is +π (the range of the principal argument is (−π, π]) and the argument
+  // at the origin is 0.
+  const yLo = yVal.lo === 0 ? 0 : yVal.lo;
+  const yHi = yVal.hi === 0 ? 0 : yVal.hi;
+  const xLo = xVal.lo === 0 ? 0 : xVal.lo;
+  const xHi = xVal.hi === 0 ? 0 : xVal.hi;
+
   // If both intervals are point intervals, use standard atan2
-  if (yVal.lo === yVal.hi && xVal.lo === xVal.hi) {
-    const result = Math.atan2(yVal.lo, xVal.lo);
+  if (yLo === yHi && xLo === xHi) {
+    const result = Math.atan2(yLo, xLo);
     return ok({ lo: result, hi: result });
   }
 
@@ -333,31 +349,59 @@ function atan2Raw(
   const angles: number[] = [];
 
   // Corner points
-  angles.push(Math.atan2(yVal.lo, xVal.lo));
-  angles.push(Math.atan2(yVal.lo, xVal.hi));
-  angles.push(Math.atan2(yVal.hi, xVal.lo));
-  angles.push(Math.atan2(yVal.hi, xVal.hi));
+  angles.push(Math.atan2(yLo, xLo));
+  angles.push(Math.atan2(yLo, xHi));
+  angles.push(Math.atan2(yHi, xLo));
+  angles.push(Math.atan2(yHi, xHi));
 
-  // The branch cut is the negative x-axis. There the angle jumps from +π
-  // to −π. The value at y = 0 is +π, the limit from y > 0. The limit from
-  // y < 0 is −π. A box contains a point of the cut when it has some x < 0
-  // and its y range reaches 0 from below. Such a box is a finite JUMP and
-  // is reported as every jump is (the item-239 contract): `singular` with
-  // the enclosure [−π, π], which bounds every value the function takes on
-  // the box. `at` is the location of the jump in the FIRST operand's
-  // coordinate, y = 0. `continuity: 'right'` says that the value at the
-  // cut belongs to the upper side. A box that only touches y = 0 from
-  // above is continuous there, because the angle runs up to π, and it
-  // takes the corner evaluation below. A plain bounded `interval` on the
-  // cut let an implicit-curve classifier read the sign change of
-  // `atan2(y, x) − 3` across the cut as a crossing (Tycho item 255).
-  // The enclosure is spelled from the DOUBLE `Math.PI`, which is below the
-  // real π, while `atan2(0, x)` for a negative `x` attains the real π exactly.
-  // The written bounds are therefore stepped one ulp outward here, at the
-  // point they are written, so the hull encloses the value even before the
-  // outward decorator sees it.
-  if (xVal.lo < 0 && yVal.lo < 0 && yVal.hi >= 0)
+  // The angle is discontinuous on the branch cut — the closed negative
+  // x-axis, the points with y = 0 and x ≤ 0 — and the three tests below are
+  // the three ways a box can meet the cut on a side the function does not
+  // extend across. Each is reported as every jump is (the item-239
+  // contract): `singular` WITH an enclosure, which bounds every value the
+  // function takes on the box, so a consumer that only needs a bound — an
+  // implicit-curve sign test, a range estimate — can use it and keep
+  // refining, while a consumer that draws the curve still sees the break. A
+  // plain bounded `interval` on the cut let an implicit-curve classifier
+  // read the sign change of `atan2(y, x) − 3` across the cut as a crossing
+  // (Tycho item 255). Every enclosure written here is spelled from the
+  // DOUBLE `Math.PI`, which is below the real π that the angle attains on
+  // the cut, so a written endpoint is stepped one ulp outward at the point
+  // it is written and the hull encloses the value even before the outward
+  // decorator sees it.
+
+  // The cut crossed in y: the box has some x < 0 and its y range reaches 0
+  // from below. The angle jumps there from +π, the value at y = 0, to −π,
+  // the limit from y < 0. `at` is the location of the jump in the FIRST
+  // operand's coordinate, y = 0, and `continuity: 'right'` says that the
+  // value at the cut belongs to the upper side. A box that only touches
+  // y = 0 from above with x < 0 throughout is continuous there, because the
+  // angle runs up to π, and it takes the corner evaluation below.
+  if (xLo < 0 && yLo < 0 && yHi >= 0)
     return jump(0, 'right', { lo: nextDown(-PI), hi: nextUp(PI) });
+
+  // The cut crossed in x: the box sits on y = 0, or on y = 0 and the strip
+  // above it, and its x range reaches both sides of zero. Along y = 0 the
+  // angle is π for x < 0 and 0 for x ≥ 0, so it jumps at x = 0 — a jump in
+  // the SECOND operand's coordinate, which `atOperand: 1` reports. The value
+  // at the jump is `Math.atan2(0, 0)`, which is 0, the limit from x > 0,
+  // hence `continuity: 'right'`. Every point of the box has y ≥ 0, so its
+  // angle is in [0, π], and both ends are attained on y = 0 (0 at x > 0 and
+  // π at x < 0), which makes that interval the exact range.
+  if (yLo === 0 && xLo < 0 && xHi >= 0)
+    return jump(0, 'right', { lo: 0, hi: nextUp(PI) }, 1);
+
+  // The box is a segment of the line x = 0 that reaches the origin: the
+  // angle is +π/2 above the origin, −π/2 below it and 0 at the origin
+  // itself, so it takes two or three values and nothing in between. The jump
+  // is at y = 0, in the first operand's coordinate. No side is reported,
+  // because the value at the origin is neither the limit from above nor the
+  // limit from below.
+  if (xLo === 0 && xHi === 0 && yLo <= 0 && yHi >= 0)
+    return jump(0, undefined, {
+      lo: yLo < 0 ? nextDown(-HALF_PI) : 0,
+      hi: yHi > 0 ? nextUp(HALF_PI) : 0,
+    });
 
   return ok({ lo: Math.min(...angles), hi: Math.max(...angles) });
 }

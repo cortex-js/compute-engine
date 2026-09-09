@@ -64,8 +64,12 @@ describe('J8: equality between integer-valued operands is exact', () => {
   });
 
   test('a real operand keeps the tolerance test', () => {
-    expect(codeOf(ce, 'x = 3')).toBe('(Math.abs((_.x) - (3)) <= 1e-10)');
-    expect(codeOf(ce, 'x = 0.5')).toBe('(Math.abs((_.x) - (0.5)) <= 1e-10)');
+    expect(codeOf(ce, 'x = 3')).toBe(
+      '((typeof (_.x) === \'number\' && (_.x) === (3)) || Math.abs((_.x) - (3)) <= 1e-10)'
+    );
+    expect(codeOf(ce, 'x = 0.5')).toBe(
+      '((typeof (_.x) === \'number\' && (_.x) === (0.5)) || Math.abs((_.x) - (0.5)) <= 1e-10)'
+    );
   });
 
   test('a tolerance of 1 or more keeps the tolerance test', () => {

@@ -1120,7 +1120,11 @@ describe('COMPILE Equal/NotEqual tolerance (CO-P1-4)', () => {
     // of the tolerance comparison this test is pinning.
     const r = compile(expr, { constantFold: false })!;
     expect(r.code).toContain('Math.abs');
-    expect(r.code).not.toContain('===');
+    // The emission carries an exact `===` test as well, but only as a
+    // pre-test: it rescues a pair whose DIFFERENCE is `NaN`, such as two
+    // infinities of the same sign. It never decides a pair the tolerance test
+    // would decide differently, which is what the run below witnesses —
+    // `0.1 + 0.2 === 0.3` is `false` in JavaScript, and the answer is `true`.
     expect(r.run!({})).toBe(true);
     // Interpreter agrees.
     expect(expr.evaluate().symbol).toBe('True');

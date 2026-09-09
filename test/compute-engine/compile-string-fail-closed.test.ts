@@ -1082,14 +1082,16 @@ describe('the gate does not reach past string operands', () => {
   test('an unknown-typed symbol does not gate (plot shapes keep compiling)', () => {
     const r = compile(ce.box(['Equal', 'xq', 4]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"(Math.abs((_.xq) - (4)) <= 1e-10)"`);
+    expect(r.code).toMatchInlineSnapshot(
+      `"((typeof (_.xq) === 'number' && (_.xq) === (4)) || Math.abs((_.xq) - (4)) <= 1e-10)"`
+    );
   });
 
   test('an inferred-parameter plot equality keeps its numeric fast path', () => {
     const r = compile(ce.parse('x^2 + y^2 = 4'), { fallback: false });
     expect(r.success).toBe(true);
     expect(r.code).toMatchInlineSnapshot(
-      `"(Math.abs(((_.x * _.x) + (_.y * _.y)) - (4)) <= 1e-10)"`
+      `"((typeof ((_.x * _.x) + (_.y * _.y)) === 'number' && ((_.x * _.x) + (_.y * _.y)) === (4)) || Math.abs(((_.x * _.x) + (_.y * _.y)) - (4)) <= 1e-10)"`
     );
   });
 
@@ -1502,7 +1504,9 @@ describe('tier 2: NotEqual over `string | missing` keeps the Kleene guard', () =
     ce.declare('pq', 'number');
     const r = compile(ce.box(['NotEqual', 'pq', 3]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"(Math.abs((_.pq) - (3)) > 1e-10)"`);
+    expect(r.code).toMatchInlineSnapshot(
+      `"(!((typeof (_.pq) === 'number' && (_.pq) === (3)) || Math.abs((_.pq) - (3)) <= 1e-10))"`
+    );
   });
 });
 

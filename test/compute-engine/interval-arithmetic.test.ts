@@ -51,6 +51,7 @@ import {
   max,
   mod,
   sign,
+  heaviside,
   // Trigonometric
   sin,
   cos,
@@ -368,7 +369,80 @@ describe('INTERVAL ELEMENTARY FUNCTIONS', () => {
     if (result.kind === 'singular') {
       // sign has no one-sided continuity at 0
       expect(result.continuity).toBeUndefined();
+      // All three values are taken, so the enclosure is the whole range.
+      expect(result.value).toEqual({ lo: -1, hi: 1 });
     }
+  });
+
+  test('sign - reaches zero from one side only', () => {
+    // An input with no negative part takes only 0 and 1, so an enclosure of
+    // [-1, 1] would report a value the function never takes. A -0 endpoint
+    // is the real zero and counts as the same side.
+    for (const x of [
+      { lo: 0, hi: 0.5 },
+      { lo: -0, hi: 0.5 },
+    ]) {
+      const result = sign(x);
+      expect(result.kind).toBe('singular');
+      if (result.kind === 'singular')
+        expect(result.value).toEqual({ lo: 0, hi: 1 });
+    }
+    for (const x of [
+      { lo: -0.5, hi: 0 },
+      { lo: -0.5, hi: -0 },
+    ]) {
+      const result = sign(x);
+      expect(result.kind).toBe('singular');
+      if (result.kind === 'singular')
+        expect(result.value).toEqual({ lo: -1, hi: 0 });
+    }
+  });
+
+  test('sign - the point zero is exact', () => {
+    expectInterval(sign({ lo: 0, hi: 0 }), 0, 0);
+    expectInterval(sign({ lo: -0, hi: -0 }), 0, 0);
+  });
+
+  test('heaviside - reaches zero from one side only', () => {
+    // The enclosures follow the engine's convention that H(0) is 1/2: an
+    // input with no negative part takes only 1/2 and 1, one with no positive
+    // part only 0 and 1/2.
+    for (const x of [
+      { lo: 0, hi: 0.5 },
+      { lo: -0, hi: 0.5 },
+    ]) {
+      const result = heaviside(x);
+      expect(result.kind).toBe('singular');
+      if (result.kind === 'singular')
+        expect(result.value).toEqual({ lo: 0.5, hi: 1 });
+    }
+    for (const x of [
+      { lo: -0.5, hi: 0 },
+      { lo: -0.5, hi: -0 },
+    ]) {
+      const result = heaviside(x);
+      expect(result.kind).toBe('singular');
+      if (result.kind === 'singular')
+        expect(result.value).toEqual({ lo: 0, hi: 0.5 });
+    }
+  });
+
+  test('heaviside - spans zero', () => {
+    const result = heaviside({ lo: -1, hi: 1 });
+    expect(result.kind).toBe('singular');
+    if (result.kind === 'singular') {
+      // The step has no one-sided continuity at 0, and all three values are
+      // taken.
+      expect(result.continuity).toBeUndefined();
+      expect(result.value).toEqual({ lo: 0, hi: 1 });
+    }
+  });
+
+  test('heaviside - away from zero, and the point zero, are exact', () => {
+    expectInterval(heaviside({ lo: 1, hi: 2 }), 1, 1);
+    expectInterval(heaviside({ lo: -2, hi: -1 }), 0, 0);
+    expectInterval(heaviside({ lo: 0, hi: 0 }), 0.5, 0.5);
+    expectInterval(heaviside({ lo: -0, hi: -0 }), 0.5, 0.5);
   });
 
   test('pow - positive integer', () => {

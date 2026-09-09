@@ -1146,11 +1146,21 @@ function canonicalFunctionSlot(
   // The declared signature, read from the definition rather than restated
   // here, so the two can't drift apart.
   const def = ce.lookupDefinition(operator);
-  const sig =
-    def && 'operator' in def ? def.operator.signature.type : undefined;
-  const adjusted = sig
-    ? validateArguments(ce, args, sig, false, false)
-    : undefined;
+  const opDef = def && 'operator' in def ? def.operator : undefined;
+  const sig = opDef ? opDef.signature.type : undefined;
+  // The strip-before-validate policy (§3.B of the missing-value typing
+  // design) is read from the SAME definition as the signature, so this seam
+  // decides an operand carrying a `missing` arm exactly as the default
+  // canonicalization path does. Every operator routed through here resolves
+  // to `pass-through` today, which strips nothing, so the policy is inert;
+  // passing it is what keeps it that way by construction, instead of leaving
+  // a later `missingBehavior` declaration silently ignored at this seam.
+  const adjusted =
+    sig && opDef
+      ? validateArguments(ce, args, sig, false, false, undefined, (i) =>
+          opDef.stripsMissingAt(i)
+        )
+      : undefined;
 
   const final = adjusted ?? args;
   // The arity check runs on the VALIDATED operand, whose source provenance
@@ -10513,6 +10523,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
       if (!xs.isFiniteCollection) return undefined;
 
+      // A settled size that is a number but not an integer (`Partition(xs,
+      // h(3))` with `h(3) = 1.5`) is the same type error `Chunk` answers
+      // through the generic runtime conformance check; that check stands down
+      // for this slot (its declared type is open), and `toInteger` below
+      // would otherwise round the value and accept it silently.
+      if (isNumber(arg) && arg.isInteger === false)
+        return ce.typeError('integer', arg.type, arg);
+
       // Partition(collection, n) and Partition(collection, n, step)
       const n = toInteger(arg);
       if (n !== null) {
@@ -10558,6 +10576,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // a raw `Error` out of `evaluate()` — the operand is typed `integer`,
       // so no spell-check hint was ever going to help.
       if (arg.type.matches('number')) return undefined;
+
+      // An ABSENT size is not a predicate either. The operand was admitted at
+      // boxing because its type only MAY be absent — `integer | missing`, the
+      // type of a default-less piecewise — and evaluation has now settled it,
+      // so the type error the boxing seam mints for a proven `Missing` is due
+      // here instead (`docs/ERROR-MODEL.md` §2, rule 2: the check re-runs when
+      // the evidence arrives). `Chunk` and `Take`, whose size parameter is a
+      // plain `integer`, answer exactly this error through the generic runtime
+      // conformance check; that check stands down for this slot because its
+      // declared type is open (it carries the free type variable `T`). Without
+      // the guard the absence reached `applicable()` below and came back as
+      // "Missing is not a function", blaming an arm the author never used.
+      if (isSymbol(arg, 'Missing'))
+        return ce.typeError('integer', arg.type, arg);
 
       // Partition(collection, predicate)
       const fn = applicable(arg);

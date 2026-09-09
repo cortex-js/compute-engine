@@ -37,15 +37,24 @@ export interface Interval {
  *   `at` locates the first discontinuity in the input's coordinate and
  *   `continuity` says which side the value at `at` belongs to. Both are
  *   given when the operation knows them. For a head with more than one
- *   operand, `at` is in the coordinate of the operand across which the jump
- *   is crossed, named in that kernel's comment (`atan2(y, x)` jumps across
- *   its branch cut at `y = 0`, so `at` is a `y` value). When jumps from
- *   different operands combine (`floor(x) + atan2(y, x)`), the propagated
- *   `at` is the smallest of the operands' `at` values compared as plain
- *   numbers (`earliestJump`, `util.ts`); it locates the break only when
- *   every contributing jump is in the same coordinate. The result carries no
- *   axis tag, so a consumer that subdivides along `at` must know from the
- *   expression which coordinate the jumps are in.
+ *   operand, `at` is in the coordinate of ONE of the operands, and
+ *   `atOperand` is the index of that operand among the operands of the
+ *   operation that REPORTED the jump: `0`, the first operand, when the field
+ *   is absent — which is what every kernel but `atan2` reports.
+ *   `atan2(y, x)` uses both spellings: across its branch cut it jumps at
+ *   `y = 0` (`at: 0` with no `atOperand`, a `y` value), and along `y = 0`
+ *   with an `x` range that reaches both sides of zero it jumps at `x = 0`
+ *   (`at: 0` with `atOperand: 1`, an `x` value). `atOperand` travels
+ *   unchanged as the jump propagates through the operations above it, so it
+ *   keeps naming the operand of the kernel that found the jump, never an
+ *   operand of the outer operation.
+ *   When jumps from different operands combine (`floor(x) + atan2(y, x)`),
+ *   the propagated `at` is the smallest of the operands' `at` values
+ *   compared as plain numbers (`earliestJump`, `util.ts`); it locates the
+ *   break only when every contributing jump is in the same coordinate. The
+ *   result names no axis of the EXPRESSION, so a consumer that subdivides
+ *   along `at` must know from the expression which variable each kernel's
+ *   operand is.
  *   Every operation propagates a jump: `floor(x) - 3` over `[0.5, 1.5]` is
  *   `singular` with `value: [-3, -2]`, still carrying floor's `at`.
  * - `partial`: Valid interval with domain clipping info
@@ -57,6 +66,7 @@ export type IntervalResult =
   | {
       kind: 'singular';
       at?: number;
+      atOperand?: number;
       continuity?: 'left' | 'right';
       value?: Interval;
     }

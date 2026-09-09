@@ -374,8 +374,11 @@ function assertPyNoMixedStringOrdering(
  * Emit a Python equality test with the engine's numeric tolerance baked in at
  * compile time. The interpreter compares numbers within `engine.tolerance`
  * (default 1e-10) — so `0.1 + 0.2 == 0.3` is *true* — while a raw `==` on
- * floats is exact and would disagree. `kind` selects Equal (`<=`) vs NotEqual
- * (`>`). Chained (N-ary) forms are conjoined pairwise with `and`.
+ * floats is exact and would disagree. `kind` selects Equal
+ * (`a == b or abs(a - b) <= tol`) vs NotEqual (the NEGATION of that same test
+ * — see the `pair` helper for why `abs(a - b) > tol` is wrong on `nan`, and why
+ * the exact `==` comes first). Chained (N-ary) forms are conjoined pairwise
+ * with `and`.
  *
  * Collection operands follow the interpreter's gate (see the `Equal`/`NotEqual`
  * evaluate handlers in `library/relational-operator.ts`), which switches on how
@@ -476,12 +479,47 @@ function compilePythonEquality(
       collParts.push(collPair(args[i], args[i + 1]));
     return `(${collParts.join(' and ')})`;
   }
-  const cmp = kind === 'Equal' ? '<=' : '>';
-  const pair = (a: Expression, b: Expression): string =>
-    `(abs((${compile(a)}) - (${compile(b)})) ${cmp} ${tol})`;
+  // Two details keep this emission faithful where the difference of the
+  // operands is `nan` — that is, when an operand is `nan`, and when both
+  // operands are infinities of the SAME sign. Every comparison against `nan` is
+  // false, so the bare tolerance test answers `False` for BOTH of those pairs:
+  //
+  //  - an EXACT `==` is tried BEFORE the tolerance test, the same order the
+  //    `_ce_eqcoll` collection helper uses. That rescues the matching
+  //    infinities (`inf == inf` is `True`, while `abs(inf - inf)` is `nan`),
+  //    which the interpreter answers `Equal(oo, oo)` → `True`. A pair the exact
+  //    test accepts has a difference of exactly 0, which the tolerance test
+  //    accepts too, so nothing else changes.
+  //  - `NotEqual` is the NEGATION of the whole `Equal` test, not
+  //    `abs(a - b) > tol`. The `>` form answered `False` on a `nan` operand —
+  //    the compiled function reported that `nan` EQUALS 3 — while the negation
+  //    answers `True`, which is both the IEEE 754 convention and what the
+  //    interpreter answers (`NotEqual(NaN, 3)` is `True`).
+  //
+  // Each operand is spliced TWICE, once in the exact test and once in the
+  // difference. That is only safe while this target has no impure lowering
+  // (`Random` and friends decline today) — bind each operand to a temporary if
+  // that changes, so that it is evaluated once as the interpreter evaluates it
+  // once. The JavaScript target already does that (`multiSpliced`).
+  const pair = (a: Expression, b: Expression): string => {
+    const ca = compile(a);
+    const cb = compile(b);
+    // An absent operand is the Python object `None`: `None == None` is true,
+    // and `abs(None - 3)` raises instead of answering. So an operand that
+    // is not a numeric literal is tested for `None` in front of the WHOLE
+    // comparison, and an absent operand makes `Equal` false and `NotEqual`
+    // true, as the JavaScript target answers for `undefined`.
+    const guard = [a, b]
+      .filter((op) => !isNumber(op))
+      .map((op) => `(${compile(op)}) is not None and `)
+      .join('');
+    const equal = `(${guard}((${ca}) == (${cb}) or abs((${ca}) - (${cb})) <= ${tol}))`;
+    return kind === 'Equal' ? equal : `(not ${equal})`;
+  };
   if (args.length === 2) return pair(args[0], args[1]);
   const parts: string[] = [];
-  // Same double-compile-of-the-middle-operand caveat as the collection chain.
+  // A shared middle operand is spliced by the two pairs that straddle it, on
+  // top of the two splices inside each pair — the same purity caveat.
   for (let i = 0; i < args.length - 1; i++)
     parts.push(pair(args[i], args[i + 1]));
   return `(${parts.join(' and ')})`;

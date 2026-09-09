@@ -258,14 +258,21 @@ export function unwrapOrPropagate(
  * finite: a `singular` with a `value` promises a BOUNDED function (see
  * `IntervalResult`), so a step function over an infinite input (`floor` over
  * `[-∞, 3]`) is reported as a pole (no `value`) instead.
+ *
+ * `atOperand` is the index of the operand whose coordinate `at` is a value
+ * in. It is left out for the first operand, which is where a one-operand
+ * routine and every step function locate their jump; only a routine that can
+ * jump along a LATER operand passes it (`atan2` along its `x` operand).
  */
 export function jump(
   at: number | undefined,
   continuity: 'left' | 'right' | undefined,
-  value: Interval
+  value: Interval,
+  atOperand?: number
 ): IntervalResult {
   const r: IntervalResult = { kind: 'singular' };
   if (at !== undefined) r.at = at;
+  if (atOperand !== undefined && atOperand !== 0) r.atOperand = atOperand;
   if (continuity !== undefined) r.continuity = continuity;
   if (Number.isFinite(value.lo) && Number.isFinite(value.hi)) r.value = value;
   return r;
@@ -276,6 +283,7 @@ export function jump(
 export function isJump(x: unknown): x is {
   kind: 'singular';
   at?: number;
+  atOperand?: number;
   continuity?: 'left' | 'right';
   value: Interval;
 } {
@@ -287,28 +295,45 @@ export function isJump(x: unknown): x is {
   );
 }
 
+type JumpLocation = {
+  at?: number;
+  atOperand?: number;
+  continuity?: 'left' | 'right';
+};
+
 /**
  * The location of the earliest of several jumps: the smallest defined `at`,
- * with its `continuity` — omitted when two jumps sit at the same point and
- * disagree on the side (`floor(x) + ceil(x)` at an integer is neither
- * left- nor right-continuous).
+ * with the `atOperand` that names its coordinate and its `continuity` — the
+ * side omitted when two jumps sit at the same point of the same coordinate
+ * and disagree on it (`floor(x) + ceil(x)` at an integer is neither left-
+ * nor right-continuous). Two jumps at the same NUMBER in different
+ * coordinates (`floor(y) · atan2(y, x)`, where `y = 0` and `x = 0` are both
+ * written `0`) locate nothing at all, so no location is reported for that
+ * number rather than one belonging to a coordinate the caller cannot name. A
+ * jump that is genuinely earlier than such a pair still locates the break.
  */
-function earliestJump(
-  jumps: ReadonlyArray<{ at?: number; continuity?: 'left' | 'right' }>
-): { at?: number; continuity?: 'left' | 'right' } {
-  let first: { at?: number; continuity?: 'left' | 'right' } | undefined;
+function earliestJump(jumps: ReadonlyArray<JumpLocation>): JumpLocation {
+  let first: JumpLocation | undefined;
+  // Set while the earliest `at` seen so far is claimed by two jumps in
+  // different coordinates.
+  let ambiguous = false;
   for (const j of jumps) {
     if (
       first === undefined ||
       (j.at !== undefined && (first.at === undefined || j.at < first.at))
     ) {
-      first = { at: j.at, continuity: j.continuity };
-    } else if (j.at === first.at && j.continuity !== first.continuity) {
-      first = { at: first.at };
+      first = { at: j.at, atOperand: j.atOperand, continuity: j.continuity };
+      ambiguous = false;
+    } else if (j.at === first.at && !ambiguous) {
+      if (j.atOperand !== first.atOperand) ambiguous = true;
+      else if (j.continuity !== first.continuity)
+        first = { at: first.at, atOperand: first.atOperand };
     }
   }
-  const r: { at?: number; continuity?: 'left' | 'right' } = {};
+  const r: JumpLocation = {};
+  if (ambiguous) return r;
   if (first?.at !== undefined) r.at = first.at;
+  if (first?.atOperand !== undefined) r.atOperand = first.atOperand;
   if (first?.continuity !== undefined) r.continuity = first.continuity;
   return r;
 }

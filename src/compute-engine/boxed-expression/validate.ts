@@ -855,6 +855,48 @@ function isCollectionKindArm(a: Type): boolean {
     ? COLLECTION_PARAM_KINDS.has(a)
     : COLLECTION_PARAM_KINDS.has(a.kind);
 }
+
+/**
+ * True when a parameter is a UNION that mixes CALLABLE arms with VALUE arms
+ * and every value arm is numeric — the shape of a "size or predicate"
+ * parameter, such as `Partition`'s `integer | ((T) any -> boolean)`.
+ *
+ * Such a parameter is exempt from the static overlap admission below because
+ * of its callable arm, and the exemption is right for a CALLABLE operand: the
+ * arrow-slot rules (Design E) are the authority there. It was wrong for
+ * everything else. A slot declared with a plain numeric type admits an
+ * operand typed `integer | missing` — the type of a default-less piecewise —
+ * because the two overlap, and defers the verdict to the runtime conformance
+ * check; the union spelling refused the identical operand at canonicalization,
+ * so `Partition(xs, k)` errored where its `Take`/`Chunk`/`Drop` siblings, whose
+ * size parameter is a plain `integer`, admitted it. Letting such a parameter
+ * reach the overlap admission restores the parity: an operand that overlaps
+ * the numeric arms is admitted and re-checked when its value settles, and one
+ * that overlaps nothing (a string, a proven `Missing`) is still refused here.
+ *
+ * A single non-numeric value arm disqualifies the parameter: the admission
+ * must not loosen a slot whose other arms police a shape — a collection, a
+ * string — that the numeric reasoning above says nothing about.
+ */
+function unionOfCallableAndNumericArms(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  let callable = false;
+  let numeric = false;
+  for (const arm of paramArms(r)) {
+    if (
+      arm === 'function' ||
+      (typeof arm !== 'string' && arm.kind === 'signature')
+    ) {
+      callable = true;
+      continue;
+    }
+    if (!isSubtype(arm, 'number')) return false;
+    numeric = true;
+  }
+  return callable && numeric;
+}
+
 export function runtimeCheckExemptParam(t: Type): boolean {
   if (freeTypeVariables(t).size > 0) return true;
   const arms = paramArms(t);
@@ -1214,7 +1256,14 @@ function evidenceGuardedNarrow(
  *   the second-pass block in `validateArguments`.
  */
 function overlapAdmission(op: Expression, param: Type): boolean {
-  if (runtimeCheckExemptParam(param)) return false;
+  // A callable-plus-numeric union parameter is exempt from the classifier
+  // only on account of its callable arm, which is no authority over a
+  // non-callable operand — see `unionOfCallableAndNumericArms`. An operand
+  // that could be callable does not reach this admission: `arrowSlotAdmission`
+  // runs first at such a parameter and returns its own verdict — `admit` or a
+  // minted error — for every operand it cannot prove non-callable.
+  if (runtimeCheckExemptParam(param) && !unionOfCallableAndNumericArms(param))
+    return false;
   if (concreteValueOf(op) !== undefined)
     return admissionOf(op, param) === 'admit';
   // Epsil pre-pass assignment evidence (the ROADMAP entry "Epsil static

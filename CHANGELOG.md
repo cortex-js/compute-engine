@@ -108,6 +108,48 @@
 
 ### Resolved Issues
 
+- **Interval `sign` and `heaviside` no longer report a value they never
+  take.** `sign([0, 0.5])` answered the enclosure `[-1, 1]`, although the
+  function takes only `0` and `1` on that input. An input that reaches zero
+  from one side only now answers `[0, 1]` or `[-1, 0]`, and only an input with
+  a negative part AND a positive part keeps `[-1, 1]`. `heaviside` is
+  tightened the same way, to the engine's convention that `H(0)` is `1/2`:
+  `[0.5, 1]` for an input with no negative part, `[0, 0.5]` for one with no
+  positive part, `[0, 1]` only for an input that spans zero. Both jumps are
+  reported as before — `singular` at `0` with no side, since the value at
+  `0` is neither the limit from above nor from below — and both point zeros
+  are unchanged and exact.
+
+- **Compiled `Equal` and `NotEqual` answer correctly on `NaN` and on two
+  infinities of the same sign.** The scalar tolerance test is
+  `Math.abs(a - b) <= 1e-10` on the JavaScript target and
+  `abs(a - b) <= 1e-10` on the Python target. Every comparison against `NaN` is
+  false, and the difference of two infinities of the same sign IS `NaN`, so two
+  answers were wrong:
+
+  `NotEqual` was emitted as the `>` complement (`Math.abs(a - b) > 1e-10`),
+  which also answers `false` on a `NaN` operand — the compiled function
+  reported that `NaN` EQUALS the other operand. Reading an absent parameter is
+  enough to reach it: with `r` declared `real`, the compiled `r \ne 3` answered
+  `false` when `run({})` left `r` undefined. `NotEqual` is now the NEGATION of
+  the whole `Equal` test, which answers `true` there — the IEEE 754 convention,
+  and what the interpreter answers (`NotEqual(NaN, 3)` is `True`).
+
+  `Equal` reported two infinities of the same sign UNEQUAL, where the
+  interpreter answers `Equal(oo, oo)` → `True`. An exact test now runs before
+  the tolerance test on both targets (`a === b || Math.abs(a - b) <= 1e-10`;
+  `a == b or abs(a - b) <= 1e-10` in Python) — the order the Python
+  `_ce_eqcoll` collection helper already used — and the JavaScript runtime
+  dispatch behind `_SYS.eq`/`_SYS.neq` gained the same pre-test at its scalar
+  leaf. A pair the exact test accepts has a difference of exactly 0, which the
+  tolerance test accepts too, so no other pair changes answer.
+
+  Compiled JavaScript for the scalar form now splices each operand twice, so an
+  impure operand (the `Random` family) is bound to a temporary and evaluated
+  once, as the interpreter evaluates it once. The exact `===`/`!==` form used
+  when both operands are provably integer is unchanged, and was already right
+  on `NaN`.
+
 - **Interval `atan2` reports the jump it makes along its `x` operand.**
   `atan2([0, 0], [-1, 1])` — the angle over the segment of the real axis from
   −1 to 1 — answered the bounded interval `[0, π]`, although the angle is `π`

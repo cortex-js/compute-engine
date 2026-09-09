@@ -1829,11 +1829,22 @@ export function canonicalLimits(
  * Its present values are numbers, and when it is absent the numeric slot
  * normalizes the absence to `NaN` at evaluation (`docs/ERROR-MODEL.md` §3);
  * a type error at boxing would blame the bound instead.
+ *
+ * A bound WRITTEN as an absence is different: the literal `NaN` and the
+ * symbol `Missing` are never a usable bound, so both are rejected here, at
+ * boxing, as the string is — a program defect with an early diagnostic, not
+ * a run-time value to propagate. (Ruled 2026-09-09: a literal `NaN` bound
+ * used to be accepted and then left the operator symbolic, while a literal
+ * `Missing` bound erred; a bound that only EVALUATES to an absence, such as
+ * a piecewise call, keeps the run-time reading and the operator answers
+ * `NaN`.)
  */
 function checkBound(bound: Expression | null): Expression | null {
   if (bound === null) return null;
   if (isSymbol(bound) && bound.symbol === 'Nothing') return bound;
   if (!bound.isValid) return bound;
+  if (isNumber(bound) && bound.isNaN === true)
+    return bound.engine.typeError('number', bound.type, bound);
   if (bound.isNumber) return bound;
   const t = bound.type;
   if (t.isUnknown || t.type === 'any') return bound;

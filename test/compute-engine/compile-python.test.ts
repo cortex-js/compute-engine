@@ -874,26 +874,29 @@ describe('PYTHON TARGET', () => {
       const code = python.compile(ce.box(['Equal', ['Add', 0.1, 0.2], 0.3]), {
         constantFold: false,
       }).code;
-      expect(code).toBe('(abs((0.1 + 0.2) - (0.3)) <= 1e-10)');
+      expect(code).toBe(
+        '((0.1 + 0.2) is not None and ((0.1 + 0.2) == (0.3) or abs((0.1 + 0.2) - (0.3)) <= 1e-10))'
+      );
     });
 
-    it('NotEqual uses the tolerance complement', () => {
+    it('NotEqual negates the whole Equal test', () => {
       const code = python.compile(ce.box(['NotEqual', 'x', 0.3])).code;
-      expect(code).toBe('(abs((x) - (0.3)) > 1e-10)');
+      expect(code).toBe('(not ((x) is not None and ((x) == (0.3) or abs((x) - (0.3)) <= 1e-10)))');
     });
 
     // The scalar/scalar emission is the hot path — pinned byte-identical so the
     // collection branch below cannot perturb it.
     it('the scalar/scalar emission is unchanged by the collection branch', () => {
       expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
-        '(abs((x) - (y)) <= 1e-10)'
+        '((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10))'
       );
       expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
-        '(abs((x) - (y)) > 1e-10)'
+        '(not ((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10)))'
       );
       // N-ary scalar chain: adjacent pairs conjoined with the scalar `and`.
       expect(python.compile(ce.box(['Equal', 'x', 'y', 'z'])).code).toBe(
-        '((abs((x) - (y)) <= 1e-10) and (abs((y) - (z)) <= 1e-10))'
+        '(((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10)) and ' +
+          '((y) is not None and (z) is not None and ((y) == (z) or abs((y) - (z)) <= 1e-10)))'
       );
     });
 

@@ -650,13 +650,13 @@ function assertNoMixedStringOrdering(
  *
  * An operand whose type carries a `nan` arm beside the integer one is admitted
  * as well. `NaN` is what an out-of-range element read (`P[i]`) or a `0/0`
- * answers, and on it the exact form is the one that agrees with the
- * interpreter: `Equal(NaN, 3)` is `False` there, and both `NaN === 3` and
- * `Math.abs(NaN - 3) <= tol` are `false`; `NotEqual(NaN, 3)` is `True` there,
- * which `NaN !== 3` reports and the tolerance test does NOT — every comparison
- * against `NaN` is false, so `Math.abs(NaN - 3) > tol` answers `false`. The
- * two forms agree on the two signed zeros: `-0 === 0` is true, and
- * `Math.abs(-0 - 0) <= tol` is true.
+ * answers, and both forms agree with the interpreter on it: `Equal(NaN, 3)` is
+ * `False` there, and `NaN === 3` is `false` while the tolerance form's two
+ * tests (`NaN === 3` and `Math.abs(NaN - 3) <= tol`) are both `false` too;
+ * `NotEqual(NaN, 3)` is `True` there, which `NaN !== 3` reports and which the
+ * tolerance form reports as the negation of the same `Equal` test. The two
+ * forms agree on the two signed zeros as well: `-0 === 0` is true, and so is
+ * `Math.abs(-0 - 0) <= tol`.
  *
  * The heads that carry an `integer` result type — and so take this form — are
  * `Sign`, `Floor`, `Ceil`, `Round`, `Length`, an integer literal, a
@@ -681,9 +681,23 @@ function exactIntegerComparison(
  * at compile time. The interpreter treats two numbers as equal when
  * `|a − b| <= engine.tolerance` (default 1e-10) — so `0.1 + 0.2 === 0.3` is
  * *true* — whereas a raw `===` is exact and would disagree. `kind` selects
- * Equal (`<=`) vs NotEqual (`>`). Complex operands compare on the modulus of
- * the difference (`_SYS.cabs`). Chained (N-ary) forms conjoin pairwise with
- * `&&`.
+ * Equal (`a === b || |a − b| <= tol`) vs NotEqual (the NEGATION of that same
+ * test, not `|a − b| > tol`). Complex operands compare component-wise for
+ * exactness and on the modulus of the difference (`_SYS.cabs`) for tolerance.
+ * Chained (N-ary) forms conjoin pairwise with `&&`.
+ *
+ * Two details keep the emission faithful where the difference of the operands
+ * is `NaN` — that is, when an operand is `NaN`, and when both operands are
+ * infinities of the SAME sign. Every comparison against `NaN` is false, so the
+ * bare tolerance test answers `false` for BOTH of those pairs:
+ *
+ *  - the EXACT pre-test (`exact`) rescues the matching infinities, which the
+ *    interpreter answers `Equal(oo, oo)` → `True`;
+ *  - `NotEqual` is the NEGATION of the whole `Equal` test, not `|a − b| > tol`.
+ *    The `>` form answered `false` on a `NaN` operand — the compiled function
+ *    reported that `NaN` EQUALS 3 — while `!(NaN-test)` answers `true`, which
+ *    is both the IEEE 754 convention and what the interpreter answers
+ *    (`NotEqual(NaN, 3)` is `True`).
  */
 function compileJSEquality(
   kind: 'Equal' | 'NotEqual',
@@ -808,18 +822,28 @@ function compileJSEquality(
         `Fail closed (D6).`
     );
   }
-  const cmp = kind === 'Equal' ? '<=' : '>';
+  // Which adjacent pairs take the EXACT `===`/`!==` form rather than the
+  // tolerance form? The tolerance form splices both of its operands twice (the
+  // exact pre-test and the difference), the exact form only once, so the
+  // impure-operand rule below needs the answer per pair.
+  const exactPair = (i: number, j: number): boolean =>
+    exactIntegerComparison([args[i], args[j]], tol);
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
-  // interpreter evaluates each operand once. Two positions splice an operand
-  // MORE than once: a COMPLEX operand is spliced twice by `part()` (once for
-  // `.re`, once for `.im`), and a MIDDLE operand of a chained (n-ary) form
-  // appears in the two comparisons that straddle it. So `Equal(Random()·i, …)`
-  // and `Equal(0.1, Random(), 0.9)` each consumed TWO draws. When any operand
-  // is spliced more than once, bind EVERY impure operand — in argument order,
-  // so the draw order matches the interpreter's — to an IIFE const, and splice
-  // the const instead. Pure operands keep the direct emission byte-identical.
+  // interpreter evaluates each operand once. Three positions splice an operand
+  // MORE than once: an operand of a TOLERANCE-form pair appears both in the
+  // exact pre-test and in the difference, a COMPLEX operand is spliced twice
+  // more by `part()` (once for `.re`, once for `.im`), and a MIDDLE operand of
+  // a chained (n-ary) form appears in the two comparisons that straddle it. So
+  // `Equal(Random()·i, …)` and `Equal(0.1, Random(), 0.9)` each consumed TWO
+  // draws. When any operand is spliced more than once, bind EVERY impure
+  // operand — in argument order, so the draw order matches the interpreter's —
+  // to an IIFE const, and splice the const instead. Pure operands keep the
+  // direct emission byte-identical.
   const multiSpliced = (i: number): boolean =>
-    (i >= 1 && i <= args.length - 2) || BaseCompiler.isComplexValued(args[i]);
+    (i >= 1 && i <= args.length - 2) ||
+    BaseCompiler.isComplexValued(args[i]) ||
+    (i > 0 && !exactPair(i - 1, i)) ||
+    (i < args.length - 1 && !exactPair(i, i + 1));
   const bind = args.some((a, i) => a.isPure === false && multiSpliced(i));
   const bindings: string[] = [];
   const codes = args.map((a, _i) => {
@@ -829,26 +853,48 @@ function compileJSEquality(
     return t;
   });
   const code = (i: number): string => codes[i] ?? compile(args[i]);
+  const anyComplex = (i: number, j: number): boolean =>
+    BaseCompiler.isComplexValued(args[i]) ||
+    BaseCompiler.isComplexValued(args[j]);
+  // Promote an operand to `{ re, im }`. A real operand contributes
+  // `re = code`, `im = 0`.
+  const part = (e: Expression, c: string): { re: string; im: string } =>
+    BaseCompiler.isComplexValued(e)
+      ? { re: `(${c}).re`, im: `(${c}).im` }
+      : { re: `(${c})`, im: '0' };
   const distance = (i: number, j: number): string => {
-    const a = args[i];
-    const b = args[j];
-    const anyComplex =
-      BaseCompiler.isComplexValued(a) || BaseCompiler.isComplexValued(b);
-    if (!anyComplex) return `Math.abs((${code(i)}) - (${code(j)}))`;
-    // Promote each operand to `{ re, im }` and take the modulus of the
-    // difference. A real operand contributes `re = code`, `im = 0`.
-    const part = (e: Expression, c: string): { re: string; im: string } =>
-      BaseCompiler.isComplexValued(e)
-        ? { re: `(${c}).re`, im: `(${c}).im` }
-        : { re: `(${c})`, im: '0' };
-    const pa = part(a, code(i));
-    const pb = part(b, code(j));
+    if (!anyComplex(i, j)) return `Math.abs((${code(i)}) - (${code(j)}))`;
+    // The modulus of the difference of the two `{ re, im }` promotions.
+    const pa = part(args[i], code(i));
+    const pb = part(args[j], code(j));
     return `_SYS.cabs({ re: ${pa.re} - ${pb.re}, im: ${pa.im} - ${pb.im} })`;
   };
-  const pair = (i: number, j: number): string =>
-    exactIntegerComparison([args[i], args[j]], tol)
-      ? `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`
-      : `(${distance(i, j)} ${cmp} ${tol})`;
+  // Bit-exact equality, tested BEFORE the tolerance test. The difference of two
+  // infinities of the same sign is `NaN`, and every comparison against `NaN` is
+  // false, so the tolerance test alone reports a matching pair of infinities
+  // UNEQUAL where the interpreter answers `Equal(oo, oo)` → `True`. The exact
+  // test rescues that pair and changes nothing else: two values it accepts have
+  // a difference of exactly 0, which the tolerance test accepts as well. It is
+  // the shape the Python `_ce_eqcoll` collection helper already used. `NaN`
+  // fails both tests, which is again the interpreter's answer.
+  // The real arm also checks that the left operand IS a number: a caller
+  // variable that is absent reads `undefined`, and two absent operands are
+  // `===` to each other, which would report two unknown values EQUAL where
+  // the numeric difference (`NaN`) reports them not equal. One check on the
+  // left suffices — an absent right operand never equals a number.
+  const exact = (i: number, j: number): string => {
+    if (!anyComplex(i, j))
+      return `(typeof (${code(i)}) === 'number' && (${code(i)}) === (${code(j)}))`;
+    const pa = part(args[i], code(i));
+    const pb = part(args[j], code(j));
+    return `(${pa.re} === ${pb.re} && ${pa.im} === ${pb.im})`;
+  };
+  const pair = (i: number, j: number): string => {
+    if (exactPair(i, j))
+      return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;
+    const equal = `${exact(i, j)} || ${distance(i, j)} <= ${tol}`;
+    return kind === 'Equal' ? `(${equal})` : `(!(${equal}))`;
+  };
   let body: string;
   if (args.length === 2) body = pair(0, 1);
   else {
@@ -7339,8 +7385,9 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  * such as `q(x)`) — the runtime side of `compileJSEquality`'s
  * possibly-collection lowering (Tycho item 41). Mirrors the interpreter's
  * dispatch, probe-verified shape by shape:
- * - scalar = scalar → tolerant boolean (`|a − b| <= tol`; a complex operand
- *   compares on the modulus of the difference)
+ * - scalar = scalar → tolerant boolean (`a === b || |a − b| <= tol`; a complex
+ *   operand compares component-wise for exactness and on the modulus of the
+ *   difference for tolerance)
  * - array = scalar (either order) → element-wise array of booleans
  *   (`[1,4,4] = 4` → `[false, true, true]`), recursing into nested arrays
  * - array = array → a single boolean: equal lengths and every element pair
@@ -7388,7 +7435,7 @@ function eqTensor(
         const x = arr[i];
         out[i] =
           typeof x === 'number'
-            ? Math.abs(x - scalar) <= tol
+            ? x === scalar || Math.abs(x - scalar) <= tol
             : eqTensor(x, scalar, tol);
       }
       return out;
@@ -7404,6 +7451,18 @@ function eqTensor(
       : { re: v as number, im: 0 };
   const pa = part(a);
   const pb = part(b);
+  // Bit-exact equality first, as `compileJSEquality`'s scalar form does and as
+  // the Python `_ce_eqcoll` helper does: the difference of two infinities of
+  // the same sign is `NaN`, so `Math.hypot(NaN, 0) <= tol` would report a
+  // matching pair of infinities UNEQUAL where the interpreter answers `True`.
+  // A pair the exact test accepts has a difference of exactly 0, which the
+  // tolerance test accepts too, so nothing else changes; `NaN` fails both,
+  // which is again the interpreter's answer.
+  // An absent operand reads `undefined` and is promoted to `{ re: undefined,
+  // im: 0 }`; two of them would be `===` on both parts, so the exact test
+  // also requires a real number on the left.
+  if (typeof pa.re === 'number' && pa.re === pb.re && pa.im === pb.im)
+    return true;
   return Math.hypot(pa.re - pb.re, pa.im - pb.im) <= tol;
 }
 

@@ -1005,7 +1005,18 @@ function heavisideRaw(x: Interval | IntervalResult): IntervalResult {
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: 0, hi: 0 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0.5, hi: 0.5 });
-  // Interval spans zero — a finite jump; the values lie in [0, 1].
+  // Interval reaches zero — a finite jump. Which values it takes depends on
+  // the side it reaches zero from: an input with no negative part takes only
+  // 1/2 and 1, one with no positive part only 0 and 1/2, and one that spans
+  // zero all three. The two one-sided enclosures follow the engine's
+  // convention that H(0) is 1/2 — the value the interpreter and every
+  // compiled target answer — and would have to change with it; an engine
+  // where H(0) were 1 would make the enclosures [1, 1] and [0, 1]. The
+  // endpoints are exact doubles, so they need no outward step. A `lo` of -0
+  // is the real zero and counts as "no negative part", which is what the
+  // comparisons below already say.
+  if (xVal.lo >= 0) return jump(0, undefined, { lo: 0.5, hi: 1 });
+  if (xVal.hi <= 0) return jump(0, undefined, { lo: 0, hi: 0.5 });
   return jump(0, undefined, { lo: 0, hi: 1 });
 }
 
@@ -1027,7 +1038,14 @@ function signRaw(x: Interval | IntervalResult): IntervalResult {
   if (xVal.lo > 0) return ok({ lo: 1, hi: 1 });
   if (xVal.hi < 0) return ok({ lo: -1, hi: -1 });
   if (xVal.lo === 0 && xVal.hi === 0) return ok({ lo: 0, hi: 0 });
-  // Interval spans zero — a finite jump; the values lie in [-1, 1].
+  // Interval reaches zero — a finite jump. Which values it takes depends on
+  // the side it reaches zero from: an input with no negative part takes only
+  // 0 and 1, one with no positive part only -1 and 0, and one that spans
+  // zero all three. The three enclosures are exact integers, so they need no
+  // outward step. A `lo` of -0 is the real zero and counts as "no negative
+  // part", which is what the comparisons below already say.
+  if (xVal.lo >= 0) return jump(0, undefined, { lo: 0, hi: 1 });
+  if (xVal.hi <= 0) return jump(0, undefined, { lo: -1, hi: 0 });
   return jump(0, undefined, { lo: -1, hi: 1 });
 }
 

@@ -180,6 +180,20 @@ describe('a `missing | T` big-operator bound is accepted', () => {
     expect(boxed.isValid).toBe(false);
   });
 
+  // A bound WRITTEN as an absence is a program defect and is rejected at
+  // boxing, on both spellings; only a bound that EVALUATES to an absence
+  // (the `g(3)` cases below) is a run-time value that answers `NaN`.
+  test('a bound written as the literal NaN or the symbol Missing is rejected', () => {
+    const ce = new ComputeEngine();
+    for (const bound of ['NaN', 'Missing']) {
+      const lower = ce.box(['Sum', 'x', ['Tuple', 'x', bound, 3]]);
+      expect(lower.isValid).toBe(false);
+      const upper = ce.box(['Product', 'x', ['Tuple', 'x', 1, bound]]);
+      expect(upper.isValid).toBe(false);
+    }
+    expect(ce.parse('\\sum_{x=\\mathrm{NaN}}^{3} x').isValid).toBe(false);
+  });
+
   // A bound that EVALUATES to `Missing` is a numeric slot holding an absence:
   // the operator answers `NaN` instead of staying unevaluated as it does for a
   // free symbol. Both bounds, both operators, exact and numeric evaluation.

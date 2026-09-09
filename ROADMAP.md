@@ -373,6 +373,16 @@ their expected effect on the corpus.
   `_SYS.neq` / `_ce_eqcoll`, so it is a cross-target contract change. The
   exact `===` form (now admitted for `integer | nan` operands) already
   agrees with the interpreter.
+- **The runtime conformance check cannot police an OPEN generic parameter
+  (found 2026-09-09 while fixing `Partition`'s union-typed size slot).**
+  `runtimeCheckExemptParam` exempts any parameter type with a free type
+  variable because `admissionOf` asserts on an open type and the conformance
+  plan is built once from the DECLARED signature, so a settled bad value at
+  such a slot (`Partition([1,2,3,4], Missing)` at evaluation) gets its verdict
+  from the operator's own handler, not from the generic check that serves
+  `Chunk`. Every generic operator with a checkable value parameter is in the
+  same position. Instantiating the plan per call site would close it; a
+  design change, low urgency.
 - **Not CE's:** the inline `At` lambda (Tycho's own override), the "Unknown
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
