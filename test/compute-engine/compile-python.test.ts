@@ -236,15 +236,15 @@ describe('PYTHON TARGET', () => {
       // top-typed call) fails closed rather than emit binding-dependent output.
       const ce2 = new ComputeEngine();
       ce2.declare('b', 'broadcastable<number>');
-      expect(() =>
-        python.compile(ce2.box(['Multiply', 2, 'b']))
-      ).toThrow(/Fail closed/);
+      expect(() => python.compile(ce2.box(['Multiply', 2, 'b']))).toThrow(
+        /Fail closed/
+      );
 
       const ce3 = new ComputeEngine();
       ce3.declare('h', '(number) -> unknown');
-      expect(() =>
-        python.compile(ce3.box(['Add', ['h', 'x'], 1]))
-      ).toThrow(/Fail closed/);
+      expect(() => python.compile(ce3.box(['Add', ['h', 'x'], 1]))).toThrow(
+        /Fail closed/
+      );
 
       // Two collection operands fail closed: the interpreter answers
       // `Error("incompatible-dimensions")` when the lengths disagree, and
@@ -299,9 +299,9 @@ describe('PYTHON TARGET', () => {
 
     it('leaves scalar arithmetic and native-broadcast math functions untouched', () => {
       // A bare unknown symbol is NOT possibly-collection-typed → plain scalar.
-      expect(python.compile(ce.box(['Add', ['Multiply', 2, 'x'], 1])).code).toBe(
-        '2 * x + 1'
-      );
+      expect(
+        python.compile(ce.box(['Add', ['Multiply', 2, 'x'], 1])).code
+      ).toBe('2 * x + 1');
       // `Sin` lowers to `np.sin`, which broadcasts natively over a NumPy array.
       const ce2 = new ComputeEngine();
       ce2.declare('b', 'broadcastable<number>');
@@ -788,6 +788,38 @@ describe('PYTHON TARGET', () => {
       expect(code).not.toContain('NaN');
     });
 
+    it('an absent selection value is None only for a provably non-numeric domain', () => {
+      // The rule is the base compiler's (`BaseCompiler.absenceKind`), shared
+      // with the JavaScript lowering: `float('nan')` for a number AND for an
+      // unknown type, `None` when every arm is provably not a number, so a
+      // compiled `IsMissing` agrees with the interpreter's `Missing` in
+      // every domain and `When`, `If` and `Which` answer alike.
+      const e = new ComputeEngine();
+      e.declare('c', 'boolean');
+      // Unknown arm type: numeric until proven otherwise.
+      expect(python.compile(e.box(['When', 'x', 'c'])).code).toBe(
+        "((x) if (c) else float('nan'))"
+      );
+      expect(python.compile(e.box(['Which', 'c', 'x'])).code).toContain(
+        "float('nan')"
+      );
+      // A string arm: the object null.
+      expect(python.compile(e.box(['When', { str: 's' }, 'c'])).code).toBe(
+        '(("s") if (c) else None)'
+      );
+      const which = python.compile(e.box(['Which', 'c', { str: 's' }])).code;
+      expect(which).toContain('None');
+      expect(which).not.toContain("float('nan')");
+      const ifElse = python.compile(
+        e.box(['If', 'c', { str: 's' }, { str: 't' }])
+      ).code;
+      expect(ifElse).toContain('else None');
+      // Mixed string and number arms stay numeric.
+      expect(
+        python.compile(e.box(['Which', 'c', { str: 's' }, 'c', 1])).code
+      ).toContain("float('nan')");
+    });
+
     it('And is an infix keyword, not an `and(a, b)` call', () => {
       const code = python.compile(
         ce.box(['And', ['Greater', 'x', 0], ['Less', 'x', 10]])
@@ -945,7 +977,9 @@ describe('PYTHON TARGET', () => {
         expect(code).toContain('def _ce_eqcoll(');
         // No float coercion — the dtype gate decides instead.
         expect(code).not.toContain('dtype=float');
-        expect(code).toContain("if _x.dtype.kind in 'iuf' and _y.dtype.kind in 'iuf':");
+        expect(code).toContain(
+          "if _x.dtype.kind in 'iuf' and _y.dtype.kind in 'iuf':"
+        );
         expect(code.split('\n').at(-1)).toBe(
           '_ce_eqcoll(["1"], ["1.0"], 1e-10)'
         );
@@ -1048,9 +1082,9 @@ describe('PYTHON TARGET', () => {
       ).toBe(`np.linalg.norm(${T3_SRC})`);
       // The order 2 names that same norm in the interpreter, and so does an
       // absent order.
-      expect(
-        python.compile(ce.box(['Norm', T3, 2] as any), noFold).code
-      ).toBe(`np.linalg.norm(${T3_SRC})`);
+      expect(python.compile(ce.box(['Norm', T3, 2] as any), noFold).code).toBe(
+        `np.linalg.norm(${T3_SRC})`
+      );
       expect(python.compile(ce.box(['Norm', T3] as any), noFold).code).toBe(
         `np.linalg.norm(${T3_SRC})`
       );
@@ -1063,10 +1097,7 @@ describe('PYTHON TARGET', () => {
       // explicit order on a 3-D input, so emitting the call would report
       // `success: true` for code that cannot run.
       expect(() =>
-        python.compile(
-          ce.box(['Norm', T3, { str: 'Infinity' }] as any),
-          noFold
-        )
+        python.compile(ce.box(['Norm', T3, { str: 'Infinity' }] as any), noFold)
       ).toThrow(/above rank 2.*Fail closed/s);
       expect(() =>
         python.compile(ce.box(['Norm', T3, 1] as any), noFold)
@@ -1091,10 +1122,8 @@ describe('PYTHON TARGET', () => {
         'np.linalg.norm([[3, 4], [5, 12]], 1)'
       );
       expect(
-        python.compile(
-          ce.box(['Norm', M, { num: '+Infinity' }] as any),
-          noFold
-        ).code
+        python.compile(ce.box(['Norm', M, { num: '+Infinity' }] as any), noFold)
+          .code
       ).toBe('np.linalg.norm([[3, 4], [5, 12]], np.inf)');
     });
 
@@ -1165,9 +1194,7 @@ describe('PYTHON TARGET', () => {
     });
 
     it('BetaRegularized reorders (x, a, b) to scipy.special.betainc(a, b, x)', () => {
-      const code = python.compile(
-        ce.box(['BetaRegularized', 'x', 2, 3])
-      ).code;
+      const code = python.compile(ce.box(['BetaRegularized', 'x', 2, 3])).code;
       expect(code).toBe('scipy.special.betainc(2, 3, x)');
     });
   });
@@ -1194,7 +1221,9 @@ describe('PYTHON TARGET', () => {
       const code = python.compileFunction(expr, 'f', [], undefined, {
         constantFold: false,
       });
-      expect(code).toBe('def f():\n    return sum(k ** 2 for k in range(0, 4))\n');
+      expect(code).toBe(
+        'def f():\n    return sum(k ** 2 for k in range(0, 4))\n'
+      );
     });
 
     it('symbolic-bound Sum keeps the bound symbolic (b + 1)', () => {
@@ -1372,11 +1401,7 @@ describe('PYTHON TARGET', () => {
     it('expression-position Loop fails closed (D6)', () => {
       const loop = ce.box([
         'List',
-        [
-          'Loop',
-          ['Assign', 'acc', 'i'],
-          ['Element', 'i', ['Range', 1, 5]],
-        ],
+        ['Loop', ['Assign', 'acc', 'i'], ['Element', 'i', ['Range', 1, 5]]],
       ]);
       expect(() => python.compile(loop)).toThrow(/Loop/);
     });
@@ -1482,7 +1507,10 @@ describe('PYTHON TARGET', () => {
       for (const [bare, wrapped] of [
         [['Break'], ['Block', ['Break']]],
         [['Continue'], ['Block', ['Continue']]],
-        [['Return', 'x'], ['Block', ['Return', 'x']]],
+        [
+          ['Return', 'x'],
+          ['Block', ['Return', 'x']],
+        ],
         [loop, ['Block', loop]],
       ] as any) {
         const expected = python.compile(arms(bare, 1)).code;
@@ -1520,9 +1548,9 @@ describe('PYTHON TARGET', () => {
           '            break\n' +
           '        k = k + 1\n'
       );
-      expect(python.compileFunction(body(['Block', ['Break']]), 'f', ['k'])).toBe(
-        expected
-      );
+      expect(
+        python.compileFunction(body(['Block', ['Break']]), 'f', ['k'])
+      ).toBe(expected);
     });
 
     it('nested Loop inside a Loop body', () => {

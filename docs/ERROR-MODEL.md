@@ -326,7 +326,12 @@ information loss stated in §1.
 Missing`) and is never erased. In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm
-survives only on data/object-domain results. The per-operator policy — an
+survives only on data/object-domain results. One boxing-time exception,
+ruled 2026-09-09: a big-operator bound WRITTEN as the literal `NaN` or the
+symbol `Missing` (`Sum(x, (x, NaN, 3))`) is a program defect and is
+rejected at boxing with a type error, like a string bound; a bound that only
+EVALUATES to an absence (a piecewise call with no matching arm) is a
+run-time value and the operator answers `NaN`. The per-operator policy — an
 operator can reject, propagate, handle, or pass through an absent operand
 — is the `missingBehavior` mechanism in
 `src/compute-engine/types-definitions.ts`; elementwise and broadcast
@@ -1165,7 +1170,13 @@ document's history):
   condition is false. A two-operand `If` whose arm is a STATEMENT keeps its
   guard-statement reading (JavaScript statement-forms it; the other targets
   decline it, each for a verified reason —
-  `test/compute-engine/compile-elseless-if-statement.test.ts`). Pinned in
+  `test/compute-engine/compile-elseless-if-statement.test.ts`). Ruled the
+  same day, after the alignment: the compiled absent value of `Which`, `If`
+  and `When` follows ONE rule per target (`BaseCompiler.absenceKind`) —
+  the object null (`undefined`, Python `None`) only when every arm is
+  provably not a number, `NaN` for a number and for an unknown type, since a
+  bare symbol arm is a number until proven otherwise and an object null there
+  would turn its arithmetic consumers into a host `TypeError`. Pinned in
   the conformance suite and in `conditional-values.test.ts`,
   `when-list-broadcast.test.ts`, `a2-restrictions.test.ts`.
 - **Container vs. cell validity (§3) — DEFERRED by ruling 2026-09-02.**

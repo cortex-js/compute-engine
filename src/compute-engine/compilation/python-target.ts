@@ -1801,9 +1801,29 @@ const PYTHON_CONDITION_DIALECT: ConditionDialect = {
 };
 
 /**
+ * The Python literal for an absent selection value over arms of the given
+ * types: `None` when every arm is provably not a number (a string, a list),
+ * `float('nan')` otherwise — an unknown type included. The rule is the base
+ * compiler's (`BaseCompiler.absenceKind`), which the JavaScript lowering
+ * follows with `undefined` and `NaN`, so the two targets answer absence the
+ * same way and a compiled `IsMissing` agrees with the interpreter's
+ * `Missing` in every domain.
+ */
+function pythonAbsent(
+  arms: ReadonlyArray<Expression | undefined>,
+  target: CompileTarget<Expression>
+): string {
+  const types = arms.flatMap((a) => (a === undefined ? [] : [a.type.type]));
+  return BaseCompiler.absenceKind(types, target) === 'object'
+    ? 'None'
+    : "float('nan')";
+}
+
+/**
  * Produce a Python conditional expression that takes an arm only when its
  * condition is exactly `True` or `False` when the function runs. A condition
- * that is anything else takes neither arm and the value is `float('nan')`.
+ * that is anything else takes neither arm and the value is the absence
+ * literal of the arms' domain (`pythonAbsent`): `float('nan')` for a number.
  * The JavaScript target applies the same rule.
  *
  * The analysis behind it is the compiler’s, shared with the JavaScript code
@@ -1837,7 +1857,10 @@ function compilePythonBranch(
   thenCode: string,
   elseCode: string,
   compileCond: (c: Expression) => string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  // The value of an undecided condition: the absence literal of the arms'
+  // domain (`pythonAbsent`). Defaults to the numeric spelling.
+  absent: string = "float('nan')"
 ): string {
   const decidability = BaseCompiler.conditionDecidability(
     cond,
@@ -1877,7 +1900,7 @@ function compilePythonBranch(
     const body = (v: string): string =>
       `((${thenCode}) if (${pythonIsBoolean(v)} and ${
         negate ? `not ${v}` : v
-      }) else ((${elseCode}) if ${pythonIsBoolean(v)} else float('nan')))`;
+      }) else ((${elseCode}) if ${pythonIsBoolean(v)} else ${absent}))`;
     if (PYTHON_ATOM.test(code)) return body(code);
     return `(lambda _CND: ${body('_CND')})(${code})`;
   }
@@ -1896,7 +1919,7 @@ function compilePythonBranch(
         return `((${thenCode}) if (${code}) else (${elseCode}))`;
       return `(((${thenCode}) if (${code}) else (${elseCode})) if (${conjuncts.join(
         ' and '
-      )}) else float('nan'))`;
+      )}) else ${absent})`;
     },
     PYTHON_CONDITION_DIALECT
   );
@@ -2690,20 +2713,23 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // Both arms are conditionally evaluated: their operand indices go to the
     // compile callback, which opens the matching CSE region (`OperandCompiler`).
     // A condition that is not exactly `True` or `False` takes neither arm and
-    // the value is `float('nan')` — see `compilePythonBranch`.
+    // the value is the absence literal of the arms' domain — see
+    // `compilePythonBranch` and `pythonAbsent`.
     return compilePythonBranch(
       args[0],
       compile(args[1], 1),
       compile(args[2], 2),
       (c) => compile(c),
-      target
+      target,
+      pythonAbsent([args[1], args[2]], target)
     );
   },
   // `When` tests its condition for truth rather than for being a boolean,
   // because it has only one arm to withhold. A condition that is not a boolean
-  // takes the else path and the value is `float('nan')`, which is the same
+  // takes the else path and the value is the absence literal of the value's
+  // domain (`pythonAbsent`) — `float('nan')` for a number — which is the same
   // answer a two-armed selection gives when it takes neither arm.
-  When: (args, compile) => {
+  When: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error('When: expected exactly 2 arguments (expr, cond)');
     // A provably collection-valued condition must fail closed: a non-empty
@@ -2713,10 +2739,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // The VALUE is the conditional position (operand 0); the condition is
     // eager — see the `When` entry of the lazy-operand inventory.
     if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
-    if (isSymbol(args[1], 'False')) return "float('nan')";
-    return `((${compile(args[0], 0)}) if (${compile(
-      args[1]
-    )}) else float('nan'))`;
+    const absent = pythonAbsent([args[0]], target);
+    if (isSymbol(args[1], 'False')) return absent;
+    return `((${compile(args[0], 0)}) if (${compile(args[1])}) else ${absent})`;
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
@@ -2726,10 +2751,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // condition into a silent whole-expression pick.
     for (let i = 0; i < args.length; i += 2)
       BaseCompiler.assertScalarCondition(args[i]);
+    // A position no clause matched, and a position whose condition is
+    // undecided, answer the same thing: the absence literal of the arms'
+    // domain (`pythonAbsent`).
+    const absent = pythonAbsent(
+      args.filter((_, i) => i % 2 === 1),
+      target
+    );
     // Every value arm, and every condition after the first, is conditionally
     // evaluated — pass its operand index so the CSE pass opens its region.
     const build = (i: number): string => {
-      if (i >= args.length) return "float('nan')";
+      if (i >= args.length) return absent;
       const cond = args[i];
       const val = args[i + 1];
       // `True` marks the default (else) branch.
@@ -2741,7 +2773,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         compile(val, i + 1),
         build(i + 2),
         (c) => (i === 0 ? compile(c) : compile(c, i)),
-        target
+        target,
+        absent
       );
     };
     return build(0);

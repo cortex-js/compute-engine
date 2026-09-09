@@ -108,6 +108,69 @@
 
 ### Resolved Issues
 
+- **Interval `atan2` reports the jump it makes along its `x` operand.**
+  `atan2([0, 0], [-1, 1])` — the angle over the segment of the real axis from
+  −1 to 1 — answered the bounded interval `[0, π]`, although the angle is `π`
+  on the left half of that segment and `0` on the right half and takes no
+  value in between: a consumer that reads a bounded `interval` as "continuous
+  on the cell" could read a crossing at any level between them. Such a box now
+  answers `singular` with the same enclosure, as every finite jump does. The
+  same verdict now covers a box that reaches `y = 0` from above while its `x`
+  range straddles zero, and the degenerate box on the line `x = 0` that
+  reaches the origin (`atan2([-1, 1], [0, 0])` takes only `−π/2`, `0` and
+  `π/2`). The branch-cut case that was already reported — some `x < 0` with a
+  `y` range that reaches 0 from below — is unchanged.
+
+  A jump along the second operand needs a location in the second operand's
+  coordinate, so a `singular` result gained an optional `atOperand` field: the
+  index of the operand whose coordinate `at` is a value in, absent for the
+  first operand, which is where every other kernel locates its jump. The field
+  travels with the jump as it propagates through the operations above it, and
+  a combination of jumps in different coordinates now reports no location at
+  all rather than a number belonging to one of them.
+
+  An endpoint of `-0` is read as the real number zero throughout the kernel,
+  which picks the principal angle: `atan2([0, 0], [-1, -1])` is `+π` (the
+  principal argument of a negative real) whichever zero the `y` operand
+  carries, and the origin as a point box is `0`.
+
+- **`Partition` accepts a maybe-absent chunk size, like its siblings.**
+  `\mathrm{Partition}([1,2,3,4], k(0))`, where `k` is a default-less
+  piecewise and therefore types `integer | missing`, was refused at
+  canonicalization with an `incompatible-type` error, while `Take`, `Drop`,
+  `Chunk`, `SlidingWindow`, `Repeat` and `At` accepted the identical operand.
+  The difference was the spelling of the size parameter: a plain `integer`
+  parameter admits an operand whose type merely OVERLAPS it and defers the
+  verdict to the runtime check, while `Partition`'s parameter is the union
+  `integer | ((T) any -> boolean)` and a union carrying a callable arm was
+  exempt from that admission altogether. The exemption is there for the
+  arrow-slot rules, whose authority is over a callable operand, so it no
+  longer covers a non-callable one when every other arm of the union is
+  numeric. `Partition([1,2,3,4], k(0))` now answers `[[1,2],[3,4]]`, and a
+  size that turns out to be absent answers the same `incompatible-type`
+  error at evaluation that `Chunk` answers. A string size, and a `Missing`
+  written in the source, are still refused at canonicalization.
+
+- **A selection with no selected value answers absence by one rule on every
+  target.** A `Which` with no matching clause, an `If` with no else branch
+  and a false restriction `e\{c\}` now emit the same absent value on a given
+  target: `NaN` when the value is a number or its type is unknown, and the
+  target's object null — `undefined` in JavaScript, `None` in Python — only
+  when every arm is provably not a number, such as a string. Before this,
+  `Which` and `If` emitted `undefined` for an arm whose type was unknown (a
+  bare symbol arm in a `cases` environment) while a restriction emitted
+  `NaN`, and the Python target emitted `float('nan')` in every domain, so a
+  compiled `IsMissing` over a string selection disagreed with the
+  interpreter's `Missing`.
+
+- **A big-operator bound written as the literal `NaN` is rejected at boxing,
+  like a bound written as `Missing`.** `Sum(x, (x, NaN, 3))` used to box and
+  then stay symbolic, while `Sum(x, (x, Missing, 3))` was a type error; a
+  bound the author wrote as an absence is never usable, so both now report
+  `incompatible-type` where they are written. A bound that only evaluates to
+  an absence — a piecewise call with no matching arm — is a run-time value,
+  and the operator answers `NaN` as before.
+
 - **A restriction, or a default-less selection, over a non-numeric value no
   longer turns a juxtaposition into a `Tuple`.** `t P\{0 \le t \le 1\}`
   over a point list `P`, `2x\{x>0\}` over an undeclared `x`, and

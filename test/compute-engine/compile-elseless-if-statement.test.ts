@@ -218,6 +218,43 @@ describe('an else-less If as a block statement', () => {
     expect(num.code).toMatch(/: NaN\)$/);
   });
 
+  test('Which, If and When answer absence by one rule per domain', () => {
+    // `BaseCompiler.absenceKind`: the object null only when every arm is
+    // provably not a number; `NaN` for a number AND for an unknown type —
+    // a bare undeclared symbol arm is a number until proven otherwise, and
+    // `undefined` there would turn its arithmetic consumers into a
+    // `TypeError` instead of a propagated NaN. Before this `Which` and the
+    // else-less `If` emitted `undefined` for an unknown arm while `When`
+    // emitted `NaN`.
+    ce.declare('c', 'boolean');
+    const js = (e: unknown) => compile(ce.box(e as any), { fallback: false });
+    expect(js(['Which', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
+    expect(js(['If', 'c', 'x']).code).toMatch(/\? NaN : NaN\)$/);
+    expect(js(['When', 'x', 'c']).code).toMatch(/: NaN\)$/);
+    expect(js(['Which', 'c', { str: 's' }]).code).toMatch(
+      /\? undefined : undefined\)$/
+    );
+    expect(js(['When', { str: 's' }, 'c']).code).toMatch(/: undefined\)$/);
+    // Mixed string and number arms stay numeric.
+    expect(js(['Which', 'c', { str: 's' }, 'c', 1]).code).toMatch(/NaN\)$/);
+    // The discharge side reads the same rule: `IsMissing` and `Coalesce`
+    // recognize the absent value the selection produced, in every domain.
+    const mixed = ['Which', 'c', { str: 's' }, 'c', 1];
+    expect((js(['IsMissing', mixed]).run as any)({ c: false })).toBe(true);
+    expect((js(['IsMissing', mixed]).run as any)({ c: true })).toBe(false);
+    expect((js(['Coalesce', mixed, 7]).run as any)({ c: false })).toBe(7);
+    expect(
+      (js(['IsMissing', ['Which', 'c', 'x']]).run as any)({ c: false })
+    ).toBe(true);
+    expect(
+      (js(['Coalesce', ['Which', 'c', { str: 's' }], { str: 'd' }]).run as any)(
+        {
+          c: false,
+        }
+      )
+    ).toBe('d');
+  });
+
   // The `If` still lowers to the expression-position TERNARY, not to the
   // `if (…) { … }` statement the else-less shape gets — that is what this case
   // pins. The ternary now sits inside the undecided-condition guard (ruling

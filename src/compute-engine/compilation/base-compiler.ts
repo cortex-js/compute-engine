@@ -1762,11 +1762,16 @@ export class BaseCompiler {
    */
   /**
    * Pick the target's absence axis (§3.F) for a position of type `t` by its
-   * DOMAIN (I6): a numeric-domain position (`<: number` after stripping the
-   * `missing` arm — `never` counts, since a bare-`missing` numeric absence is
-   * `NaN`) uses `absence.numeric`; any other (object) domain uses
-   * `absence.object`. Throws (fail closed) when the target declares no absence
-   * capability at all, or lacks the required object axis.
+   * DOMAIN (I6): a position whose type is not provably outside the numbers
+   * uses `absence.numeric` — that is a numeric type, `never` (a bare
+   * `missing` numeric absence is `NaN`), an unknown type, and a union that
+   * mixes numbers with objects; a position provably outside the numbers (a
+   * string, a list) uses `absence.object`. The predicate is
+   * `absentDomainIsObject`, the same one the selection lowerings use to
+   * PRODUCE an absent value (`absenceKind`), so what `Which`/`If`/`When`
+   * emit for no selection is what `IsMissing`/`Coalesce` test for. Throws
+   * (fail closed) when the target declares no absence capability at all, or
+   * lacks the required object axis.
    */
   static absenceAxisForType(
     t: Readonly<Type>,
@@ -1781,16 +1786,7 @@ export class BaseCompiler {
         `${opName}: target '${target.language ?? 'unknown'}' has no absence ` +
           `capability. Fail closed (§3.F).`
       );
-    // Unfold a declared type reference BEFORE the strip: `stripMissingFromType`
-    // is structural and does not see through a `reference`, so an alias such as
-    // `type alias maybe_n = number | missing` would survive the strip intact and
-    // mis-select the object axis. Resolve again afterwards, in case removing the
-    // `missing` arm collapsed the union down to a single reference arm.
-    const stripped = resolveTypeForCompilation(
-      stripMissingFromType(resolveTypeForCompilation(t))
-    );
-    const numeric = stripped === 'never' || isSubtype(stripped, 'number');
-    if (numeric) return target.absence.numeric;
+    if (!BaseCompiler.absentDomainIsObject(t)) return target.absence.numeric;
     if (target.absence.object === undefined)
       throw new Error(
         `${opName}: an object-domain absent position has no representation on ` +
@@ -7417,18 +7413,17 @@ export class BaseCompiler {
           .join(', ')})`;
       }
       // Compile to a ternary: cond ? expr : <absent>. The masked branch is
-      // the codomain's absence marker: `NaN` for a number, the target's
-      // object null literal for a value PROVABLY outside the numbers (a
-      // string, a list), so a compiled `IsMissing`/`Coalesce` over a masked
-      // value agrees with the interpreter, which answers `Missing`. A value
-      // whose type is unknown — `x {x > 0}` over an undeclared `x`, the
-      // plot staple — keeps `NaN`: it is a number until proven otherwise,
-      // and the object null would turn every arithmetic consumer of the mask
-      // into a `TypeError` instead of a propagated NaN. A complex-valued arm
-      // keeps the masked branch in the same `{ re, im }` convention (see
+      // the codomain's absence marker, the same value a `Which` that matched
+      // no clause emits (`noBranchValue`, which says which domains get the
+      // object null and why an unknown type keeps `NaN`). A complex-valued
+      // arm keeps the masked branch in the same `{ re, im }` convention (see
       // `branchComplexCoercion`).
       const coerce = BaseCompiler.branchComplexCoercion([args[0]], target);
-      const nan = BaseCompiler.maskedValue(node, target, coerce !== undefined);
+      const nan = BaseCompiler.noBranchValue(
+        node,
+        target,
+        coerce !== undefined
+      );
       // Special-case constant True/False conditions to avoid bare symbol refs
       if (isSymbol(args[1], 'True'))
         return `(${BaseCompiler.compileOp(node, 0, target, 0, args[0])})`;
@@ -14941,39 +14936,16 @@ export class BaseCompiler {
    *
    * A numeric result is `NaN`, which is how every target that produces real
    * numbers represents a missing one (`docs/ERROR-MODEL.md` describes the
-   * absence markers). A result that is not a number — a string, a list — has
-   * no NaN, so the value is the target's literal for a missing object,
-   * `undefined` in JavaScript. A target that declares no such literal uses
-   * `NaN` for both.
+   * absence markers). A result that is PROVABLY not a number — a string, a
+   * list — has no NaN, so the value is the target's literal for a missing
+   * object, `undefined` in JavaScript. A result whose type is unknown keeps
+   * `NaN`: it is a number until proven otherwise, and the object null would
+   * turn every arithmetic consumer of the value into a `TypeError` instead
+   * of a propagated NaN. See `absenceKind`, which the `When` restriction and
+   * the Python target's selection handlers share, so every selection form
+   * answers absence the same way on a target. A target that declares no
+   * object literal uses `NaN` for both.
    */
-  /**
-   * The value a masked `When` emits where its condition is false: the
-   * complex NaN pair for a complex arm; the target's object null literal
-   * when the value's type — absence marker stripped — is provably not a
-   * number; `NaN` otherwise, which covers numbers AND an unknown type (see
-   * the `When` branch of `compileExpr` for why an unknown type keeps NaN).
-   */
-  private static maskedValue(
-    node: Expression | undefined,
-    target: CompileTarget<Expression>,
-    complexArms: boolean
-  ): TargetSource {
-    if (complexArms) return '({ re: NaN, im: NaN })';
-    const nullLiteral = target.absence?.object?.nullLiteral;
-    if (nullLiteral === undefined || node === undefined) return 'NaN';
-    const t = resolveTypeForCompilation(
-      stripMissingFromType(resolveTypeForCompilation(node.type.type))
-    );
-    if (
-      t !== 'never' &&
-      t !== 'unknown' &&
-      t !== 'any' &&
-      provablyDisjoint(t, 'number')
-    )
-      return nullLiteral;
-    return 'NaN';
-  }
-
   private static noBranchValue(
     node: Expression | undefined,
     target: CompileTarget<Expression>,
@@ -14981,13 +14953,65 @@ export class BaseCompiler {
   ): TargetSource {
     if (complexArms) return '({ re: NaN, im: NaN })';
     const nullLiteral = target.absence?.object?.nullLiteral;
-    if (nullLiteral !== undefined && node !== undefined) {
-      const t = resolveTypeForCompilation(
-        stripMissingFromType(resolveTypeForCompilation(node.type.type))
-      );
-      if (t !== 'never' && !isSubtype(t, 'number')) return nullLiteral;
-    }
+    if (
+      nullLiteral !== undefined &&
+      node !== undefined &&
+      BaseCompiler.absenceKind([node.type.type], target) === 'object'
+    )
+      return nullLiteral;
     return 'NaN';
+  }
+
+  /**
+   * Which absence representation a selection with the given result types
+   * emits on `target` where no arm is selected: `'object'` — the target's
+   * object null literal — only when the target declares one AND every type,
+   * its own absence marker stripped, is provably disjoint from `number`;
+   * `'numeric'` — the target's NaN — otherwise. An unknown type is numeric
+   * here (see `noBranchValue`), and so is a mix of numeric and object arms,
+   * whose consumers are arithmetic more often than not.
+   *
+   * Shared by the JavaScript lowering (`noBranchValue`) and the Python
+   * target's `If`/`When`/`Which` handlers, so the two targets answer
+   * absence by the same rule with their own spelling.
+   */
+  static absenceKind(
+    types: ReadonlyArray<Type>,
+    target: CompileTarget<Expression>
+  ): 'numeric' | 'object' {
+    if (target.absence?.object?.nullLiteral === undefined) return 'numeric';
+    if (types.length === 0) return 'numeric';
+    return types.every((type) => BaseCompiler.absentDomainIsObject(type))
+      ? 'object'
+      : 'numeric';
+  }
+
+  /**
+   * Whether an absent value of type `t` lives on the OBJECT axis: the type,
+   * its own `missing` marker stripped and any declared alias unfolded, is
+   * provably disjoint from `number`. `never`, an unknown type and `any` are
+   * NOT object-domain — they are numbers until proven otherwise — and neither
+   * is a union that mixes numbers with objects. The one predicate behind both
+   * the production of an absent value (`absenceKind`, `noBranchValue`) and
+   * its discharge (`absenceAxisForType`).
+   *
+   * The alias is unfolded BEFORE the strip: `stripMissingFromType` is
+   * structural and does not see through a `reference`, so an alias such as
+   * `type alias maybe_n = number | missing` would survive the strip intact
+   * and be read as an object domain. It is resolved again afterwards, in case
+   * removing the `missing` arm collapsed the union down to a single
+   * reference arm.
+   */
+  private static absentDomainIsObject(t: Readonly<Type>): boolean {
+    const stripped = resolveTypeForCompilation(
+      stripMissingFromType(resolveTypeForCompilation(t))
+    );
+    return (
+      stripped !== 'never' &&
+      stripped !== 'unknown' &&
+      stripped !== 'any' &&
+      provablyDisjoint(stripped, 'number')
+    );
   }
 
   /**
