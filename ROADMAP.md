@@ -139,50 +139,18 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
-### Colour handling residue (audit of 2026-09-08, requested by the owner)
+### Colour handling residue (audit of 2026-09-08; the five colour rulings — a tuple is 0–1 sRGB, `ColorFromColorspace` answers the route's canonical components, a well-formed spelling that packs to zero is transparent black, a list is not a colour, `ContrastingColor` answers the candidate — landed 2026-09-09)
 
-The audit inventoried every operator that takes or produces a colour
-(`library/colors.ts`, the JavaScript and GPU lowerings) and fixed eight
-cross-route disagreements (see the CHANGELOG). What remains is design, not
-wrong values, except where noted.
-
-- **Ruling D1: what colour space does a bare tuple denote at a colour
-  argument?** `ColorMix((1,0,0), (0,0,1), 0.5)` reads the tuples as sRGB in
-  the interpreter (`Oklch(0.540, 0.285, 326.6)`) and as OKLCh triples on
-  the JavaScript and GPU targets (`[0.5, 0, 0]`); `ColorToString((1,0,0))`
-  is `"#ff0000"` on one route and `"#ffffff"` on the other, and
-  `ContrastingColor((1,0,0))` is white and black. Both readings are pinned
-  by tests (`colors.test.ts` uses `(1,1,1)` as white; the GPU shape tests
-  use `(0.5, 0.2, 120)` as an OKLCh triple). Options: (A) a tuple is 0–1
-  sRGB everywhere — the compiled targets convert a syntactic tuple at a
-  colour position (matches the interpreter and `doc/86-reference-colors.md`;
-  four GPU tests change; a tuple that arrives through a variable keeps the
-  OKLCh reading, since its shape is unknowable at compile time); (B) keep
-  the per-route reading (today: the same expression gives different colours
-  on different routes, silently); (C) refuse a bare tuple and require
-  `Rgb(…)`/`Oklch(…)`/a string. Recommendation: (A). Doing nothing is (B).
-- **D2.** `ColorFromColorspace((0,1,0.5), "hsl")` returns sRGB components
-  `(1, 0, 0)` in the interpreter and an OKLCh colour value on the compiled
-  targets; each is coherent when chained, they differ when read. Resolving
-  D1 as (A) makes "components in the route's canonical form" a defensible
-  contract to document; otherwise pick a route to change.
-- **D3.** `#00000000` and `rgba(0,0,0,0)` are refused as colours (they parse
-  to the same 0 as garbage); only `transparent` spells transparent black.
-  Pre-existing in `Color`, now uniform across operators.
-- **D4.** Should a `List` of three numbers be a colour like a `Tuple`?
-  `ColorMix([1,0,0], …)` is `incompatible-type` in the interpreter while the
-  GPU `ColorFromColorspace` accepts a `List`.
-- **D5.** `ContrastingColor` answers an `Rgb` head where `Color`, `ColorMix`
-  and `Colormap` answer `Oklch`, and its three-argument form re-encodes the
-  chosen candidate as `Rgb`.
-- **Work, not decisions:** `doc/86-reference-colors.md` says `Color` returns
-  a `Tuple` (it returns an `Oklch` head); `src/math-json/OPERATORS.json` and
-  `src/epsil/docs/library.md` carry the old `As*` signature until their
-  generators run; `AsRgb("#ff0000")` and `AsRgb((1,0,0))` decline on the
-  JavaScript target (fail closed, the interpreter answers) because the
-  compiler treats a string or tuple at a `broadcastable` head as an
-  unlowerable broadcast — an operand shape listed in `broadcastExemptions`
-  should compile whole (`base-compiler.ts`).
+- `doc/86-reference-colors.md` says `Color` returns a `Tuple`; it returns an
+  `Oklch` head. Update the reference.
+- `ContrastingColor((u, 1, 1), Rgb(1, 0, 0), Rgb(0, 0, 1))` declines on WGSL:
+  `gpuCheckOperandShapes` refuses `select` over a `vec3` operand and a scalar
+  one. GLSL compiles the same expression. A fail-closed decline in the shared
+  shape gate, not a wrong value; pre-existing.
+- A colour tuple that reaches a colour operator through a VARIABLE keeps the
+  route's canonical reading (OKLCh on the compiled targets): its shape is
+  unknowable at compile time. Documented in the handler comments and pinned;
+  no better answer exists without a runtime tag on colour values.
 
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 

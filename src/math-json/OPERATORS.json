@@ -1147,7 +1147,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Convert color space components to a canonical sRGB tuple"
+      "description": "Convert color space components to a color, answered in the canonical form of the route: an sRGB tuple when evaluated, the target's canonical color value when compiled. To get the same numbers on every route, call ColorToColorspace(result, \"rgb\")"
     },
     {
       "name": "Colormap",
@@ -1381,7 +1381,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Choose the foreground color with better APCA contrast against a background"
+      "description": "Choose the foreground color with better APCA contrast against a background, answered as given: the interpreter keeps the color head the candidate was written with, and a compiled target answers the same color in its canonical form"
     },
     {
       "name": "Correlation",

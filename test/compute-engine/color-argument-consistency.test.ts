@@ -9,12 +9,12 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
  * answer the same color for the same input. This file checks that agreement
  * route by route.
  *
- * Note on the tuple spelling: the interpreter reads a bare tuple at a color
- * position as 0-1 sRGB, while the compiled targets read the same tuple as the
- * canonical OKLCh triple that IS a color value on those targets. That
- * disagreement is a design question, not something this file pins; the cases
- * below therefore use a typed color head or a string wherever a value has to
- * cross routes.
+ * A bare tuple at a color position denotes 0-1 sRGB on EVERY route. A color
+ * VALUE on the compiled targets is the canonical OKLCh triple, so a tuple
+ * written at the call site is converted there with the same conversion
+ * `Rgb(r, g, b)` takes. Only a tuple written literally can be recognized: one
+ * that arrives through a variable has no shape at compile time and keeps the
+ * canonical reading.
  */
 
 const ce = new ComputeEngine();
@@ -106,8 +106,10 @@ function glslToJS(src: string): string {
             .filter((p) => p.length > 0)
             .join(', ')}) {`
       )
-      // Local declarations.
+      // Local declarations, with and without an initializer (`_gpu_color_mix`
+      // declares `float H;` and assigns it in the branches below).
       .replace(/\b(?:float|vec2|vec3|bool|int)\s+(\w+)\s*=/g, 'let $1 =')
+      .replace(/\b(?:float|vec2|vec3|bool|int)\s+(\w+)\s*;/g, 'let $1;')
       // Constructors.
       .replace(/\bvec3\s*\(/g, 'V3(')
       .replace(/\bvec2\s*\(/g, 'V2(')
@@ -128,6 +130,18 @@ function evalGLSL(expr: any): any {
   // eslint-disable-next-line no-new-func
   const f = new Function(...names, body);
   return f(...names.map((n) => GLSL_BUILTINS[n as keyof typeof GLSL_BUILTINS]));
+}
+
+/**
+ * Whether the JavaScript target DECLINED to lower `expr`.
+ *
+ * A codegen handler that throws is caught by the shared compiler, which falls
+ * back to the interpreter and emits no code of its own — an empty `code` is
+ * how that decline shows up to a caller.
+ */
+function jsDeclines(expr: any): boolean {
+  const compiled: any = compile(ce.expr(expr), NO_FOLD as any);
+  return compiled?.code === '';
 }
 
 /** The `[L, C, H]` components of an interpreted color, in OKLCh. */
@@ -167,6 +181,199 @@ describe('color strings are refused the same way by every operator', () => {
     expect(r.operator).toBe('Oklch');
     expect(r.ops!.map((op) => op.re)).toEqual([0, 0, 0, 0]);
     expect(runJS(['Color', "'transparent'"])).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('a bare tuple is 0-1 sRGB on every route', () => {
+  test('ColorMix of two tuples mixes red with blue everywhere', () => {
+    const expr = ['ColorMix', ['Tuple', 1, 0, 0], ['Tuple', 0, 0, 1], 0.5];
+    // The same mix written with typed heads, which never had a route split.
+    const expected = interp([
+      'ColorMix',
+      ['Rgb', 1, 0, 0],
+      ['Rgb', 0, 0, 1],
+      0.5,
+    ]);
+    expect(interp(expr).toString()).toBe(expected.toString());
+    const components = expected.ops!.slice(0, 3).map((op) => op.re);
+    expect(components[0]).toBeCloseTo(0.54, 2);
+    expect(components[1]).toBeCloseTo(0.285, 2);
+    expect(components[2]).toBeCloseTo(326.6, 1);
+
+    // Before the ruling the compiled routes read the same two tuples as OKLCh
+    // triples and answered [0.5, 0, 0] — a dark red, not the red/blue mix.
+    const js = runJS(expr);
+    for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(components[i], 12);
+
+    const code = glsl.compile(ce.expr(expr), NO_FOLD as any).code!;
+    expect(code).toBe(
+      '_gpu_color_mix(_gpu_srgb_to_oklch(vec3(1.0, 0.0, 0.0)), ' +
+        '_gpu_srgb_to_oklch(vec3(0.0, 0.0, 1.0)), 0.5)'
+    );
+    const shader = evalGLSL(expr);
+    expect(shader.x).toBeCloseTo(components[0], 6);
+    expect(shader.y).toBeCloseTo(components[1], 6);
+    expect(shader.z).toBeCloseTo(components[2], 4);
+  });
+
+  test('ColorToString of a tuple is the sRGB color', () => {
+    const expr = ['ColorToString', ['Tuple', 1, 0, 0]];
+    expect(interp(expr).string).toBe('#ff0000');
+    // Read as OKLCh this tuple is L = 1, which printed as `#ffffff`.
+    expect(runJS(expr)).toBe('#ff0000');
+  });
+
+  test('ColorDelta and ColorToColorspace of tuples agree with the interpreter', () => {
+    const delta = ['ColorDelta', ['Tuple', 1, 0, 0], ['Tuple', 0, 0, 1]];
+    expect(runJS(delta)).toBeCloseTo(interp(delta).re, 12);
+
+    const space = ['ColorToColorspace', ['Tuple', 1, 0, 0], "'hsl'"];
+    const expected = interp(space).ops!.map((op) => op.re);
+    expect(expected).toEqual([0, 1, 0.5]);
+    expect(runJS(space)).toEqual(expected);
+  });
+
+  test('ContrastingColor of a tuple background agrees with the interpreter', () => {
+    const expr = ['ContrastingColor', ['Tuple', 1, 0, 0]];
+    // Red is a dark background, so white wins. Read as OKLCh the same tuple
+    // is L = 1 — a white background — and the compiled routes chose black.
+    const picked = interp(expr);
+    expect(picked.ops![0].re).toBe(1);
+    const js = runJS(expr);
+    // The compiled form of white is L = 1, achromatic.
+    expect(js[0]).toBeCloseTo(1, 6);
+    expect(js[1]).toBeCloseTo(0, 6);
+
+    const shader = evalGLSL(expr);
+    expect(shader.x).toBeCloseTo(1, 6);
+  });
+
+  test('the As* conversions read a tuple as sRGB on the shader too', () => {
+    // `AsOklch` is the identity on a color VALUE, so a tuple passed through
+    // unconverted was answered verbatim as though it were already OKLCh.
+    expect(
+      glsl.compile(
+        ce.expr(['AsOklch', ['Tuple', 0.5, 0.2, 0.1]]),
+        NO_FOLD as any
+      ).code
+    ).toBe('_gpu_srgb_to_oklch(vec3(0.5, 0.2, 0.1))');
+    const shader = evalGLSL(['AsOklch', ['Tuple', 0.5, 0.2, 0.1]]);
+    const expected = interpOklch(['Tuple', 0.5, 0.2, 0.1]);
+    expect(shader.x).toBeCloseTo(expected[0], 6);
+    expect(shader.y).toBeCloseTo(expected[1], 6);
+    expect(shader.z).toBeCloseTo(expected[2], 4);
+  });
+
+  test('a tuple that arrives through a VARIABLE keeps the canonical reading', () => {
+    // Documented behaviour, not an oversight: a variable has no shape at
+    // compile time, so the compiled targets cannot tell a tuple of sRGB
+    // components from the color value they already hold as three numbers.
+    // The value a variable carries at run time IS the canonical color, so it
+    // is passed through unconverted.
+    const cev = new ComputeEngine();
+    cev.declare('v', 'tuple<number, number, number>');
+    const expr = cev.expr(['ColorMix', 'v', ['Rgb', 0, 0, 1], 0.5]);
+    expect((compile(expr, NO_FOLD as any) as any).code).toBe(
+      '_SYS.colorMix(_.v, _SYS.rgb(0, 0, 1), 0.5)'
+    );
+    expect(new GLSLTarget().compile(expr, NO_FOLD as any).code).toBe(
+      '_gpu_color_mix(v, _gpu_srgb_to_oklch(vec3(0.0, 0.0, 1.0)), 0.5)'
+    );
+  });
+});
+
+describe('a well-formed color spelling that packs to zero is transparent black', () => {
+  // `parseColor()` answers 0 both for transparent black and for a string that
+  // is not a color, so the two are told apart by the spelling.
+  test.each(['#00000000', 'rgba(0,0,0,0)', 'rgb(0 0 0 / 0)', 'transparent'])(
+    '%s is a color',
+    (spelling) => {
+      const r = interp(['Color', `'${spelling}'`]);
+      expect(r.operator).toBe('Oklch');
+      expect(r.ops!.map((op) => op.re)).toEqual([0, 0, 0, 0]);
+      expect(runJS(['Color', `'${spelling}'`])).toEqual([0, 0, 0, 0]);
+    }
+  );
+
+  test('a transparent-black string mixes like any other color', () => {
+    const expr = ['ColorMix', "'#00000000'", "'#ffffff'", 0.5];
+    const r = interp(expr);
+    expect(r.operator).toBe('Oklch');
+    const js = runJS(expr);
+    expect(js).toHaveLength(4);
+    for (let i = 0; i < 4; i++) expect(js[i]).toBeCloseTo(r.ops![i].re, 12);
+  });
+
+  test.each([
+    'bogus',
+    '#gg0000',
+    '#00000',
+    'hsla(0,0%,0%,0)',
+    // An unterminated or empty functional spelling packs to zero as well, so
+    // testing only the opening prefix read a typing mistake as transparent
+    // black. The whole form is anchored.
+    'rgb(255,0,0',
+    'oklch(',
+    'rgba()',
+  ])('%s is not a color', (spelling) => {
+    // `parseColor()` does not check the digits of a `#` form — it reads
+    // `#gg0000` as opaque black — so the shape is checked before parsing.
+    expect(interp(['Color', `'${spelling}'`]).operator).toBe('Error');
+    expect(() => runJS(['Color', `'${spelling}'`])).toThrow(/Unknown color/);
+    // The shader route parses the literal at compile time through the same
+    // predicate. It used to read the zero packing as "not a color", so
+    // `Color("#gg0000")` compiled to opaque black — a wrong value behind a
+    // reported success.
+    expect(() =>
+      glsl.compile(ce.expr(['Color', `'${spelling}'`]), NO_FOLD as any)
+    ).toThrow(/invalid color string/);
+  });
+
+  test('a transparent spelling reaches the shader as an alpha decline', () => {
+    // On the shader a color value is a `vec3` with no alpha channel, so a
+    // transparent color is declined — but for carrying alpha, not for being
+    // an unknown name.
+    for (const spelling of ['#00000000', 'rgba(0,0,0,0)', 'transparent'])
+      expect(() =>
+        glsl.compile(ce.expr(['Color', `'${spelling}'`]), NO_FOLD as any)
+      ).toThrow(/carries an alpha channel/);
+  });
+});
+
+describe('a four-digit hex color is #rgba', () => {
+  // `parseColor()` reads a `#` form of 3, 6 or 8 digits only and answers its
+  // zero packing for any other length, so `#f00f` — opaque red in CSS — was
+  // read as transparent black. Each digit is doubled before the parse.
+  test('#f00f is opaque red on every route', () => {
+    const red = interp(['Color', "'#ff0000'"]);
+    const r = interp(['Color', "'#f00f'"]);
+    expect(r.operator).toBe('Oklch');
+    expect(r.toString()).toBe(red.toString());
+    expect(runJS(['Color', "'#f00f'"])).toEqual(runJS(['Color', "'#ff0000'"]));
+    expect(
+      glsl.compile(ce.expr(['Color', "'#f00f'"]), NO_FOLD as any).code
+    ).toBe(glsl.compile(ce.expr(['Color', "'#ff0000'"]), NO_FOLD as any).code);
+  });
+
+  test('#0000 is transparent black', () => {
+    const r = interp(['Color', "'#0000'"]);
+    expect(r.operator).toBe('Oklch');
+    expect(r.ops!.map((op) => op.re)).toEqual([0, 0, 0, 0]);
+    expect(runJS(['Color', "'#0000'"])).toEqual([0, 0, 0, 0]);
+  });
+
+  test('#f00 still expands to opaque red', () => {
+    expect(interp(['Color', "'#f00'"]).toString()).toBe(
+      interp(['Color', "'#ff0000'"]).toString()
+    );
+    expect(runJS(['Color', "'#f00'"])).toEqual(runJS(['Color', "'#ff0000'"]));
+  });
+
+  test('#f008 is red at half alpha', () => {
+    // The 4th digit is the alpha digit, doubled like the others: `8` → `0x88`.
+    expect(interp(['Color', "'#f008'"]).toString()).toBe(
+      interp(['Color', "'#ff000088'"]).toString()
+    );
   });
 });
 
@@ -279,6 +486,31 @@ describe('ContrastingColor picks the same color on the interpreter and GLSL', ()
   );
 });
 
+describe('ContrastingColor answers the candidate the caller passed', () => {
+  test('an Oklch candidate keeps its exact components on both routes', () => {
+    const expr = [
+      'ContrastingColor',
+      ['Oklch', 0.98, 0.02, 90],
+      ['Oklch', 0.2, 0.1, 29],
+      ['Oklch', 0.95, 0.2, 264],
+    ];
+    // Verbatim in the interpreter: the head, the space and the components.
+    const picked = interp(expr);
+    expect(picked.operator).toBe('Oklch');
+    expect(picked.ops!.map((op) => op.re)).toEqual([0.2, 0.1, 29]);
+    // The same color in the compiled target's canonical form. Both routes
+    // used to hand the chosen candidate back through an 8-bit sRGB packing,
+    // which moved its components.
+    expect(runJS(expr)).toEqual([0.2, 0.1, 29]);
+  });
+
+  test('the one-argument form still answers white or black', () => {
+    const white = interp(['ContrastingColor', ['Rgb', 0, 0, 0]]);
+    expect(white.operator).toBe('Rgb');
+    expect(white.ops!.map((op) => op.re)).toEqual([1, 1, 1]);
+  });
+});
+
 describe('ColorFromColorspace does not convert a typed color head twice', () => {
   // A typed head at this position is read as raw components in the named
   // space. Its own lowering already converts to OKLCh, so the compiled routes
@@ -359,5 +591,96 @@ describe('a color string reaches the same color through every operator', () => {
   test('a named color and its hex agree', () => {
     // `red` in this palette is #d7170b, not #ff0000.
     expect(interpOklch("'red'")).toEqual(interpOklch("'#d7170b'"));
+  });
+});
+
+describe('a color tuple has exactly 3 or 4 components on every route', () => {
+  // The interpreter read the first three components of a wider tuple and
+  // dropped the rest, so `(1, 0, 0, 0.5, 0.2)` was red at half alpha there
+  // while the compiled routes passed the same tuple on as a color value.
+  test.each([
+    ['two', ['Tuple', 1, 0]],
+    ['five', ['Tuple', 1, 0, 0, 0.5, 0.2]],
+  ])('a tuple of %s components is not a color', (_n, tuple) => {
+    const expr = ['ColorMix', tuple, "'red'"];
+    expect(interp(expr).operator).toBe('Error');
+    // The compiled routes fail closed: a literal tuple's width is known at
+    // compile time, so neither may re-read it as a canonical color value.
+    expect(jsDeclines(expr)).toBe(true);
+    expect(() => glsl.compile(ce.expr(expr), NO_FOLD as any)).toThrow(
+      /is not a color/
+    );
+  });
+
+  test('3 and 4 components are still colors', () => {
+    expect(interp(['ColorMix', ['Tuple', 1, 0, 0], "'red'"]).operator).toBe(
+      'Oklch'
+    );
+    expect(
+      interp(['ColorMix', ['Tuple', 1, 0, 0, 0.5], "'red'"]).operator
+    ).toBe('Oklch');
+  });
+});
+
+describe('a tuple with a component that is not a finite number is not a color', () => {
+  // The typed-head rule is the one rule. `Rgb(~oo, 0, 0)` at a color position
+  // is `incompatible-type`, but the same components written as a bare tuple
+  // multiplied `~oo` by 255 and answered a NaN color.
+  test('the tuple spelling is refused exactly as the Rgb spelling is', () => {
+    const tuple = ['ColorMix', ['Tuple', 'ComplexInfinity', 0, 0], "'red'"];
+    const head = ['ColorMix', ['Rgb', 'ComplexInfinity', 0, 0], "'red'"];
+    expect(interp(head).operator).toBe('Error');
+    expect(interp(tuple).operator).toBe('Error');
+  });
+
+  test('ColorToString and AsRgb agree with ColorMix', () => {
+    expect(
+      interp(['ColorToString', ['Tuple', 'ComplexInfinity', 0, 0]]).operator
+    ).toBe('Error');
+    expect(interp(['AsRgb', ['Tuple', 'ComplexInfinity', 0, 0]]).operator).toBe(
+      'Error'
+    );
+  });
+});
+
+describe('a color channel must be a scalar on the compiled routes', () => {
+  // The `vec3` constructor is built by the color lowering itself, so the
+  // shape gate the `Tuple` lowering applies has to be applied there too:
+  // `vec3(1.0, vec2(0.0, 1.0), 0.0)` is source no driver accepts, and the
+  // JavaScript route answered a NaN color where the interpreter errors.
+  const nested = ['Tuple', ['Tuple', 1, 2], 0, 0];
+
+  test('a nested tuple component fails closed', () => {
+    expect(interp(['ColorMix', nested, "'red'"]).operator).toBe('Error');
+    expect(jsDeclines(['ColorMix', nested, "'red'"])).toBe(true);
+    expect(() =>
+      glsl.compile(ce.expr(['ColorMix', nested, "'red'"]), NO_FOLD as any)
+    ).toThrow(/scalar components/);
+  });
+
+  test('ColorFromColorspace of a typed head with a nested component too', () => {
+    expect(() =>
+      glsl.compile(
+        ce.expr([
+          'ColorFromColorspace',
+          ['Rgb', 1, ['Tuple', 1, 2], 0],
+          "'rgb'",
+        ]),
+        NO_FOLD as any
+      )
+    ).toThrow(/scalar components/);
+  });
+
+  test('a complex component fails closed', () => {
+    expect(() =>
+      glsl.compile(
+        ce.expr([
+          'ColorMix',
+          ['Tuple', 1, 'ImaginaryUnit', 0],
+          ['Rgb', 0, 0, 1],
+        ]),
+        NO_FOLD as any
+      )
+    ).toThrow(/Fail closed/);
   });
 });

@@ -14,7 +14,8 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { parseColor, rgbToOklch } from '@arnog/colors';
+import { rgbToOklch } from '@arnog/colors';
+import { parseColorString } from '../library/colors.js';
 import {
   tryGetConstant,
   foldTerms,
@@ -596,7 +597,7 @@ function gpuRgbBoundary(
 ): string {
   if (
     isFunction(color) &&
-    ['Rgb', 'Hsv', 'Hsl'].includes(color.operator) &&
+    ['Rgb', 'Hsv', 'Hsl', 'Tuple'].includes(color.operator) &&
     !isCallerMapped(color, target.cse?.harvestOptions) &&
     !target.foldExcludedOps?.has(color.operator)
   ) {
@@ -610,6 +611,58 @@ function gpuRgbBoundary(
 /** The five typed color heads. Their operands are components in their own
  *  color space. */
 const GPU_COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
+
+/**
+ * Compile an operand that sits at a COLOR position.
+ *
+ * A bare tuple written at a color position denotes 0-1 sRGB components on
+ * every route, so `ColorMix((1, 0, 0), (0, 0, 1), 0.5)` mixes red with blue
+ * exactly as the interpreter does. A color VALUE on a shader is the canonical
+ * OKLCh `vec3`, so a tuple written at the call site takes the same conversion
+ * `Rgb(r, g, b)` takes. Without it the shader read that tuple as an OKLCh
+ * triple and computed a different color than the interpreter for the same
+ * expression.
+ *
+ * Only a tuple written LITERALLY at the call site can be recognized. A tuple
+ * that reaches this position through a variable has no shape at compile time,
+ * so it keeps the canonical reading: it is taken to be a color value already.
+ *
+ * A `List` written at a color position is refused; only an operand of unknown
+ * shape keeps the canonical reading. The interpreter's signatures say `tuple`
+ * and it answers `incompatible-type` for a list, so a shader must not quietly
+ * read as a color what the engine calls an error. A literal tuple of any
+ * width other than 3 or 4 is refused for the same reason.
+ */
+function gpuColorOperand(
+  head: string,
+  color: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  if (isFunction(color, 'List'))
+    throw new Error(
+      `${head}: a list is not a color — a color operand must be a color, a ` +
+        `color string or a tuple of 3 or 4 components. Fail closed (D6).`
+    );
+  if (!isFunction(color) || color.operator !== 'Tuple') return compile(color);
+  const ops = color.ops;
+  if (ops.length < 3 || ops.length > 4)
+    throw new Error(
+      `${head}: a tuple of ${ops.length} components is not a color — a color ` +
+        `tuple has 3 components, or 4 with the fourth read as alpha. Fail ` +
+        `closed (D6).`
+    );
+  assertNoGPUAlpha(head, ops);
+  // The `vec3` constructor below is built here rather than by the `Tuple`
+  // lowering, so the shape gate that lowering applies has to be applied here
+  // too: a vector-valued component emitted `vec3(1.0, vec2(0.0, 1.0), 0.0)`,
+  // which no driver accepts.
+  assertGPUScalarComponents(ops.slice(0, 3), gpuVec3(target));
+  return `_gpu_srgb_to_oklch(${gpuVec3(target)}(${ops
+    .slice(0, 3)
+    .map((op) => compile(op))
+    .join(', ')}))`;
+}
 
 /**
  * Fail closed (D6) on a color constructor given a 4th (alpha) operand.
@@ -6232,17 +6285,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Color functions (pure-math, GPU-compilable)
-  ColorMix: (args, compile) => {
+  ColorMix: (args, compile, target) => {
     if (args.length < 2) throw new Error('ColorMix: need two colors');
-    const c1 = compile(args[0]);
-    const c2 = compile(args[1]);
+    const c1 = gpuColorOperand('ColorMix', args[0], compile, target);
+    const c2 = gpuColorOperand('ColorMix', args[1], compile, target);
     const ratio = args.length >= 3 ? compile(args[2]) : '0.5';
     return `_gpu_color_mix(${c1}, ${c2}, ${ratio})`;
   },
-  ColorContrast: ([bg, fg], compile) => {
+  ColorContrast: ([bg, fg], compile, target) => {
     if (bg === null || fg === null)
       throw new Error('ColorContrast: need two colors');
-    return `_gpu_apca(${compile(bg)}, ${compile(fg)})`;
+    return `_gpu_apca(${gpuColorOperand(
+      'ColorContrast',
+      bg,
+      compile,
+      target
+    )}, ${gpuColorOperand('ColorContrast', fg, compile, target)})`;
   },
   ContrastingColor: (args, compile, target) => {
     if (args.length === 0) throw new Error('ContrastingColor: no argument');
@@ -6268,7 +6326,31 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           `temporary at this position — a repeated draw would shift every ` +
           `later value in the shader. Fail closed (D6).`
       );
-    const bg = compile(args[0]);
+    // Every color operand is spliced twice, and `select` evaluates both arms,
+    // so an operand written inline runs its `_gpu_srgb_to_oklch` conversion up
+    // to four times per fragment. Bind each converted operand to a `vec3`
+    // local once where the target has a statement sink.
+    //
+    // Only an operand that VARIES is bound. An operand with no unknowns is
+    // the same value in every fragment, so the repeated splice costs nothing
+    // measurable and the shorter inline form is kept. A bare name is already
+    // a single evaluation, and where there is no statement sink the code is
+    // spliced as before.
+    const bindColor = (x: Expression, code: string): string => {
+      if (target === undefined || x.unknowns.length === 0) return code;
+      if (/^[A-Za-z_]\w*$/.test(code)) return code;
+      if (!BaseCompiler.canHoist(target)) return code;
+      const t = BaseCompiler.tempVar(target);
+      const type = gpuVec3(target);
+      const decl =
+        target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
+      BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
+      return t;
+    };
+    const bg = bindColor(
+      args[0],
+      gpuColorOperand('ContrastingColor', args[0], compile, target)
+    );
     // The comparison is the one the interpreter makes through the
     // `contrastingColor()` routine of `@arnog/colors`: the candidate with the
     // larger ABSOLUTE APCA contrast wins, and the candidate is the FIRST
@@ -6276,8 +6358,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // and the reversed order picked the other candidate for some
     // backgrounds.
     if (args.length >= 3) {
-      const fg1 = compile(args[1]);
-      const fg2 = compile(args[2]);
+      const fg1 = bindColor(
+        args[1],
+        gpuColorOperand('ContrastingColor', args[1], compile, target)
+      );
+      const fg2 = bindColor(
+        args[2],
+        gpuColorOperand('ContrastingColor', args[2], compile, target)
+      );
       return pick(
         `abs(_gpu_apca(${fg1}, ${bg})) >= abs(_gpu_apca(${fg2}, ${bg}))`,
         fg1,
@@ -6305,7 +6393,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const spaceName = readStringLiteral(space);
     if (spaceName === null)
       throw new Error('ColorToColorspace: space must be a string literal');
-    const c = compile(color);
+    const c = gpuColorOperand('ColorToColorspace', color, compile, target);
     switch (spaceName) {
       case 'oklch':
         return c;
@@ -6338,11 +6426,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       isFunction(components) && GPU_COLOR_HEADS.has(components.operator)
         ? components
         : null;
+    // A `List` is refused here, not read as components: the interpreter's
+    // signature is `(color | tuple, string)` and it answers
+    // `incompatible-type` for a list, so a shader must not quietly accept
+    // what the engine calls an error.
+    if (isFunction(components) && components.operator === 'List')
+      throw new Error(
+        `ColorFromColorspace: a list is not a color component vector — the ` +
+          `operand must be a tuple or a color. Fail closed (D6).`
+      );
     if (typedHead) assertNoGPUAlpha('ColorFromColorspace', typedHead.ops);
-    else if (
-      isFunction(components) &&
-      (components.operator === 'Tuple' || components.operator === 'List')
-    )
+    else if (isFunction(components) && components.operator === 'Tuple')
       assertNoGPUAlpha('ColorFromColorspace', components.ops);
     // This operand is read as raw COMPONENTS in the named space — that is how
     // the interpreter reads a typed color head here. The head's own lowering
@@ -6350,6 +6444,12 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // the ordinary way applied the space conversion a second time and
     // `ColorFromColorspace(Rgb(1, 0, 0), 'rgb')` answered a color that was
     // not red.
+    // The `vec3` constructor is built here rather than by the head's own
+    // lowering, so the shape gate that lowering applies has to be applied
+    // here too: a vector-valued component emitted
+    // `vec3(1.0, vec2(0.0, 1.0), 0.0)`, which no driver accepts.
+    if (typedHead)
+      assertGPUScalarComponents(typedHead.ops.slice(0, 3), gpuVec3(target));
     const c = typedHead
       ? `${gpuVec3(target)}(${typedHead.ops
           .slice(0, 3)
@@ -6389,12 +6489,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const str = readStringLiteral(s);
     if (str === null)
       throw new Error('Color: argument must be a string literal on GPU target');
-    const packed = parseColor(str);
-    if (packed === 0 && str.trim().toLowerCase() !== 'transparent')
+    // The predicate is the interpreter's own (`parseColorString`,
+    // `library/colors.ts`), so a string is a color on every route or on none
+    // of them. Reading the parser's zero sentinel as "not a color" here made
+    // `Color("#gg0000")` compile to opaque black — a wrong value behind a
+    // reported success — while refusing the genuinely transparent spellings
+    // `#00000000` and `rgba(0, 0, 0, 0)`.
+    const packed = parseColorString(str);
+    if (packed === null)
       throw new Error(`Color: invalid color string "${str}"`);
-    // `parseColor()` returns 0xrrggbbaa. Only the RGB is lowered below, so a
-    // literal carrying a non-opaque alpha would silently become opaque.
-    // Decline instead, matching `assertNoGPUAlpha`.
+    // The packing is 0xrrggbbaa. Only the RGB is lowered below, so a literal
+    // carrying a non-opaque alpha would silently become opaque. Decline
+    // instead, matching `assertNoGPUAlpha`.
     if ((packed & 0xff) !== 0xff)
       throw new Error(
         `Color: the color string "${str}" carries an alpha channel, which is ` +
@@ -6454,27 +6560,53 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   AsOklch: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklch: no argument');
-    return gpuIdentityPassthrough(c, compile, target);
+    // Identity for a color value — it is already in the canonical form. A
+    // tuple at this position is sRGB components and still has to be
+    // converted.
+    return gpuParenthesizeIdentity(
+      c,
+      gpuColorOperand('AsOklch', c, compile, target),
+      target
+    );
   },
 
-  AsOklab: ([c], compile) => {
+  AsOklab: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklab: no argument');
-    return `_gpu_oklch_to_oklab(${compile(c)})`;
+    return `_gpu_oklch_to_oklab(${gpuColorOperand(
+      'AsOklab',
+      c,
+      compile,
+      target
+    )})`;
   },
 
   AsRgb: ([c], compile, target) => {
     if (c === null) throw new Error('AsRgb: no argument');
-    return gpuRgbBoundary(c, compile(c), target);
+    return gpuRgbBoundary(
+      c,
+      gpuColorOperand('AsRgb', c, compile, target),
+      target
+    );
   },
 
-  AsHsv: ([c], compile) => {
+  AsHsv: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsv: no argument');
-    return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${compile(c)}))`;
+    return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${gpuColorOperand(
+      'AsHsv',
+      c,
+      compile,
+      target
+    )}))`;
   },
 
-  AsHsl: ([c], compile) => {
+  AsHsl: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsl: no argument');
-    return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${compile(c)}))`;
+    return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${gpuColorOperand(
+      'AsHsl',
+      c,
+      compile,
+      target
+    )}))`;
   },
 
   // Fractal functions

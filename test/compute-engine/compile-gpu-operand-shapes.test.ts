@@ -186,15 +186,21 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   });
 
   it('an AGGREGATE-AWARE preamble helper is left alone', () => {
-    // `_gpu_color_mix(vec3, vec3, float)` and `_gpu_apca(vec3, vec3)` are
-    // declared over vectors: their operand shapes are the point.
+    // `_gpu_color_mix(vec3, vec3, float)`, `_gpu_apca(vec3, vec3)` and
+    // `_gpu_srgb_to_oklch(vec3)` are declared over vectors: their operand
+    // shapes are the point. A tuple at a color position is 0-1 sRGB on every
+    // route, so each one arrives through that conversion — a second
+    // aggregate-aware helper the shape gate must also leave alone.
     expect(
       g(['ColorMix', ['Tuple', 0.5, 0.2, 120], ['Tuple', 0.8, 0.1, 30], 0.25])
-    ).toBe('_gpu_color_mix(vec3(0.5, 0.2, 120.0), vec3(0.8, 0.1, 30.0), 0.25)');
+    ).toBe(
+      '_gpu_color_mix(_gpu_srgb_to_oklch(vec3(0.5, 0.2, 120.0)), ' +
+        '_gpu_srgb_to_oklch(vec3(0.8, 0.1, 30.0)), 0.25)'
+    );
     // The background is the SECOND argument of each contrast, matching the
     // argument order the interpreter uses.
     expect(g(['ContrastingColor', ['Tuple', 0.5, 0.2, 120]])).toContain(
-      '_gpu_apca(vec3(1.0, 0.0, 0.0), vec3(0.5, 0.2, 120.0))'
+      '_gpu_apca(vec3(1.0, 0.0, 0.0), _gpu_srgb_to_oklch(vec3(0.5, 0.2, 120.0)))'
     );
   });
 

@@ -466,11 +466,52 @@ describe('ContrastingColor', () => {
   });
 
   test('with two fg candidates', () => {
+    // A string candidate has no color head of its own and denotes 0-1 sRGB,
+    // so it comes back as an `Rgb` head.
     const result = ce
       .expr(['ContrastingColor', "'#ffffff'", "'#ff0000'", "'#0000ff'"])
       .evaluate();
     expect(result.operator).toBe('Rgb');
     expect(result.ops!.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('the chosen candidate keeps the color space it was given in', () => {
+    // The chosen operand is answered VERBATIM. Re-encoding it as an `Rgb`
+    // head pinched an OKLCh candidate through the sRGB gamut and threw its
+    // color space away.
+    const result = ce
+      .expr([
+        'ContrastingColor',
+        ['Oklch', 0.98, 0.02, 90],
+        ['Oklch', 0.2, 0.1, 29],
+        ['Oklch', 0.95, 0.2, 264],
+      ])
+      .evaluate();
+    expect(result.operator).toBe('Oklch');
+    // The dark candidate against a near-white background.
+    expect(result.ops!.map((op) => op.re)).toEqual([0.2, 0.1, 29]);
+  });
+
+  test('an Hsl candidate comes back as Hsl', () => {
+    const result = ce
+      .expr([
+        'ContrastingColor',
+        ['Hsl', 0, 1, 0.5],
+        ['Hsl', 120, 1, 0.9],
+        ['Hsl', 240, 1, 0.1],
+      ])
+      .evaluate();
+    expect(result.operator).toBe('Hsl');
+    expect(result.ops!.map((op) => op.re)).toEqual([120, 1, 0.9]);
+  });
+
+  test('the one-argument form still answers an Rgb head', () => {
+    // Its two candidates are the built-in white and black, which have no
+    // caller-supplied color space to preserve.
+    expect(
+      ce.expr(['ContrastingColor', ['Oklch', 0.98, 0.02, 90]]).evaluate()
+        .operator
+    ).toBe('Rgb');
   });
 
   test('accepts tuple input', () => {
@@ -705,10 +746,14 @@ describe('oklab() parsing', () => {
 
 describe('GPU color compilation', () => {
   test('compile ColorMix to GLSL', () => {
+    // The operands are written as OKLCh heads rather than as bare tuples: a
+    // tuple at a color position is 0-1 sRGB on every route and is converted
+    // at the call, which would pull the sRGB converters into the preamble and
+    // hide the subsetting this test pins.
     const expr = ce.expr([
       'ColorMix',
-      ['Tuple', 1, 0, 0],
-      ['Tuple', 0, 0, 1],
+      ['Oklch', 0.63, 0.26, 29],
+      ['Oklch', 0.45, 0.31, 264],
       0.5,
     ]);
     const compiled = compile(expr, { to: 'glsl' });
@@ -765,12 +810,29 @@ describe('GPU color compilation', () => {
   });
 
   test('compile ColorToColorspace to GLSL routes rgb to sRGB', () => {
-    const expr = ce.expr(['ColorToColorspace', ['Tuple', 0.7, 0.1, 30], "'rgb'"]);
+    const expr = ce.expr([
+      'ColorToColorspace',
+      ['Oklch', 0.7, 0.1, 30],
+      "'rgb'",
+    ]);
     // `constantFold: false`: constant operands would otherwise fold to a
     // literal vec3, hiding the conversion helper this test pins.
     const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_oklch_to_srgb');
+  });
+
+  test('a bare tuple at the same position is sRGB and round trips', () => {
+    // A tuple is 0-1 sRGB, so asking for the `rgb` space of one is a round
+    // trip through the canonical OKLCh form, which the peephole collapses.
+    const expr = ce.expr([
+      'ColorToColorspace',
+      ['Tuple', 0.7, 0.1, 0.3],
+      "'rgb'",
+    ]);
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
+    expect(compiled.success).toBe(true);
+    expect(compiled.code).toBe('_gpu_srgb_roundtrip(vec3(0.7, 0.1, 0.3))');
   });
 
   test('compile ColorFromColorspace to WGSL', () => {

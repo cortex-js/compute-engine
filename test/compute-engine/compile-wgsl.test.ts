@@ -990,10 +990,15 @@ describe('WGSL ContrastingColor uses select, never a ternary', () => {
     // candidate is the FIRST argument of the contrast. An earlier emission
     // compared against a fixed 50 threshold, on a contrast scale 100 times
     // the interpreter's.
+    // The background is written as a tuple, which is 0-1 sRGB on every route
+    // and so reaches the contrast through `_gpu_srgb_to_oklch`. The two
+    // candidates are literal OKLCh constants and need no conversion.
     expect(code).toBe(
       'select(vec3f(0.0), vec3f(1.0, 0.0, 0.0), ' +
-        'abs(_gpu_apca(vec3f(1.0, 0.0, 0.0), vec3f(1.0, 1.0, 1.0))) >= ' +
-        'abs(_gpu_apca(vec3f(0.0), vec3f(1.0, 1.0, 1.0))))'
+        'abs(_gpu_apca(vec3f(1.0, 0.0, 0.0), ' +
+        '_gpu_srgb_to_oklch(vec3f(1.0, 1.0, 1.0)))) >= ' +
+        'abs(_gpu_apca(vec3f(0.0), ' +
+        '_gpu_srgb_to_oklch(vec3f(1.0, 1.0, 1.0)))))'
     );
     expect(code).not.toContain('?');
   });
@@ -1011,10 +1016,16 @@ describe('WGSL ContrastingColor uses select, never a ternary', () => {
     // background the second — the argument order the interpreter uses. APCA
     // is not symmetric in its two arguments, so the reversed order this
     // emission used before chose the other candidate for some backgrounds.
+    // All three operands are tuples, so all three are 0-1 sRGB and reach the
+    // contrast through `_gpu_srgb_to_oklch` — including the two candidates,
+    // which are also the value the selection answers.
     expect(code).toBe(
-      'select(vec3f(0.5, 0.1, 30.0), vec3f(0.0, 0.0, 0.0), ' +
-        'abs(_gpu_apca(vec3f(0.0, 0.0, 0.0), vec3f(1.0, 1.0, 1.0))) >= ' +
-        'abs(_gpu_apca(vec3f(0.5, 0.1, 30.0), vec3f(1.0, 1.0, 1.0))))'
+      'select(_gpu_srgb_to_oklch(vec3f(0.5, 0.1, 30.0)), ' +
+        '_gpu_srgb_to_oklch(vec3f(0.0, 0.0, 0.0)), ' +
+        'abs(_gpu_apca(_gpu_srgb_to_oklch(vec3f(0.0, 0.0, 0.0)), ' +
+        '_gpu_srgb_to_oklch(vec3f(1.0, 1.0, 1.0)))) >= ' +
+        'abs(_gpu_apca(_gpu_srgb_to_oklch(vec3f(0.5, 0.1, 30.0)), ' +
+        '_gpu_srgb_to_oklch(vec3f(1.0, 1.0, 1.0)))))'
     );
     expect(code).not.toContain('?');
   });

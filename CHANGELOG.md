@@ -210,6 +210,47 @@
   100 000-point sweep, and an exactly representable answer stays a point:
   `8^(2/3)` is 4, `27^(2/3)` is 9 (it was 8.999999999999998), `(-8)^(2/3)` is 4
   and `8^(-2/3)` is 0.25.
+- **The compile targets honour an operator's `broadcastExemptions: ['tuples']`
+  declaration.** A `broadcastable` head maps over a collection operand, and a
+  tuple is an indexed collection, so a tuple written at the call site was
+  fanned out even by a head that owns that shape: `AsRgb((1, 0, 0))` failed
+  closed on the JavaScript target and needed a special case on the shaders.
+  The base compiler now reads the definition and hands such a tuple to the
+  head whole, as the interpreter does.
+- **A bare tuple at a colour argument is 0–1 sRGB on every route.** The
+  compiled JavaScript and shader targets read the same tuple as the
+  canonical OKLCh triple, so `ColorMix((1, 0, 0), (0, 0, 1), 0.5)` mixed red
+  with blue in the interpreter and two arbitrary OKLCh values when compiled,
+  and `ColorToString((1, 0, 0))` answered `#ff0000` in one and `#ffffff` in
+  the other. A tuple written at the call site is now converted with the same
+  conversion `Rgb(r, g, b)` takes; a tuple that arrives through a variable
+  has no shape at compile time and keeps the canonical reading. On the
+  shaders the `As*` conversions of a tuple were claimed by the element-wise
+  fan-out lane before the handler ran (`AsOklch((0.5, 0.2, 0.1))` emitted the
+  tuple untouched); the lane now converts it. A list of three numbers is not
+  a colour on any route.
+- **Colour strings and tuples are validated the same way on every route.** A
+  four-digit hex colour (`#f00f`) is read as `#rrggbbaa` with each digit
+  doubled, as CSS reads it (the parser had no four-digit branch). A
+  malformed functional spelling — `rgb(255, 0, 0` or `rgba()` — is refused:
+  the complete form is checked, not only the opening name. The shader
+  `Color("…")` handler uses the shared predicate, so `#gg0000` is refused
+  instead of compiling to opaque black. A colour tuple has exactly three or
+  four components, they must be finite numbers, and a nested or complex
+  component fails closed on the compiled routes instead of emitting
+  invalid shader source or a NaN colour.
+- **A well-formed colour spelling that packs to zero is transparent black,
+  not an error.** `#00000000` and `rgba(0, 0, 0, 0)` were refused because
+  the parser packs them to the same 0 it uses for an unrecognized string. A
+  `#` form is checked for 3, 4, 6 or 8 hexadecimal digits before parsing, so
+  `#gg0000` is refused instead of reading as opaque black.
+- **`ContrastingColor` answers the chosen candidate in the colour space it
+  was given in.** It re-encoded the winner as an `Rgb` head, which pinched an
+  `Oklch` candidate through the sRGB gamut, and the compiled runtime
+  quantized it to 8 bits per channel; `ContrastingColor(Oklch(0.98, 0.02, 90),
+  Oklch(0.2, 0.1, 29), Oklch(0.95, 0.2, 264))` now answers `Oklch(0.2, 0.1, 29)`
+  on both routes. `ColorFromColorspace`'s description now states that its
+  result is the colour's components in the route's canonical form.
 - **Colour operators handle their arguments consistently across the interpreter,
   the JavaScript target and the shader targets** (an audit of every operator
   that takes or produces a colour). A colour string that names no colour is

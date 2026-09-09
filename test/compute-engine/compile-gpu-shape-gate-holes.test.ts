@@ -370,7 +370,13 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     );
     expect(
       g(['ColorMix', ['Tuple', 0.5, 0.2, 120], ['Tuple', 0.8, 0.1, 30], 0.25])
-    ).toBe('_gpu_color_mix(vec3(0.5, 0.2, 120.0), vec3(0.8, 0.1, 30.0), 0.25)');
+    ).toBe(
+      // A tuple at a color position is 0-1 sRGB on every route, so each
+      // operand reaches `_gpu_color_mix` through `_gpu_srgb_to_oklch` —
+      // another aggregate-aware helper the gate must leave alone.
+      '_gpu_color_mix(_gpu_srgb_to_oklch(vec3(0.5, 0.2, 120.0)), ' +
+        '_gpu_srgb_to_oklch(vec3(0.8, 0.1, 30.0)), 0.25)'
+    );
   });
 
   it('the per-language divergence holds: `max(vec3, 2.0)` is GLSL-only', () => {

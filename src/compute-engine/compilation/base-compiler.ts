@@ -5771,6 +5771,11 @@ export class BaseCompiler {
             // Nor is a `Hypot` point leg, for the same reason: the head's own
             // codegen consumes it whole, as one leg (`isHypotPointLeg`).
             !BaseCompiler.isHypotPointLeg(h, a) &&
+            // Nor is a tuple at a head that declares the `'tuples'` broadcast
+            // exemption: the head owns that shape and its own codegen
+            // consumes the tuple whole, as the interpreter does. A color
+            // conversion reads `AsRgb((1, 0, 0))` as one color in 0-1 sRGB.
+            !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, a) &&
             (a.isCollection ||
               // The COLLECTION shape top, not the list/indexed spellings: a
               // SET-typed operand matches neither `list<any>` nor
@@ -5837,6 +5842,7 @@ export class BaseCompiler {
         isOperatorDef(def) &&
         def.operator.broadcastable === true &&
         isFiniteIndexedCollection(args[0]) &&
+        !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, args[0]) &&
         typeof target.functions?.(h) === 'function';
       if (
         isArithmeticInfixHead &&
@@ -7437,12 +7443,19 @@ export class BaseCompiler {
       // without one fails closed (D6); the base compiler used to emit a
       // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
       // valid GLSL, WGSL or Python.
+      //
+      // A tuple operand of a head that declares the `'tuples'` broadcast
+      // exemption is NOT a source of cells here: the head owns that shape and
+      // consumes it whole, so the fan-out stands aside and the head's own
+      // codegen (`fn`, below) receives the tuple entire — see
+      // `isBroadcastExemptTupleOperand`.
       const def = engine.lookupDefinition(h);
       if (
         isOperatorDef(def) &&
         def.operator.broadcastable &&
         args.length === 1 &&
-        isFiniteIndexedCollection(args[0])
+        isFiniteIndexedCollection(args[0]) &&
+        !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, args[0])
       ) {
         const broadcast = BaseCompiler.compileBroadcastUnary(
           engine,
@@ -7862,6 +7875,60 @@ export class BaseCompiler {
    */
   private static isHypotPointLeg(h: string, a: Expression): boolean {
     return h === 'Hypot' && isTuple(a);
+  }
+
+  /**
+   * The heads whose declared `'tuples'` broadcast exemption the compiled
+   * lanes already reproduce, because their exempted shape is value-equivalent
+   * under an element-wise lowering: tuple arithmetic IS component-wise, so
+   * mapping the scalar lowering over the components answers what the head's
+   * own handler answers. A tuple operand of one of these heads therefore keeps
+   * the element-wise lanes it has always taken, and the atomic reading of
+   * {@link isBroadcastExemptTupleOperand} does not apply to it. The same set,
+   * with the two equality heads added, gates `tryCompileBroadcast`.
+   */
+  private static readonly ELEMENTWISE_TUPLE_EXEMPT_HEADS: ReadonlySet<string> =
+    new Set(['Add', 'Multiply', 'Negate', 'Subtract', 'Divide']);
+
+  /**
+   * True when `h` consumes the operand `a` as ONE value because its definition
+   * declares the `'tuples'` broadcast exemption and `a` is a tuple whose shape
+   * is visible at compile time.
+   *
+   * A `broadcastable` head maps over a collection operand, and a tuple is an
+   * indexed collection, so the compiled lanes fan a tuple out the same way a
+   * list is fanned out. A definition that declares
+   * `broadcastExemptions: ['tuples']` says the opposite for that shape: the
+   * interpreter stands the element-wise lift down and hands the tuple to the
+   * head's own handler whole (`skipBroadcastForVectorOpsOnViews` in
+   * `boxed-expression/broadcast-lift-type.ts`). That is how the color-space
+   * conversions read `AsRgb((1, 0, 0))` as one color in 0-1 sRGB rather than
+   * as three one-number applications. The compiled lanes must read it the same
+   * way, or a compiled artifact and the interpreter answer different values
+   * for the same input.
+   *
+   * Only a tuple written at the call site qualifies — an application such as a
+   * literal `Tuple`, never a symbol. A tuple that reaches the head through a
+   * variable has no compile-time shape, so the existing lanes keep it, exactly
+   * as the color operand compilers of the JavaScript and GPU targets already
+   * decide (`compileColorOperand`, `gpuColorOperand`).
+   *
+   * Standing the fan-out down is not acceptance. Whether the head can lower
+   * THIS tuple stays the head's own decision: the color operand compilers
+   * refuse a tuple of any width other than 3 or 4, which is the width the
+   * interpreter answers `incompatible-type` for.
+   */
+  private static isBroadcastExemptTupleOperand(
+    engine: ComputeEngine,
+    h: string,
+    a: Expression
+  ): boolean {
+    if (BaseCompiler.ELEMENTWISE_TUPLE_EXEMPT_HEADS.has(h)) return false;
+    if (!isFunction(a) || !isTuple(a)) return false;
+    const def = engine.lookupDefinition(h);
+    return (
+      isOperatorDef(def) && def.operator.broadcastExemptions.includes('tuples')
+    );
   }
 
   /**

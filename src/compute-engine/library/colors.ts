@@ -3,7 +3,6 @@ import {
   parseColor,
   apca,
   oklabDeltaE,
-  contrastingColor,
   asOklch,
   rgbToOklch,
   oklchToRgb,
@@ -73,23 +72,75 @@ function normalizeColorHead(ce: any, expr: any): any {
 }
 
 /**
+ * A `#` color with exactly 3, 4, 6 or 8 hexadecimal digits. `parseColor()`
+ * does not check the digits of a `#` form — it reads `#gg0000` as opaque
+ * black — so the shape is checked here.
+ */
+const HEX_COLOR_FORM = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/;
+
+/** A `#` color with exactly 4 hexadecimal digits (`#rgba`). */
+const FOUR_DIGIT_HEX_FORM = /^#[0-9a-f]{4}$/;
+
+/**
+ * Expand a four-digit `#rgba` spelling to the eight-digit `#rrggbbaa` form by
+ * doubling each digit. Returns `undefined` for any other spelling.
+ *
+ * `parseColor()` reads a `#` form of 3, 6 or 8 digits only and answers its
+ * zero sentinel for every other length, so `#f00f` — opaque red in CSS — was
+ * read as transparent black. The expansion is done before the call so the
+ * parser sees a length it handles.
+ */
+function expandFourDigitHex(spelling: string): string | undefined {
+  if (!FOUR_DIGIT_HEX_FORM.test(spelling)) return undefined;
+  return `#${[...spelling.slice(1)].map((d) => d + d).join('')}`;
+}
+
+/**
+ * A COMPLETE functional color notation: one of the spellings `parseColor()`
+ * understands, with a non-empty argument list closed by a parenthesis.
+ *
+ * Measured against `@arnog/colors`, not assumed: `hsla(`, `lab(`, `lch(`,
+ * `hwb(` and `color(` are NOT among them and are refused like any other
+ * unknown spelling.
+ *
+ * The whole form is anchored, not just the opening prefix: an unterminated or
+ * empty spelling (`rgb(255,0,0`, `rgba()`) also packs to the parser's zero
+ * sentinel, and reading it as transparent black turned a typing mistake into
+ * a color. An alpha written inside the parentheses (`rgb(0 0 0 / 0)`) is part
+ * of the argument list, so the form still admits it.
+ */
+const COLOR_FUNCTION_FORM = /^(rgba?|hsl|oklch|oklab)\s*\(\s*[^()]+\s*\)$/;
+
+/**
  * Parse a CSS-style color string to a packed `0xRRGGBBAA` integer. Returns
  * `null` when the string does not name a color.
  *
- * `parseColor()` answers 0 both for an unrecognized string and for
- * transparent black, so the two are told apart here by the spelling. Every
- * operator that accepts a color string goes through this function, so a
+ * Every operator that accepts a color string goes through this function, so a
  * misspelled color is refused the same way everywhere instead of silently
  * becoming transparent black in some operators and an error in others.
  *
- * A fully transparent color written in a way other than the keyword
- * `transparent` (for example `#00000000`) also parses to 0 and is refused.
+ * `parseColor()` answers 0 both for a string that is not a color and for
+ * transparent black, whose packing is 0. The two are told apart by the
+ * SPELLING: a well-formed color notation that lands on 0 is transparent
+ * black and is accepted, so `#00000000` and `rgba(0, 0, 0, 0)` are colors
+ * just as the keyword `transparent` is. Only a string that is not a color
+ * notation at all is refused. A COMPUTED color with a zero alpha is a color
+ * value, not a string, and never reaches this predicate.
  */
-function parseColorString(s: string | undefined | null): number | null {
+export function parseColorString(s: string | undefined | null): number | null {
   if (!s) return null;
-  const color = parseColor(s);
-  if (color === 0 && s.trim().toLowerCase() !== 'transparent') return null;
-  return color;
+  const spelling = s.trim().toLowerCase();
+  if (spelling.startsWith('#') && !HEX_COLOR_FORM.test(spelling)) return null;
+  let color: number;
+  try {
+    color = parseColor(expandFourDigitHex(spelling) ?? s);
+  } catch {
+    // A malformed functional notation throws inside the parser.
+    return null;
+  }
+  if (color !== 0) return color;
+  if (spelling === 'transparent' || spelling.startsWith('#')) return 0;
+  return COLOR_FUNCTION_FORM.test(spelling) ? 0 : null;
 }
 
 /** Convert a 0xRRGGBBAA packed integer to an `OklchColor`. */
@@ -290,6 +341,17 @@ function oklchToExpr(ce: any, c: OklchColor): any {
 /**
  * Extract an RgbColor (0-255) from a Color string, an sRGB Tuple (0-1), or
  * a typed color expression (`Rgb`/`Hsv`/`Hsl`/`Oklab`/`Oklch`).
+ *
+ * A Tuple is a color when it has EXACTLY 3 components, or 4 with the fourth
+ * read as alpha. A wider tuple is not a color: reading the first three
+ * components and dropping the rest accepted `(1, 0, 0, 0.5, 0.2)` as red at
+ * half alpha, which no other route did.
+ *
+ * A tuple whose components are not all finite numbers is refused, exactly as
+ * a typed head with the same components is refused (`readColorExpr`). The
+ * typed-head rule is the one rule: `Rgb(~oo, 0, 0)` and `(~oo, 0, 0)` are
+ * both `incompatible-type` instead of one answering an error and the other a
+ * NaN color.
  */
 function extractRgb(ce: any, arg: any): RgbColor | undefined {
   if (isString(arg)) {
@@ -306,12 +368,17 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
   }
   const fromTyped = colorExprToRgb(arg);
   if (fromTyped) return fromTyped;
-  if (arg.operator === 'Tuple' && arg.ops && arg.ops.length >= 3) {
-    const rgb: RgbColor = {
-      r: arg.ops[0].re * 255,
-      g: arg.ops[1].re * 255,
-      b: arg.ops[2].re * 255,
-    };
+  if (
+    arg.operator === 'Tuple' &&
+    arg.ops &&
+    (arg.ops.length === 3 || arg.ops.length === 4)
+  ) {
+    const c0 = arg.ops[0].re;
+    const c1 = arg.ops[1].re;
+    const c2 = arg.ops[2].re;
+    if (!Number.isFinite(c0) || !Number.isFinite(c1) || !Number.isFinite(c2))
+      return undefined;
+    const rgb: RgbColor = { r: c0 * 255, g: c1 * 255, b: c2 * 255 };
     if (arg.ops.length >= 4) {
       const alpha = normalizeAlpha(arg.ops[3].re);
       if (alpha !== undefined) rgb.alpha = alpha;
@@ -319,6 +386,26 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
     return rgb;
   }
   return undefined;
+}
+
+/**
+ * A `ContrastingColor` candidate, as a color expression.
+ *
+ * A typed color head is answered VERBATIM, so the caller gets back the space
+ * and the gamut it wrote: re-encoding an `Oklch` candidate as an `Rgb` head
+ * pinched it through the sRGB gamut and threw its color space away. A string
+ * or a tuple has no color head of its own and both denote 0-1 sRGB, so those
+ * are answered as an `Rgb` head.
+ */
+function asColorExpr(ce: any, arg: any, rgb: RgbColor): any {
+  if (isFunction(arg) && COLOR_OPERATORS.has(arg.operator)) return arg;
+  const args = [
+    ce.number(rgb.r / 255),
+    ce.number(rgb.g / 255),
+    ce.number(rgb.b / 255),
+  ];
+  if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
+  return ce.function('Rgb', args);
 }
 
 /** Build a Tuple expression from components, appending alpha when defined. */
@@ -541,7 +628,11 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   },
 
   ColorFromColorspace: {
-    description: 'Convert color space components to a canonical sRGB tuple',
+    description:
+      'Convert color space components to a color, answered in the canonical ' +
+      "form of the route: an sRGB tuple when evaluated, the target's " +
+      'canonical color value when compiled. To get the same numbers on every ' +
+      'route, call ColorToColorspace(result, "rgb")',
     complexity: 8000,
     signature: '(color | tuple, string) -> tuple',
     evaluate: (ops, { engine: ce }) => {
@@ -634,7 +725,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   ContrastingColor: {
     description:
-      'Choose the foreground color with better APCA contrast against a background',
+      'Choose the foreground color with better APCA contrast against a ' +
+      'background, answered as given: the interpreter keeps the color head ' +
+      'the candidate was written with, and a compiled target answers the ' +
+      'same color in its canonical form',
     complexity: 8000,
     signature:
       '(color | string | tuple, (color | string | tuple)?, (color | string | tuple)?) -> color',
@@ -642,25 +736,32 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       const bgRgb = extractRgb(ce, ops[0]);
       if (!bgRgb) return ce.error('incompatible-type');
 
-      let packed: number;
+      // The comparison `contrastingColor()` of `@arnog/colors` makes: the
+      // candidate with the larger ABSOLUTE APCA contrast against the
+      // background wins, and the candidate is the FIRST argument of the
+      // contrast. APCA is not symmetric in its two arguments, so that order
+      // is part of the comparison, not an accident of spelling.
+      const firstWins = (fg1: RgbColor, fg2: RgbColor): boolean =>
+        Math.abs(apca(fg1, bgRgb)) >= Math.abs(apca(fg2, bgRgb));
+
       if (ops.length >= 3 && ops[1] !== undefined && ops[2] !== undefined) {
         const fg1 = extractRgb(ce, ops[1]);
         const fg2 = extractRgb(ce, ops[2]);
         if (!fg1 || !fg2) return ce.error('incompatible-type');
-        packed = contrastingColor({ bg: bgRgb, fg1, fg2 });
-      } else {
-        // Default: choose between white and black
-        packed = contrastingColor(bgRgb);
+        return firstWins(fg1, fg2)
+          ? asColorExpr(ce, ops[1], fg1)
+          : asColorExpr(ce, ops[2], fg2);
       }
 
-      // Unpack 0xRRGGBBAA into an Rgb head (channels 0-1).
-      const r = ((packed >>> 24) & 0xff) / 255;
-      const g = ((packed >>> 16) & 0xff) / 255;
-      const b = ((packed >>> 8) & 0xff) / 255;
-      const alpha = normalizeAlpha((packed & 0xff) / 255);
-      const args = [ce.number(r), ce.number(g), ce.number(b)];
-      if (alpha !== undefined) args.push(ce.number(alpha));
-      return ce.function('Rgb', args);
+      // Default: the better of white and black, as `Rgb` heads.
+      const white: RgbColor = { r: 255, g: 255, b: 255 };
+      const black: RgbColor = { r: 0, g: 0, b: 0 };
+      const chosen = firstWins(white, black) ? 1 : 0;
+      return ce.function('Rgb', [
+        ce.number(chosen),
+        ce.number(chosen),
+        ce.number(chosen),
+      ]);
     },
   },
 

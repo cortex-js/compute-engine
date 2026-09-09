@@ -1894,7 +1894,20 @@ function identityPassthrough(
   compile: (e: Expression) => string,
   target: CompileTarget<Expression> | undefined
 ): string {
-  const code = compile(x);
+  return parenthesizeIdentity(x, compile(x), target);
+}
+
+/**
+ * The already-compiled form of `identityPassthrough`, for a caller that has
+ * to compile its operand through a helper of its own and so cannot hand the
+ * operand over. Same rule: parenthesize `code` when the head of `x` has an
+ * infix spelling on this target.
+ */
+function parenthesizeIdentity(
+  x: Expression,
+  code: string,
+  target: CompileTarget<Expression> | undefined
+): string {
   if (!isFunction(x)) return code;
   const op =
     target?.operators?.(x.operator) ?? JAVASCRIPT_OPERATORS[x.operator];
@@ -1992,6 +2005,64 @@ function tryGetJSComplexParts(
 const COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
 
 /**
+ * Compile an operand that sits at a COLOR position.
+ *
+ * A bare tuple written at a color position denotes 0-1 sRGB components on
+ * every route, so `ColorMix((1, 0, 0), (0, 0, 1), 0.5)` mixes red with blue
+ * exactly as the interpreter does. A color VALUE on this target is the
+ * canonical OKLCh triple, so a tuple written at the call site is converted
+ * here with the same conversion `Rgb(r, g, b)` takes. Without it the compiled
+ * routes read that tuple as an OKLCh triple and answered a different color
+ * than the interpreter for the same expression.
+ *
+ * Only a tuple written LITERALLY at the call site can be recognized. A tuple
+ * that reaches this position through a variable has no shape at compile time,
+ * so it keeps the canonical reading: it is taken to be a color value already.
+ *
+ * A `List` written at a color position is refused; only an operand of unknown
+ * shape keeps the canonical reading. The interpreter's signatures say `tuple`
+ * and it answers `incompatible-type` for a list, so a compiled route must not
+ * quietly read as a color what the engine calls an error. A literal tuple of
+ * any width other than 3 or 4 is refused for the same reason.
+ */
+function compileColorOperand(
+  color: Expression,
+  compile: (expr: Expression) => string
+): string {
+  if (isFunction(color, 'List')) refuseColorList();
+  if (!isFunction(color, 'Tuple')) return compile(color);
+  const ops = color.ops;
+  if (ops.length < 3 || ops.length > 4) refuseColorTupleWidth(ops.length);
+  // A component that is provably not a scalar is not a color channel. The
+  // interpreter refuses such a tuple (`extractRgb` reads a finite number off
+  // each of the first three components), so `((1, 2), 0, 0)` must not compile
+  // to a color that comes out as NaN at run time.
+  for (const op of ops)
+    if (BaseCompiler.isNonScalarShape(op))
+      throw new Error(
+        'A color channel must be a scalar — a tuple/list component is not a ' +
+          'color channel. Fail closed (D6).'
+      );
+  return `_SYS.rgb(${ops.map((op) => compile(op)).join(', ')})`;
+}
+
+/** Decline a `List` written where a color is expected. */
+function refuseColorList(): never {
+  throw new Error(
+    'A list is not a color — a color operand must be a color, a color ' +
+      'string or a tuple of 3 or 4 components. Fail closed (D6).'
+  );
+}
+
+/** Decline a literal tuple that is too narrow or too wide to be a color. */
+function refuseColorTupleWidth(n: number): never {
+  throw new Error(
+    `A tuple of ${n} components is not a color — a color tuple has 3 ` +
+      'components, or 4 with the fourth read as alpha. Fail closed (D6).'
+  );
+}
+
+/**
  * Compile an operand that is read as color COMPONENTS rather than as a color
  * value (`ColorFromColorspace`'s first argument).
  *
@@ -2001,6 +2072,10 @@ const COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
  * the OKLCh triple of red back as sRGB channels and answered a color that was
  * not red at all. The interpreter takes the head's components verbatim at
  * this position, so emit them the same way.
+ *
+ * A `List` written here is refused, not read as components: the interpreter's
+ * signature is `(color | tuple, string)` and it answers `incompatible-type`
+ * for a list. Only an operand of unknown shape keeps the canonical reading.
  */
 function compileColorComponents(
   components: Expression,
@@ -2008,6 +2083,7 @@ function compileColorComponents(
 ): string {
   if (isFunction(components) && COLOR_HEADS.has(components.operator))
     return `[${components.ops.map((op) => compile(op)).join(', ')}]`;
+  if (isFunction(components, 'List')) refuseColorList();
   return compile(components);
 }
 
@@ -5170,35 +5246,44 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorToString: (args, compile) => {
     if (args.length === 0) throw new Error('ColorToString: no argument');
+    const c = compileColorOperand(args[0], compile);
     if (args.length >= 2)
-      return `_SYS.colorToString(${compile(args[0])}, ${compile(args[1])})`;
-    return `_SYS.colorToString(${compile(args[0])})`;
+      return `_SYS.colorToString(${c}, ${compile(args[1])})`;
+    return `_SYS.colorToString(${c})`;
   },
   ColorMix: (args, compile) => {
     if (args.length < 2) throw new Error('ColorMix: need two colors');
+    const c1 = compileColorOperand(args[0], compile);
+    const c2 = compileColorOperand(args[1], compile);
     if (args.length >= 3)
-      return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])}, ${compile(
-        args[2]
-      )})`;
-    return `_SYS.colorMix(${compile(args[0])}, ${compile(args[1])})`;
+      return `_SYS.colorMix(${c1}, ${c2}, ${compile(args[2])})`;
+    return `_SYS.colorMix(${c1}, ${c2})`;
   },
   ColorContrast: ([bg, fg], compile) => {
     if (bg === null || fg === null)
       throw new Error('ColorContrast: need two colors');
-    return `_SYS.colorContrast(${compile(bg)}, ${compile(fg)})`;
+    return `_SYS.colorContrast(${compileColorOperand(
+      bg,
+      compile
+    )}, ${compileColorOperand(fg, compile)})`;
   },
   ContrastingColor: (args, compile) => {
     if (args.length === 0) throw new Error('ContrastingColor: no argument');
+    const bg = compileColorOperand(args[0], compile);
     if (args.length >= 3)
-      return `_SYS.contrastingColor(${compile(args[0])}, ${compile(
-        args[1]
-      )}, ${compile(args[2])})`;
-    return `_SYS.contrastingColor(${compile(args[0])})`;
+      return `_SYS.contrastingColor(${bg}, ${compileColorOperand(
+        args[1],
+        compile
+      )}, ${compileColorOperand(args[2], compile)})`;
+    return `_SYS.contrastingColor(${bg})`;
   },
   ColorToColorspace: ([color, space], compile) => {
     if (color === null || space === null)
       throw new Error('ColorToColorspace: need color and space');
-    return `_SYS.colorToColorspace(${compile(color)}, ${compile(space)})`;
+    return `_SYS.colorToColorspace(${compileColorOperand(
+      color,
+      compile
+    )}, ${compile(space)})`;
   },
   ColorFromColorspace: ([components, space], compile) => {
     if (components === null || space === null)
@@ -5260,30 +5345,38 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // -----------------------------------------------------------------------
   AsRgb: ([c], compile) => {
     if (c === null) throw new Error('AsRgb: no argument');
-    return `_SYS.asRgb(${compile(c)})`;
+    return `_SYS.asRgb(${compileColorOperand(c, compile)})`;
   },
   AsHsv: ([c], compile) => {
     if (c === null) throw new Error('AsHsv: no argument');
-    return `_SYS.asHsv(${compile(c)})`;
+    return `_SYS.asHsv(${compileColorOperand(c, compile)})`;
   },
   AsHsl: ([c], compile) => {
     if (c === null) throw new Error('AsHsl: no argument');
-    return `_SYS.asHsl(${compile(c)})`;
+    return `_SYS.asHsl(${compileColorOperand(c, compile)})`;
   },
   AsOklab: ([c], compile) => {
     if (c === null) throw new Error('AsOklab: no argument');
-    return `_SYS.asOklab(${compile(c)})`;
+    return `_SYS.asOklab(${compileColorOperand(c, compile)})`;
   },
-  AsOklch: ([c], compile) => {
+  AsOklch: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklch: no argument');
-    return compile(c); // identity — already in canonical form
+    // Identity for a color value — it is already in the canonical form. A
+    // tuple at this position is sRGB components and still has to be
+    // converted. The identity case hands the parent the OPERAND's own code,
+    // which may be an infix expression, so it is parenthesized like every
+    // other identity lowering (`identityPassthrough`).
+    return parenthesizeIdentity(c, compileColorOperand(c, compile), target);
   },
 
   // Perceptual color difference (ΔE_OK).
   ColorDelta: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('ColorDelta: need two colors');
-    return `_SYS.colorDelta(${compile(a)}, ${compile(b)})`;
+    return `_SYS.colorDelta(${compileColorOperand(
+      a,
+      compile
+    )}, ${compileColorOperand(b, compile)})`;
   },
 
   // Euclidean distance between two tuples (any positive dimension).
@@ -5587,22 +5680,81 @@ function toOklch(input: string | number[]): {
 }
 
 /**
- * Parse a CSS-style color string to a packed `0xRRGGBBAA` integer.
+ * A `#` color with exactly 3, 4, 6 or 8 hexadecimal digits. `parseColor()`
+ * does not check the digits of a `#` form — it reads `#gg0000` as opaque
+ * black — so the shape is checked here.
+ */
+const HEX_COLOR_FORM = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/;
+
+/** A `#` color with exactly 4 hexadecimal digits (`#rgba`). */
+const FOUR_DIGIT_HEX_FORM = /^#[0-9a-f]{4}$/;
+
+/**
+ * Expand a four-digit `#rgba` spelling to the eight-digit `#rrggbbaa` form by
+ * doubling each digit. Returns `undefined` for any other spelling.
  *
- * `parseColor()` answers 0 both for an unrecognized string and for
- * transparent black, so the two are told apart here by the spelling — the
- * same test the interpreter applies (`parseColorString`, `library/colors.ts`).
+ * `parseColor()` reads a `#` form of 3, 6 or 8 digits only and answers its
+ * zero sentinel for every other length, so `#f00f` — opaque red in CSS — was
+ * read as transparent black. The expansion is done before the call so the
+ * parser sees a length it handles.
+ */
+function expandFourDigitHex(spelling: string): string | undefined {
+  if (!FOUR_DIGIT_HEX_FORM.test(spelling)) return undefined;
+  return `#${[...spelling.slice(1)].map((d) => d + d).join('')}`;
+}
+
+/**
+ * A COMPLETE functional color notation: one of the spellings `parseColor()`
+ * understands, with a non-empty argument list closed by a parenthesis.
+ *
+ * Measured against `@arnog/colors`, not assumed: `hsla(`, `lab(`, `lch(`,
+ * `hwb(` and `color(` are NOT among them and are refused like any other
+ * unknown spelling.
+ *
+ * The whole form is anchored, not just the opening prefix: an unterminated or
+ * empty spelling (`rgb(255,0,0`, `rgba()`) also packs to the parser's zero
+ * sentinel, and reading it as transparent black turned a typing mistake into
+ * a color. An alpha written inside the parentheses (`rgb(0 0 0 / 0)`) is part
+ * of the argument list, so the form still admits it.
+ */
+const COLOR_FUNCTION_FORM = /^(rgba?|hsl|oklch|oklab)\s*\(\s*[^()]+\s*\)$/;
+
+/**
+ * Parse a CSS-style color string to a packed `0xRRGGBBAA` integer. This is
+ * the same predicate the interpreter applies (`parseColorString`,
+ * `library/colors.ts`), which the GPU target calls directly, so a string is a
+ * color on every route or on none of them.
+ *
+ * `parseColor()` answers 0 both for a string that is not a color and for
+ * transparent black, whose packing is 0. The two are told apart by the
+ * SPELLING: a well-formed color notation that lands on 0 is transparent
+ * black, so `#00000000` and `rgba(0, 0, 0, 0)` are colors just as the keyword
+ * `transparent` is. A COMPUTED color with a zero alpha is a color value, not
+ * a string, and never reaches this predicate.
+ *
  * A string that names no color throws, which is how the neighbouring helpers
  * already report an unusable name ("Unknown palette", "Unknown color
  * space"). Reading it as transparent black instead made a misspelled color
- * compile to a silent, plausible-looking value where the interpreter
- * answered `incompatible-type`.
+ * compile to a silent, plausible-looking value where the interpreter answered
+ * `incompatible-type`.
  */
 function parseColorStringOrThrow(input: string): number {
-  const c = parseColor(input as HexColor);
-  if (c === 0 && input.trim().toLowerCase() !== 'transparent')
+  const spelling = input.trim().toLowerCase();
+  const refuse = (): never => {
     throw new Error(`Unknown color: ${input}`);
-  return c;
+  };
+  if (spelling.startsWith('#') && !HEX_COLOR_FORM.test(spelling)) refuse();
+  let c: number;
+  try {
+    c = parseColor((expandFourDigitHex(spelling) ?? input) as HexColor);
+  } catch {
+    // A malformed functional notation throws inside the parser.
+    return refuse();
+  }
+  if (c !== 0) return c;
+  if (spelling === 'transparent' || spelling.startsWith('#')) return 0;
+  if (COLOR_FUNCTION_FORM.test(spelling)) return 0;
+  return refuse();
 }
 
 /** Packed 0xRRGGBBAA integer to Oklch `[L, C, H]` or `[L, C, H, alpha]`. */
@@ -5717,10 +5869,26 @@ const colorHelpers = {
   ): number[] {
     const bgRgb = toRgb255(bg);
     if (fg1 !== undefined && fg2 !== undefined) {
-      return packedToOklch(
-        contrastingColor({ bg: bgRgb, fg1: toRgb255(fg1), fg2: toRgb255(fg2) })
-      );
+      // Answer the CHOSEN candidate itself, in this target's canonical OKLCh
+      // form. The library routine answers a packed 0xRRGGBBAA integer, so
+      // taking the color back from it quantized to 8 bits per channel a
+      // candidate the caller passed as an exact color — the same loss the
+      // interpreter no longer takes, where the chosen operand is answered
+      // verbatim in the color space it was written in.
+      //
+      // The comparison is the library's: the larger ABSOLUTE APCA contrast
+      // wins, with the candidate as the FIRST argument of the contrast (APCA
+      // is not symmetric in its two arguments).
+      const rgb1 = toRgb255(fg1);
+      const rgb2 = toRgb255(fg2);
+      const chosen =
+        Math.abs(apca(rgb1, bgRgb)) >= Math.abs(apca(rgb2, bgRgb)) ? fg1 : fg2;
+      return typeof chosen === 'string'
+        ? packedToOklch(parseColorStringOrThrow(chosen))
+        : [...chosen];
     }
+    // Default: the better of the built-in white and black. Neither is a
+    // caller value, so there is no color space to preserve.
     return packedToOklch(contrastingColor(bgRgb));
   },
   colorToColorspace(input: string | number[], space: string): number[] {

@@ -349,12 +349,12 @@ To search the library by concept rather than by name, use
 | `color` | `Color` | `(string) -> color` | Parse a CSS-style color string to an Oklch color |
 | `colorContrast` | `ColorContrast` | `(color \| string \| tuple, color \| string \| tuple) -> number` | APCA contrast ratio between two colors |
 | `colorDelta` | `ColorDelta` | `(color \| string \| tuple, color \| string \| tuple) -> number` | Perceptual color difference (ΔE_OK) between two colors |
-| `colorFromColorspace` | `ColorFromColorspace` | `(color \| tuple, string) -> tuple` | Convert color space components to a canonical sRGB tuple |
+| `colorFromColorspace` | `ColorFromColorspace` | `(color \| tuple, string) -> tuple` | Convert color space components to a color, answered in the canonical form of the route: an sRGB tuple when evaluated, the target's canonical color value when compiled. |
 | `colorMix` | `ColorMix` | `(color \| string \| tuple, color \| string \| tuple, number?) -> color` | Mix two colors in OKLCh space |
 | `colorToColorspace` | `ColorToColorspace` | `(color \| string \| tuple, string) -> tuple` | Convert a color to components in a target color space |
 | `colorToString` | `ColorToString` | `(color \| string \| tuple, string?) -> string` | Convert a color to a string in the specified format |
 | `colormap` | `Colormap` | `(string, number?) -> color \| list<color>` | Sample colors from a named palette |
-| `contrastingColor` | `ContrastingColor` | `(color \| string \| tuple, (color \| string \| tuple)?, (color \| string \| tuple)?) -> color` | Choose the foreground color with better APCA contrast against a background |
+| `contrastingColor` | `ContrastingColor` | `(color \| string \| tuple, (color \| string \| tuple)?, (color \| string \| tuple)?) -> color` | Choose the foreground color with better APCA contrast against a background, answered as given: the interpreter keeps the color head the candidate was written with, and a compiled target answers the same color in its canonical form |
 | `hsl` | `Hsl` | `(number, number, number, number?) -> color` | HSL color (hue degrees, saturation/lightness 0-1, optional alpha) |
 | `hsv` | `Hsv` | `(number, number, number, number?) -> color` | HSV color (hue degrees, saturation/value 0-1, optional alpha) |
 | `oklab` | `Oklab` | `(number, number, number, number?) -> color` | OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha) |

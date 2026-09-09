@@ -807,9 +807,14 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
         ['Tuple', 0.5, 0.1, 30],
       ])
     ).toBe(
-      '(abs(_gpu_apca(vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0))) >= ' +
-        'abs(_gpu_apca(vec3(0.5, 0.1, 30.0), vec3(1.0, 1.0, 1.0))) ? ' +
-        'vec3(0.0, 0.0, 0.0) : vec3(0.5, 0.1, 30.0))'
+      // Every operand is a tuple, which is 0-1 sRGB on every route, so each
+      // reaches the contrast through `_gpu_srgb_to_oklch`.
+      '(abs(_gpu_apca(_gpu_srgb_to_oklch(vec3(0.0, 0.0, 0.0)), ' +
+        '_gpu_srgb_to_oklch(vec3(1.0, 1.0, 1.0)))) >= ' +
+        'abs(_gpu_apca(_gpu_srgb_to_oklch(vec3(0.5, 0.1, 30.0)), ' +
+        '_gpu_srgb_to_oklch(vec3(1.0, 1.0, 1.0)))) ? ' +
+        '_gpu_srgb_to_oklch(vec3(0.0, 0.0, 0.0)) : ' +
+        '_gpu_srgb_to_oklch(vec3(0.5, 0.1, 30.0)))'
     );
     expect(
       gpuCode([
