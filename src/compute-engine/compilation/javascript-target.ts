@@ -23,7 +23,10 @@ import {
   isFunction,
   isString,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralBoundNames,
+  functionLiteralParameterName,
+} from '../boxed-expression/function-literal.js';
 import { Complex } from 'complex-esm';
 import {
   tryGetConstant,
@@ -204,6 +207,10 @@ import {
   unionAdmitsIndexedCollection,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import {
+  overriddenCompilationHeads,
+  unrollFixedWidthCollections,
+} from './fixed-width-unroll.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import type {
   CompileMode,
@@ -3277,7 +3284,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // extra arguments must not leak into the lambda's parameters (the
   // interpreter passes exactly `(x)`). A mapping operand that does not
   // compile to a lambda fails closed.
-  Map: (args, compile) => {
+  Map: (args, compile, target) => {
     if (args[1] == null) throw new Error('Map: missing source collection');
     // The multi-collection (zipWith) form: `Map(f, xs, ys)` is
     // `[f(x1, y1), f(x2, y2), …]`, as long as the SHORTEST source — the
@@ -3296,45 +3303,45 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const colls = sources.map((a, i) =>
         elementsArg('Map', a, compile, i + 2)
       );
-      const fn = zipFnArg('Map', args[0], sources, compile);
+      const fn = zipFnArg('Map', args[0], sources, compile, target);
       return `((_f, ..._ls) => Array.from({ length: Math.min(..._ls.map((_l) => _l.length)) }, (_, _i) => _f(..._ls.map((_l) => _l[_i]))))(${fn}, ${colls.join(', ')})`;
     }
     const coll = elementsArg('Map', args[1], compile);
-    return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile)})`;
+    return `((_f) => (${coll}).map((_x) => _f(_x)))(${fnArg('Map', args[0], args[1], compile, [], target)})`;
   },
-  Filter: (args, compile) => {
+  Filter: (args, compile, target) => {
     const coll = elementsArg('Filter', args[0], compile);
     if (args[1] == null) throw new Error('Filter: missing predicate');
     return joinIfString(
       args[0],
-      `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile)})`
+      `((_f) => (${coll}).filter((_x) => _f(_x)))(${fnArg('Filter', args[1], args[0], compile, [], target)})`
     );
   },
   // Number of elements satisfying the predicate.
-  CountIf: (args, compile) => {
+  CountIf: (args, compile, target) => {
     const coll = elementsArg('CountIf', args[0], compile);
     if (args[1] == null) throw new Error('CountIf: missing predicate');
-    return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile)})`;
+    return `((_f) => (${coll}).filter((_x) => _f(_x)).length)(${fnArg('CountIf', args[1], args[0], compile, [], target)})`;
   },
   // First element satisfying the predicate; none → NaN (the interpreter's
   // `Nothing` projected onto a real target, matching `Last`).
-  Find: (args, compile) => {
+  Find: (args, compile, target) => {
     const coll = elementsArg('Find', args[0], compile);
     if (args[1] == null) throw new Error('Find: missing predicate');
-    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${fnArg('Find', args[1], args[0], compile)})`;
+    return `((_f) => ((${coll}).find((_x) => _f(_x)) ?? NaN))(${fnArg('Find', args[1], args[0], compile, [], target)})`;
   },
   // 1-based index of the first element satisfying the predicate, or 0 if
   // none — `findIndex` is 0-based and returns -1, so `+ 1` maps both.
-  IndexWhere: (args, compile) => {
+  IndexWhere: (args, compile, target) => {
     const coll = elementsArg('IndexWhere', args[0], compile);
     if (args[1] == null) throw new Error('IndexWhere: missing predicate');
-    return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${fnArg('IndexWhere', args[1], args[0], compile)})`;
+    return `((_f) => (${coll}).findIndex((_x) => _f(_x)) + 1)(${fnArg('IndexWhere', args[1], args[0], compile, [], target)})`;
   },
   // List of the 1-based indexes of the elements satisfying the predicate.
-  Position: (args, compile) => {
+  Position: (args, compile, target) => {
     const coll = elementsArg('Position', args[0], compile);
     if (args[1] == null) throw new Error('Position: missing predicate');
-    return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${fnArg('Position', args[1], args[0], compile)})`;
+    return `((_f) => (${coll}).flatMap((_x, _i) => _f(_x) ? [_i + 1] : []))(${fnArg('Position', args[1], args[0], compile, [], target)})`;
   },
   // Apply the function to 1-based indexes: 1-D `Tabulate(f, n)` → list;
   // 2-D `Tabulate(f, m, n)` → m×n nested list with the first dimension
@@ -3348,7 +3355,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter (it stays symbolic, e.g. `Tabulate(f, 0)`), so it fails closed
   // (D6) here rather than compiling to `[]` behind `success: true` — mirroring
   // the `Range`/`Table` step-0 precedent.
-  Tabulate: (args, compile) => {
+  Tabulate: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Tabulate: missing argument');
     if (args.length > 3)
@@ -3369,7 +3376,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       'integer',
       'integer',
     ]);
-    const f = compile(args[0]);
+    const f = hoistedCallbackLambda(args[0], compile, target);
     const n = compile(args[1]);
     if (args.length === 2)
       return `((_f, _n) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => _f(_i + 1)))(${f}, ${n})`;
@@ -3379,7 +3386,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Fill(f, (rows, cols))` → rows×cols nested list of `f(i, j)` with
   // 1-based row/column indexes, matching the interpreter. Same hoisting and
   // dimension normalization as `Tabulate`.
-  Fill: (args, compile) => {
+  Fill: (args, compile, target) => {
     const dims = args[1];
     if (args[0] == null || dims == null)
       throw new Error('Fill: missing argument');
@@ -3392,7 +3399,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       'integer',
       'integer',
     ]);
-    const f = compile(args[0]);
+    const f = hoistedCallbackLambda(args[0], compile, target);
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
     return `((_f, _r, _c) => Array.from({ length: Math.max(0, Math.round(_r)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_c)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${rows}, ${cols})`;
@@ -3621,7 +3628,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // with a step, complete sliding windows only — mirroring the interpreter.
   // The predicate form yields [[matching], [non-matching]]. The predicate is
   // hoisted and called unary, like the other higher-order operators.
-  Partition: (args, compile) => {
+  Partition: (args, compile, target) => {
     const coll = collArg('Partition', args[0], compile);
     const arg = args[1];
     if (arg == null) throw new Error('Partition: missing operand');
@@ -3649,7 +3656,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       (isSymbol(arg) &&
         BaseCompiler.userFunctionLiteral(arg.engine, arg.symbol) !== undefined)
     )
-      return `((_f, _l) => { const _t = [], _u = []; for (const _x of _l) (_f(_x) ? _t : _u).push(_x); return [_t, _u]; })(${fnArg('Partition', arg, args[0], compile)}, ${coll})`;
+      return `((_f, _l) => { const _t = [], _u = []; for (const _x of _l) (_f(_x) ? _t : _u).push(_x); return [_t, _u]; })(${fnArg('Partition', arg, args[0], compile, [], target)}, ${coll})`;
     throw new Error(
       `Partition: the second operand must be an integer or a function ` +
         `literal. Fail closed (D6).`
@@ -3694,51 +3701,56 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // predicate form compiles: without a predicate the elements must be
   // booleans, which a numeric collection cannot prove — the interpreter
   // stays inert there.
-  Any: (args, compile) => {
+  Any: (args, compile, target) => {
     const coll = elementsArg('Any', args[0], compile);
     if (args[1] == null)
       throw new Error(
         `Any: only the predicate form compiles. Fail closed (D6).`
       );
-    return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile)})`;
+    return `((_f) => (${coll}).some((_x) => _f(_x)))(${fnArg('Any', args[1], args[0], compile, [], target)})`;
   },
-  All: (args, compile) => {
+  All: (args, compile, target) => {
     const coll = elementsArg('All', args[0], compile);
     if (args[1] == null)
       throw new Error(
         `All: only the predicate form compiles. Fail closed (D6).`
       );
-    return `((_f) => (${coll}).every((_x) => _f(_x)))(${fnArg('All', args[1], args[0], compile)})`;
+    return `((_f) => (${coll}).every((_x) => _f(_x)))(${fnArg('All', args[1], args[0], compile, [], target)})`;
   },
   // Longest prefix satisfying the predicate / the rest after that prefix.
-  TakeWhile: (args, compile) => {
+  TakeWhile: (args, compile, target) => {
     if (args[1] == null) throw new Error('TakeWhile: missing predicate');
     // A statically infinite operand compiles as a lazy stream, scanned until
     // the predicate first fails (see `takeWhileIter` for the
-    // never-false-predicate caveat).
+    // never-false-predicate caveat). The predicate is compiled without the
+    // loop-invariant hoist (no `target` is passed to `fnArg`) for the reason
+    // `emitLazyStream` states: the stream yields one element at a time, so an
+    // upstream stage's callback runs between two calls of this predicate, and
+    // an upstream body that assigns a variable of the enclosing scope would
+    // leave the predicate reading a binding cached before that assignment.
     if (isLazyStream(args[0]))
       return `_SYS.takeWhileIter(${emitLazyStream(args[0]!, compile)}, ${fnArg('TakeWhile', args[1], args[0], compile)})`;
     const coll = elementsArg('TakeWhile', args[0], compile);
     return joinIfString(
       args[0],
-      `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${fnArg('TakeWhile', args[1], args[0], compile)}, ${coll})`
+      `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? _l.slice() : _l.slice(0, _i); })(${fnArg('TakeWhile', args[1], args[0], compile, [], target)}, ${coll})`
     );
   },
-  DropWhile: (args, compile) => {
+  DropWhile: (args, compile, target) => {
     const coll = elementsArg('DropWhile', args[0], compile);
     if (args[1] == null) throw new Error('DropWhile: missing predicate');
     return joinIfString(
       args[0],
-      `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${fnArg('DropWhile', args[1], args[0], compile)}, ${coll})`
+      `((_f, _l) => { const _i = _l.findIndex((_x) => !_f(_x)); return _i < 0 ? [] : _l.slice(_i); })(${fnArg('DropWhile', args[1], args[0], compile, [], target)}, ${coll})`
     );
   },
   // Map + flatten one level. Native `flatMap` matches the interpreter for
   // both shapes: a collection-valued mapping is spliced, a scalar result is
   // kept as-is.
-  FlatMap: (args, compile) => {
+  FlatMap: (args, compile, target) => {
     const coll = collArg('FlatMap', args[0], compile);
     if (args[1] == null) throw new Error('FlatMap: missing mapping function');
-    return `((_f) => (${coll}).flatMap((_x) => _f(_x)))(${fnArg('FlatMap', args[1], args[0], compile)})`;
+    return `((_f) => (${coll}).flatMap((_x) => _f(_x)))(${fnArg('FlatMap', args[1], args[0], compile, [], target)})`;
   },
   // Running fold: the accumulator AFTER each element; the initial value is
   // not emitted. Without an initial value the first element seeds the
@@ -9102,6 +9114,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // semantics (scaled trig args, scaled inverse-trig results) so compiled
     // output agrees with evaluate().
     expr = rewriteAngularUnit(expr);
+    // Turn a collection whose WIDTH is known at compile time into straight-line
+    // scalar code, so this target sees the shape the interpreter computes
+    // rather than a runtime array (`fixed-width-unroll.ts`). A head the caller
+    // overrode is withheld from the pass: the caller's implementation replaces
+    // the emission and receives the node's own operands, which an unroll would
+    // change.
+    const unrollSkipHeads = overriddenCompilationHeads(
+      options.operators,
+      options.functions
+    );
+    expr = unrollFixedWidthCollections(expr, { skipHeads: unrollSkipHeads });
     const {
       operators,
       functions,
@@ -9202,6 +9225,9 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
       mode: options.mode,
       foldExcludedOps: foldExcludedOps.size > 0 ? foldExcludedOps : undefined,
+      // See `CompileTarget.unrollSkipHeads`: the same answer the entry above
+      // used, for the definition bodies this entry never sees.
+      unrollSkipHeads,
       operators: operatorLookup,
       varsObjectRefs,
       // See `CompileTarget.varsObjectName`: free symbols read as `_.<id>`, so
@@ -9857,6 +9883,20 @@ function isLazyStream(expr: Expression | undefined): boolean {
  * iterator code. Only a bounding consumer calls this; the eager handlers for
  * the same operators never produce iterator code, so array-consuming
  * lowerings never receive one.
+ *
+ * The callbacks of the `Map`/`Filter` stages are compiled WITHOUT the
+ * loop-invariant hoist of `hoistedCallbackLambda` (no `target` is passed to
+ * `fnArg`). A stage of a lazy stream pulls one element at a time
+ * (`_SYS.mapIter` is `for (const x of it) yield f(x)`), so the callback of an
+ * UPSTREAM stage runs BETWEEN two calls of this stage's callback. An upstream
+ * body that assigns a variable of the enclosing scope therefore changes, in
+ * the middle of this stage's iteration, a value this stage treats as
+ * invariant: the hoist binds that value on the first call and every later
+ * element would read the stale binding. The candidate analysis cannot see
+ * that assignment — `BaseCompiler.loopInvariantHoistCandidates` scans only
+ * the body it is given. The eager lowerings of the same operators are safe
+ * because their source collection is fully materialized before the callback
+ * is called even once.
  */
 function emitLazyStream(
   expr: Expression,
@@ -10294,19 +10334,138 @@ function compileJSPad(
 }
 
 /**
+ * Compile a callback `Function` literal with the LOOP-INVARIANT
+ * subexpressions of its body bound once, outside the per-element lambda.
+ *
+ * Every callback lowering of this target instantiates the lambda once and
+ * calls it per element (`((_f) => (coll).map((_x) => _f(_x)))(lambda)`), but
+ * the lambda BODY is emitted whole, so a subexpression that mentions none of
+ * the lambda's parameters was recomputed for every element. A call to a
+ * user-defined function of the ENCLOSING parameters is the expensive case:
+ * `Map((_) ↦ Which(_ = m(x, y), …), d(x, y))` over a nine-element list called
+ * `m(x, y)` nine times, and `m` rebuilds the whole list it reduces.
+ * `BaseCompiler.hoistLoopInvariants` finds the subexpressions that qualify —
+ * pure, admissible to emit once, and free of the lambda's parameters — and
+ * rewrites the body to read a name instead of recomputing them.
+ *
+ * The names are declared next to the lambda, where the enclosing scope's
+ * variables are still visible and the lambda's parameters are not, and are
+ * ASSIGNED on the FIRST call of the lambda, behind a flag. A collection may
+ * be empty, and the interpreter then evaluates no part of the body:
+ * assigning at instantiation time would evaluate a subexpression the
+ * unhoisted code never reached, so an error it raises would be new. The
+ * first call also keeps the assignments AFTER the source collection is
+ * built, which is the order the unhoisted body ran in. The flag costs one
+ * boolean read per element. `BaseCompiler.compileComprehension` initializes
+ * its own hoisted bindings on the first iteration for the same two reasons.
+ *
+ * A callback that is not a `Function` literal — a bare user-function symbol,
+ * an operator symbol — has no body to rewrite here and compiles unchanged.
+ */
+function hoistedCallbackLambda(
+  callback: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  if (
+    target === undefined ||
+    target.language !== 'javascript' ||
+    !isFunction(callback, 'Function') ||
+    callback.ops[0] === undefined
+  )
+    return compile(callback);
+
+  // The body as the `Function` lowering compiles it, so the hoist scans the
+  // very node objects the emission will reach: it rewrites an occurrence by
+  // installing a code override keyed on the NODE.
+  //
+  // A function literal canonicalizes its body into a `Block`, which is a
+  // SCOPE, and the candidate pass never descends into a scope: a name the
+  // scope declares does not exist where the bindings are emitted. A block of
+  // ONE statement declares nothing before that statement, so the statement
+  // itself is what is scanned. A block of several statements may declare a
+  // local that a later statement reads, so it is left whole and nothing is
+  // hoisted out of it.
+  const block = callback.ops[0].canonical;
+  const body =
+    isFunction(block, 'Block') && block.nops === 1 ? block.ops[0] : block;
+  // Every name the parameter list BINDS is varying. A destructuring pattern
+  // binds its leaf names and has no name of its own, so
+  // `functionLiteralBoundNames` — not `functionLiteralParameterName`, which
+  // answers `''` for a pattern — is what the hoist must be told: a body that
+  // reads a leaf of `((p, q)) ↦ p + q` reads a value that changes with every
+  // element, and binding it once would freeze the first element's components.
+  const varying = functionLiteralBoundNames(callback.ops.slice(1));
+
+  const { bindings, result: lambda } = BaseCompiler.hoistLoopInvariants(
+    body,
+    varying,
+    target,
+    () => compile(callback)
+  );
+  if (bindings.length === 0) return lambda;
+
+  // An emitter that REBUILDS the literal before it compiles the body — the
+  // ground-signature repair a generic literal takes in the `Function`
+  // lowering — compiles different node objects, which no override reaches.
+  // The bindings would then be declared and never read. Emit them only when
+  // the compiled lambda names one of them.
+  const named = new RegExp(
+    `(?<![\\w$])(?:${bindings.map(([name]) => name).join('|')})(?![\\w$])`
+  );
+  if (!named.test(lambda)) return lambda;
+
+  const statements = javascriptStatements(target);
+  const flag = BaseCompiler.tempVar(target);
+  const held = BaseCompiler.tempVar(target);
+  // The shim forwards exactly the lambda's own parameter count: the native
+  // callbacks pass `(x, index, array)`, and the extra arguments must not
+  // reach the lambda (the interpreter passes exactly the element). The count
+  // is the number of parameter OPERANDS, which is not the number of names
+  // they bind: a destructuring pattern is ONE parameter that binds a name per
+  // leaf of the pattern, and a `_` leaf binds no name at all.
+  const args = callback.ops.slice(1).map(() => BaseCompiler.tempVar(target));
+  const declarations = `let ${flag} = false; let ${bindings
+    .map(([name]) => name)
+    .join(', ')}; `;
+  // In DEPENDENCY order, as `hoistLoopInvariants` returns them: a later
+  // right-hand side may read an earlier name.
+  const assignments = bindings
+    .map(
+      ([name, code]) =>
+        statements?.consume(code, (value) => `${name} = ${value};`) ??
+        `${name} = ${code};`
+    )
+    .join(' ');
+  const shim =
+    `(${args.join(', ')}) => { if (!${flag}) { ${flag} = true; ` +
+    `${assignments} } return ${held}(${args.join(', ')}); }`;
+  const holder =
+    statements?.initialize(held, lambda) ?? `const ${held} = ${lambda};`;
+  return (
+    statements?.expression((exit) => `${declarations}${holder} ${exit(shim)}`) ??
+    `(() => { ${declarations}${holder} return ${shim}; })()`
+  );
+}
+
+/**
  * Compile an ELEMENT-consuming callback operand (a predicate, a mapping
  * function), failing closed (D6) when a parameter annotation the emitted
  * lowering cannot enforce is not provably satisfied by `source`'s element type
  * — see `BaseCompiler.assertCallbackAnnotations`. `extraArgTypes` prefixes the
  * element position for a combiner-shaped callback (`Reduce`/`Scan`, whose
  * first parameter is the accumulator).
+ *
+ * `target` enables the loop-invariant hoist of `hoistedCallbackLambda`; a
+ * caller that has no target compiles the callback unchanged.
  */
 function fnArg(
   kind: string,
   callback: Expression | undefined,
   source: Expression | undefined,
   compile: (expr: Expression) => string,
-  extraArgTypes: ReadonlyArray<Type | undefined> = []
+  extraArgTypes: ReadonlyArray<Type | undefined> = [],
+  target?: CompileTarget<Expression>
 ): string {
   BaseCompiler.assertCallbackAnnotations(kind, callback, [
     ...extraArgTypes,
@@ -10332,7 +10491,7 @@ function fnArg(
     const eta = BaseCompiler.complexElementCallbackEta(callback, source);
     if (eta !== undefined) return compile(eta);
   }
-  return compile(callback!);
+  return hoistedCallbackLambda(callback!, compile, target);
 }
 
 /**
@@ -10356,7 +10515,8 @@ function zipFnArg(
   kind: string,
   callback: Expression | undefined,
   sources: ReadonlyArray<Expression | undefined>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  target?: CompileTarget<Expression>
 ): string {
   if (
     isSymbol(callback) &&
@@ -10375,7 +10535,7 @@ function zipFnArg(
     BaseCompiler.zipCallbackArgTypes(kind, sources, 2)
   );
   BaseCompiler.assertBuiltinCallbackUsable(kind, callback);
-  return compile(callback!);
+  return hoistedCallbackLambda(callback!, compile, target);
 }
 
 //

@@ -60,6 +60,10 @@ import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import {
+  overriddenCompilationHeads,
+  unrollFixedWidthCollections,
+} from './fixed-width-unroll.js';
 import { foldSeed } from '../numerics/random.js';
 
 /**
@@ -10754,6 +10758,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   ): CompilationResult {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
+    // Turn a collection whose WIDTH is known at compile time into straight-line
+    // scalar code, so this target sees the shape the interpreter computes
+    // rather than a runtime array (`fixed-width-unroll.ts`). A head the caller
+    // overrode is withheld from the pass: the caller's implementation replaces
+    // the emission and receives the node's own operands, which an unroll would
+    // change. This target reads no `operators` option.
+    const unrollSkipHeads = overriddenCompilationHeads(
+      undefined,
+      options.functions
+    );
+    expr = unrollFixedWidthCollections(expr, { skipHeads: unrollSkipHeads });
     const { functions: userFunctions, vars } = options;
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();
@@ -10768,6 +10783,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       foldExcludedOps: userFunctions
         ? new Set(Object.keys(userFunctions))
         : undefined,
+      // See `CompileTarget.unrollSkipHeads`: the same answer the entry above
+      // used, for the definition bodies this entry never sees.
+      unrollSkipHeads,
       constantFold: options.constantFold,
       // The validated `storage` hints (`compile()` resolved them), read by
       // the `At` lowering and by the reference gate `createTargetFor`

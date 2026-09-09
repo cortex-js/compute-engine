@@ -32,6 +32,7 @@ import {
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
   isFunction,
@@ -3649,6 +3650,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): CompilationResult<'python'> {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
+    // Turn a collection whose WIDTH is known at compile time into straight-line
+    // scalar code, so this target sees the shape the interpreter computes
+    // rather than a runtime array (`fixed-width-unroll.ts`). No head is
+    // withheld from the pass here: this target has no `functions`/`operators`
+    // override channel, so no caller implementation can be handed operands the
+    // pass changed.
+    expr = unrollFixedWidthCollections(expr);
     const vars = options.vars as Record<string, string> | undefined;
     // Root compilation boundary: fresh, deterministic numbering for the
     // generated temporaries, seeded with the names this compilation must not

@@ -14,6 +14,10 @@ import { resolveStorageHints } from './storage-hints.js';
 import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import {
+  overriddenCompilationHeads,
+  unrollFixedWidthCollections,
+} from './fixed-width-unroll.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 
 export type CompileExpressionOptions<T extends string = string> = {
@@ -158,7 +162,21 @@ export function compile<
       // compilation boundary: the caller's target may be one it built once
       // and reuses, and per-compilation numbering must restart for each
       // `compile()` call (recompile-replay determinism).
-      const rewritten = rewriteAngularUnit(expr);
+      // The fixed-width unroll turns a collection whose width is known at
+      // compile time into straight-line scalar code; like the angular-unit
+      // rewrite it is target independent, and a raw target gets it here
+      // because it has no `compileOrThrow` of its own to apply it
+      // (`fixed-width-unroll.ts`).
+      // A head the caller overrode through the `operators`/`functions`
+      // options is withheld from the unroll: the caller's implementation
+      // replaces the emission and receives the node's own operands, which an
+      // unroll would change.
+      const rewritten = unrollFixedWidthCollections(rewriteAngularUnit(expr), {
+        skipHeads: overriddenCompilationHeads(
+          options.operators,
+          options.functions
+        ),
+      });
       // Install a fresh naming context for generated temporaries on every call,
       // so a target the caller reuses never carries stale numbering into the
       // next compilation; `compileRoot`'s signature is unchanged — this is the

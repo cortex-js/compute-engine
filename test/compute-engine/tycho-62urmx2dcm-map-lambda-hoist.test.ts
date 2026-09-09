@@ -1,0 +1,514 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
+/**
+ * The JavaScript target instantiates a callback lambda ONCE and calls it per
+ * element (`((_f) => (coll).map((_x) => _f(_x)))(lambda)`), but the lambda
+ * BODY used to be emitted whole: a subexpression that mentions none of the
+ * lambda's parameters was recomputed for every element. The expensive shape
+ * is a call to a user-defined function of the enclosing parameters —
+ * `Map((_) ↦ Which(_ = m(x, y), 1e9, True, _), d(x, y))`, where `m` reduces
+ * a list `d` rebuilds, so a nine-element map ran `m` nine times.
+ *
+ * The hoist binds such a subexpression once, next to the lambda, and assigns
+ * it on the FIRST call of the lambda — behind a flag, so an empty collection
+ * evaluates it as few times as the interpreter does (never).
+ *
+ * These tests read the EMITTED SOURCE, because the optimization has no other
+ * witness: the values are unchanged by construction.
+ */
+
+/** How many times `needle` appears in `code`. */
+const occurrences = (code: string, needle: string): number =>
+  code.split(needle).length - 1;
+
+/** The line of `preamble` that defines the emitted function `name`. */
+function definitionOf(preamble: string, name: string): string {
+  const line = preamble
+    .split('\n')
+    .find((l) => l.includes(`const _fn_${name} =`));
+  expect(line).toBeDefined();
+  return line!;
+}
+
+/**
+ * The body of the once-only initializer a hoisted callback carries —
+ * `if (!_flag) { _flag = true; <assignments> }` — or `''` when the emission
+ * hoisted nothing. Matched by brace balance, so a nested block inside an
+ * assignment stays inside the result.
+ */
+function firstCallInit(code: string): string {
+  const header = /if \(!(_[\w$]+)\) \{ \1 = true; /.exec(code);
+  if (header === null) return '';
+  const start = header.index + header[0].length;
+  let depth = 1;
+  let i = start;
+  for (; i < code.length && depth > 0; i++) {
+    if (code[i] === '{') depth++;
+    else if (code[i] === '}') depth--;
+  }
+  return code.slice(start, i - 1);
+}
+
+/** `code` with the once-only initializer removed: what runs per element. */
+function perElement(code: string): string {
+  const init = firstCallInit(code);
+  if (init === '') return code;
+  return code.replace(init, '');
+}
+
+/** The balanced argument text of the first `.map(` / `.filter(` … call. */
+function callbackOf(code: string, call: string): string {
+  const at = code.indexOf(call);
+  expect(at).toBeGreaterThanOrEqual(0);
+  let depth = 1;
+  let i = at + call.length;
+  for (; i < code.length && depth > 0; i++) {
+    if (code[i] === '(') depth++;
+    else if (code[i] === ')') depth--;
+  }
+  return code.slice(at + call.length, i - 1);
+}
+
+//
+// The Tycho witness (Desmos state 62urmx2dcm): nine lattice points per cell,
+// the squared distance to each, the minimum, then the SECOND minimum found by
+// masking the first out with a `Map`.
+//
+
+const N = 16;
+const n = 4;
+const h = 1 / n;
+const hash = (a: unknown) => [
+  'Mod',
+  ['Multiply', 10000, ['Sin', ['Multiply', 10000, a]]],
+  1,
+];
+const jitter = (x: unknown, y: unknown, s: number) =>
+  hash([
+    'Add',
+    ['Floor', ['Multiply', n, x]],
+    ['Multiply', n, ['Floor', ['Multiply', n, y]]],
+    s,
+  ]);
+const point = (x: unknown, y: unknown) => [
+  'Add',
+  [
+    'Multiply',
+    ['Divide', 1, n],
+    ['PointList', ['Floor', ['Multiply', n, x]], ['Floor', ['Multiply', n, y]]],
+  ],
+  [
+    'Multiply',
+    ['Divide', 1, n],
+    ['PointList', jitter(x, y, 0), jitter(x, y, 0.5)],
+  ],
+];
+const OFFSETS: [number, number][] = [
+  [-h, -h],
+  [0, -h],
+  [h, -h],
+  [-h, 0],
+  [0, 0],
+  [h, 0],
+  [-h, h],
+  [0, h],
+  [h, h],
+];
+const neighbours = (x: unknown, y: unknown) => [
+  'List',
+  ...OFFSETS.map(([dx, dy]) => point(['Add', x, dx], ['Add', y, dy])),
+];
+
+/** The by-REFERENCE chain: five named functions, each calling the last. */
+function byReferenceEngine(): ComputeEngine {
+  const ce = new ComputeEngine();
+  const def = (name: string, body: unknown) =>
+    ce.box(['DefineFunction', name, ['Function', body, 'x', 'y']]).evaluate();
+  def('V', neighbours('x', 'y'));
+  def('d', [
+    'Add',
+    ['Square', ['Subtract', 'x', ['PointX', ['V', 'x', 'y']]]],
+    ['Square', ['Subtract', 'y', ['PointY', ['V', 'x', 'y']]]],
+  ]);
+  def('m', ['Min', ['d', 'x', 'y']]);
+  def('d2', [
+    'Map',
+    ['Function', ['Which', ['Equal', '_', ['m', 'x', 'y']], 1e9, 'True', '_'], '_'],
+    ['d', 'x', 'y'],
+  ]);
+  def('m2', ['Min', ['d2', 'x', 'y']]);
+  return ce;
+}
+
+/** `(1/16)^2 - |m2(x, y) - m(x, y)|`, over the named functions. */
+const byReferenceRow = (x: unknown, y: unknown) => [
+  'Subtract',
+  ['Power', ['Divide', 1, N], 2],
+  ['Abs', ['Subtract', ['m2', x, y], ['m', x, y]]],
+];
+
+/** The same row with every definition INLINED — no named function at all. */
+function inlinedRow(): unknown {
+  const dIn = (x: unknown, y: unknown) => [
+    'Add',
+    ['Square', ['Subtract', x, ['PointX', neighbours(x, y)]]],
+    ['Square', ['Subtract', y, ['PointY', neighbours(x, y)]]],
+  ];
+  const mIn = (x: unknown, y: unknown) => ['Min', dIn(x, y)];
+  const d2In = (x: unknown, y: unknown) => [
+    'Map',
+    [
+      'Function',
+      ['Which', ['Equal', '_', mIn(x, y)], 1e9, 'True', '_'],
+      '_',
+    ],
+    dIn(x, y),
+  ];
+  return [
+    'Subtract',
+    ['Power', ['Divide', 1, N], 2],
+    ['Abs', ['Subtract', ['Min', d2In('x', 'y')], mIn('x', 'y')]],
+  ];
+}
+
+describe('callback lambda: loop-invariant hoist (JavaScript target)', () => {
+  it('a: the by-reference chain calls `_fn_m` once, outside the per-element callback', () => {
+    const ce = byReferenceEngine();
+    const result = compile(ce.box(byReferenceRow('x', 'y')), {
+      to: 'javascript',
+    } as any) as any;
+    expect(result.success).not.toBe(false);
+
+    const d2 = definitionOf(result.preamble, 'd2');
+
+    // The invariant call is emitted ONCE, where nine elements used to emit
+    // nine calls.
+    expect(occurrences(d2, '_fn_m')).toBe(1);
+
+    // It sits in the once-only initializer, not in the code that runs per
+    // element.
+    expect(firstCallInit(d2)).toContain('_fn_m');
+    expect(perElement(d2)).not.toContain('_fn_m');
+
+    // The native `.map` callback is the bare dispatch it has always been.
+    expect(callbackOf(d2, '.map(')).not.toContain('_fn_m');
+  });
+
+  it('b: an inline `Sin(x)` in a Map body is emitted once, outside the callback', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    const result = compile(
+      ce.box([
+        'Map',
+        ['Function', ['Add', '_', ['Sin', 'x']], '_'],
+        ['List', 1, 2, 3],
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+    expect(firstCallInit(code)).toContain('Math.sin');
+    expect(perElement(code)).not.toContain('Math.sin');
+    expect(callbackOf(code, '.map(')).not.toContain('Math.sin');
+  });
+
+  it('c: a Filter predicate hoists its invariant part', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    const result = compile(
+      ce.box([
+        'Filter',
+        ['List', 1, 2, 3, 4],
+        ['Function', ['Greater', '_', ['Sin', 'x']], '_'],
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+    expect(firstCallInit(code)).toContain('Math.sin');
+    expect(perElement(code)).not.toContain('Math.sin');
+  });
+
+  it('c2: CountIf, Find and IndexWhere hoist the same way', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    for (const op of ['CountIf', 'Find', 'IndexWhere']) {
+      const result = compile(
+        ce.box([
+          op,
+          ['List', 1, 2, 3, 4],
+          ['Function', ['Greater', '_', ['Sin', 'x']], '_'],
+        ]),
+        { to: 'javascript' } as any
+      ) as any;
+      expect(result.success).not.toBe(false);
+      const code: string = result.code;
+      expect(occurrences(code, 'Math.sin')).toBe(1);
+      expect(firstCallInit(code)).toContain('Math.sin');
+      expect(perElement(code)).not.toContain('Math.sin');
+    }
+  });
+
+  it('c3: the index-consuming Tabulate and Fill hoist the same way', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    const tabulate = compile(
+      ce.box(['Tabulate', ['Function', ['Multiply', '_', ['Sin', 'x']], '_'], 5]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(tabulate.success).not.toBe(false);
+    expect(occurrences(tabulate.code, 'Math.sin')).toBe(1);
+    expect(firstCallInit(tabulate.code)).toContain('Math.sin');
+    expect(perElement(tabulate.code)).not.toContain('Math.sin');
+    expect(tabulate.run({ x: 0.5 })).toEqual([
+      Math.sin(0.5),
+      2 * Math.sin(0.5),
+      3 * Math.sin(0.5),
+      4 * Math.sin(0.5),
+      5 * Math.sin(0.5),
+    ]);
+
+    // Two parameters: the shim forwards both.
+    const fill = compile(
+      ce.box([
+        'Fill',
+        ['Function', ['Add', 'i', 'j', ['Sin', 'x']], 'i', 'j'],
+        ['Tuple', 2, 3],
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(fill.success).not.toBe(false);
+    expect(occurrences(fill.code, 'Math.sin')).toBe(1);
+    expect(firstCallInit(fill.code)).toContain('Math.sin');
+    expect(fill.run({ x: 0.5 })).toEqual([
+      [2 + Math.sin(0.5), 3 + Math.sin(0.5), 4 + Math.sin(0.5)],
+      [3 + Math.sin(0.5), 4 + Math.sin(0.5), 5 + Math.sin(0.5)],
+    ]);
+  });
+
+  it('d: a body that reads only the parameter is left alone', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    const result = compile(
+      ce.box(['Map', ['Function', ['Sin', '_'], '_'], 'L']),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    // Nothing is invariant, so no binding and no once-only initializer.
+    expect(firstCallInit(code)).toBe('');
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+  });
+
+  it('d2: an IMPURE invariant stays inside the callback', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    const result = compile(
+      ce.box([
+        'Map',
+        ['Function', ['Add', '_', ['Sin', 'x'], ['Random']], '_'],
+        ['List', 1, 2, 3],
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    const draw = 'drawNextRandomNumber';
+    // The interpreter draws once per element, so the compiled code must too:
+    // the draw is emitted inside the lambda, never in the once-only
+    // initializer.
+    expect(occurrences(code, draw)).toBe(1);
+    expect(firstCallInit(code)).not.toContain(draw);
+    expect(perElement(code)).toContain(draw);
+    // The PURE invariant beside it is still hoisted.
+    expect(firstCallInit(code)).toContain('Math.sin');
+  });
+
+  it('d3: a `Random()` body hoists nothing at all', () => {
+    const ce = new ComputeEngine();
+    const result = compile(
+      ce.box([
+        'Map',
+        ['Function', ['Add', '_', ['Random']], '_'],
+        ['List', 1, 2, 3],
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+    const code: string = result.code;
+    expect(firstCallInit(code)).toBe('');
+    expect(occurrences(code, 'drawNextRandomNumber')).toBe(1);
+  });
+
+  it('d4: the hoisted value is computed once, and NOT AT ALL over an empty collection', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.declare('L', 'list<number>');
+    const result = compile(
+      ce.box(['Map', ['Function', ['Add', '_', ['Sin', 'x']], '_'], 'L']),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    // A getter counts how often a run reads `x`. The count includes whatever
+    // the runner's own entry check reads, which is the same for every call —
+    // so the counts are compared with EACH OTHER, never with a constant.
+    let reads = 0;
+    const count = (L: number[]): number => {
+      reads = 0;
+      const value = result.run({
+        L,
+        get x() {
+          reads++;
+          return 0.5;
+        },
+      });
+      expect(value).toEqual(L.map((v) => v + Math.sin(0.5)));
+      return reads;
+    };
+
+    const empty = count([]);
+    const three = count([1, 2, 3]);
+    const six = count([1, 2, 3, 4, 5, 6]);
+
+    // Once per CALL, not once per element: twice the elements reads `x` no
+    // more often. The defect this hoist fixes read it once per element.
+    expect(three).toBe(six);
+    // An empty collection runs the body zero times in the interpreter, so
+    // the compiled code must not evaluate the hoisted subexpression either:
+    // an error it raised would be one the unhoisted code never raised. The
+    // empty run reads `x` exactly one time LESS than a non-empty one.
+    expect(empty).toBe(three - 1);
+  });
+
+  it('f: a LAZY stream stage hoists NOTHING, where the eager Map still hoists', () => {
+    // A stage of a lazy stream pulls one element at a time (`_SYS.mapIter` is
+    // `for (const x of it) yield f(x)`), so the callback of an UPSTREAM stage
+    // runs between two calls of this stage's callback. An upstream body that
+    // assigns a variable of the enclosing scope therefore changes, in the
+    // middle of this stage's iteration, a value the stage would treat as
+    // invariant — and the candidate analysis cannot see that assignment,
+    // since it scans only the body it is given. So the lazy stages compile
+    // their callback unhoisted: `Math.sin` stays INSIDE the lambda. The eager
+    // lowerings have no such interleaving — their source collection is fully
+    // materialized before the callback is called even once — and keep the
+    // hoist.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+
+    const lazy = compile(
+      ce.box([
+        'Take',
+        [
+          'Map',
+          ['Function', ['Add', '_', ['Sin', 'x']], '_'],
+          ['Range', 1, { num: '+Infinity' }],
+        ],
+        3,
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(lazy.success).not.toBe(false);
+    const lazyCode: string = lazy.code;
+    expect(lazyCode).toContain('_SYS.mapIter');
+    // No once-only initializer at all, and the invariant call is emitted
+    // where it runs per element.
+    expect(firstCallInit(lazyCode)).toBe('');
+    expect(occurrences(lazyCode, 'Math.sin')).toBe(1);
+    expect(perElement(lazyCode)).toContain('Math.sin');
+    expect(lazy.run({ x: 0.5 })).toEqual([
+      1 + Math.sin(0.5),
+      2 + Math.sin(0.5),
+      3 + Math.sin(0.5),
+    ]);
+
+    // The same body over a literal list — an eager `Map` — still hoists.
+    const eager = compile(
+      ce.box([
+        'Map',
+        ['Function', ['Add', '_', ['Sin', 'x']], '_'],
+        ['List', 1, 2, 3],
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(eager.success).not.toBe(false);
+    expect(firstCallInit(eager.code)).toContain('Math.sin');
+    expect(perElement(eager.code)).not.toContain('Math.sin');
+  });
+
+  it('g: a callback rebuilt at its GROUND signature emits no hoist at all', () => {
+    // The hoist rewrites an occurrence by installing a code override keyed on
+    // the body NODE, so it only reaches an emission that compiles those very
+    // nodes. A callback whose declared signature is GENERIC is re-boxed at its
+    // ground bound before its body is compiled (the `Function` lowering's
+    // `literalAtGroundSignature` repair), which compiles different node
+    // objects: no override is read, and the bindings would be declared and
+    // never used. The emission checks whether the compiled lambda names any of
+    // its minted temporaries and, finding none, emits the plain lambda.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.declare('L', 'list<number>');
+    const result = compile(
+      ce.box([
+        'Map',
+        [
+          'Function',
+          [
+            'Typed',
+            ['Add', '_', ['Sin', 'x']],
+            { str: '(_: T) -> T where T: number' },
+          ],
+          '_',
+        ],
+        'L',
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    // No wrapper, no once-only initializer, and exactly one emission of the
+    // invariant — a declared-but-unread binding would show up as a second
+    // `Math.sin` beside an initializer that assigns a name nothing reads.
+    expect(firstCallInit(code)).toBe('');
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+    expect(result.run({ x: 0.5, L: [1, 2, 3] })).toEqual([
+      1 + Math.sin(0.5),
+      2 + Math.sin(0.5),
+      3 + Math.sin(0.5),
+    ]);
+  });
+
+  it('e: the compiled rows agree with the interpreter at 20 sample points', () => {
+    const ce = byReferenceEngine();
+    const byRef = compile(ce.box(byReferenceRow('x', 'y')), {
+      to: 'javascript',
+    } as any) as any;
+    expect(byRef.success).not.toBe(false);
+
+    const ceInline = new ComputeEngine();
+    const inline = compile(ceInline.box(inlinedRow() as any), {
+      to: 'javascript',
+    } as any) as any;
+    expect(inline.success).not.toBe(false);
+
+    for (let i = 0; i < 20; i++) {
+      const x = -0.83 + i * 0.0817;
+      const y = 0.61 - i * 0.0713;
+      // `.N()` and not `.evaluate()`: a transcendental of an EXACT argument
+      // stays symbolic under `evaluate()` (the exactness contract), and at a
+      // lattice-aligned sample the whole chain is exact.
+      const expected = ce.box(byReferenceRow(x, y) as any).N().re;
+      expect(typeof expected).toBe('number');
+      expect(byRef.run({ x, y })).toBeCloseTo(expected, 9);
+      expect(inline.run({ x, y })).toBeCloseTo(expected, 9);
+    }
+  });
+});

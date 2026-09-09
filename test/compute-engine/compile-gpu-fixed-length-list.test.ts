@@ -416,10 +416,20 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
     const ce = new ComputeEngine();
     expect(
       glsl.compile(
-        ce.box(['Multiply', ['Sum', ['List', ['Add', 'x', 1]]], 2]),
+        ce.box(['Multiply', ['Sum', ['Tuple', ['Add', 'x', 1]]], 2]),
         NO_FOLD
       ).code
     ).toBe('2.0 * ((x + 1.0))');
+    // The same probe over a LIST never reaches this fold: a reduction over a
+    // literal list is made n-ary before any target sees it
+    // (`compilation/fixed-width-unroll.ts`), so a one-element `Sum` is just
+    // its element and the surrounding `Multiply` parenthesizes it itself.
+    expect(
+      glsl.compile(
+        ce.box(['Multiply', ['Sum', ['List', ['Add', 'x', 1]]], 2]),
+        NO_FOLD
+      ).code
+    ).toBe('2.0 * (x + 1.0)');
     expect(
       glsl.compile(
         ce.box(['Sum', ['Tuple', ['Add', 'x', 1], 'y']]),

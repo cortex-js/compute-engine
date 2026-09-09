@@ -107,6 +107,7 @@ import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
+import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import {
   isWildcard,
   wildcardName,
@@ -17390,12 +17391,20 @@ export class BaseCompiler {
    *    ONCE, while substitution repeats it at every occurrence of its
    *    parameter — `(Random(), y)` into a body reading `P.x` twice would
    *    draw twice;
-   *  - the body binds no variable of its own: `subs` is not binder-aware,
-   *    so a parameter rebound by an inner `Sum`/`Function`/`Block`, or an
-   *    argument symbol such a binder would capture, would be rewritten
-   *    blindly (the guard `betaReduceLambda` in `boxed-expression/utils.ts`
-   *    applies; here any binder declines, which also keeps
-   *    `foldLiteralPointAccess` from rebuilding a scoped node).
+   *  - no binder in the body captures the substitution: `subs` is not
+   *    binder-aware, so a parameter REBOUND by an inner `Sum`/`Function`/
+   *    `Block`, or an argument symbol such a binder would CAPTURE, would be
+   *    rewritten blindly. This is the condition `betaReduceLambda`
+   *    (`boxed-expression/utils.ts`) applies to a lambda application, and only
+   *    that condition: a body that merely CONTAINS a binder colliding with
+   *    nothing — `Map(p ↦ …, list)` as the whole body — inlines.
+   *
+   * The substituted body runs through `unrollFixedWidthCollections`
+   * (`fixed-width-unroll.ts`) before it is compiled. That is what turns the
+   * body's `P.x`/`P.y` over a literal point into the coordinate itself, and a
+   * fixed-width collection the body builds into straight-line scalar code —
+   * the shapes a target with no `PointX` or collection lowering (interval
+   * arithmetic, the shader targets) can compile.
    *
    * A `Typed` parameter's annotation is not re-validated at the inline call
    * site: the strict lane-mismatch check above already compared the
@@ -17411,6 +17420,69 @@ export class BaseCompiler {
   ): TargetSource | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
+    if (registry.compiling.has(BaseCompiler.userFunctionName(registry, h)))
+      return undefined;
+    const inlining = (registry.inlining ??= new Set<string>());
+    if (inlining.has(h)) return undefined;
+    const substituted = BaseCompiler.substitutedUserFunctionBody(
+      engine,
+      h,
+      args,
+      target
+    );
+    if (substituted === undefined) return undefined;
+    const inlined = unrollFixedWidthCollections(
+      BaseCompiler.inlineCollectionValuedCalls(
+        engine,
+        substituted,
+        target,
+        new Set([h]),
+        { left: BaseCompiler.MAX_NESTED_INLINES }
+      ),
+      {
+        // The accessor reads a point SUBSTITUTED for a parameter, in a body
+        // the target could not emit as a definition; folding it to the
+        // coordinate is what makes the body ordinary scalar code.
+        foldSingleLiteralPoint: true,
+        // The entry hooks never see this body — it comes from the engine
+        // definition — so the heads the caller overrode are read from the
+        // target (`CompileTarget.unrollSkipHeads`).
+        skipHeads: target.unrollSkipHeads,
+      }
+    );
+    if (!inlined.isValid) return undefined;
+    // The generated code bakes this definition, as an emitted one would.
+    target.symbolDeps?.add(h);
+    inlining.add(h);
+    try {
+      return BaseCompiler.compile(inlined, target);
+    } finally {
+      inlining.delete(h);
+    }
+  }
+
+  /**
+   * The body of the user function `h` with `args` SUBSTITUTED for its
+   * parameters, or `undefined` when that substitution would not be sound.
+   *
+   * The soundness conditions are the ones listed on
+   * {@link tryInlineUserFunctionCall}, minus the two the CALL SITE owns (the
+   * callee already being compiled by reference, and the callee already being
+   * inlined higher up): a single-statement pure non-generic literal, no direct
+   * self-call, arguments that are pure and provably a scalar or a literal
+   * point, no binder in the body that would capture the substitution, and a
+   * declaration the body does not contradict.
+   *
+   * Nothing is compiled here, and the result is not rewritten: the caller
+   * decides what to do with the substituted body.
+   */
+  private static substitutedUserFunctionBody(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): Expression | undefined {
+    if (!target.userFunctions) return undefined;
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
     if (literal === undefined) return undefined;
     if (BaseCompiler.userFunctionIsGeneric(engine, h, literal))
@@ -17422,10 +17494,6 @@ export class BaseCompiler {
       isFunction(body, 'Block') && body.nops === 1 ? body.op1 : body;
     if (isFunction(statement, 'Block') || statement.isPure !== true)
       return undefined;
-    if (registry.compiling.has(BaseCompiler.userFunctionName(registry, h)))
-      return undefined;
-    const inlining = (registry.inlining ??= new Set<string>());
-    if (inlining.has(h)) return undefined;
     const mentionsHead = (x: Expression): boolean =>
       isFunction(x) &&
       (x.operator === h || x.ops.some((op) => mentionsHead(op)));
@@ -17438,7 +17506,6 @@ export class BaseCompiler {
       )
     )
       return undefined;
-    if (collectBinderNames(statement).size > 0) return undefined;
     // A declaration the body contradicts — a scalar or boolean promise over
     // a collection-constructing body — fails closed at the DEFINITION
     // (`isContradictedScalarFunctionBody`, the wave-3/wave-6 rulings) and in
@@ -17456,48 +17523,117 @@ export class BaseCompiler {
       if (name === undefined) return undefined;
       substitution[name] = args[i];
     }
-    const inlined = BaseCompiler.foldLiteralPointAccess(
-      statement.subs(substitution)
-    );
-    if (!inlined.isValid) return undefined;
-    // The generated code bakes this definition, as an emitted one would.
-    target.symbolDeps?.add(h);
-    inlining.add(h);
-    try {
-      return BaseCompiler.compile(inlined, target);
-    } finally {
-      inlining.delete(h);
+    // `subs` is not capture-avoiding: it rewrites through an inner
+    // `Function`/`Block`/`Sum` binder blindly. The substitution is sound
+    // exactly when no parameter name being substituted is REBOUND by a binder
+    // in the body, and no free symbol of an argument would be CAPTURED by one.
+    // This is the same condition `betaReduceLambda`
+    // (`boxed-expression/utils.ts`) applies to a lambda application. Declining
+    // on the mere PRESENCE of a binder is coarser and refuses bodies that are
+    // safe: a body whose whole value is `Map(p ↦ …, list)` binds `p`, which
+    // collides with nothing, and that decline is what kept the shader and
+    // interval targets from compiling such a definition at all.
+    const binders = collectBinderNames(statement);
+    if (binders.size > 0) {
+      for (const [name, arg] of Object.entries(substitution)) {
+        if (binders.has(name)) return undefined;
+        for (const s of arg.symbols) if (binders.has(s)) return undefined;
+      }
     }
+    return statement.subs(substitution);
   }
 
   /**
-   * `expr` with every coordinate accessor of a LITERAL point folded to the
-   * coordinate — `PointX((x, y))` is `x` — at every depth. Nothing else is
-   * rebuilt: a node with no fold beneath it is returned as is, so bound
-   * structure elsewhere in the expression is never re-canonicalized.
-   *
-   * After an inlining substitutes a literal point for a point parameter, the
-   * body's `P.x`/`P.y` read a component of a tuple the compiler can see
-   * into; folding them here is what lets a target with no `PointX` lowering
-   * at all (interval arithmetic) compile the inlined body.
+   * How many nested calls one inlining may substitute. A definition that calls
+   * a collection-valued helper several times copies that helper's body once
+   * per call, so an unbounded chain would grow the emitted code
+   * multiplicatively. The cap is generous for a hand-written chain of
+   * definitions and stops a pathological one; when it runs out the remaining
+   * calls stay by reference and compile — or decline — exactly as before.
    */
-  private static foldLiteralPointAccess(expr: Expression): Expression {
-    if (!isFunction(expr)) return expr;
-    const ops = expr.ops.map((op) => BaseCompiler.foldLiteralPointAccess(op));
-    const position = BaseCompiler.POINT_ACCESSOR_POSITION[expr.operator];
-    if (position !== undefined && ops.length === 1) {
-      const point = ops[0];
-      if (isFunction(point, 'Tuple') && point.nops >= position)
-        return point.ops[position - 1];
-    }
-    if (ops.every((op, i) => op === expr.ops[i])) return expr;
-    return expr.engine.function(expr.operator, ops);
-  }
+  private static readonly MAX_NESTED_INLINES = 64;
 
-  /** The 1-based coordinate each point accessor reads. */
-  private static readonly POINT_ACCESSOR_POSITION: Readonly<
-    Record<string, number>
-  > = { __proto__: null as never, PointX: 1, PointY: 2, PointZ: 3 };
+  /**
+   * `expr` with every nested user-function call whose VALUE is not provably a
+   * scalar replaced by the callee's substituted body.
+   *
+   * A call is opaque to the shape-reading lowerings: `PointX(V(x, y))` asks
+   * what kind of point `V(x, y)` is and gets a list of points, which the
+   * shader and interval targets have no lowering for, and the fixed-width
+   * unroll cannot see the list's width through the call either. Substituting
+   * the callee's body exposes both. Only a call that is NOT provably a scalar
+   * is substituted: a scalar-valued helper compiles by reference on every
+   * target, and inlining it would copy a shared definition for nothing.
+   *
+   * `onPath` holds the names being inlined above this point, so a mutually
+   * recursive pair stops rather than expanding forever; `budget` caps the
+   * total substitutions (see {@link MAX_NESTED_INLINES}). A subtree that BINDS
+   * a name is left untouched: `subs` is not capture-avoiding, and rebuilding a
+   * scoped node would re-canonicalize its scope.
+   */
+  private static inlineCollectionValuedCalls(
+    engine: ComputeEngine,
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    onPath: Set<string>,
+    budget: { left: number }
+  ): Expression {
+    if (!isFunction(expr)) return expr;
+    if (boundVariableNames(expr).length > 0) return expr;
+    const ops = expr.ops.map((op) =>
+      BaseCompiler.inlineCollectionValuedCalls(
+        engine,
+        op,
+        target,
+        onPath,
+        budget
+      )
+    );
+    const node: Expression = ops.every((op, i) => op === expr.ops[i])
+      ? expr
+      : engine.function(expr.operator, ops);
+    if (!isFunction(node)) return node;
+    if (budget.left <= 0) return node;
+    if (onPath.has(node.operator)) return node;
+    // A definition whose emission is already in flight elsewhere in this
+    // compilation stays a CALL. Substituting its body here would emit the same
+    // definition a second time, in the middle of the emission that is already
+    // producing it — the re-entrancy the top-level inlining refuses through
+    // the same check (`registry.compiling`), and the mutual-recursion case it
+    // exists for.
+    const registry = target.userFunctions;
+    if (
+      registry !== undefined &&
+      registry.compiling.has(
+        BaseCompiler.userFunctionName(registry, node.operator)
+      )
+    )
+      return node;
+    if (BaseCompiler.provablyScalarArg(node)) return node;
+    const body = BaseCompiler.substitutedUserFunctionBody(
+      engine,
+      node.operator,
+      node.ops,
+      target
+    );
+    if (body === undefined) return node;
+    budget.left -= 1;
+    // The generated code bakes this definition too, exactly as the outer
+    // inlining bakes its own (`CompileTarget.symbolDeps`).
+    target.symbolDeps?.add(node.operator);
+    onPath.add(node.operator);
+    try {
+      return BaseCompiler.inlineCollectionValuedCalls(
+        engine,
+        body,
+        target,
+        onPath,
+        budget
+      );
+    } finally {
+      onPath.delete(node.operator);
+    }
+  }
 
   static ensureUserFunctionEmitted(
     engine: ComputeEngine,
@@ -18255,7 +18391,16 @@ export class BaseCompiler {
     const declared = literal.ops
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
-    const bodyExpr = rewriteAngularUnit(literal.ops[0].canonical);
+    // The same two target-independent rewrites the public compile entries
+    // apply, so an emitted DEFINITION gets the fixed-width unroll its
+    // inlined counterpart gets (`fixed-width-unroll.ts`). The entry hooks
+    // never see this body — it comes from the engine definition — so the
+    // heads the caller overrode are read from the target
+    // (`CompileTarget.unrollSkipHeads`).
+    const bodyExpr = unrollFixedWidthCollections(
+      rewriteAngularUnit(literal.ops[0].canonical),
+      { skipHeads: target.unrollSkipHeads }
+    );
     const root = registry.root ?? target;
     // The SAME parameter-shadowing rule as the inline lambda lowering, through
     // the same helper. This site builds the identical `(params) => body` shape

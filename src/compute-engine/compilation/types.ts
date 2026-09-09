@@ -990,6 +990,20 @@ export interface CompileTarget<Expr = unknown> {
   foldExcludedOps?: ReadonlySet<MathJsonSymbol>;
 
   /**
+   * Heads the fixed-width unroll (`compilation/fixed-width-unroll.ts`) must
+   * leave alone, computed from the caller's `operators` and `functions`
+   * options by `overriddenCompilationHeads`.
+   *
+   * The public compile entry applies that pass to the top-level expression
+   * itself and needs no field for it. This one carries the same answer to the
+   * two places that rewrite an expression the entry never saw: the body of an
+   * emitted user-function definition, and a body substituted at an inline call
+   * site. Both are compiled with the caller's overrides in force, so both must
+   * withhold the same heads.
+   */
+  unrollSkipHeads?: ReadonlySet<MathJsonSymbol>;
+
+  /**
    * The set of names currently **bound** by an enclosing binding form — lambda
    * parameters, `Sum`/`Product`/`Loop` indices, `Block` locals, comprehension
    * variables, `Match` captures. A bound name shadows any same-named engine

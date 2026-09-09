@@ -45,6 +45,10 @@ import {
   isNumericIndexOperand,
 } from './javascript-target.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import {
+  overriddenCompilationHeads,
+  unrollFixedWidthCollections,
+} from './fixed-width-unroll.js';
 import type {
   CompileDiagnostic,
   CompileMode,
@@ -3018,6 +3022,17 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
   ): CompilationResult<'interval-js', IntervalValue> {
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
+    // Turn a collection whose WIDTH is known at compile time into straight-line
+    // scalar code, so this target sees the shape the interpreter computes
+    // rather than a runtime array (`fixed-width-unroll.ts`). A head the caller
+    // overrode is withheld from the pass: the caller's implementation replaces
+    // the emission and receives the node's own operands, which an unroll would
+    // change. This target reads no `operators` option.
+    const unrollSkipHeads = overriddenCompilationHeads(
+      undefined,
+      options.functions
+    );
+    expr = unrollFixedWidthCollections(expr, { skipHeads: unrollSkipHeads });
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
 
@@ -3079,6 +3094,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         Object.keys(namedFunctions).length > 0
           ? new Set(Object.keys(namedFunctions))
           : undefined,
+      // See `CompileTarget.unrollSkipHeads`: the same answer the entry above
+      // used, for the definition bodies this entry never sees.
+      unrollSkipHeads,
       // The SOUND fold — evaluating a closed constant subtree's own interval
       // code at compile time (`foldConstantIntervalCode`) — is on by default
       // and honors the caller's `constantFold: false`, which promises the
