@@ -217,6 +217,24 @@ describe('GPU ELEMENT-WISE SELECTION', () => {
   describe('fail closed (D6)', () => {
     // Regression: these used to emit invalid shader source behind
     // `success: true` — `((u_L == 3.0) ? …)`, `((vec2(True, False)) ? …)`.
+    it('a list with absent NUMERIC cells compiles; a whole list that may be absent does not', () => {
+      // `[sin x, x{c}]` types `list<number | missing>`: an absent cell is a
+      // NaN lane, which the `When` no-match lowering emits, so the shape is
+      // admitted on both targets.
+      expect(g(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(/_gpu_nan/);
+      expect(w(['List', ['Sin', 'x'], ['When', 'x', 'c']])).toMatch(
+        /0x7fc00000/
+      );
+      // A default-less `Which` over a list types `missing | list<…>`: the
+      // WHOLE list may be absent, and the no-match lowering would pair an
+      // array arm with a scalar NaN. That stays fail-closed.
+      expect(() => g(['Which', 'c', ['List', 1, 2, 3, 4, 5]])).toThrow(
+        /object-domain absent/
+      );
+      expect(() => w(['Which', 'c', ['List', 1, 2, 3, 4, 5]])).toThrow(
+        /object-domain absent/
+      );
+    });
     it('declines an unknown-length list condition operand', () => {
       expect(() => g(['Which', ['Equal', 'L', 3], 1, 'True', 0])).toThrow(
         /no static vec2–vec4 shape/

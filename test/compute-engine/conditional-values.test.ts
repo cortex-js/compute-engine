@@ -45,10 +45,10 @@ describe('CONDITIONAL VALUES — When threading (T1–T5)', () => {
     expect(r.isSame(6)).toBe(true);
   });
 
-  it('T4: a decidable-False guard masks to Undefined', () => {
-    // When(5, 3<0) → Undefined (masking rule)
+  it('T4: a decidable-False guard masks to Missing', () => {
+    // When(5, 3<0) → Missing (masking rule; aligned with the no-selection ruling 2026-09-09)
     expect(ce.box(['When', 5, ['Less', 3, 0]]).evaluate().symbol).toBe(
-      'Undefined'
+      'Missing'
     );
   });
 
@@ -178,9 +178,9 @@ describe('CONDITIONAL VALUES — Undefined conditions (decision 9)', () => {
     expect(r.symbol).toBe('Missing');
   });
 
-  it('When with an Undefined condition masks to Undefined', () => {
+  it('When with an Undefined condition masks to Missing', () => {
     expect(ce.box(['When', 5, 'Undefined']).evaluate().symbol).toBe(
-      'Undefined'
+      'Missing'
     );
   });
 
@@ -397,9 +397,9 @@ describe('Convergence guards (Phase 3a)', () => {
     expect(r.subs({ a: 2 }).evaluate().toString()).toBe('1/2');
   });
 
-  it('substituting a = −1 (outside the guard) gives Undefined', () => {
+  it('substituting a = −1 (outside the guard) gives Missing', () => {
     const r = ce.parse('\\int_0^\\infty e^{-a x} dx').evaluate();
-    expect(r.subs({ a: -1 }).evaluate().symbol).toBe('Undefined');
+    expect(r.subs({ a: -1 }).evaluate().symbol).toBe('Missing');
   });
 
   it('an assumption a > 0 discharges the guard to a bare 1/a', () => {
@@ -554,7 +554,7 @@ describe('Phase 3b', () => {
       .box(['Solve', ce.parse('\\sqrt{x+3} = a'), 'x'])
       .evaluate().op1;
     expect(root?.subs({ a: 2 }).evaluate().toString()).toBe('1');
-    expect(root?.subs({ a: -2 }).evaluate().symbol).toBe('Undefined');
+    expect(root?.subs({ a: -2 }).evaluate().symbol).toBe('Missing');
   });
 
   it('numeric RHS unchanged: √(x+3) = 2 → [1]', () => {

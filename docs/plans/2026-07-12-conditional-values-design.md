@@ -11,6 +11,15 @@ roots via templates, `conditionalRoot` chokepoint + pruning in
 `test/compute-engine/conditional-values.test.ts`. Snapshot blast radius:
 **zero** across both phases; solve benchmark held at 38/40 (= SymPy =
 Mathematica). Phase 3 (Sum/Integrate adopters) demand-paced.
+**Amendment 2026-09-09:** everywhere this document says a false guard gives
+`Undefined`, the engine now gives `Missing`, the position-preserving absent
+datum of `docs/ERROR-MODEL.md` — the same answer a `Which` with no selected
+clause and the else-less `If` give (no-selection ruling of 2026-08-27, which
+the `When` operator joined on 2026-09-09). Decision 9 below (an `Undefined`
+guard falls through) is unchanged; the `NaN` / `Undefined` seam of decision 3
+is now a `NaN` / `Missing` seam, with `Missing` absorbed into `NaN` in a
+numeric domain. The text below is kept as written.
+
 **Scope:** make operations able to *return* parameter-conditional results, by
 (1) fixing the semantic split between the two existing conditional heads,
 (2) adding the threading algebra that lets arithmetic and function application

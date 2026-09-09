@@ -2654,9 +2654,12 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
     // structures disagreed: `Which` answered `Undefined` (a "no answer"
     // citizen invented before the absence ruling) and the else-less `If`
     // answered `Nothing`, the splicing erasure marker §1 forbids for a failed
-    // selection. The masking `Undefined` of the `When` operator is a separate,
-    // deliberate contract (plot consumers skip masked points) and is
-    // unchanged.
+    // selection. The masking answer of the `When` restriction operator was
+    // left on `Undefined` by that ruling and aligned on 2026-09-09: `Undefined`
+    // has no standing in the error model (its type is `unknown`) and no
+    // consumer read it — plots take the mask from compiled code, where it is
+    // `NaN` — so a false guard now answers `Missing` too, and the `When` type
+    // carries the `missing` arm exactly as a default-less `Which` does.
     const ce2 = new ComputeEngine();
     expect(symbolName(ce2.box(['Which']).evaluate())).toBe('Missing');
     expect(symbolName(ce2.box(['If', 'False', 5]).evaluate())).toBe('Missing');
@@ -2664,8 +2667,30 @@ describe('ERROR-MODEL §3 — a lazy operator propagates only what it DEMANDS', 
       'Missing'
     );
     expect(symbolName(ce2.box(['When', 5, 'False']).evaluate())).toBe(
-      'Undefined'
+      'Missing'
     );
+  });
+
+  test('the When restriction carries the missing arm in its type, like a default-less Which', () => {
+    const ce2 = new ComputeEngine();
+    expect(ce2.box(['When', 5, ['Less', 1, 0]]).type.toString()).toBe(
+      'integer | missing'
+    );
+    expect(ce2.box(['Which', ['Less', 1, 0], 5]).type.toString()).toBe(
+      'integer | missing'
+    );
+    // A literal `True` guard can never mask, so the bare type survives.
+    expect(ce2.box(['When', 5, 'True']).type.toString()).toBe('integer');
+    // A masked cell in a list is typed like an absent one.
+    expect(
+      ce2.box(['List', 1, ['When', 2, ['Less', 1, 0]], 3]).type.toString()
+    ).toBe('list<integer | missing>');
+    // A restriction over an UNDECLARED symbol types `missing | unknown`, and
+    // juxtaposition still reads it as a product, as it reads a bare `unknown`.
+    // Before the alignment `2x{x>0}` was a product only because `When` hid
+    // the absent case from its type.
+    expect(ce2.parse('2x\\{x>0\\}').operator).toBe('Multiply');
+    expect(ce2.parse('2\\operatorname{If}(1<0, x)').operator).toBe('Multiply');
   });
 
   describe('the rule holds under COMPOSITION, not only at the root', () => {

@@ -116,7 +116,7 @@ describe('A2 — Compact piecewise parsing', () => {
   });
 
   test('{cond:val} (no default) parses to Which with implicit default', () => {
-    // Desmos behavior: missing default = Undefined.
+    // Desmos behavior: missing default = Missing (no-selection ruling 2026-08-27).
     const ce = new ComputeEngine();
     const expr = ce.parse('\\left\\{x > 0 : 1\\right\\}');
     expect(expr.operator).toEqual('Which');
@@ -196,18 +196,18 @@ describe('A2 — Multi-restriction GLSL verification', () => {
     expect(v1.re).toEqual(9);
     ce.assign('x', -1);
     const v2 = expr.evaluate();
-    expect(v2.symbol).toEqual('Undefined');
+    expect(v2.symbol).toEqual('Missing');
     ce.assign('x', 10);
     const v3 = expr.evaluate();
-    expect(v3.symbol).toEqual('Undefined');
+    expect(v3.symbol).toEqual('Missing');
   });
 });
 
 describe('A2 — When(e, False) masking rule', () => {
-  test('When(e, False) evaluates to Undefined', () => {
+  test('When(e, False) evaluates to Missing', () => {
     const ce = new ComputeEngine();
     const expr = ce.expr(['When', 42, 'False']);
-    expect(expr.evaluate().symbol).toEqual('Undefined');
+    expect(expr.evaluate().symbol).toEqual('Missing');
   });
 
   test('When(e, True) evaluates to e', () => {

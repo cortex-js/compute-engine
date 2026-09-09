@@ -1136,6 +1136,38 @@ document's history):
   the element-wise no-match cell (`NaN` for numeric cells — `Missing`
   absorbed into a numeric domain, per the absence ruling). Pinned in the
   conformance suite (`test/compute-engine/error-model.test.ts`).
+- **RULED 2026-09-09: the `When` restriction masks to `Missing` too, and
+  its type carries the `missing` arm.** This amends the exemption the
+  2026-08-27 ruling above made for `When`. `When(e, False)` — and
+  `When(e, Undefined)`, decision 9's fall-through — now answers `Missing`,
+  the position-preserving absent datum, where it answered the `Undefined`
+  symbol; the element-wise form masks each cell the same way
+  (`[10,20,30]{[1,2,3] > 2}` is `[Missing, Missing, 30]`). The reason the
+  exemption gave — "plot consumers skip masked points" — had no reader:
+  `Undefined` has no standing in §1 (its type is `unknown`), the engine's
+  only reader of it was the `Add` fold that turned it into `NaN`, Tycho's
+  masked-point test reads `Missing`, and plots take the mask from compiled
+  code, where every target already emitted `NaN`. The compiled lanes are
+  unchanged. The `When` type handler now answers `missing | T` for every
+  condition except the literal `True` symbol (the same shape a default-less
+  `Which` and the else-less `If` carry, Option A of the same day), and
+  `list<T | missing>` for a list-of-booleans condition — so a list holding a
+  masked cell no longer types as a full `vector<integer^3>`. Consumers fixed
+  with it: the invisible-operator gates read an operand's type with the
+  absence marker stripped (`typeIgnoringAbsence`,
+  `boxed-expression/invisible-operator.ts`), so `2x{x>0}`, `t P{0 ≤ t ≤ 1}`
+  over a point list and `2 If(c, x)` over an undeclared `x` stay products
+  rather than becoming silent `Tuple`s. Found on the way and fixed with it:
+  the value-form else-less `If(c, t)` was refused by every compile target
+  ("wrong number of arguments") while the interpreter answered `Missing`;
+  it is now lowered as the one-clause `Which(c, t)` on every target, and
+  answers the codomain's absence marker (`NaN` for a number) when the
+  condition is false. A two-operand `If` whose arm is a STATEMENT keeps its
+  guard-statement reading (JavaScript statement-forms it; the other targets
+  decline it, each for a verified reason —
+  `test/compute-engine/compile-elseless-if-statement.test.ts`). Pinned in
+  the conformance suite and in `conditional-values.test.ts`,
+  `when-list-broadcast.test.ts`, `a2-restrictions.test.ts`.
 - **Container vs. cell validity (§3) — DEFERRED by ruling 2026-09-02.**
   Should a collection whose cells include errors eventually be a *valid*
   container of partially-invalid cells, with a type that says so

@@ -7,32 +7,41 @@ import type {
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
-  couldBeNumericTuple,
-  isLinearAlgebraCollection,
+  typeCouldBeNumericTuple,
+  typeIsLinearAlgebraCollection,
 } from '../collection-utils.js';
 import { noteProvisionalApplication } from './provisional-application.js';
-import { numericMissingSlot } from '../../common/type/utils.js';
+import {
+  stripMissingFromType,
+  typeContainsMissing,
+} from '../../common/type/utils.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
 const LIST_TYPE = new BoxedType('list');
 
 /**
- * Whether the operand is numeric once an absence marker is set aside: either
- * its type is below `number`, or it is a `missing`-carrying union whose other
- * members are all numeric (`missing | real`).
+ * The operand's type with an absence marker set aside: `missing | T` reads
+ * as `T`, any other type reads as itself.
  *
- * A piecewise expression with no default arm — a `Which` with no literal-`True`
- * clause, or an `If` with no else branch — types `missing | T`: the value may
- * be absent, but when it is present it is a number. `matches('number')` alone
- * answers `false` for such a type, because the `missing` member is not a
- * number, and a juxtaposition operand rejected that way became a silent
- * `Tuple` instead of a product. Stripping only the `missing` arm keeps the
- * gate tight: `string | number` — which `couldMatch('number')` would let
- * through — still fails and stays a `Tuple`.
+ * A restriction (`x {x > 0}`) and a selection with no default clause (a
+ * `Which` with no literal-`True` clause, an `If` with no else branch) type
+ * `missing | T`: the value may be absent, but when it is present it is a `T`.
+ * The absence marker adds a possible OUTCOME; it says nothing about what the
+ * value multiplies like when it is there. So every type test that decides
+ * whether a juxtaposition is a product reads the operand's type through this
+ * helper: `2x{x>0}` is a product exactly as `2x` is, `t P{0 ≤ t ≤ 1}` scales
+ * the point list exactly as `t P` does. Testing the raw union instead made
+ * each of these a silent `Tuple` — `matches('number')`, `matches('list')`
+ * and `isUnknown` all answer `false` for a union with a `missing` member.
+ * Only the marker is stripped, so a type that fails the gate on its own
+ * merits (`string | number`) still fails it.
  */
-function isNumericIgnoringAbsence(x: Expression): boolean {
-  return x.type.matches('number') || numericMissingSlot(x.type.type);
+function typeIgnoringAbsence(x: Expression): BoxedType {
+  const t = x.type.type;
+  if (!typeContainsMissing(t)) return x.type;
+  const stripped = stripMissingFromType(t);
+  return stripped === 'never' ? x.type : new BoxedType(stripped);
 }
 
 export function canonicalInvisibleOperator(
@@ -397,68 +406,73 @@ export function canonicalInvisibleOperator(
   //
   if (
     ops.every(
-      (x) =>
-        x.isValid &&
-        (x.type.isUnknown ||
-          x.type.type === 'any' ||
-          x.type.type === 'expression' ||
-          // `value` is the widest value type — a supertype spanning BOTH
-          // scalars and collections (see VALUE_TYPES in common/type). A
-          // symbol typed `value` (e.g. inferred from a `(value*)` signature
-          // such as `Max`/`Min`) is NOT evidence of collection/point-ness: it
-          // carries no constraint at all. Like `any`/`expression`/`unknown`
-          // above, the charitable default for juxtaposition is multiplication,
-          // not a silent `Tuple`. Concrete collection/tuple operands are still
-          // caught by `isLinearAlgebraCollection`/`couldBeNumericTuple`/
-          // `isIndexedCollection` below.
-          x.type.type === 'value' ||
-          isNumericIgnoringAbsence(x) ||
-          // A `broadcastable<…>`-typed operand — arithmetic over an
-          // unknown-return call, e.g. `(2h(x)-1)` with `h: (number) ->
-          // unknown` — is a number OR an indexed collection of numbers
-          // (see the `Add`/`Multiply` type handlers). Juxtaposition is
-          // multiplication in the scalar case and scaling in the collection
-          // case, never a silent `Tuple`.
-          (typeof x.type.type !== 'string' &&
-            x.type.type.kind === 'broadcastable') ||
-          // Matrix-typed symbols (`M P` → matrix product) and function-typed
-          // symbols (`2f`, `f x` → scaled/product) are value-like operands:
-          // juxtaposition is multiplication, not a silent `Tuple`.
-          x.type.matches(MATRIX_TYPE) ||
-          x.type.matches(FUNCTION_TYPE) ||
-          // List/vector-typed operands (e.g. `2v` with `v: vector<3>`, or a
-          // still-unevaluated `2\frac{[1,2,3]}{8}` whose scaled numerator has
-          // type `vector<3>`/`list<number>`) are value-like: juxtaposition is
-          // scaling, not a silent `Tuple`. The runtime `isIndexedCollection`
-          // test below only catches operands that are already concrete
-          // collections (raw `List`), so match the value type here as well.
-          // `list` deliberately excludes heterogeneous `tuple` and `set`.
-          x.type.matches(LIST_TYPE) ||
-          // A symbol *declared* with an abstract `indexed_collection` /
-          // `collection` type but not yet assigned a value (e.g. Tycho's
-          // importer head-pre-pass, which derives `indexed_collection` for a
-          // List/Range value) is still a value-like operand: juxtaposition is
-          // scaling, not a silent `Tuple`. This is the same predicate the
-          // `Add`/`Multiply` type handlers use, so the invisible-operator
-          // decision stays consistent with them. It deliberately EXCLUDES
-          // `tuple` kinds — numeric tuples are handled by `couldBeNumericTuple`
-          // just below, and heterogeneous tuples must stay a `Tuple` — and
-          // `set` (no scaling semantics).
-          isLinearAlgebraCollection(x) ||
-          // Numeric-tuple-typed operands (points/vectors in ℝⁿ, e.g. `3z`
-          // with `z: tuple<number, number>`) are value-like: juxtaposition
-          // is scaling. Literal tuples are already caught by the
-          // `isIndexedCollection` test below; this covers tuple-typed
-          // symbols and unevaluated tuple-typed expressions — with
-          // COULD-semantics, so a tuple whose elements type `unknown`
-          // (e.g. `PointList(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`,
-          // typed `tuple<unknown, unknown>` and NOT an indexed collection)
-          // is scaling too, not a silent nested `Tuple` (Tycho item 30).
-          // Heterogeneous tuples (e.g. `tuple<string, number>`) still group
-          // as `Tuple`.
-          couldBeNumericTuple(x) ||
-          isFunction(x, 'Matrix') ||
-          (x.isIndexedCollection && !isString(x)))
+      (x) => {
+        // Read through `typeIgnoringAbsence`: a `missing | T` operand
+        // multiplies as a `T` does (see the helper).
+        const t = typeIgnoringAbsence(x);
+        return (
+          x.isValid &&
+          (t.isUnknown ||
+            t.type === 'any' ||
+            t.type === 'expression' ||
+            // `value` is the widest value type — a supertype spanning BOTH
+            // scalars and collections (see VALUE_TYPES in common/type). A
+            // symbol typed `value` (e.g. inferred from a `(value*)` signature
+            // such as `Max`/`Min`) is NOT evidence of collection/point-ness: it
+            // carries no constraint at all. Like `any`/`expression`/`unknown`
+            // above, the charitable default for juxtaposition is multiplication,
+            // not a silent `Tuple`. Concrete collection/tuple operands are still
+            // caught by `typeIsLinearAlgebraCollection`/`typeCouldBeNumericTuple`/
+            // `isIndexedCollection` below.
+            t.type === 'value' ||
+            t.matches('number') ||
+            // A `broadcastable<…>`-typed operand — arithmetic over an
+            // unknown-return call, e.g. `(2h(x)-1)` with `h: (number) ->
+            // unknown` — is a number OR an indexed collection of numbers
+            // (see the `Add`/`Multiply` type handlers). Juxtaposition is
+            // multiplication in the scalar case and scaling in the collection
+            // case, never a silent `Tuple`.
+            (typeof t.type !== 'string' && t.type.kind === 'broadcastable') ||
+            // Matrix-typed symbols (`M P` → matrix product) and function-typed
+            // symbols (`2f`, `f x` → scaled/product) are value-like operands:
+            // juxtaposition is multiplication, not a silent `Tuple`.
+            t.matches(MATRIX_TYPE) ||
+            t.matches(FUNCTION_TYPE) ||
+            // List/vector-typed operands (e.g. `2v` with `v: vector<3>`, or a
+            // still-unevaluated `2\frac{[1,2,3]}{8}` whose scaled numerator has
+            // type `vector<3>`/`list<number>`) are value-like: juxtaposition is
+            // scaling, not a silent `Tuple`. The runtime `isIndexedCollection`
+            // test below only catches operands that are already concrete
+            // collections (raw `List`), so match the value type here as well.
+            // `list` deliberately excludes heterogeneous `tuple` and `set`.
+            t.matches(LIST_TYPE) ||
+            // A symbol *declared* with an abstract `indexed_collection` /
+            // `collection` type but not yet assigned a value (e.g. Tycho's
+            // importer head-pre-pass, which derives `indexed_collection` for a
+            // List/Range value) is still a value-like operand: juxtaposition is
+            // scaling, not a silent `Tuple`. This is the same predicate the
+            // `Add`/`Multiply` type handlers use, so the invisible-operator
+            // decision stays consistent with them. It deliberately EXCLUDES
+            // `tuple` kinds — numeric tuples are handled by `typeCouldBeNumericTuple`
+            // just below, and heterogeneous tuples must stay a `Tuple` — and
+            // `set` (no scaling semantics).
+            typeIsLinearAlgebraCollection(t.type) ||
+            // Numeric-tuple-typed operands (points/vectors in ℝⁿ, e.g. `3z`
+            // with `z: tuple<number, number>`) are value-like: juxtaposition
+            // is scaling. Literal tuples are already caught by the
+            // `isIndexedCollection` test below; this covers tuple-typed
+            // symbols and unevaluated tuple-typed expressions — with
+            // COULD-semantics, so a tuple whose elements type `unknown`
+            // (e.g. `PointList(S(x,y,0), S(x,y,1))` with `S: (…) -> unknown`,
+            // typed `tuple<unknown, unknown>` and NOT an indexed collection)
+            // is scaling too, not a silent nested `Tuple` (Tycho item 30).
+            // Heterogeneous tuples (e.g. `tuple<string, number>`) still group
+            // as `Tuple`.
+            typeCouldBeNumericTuple(t.type) ||
+            isFunction(x, 'Matrix') ||
+            (x.isIndexedCollection && !isString(x)))
+        );
+      }
     )
   ) {
     // Note: `_fn` rather than `canonicalMultiply` — this function decides
@@ -741,18 +755,21 @@ function combineFunctionApplications(
  * correctly blames the illegal application rather than a `Multiply`.
  */
 function isScalable(x: Expression): boolean {
+  // Read through `typeIgnoringAbsence`: a `missing | T` head scales as a
+  // `T` does (see the helper).
+  const t = typeIgnoringAbsence(x);
   return (
-    isNumericIgnoringAbsence(x) ||
-    x.type.matches(MATRIX_TYPE) ||
-    x.type.matches(LIST_TYPE) ||
+    t.matches('number') ||
+    t.matches(MATRIX_TYPE) ||
+    t.matches(LIST_TYPE) ||
     // A `broadcastable<…>`-typed head is a number OR an indexed collection
     // of numbers (never a function), exactly as the multi-operand gate
     // below reads it — omitting it here made `A(B)` on such a head an
     // application while `A B` multiplied, the argument-shape dependence
     // item 173 removed.
-    (typeof x.type.type !== 'string' && x.type.type.kind === 'broadcastable') ||
-    isLinearAlgebraCollection(x) ||
-    couldBeNumericTuple(x)
+    (typeof t.type !== 'string' && t.type.kind === 'broadcastable') ||
+    typeIsLinearAlgebraCollection(t.type) ||
+    typeCouldBeNumericTuple(t.type)
   );
 }
 
@@ -765,8 +782,11 @@ function isScalable(x: Expression): boolean {
  * CONCRETE non-multiplicative type is diverted to the application route.
  */
 function isWideValueType(x: Expression): boolean {
-  const t = x.type.type;
-  return x.type.isUnknown || t === 'any' || t === 'expression' || t === 'value';
+  // Read through `typeIgnoringAbsence`: `missing | unknown` is as wide as
+  // `unknown` (see the helper).
+  const bt = typeIgnoringAbsence(x);
+  const t = bt.type;
+  return bt.isUnknown || t === 'any' || t === 'expression' || t === 'value';
 }
 
 /** Whether a later definition could turn a juxtaposition on this symbol into a

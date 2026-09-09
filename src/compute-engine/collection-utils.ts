@@ -1223,9 +1223,19 @@ export function typeCouldBeNumericTupleCollection(
  * collections AND symbols declared with a collection type (e.g. `X: matrix`).
  */
 export function isLinearAlgebraCollection(expr: Expression): boolean {
+  return typeIsLinearAlgebraCollection(expr.type.type);
+}
+
+/**
+ * The type-level test behind `isLinearAlgebraCollection`, for a caller that
+ * holds a TYPE rather than an expression — the invisible-operator gate reads
+ * an operand's type with its absence marker stripped (`missing | list<…>`
+ * scales as `list<…>` does).
+ */
+export function typeIsLinearAlgebraCollection(type: Readonly<Type>): boolean {
   // See `typeCouldBeNumericCollection` on why a transparent alias is unfolded
   // here and a nominal reference is not.
-  const t = resolveTypeAlias(expr.type.type);
+  const t = resolveTypeAlias(type);
   if (
     t === 'list' ||
     t === 'collection' ||

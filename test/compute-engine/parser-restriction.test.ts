@@ -54,9 +54,9 @@ describe('Parser: restriction braces', () => {
       expect(result.json).toBe(5);
     });
 
-    test('When(5, False) evaluates to Undefined', () => {
+    test('When(5, False) evaluates to Missing', () => {
       const result = ce.expr(['When', 5, 'False']).evaluate();
-      expect(result.json).toBe('Undefined');
+      expect(result.json).toBe('Missing');
     });
 
     test('When(5, x > 0) holds when x has no value', () => {

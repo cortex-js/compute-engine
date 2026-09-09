@@ -35,7 +35,6 @@ import { isValidType } from '../../common/type/primitive.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
-import { typeToString } from '../../common/type/serialize.js';
 import {
   CancellationError,
   run,
@@ -335,7 +334,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       description:
         'Conditional/restriction value. `When(e, cond)` evaluates to:\n' +
         '  - `e` when `cond` evaluates to `True`\n' +
-        '  - `Undefined` when `cond` evaluates to `False` (the "masking rule"; consumers like 2D plotters skip masked points)\n' +
+        '  - `Missing` when `cond` evaluates to `False` (the "masking rule": the position-preserving absent datum, the same answer a selection with no selected branch gives; consumers like 2D plotters skip masked points)\n' +
         '  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\n' +
         'Stacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\n' +
         'Compiles to ternary `(cond) ? (e) : NaN` in JS and GLSL.',
@@ -349,21 +348,59 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // condition's *declared* type is a list/vector of booleans. A scalar
         // or unknown boolean condition keeps `expr`'s type.
         //
+        // A false condition masks the value to `Missing`, and that arm must
+        // survive in the type — as it does for a `Which` with no default
+        // clause and for the else-less `If` (no-selection ruling of
+        // 2026-08-27; `When` aligned 2026-09-09). The union is built
+        // explicitly rather than through `widen`, which joins toward a
+        // common supertype and would dissolve the absence marker into a top
+        // type. Only a condition that is the literal `True` symbol can never
+        // mask, so only that case keeps `expr`'s bare type.
+        //
         // A type read must never crash, whatever the application looks
         // like, so a malformed arity-0 `When` answers `unknown` here. (An
         // earlier version of this handler dereferenced `expr.type`
         // unconditionally and threw on that input.)
         if (expr === undefined)
           return BoxedType.forResult('unknown', context.engine._typeResolver);
+        // The handler reads operand VIEWS (the descriptor route), so the
+        // literal is recognized through `structureOf`, exactly as the `Which`
+        // type handler finds its default clause.
+        const condStructure = cond?.structureOf?.();
+        if (condStructure?.kind === 'symbol' && condStructure.name === 'True')
+          return BoxedType.forResult(expr.type, context.engine._typeResolver);
         if (
           cond !== undefined &&
           isSubtype(cond.type, parseType('list<boolean>')!)
-        )
+        ) {
+          // Built structurally, not from a type STRING: a literal element
+          // type (`When(1, [c1, c2])` types `list<1 | missing>`) has no
+          // string spelling the parser accepts inside a union.
+          //
+          // A list-valued `expr` is zipped with the mask, cell by cell (see
+          // the broadcast branch in `evaluate`), so the cells of the result
+          // are the CELLS of `expr`, not `expr` itself:
+          // `[10,20,30]{[1,2,3] > 2}` is `[Missing, Missing, 30]`, a
+          // `list<integer | missing>`. A scalar `expr` is masked whole in
+          // every cell.
+          const cell = isSubtype(expr.type, 'list<any>')
+            ? (collectionElementType(expr.type) ?? 'unknown')
+            : expr.type;
           return BoxedType.forResult(
-            `list<${typeToString(expr.type)}>`,
+            {
+              kind: 'list',
+              elements: reduceType({
+                kind: 'union',
+                types: [cell, 'missing'],
+              }),
+            },
             context.engine._typeResolver
           );
-        return BoxedType.forResult(expr.type, context.engine._typeResolver);
+        }
+        return BoxedType.forResult(
+          reduceType({ kind: 'union', types: [expr.type, 'missing'] }),
+          context.engine._typeResolver
+        );
       },
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return null;
@@ -434,7 +471,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               // The per-element expression: the zipped element, or the scalar.
               const elem = zip ? elems[i] : ev;
               if (cis === 'True') result.push(elem);
-              else if (cis === 'False') result.push(ce.symbol('Undefined'));
+              else if (cis === 'False') result.push(ce.Missing);
               // Indeterminate (symbolic boolean): hold `When` on the element.
               else result.push(ce._fn('When', [zip ? elems[i] : expr, ci]));
             }
@@ -444,10 +481,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
 
         const cs = sym(c);
         if (cs === 'True') return expr.evaluate(options);
-        if (cs === 'False') return ce.symbol('Undefined');
+        // A false guard masks the value: the answer is `Missing`, the
+        // position-preserving absent datum — the same answer a `Which` with
+        // no selected clause and the else-less `If` give (no-selection
+        // ruling of 2026-08-27; `When` aligned 2026-09-09). Before the
+        // alignment `When` answered the `Undefined` symbol, which has no
+        // standing in `docs/ERROR-MODEL.md` and no consumer: plot consumers
+        // read the mask from compiled code, where it is `NaN`.
+        if (cs === 'False') return ce.Missing;
         // A guard that evaluates to `Undefined` masks (decision 9): no value,
         // treated as not-True rather than held.
-        if (cs === 'Undefined') return ce.symbol('Undefined');
+        if (cs === 'Undefined') return ce.Missing;
 
         // Indeterminate scalar condition over a collection value: the
         // restriction distributes elementwise (Tycho item 66), so that
@@ -476,9 +520,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // MASK that cannot be read yet, not the scalar guard this branch
         // distributes: splicing it into every cell freezes a nested result.
         // `When([1,2], B)` for a valueless `B: list<boolean>` gave
-        // `[1 {B}, 2 {B}]`, which re-evaluates to `[[1,Undefined],[2,Undefined]]`
+        // `[1 {B}, 2 {B}]`, which re-evaluates to `[[1,Missing],[2,Missing]]`
         // once `B := [True, False]` — where the same expression evaluated
-        // fresh masks to `[1, Undefined]` (Tycho item 221). Stay held; the
+        // fresh masks to `[1, Missing]` (Tycho item 221). Stay held; the
         // list-condition branch above zips the mask once it resolves.
         if (
           expr.type.matches('collection<any>') &&
@@ -1652,9 +1696,8 @@ function evaluateWhich(
   }
 
   // No clause selected: `Missing`, the position-preserving absent datum
-  // (no-selection ruling 2026-08-27, shared with the else-less `If`). The
-  // masking `Undefined` of the `When` operator is a different, deliberate
-  // contract — plot consumers skip masked points — and is unchanged.
+  // (no-selection ruling 2026-08-27, shared with the else-less `If` and,
+  // since 2026-09-09, with the masking answer of the `When` operator).
   return options.engine.Missing;
 }
 

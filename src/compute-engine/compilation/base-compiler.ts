@@ -60,7 +60,7 @@ import {
   widen,
   type AliasDescent,
 } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { boundVariableNames } from '../boxed-expression/binders.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
@@ -2044,12 +2044,30 @@ export class BaseCompiler {
           stripped.elements.length >= 2 &&
           stripped.elements.length <= 4 &&
           stripped.elements.every((el) => isSubtype(el.type, 'number'));
+        // A LIST whose cells are numbers that may be absent
+        // (`list<integer | missing>`, the type of `[sin x, x{x > 0}]`) is
+        // exempt for the same reason a scalar number is: an absent cell is a
+        // NaN lane, which is exactly what the `When`/`Which` no-match
+        // lowering emits for that cell. The exemption reads the UNSTRIPPED
+        // type: only a type that IS a list, with the marker on its element
+        // type, qualifies. `missing | list<number>` — the whole list may be
+        // absent — does not: the no-match lowering pairs an array arm with a
+        // scalar NaN there, which is not a shader, so it stays fail-closed.
+        const numericCells = (() => {
+          const whole = resolveTypeForCompilation(t);
+          if (typeof whole === 'string' || whole.kind !== 'list') return false;
+          const cell = resolveTypeForCompilation(
+            stripMissingFromType(whole.elements)
+          );
+          return cell !== 'never' && isSubtype(cell, 'number');
+        })();
         if (
           stripped !== 'never' &&
           stripped !== 'unknown' &&
           stripped !== 'any' &&
           !isSubtype(stripped, 'number') &&
-          !numericShaped
+          !numericShaped &&
+          !numericCells
         )
           throw new Error(
             `Cannot compile an object-domain absent ('missing') position ` +
@@ -7134,8 +7152,37 @@ export class BaseCompiler {
       return BaseCompiler.compileComprehension(args, target, node);
     }
 
-    if (h === 'If') {
-      if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    if (h === 'If' && args.length !== 2 && args.length !== 3)
+      throw new Error('If: wrong number of arguments');
+    // The else-less `If(c, t)` is the one-clause `Which(c, t)`: when the
+    // condition is false no branch is selected, and the value is the
+    // codomain's absence marker (`NaN` for a number), exactly what a `Which`
+    // that matched no clause answers (no-selection ruling of 2026-08-27,
+    // `docs/ERROR-MODEL.md`). The operand indices of the two shapes agree
+    // (0 → condition, 1 → arm), so the `Which` branch below compiles the
+    // `If` node as it stands, CSE regions included, and every target's own
+    // `Which` handler lowers it. Before this the two-operand shape was
+    // refused on every target with "wrong number of arguments" while the
+    // interpreter answered `Missing` for it.
+    //
+    // Only the VALUE form is routed this way: a two-operand `If` whose arm is
+    // a statement (an assignment, a block, a loop, a jump) is a guard
+    // statement that reached the expression compiler from a block, and each
+    // target decides that shape on its own terms — plain JavaScript
+    // statement-forms it in the block dispatcher before this point, and the
+    // other targets decline it here, each for a verified reason
+    // (`test/compute-engine/compile-elseless-if-statement.test.ts`). Wrapping
+    // such an arm in a conditional expression would emit an assignment inside
+    // an expression, which Python refuses and the GPU statement model does
+    // not admit.
+    const selectionHead =
+      h === 'If' && args.length === 2 && !BaseCompiler.isStatementArm(args[1])
+        ? 'Which'
+        : h;
+    if (h === 'If' && args.length === 2 && selectionHead === 'If')
+      throw new Error('If: wrong number of arguments');
+
+    if (selectionHead === 'If') {
       // A condition that may be an indexed collection at run time selects
       // ELEMENT-WISE: `If(c, t, f)` is the two-clause `Which(c, t, True, f)`
       // (see the `Which` branch below and `target.selection`). Consulted BEFORE
@@ -7224,7 +7271,7 @@ export class BaseCompiler {
       );
     }
 
-    if (h === 'Which') {
+    if (selectionHead === 'Which') {
       if (args.length < 2 || args.length % 2 !== 0)
         throw new Error(
           'Which: expected even number of arguments (condition/value pairs)'
@@ -7244,7 +7291,7 @@ export class BaseCompiler {
         (derived) => BaseCompiler.operandCompiler(node, derived)
       );
       if (selection !== null && selection !== undefined) return selection;
-      const fn = target.functions?.(h);
+      const fn = target.functions?.(selectionHead);
       if (fn) {
         if (typeof fn === 'function') {
           return fn(args, BaseCompiler.operandCompiler(node, target), target);
@@ -7369,11 +7416,19 @@ export class BaseCompiler {
           .map((x) => BaseCompiler.compile(x, target))
           .join(', ')})`;
       }
-      // Compile to ternary: cond ? expr : NaN. A complex-valued arm keeps the
-      // masked branch in the same `{ re, im }` convention (see
+      // Compile to a ternary: cond ? expr : <absent>. The masked branch is
+      // the codomain's absence marker: `NaN` for a number, the target's
+      // object null literal for a value PROVABLY outside the numbers (a
+      // string, a list), so a compiled `IsMissing`/`Coalesce` over a masked
+      // value agrees with the interpreter, which answers `Missing`. A value
+      // whose type is unknown — `x {x > 0}` over an undeclared `x`, the
+      // plot staple — keeps `NaN`: it is a number until proven otherwise,
+      // and the object null would turn every arithmetic consumer of the mask
+      // into a `TypeError` instead of a propagated NaN. A complex-valued arm
+      // keeps the masked branch in the same `{ re, im }` convention (see
       // `branchComplexCoercion`).
       const coerce = BaseCompiler.branchComplexCoercion([args[0]], target);
-      const nan = coerce ? '({ re: NaN, im: NaN })' : 'NaN';
+      const nan = BaseCompiler.maskedValue(node, target, coerce !== undefined);
       // Special-case constant True/False conditions to avoid bare symbol refs
       if (isSymbol(args[1], 'True'))
         return `(${BaseCompiler.compileOp(node, 0, target, 0, args[0])})`;
@@ -14477,6 +14532,36 @@ export class BaseCompiler {
     return undefined;
   }
 
+  /**
+   * Whether an `If` arm is a STATEMENT — an assignment, a loop, a
+   * declaration or a jump — rather than an expression with a value. Such an
+   * arm has no expression form, so the two-operand `If` around it is a guard
+   * statement, never the value-form selection that compiles as a one-clause
+   * `Which`.
+   *
+   * A `Block` is read through to its VALUE statement, its last operand (the
+   * same reading `statementBodyHead` gives it): `Block(y ≔ x, y)` is a value
+   * arm, `Block(y ≔ x)` and an empty block are statements. A `Loop` is a
+   * statement here even though `Break(v)` can give it a value: the
+   * conditional-expression lowering has no form for a loop inside a ternary.
+   */
+  static isStatementArm(arm: Expression | undefined): boolean {
+    if (arm === undefined || !isFunction(arm)) return false;
+    const h = arm.operator;
+    if (h === 'Block') {
+      if (arm.nops === 0) return true;
+      return BaseCompiler.isStatementArm(arm.ops[arm.nops - 1]);
+    }
+    return (
+      h === 'Assign' ||
+      h === 'Loop' ||
+      h === 'Declare' ||
+      h === 'Return' ||
+      h === 'Break' ||
+      h === 'Continue'
+    );
+  }
+
   static assertScalarCondition(cond: Expression): void {
     if (cond.type.matches('collection<any>'))
       throw new Error(
@@ -14861,6 +14946,34 @@ export class BaseCompiler {
    * `undefined` in JavaScript. A target that declares no such literal uses
    * `NaN` for both.
    */
+  /**
+   * The value a masked `When` emits where its condition is false: the
+   * complex NaN pair for a complex arm; the target's object null literal
+   * when the value's type — absence marker stripped — is provably not a
+   * number; `NaN` otherwise, which covers numbers AND an unknown type (see
+   * the `When` branch of `compileExpr` for why an unknown type keeps NaN).
+   */
+  private static maskedValue(
+    node: Expression | undefined,
+    target: CompileTarget<Expression>,
+    complexArms: boolean
+  ): TargetSource {
+    if (complexArms) return '({ re: NaN, im: NaN })';
+    const nullLiteral = target.absence?.object?.nullLiteral;
+    if (nullLiteral === undefined || node === undefined) return 'NaN';
+    const t = resolveTypeForCompilation(
+      stripMissingFromType(resolveTypeForCompilation(node.type.type))
+    );
+    if (
+      t !== 'never' &&
+      t !== 'unknown' &&
+      t !== 'any' &&
+      provablyDisjoint(t, 'number')
+    )
+      return nullLiteral;
+    return 'NaN';
+  }
+
   private static noBranchValue(
     node: Expression | undefined,
     target: CompileTarget<Expression>,

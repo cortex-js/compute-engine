@@ -481,14 +481,14 @@ describe('a collection-TYPED but valueless operand', () => {
       expect(stored.operator).toBe('When');
       ce.assign('B', ['List', 'True', 'False']);
       // The captured form was `[1 {B}, 2 {B}]`, which re-evaluated to the
-      // nested `[[1,Undefined],[2,Undefined]]`.
+      // nested `[[1,Missing],[2,Missing]]`.
       expect(ce.box(stored.json).evaluate().toString()).toBe(
         ce
           .box(['When', ['List', 1, 2], 'B'])
           .evaluate()
           .toString()
       );
-      expect(ce.box(stored.json).evaluate().toString()).toBe('[1,"Undefined"]');
+      expect(ce.box(stored.json).evaluate().toString()).toBe('[1,"Missing"]');
     });
 
     // `PointList` zips its components into points, lifting a scalar component

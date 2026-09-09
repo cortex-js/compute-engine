@@ -34,7 +34,7 @@ function interpreted(expr: BoxedExpression): unknown {
   const project = (x: BoxedExpression): unknown => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
-    if (x.symbol === 'Nothing' || x.symbol === 'Undefined') return NaN;
+    if (x.symbol === 'Nothing' || x.symbol === 'Missing') return NaN;
     if (x.operator === 'Error') return NaN;
     // Iterated rather than read off `ops`: `Map` is lazy, so `.N()` of a
     // comprehension is still a `Map` node whose elements only appear when the

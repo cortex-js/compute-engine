@@ -28,7 +28,7 @@ function interpreted(expr: BoxedExpression): unknown {
   const project = (x: BoxedExpression): unknown => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
-    if (x.symbol === 'Nothing' || x.symbol === 'Undefined') return NaN;
+    if (x.symbol === 'Nothing' || x.symbol === 'Missing') return NaN;
     if (x.operator === 'Error') return NaN;
     if (x.operator === 'List') return (x.ops ?? []).map(project);
     return x.re;

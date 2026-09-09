@@ -28,7 +28,7 @@ describe('When: list-condition broadcast', () => {
       .parse('x\\left\\{x\\le\\left[1,2,3\\right]\\right\\}')
       .evaluate();
     // 2 <= [1,2,3] → [False, True, True]
-    expect(r.json).toEqual(['List', 'Undefined', 2, 2]);
+    expect(r.json).toEqual(['List', 'Missing', 2, 2]);
   });
 
   test('indeterminate (symbolic) elements → held When per element', () => {
@@ -50,7 +50,7 @@ describe('When: list-condition broadcast', () => {
       .parse('\\left[10,20,30\\right]\\left\\{\\left[1,2,3\\right]>2\\right\\}')
       .evaluate();
     // [1,2,3] > 2 → [False, False, True]
-    expect(r.json).toEqual(['List', 'Undefined', 'Undefined', 30]);
+    expect(r.json).toEqual(['List', 'Missing', 'Missing', 30]);
   });
 
   test('different lengths truncate to the shorter (At mask alignment)', () => {
@@ -71,7 +71,7 @@ describe('When: list-condition broadcast', () => {
     // Canonical folds to When(x, And(0 < x, x <= [1,2])).
     expect(expr.op2.operator).toEqual('And');
     // 3 > 0 ∧ 3 <= [1,2] → [False, False]
-    expect(expr.evaluate().json).toEqual(['List', 'Undefined', 'Undefined']);
+    expect(expr.evaluate().json).toEqual(['List', 'Missing', 'Missing']);
   });
 
   describe('type handler', () => {
@@ -99,11 +99,11 @@ describe('When: list-condition broadcast', () => {
       expect(ce.parse('x\\left\\{x>3\\right\\}').evaluate().re).toEqual(5);
     });
 
-    test('False condition → Undefined', () => {
+    test('False condition → Missing', () => {
       const ce = new ComputeEngine();
       ce.assign('x', 1);
       expect(ce.parse('x\\left\\{x>3\\right\\}').evaluate().symbol).toEqual(
-        'Undefined'
+        'Missing'
       );
     });
 

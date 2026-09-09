@@ -1,11 +1,16 @@
 /**
  * An ELSE-LESS `If` in STATEMENT position (2026-08-08).
  *
- * `if c { … }` with no else has no value: the interpreter answers `Nothing`,
- * the erasure marker, which the compile targets deliberately refuse to
- * materialize ("the erasure marker is not a value"). `compileExpr`'s
- * conditional therefore needs all three operands and threw `If: wrong number of
- * arguments` on a two-operand one.
+ * `if c { … }` with no else is a guard STATEMENT: its arm is an assignment,
+ * a block or a jump, which has no expression form. `compileExpr`'s
+ * conditional needs an expression in every operand and threw `If: wrong
+ * number of arguments` on such a two-operand one. (The VALUE form of the
+ * two-operand `If` — an expression arm, `If(c, x + 1)` — is a different
+ * shape: since the no-selection ruling of 2026-08-27 the interpreter answers
+ * `Missing` for it when the condition is false, and since 2026-09-09 the
+ * compiler lowers it as the one-clause `Which(c, x + 1)` on every target,
+ * with the codomain's absence marker — `NaN` for a number — where no clause
+ * is selected. The last test of the first describe pins that form.)
  *
  * A LOOP BODY never hit that — `compileLoopBody` (JavaScript) and
  * `compilePythonStatements` (Python) statement-form `If` and already emit the
@@ -16,8 +21,8 @@
  *
  * The fix is confined to the STATEMENT positions of a block: a block's last
  * statement, when the block's value is used, is NOT one — an else-less `If`
- * there still fails closed (D6), since its value is the block's and there is
- * none.
+ * there is the value form, and compiles as the one-clause `Which` described
+ * above.
  *
  * It is also confined to PLAIN JavaScript. Python and interval-JavaScript
  * function bodies keep declining, each for a verified reason — see the
@@ -136,18 +141,81 @@ describe('an else-less If as a block statement', () => {
     expect(expr.evaluate().re).toBe(12);
   });
 
-  test('an else-less If in VALUE position still fails closed (D6)', () => {
-    // The block's value would be the `If`'s, and it has none — the interpreter
-    // answers `Nothing`. Declining lets the interpreter say so.
+  test('an else-less If in VALUE position is the one-clause Which', () => {
+    // The block's value is the `If`'s. The interpreter answers `2` when the
+    // condition holds and `Missing` when it does not (no-selection ruling
+    // 2026-08-27), and the compiled function answers `2` and the absence
+    // marker of the number codomain, `NaN` — the same lowering the
+    // default-less `Which(x > 0, 2)` gets. Before 2026-09-09 this shape was
+    // refused with `If: wrong number of arguments` on every target.
     ce.declare('x', 'number');
     const expr = ce.box([
       'Block',
       ['Declare', 's', { str: 'unknown' }, 1],
       ['If', ['Greater', 'x', 0], 2],
     ]);
-    const r = compile(expr);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/If: wrong number of arguments/);
+    const r = compile(expr, { fallback: false });
+    expect(r.success).toBe(true);
+    expect((r.run as any)({ x: 1 })).toBe(2);
+    expect((r.run as any)({ x: -1 })).toBeNaN();
+  });
+
+  test('the value-form else-less If compiles on every target as a one-clause Which', () => {
+    ce.declare('x', 'number');
+    const expr = ce.box(['If', ['Greater', 'x', 0], ['Add', 'x', 1]]);
+    for (const to of ['javascript', 'python', 'interval-js', 'glsl'] as const) {
+      const r = compile(expr, { to, fallback: false });
+      expect([to, r.success]).toEqual([to, true]);
+    }
+    const js = compile(expr, { fallback: false });
+    expect((js.run as any)({ x: 2 })).toBe(3);
+    expect((js.run as any)({ x: -2 })).toBeNaN();
+    // A STATEMENT arm keeps the guard-statement reading of the describe
+    // below: it is not a value-form selection.
+    const stmt = ce.box(['If', ['Greater', 'x', 0], ['Assign', 's', 1]]);
+    expect(compile(stmt, { to: 'python' }).success).toBe(false);
+  });
+
+  test('a Block arm is read through to its value statement', () => {
+    ce.declare('x', 'number');
+    // `Block(y ≔ x, y)` ends in a value, so the else-less `If` around it is
+    // the value form and compiles as the one-clause `Which`.
+    const valueBlock = ce.box([
+      'If',
+      ['Greater', 'x', 0],
+      ['Block', ['Assign', 'y', 'x'], 'y'],
+    ]);
+    const r = compile(valueBlock, { fallback: false });
+    expect(r.success).toBe(true);
+    expect((r.run as any)({ x: 2 })).toBe(2);
+    expect((r.run as any)({ x: -2 })).toBeNaN();
+    // `Block(y ≔ x)` ends in a statement: a guard statement, declined on
+    // Python like the bare assignment arm is.
+    const stmtBlock = ce.box([
+      'If',
+      ['Greater', 'x', 0],
+      ['Block', ['Assign', 'y', 'x']],
+    ]);
+    expect(compile(stmtBlock, { to: 'python' }).success).toBe(false);
+  });
+
+  test('a masked object-domain value is the object null, not NaN', () => {
+    // The interpreter answers `Missing` for a masked value in every domain.
+    // The compiled masked branch is the codomain's absence marker — `NaN` for
+    // a number, `undefined` for a string — so a compiled `IsMissing` agrees
+    // with the interpreter. Before this the branch was a literal `NaN` in
+    // every domain, and `IsMissing` of a masked string answered `false`.
+    ce.declare('x', 'number');
+    ce.declare('c', 'boolean');
+    const masked = ce.box(['When', { str: 'ok' }, 'c']);
+    expect(compile(masked, { fallback: false }).code).toMatch(
+      /\? \("ok"\) : undefined/
+    );
+    const test = compile(ce.box(['IsMissing', masked]), { fallback: false });
+    expect((test.run as any)({ c: false })).toBe(true);
+    expect((test.run as any)({ c: true })).toBe(false);
+    const num = compile(ce.box(['When', 'x', 'c']), { fallback: false });
+    expect(num.code).toMatch(/: NaN\)$/);
   });
 
   // The `If` still lowers to the expression-position TERNARY, not to the
