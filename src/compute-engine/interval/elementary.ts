@@ -13,7 +13,23 @@ import {
   liftJump,
   jump,
 } from './util.js';
-import { sub, mul, div } from './arithmetic.js';
+import { subUnrounded, mulUnrounded, divUnrounded } from './arithmetic.js';
+import {
+  outward,
+  outwardUnlessExact,
+  eitherExact,
+  exactInRange,
+  exactSqrt,
+  exactSquare,
+  exactPow,
+  exactPowInterval,
+  exactIntegerGridPoint,
+  exactAtOrigin,
+  exactAtZeroBound,
+  exactNthRoot,
+  exactPowRational,
+  exactLog,
+} from './rounding.js';
 import {
   gamma as scalarGamma,
   gammaln as scalarGammaln,
@@ -26,6 +42,8 @@ import {
   gcd as scalarGcd,
   lcm as scalarLcm,
   chop as scalarChop,
+  nextDown,
+  nextUp,
 } from '../numerics/numeric.js';
 import { choose as scalarBinomial } from '../boxed-expression/expand.js';
 
@@ -188,8 +206,16 @@ function powIntervalRaw(
   // Special case: exponent is a point interval with an integer value.
   // For integer exponents, negative bases are well-defined (parity matters).
   // This is critical for patterns like (-1)^k in summations.
+  // The RAW power is called here, not the exported `pow`. The export rounds
+  // its answer outward, and this routine's own export rounds again, so going
+  // through it would move the endpoint twice for a single computation. The
+  // invariant across this library is that a routine's answer is stepped
+  // outward ONCE, at that routine's own export, by a step count that covers
+  // all the rounding its own computation performs — a routine built from
+  // others composes their RAW kernels so that their exports never see the
+  // intermediate values.
   if (expVal.lo === expVal.hi && Number.isInteger(expVal.lo)) {
-    return pow(baseVal, expVal.lo);
+    return powRaw(baseVal, expVal.lo);
   }
 
   // For real-valued results with non-integer exponents, base must be positive
@@ -320,10 +346,12 @@ function powRationalRaw(
 
   // Even denominator: real only for a non-negative base — `pow` already models
   // the empty/partial/monotone cases correctly.
-  if (q % 2 === 0) return pow(ok(b), exp);
+  // The raw power, for the one-outward-step-per-routine reason given in
+  // `powIntervalRaw` above.
+  if (q % 2 === 0) return powRaw(ok(b), exp);
 
   // Odd denominator, non-negative base: ordinary `pow` is exact.
-  if (b.lo >= 0) return pow(ok(b), exp);
+  if (b.lo >= 0) return powRaw(ok(b), exp);
 
   const hasZero = b.lo <= 0 && b.hi >= 0;
   // Negative exponent has a pole at 0.
@@ -350,8 +378,10 @@ function nthRootRaw(
   const unwrapped = unwrapOrPropagate(base);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [b] = unwrapped;
-  if (!Number.isInteger(n) || n === 0) return pow(ok(b), 1 / n);
-  if (n % 2 === 0) return pow(ok(b), 1 / n);
+  // The raw power, for the one-outward-step-per-routine reason given in
+  // `powIntervalRaw` above.
+  if (!Number.isInteger(n) || n === 0) return powRaw(ok(b), 1 / n);
+  if (n % 2 === 0) return powRaw(ok(b), 1 / n);
   // Odd degree: real everywhere, monotone increasing.
   const root = (x: number): number =>
     Math.sign(x) * Math.pow(Math.abs(x), 1 / n);
@@ -680,10 +710,33 @@ function modRaw(
   // not spanning a jump — is not misreported as `singular` by the machinery
   // below.
   if (aVal.lo === aVal.hi && bVal.lo === bVal.hi) {
+    const a0 = aVal.lo;
     const b0 = bVal.lo;
-    // `+ 0` normalizes JS's `-0` (e.g. `-3 % -3`) to `+0`.
-    const m = (((aVal.lo % b0) + b0) % b0) + 0;
-    return ok({ lo: m, hi: m });
+    // A non-finite operand has no floored modulo. The compiled scalar `Mod`
+    // (`((a % b) + b) % b`) answers NaN for one, and this must answer the
+    // same value.
+    if (!Number.isFinite(a0) || !Number.isFinite(b0)) return ok(NAN_INTERVAL);
+    // `a % b` is the IEEE remainder operation, which is exact — its result
+    // needs no more bits than `a` has. When it already carries the sign of the
+    // divisor it IS the floored modulo, and `+ 0` normalizes JS's `-0` (e.g.
+    // `-3 % -3`) to `+0`.
+    const r = a0 % b0;
+    if (r === 0 || Math.sign(r) === Math.sign(b0))
+      return ok({ lo: r + 0, hi: r + 0 });
+    // Otherwise the sign correction `r + b` is the floored modulo, and THAT
+    // addition can round: `-1e-20 % 1` is `-1e-20`, and `-1e-20 + 1` rounds
+    // up to exactly 1, so the previous `((a % b) + b) % b` finished with
+    // `1 % 1` and answered the point 0 for a true value of `1 - 1e-20`. No
+    // outward step covers a miss that large. Knuth's TwoSum gives the exact
+    // rounding error, and the enclosure is the computed sum together with the
+    // neighbour it rounded away from.
+    const s = r + b0;
+    const bPart = s - r;
+    const err = r - (s - bPart) + (b0 - bPart);
+    if (err === 0) return ok({ lo: s, hi: s });
+    return err < 0
+      ? ok({ lo: nextDown(s), hi: s })
+      : ok({ lo: s, hi: nextUp(s) });
   }
 
   const period = Math.abs(
@@ -743,7 +796,12 @@ function remainderRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
-  return sub(a, mul(b, round(div(a, b))));
+  // The UNROUNDED arithmetic kernels, so the three operations of the
+  // composition are not each stepped outward before this routine's own export
+  // steps its answer. `round` performs no rounding of its own, so the exported
+  // form of it is used as it is — and it is the source of this routine's
+  // discontinuities, which the unrounded kernels still propagate.
+  return subUnrounded(a, mulUnrounded(b, round(divUnrounded(a, b))));
 }
 
 /**
@@ -1196,16 +1254,46 @@ function hypotRaw(
 // Every operation above is exported through `liftJump` so that a finite
 // jump in an operand (a `singular` result carrying a `value`) is re-tagged
 // on the result instead of being forgotten — see `liftJump` in `util.ts`.
-export const sqrt = liftJump(sqrtRaw);
-export const square = liftJump(squareRaw);
-export const pow = liftJump(powRaw);
-export const powInterval = liftJump(powIntervalRaw);
-export const powRational = liftJump(powRationalRaw);
-export const nthRoot = liftJump(nthRootRaw);
-export const exp = liftJump(expRaw);
-export const ln = liftJump(lnRaw);
-export const log10 = liftJump(log10Raw);
-export const log2 = liftJump(log2Raw);
+//
+// Every operation that ROUNDS is also exported through an outward decorator,
+// so the enclosure it answers contains the true range instead of a
+// round-to-nearest approximation of it — see `rounding.ts`. `sqrt`, `square`
+// and the powers carry a prover, so an exact result (`√4`, `2²`, `(−1)^k`)
+// stays the point it is. The routines that only select, negate or truncate
+// endpoints compute no new real number and are exported unwrapped: `abs`,
+// `floor`, `ceil`, `round`, `trunc`, `fract` (`x − floor(x)` has fewer
+// significant bits than `x`, so a double holds it), `min`, `max`, `sign`,
+// `heaviside` and `chop`.
+export const sqrt = liftJump(outwardUnlessExact(sqrtRaw, exactSqrt));
+export const square = liftJump(outwardUnlessExact(squareRaw, exactSquare));
+export const pow = liftJump(outwardUnlessExact(powRaw, exactPow));
+export const powInterval = liftJump(
+  outwardUnlessExact(powIntervalRaw, exactPowInterval)
+);
+// `powRational` rounds the exponent `p/q` and then powers with it, on each of
+// the endpoint candidates it takes the extremum over; `nthRoot` of an ODD
+// degree computes `Math.pow(|x|, 1/n)`, where the reciprocal `1/n` rounds and
+// the power rounds on top of it. Three ulps is the minimum outward step for
+// that chain, not a proof — but a root the prover reproduces exactly by an
+// integer product chain takes no step at all, so `nthRoot([4, 4], 2)` stays
+// the point 2 and the exact lower bound 0 of `nthRoot([0, 8], 3)` stays 0.
+export const powRational = liftJump(
+  outwardUnlessExact(powRationalRaw, exactPowRational, 3)
+);
+export const nthRoot = liftJump(
+  outwardUnlessExact(nthRootRaw, exactNthRoot, 3)
+);
+export const exp = liftJump(
+  outwardUnlessExact(expRaw, exactInRange(0, Infinity))
+);
+// A logarithm of 1 is exactly 0, and an integer-base logarithm of an exact
+// power of its base is exactly that power. Widening those endpoints turned
+// `ln([1, 1])` into `[-5e-324, 5e-324]`, which a later `sqrt` reports as a
+// domain-clipped `partial`, and lost the integer points of `log2` and
+// `log10`.
+export const ln = liftJump(outwardUnlessExact(lnRaw, exactLog()));
+export const log10 = liftJump(outwardUnlessExact(log10Raw, exactLog(10)));
+export const log2 = liftJump(outwardUnlessExact(log2Raw, exactLog(2)));
 export const abs = liftJump(absRaw);
 export const floor = liftJump(floorRaw);
 export const ceil = liftJump(ceilRaw);
@@ -1214,19 +1302,47 @@ export const fract = liftJump(fractRaw);
 export const trunc = liftJump(truncRaw);
 export const min = liftJump(minRaw);
 export const max = liftJump(maxRaw);
-export const mod = liftJump(modRaw);
-export const remainder = liftJump(remainderRaw);
+export const mod = liftJump(
+  outwardUnlessExact(
+    modRaw,
+    eitherExact(exactIntegerGridPoint, exactAtZeroBound)
+  )
+);
+// `remainder` composes a division, a rounding, a multiplication and a
+// subtraction. The `round` is exact, the other three each round once, so three
+// ulps is the step for the whole chain.
+export const remainder = liftJump(
+  outwardUnlessExact(remainderRaw, exactIntegerGridPoint, 3)
+);
 export const heaviside = liftJump(heavisideRaw);
 export const sign = liftJump(signRaw);
-export const gamma = liftJump(gammaRaw);
-export const gammaln = liftJump(gammalnRaw);
-export const factorial = liftJump(factorialRaw);
-export const factorial2 = liftJump(factorial2Raw);
-export const binomial = liftJump(binomialRaw);
-export const gcd = liftJump(gcdRaw);
-export const lcm = liftJump(lcmRaw);
+export const gamma = liftJump(outward(gammaRaw));
+export const gammaln = liftJump(outward(gammalnRaw));
+export const factorial = liftJump(
+  outwardUnlessExact(factorialRaw, exactIntegerGridPoint)
+);
+export const factorial2 = liftJump(
+  outwardUnlessExact(factorial2Raw, exactIntegerGridPoint)
+);
+export const binomial = liftJump(
+  outwardUnlessExact(binomialRaw, exactIntegerGridPoint)
+);
+export const gcd = liftJump(outwardUnlessExact(gcdRaw, exactIntegerGridPoint));
+export const lcm = liftJump(outwardUnlessExact(lcmRaw, exactIntegerGridPoint));
 export const chop = liftJump(chopRaw);
-export const erf = liftJump(erfRaw);
-export const erfc = liftJump(erfcRaw);
-export const exp2 = liftJump(exp2Raw);
-export const hypot = liftJump(hypotRaw);
+export const erf = liftJump(
+  outwardUnlessExact(erfRaw, eitherExact(exactAtOrigin, exactInRange(-1, 1)))
+);
+export const erfc = liftJump(outwardUnlessExact(erfcRaw, exactInRange(0, 2)));
+export const exp2 = liftJump(
+  outwardUnlessExact(
+    exp2Raw,
+    eitherExact(exactIntegerGridPoint, exactInRange(0, Infinity))
+  )
+);
+// `Math.hypot` is allowed by the language specification to be approximated,
+// and it scales, sums and takes a root internally, so one ulp would not cover
+// it.
+export const hypot = liftJump(
+  outwardUnlessExact(hypotRaw, exactInRange(0, Infinity), 2)
+);

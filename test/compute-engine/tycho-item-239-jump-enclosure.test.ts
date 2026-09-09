@@ -42,6 +42,24 @@ function asJump(r: IntervalResult): {
   return { at: r.at, continuity: r.continuity, value: r.value! };
 }
 
+/**
+ * Does the enclosure a result carries contain `[lo, hi]` and stay within an
+ * ulp or so of it? The library rounds an endpoint it cannot prove exact one
+ * ulp outward (`interval/rounding.ts`), so a computed bound is a neighbour of
+ * the nominal double rather than that double.
+ */
+function encloses(r: IntervalResult, lo: number, hi: number): boolean {
+  const v = r.kind === 'empty' || r.kind === 'entire' ? undefined : r.value;
+  if (v === undefined) return false;
+  const scale = Math.max(1, Math.abs(lo), Math.abs(hi));
+  return (
+    v.lo <= lo &&
+    v.hi >= hi &&
+    lo - v.lo < scale * 1e-15 &&
+    v.hi - hi < scale * 1e-15
+  );
+}
+
 function expectPole(r: IntervalResult): void {
   expect(r.kind).toBe('singular');
   if (r.kind === 'singular') expect(r.value).toBeUndefined();
@@ -121,10 +139,13 @@ describe('Interval jump enclosure — the step functions carry a bound', () => {
       kind: 'interval',
       value: iv(1, 1),
     });
-    expect(IA.mod(iv(1, 2), iv(6.3, 6.3))).toEqual({
-      kind: 'interval',
-      value: iv(1, 2),
-    });
+    // `mod` is the identity below the first period multiple. The endpoints
+    // are one subtraction each, which the library rounds outward when it
+    // cannot prove it exact, so the enclosure is the one-ulp neighbourhood of
+    // `[1, 2]` rather than that pair of doubles.
+    const m = IA.mod(iv(1, 2), iv(6.3, 6.3));
+    expect(m.kind).toBe('interval');
+    expect(encloses(m, 1, 2)).toBe(true);
   });
 
   test('a NaN input propagates as a NaN interval, not a jump at NaN', () => {
@@ -159,7 +180,9 @@ describe('Interval jump enclosure — propagation through operations', () => {
       iv(1, 3)
     );
     expect(asJump(IA.negate(jumpFloor)).value).toEqual(iv(-1, -0));
-    expect(asJump(IA.exp(jumpFloor)).value).toEqual(iv(1, Math.E));
+    // `exp` is an approximation, so its enclosure of `[e^0, e^1]` is the
+    // outward-rounded neighbourhood of `[1, e]`, not that pair of doubles.
+    expect(encloses(IA.exp(jumpFloor), 1, Math.E)).toBe(true);
   });
 
   test('an unbounded result is returned as the operation gave it', () => {

@@ -10,7 +10,7 @@ import type {
 import {
   clearIntegerRanges,
   isConstructedScalar,
-  recordDeclaredScalarParams,
+  recordScalarParams,
   recordIntegerRange,
 } from './javascript-value-facts.js';
 import {
@@ -6590,13 +6590,56 @@ export class BaseCompiler {
       // one under, so it takes the same wrapper inline, at the same positions.
       // The `{ re, im }` convention is a JavaScript one, so a target that never
       // wraps its arguments emits the bare arrow as before.
-      if (target.language === 'javascript' && complexParam.some((c) => c))
-        return `(${BaseCompiler.complexCoercingWrapper(
-          arrow,
-          complexParam,
-          target
-        )})`;
-      return arrow;
+      const callee =
+        target.language === 'javascript' && complexParam.some((c) => c)
+          ? `(${BaseCompiler.complexCoercingWrapper(
+              arrow,
+              complexParam,
+              target
+            )})`
+          : arrow;
+
+      // The BROADCAST coercion, the second one a raw element needs. A literal
+      // whose parameters are all scalar is applied element-wise by the
+      // interpreter when an argument is a collection — `Map((x) ↦ 2x,
+      // [[1, 2], [], [3]])` answers `[[2, 4], [], [6]]` — but the arrow's body
+      // is emitted for scalars only, so the bare arrow multiplied a whole row
+      // as a number and answered `[NaN, 0, 6]` behind `success: true`. The
+      // wrapper is the one a NAMED scalar-parameter function is handed out
+      // under (`ensureUserFunctionValueRef`), with the same `_SYS.bcastFn`
+      // helper, so the two spellings of one function behave alike.
+      //
+      // The arrow is bound to a name FIRST, because the wrapper mentions its
+      // callee twice: splicing the arrow text into both arms would construct a
+      // fresh closure on every element. A statement sink flattens the binding
+      // into a `const`; without one it stays an immediately applied arrow.
+      //
+      // A literal with a collection-typed parameter binds its argument whole
+      // (the same `paramsAreScalar` reading `applyFunctionLiteral` makes) and
+      // keeps the bare arrow, as does a parameterless one, which has no
+      // argument that could be a collection.
+      if (
+        target.language === 'javascript' &&
+        params.length > 0 &&
+        literal !== undefined &&
+        paramsAreScalar(literal.type.type) &&
+        BaseCompiler.signatureParamsLowerToScalars(literal.type.type)
+      ) {
+        const bound = BaseCompiler.tempVar(target);
+        const wrapper = BaseCompiler.broadcastingWrapper(
+          bound,
+          params.length,
+          target,
+          'bcastFn'
+        );
+        return (
+          javascriptStatements(target)?.parameters(
+            [[bound, callee]],
+            wrapper
+          ) ?? `((${bound}) => ${wrapper})(${callee})`
+        );
+      }
+      return callee;
     }
 
     if (h === 'Declare') {
@@ -16925,6 +16968,47 @@ export class BaseCompiler {
    * own inferred type is the fallback. Conservative (`unknown` → scalar), the
    * same way `paramsAreScalar` is.
    */
+  /**
+   * Does every parameter of `signature` lower to a JavaScript SCALAR — a
+   * number, a `{re, im}` object, a boolean, a string — or to an `unknown`
+   * value the runtime reads by shape? The broadcast-aware wrapper a function
+   * value receives (`broadcastingWrapper`) decides at run time with
+   * `Array.isArray`, and a tuple, a record, a nominal (tagged or opaque) value
+   * and a collection all lower to a bare JavaScript array or object, so the
+   * wrapper would map over the FIELDS of one such argument where the
+   * interpreter binds the whole value. Such a function keeps the bare
+   * reference. A parameter typed `unknown` or `any` is admitted, as the
+   * interpreter's own broadcast gate admits it; a record reaching it through a
+   * callback value is a known limitation recorded in ROADMAP.md.
+   */
+  private static signatureParamsLowerToScalars(
+    signature: Type | undefined
+  ): boolean {
+    if (
+      signature === undefined ||
+      typeof signature === 'string' ||
+      signature.kind !== 'signature'
+    )
+      return true;
+    const params = [
+      ...(signature.args ?? []),
+      ...(signature.optArgs ?? []),
+      ...(signature.variadicArg ? [signature.variadicArg] : []),
+    ];
+    return params.every(({ type: t }) => {
+      if (t === 'unknown' || t === 'any') return true;
+      if (BaseCompiler.isNominalAtomicType(t)) return false;
+      if (isTupleShapedType(t)) return false;
+      if (typeof t !== 'string' && (t.kind === 'record' || t.kind === 'tuple'))
+        return false;
+      return (
+        isSubtype(t, 'number') ||
+        isSubtype(t, 'boolean') ||
+        isSubtype(t, 'string')
+      );
+    });
+  }
+
   private static userFunctionParamsAreScalar(
     engine: ComputeEngine,
     h: string
@@ -18012,9 +18096,27 @@ export class BaseCompiler {
    * reference is compiled without one — `_SYS.cplx` is idempotent, so a
    * complex element passes through and a real one is wrapped.
    *
-   * Returns the plain name unchanged when there is nothing to coerce, so the
-   * emitted code for every function without a declared-complex parameter is
-   * byte-identical to before.
+   * The second coercion a raw element needs is the BROADCAST one. A user
+   * function whose parameters are all scalar is applied element-wise by the
+   * interpreter when an argument is a collection, and the emitted CALL sites
+   * reproduce that (`_SYS.bcastFn`, or an `Array.isArray` guard); the body
+   * itself is emitted for scalars only. A value reference had no such
+   * dispatch, and the consumer of the value passes whatever element it holds:
+   * for `f(x) := 2x`, `Map(f, [[1, 2], [3, 4]])` handed a whole ROW to a body
+   * that multiplies, and answered `[NaN, NaN]` where the interpreter answers
+   * `[[2, 4], [6, 8]]`. So a scalar-parameter function is handed out as a
+   * broadcast-aware wrapper under its own name, emitted ONCE next to the
+   * function itself — a consumer that maps over a million elements pays one
+   * closure, not one per element. A function with a parameter that is NOT
+   * scalar binds its arguments whole and keeps the plain reference, because
+   * the interpreter does not broadcast it either.
+   *
+   * The broadcast wrapper takes the complex-coercing shim as its callee where
+   * both apply, so an element reaches the body coerced, the same order the
+   * call route dispatches in (`dispatchCall`).
+   *
+   * Returns the plain name unchanged when there is nothing to coerce and
+   * nothing to broadcast.
    */
   static ensureUserFunctionValueRef(
     engine: ComputeEngine,
@@ -18037,19 +18139,85 @@ export class BaseCompiler {
       const pt = BaseCompiler.laneRequestParamType(engine, h, i);
       complexParam.push(pt !== undefined && isNonRealNumber(pt));
     }
-    if (!complexParam.some((c) => c)) return name;
 
-    const shimName = `${name}$v`;
-    if (!registry.defs.has(shimName))
+    let callee = name;
+    if (complexParam.some((c) => c)) {
+      callee = `${name}$v`;
+      if (!registry.defs.has(callee))
+        registry.defs.set(
+          callee,
+          `const ${callee} = ${BaseCompiler.complexCoercingWrapper(
+            name,
+            complexParam,
+            target
+          )};`
+        );
+    }
+
+    // A parameterless function has no argument that could be a collection.
+    if (nParams === 0) return callee;
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return callee;
+    // A parameter that lowers to an array or object (a tuple, a record, a
+    // nominal value) must reach the body whole — see
+    // `signatureParamsLowerToScalars`.
+    if (
+      !BaseCompiler.signatureParamsLowerToScalars(
+        BaseCompiler.userFunctionSignature(engine, h)
+      )
+    )
+      return callee;
+
+    const bcastName = `${name}$b`;
+    if (!registry.defs.has(bcastName))
       registry.defs.set(
-        shimName,
-        `const ${shimName} = ${BaseCompiler.complexCoercingWrapper(
-          name,
-          complexParam,
-          target
+        bcastName,
+        `const ${bcastName} = ${BaseCompiler.broadcastingWrapper(
+          callee,
+          nParams,
+          target,
+          'bcastFn'
         )};`
       );
-    return shimName;
+    return bcastName;
+  }
+
+  /**
+   * A wrapper around `callee` that applies it element-wise when any of its
+   * `nParams` arguments is an array, and calls it directly otherwise:
+   * `(_tv1) => Array.isArray(_tv1) ? _SYS.<helper>(callee, _tv1) : callee(_tv1)`.
+   *
+   * `helper` selects which runtime broadcast the wrapper dispatches through,
+   * because the two forms disagree about an EMPTY position. `bcastFn` is the
+   * user-function form: it zips zero elements into an empty list, which is
+   * what applying a function literal to `[]` answers in the interpreter.
+   * `bcast` is the OPERATOR form: an empty operator position answers
+   * `Nothing`, which the real-valued targets spell NaN (`Sin([])` evaluates to
+   * `Nothing`). Both recurse into nested arrays.
+   *
+   * The wrapper takes a FIXED number of parameters, read from the function
+   * literal, rather than a rest argument. A consumer that hands the value
+   * straight to `Array.prototype.map` supplies the index and the source array
+   * as extra arguments, and a rest form would see that array and broadcast
+   * over it.
+   *
+   * The `Array.isArray` test is done here rather than left to the runtime
+   * helper so the scalar case — every element of an ordinary flat list — costs
+   * one type test instead of the broadcast's operand-shape analysis.
+   */
+  private static broadcastingWrapper(
+    callee: string,
+    nParams: number,
+    target: CompileTarget<Expression>,
+    helper: 'bcast' | 'bcastFn'
+  ): string {
+    const params: string[] = [];
+    for (let i = 0; i < nParams; i++) params.push(BaseCompiler.tempVar(target));
+    const args = params.join(', ');
+    const test = params.map((p) => `Array.isArray(${p})`).join(' || ');
+    return (
+      `(${args}) => ${test} ? _SYS.${helper}(${callee}, ${args}) : ` +
+      `${callee}(${args})`
+    );
   }
 
   /**
@@ -18129,7 +18297,7 @@ export class BaseCompiler {
       try {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(literal, target, registry);
-        BaseCompiler.recordDeclaredScalarParams(h, literal, bodyTarget);
+        BaseCompiler.recordScalarParams(h, literal, bodyTarget);
         // A target with its own definition lowering (the shader targets)
         // synthesizes the signature and compiles the body itself — a shader
         // function body is a STATEMENT position and its declaration needs
@@ -18312,6 +18480,10 @@ export class BaseCompiler {
    * Parameter names are drawn from the compilation's temp-name counter
    * (`_tv1`, …), which already skips every name the artifact uses, so the
    * synthesized wrapper can capture nothing.
+   *
+   * What the caller receives is the BROADCAST-AWARE name where the built-in
+   * is element-wise (`builtinCallbackValueRef`), because the synthesized body
+   * is written for scalars only.
    */
   static ensureBuiltinCallbackEmitted(
     engine: ComputeEngine,
@@ -18324,7 +18496,8 @@ export class BaseCompiler {
     // Already emitted (a repeated reference): share the one definition, and
     // in particular do NOT draw fresh temp names for it.
     const name = BaseCompiler.userFunctionName(registry, s);
-    if (registry.defs.has(name)) return name;
+    if (registry.defs.has(name))
+      return BaseCompiler.builtinCallbackValueRef(engine, s, name, target);
 
     const arity = builtinCallbackArity(engine, s);
     if (arity === undefined) return undefined;
@@ -18340,12 +18513,68 @@ export class BaseCompiler {
     // yield an error body: fail closed rather than emit it.
     if (!isFunction(literal, 'Function') || !literal.isValid) return undefined;
 
-    return BaseCompiler.emitFunctionLiteralDefinition(
+    const emitted = BaseCompiler.emitFunctionLiteralDefinition(
       s,
       literal,
       target,
       registry
     );
+    if (emitted === undefined) return undefined;
+    return BaseCompiler.builtinCallbackValueRef(engine, s, emitted, target);
+  }
+
+  /**
+   * The name under which the eta-expanded built-in `s` is handed to a consumer
+   * of a function VALUE: the broadcast-aware wrapper when the operator is
+   * element-wise, and the plain `name` otherwise.
+   *
+   * The synthesized body applies the operator to SCALARS — `(_tv1) =>
+   * Math.sin(_tv1)` — while the consumers of a function value hand the callee
+   * whatever element they hold. An element that is itself a collection was
+   * therefore passed straight into a scalar kernel: `Map(Sin, xs)` over
+   * `[[1, 2], [], [3]]` answered `[NaN, 0, 0.141…]` behind `success: true`,
+   * because `Math.sin` coerces an array through `Number`. The interpreter
+   * applies the operator's own broadcast to such an element, so
+   * `Sin([1, 2])` is `[sin 1, sin 2]`.
+   *
+   * The runtime helper is `_SYS.bcast`, the OPERATOR broadcast, not the
+   * `_SYS.bcastFn` a user function gets: an empty operator position evaluates
+   * to `Nothing` (`Sin([])` is `Nothing`, spelled NaN on a real-valued
+   * target), where applying a function literal to `[]` answers the empty list.
+   *
+   * Only an element-wise operator is wrapped. A built-in that consumes its
+   * argument WHOLE — `Length`, `Sum`, `Min` over a list — is not broadcast by
+   * the interpreter either, and keeps the bare name so a collection element
+   * still reaches its kernel intact.
+   */
+  private static builtinCallbackValueRef(
+    engine: ComputeEngine,
+    s: string,
+    name: string,
+    target: CompileTarget<Expression>
+  ): string {
+    // The `{ re, im }` convention and the `_SYS` runtime are JavaScript ones,
+    // so a target with its own definition lowering emits the bare name.
+    if (target.language !== 'javascript') return name;
+    const registry = target.userFunctions;
+    if (!registry) return name;
+    if (builtinOperatorDefinition(engine, s)?.broadcastable !== true)
+      return name;
+    const arity = builtinCallbackArity(engine, s);
+    if (arity === undefined) return name;
+
+    const bcastName = `${name}$b`;
+    if (!registry.defs.has(bcastName))
+      registry.defs.set(
+        bcastName,
+        `const ${bcastName} = ${BaseCompiler.broadcastingWrapper(
+          name,
+          arity,
+          target,
+          'bcast'
+        )};`
+      );
+    return bcastName;
   }
 
   /**
@@ -18432,32 +18661,38 @@ export class BaseCompiler {
 
   /**
    * Record, for the body about to compile under `bodyTarget`, which of `h`'s
-   * parameters hold a run-time SCALAR because the author DECLARED them one.
-   * A call that passes such a parameter on then compiles as a direct call
-   * instead of a runtime broadcast dispatch. (The Tycho code-generation audit
-   * of 2026-09-08 measured 297 broadcast dispatches inside function bodies.)
+   * parameters hold a run-time SCALAR because the type in `h`'s signature at
+   * that position is a scalar one. A call that passes such a parameter on
+   * then compiles as a direct call instead of a runtime broadcast dispatch.
+   * (The Tycho code-generation audit of 2026-09-08 measured 297 broadcast
+   * dispatches inside function bodies.)
    *
    * Two conditions, both necessary.
    *
-   * The parameter's type must be DECLARED, never inferred. An inferred scalar
-   * says only how the body USES the parameter, which is no promise about the
-   * value a call passes; a declaration is the author's contract, exactly as a
-   * caller's `ce.declare('u', 'number')` is at a top-level call site (user
-   * ruling 2026-09-07). The two declaration spellings are read together: a
-   * `Typed(x, "number")` annotation on the literal, and a pinned signature on
-   * the definition (`ce.declare(h, '(number) -> number')` then assign), which
-   * the definition marks with `inferredType: false` / `inferredSignature:
-   * false`.
+   * The parameter's type must be a SCALAR one — `number` and its subtypes,
+   * `boolean`, `string`. Whether the author wrote that type or the engine
+   * inferred it makes no difference (user ruling 2026-09-08): a
+   * scalar-parameter function is a run-time scalar at that position by
+   * construction, because every emitted call site of it is broadcast-aware.
+   * A call whose argument is not provably a scalar is dispatched element-wise
+   * (`_SYS.bcastFn`) or guarded by `Array.isArray`, so the body sees one
+   * element; the only call form that passes an argument straight through is
+   * the one an explicit caller declaration already exempts, and a caller that
+   * hands that form a list has broken its own declared contract. A parameter
+   * typed `unknown`, `any` or a collection carries no such standing and keeps
+   * its dispatch: such a body may legitimately receive a list whole, the way
+   * `k(L) := Sum(L)` does. The two type spellings are read together: a
+   * `Typed(x, "number")` annotation on the literal, and the signature on the
+   * definition, whether pinned by `ce.declare(h, '(number) -> number')` or
+   * inferred from the body.
    *
    * And EVERY parameter of `h` must be scalar, so that every emitted call
-   * site of `h` is broadcast-aware: a call whose argument is not provably a
-   * scalar is dispatched element-wise or guarded by `Array.isArray`, and the
-   * body sees one element either way. A callee with a collection-typed
+   * site of `h` is broadcast-aware. A callee with a collection-typed
    * parameter binds its arguments whole (`paramsAreScalar` is false) and
    * emits a bare direct call, which would pass an array straight into a
-   * scalar-declared sibling parameter.
+   * scalar sibling parameter.
    */
-  private static recordDeclaredScalarParams(
+  private static recordScalarParams(
     h: string,
     literal: Expression & FunctionInterface,
     bodyTarget: CompileTarget<Expression>
@@ -18465,43 +18700,23 @@ export class BaseCompiler {
     if (bodyTarget.language !== 'javascript') return;
     const engine = literal.engine as unknown as ComputeEngine;
     if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return;
-    const signature = BaseCompiler.userFunctionSignatureIsDeclared(engine, h)
-      ? BaseCompiler.userFunctionSignature(engine, h)
-      : undefined;
+    const signature = BaseCompiler.userFunctionSignature(engine, h);
     const names = new Set<string>();
     literal.ops.slice(1).forEach((p, i) => {
       const name = functionLiteralParameterName(p);
       if (!name) return;
-      const declared =
+      const t =
         BaseCompiler.declaredParamType(p) ??
         BaseCompiler.signatureParamType(signature, i);
-      if (declared === undefined || declared === 'never') return;
+      if (t === undefined || t === 'never') return;
       if (
-        isSubtype(declared, 'number') ||
-        isSubtype(declared, 'boolean') ||
-        isSubtype(declared, 'string')
+        isSubtype(t, 'number') ||
+        isSubtype(t, 'boolean') ||
+        isSubtype(t, 'string')
       )
         names.add(name);
     });
-    recordDeclaredScalarParams(bodyTarget, names);
-  }
-
-  /**
-   * Is the signature of user-defined function `h` the author's DECLARATION
-   * rather than an inference from its body? Read from the same definition
-   * `userFunctionSignature` reads the signature itself from, so the two agree
-   * about which signature the flag describes.
-   */
-  private static userFunctionSignatureIsDeclared(
-    engine: ComputeEngine,
-    h: string
-  ): boolean {
-    const def = engine.lookupDefinition(h);
-    if (!def) return false;
-    if ('value' in def && def.value !== undefined)
-      return def.value.inferredType === false;
-    if ('operator' in def) return def.operator.inferredSignature === false;
-    return false;
+    recordScalarParams(bodyTarget, names);
   }
 
   /**

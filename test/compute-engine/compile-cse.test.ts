@@ -1136,34 +1136,35 @@ describe('COMPILE CSE — threshold and the per-region cap', () => {
     expect(result.code).toBe('6 * _.u + 6 * _.u');
   });
 
-  /** 40 distinct thrice-repeated candidates in ONE region. */
+  /** 80 distinct thrice-repeated candidates in ONE region — more than the
+   * per-region cap (64), so the cap decides which ones bind. */
   const capped = () => {
     const terms: any[] = [];
-    for (let k = 0; k < 40; k++) {
+    for (let k = 0; k < 80; k++) {
       const t = ['Sin', ['Multiply', k + 2, 'u']];
       terms.push(t, t, t);
     }
     return ce.box(['Add', ...terms]);
   };
 
-  it('keeps the highest-scoring 32 candidates, deterministically', () => {
+  it('keeps the highest-scoring 64 candidates, deterministically', () => {
     const first = compile(capped(), { fallback: false }).code;
     const second = compile(capped(), { fallback: false }).code;
 
-    expect(occurrences(first, 'const _cse')).toBe(32);
-    expect(first).toContain('const _cse32 = Math.sin(33 * _.u)');
-    expect(first).not.toContain('const _cse33');
+    expect(occurrences(first, 'const _cse')).toBe(64);
+    expect(first).toContain('const _cse64 = Math.sin(65 * _.u)');
+    expect(first).not.toContain('const _cse65');
     // Every score is equal here, so the tie-break is first-occurrence order:
-    // coefficients 2…33 bind, 34…41 stay inline.
-    expect(occurrences(first, 'Math.sin(34 * _.u)')).toBe(3);
+    // coefficients 2…65 bind, 66…81 stay inline.
+    expect(occurrences(first, 'Math.sin(66 * _.u)')).toBe(3);
     expect(second).toBe(first);
     parity(capped(), { u: 0.3 }, 9);
   });
 
   it('keeps the cap on the Python target too', () => {
     const code = new PythonTarget().compileToSource(capped());
-    expect(occurrences(code, 'for _cse')).toBe(32);
-    expect(code).toContain('for _cse32 in [np.sin(33 * u)]');
+    expect(occurrences(code, 'for _cse')).toBe(64);
+    expect(code).toContain('for _cse64 in [np.sin(65 * u)]');
   });
 });
 
@@ -1806,7 +1807,11 @@ describe('COMPILE CSE — typed named callback of an eager operator', () => {
     expect(occurrences(result.code, 'const _cse')).toBe(1);
     // The whole application binds once — not just its collection operand.
     expect(occurrences(result.code, '.filter(')).toBe(1);
-    expect(result.code).toContain('const _cse1 = ((_f)');
+    // The index of the temporary is not pinned: CSE temporaries and the
+    // compiler's other generated names are drawn from one counter, so an
+    // emission that also needs a temporary (here the broadcast wrapper of
+    // the named predicate) shifts it.
+    expect(result.code).toMatch(/const _cse\d+ = \(\(_f\)/);
 
     const off = compile(expr, {
       fallback: false,
@@ -2232,24 +2237,24 @@ pyDescribe('COMPILE CSE — Python emitted source (pyexec)', () => {
     );
   });
 
-  it('keeps a 32-binding stress source within the Python parser', () => {
+  it('keeps a 64-binding stress source within the Python parser', () => {
     // The per-region cap (§6.2) exists so a many-candidate region cannot grow
     // source past what the parser accepts. The FLAT comprehension form is what
     // keeps the nesting depth constant.
     const terms: any[] = [];
-    for (let k = 0; k < 40; k++) {
+    for (let k = 0; k < 80; k++) {
       const t = ['Sin', ['Multiply', k + 2, 'u']];
       terms.push(t, t, t);
     }
     const source = new PythonTarget().compileToSource(
       ce.box(['Add', ...terms])
     );
-    expect(occurrences(source, 'for _cse')).toBe(32);
+    expect(occurrences(source, 'for _cse')).toBe(64);
     astParse(source, 'stress');
 
     const { calls, value } = run(source, 'stress-run', 'u = 0.3');
-    // 32 bound right-hand sides + 8 uncapped candidates emitted inline (3× each).
-    expect(calls).toBe(32 + 8 * 3);
+    // 64 bound right-hand sides + 16 uncapped candidates emitted inline (3× each).
+    expect(calls).toBe(64 + 16 * 3);
     expect(value as number).toBeCloseTo(
       compile(ce.box(['Add', ...terms]), { fallback: false }).run!({
         u: 0.3,

@@ -39,6 +39,26 @@ function shape(r: unknown): [string, number, number] | [string] {
 }
 
 /**
+ * The result's kind, with each finite bound checked as an ENCLOSING bound of
+ * the value it is computed from rather than as an exact double.
+ *
+ * The library rounds every endpoint it cannot prove exact one ulp outward
+ * (`interval/rounding.ts`), so a `Math.pow` corner comes back one ulp wide of
+ * the nominal value. What these tests pin is WHICH corner (or which literal
+ * bound) the routine reports, not the last bit of it.
+ */
+function expectShape(r: unknown, kind: string, lo: number, hi: number): void {
+  const s = shape(r);
+  expect(s[0]).toBe(kind);
+  const [, alo, ahi] = s as [string, number, number];
+  expect(alo).toBeLessThanOrEqual(lo);
+  expect(ahi).toBeGreaterThanOrEqual(hi);
+  if (Number.isFinite(lo)) expect(alo).toBeCloseTo(lo, 12);
+  if (Number.isFinite(hi)) expect(ahi).toBeCloseTo(hi, 12);
+  else expect(ahi).toBe(hi);
+}
+
+/**
  * Does the reported enclosure contain the true range? Sampled on a grid — a
  * coarse but independent check that the fix did not trade a wrong `partial`
  * for a wrong bound.
@@ -67,22 +87,15 @@ function containsTrueRange(
 
 describe('Tycho 260 — a base touching zero is not automatically clipped', () => {
   test('a wholly positive exponent is entirely in the domain', () => {
-    expect(shape(powInterval(I(0, 2), I(1.9, 2.1)))).toEqual([
-      'interval',
-      0,
-      Math.pow(2, 2.1),
-    ]);
-    expect(shape(powInterval(I(0, 2), I(0.5, 0.5)))).toEqual([
-      'interval',
-      0,
-      Math.SQRT2,
-    ]);
+    expectShape(powInterval(I(0, 2), I(1.9, 2.1)), 'interval', 0, 2 ** 2.1);
+    expectShape(powInterval(I(0, 2), I(0.5, 0.5)), 'interval', 0, Math.SQRT2);
     // A base below 1, where the supremum is at the LOWER exponent.
-    expect(shape(powInterval(I(0, 0.5), I(1.9, 2.1)))).toEqual([
+    expectShape(
+      powInterval(I(0, 0.5), I(1.9, 2.1)),
       'interval',
       0,
-      Math.pow(0.5, 1.9),
-    ]);
+      0.5 ** 1.9
+    );
   });
 
   // A pole needs a NEGATIVE exponent. An exponent of exactly 0 gives `x^0 = 1`
@@ -91,8 +104,8 @@ describe('Tycho 260 — a base touching zero is not automatically clipped', () =
   // answered `+∞` for `[0,2]^[0,1]`, whose true range is `[0,2]`: sound, but it
   // discards the bound and reports the very discontinuity this fix removes.
   test('an exponent whose lower bound is exactly zero is not a pole', () => {
-    expect(shape(powInterval(I(0, 2), I(0, 1)))).toEqual(['interval', 0, 2]);
-    expect(shape(powInterval(I(0, 2), I(0, 3)))).toEqual(['interval', 0, 8]);
+    expectShape(powInterval(I(0, 2), I(0, 1)), 'interval', 0, 2);
+    expectShape(powInterval(I(0, 2), I(0, 3)), 'interval', 0, 8);
     expect(containsTrueRange(I(0, 2), I(0, 1))).toBe(true);
     expect(containsTrueRange(I(0, 2), I(0, 3))).toBe(true);
   });
@@ -112,20 +125,17 @@ describe('Tycho 260 — a base touching zero is not automatically clipped', () =
   });
 
   test('a wholly positive base is unchanged', () => {
-    expect(shape(powInterval(I(1, 2), I(1.9, 2.1)))).toEqual([
-      'interval',
-      1,
-      Math.pow(2, 2.1),
-    ]);
+    expectShape(powInterval(I(1, 2), I(1.9, 2.1)), 'interval', 1, 2 ** 2.1);
   });
 
   describe('a pole at zero reports an infinite supremum, not a finite one', () => {
     test('a wholly negative exponent', () => {
-      expect(shape(powInterval(I(0, 2), I(-2.5, -1.5)))).toEqual([
+      expectShape(
+        powInterval(I(0, 2), I(-2.5, -1.5)),
         'partial',
-        Math.pow(2, -2.5),
-        Infinity,
-      ]);
+        2 ** -2.5,
+        Infinity
+      );
     });
 
     test('an exponent spanning zero reaches both limits', () => {
@@ -140,11 +150,7 @@ describe('Tycho 260 — a base touching zero is not automatically clipped', () =
     });
 
     test('an exponent reaching zero from below', () => {
-      expect(shape(powInterval(I(0, 2), I(-1, 0)))).toEqual([
-        'partial',
-        0.5,
-        Infinity,
-      ]);
+      expectShape(powInterval(I(0, 2), I(-1, 0)), 'partial', 0.5, Infinity);
     });
   });
 

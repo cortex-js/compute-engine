@@ -251,26 +251,37 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     expect(r?.run?.({})).toEqual([2, 4, 6]);
   });
 
-  test('a REAL-declared literal emits the bare arrow, unchanged', () => {
+  test('a REAL-declared literal takes no complex coercion', () => {
     const r = compile(mapOver('(x: real) -> real'), { constantFold: false });
+    // The arrow itself is unwrapped — no `_SYS.cplx`, no `.re` — but the
+    // parameter is scalar, so the literal is still handed out through the
+    // broadcast-aware wrapper that an element which is a collection needs.
     expect(r?.code).toBe(
-      '((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(((x) => 2 * x))'
+      '((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x) => 2 * x)))'
     );
+    expect(r?.code).not.toContain('_SYS.cplx');
     expect(r?.run?.({})).toEqual([2, 4, 6]);
   });
 
-  test('the NAMED path is unchanged: the coercion still rides on the `$v` shim', () => {
+  test('the NAMED path: the coercion rides on the `$v` shim, under the broadcast wrapper', () => {
     const ce = fresh();
     ce.declare('Q', '(x: complex) -> complex');
     ce.assign('Q', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = compile(ce.box(['Map', 'Q', ['List', 1, 2, 3]] as any), {
       constantFold: false,
     });
-    expect(r?.code).toBe(
-      '((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$v)'
-    );
+    // `complex` is a scalar parameter type, so the value reference is also
+    // broadcast-aware (`$b`): the consumer of a function value may hand it a
+    // nested element, which the interpreter maps over. The broadcast wraps
+    // the coercing shim, so an element reaches the body coerced.
+    expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$b)');
     expect(r?.preamble).toContain(
       'const _fn_Q$v = (_tv1) => _fn_Q(_SYS.cplx(_tv1));'
+    );
+    expect(r?.preamble).toContain(
+      'const _fn_Q$b = (_tv2) => Array.isArray(_tv2) ? ' +
+        '_SYS.bcastFn(_fn_Q$v, _tv2) : _fn_Q$v(_tv2);'
     );
     expect(r?.run?.({})).toEqual([2, 4, 6]);
     expect(

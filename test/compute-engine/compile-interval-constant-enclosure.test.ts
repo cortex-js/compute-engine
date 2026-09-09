@@ -13,8 +13,9 @@
  * 2. a NUMBER LITERAL the engine holds exactly while no double does — a
  *    rational such as `1/49` and a radical such as `√2`;
  * 3. the compile-time constant fold, which evaluates emitted interval code
- *    with the run-time library — a library that rounds to nearest, not
- *    outward.
+ *    with the run-time library. The library itself now rounds every endpoint
+ *    it cannot prove exact outward, so the folded literal is the same
+ *    enclosure the emitted code computes.
  *
  * The reference values are read from the engine at 40 digits and compared
  * as decimals, so a bound is checked against the real constant, never
@@ -316,10 +317,9 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
     expect(r.code.split('_IA.point(').length - 1).toBe(20);
     expect(r.code).toContain('_k1');
     // The binding does not change the value: the run still answers the sum
-    // of the terms. The comparison carries a tolerance because this is a
-    // RUN-TIME result — the interval library rounds to nearest, so the
-    // enclosure it computes is not guaranteed to contain the real sum. Only
-    // the constants and the compile-time folds above carry that guarantee.
+    // of the terms. The comparison carries a tolerance because the reference
+    // is a plain double sum of the same terms, which is not itself an
+    // enclosure of anything.
     const v = boundOf(r.run({ x: 0.35 }));
     let expected = 0;
     for (let i = 1; i <= 20; i++) expected += 0.5 * Math.sin(i * 0.35);

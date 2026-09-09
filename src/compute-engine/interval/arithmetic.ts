@@ -6,6 +6,13 @@
 
 import type { Interval, IntervalResult } from './types.js';
 import { ok, unwrapOrPropagate, liftJump } from './util.js';
+import {
+  outwardUnlessExact,
+  exactAdd,
+  exactSub,
+  exactMul,
+  exactDiv,
+} from './rounding.js';
 
 /**
  * Add two intervals (or IntervalResults).
@@ -169,7 +176,16 @@ function _div(a: Interval, b: Interval): IntervalResult {
 
   // Case 3: Divisor is exactly [0, c] (touches zero at lower bound)
   if (b.lo === 0 && b.hi > 0) {
-    // Dividing by [0+, c]: approaches +Infinity or -Infinity from one side
+    // Dividing by [0+, c]: approaches +Infinity or -Infinity from one side.
+    //
+    // The finite end of the `partial` can itself overflow: `1 / [0, 5·10⁻³²⁴]`
+    // has the true lower bound `1 / 5·10⁻³²⁴`, a real number no double holds,
+    // and the division answers `Infinity` for it. The outward step turns that
+    // inward-facing infinity back into `Number.MAX_VALUE` (`rounding.ts`), so
+    // the answer is `[MAX_VALUE, ∞)`: a `partial` with an INFINITE upper bound
+    // is the sound reading, because the quotient really is unbounded as the
+    // divisor approaches 0, while `[∞, ∞]` would enclose nothing and `empty`
+    // would claim there is no value at all.
     if (a.lo >= 0) {
       // Positive / [0+, c] = [a.lo/c, +Infinity)
       return {
@@ -217,8 +233,30 @@ function _div(a: Interval, b: Interval): IntervalResult {
 // Every operation above is exported through `liftJump` so that a finite
 // jump in an operand (a `singular` result carrying a `value`) is re-tagged
 // on the result instead of being forgotten — see `liftJump` in `util.ts`.
-export const add = liftJump(addRaw);
-export const sub = liftJump(subRaw);
+//
+// Each operation that rounds is also exported through `outwardUnlessExact`,
+// which moves an endpoint one ulp outward unless its prover shows the endpoint
+// is the true real value — see `rounding.ts`. Every endpoint here is ONE
+// correctly rounded double operation, so one ulp is a proof: the true value is
+// within half an ulp of the computed endpoint. `negate` only flips the sign of
+// each endpoint, which is exact, so it is not wrapped.
+export const add = liftJump(outwardUnlessExact(addRaw, exactAdd));
+export const sub = liftJump(outwardUnlessExact(subRaw, exactSub));
 export const negate = liftJump(negateRaw);
-export const mul = liftJump(mulRaw);
-export const div = liftJump(divRaw);
+export const mul = liftJump(outwardUnlessExact(mulRaw, exactMul));
+export const div = liftJump(outwardUnlessExact(divRaw, exactDiv));
+
+// The same kernels WITHOUT the outward step, for the routines of other modules
+// that are BUILT from arithmetic and take their own outward step at their own
+// export — `remainder` (`elementary.ts`) and the reciprocal trigonometric and
+// hyperbolic routines (`trigonometric.ts`). Going through the rounded
+// `sub`/`mul`/`div` above moves an endpoint once per composed operation on top
+// of that step, which cost `sech([0, 0])` its exact value of 1 and made
+// `acsc([2, 2])` four ulps wide for one division and one arc sine.
+//
+// They still propagate a finite jump, which those compositions depend on:
+// `remainder`'s discontinuities come from the `round` in the middle of it, and
+// a raw kernel would drop that jump on the multiplication that follows.
+export const subUnrounded = liftJump(subRaw);
+export const mulUnrounded = liftJump(mulRaw);
+export const divUnrounded = liftJump(divRaw);

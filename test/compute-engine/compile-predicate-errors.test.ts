@@ -336,8 +336,11 @@ describe('unannotated callbacks are untouched', () => {
       'ds',
       ['Function', ['Greater', 'n', 0], 'n'],
     ]);
+    // The predicate's own lowering is untouched; the broadcast-aware wrapper
+    // every scalar-parameter literal is handed out under stands around it.
     expect(js(expr).code).toBe(
-      '((_f) => (_.ds).filter((_x) => _f(_x)))(((n) => 0 < n))'
+      '((_f) => (_.ds).filter((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((n) => 0 < n)))'
     );
     expect(python.compile(expr).code).toBe(
       '(lambda _f: [_x for _x in ds if _f(_x)])((lambda n: 0 < n))'

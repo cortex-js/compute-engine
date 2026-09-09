@@ -5,6 +5,8 @@
 // The collection accessors (`interval/collections.ts`). A collection is never
 // this target's RESULT — these project a run-time array of intervals back down
 // to the single interval the interval-js value model holds.
+import { BigDecimal } from '../../src/big-decimal';
+import { nextDown, nextUp } from '../../src/compute-engine/numerics/numeric';
 import {
   integrate as integrateEnclosure,
   integrateClosed,
@@ -38,6 +40,8 @@ import {
   remainder,
   exp,
   ln,
+  log2,
+  log10,
   abs,
   floor,
   ceil,
@@ -57,6 +61,7 @@ import {
   asin,
   acos,
   atan,
+  atan2,
   acot,
   acsc,
   asec,
@@ -1189,5 +1194,200 @@ describe('INTERVAL INTEGRATE — closed-form guard', () => {
       hi: Infinity,
     });
     expect(r).toEqual({ lo: 1, hi: 1 });
+  });
+});
+
+describe('OUTWARD ROUNDING', () => {
+  // The library answers an ENCLOSURE: the interval it returns contains the
+  // true range of the function over its operands. A double operation rounds
+  // to nearest, so an endpoint that is not the true value is moved one ulp
+  // (or more) outward, while an endpoint an operation can PROVE exact stays
+  // bit-identical — see `interval/rounding.ts`.
+
+  /** The exact value of a double, as a decimal. `new BigDecimal(x)` reads the
+   *  SHORTEST decimal that round-trips to `x`, which is the wrong number
+   *  here; `toFixed(40)` writes the value itself. */
+  const exactly = (x: number): BigDecimal => new BigDecimal(x.toFixed(40));
+
+  test('an inexact sum encloses the real value it cannot represent', () => {
+    // Neither 0.1 nor 0.2 is a double, and their sum is not the double
+    // nearest 0.3 either. The enclosure has to contain the REAL 0.3, which
+    // is strictly between the two doubles the endpoints hold — a comparison
+    // no double arithmetic can make, so it is made in decimal.
+    const r = getValue(add(point(0.1), point(0.2)))!;
+    const truth = new BigDecimal('0.3');
+    expect(exactly(r.lo).lt(truth)).toBe(true);
+    expect(exactly(r.hi).gt(truth)).toBe(true);
+  });
+
+  test('an exact operation stays a point', () => {
+    // Each of these is a real number a double holds, reached with no
+    // rounding at all. Widening any of them would make a `floor` over the
+    // result answer a spurious discontinuity.
+    expect(getValue(add(point(1), point(2)))).toEqual({ lo: 3, hi: 3 });
+    expect(getValue(sub(point(1), point(0.5)))).toEqual({ lo: 0.5, hi: 0.5 });
+    expect(getValue(mul(point(2), point(0.5)))).toEqual({ lo: 1, hi: 1 });
+    expect(getValue(sqrt(point(4)))).toEqual({ lo: 2, hi: 2 });
+    expect(getValue(div(point(49), point(49)))).toEqual({ lo: 1, hi: 1 });
+    expect(getValue(square(point(3)))).toEqual({ lo: 9, hi: 9 });
+    expect(getValue(pow(point(-1), 3))).toEqual({ lo: -1, hi: -1 });
+  });
+
+  test('scaling an enclosure by a power of two adds nothing of its own', () => {
+    // `π`'s enclosure is the pair of doubles either side of the real π.
+    // Multiplying by 2 is exact in binary, so the answer is that pair
+    // scaled — no third ulp.
+    const enclosureOfPi = { lo: nextDown(Math.PI), hi: nextUp(Math.PI) };
+    expect(getValue(mul(point(2), enclosureOfPi))).toEqual({
+      lo: 2 * nextDown(Math.PI),
+      hi: 2 * nextUp(Math.PI),
+    });
+    // The same multiplication over the POINT `Math.PI` is exact as well, so
+    // it answers a point — the widening comes from the operand, never from
+    // an operation that rounded nothing.
+    expect(getValue(mul(point(2), point(Math.PI)))).toEqual({
+      lo: 2 * Math.PI,
+      hi: 2 * Math.PI,
+    });
+  });
+
+  test('an inexact product moves one ulp outward on each side', () => {
+    const r = getValue(mul(point(0.1), point(Math.PI)))!;
+    const p = 0.1 * Math.PI;
+    expect(r).toEqual({ lo: nextDown(p), hi: nextUp(p) });
+  });
+
+  test('an odd function through the origin keeps the exact point 0', () => {
+    // The outward step of a zero endpoint is a subnormal of the opposite
+    // sign, so a sign test on a cell that touches the origin would read an
+    // enclosure straddling zero.
+    expect(getValue(sin(point(0)))).toEqual({ lo: 0, hi: 0 });
+    expect(getValue(tan(point(0)))).toEqual({ lo: 0, hi: 0 });
+    expect(getValue(atan(point(0)))).toEqual({ lo: 0, hi: 0 });
+    expect(getValue(sinh(point(0)))).toEqual({ lo: 0, hi: 0 });
+  });
+
+  test('a transcendental of an irrational argument is widened', () => {
+    const r = getValue(exp(point(1)))!;
+    expect(r.lo).toBe(nextDown(Math.E));
+    expect(r.hi).toBe(nextUp(Math.E));
+    // Euler's number to 40 digits: the enclosure contains it, the double
+    // `Math.E` alone does not say whether it is above or below.
+    const e = new BigDecimal('2.718281828459045235360287471352662497757');
+    expect(exactly(r.lo).lt(e)).toBe(true);
+    expect(exactly(r.hi).gt(e)).toBe(true);
+  });
+
+  test('a jump enclosure a routine writes down is stepped outward too', () => {
+    // `atan2` spells its branch-cut hull from the double `Math.PI`, which is
+    // BELOW the real π that `atan2(0, x)` attains for a negative `x`. The
+    // enclosure has to reach past it on both sides, or a box on the cut
+    // excludes the very value the function takes there.
+    const j = atan2({ lo: -1, hi: 1 }, { lo: -2, hi: -1 });
+    expect(j.kind).toBe('singular');
+    const v = getValue(j)!;
+    expect(v.hi).toBeGreaterThan(Math.PI);
+    expect(v.lo).toBeLessThan(-Math.PI);
+    // π to 40 digits: the enclosure contains the real π, which the double
+    // `Math.PI` does not reach.
+    const pi = new BigDecimal('3.141592653589793238462643383279502884197');
+    expect(exactly(v.hi).gt(pi)).toBe(true);
+    expect(exactly(v.lo).lt(pi.neg())).toBe(true);
+  });
+
+  test('an endpoint that OVERFLOWED steps back to a finite bound', () => {
+    // `MAX_VALUE · 2` is a real number above `Number.MAX_VALUE`, and the
+    // product answers `Infinity` for it. `[∞, ∞]` encloses nothing, so the
+    // lower endpoint — the one facing INTO the interval — steps back to the
+    // largest double.
+    expect(getValue(mul(point(Number.MAX_VALUE), point(2)))).toEqual({
+      lo: Number.MAX_VALUE,
+      hi: Infinity,
+    });
+    expect(getValue(mul(point(-Number.MAX_VALUE), point(2)))).toEqual({
+      lo: -Infinity,
+      hi: -Number.MAX_VALUE,
+    });
+    // An operand that is ALREADY infinite is a genuinely unbounded range, not
+    // an overflow, and is left alone.
+    expect(getValue(mul(point(Infinity), point(2)))).toEqual({
+      lo: Infinity,
+      hi: Infinity,
+    });
+  });
+
+  test('a quotient whose finite bound overflows is a partial, not a point at infinity', () => {
+    // `exp(-1000)` underflows to 0 and its enclosure is `[0, 5e-324]`, so the
+    // quotient's lower bound `1 / 5e-324` overflows. The divisor reaches 0,
+    // so the quotient really is unbounded above — a `partial` with an
+    // infinite upper bound and a finite lower one is the sound reading.
+    const e = exp(point(-1000));
+    expect(getValue(e)).toEqual({ lo: 0, hi: Number.MIN_VALUE });
+    const q = div(point(1), e);
+    expect(q.kind).toBe('partial');
+    expect(getValue(q)).toEqual({ lo: Number.MAX_VALUE, hi: Infinity });
+  });
+
+  test('a root the exact product chain reproduces stays the point it is', () => {
+    // `nthRoot` and `powRational` round the reciprocal exponent and then the
+    // power, so their step is three ulps — but an endpoint whose integer
+    // power reproduces the operand endpoint is the true real root.
+    expect(getValue(nthRoot({ lo: 4, hi: 4 }, 2))).toEqual({ lo: 2, hi: 2 });
+    expect(getValue(powRational({ lo: 8, hi: 8 }, 1, 3))).toEqual({
+      lo: 2,
+      hi: 2,
+    });
+    expect(getValue(powRational({ lo: 4, hi: 4 }, 1, 2))).toEqual({
+      lo: 2,
+      hi: 2,
+    });
+    // The exact lower bound 0 keeps a later `sqrt` from reporting a
+    // domain-clipped `partial` over a radicand that only touches the axis.
+    const r = getValue(nthRoot({ lo: 0, hi: 8 }, 3))!;
+    expect(r.lo).toBe(0);
+    expect(sqrt(nthRoot({ lo: 0, hi: 8 }, 3)).kind).toBe('interval');
+    // An irrational root still moves three ulps on each side.
+    const two = getValue(nthRoot({ lo: 2, hi: 2 }, 2))!;
+    expect(two.lo).toBe(nextDown(nextDown(nextDown(Math.SQRT2))));
+    expect(two.hi).toBe(nextUp(nextUp(nextUp(Math.SQRT2))));
+  });
+
+  test('a logarithm of 1, and of an exact power of its base, is exact', () => {
+    expect(getValue(ln(point(1)))).toEqual({ lo: 0, hi: 0 });
+    expect(getValue(log2(point(8)))).toEqual({ lo: 3, hi: 3 });
+    expect(getValue(log10(point(100)))).toEqual({ lo: 2, hi: 2 });
+    // A widened `ln(1)` is `[-5e-324, 5e-324]`, whose square root is a
+    // domain-clipped `partial`.
+    const r = sqrt(ln(point(1)));
+    expect(r.kind).toBe('interval');
+    expect(getValue(r)).toEqual({ lo: 0, hi: 0 });
+    // A logarithm with no closed double value is still widened.
+    const l2 = getValue(ln(point(2)))!;
+    expect(l2.lo).toBe(nextDown(Math.LN2));
+    expect(l2.hi).toBe(nextUp(Math.LN2));
+  });
+
+  test('a modulo whose sign correction rounds encloses the value it missed', () => {
+    // `-1e-20 % 1` is `-1e-20`, and `-1e-20 + 1` rounds UP to exactly 1, so
+    // the plain `((a % b) + b) % b` finished with `1 % 1` and answered the
+    // point 0 — a miss of a whole period that no ulp step covers.
+    const r = getValue(mod(point(-1e-20), point(1)))!;
+    const truth = new BigDecimal(1).sub(exactly(1e-20));
+    expect(exactly(r.lo).lt(truth)).toBe(true);
+    expect(exactly(r.hi).gt(truth)).toBe(true);
+    // An integer modulo is still the exact integer point.
+    expect(getValue(mod(point(7), point(3)))).toEqual({ lo: 1, hi: 1 });
+  });
+
+  test('a routine built from other routines takes ONE outward step', () => {
+    // `sech(0)` is `1 / cosh(0)` = 1 exactly. Composing the EXPORTED `div`
+    // and `cosh` stepped that answer twice before `sech`'s own export stepped
+    // it a third time, and the exact 1 was lost.
+    expect(getValue(sech(point(0)))).toEqual({ lo: 1, hi: 1 });
+    // `acsc(2)` is `asin(1/2)` = π/6: one exact division and one arc sine, so
+    // one step on each side and no more.
+    const r = getValue(acsc(point(2)))!;
+    expect(r.lo).toBe(nextDown(Math.asin(0.5)));
+    expect(r.hi).toBe(nextUp(Math.asin(0.5)));
   });
 });

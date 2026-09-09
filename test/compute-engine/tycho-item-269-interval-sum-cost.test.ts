@@ -10,9 +10,8 @@
  *    on this target (it bakes a zero-width point), so the fold here evaluates
  *    the emitted CODE with the interval library at compile time
  *    (`foldConstantIntervalCode`) and re-emits the enclosure as a literal of
- *    the same shape. Each endpoint the fold cannot prove exact is moved one
- *    ulp outward first, so the baked literal contains the real value where
- *    the run-time library's round-to-nearest answer may not.
+ *    the same shape. The library rounds every endpoint it cannot prove exact
+ *    outward, so the baked literal contains the real value.
  * 2. No common-subexpression elimination inside an unrolled term: the Sum
  *    body compiled outside its CSE region.
  * 3. No loop-invariant hoisting: the x-only `√(X² + 0.81)` was recomputed in
@@ -55,13 +54,14 @@ function count(haystack: string, needle: string): number {
  * The folded result ENCLOSES the structurally computed one, and is no more
  * than a few ulps wider.
  *
- * The two are not identical, and must not be: the fold evaluates the
- * emitted code through a wrapper that moves every endpoint it cannot prove
- * exact one ulp outward, so the literal it bakes CONTAINS the real value.
- * The run-time library rounds to nearest instead, so the enclosure it
- * computes for an irrational — `ln(2)`, `√(2π)` — can exclude the very
- * value it claims to bound. See `compile-interval-constant-enclosure.test.ts`
- * for the soundness properties this widening buys.
+ * The fold evaluates the emitted code with the run-time library itself, which
+ * rounds every endpoint it cannot prove exact outward, so the literal it
+ * bakes is the same enclosure the structural code computes — and both contain
+ * the real value. The assertion stays an enclosure check rather than an
+ * equality so that a folded chain which reaches the value by a different
+ * order of operations is still accepted. See
+ * `compile-interval-constant-enclosure.test.ts` for the soundness properties
+ * the outward rounding buys.
  */
 function expectEncloses(folded: unknown, reference: unknown): void {
   const boundOf = (v: unknown): { lo: number; hi: number } => {

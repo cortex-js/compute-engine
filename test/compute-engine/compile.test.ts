@@ -3830,7 +3830,10 @@ describe('COMPILE built-in operator name as a callback', () => {
     const r = compile(expr, { fallback: false, constantFold: false })!;
 
     expect(r.code).toContain('const _fn_Sin = (_tv1) => Math.sin(_tv1);');
-    expect(r.code.split('const _fn_Sin').length - 1).toBe(1);
+    // `const _fn_Sin =` and not the bare `const _fn_Sin`: the broadcast-aware
+    // reference `_fn_Sin$b`, which the callback is handed out under, has the
+    // shorter spelling as a prefix of its own definition.
+    expect(r.code.split('const _fn_Sin =').length - 1).toBe(1);
     expect(r.run!(0.5) as number).toBeCloseTo(0.5 + SUM_SIN, 12);
   });
 

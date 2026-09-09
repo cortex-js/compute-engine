@@ -67,9 +67,8 @@ import type {
 import { compileDiagnosticOf } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { IntervalArithmetic } from '../interval/index.js';
-import type { Interval, IntervalResult } from '../interval/types.js';
+import type { Interval } from '../interval/types.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
-import { exactSum, prodExact } from '../numerics/interval-arithmetic.js';
 import {
   INTERVAL_QUADRATURE_BUDGET,
   INTERVAL_QUADRATURE_SUBDIVISIONS,
@@ -511,6 +510,26 @@ const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
 };
 
 /**
+ * The operand of a `Negate` node; `undefined` for anything else.
+ *
+ * `Subtract` canonicalizes to `Add(a, Negate(b))` before compilation, so an
+ * `Add` chain that compiled each operand on its own would emit
+ * `_IA.add(a, _IA.negate(b))` — an extra call and an extra interval object
+ * for every subtraction in the program. The library `sub` kernel answers the
+ * same endpoints as that composition (`lo = a.lo − b.hi`,
+ * `hi = a.hi − b.lo`), so the chain calls it directly instead.
+ *
+ * The one behaviour the two spellings do not share: `negate` of a POINT
+ * result drops the jump tag that a singular result carries, while `sub`
+ * keeps it, so a subtrahend that is a point-valued singular result stays
+ * tagged now. No kernel of the interval library produces such a value.
+ */
+function negatedIntervalOperand(expr: Expression): Expression | undefined {
+  if (!isFunction(expr, 'Negate') || expr.nops !== 1) return undefined;
+  return expr.op1;
+}
+
+/**
  * Interval arithmetic function implementations.
  */
 // Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
@@ -532,10 +551,43 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Add: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(0)';
     if (args.length === 1) return compile(args[0]);
-    // Chain additions: (a + b) + c
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = foldChainStep(`_IA.add(${result}, ${compile(args[i])})`, target);
+    // Chain additions: (a + b) + c. A negated operand subtracts instead of
+    // adding its negation (`_IA.sub` answers the same endpoints as
+    // `_IA.add` of the `_IA.negate`, with one call and one object fewer).
+    //
+    // Canonical ordering places a negated product BEFORE a bare symbol, so
+    // `x - y·z` arrives as `Add(Negate(y·z), x)` with the negation first.
+    // Interval addition is commutative endpoint for endpoint, so when the
+    // first operand is negated and the second is not, the chain starts from
+    // the second operand and subtracts the first: `_IA.sub(x, y·z)`. This
+    // reorders the evaluation of the two operands, which is unobservable
+    // only when both are pure, so an impure operand (a `Random` draw) keeps
+    // the original order and the `_IA.negate`.
+    const firstNegated = negatedIntervalOperand(args[0]);
+    const swapFirst =
+      firstNegated !== undefined &&
+      negatedIntervalOperand(args[1]) === undefined &&
+      args[0].isPure === true &&
+      args[1].isPure === true;
+    let result: string;
+    let start: number;
+    if (swapFirst) {
+      result = foldChainStep(
+        `_IA.sub(${compile(args[1])}, ${compile(firstNegated)})`,
+        target
+      );
+      start = 2;
+    } else {
+      result = compile(args[0]);
+      start = 1;
+    }
+    for (let i = start; i < args.length; i++) {
+      const subtrahend = negatedIntervalOperand(args[i]);
+      const step =
+        subtrahend !== undefined
+          ? `_IA.sub(${result}, ${compile(subtrahend)})`
+          : `_IA.add(${result}, ${compile(args[i])})`;
+      result = foldChainStep(step, target);
     }
     return result;
   },
@@ -1977,380 +2029,6 @@ function intervalEnclosureLiteral(v: number, steps = 1): string {
 }
 
 /**
- * Which endpoints of a folded result its operation produced with NO
- * rounding — the true real value, not a neighbour of it.
- */
-type FoldExactness = { readonly lo: boolean; readonly hi: boolean };
-const FOLD_INEXACT: FoldExactness = { lo: false, hi: false };
-const FOLD_EXACT: FoldExactness = { lo: true, hi: true };
-
-/**
- * The `_IA` routines whose answer is exact whenever their operands are, so
- * the fold must never widen it.
- *
- * Each one only selects, negates or truncates endpoints; none computes a
- * new real number that a double might have to round. `point` returns the
- * literal the emitter wrote; `negate`, `abs`, `min`, `max`, `chop`, `sign`
- * and `heaviside` select or flip endpoints (or answer one of the constants
- * -1, 0, 0.5, 1); `floor`, `ceil`, `round` and `trunc` answer integers; and
- * `fract` answers `x − floor(x)`, which a double holds exactly because it
- * has fewer significant bits than `x`.
- */
-const EXACT_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
-  'point',
-  'negate',
-  'abs',
-  'floor',
-  'ceil',
-  'round',
-  'trunc',
-  'fract',
-  'min',
-  'max',
-  'sign',
-  'heaviside',
-  'chop',
-]);
-
-/**
- * How many ulps the fold steps an inexact endpoint outward, per routine.
- *
- * One step covers ONE correctly rounded double operation: the true value is
- * then within half an ulp of the computed endpoint. The one-step default is a
- * PROOF only for the routines whose endpoint is one correctly rounded
- * operation — the arithmetic of `interval/arithmetic.ts` (`div` divides the
- * endpoints directly, through `_quot`, instead of multiplying by a rounded
- * reciprocal) and `Math.sqrt`. For every other routine it is the minimum
- * outward step, as the note on `WIDENING_INTERVAL_LIBRARY` says.
- *
- * The entries below are the composite routines of `interval/elementary.ts`,
- * which round more than once per endpoint even before the approximation
- * error of the underlying `Math` member:
- * - `hypot` calls `Math.hypot`, which the language spec lets an
- *   implementation approximate, and which scales, sums and takes a root
- *   internally.
- * - `nthRoot` of an ODD degree computes `Math.pow(|x|, 1/n)`: the reciprocal
- *   `1/n` rounds, and the power rounds on top of it.
- * - `powRational` rounds the exponent `p/q` and then powers with it, on each
- *   of the endpoint candidates it takes the extremum over.
- */
-const FOLD_WIDENING_ULPS: Readonly<Record<string, number>> = {
-  __proto__: null as never,
-  hypot: 2,
-  nthRoot: 3,
-  powRational: 3,
-};
-const FOLD_DEFAULT_WIDENING_ULPS = 1;
-
-/** The enclosure an `_IA` operand or answer carries, or `undefined` when it
- * carries none (`empty`, `entire`, a pole) or is not interval-shaped at all
- * (a number exponent, a `BoolInterval`). */
-function foldIntervalOf(value: unknown): Interval | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value))
-    return undefined;
-  return IntervalArithmetic.unwrap(value as Interval | IntervalResult);
-}
-
-/** `x` moved `steps` ulps in the direction `dir`. A non-finite endpoint has
- * no neighbour to move to and is returned as it is. */
-function widenEndpoint(x: number, dir: -1 | 1, steps: number): number {
-  if (!Number.isFinite(x)) return x;
-  let v = x;
-  for (let i = 0; i < steps; i++) v = dir < 0 ? nextDown(v) : nextUp(v);
-  return v;
-}
-
-/**
- * Was the result endpoint `e` reached from `pairs` — the operand-endpoint
- * pairs an interval multiplication takes the extremum over — with no
- * rounding on any pair that reaches it?
- *
- * Every pair whose product equals `e` has to be exact, not just one of
- * them: a second pair that rounded TO `e` may have a true product below it
- * (for a lower endpoint), in which case `e` is not a bound. A pair whose
- * product is any other double is at least one ulp away, so its true product
- * cannot cross `e`. A zero operand gives the exact product zero — the
- * `0 · ±∞ = 0` convention of `interval/arithmetic.ts` included.
- */
-function productEndpointExact(
-  pairs: ReadonlyArray<readonly [number, number]>,
-  e: number
-): boolean {
-  let reached = false;
-  for (const [x, y] of pairs) {
-    const zero = x === 0 || y === 0;
-    const p = zero ? 0 : x * y;
-    if (p !== e) continue;
-    reached = true;
-    if (!zero && !prodExact(x, y, p)) return false;
-  }
-  return reached;
-}
-
-/** How many factors an integer power is checked through before the fold
- * gives up and widens. A power of a constant in emitted code is small; the
- * bound only keeps the check from walking a huge exponent. */
-const MAX_PROVEN_POWER = 64;
-
-/**
- * The exact value of `v` raised to the non-negative integer `n`, or `NaN`
- * when no double holds it.
- *
- * The power is built one multiplication at a time and every product is
- * checked with Dekker's TwoProduct, so a single rounded factor makes the
- * whole answer `NaN`. This is what keeps an alternating sign sum
- * `Σ (−1)^k` folding to the exact point 0: `Math.pow` is not a correctly
- * rounded operation, so its answer cannot be trusted on its own, but here
- * it only has to AGREE with the exact chain.
- */
-function exactIntegerPower(v: number, n: number): number {
-  if (!Number.isInteger(n) || n < 0 || n > MAX_PROVEN_POWER) return NaN;
-  let acc = 1;
-  for (let i = 0; i < n; i++) {
-    const p = acc * v;
-    if (acc !== 0 && v !== 0 && !prodExact(acc, v, p)) return NaN;
-    acc = p;
-  }
-  return acc;
-}
-
-/** Was the power endpoint `e` reached from an endpoint of `x` with no
- * rounding on any endpoint that reaches it? The same "every reaching
- * candidate must be exact" rule as `productEndpointExact`, over the two
- * endpoint powers `intPow` (`interval/elementary.ts`) takes the extremum
- * of. */
-function powEndpointExact(x: Interval, n: number, e: number): boolean {
-  let reached = false;
-  for (const v of [x.lo, x.hi]) {
-    const p = Math.pow(v, n);
-    if (p !== e) continue;
-    reached = true;
-    if (exactIntegerPower(v, n) !== p) return false;
-  }
-  return reached;
-}
-
-/** The exactness of an interval power's two endpoints. An even power of an
- * interval that straddles zero has the exact lower bound 0 (no such power
- * is below it); the exemption is restricted to a NON-NEGATIVE exponent,
- * because a zero lower bound of a negative power comes from an infinite
- * intermediate, where zero does not bound the values below the axis. */
-function powExactness(x: Interval, n: number, value: Interval): FoldExactness {
-  return {
-    lo: (n >= 0 && value.lo === 0) || powEndpointExact(x, n, value.lo),
-    hi: powEndpointExact(x, n, value.hi),
-  };
-}
-
-/**
- * Per-routine proofs that a folded endpoint is the exact real value.
- *
- * A routine with no entry here is treated as inexact and widened. The
- * proofs read the operands the routine was called with and the enclosure it
- * answered, and repeat the endpoint rule of `interval/arithmetic.ts` and
- * `interval/elementary.ts` — which endpoints of the operands produce which
- * endpoint of the answer — so a change to those rules must be mirrored
- * here. Being wrong in the direction of "exact" would emit an enclosure
- * that excludes the value, so every arm answers `false` when it cannot
- * decide.
- */
-/**
- * The prover shared by the routines that answer an INTEGER over an integer
- * grid (`gcd`, `lcm`, `factorial`, `factorial2`, `binomial`, `mod`,
- * `remainder`, `exp2`). Their answer is the true value — not a neighbour of
- * it — when it is a degenerate point at a SAFE integer and every operand is a
- * degenerate point at an integer: every integer below 2^53 is a double, so a
- * result in that range was reached with no rounding, and a result that WAS
- * rounded (a factorial past 18, say) lands outside the safe range and stays
- * conservative.
- *
- * The operand condition is not decoration. `exp2` is `Math.pow(2, x)`, which
- * answers exactly 3 for the double nearest `log2(3)` even though the true
- * value there is not 3; calling that endpoint exact would emit a point the
- * value is outside of. With an integer exponent the power is exact.
- */
-function exactIntegerGridPoint(
-  args: unknown[],
-  value: Interval
-): FoldExactness {
-  if (value.lo !== value.hi || !Number.isSafeInteger(value.lo))
-    return FOLD_INEXACT;
-  for (const arg of args) {
-    const a = foldIntervalOf(arg);
-    if (a === undefined || a.lo !== a.hi || !Number.isInteger(a.lo))
-      return FOLD_INEXACT;
-  }
-  return FOLD_EXACT;
-}
-
-const FOLD_EXACTNESS_PROVERS: Readonly<
-  Record<string, (args: unknown[], value: Interval) => FoldExactness>
-> = {
-  __proto__: null as never,
-  gcd: exactIntegerGridPoint,
-  lcm: exactIntegerGridPoint,
-  factorial: exactIntegerGridPoint,
-  factorial2: exactIntegerGridPoint,
-  binomial: exactIntegerGridPoint,
-  mod: exactIntegerGridPoint,
-  remainder: exactIntegerGridPoint,
-  exp2: exactIntegerGridPoint,
-  // `[a.lo + b.lo, a.hi + b.hi]`: one addition per endpoint, and Knuth's
-  // TwoSum decides each one.
-  add: (args) => {
-    const a = foldIntervalOf(args[0]);
-    const b = foldIntervalOf(args[1]);
-    if (a === undefined || b === undefined) return FOLD_INEXACT;
-    return { lo: exactSum(a.lo, b.lo), hi: exactSum(a.hi, b.hi) };
-  },
-  // `[a.lo − b.hi, a.hi − b.lo]`. Negation is exact, so the subtraction is
-  // the same TwoSum test on the negated operand.
-  sub: (args) => {
-    const a = foldIntervalOf(args[0]);
-    const b = foldIntervalOf(args[1]);
-    if (a === undefined || b === undefined) return FOLD_INEXACT;
-    return { lo: exactSum(a.lo, -b.hi), hi: exactSum(a.hi, -b.lo) };
-  },
-  // The extremum over the four endpoint products.
-  mul: (args, value) => {
-    const a = foldIntervalOf(args[0]);
-    const b = foldIntervalOf(args[1]);
-    if (a === undefined || b === undefined) return FOLD_INEXACT;
-    const pairs = [
-      [a.lo, b.lo],
-      [a.lo, b.hi],
-      [a.hi, b.lo],
-      [a.hi, b.hi],
-    ] as const;
-    return {
-      lo: productEndpointExact(pairs, value.lo),
-      hi: productEndpointExact(pairs, value.hi),
-    };
-  },
-  // Two endpoint products, plus the exact lower bound 0 an interval that
-  // straddles zero gets (no square is below it).
-  square: (args, value) => {
-    const x = foldIntervalOf(args[0]);
-    if (x === undefined) return FOLD_INEXACT;
-    const pairs = [
-      [x.lo, x.lo],
-      [x.hi, x.hi],
-    ] as const;
-    return {
-      lo: value.lo === 0 || productEndpointExact(pairs, value.lo),
-      hi: productEndpointExact(pairs, value.hi),
-    };
-  },
-  // `Math.sqrt` is correctly rounded, so an endpoint `s` is the true root
-  // of an operand endpoint exactly when `s·s` reproduces that endpoint with
-  // no rounding. The lower bound 0 of a radicand that straddles zero is
-  // exact on its own (the clipped domain starts there).
-  sqrt: (args, value) => {
-    const x = foldIntervalOf(args[0]);
-    if (x === undefined) return FOLD_INEXACT;
-    const rootExact = (s: number, radicand: number): boolean =>
-      prodExact(s, s, s * s) && s * s === radicand;
-    return {
-      lo: value.lo === 0 || rootExact(value.lo, x.lo),
-      hi: rootExact(value.hi, x.hi),
-    };
-  },
-  // A NON-NEGATIVE INTEGER exponent only: the endpoint is then a product
-  // chain that either reproduces exactly or does not. A negative exponent
-  // goes through a reciprocal and a fractional one through `Math.pow`, and
-  // neither is decided here.
-  pow: (args, value) => {
-    const x = foldIntervalOf(args[0]);
-    const n = args[1];
-    if (x === undefined || typeof n !== 'number') return FOLD_INEXACT;
-    return powExactness(x, n, value);
-  },
-  // The same proof through the interval-exponent entry point, which hands a
-  // point integer exponent straight to `pow` (`interval/elementary.ts`).
-  // This is the spelling an unrolled `Σ (−1)^k` compiles to, where the
-  // exponent is the loop index rather than a literal.
-  powInterval: (args, value) => {
-    const x = foldIntervalOf(args[0]);
-    const e = foldIntervalOf(args[1]);
-    if (x === undefined || e === undefined) return FOLD_INEXACT;
-    if (e.lo !== e.hi || !Number.isInteger(e.lo)) return FOLD_INEXACT;
-    return powExactness(x, e.lo, value);
-  },
-  // Only the point/point case is decided: the quotient `q` of two point
-  // operands is the true one exactly when `q · b` reproduces `a` with no
-  // rounding. For wider operands the answer is the extremum over four
-  // quotients, each of them computed through a reciprocal, and no cheap
-  // test decides it — those are widened.
-  div: (args, value) => {
-    const a = foldIntervalOf(args[0]);
-    const b = foldIntervalOf(args[1]);
-    if (a === undefined || b === undefined) return FOLD_INEXACT;
-    if (a.lo !== a.hi || b.lo !== b.hi || value.lo !== value.hi)
-      return FOLD_INEXACT;
-    const q = value.lo;
-    const exact = prodExact(q, b.lo, q * b.lo) && q * b.lo === a.lo;
-    return { lo: exact, hi: exact };
-  },
-};
-
-/**
- * The `_IA` the compile-time fold evaluates against: every routine of the
- * run-time library, wrapped so that an inexact endpoint of its answer is
- * moved one ulp OUTWARD.
- *
- * The run-time library rounds to nearest, not outward (see the note in
- * `interval/integrate.ts`), so the enclosure it computes for `√(2π)` is the
- * degenerate point `2.5066282746310002` — which does not contain `√(2π)`.
- * Baking that point into the emitted code would hand a caller a bound the
- * true value is outside of, and this target exists to answer bounds a
- * caller can act on. The widening applies to the FOLD only: it changes what
- * the compiler writes, never what the run-time library computes, and it
- * costs nothing at run time.
- *
- * An endpoint is left alone when the routine proves it exact
- * (`EXACT_INTERVAL_ROUTINES`, `FOLD_EXACTNESS_PROVERS`), so an integer fold
- * such as `1 + (−0.5)` or `2 · 0.5` still emits a point.
- *
- * One ulp is a proof only for the correctly rounded routines (the
- * arithmetic and `Math.sqrt`). For a transcendental routine — `exp`, `ln`,
- * the trigonometry, `gamma`, `erf` — it is the minimum outward step, not a
- * proof: those are approximations whose own error can exceed an ulp, and
- * the run-time library has the same limitation. Widening the fold keeps the
- * folded constant no worse than the code it replaces.
- */
-const WIDENING_INTERVAL_LIBRARY: Record<string, unknown> =
-  makeWideningIntervalLibrary();
-
-function makeWideningIntervalLibrary(): Record<string, unknown> {
-  const wrapped: Record<string, unknown> = Object.create(null);
-  for (const [name, member] of Object.entries(IntervalArithmetic)) {
-    if (typeof member !== 'function' || EXACT_INTERVAL_ROUTINES.has(name)) {
-      wrapped[name] = member;
-      continue;
-    }
-    const prove = FOLD_EXACTNESS_PROVERS[name];
-    const steps = FOLD_WIDENING_ULPS[name] ?? FOLD_DEFAULT_WIDENING_ULPS;
-    const routine = member as (...args: unknown[]) => unknown;
-    wrapped[name] = (...args: unknown[]): unknown => {
-      const result = routine(...args);
-      const value = foldIntervalOf(result);
-      if (value === undefined) return result;
-      const exact = prove ? prove(args, value) : FOLD_INEXACT;
-      const widened = {
-        lo: exact.lo ? value.lo : widenEndpoint(value.lo, -1, steps),
-        hi: exact.hi ? value.hi : widenEndpoint(value.hi, 1, steps),
-      };
-      // A bare `{ lo, hi }` answer (the shape `point` and the collection
-      // accessors return) is replaced wholesale; an `IntervalResult` keeps
-      // its `kind` and its jump/clip markers with the widened enclosure.
-      if (!('kind' in (result as object))) return widened;
-      return { ...(result as object), value: widened };
-    };
-  }
-  return wrapped;
-}
-
-/**
  * Fold the emitted code of a CLOSED constant interval subtree to a literal
  * (`foldEmittedConstant` on this target). `_IA.mul(_IA.point(0.1),
  * _IA.point(Math.PI))` becomes `{ kind: 'interval', value: { lo: …, hi: … } }`
@@ -2362,11 +2040,10 @@ function makeWideningIntervalLibrary(): Record<string, unknown> {
  * `IntervalJavaScriptTarget.compile`): it computes in the interval domain
  * rather than baking a `.N()` point.
  *
- * The evaluation goes through `WIDENING_INTERVAL_LIBRARY`, not through the
- * library itself, so an endpoint the library rounded to nearest is moved
- * outward and the folded literal ENCLOSES the value. The folded enclosure
- * is therefore at least as wide as the one the run-time code computes, and
- * never narrower.
+ * The evaluation goes through the run-time library itself, which rounds every
+ * endpoint it cannot prove exact outward (`interval/rounding.ts`), so the
+ * folded literal ENCLOSES the value and is the SAME enclosure the emitted
+ * code would have computed on every call.
  *
  * Admissibility is read off the CODE: it must consist only of calls into
  * `FOLDABLE_INTERVAL_ROUTINES` over numeric literals, `Math` members and
@@ -2464,9 +2141,7 @@ function evaluateConstantIntervalCode(
 
   let result: unknown;
   try {
-    result = new Function('_IA', `return (${code});`)(
-      WIDENING_INTERVAL_LIBRARY
-    );
+    result = new Function('_IA', `return (${code});`)(IntervalArithmetic);
   } catch {
     return undefined;
   }

@@ -253,8 +253,12 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     // `cs`'s assigned value is a compound pure value, so the JS-family
     // targets bind it once in the preamble (`const _val_cs = …`) and the
     // code reads it by name (the Tycho item 225 shared-value emission).
+    // The predicate is a scalar-parameter literal, so it is handed to the
+    // filter through the broadcast-aware wrapper — the arrow bound once, then
+    // dispatched per element (`_SYS.bcastFn` when the element is a collection).
     expect(r.code).toBe(
-      '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((n) => 1 < n))'
+      '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((_tv1) => (_tv2) => ' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((n) => 1 < n)))'
     );
     expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
     expect((r.run as () => unknown)()).toBe(2);

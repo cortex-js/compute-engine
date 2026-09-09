@@ -43,26 +43,24 @@ export function recordIntegerRange(
   ranges.set(name, { min, max });
 }
 
-// The parameters of an emitted user-function body whose type the AUTHOR wrote
-// as a scalar. Keyed on the bound-variable set the body compiles under, the
-// same way `loopRanges` above is: a nested binder installs a new set, so a
-// name it shadows loses the fact instead of inheriting it.
-const declaredScalarParams = new WeakMap<
-  ReadonlySet<string>,
-  ReadonlySet<string>
->();
+// The parameters of an emitted user-function body whose type in the
+// function's signature is a scalar one, whether the author wrote that type or
+// the engine inferred it. Keyed on the bound-variable set the body compiles
+// under, the same way `loopRanges` above is: a nested binder installs a new
+// set, so a name it shadows loses the fact instead of inheriting it.
+const scalarParams = new WeakMap<ReadonlySet<string>, ReadonlySet<string>>();
 
 /**
  * Record that, inside the body compiling under `target`, every name in
- * `names` holds a runtime scalar because the function's own declaration says
- * so. See `isConstructedScalar` for what the fact is used for.
+ * `names` holds a runtime scalar because the function's own signature types
+ * it as one. See `isConstructedScalar` for what the fact is used for.
  */
-export function recordDeclaredScalarParams(
+export function recordScalarParams(
   target: CompileTarget<Expression>,
   names: ReadonlySet<string>
 ): void {
   if (!target.boundVars || names.size === 0) return;
-  declaredScalarParams.set(target.boundVars, names);
+  scalarParams.set(target.boundVars, names);
 }
 
 function builtin(expr: Expression, target: CompileTarget<Expression>): boolean {
@@ -194,8 +192,11 @@ export function numericArrayCells(
 }
 
 /** A scalar constructed from numeric literals, compiler-owned counters and
- * scalar arithmetic, or an explicitly declared scalar runtime input. Inferred
- * types remain eligible for runtime broadcasting. */
+ * scalar arithmetic, from an explicitly declared scalar runtime input, or
+ * from a scalar-typed parameter of the emitted body this expression belongs
+ * to. An INPUT whose scalar type is merely inferred remains eligible for
+ * runtime broadcasting; a body PARAMETER does not, because its every call
+ * site is broadcast-aware. */
 export function isConstructedScalar(
   expr: Expression,
   target: CompileTarget<Expression>,
@@ -206,16 +207,19 @@ export function isConstructedScalar(
   if (isSymbol(expr)) {
     if (integerRange(expr, target) !== undefined) return true;
     // A parameter of the emitted body this expression belongs to, whose type
-    // the author DECLARED scalar. Every emitted call of such a function hands
-    // that parameter a scalar: a call whose argument is not provably one is
-    // dispatched element-wise (`_SYS.bcastFn`) or guarded by `Array.isArray`,
-    // so the body sees one element; the only call form that passes an
-    // argument straight through is the one an explicit caller declaration
-    // already exempts. Recorded by the emission
-    // (`BaseCompiler.recordDeclaredScalarParams`).
+    // in the function's signature is a scalar one — declared by the author or
+    // inferred by the engine, which count alike (user ruling 2026-09-08).
+    // Every emitted call of such a function hands that parameter a scalar: a
+    // call whose argument is not provably one is dispatched element-wise
+    // (`_SYS.bcastFn`) or guarded by `Array.isArray`, so the body sees one
+    // element; the only call form that passes an argument straight through is
+    // the one an explicit caller declaration already exempts. A parameter
+    // typed `unknown`, `any` or a collection is never recorded, because such
+    // a body may receive a list whole. Recorded by the emission
+    // (`BaseCompiler.recordScalarParams`).
     if (
       target.boundVars !== undefined &&
-      declaredScalarParams.get(target.boundVars)?.has(expr.symbol) === true
+      scalarParams.get(target.boundVars)?.has(expr.symbol) === true
     )
       return true;
     // A caller's explicit declaration is the input contract. A type inferred

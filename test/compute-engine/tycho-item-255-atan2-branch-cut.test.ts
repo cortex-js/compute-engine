@@ -33,12 +33,16 @@ describe('Tycho item 255: Arctan2 across its branch cut', () => {
 
   test('a box straddling the cut is a finite jump with the enclosure [−π, π]', () => {
     const r = fn.run!(box([-1.2, -0.8], [-0.1, 0.1]));
-    expect(r).toEqual({
-      kind: 'singular',
-      at: 0,
-      continuity: 'right',
-      value: { lo: -Math.PI, hi: Math.PI },
-    });
+    expect(r.kind).toBe('singular');
+    expect(r.at).toBe(0);
+    expect(r.continuity).toBe('right');
+    // The hull is an ENCLOSURE of the real [−π, π]: `Math.PI` is below the
+    // real π that the function attains on the cut, so the endpoints are the
+    // doubles just outside ±Math.PI.
+    expect(r.value.lo).toBeLessThan(-Math.PI);
+    expect(r.value.hi).toBeGreaterThan(Math.PI);
+    expect(r.value.lo).toBeCloseTo(-Math.PI, 14);
+    expect(r.value.hi).toBeCloseTo(Math.PI, 14);
   });
 
   test('the jump propagates through the operations above it', () => {
@@ -82,7 +86,13 @@ describe('Tycho item 255: Arctan2 across its branch cut', () => {
   test('the kernel answers the same jump directly', () => {
     const r = IA.atan2({ lo: -0.1, hi: 0.1 }, { lo: -1.2, hi: -0.8 });
     expect(r.kind).toBe('singular');
-    if (r.kind === 'singular') expect(r.value).toEqual({ lo: -Math.PI, hi: Math.PI });
+    if (r.kind === 'singular') {
+      // The same enclosure as above: the doubles just outside ±Math.PI.
+      expect(r.value.lo).toBeLessThan(-Math.PI);
+      expect(r.value.hi).toBeGreaterThan(Math.PI);
+      expect(r.value.lo).toBeCloseTo(-Math.PI, 14);
+      expect(r.value.hi).toBeCloseTo(Math.PI, 14);
+    }
   });
 
   test('Argument of a complex expression still fails closed on the interval target', () => {

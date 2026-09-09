@@ -146,31 +146,30 @@ CE 0.126.2, 862 records over 71 documents) was worked in eight slices; what
 follows is what the slices measured and did not change. Each line names the
 decision or the work that remains.
 
-- **Ruling: the per-region CSE binding cap.** `CSE_MAX_BINDINGS_PER_REGION`
-  is 32 (`compilation/cse.ts`). On the Voronoi body of the audit (record #745,
-  3.1 KB GLSL) the harvest finds 208 candidates that pass the threshold and
-  discards 167 of them at the cap, so `floor(n * x)` is recomputed nine times.
-  The cap protects register pressure in a shader and code size everywhere; a
-  larger cap, or a cap proportional to the region's candidate count, is a
-  tuning decision with snapshot churn on every target. Nothing changes until
-  it is decided.
-- **The interval-js runtime library does not round outward.** Only the
-  constants the compiler emits, and the constants it folds at compile time,
-  are enclosures now (this round). A run-time `_IA.mul(x, y)` with
-  non-degenerate operands still rounds to nearest, so an enclosure computed
-  from a sampled cell can exclude the true value by an ulp. Making the
-  library round outward (error-free transformations, as the compile-time
-  fold does, or `nextUp`/`nextDown` on every inexact endpoint) costs several
-  flops per operation; Tycho item 269 was about the cost of this target.
-  Decide before doing. Also on this target: `Round(x, n)` with a negative
-  `n` bakes its scale `10^n` as a degenerate point (`interval-javascript-target.ts`,
-  the `Round` handler).
-- **`Subtract` on interval-js is still `add(negate(b))`.** The library's
-  `sub` has identical endpoints, but `liftJump` propagates a `singular` right
-  operand whose enclosure is a point differently through the two spellings
-  (`sub` keeps the jump tag, `add(negate(…))` drops it). No library kernel
-  produces such a value today, so the divergence looks unreachable; adopting
-  `sub` (three lines in the interval `Add` handler) is a decision, not a fix.
+- **Ruling: `powRational` is not an enclosure for a large or small base.**
+  The routine rounds the exponent `p/q` to a double before calling
+  `Math.pow`, and `x^(e+δ) = x^e · (1 + δ ln x)`, so the relative error grows
+  with `|ln x|`; a fixed outward step cannot cover it. Measured over 20 000
+  random `powRational(point(x), p, q)` with `x ∈ (0, 1000]`, `p ∈ [1, 5]`,
+  `q ∈ {3, 5, 7}` against a 21-digit reference: 1 056 endpoint misses with
+  the 3-ulp step, worst about 2 ulps beyond it; `nthRoot` has 0 misses in
+  the same sweep. Pre-existing (found by the review of the outward-rounding
+  change, 2026-09-08). Options: (a) a data-dependent step
+  (`steps ≈ 3 + |ln x| · |p/q| / 2⁵³` in ulps — the decorator's step count is
+  fixed at wrap time, so this is an API change), or (b) compute `x^(p/q)` as
+  `(x^(1/q))^p` with the exact integer-power chain, which is sound with the
+  existing provers and also makes `8^(2/3)` the exact point 4 (today
+  `3.9999999999999996`). Recommendation: (b); it changes `powRational`'s
+  numeric output, so it is a decision.
+- **Interval-js: `Round(x, n)` with a negative `n` bakes its scale `10^n` as
+  a degenerate point** (`interval-javascript-target.ts`, the `Round`
+  handler); the scale sits inside a step function whose result depends on
+  it exactly, so widening it is a judgement call, not a mechanical fix. The
+  library itself rounds outward since 2026-09-08; eight composite routines
+  (`acsc`, `asec`, `coth`, `csch`, `sech`, `acoth`, `acsch`, `asech`,
+  `remainder`) call exported kernels internally and so take an inner step
+  plus their own — sound, one ulp wider than one seam; and `integrate.ts`
+  keeps its `widen()` margin for the partition widths.
 - **Identity lowerings that return their operand's code, other targets.** The
   JavaScript handlers were fixed this round (`identityPassthrough`,
   `javascript-target.ts`). The same pattern — `return compile(op)` spliced
@@ -186,20 +185,23 @@ decision or the work that remains.
   answers 0 where `Math.hypot` answers `5e-200`. The split real-part lowering
   added this round uses `Math.hypot`; the object form still goes through
   `cabs`. Consider `Math.hypot(z.re, z.im)` in the helper.
-- **Ruling: the call guard inside a user-function body whose parameter types
-  were inferred.** Inside a compiled body, a call that passes the body's own
-  parameter is wrapped in a runtime shape test (`_SYS.bcastFn(_fn_r, x, y)`)
-  unless the parameter's scalar type is explicitly declared (this round). For
-  `r(a, b) := a + b`, `q(x, y) := r(x, y) + 1` with nothing declared, the
-  body is `_SYS.bcastFn(_fn_r, x, y) + 1` today and would be `_fn_r(x, y) + 1`
-  if the inferred type were trusted. Every emitted call site of a
-  scalar-parameter function already maps a list argument element-wise, so the
-  body only ever sees a scalar — but that is a property of the emitter, not a
-  declaration. Options: keep as is (default), trust inferred scalar parameter
-  types (removes 297 wrappers in the audit corpus), or trust them only for
-  functions with no `run()`-reachable call site. The 09-07 amendment of the
-  call-guard rule (`docs/COMPILATION-MODEL.md` § Collections) is the
-  precedent.
+- **Decision: should inference narrow an unannotated parameter to `number`
+  when its only uses are at scalar positions?** The owner ruled 2026-09-08
+  that a scalar-typed parameter, declared or inferred, makes the calls inside
+  the body direct — and that landed. But the engine infers `unknown` for
+  `q(x, y) := r(x, y) + 1` and for every other shape tried (`\sin(r(x, y))`,
+  `r(x, 2) + 1`, a parameter used both as a scalar and passed along), because
+  a use at a scalar parameter position admits a list that broadcasts. Only a
+  use at a COLLECTION parameter narrows (`q2(L) := k(L)` with
+  `k: (list<number>) -> number` gives `(list<number>) -> number`). So the
+  297 in-body dispatch wrappers of the Tycho corpus remain until either the
+  importer declares the Desmos functions' signatures (the call-site broadcast
+  keeps the Desmos list semantics) or inference narrows such a parameter to
+  `number`. The second is a type-system change: a list passed to `q` would
+  then be a broadcast over a `number` parameter, which is what the call site
+  already does, but every reader of the parameter type — the compiler's
+  shape gates, the `broadcastable<T>` lift, the static checker — would see
+  `number` where it sees `unknown` today. Decide before changing inference.
 - **Audit item J3 is not reproducible at HEAD.** The 496 `_SYS.bcast` sites
   over user-function results needed the call to type top; every construction
   tried (assign, declared `-> unknown`, `Block`, `If`, `Which`, piecewise)
@@ -237,6 +239,36 @@ decision or the work that remains.
   Hand off to Tycho.
 - **Audit item I4 (interval piecewise arms as per-call closures; the `Sum`
   bound read through an inline shape probe) was not worked** this round.
+- **A record reaching an `unknown`-typed parameter through a callback value
+  is broadcast over its fields.** The broadcast-aware wrapper a function
+  value receives decides with `Array.isArray`, and a record, tuple or
+  nominal value lowers to a bare JavaScript array. A parameter TYPED as one
+  of those keeps the bare reference (`signatureParamsLowerToScalars`,
+  `base-compiler.ts`); a parameter left `unknown` is admitted, as the
+  interpreter's own broadcast gate admits it, so `Map(f, persons)` with an
+  unannotated `f(p)` would map over each person's fields. Objects have no
+  compiled representation yet, so no corpus reaches this; recorded so the
+  gate is tightened when they do.
+- **The broadcast wrapper around an inline function literal is wider than
+  callback position.** The `Function`-literal lowering cannot see its parent,
+  so the wrapper also lands on a block-local definition (`let g = (k) ↦ …`,
+  whose call sites are already broadcast-aware), on an `Apply` head
+  (`\sin'(x)`) and on a whole-artifact function result. Redundant, not
+  wrong: one extra call frame and one `Array.isArray` per call. Narrowing it
+  means moving the wrap into the callback funnel of `javascript-target.ts`
+  (`hoistedCallbackLambda` / `fnArg`), which was carrying a peer's in-flight
+  work when this landed (2026-09-08). Also: `Map(Length, xs)` does not
+  compile on the JavaScript target — the synthesized parameter is typed
+  `unknown`, so `Length` declines (a fallback, not a wrong value).
+- **`Map` over a nested source: the interpreter refuses a literal, the
+  compiled route maps.** `Map(f, [[1, 2], [3, 4]])` with `f: (number) -> number`
+  is an `incompatible-type` error when evaluated (the literal source's
+  element type is checked against the callback), while `f([1, 2])` applied
+  directly broadcasts to `[2, 4]`, and the compiled `Map(f, xs)` over a
+  caller-supplied nested array now broadcasts per row (it answered
+  `[NaN, NaN]` before 2026-09-08). The two interpreter answers disagree with
+  each other; decide which one `Map` should give before aligning the
+  compiled route's static check.
 - **An accepted hoist binding can be left unread on GLSL.** For
   `\sum_{i=1}^{200}(i x + \min([1,2,3]))` the list literal is hoisted as its
   own class (`vec3 _tv2 = vec3(1.0, 2.0, 3.0);`) and the `Min` class then

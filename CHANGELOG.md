@@ -126,6 +126,45 @@
   `[1,2,3] |> Sum(\_)` answered the list itself for the same reason. The
   substitution is no longer canonicalized, and the body is canonicalized
   inside the literal's own scope, where its parameter is declared.
+- **A user-defined function passed as a value broadcasts over an element that
+  is itself a collection.** The callback of `Map`, `Filter` or `Reduce`, or a
+  comparator, was handed out as the bare compiled function, so for
+  `f(x) := 2x` the compiled `Map(f, xs)` over `[[1, 2], [3, 4]]` fed a whole
+  row into scalar arithmetic and answered `[NaN, NaN]` where evaluating it
+  answers `[[2, 4], [6, 8]]`. A function whose parameters are all scalar is
+  now handed out as a broadcast-aware wrapper, emitted once per function; a
+  function with a collection parameter keeps the direct reference, because
+  it consumes a list whole.
+- **A built-in operator name or an inline function literal used as a compiled
+  callback broadcasts over a collection element.** `Map(Sin, xs)` and
+  `Map((x) ↦ 2x, xs)` applied a scalar-only body to whatever element the
+  collection held, so an element that was itself a collection answered NaN
+  behind `success: true`. Both are now handed out broadcast-aware, matching
+  the interpreter: over `[[1, 2], [], [3]]` the first answers
+  `[[sin 1, sin 2], NaN, [sin 3]]` (the operator answers `Nothing` for an
+  empty operand) and the second `[[2, 4], [], [6]]`. A built-in that consumes
+  its argument whole, such as `First`, and a literal with a collection-typed
+  parameter keep the bare reference.
+- **The interval-arithmetic runtime library rounds every result outward.**
+  The library the `interval-js` target injects computed in round-to-nearest
+  doubles, so a product, a quotient or a transcendental of non-degenerate
+  operands could answer a bound that excludes the value it claims to bound,
+  and a proof built on it (a curve misses a cell, a function has no root in
+  a box) was not a proof. Every routine that rounds now steps an inexact
+  endpoint outward (one ulp for a correctly rounded operation, two for
+  `hypot`, three for `nthRoot` and a rational power); an endpoint the
+  operation can prove exact — an integer, a dyadic fraction, `2 · 0.5`,
+  `49/49`, `(−1)^k`, an odd function at 0, a range bound such as `cos = 1` —
+  stays the point it is, so `floor` over it still answers one integer. The
+  compile-time constant fold, which widened on its own, now evaluates through
+  the library and emits the same enclosures. An endpoint that overflowed
+  from finite operands steps back to `±Number.MAX_VALUE` instead of staying
+  at infinity, a jump's enclosure is widened like a point's (`atan2` across
+  its branch cut now contains π), the point arm of `mod` no longer rounds
+  `-10⁻²⁰ mod 1` to exactly 0, and the logarithms, roots and composed
+  hyperbolic and reciprocal routines keep their exact points. Cost: a
+  40-term unrolled sum went from 32 to 72 µs per call (2.2×); the exactness
+  proofs are two thirds of it.
 - **A product with an exact rational factor compiles as a division.** The
   canonical form of `x/49` is `Multiply(Rational(1, 49), x)`, and every compile
   target emitted the rounded reciprocal, `0.02040816326530612 * x`. That
@@ -212,6 +251,33 @@
 
 ### Improvements
 
+- **The common-subexpression cap per region is 64 (was 32).** A body that
+  inlines several user functions over `(x, y)` — a Voronoi cell distance in
+  the Tycho corpus — produced 208 candidates that passed the sharing
+  threshold in one region and discarded 167 of them at the old cap, so
+  `floor(n x)` was recomputed nine times. The cap still bounds the register
+  pressure of a shader region.
+- **Inside a compiled user-function body, a call that passes on a parameter
+  whose signature type is a scalar is a direct call**, whether the author
+  declared that type or the engine holds it as inferred. Such a parameter is
+  a run-time scalar by construction: every emitted call site of a
+  scalar-parameter function either maps a list argument element-wise or is
+  the bare call an explicit caller declaration exempts. A parameter typed
+  `unknown`, `any` or a collection keeps its run-time shape dispatch, so a
+  body that receives a list whole — `k(L) := Sum(L)` — is unaffected. Note
+  that the engine's own inference leaves an unannotated parameter used at a
+  scalar position as `unknown` (a list may broadcast there), so today the
+  direct call appears for declared signatures and for signatures a host
+  installs as inferred.
+- **The interval-js target emits `_IA.sub` for a subtraction.** `Subtract`
+  canonicalizes to `Add(a, Negate(b))`, so the target emitted
+  `_IA.add(a, _IA.negate(b))` — one extra call and one extra interval object
+  per subtraction on every evaluation. A negated operand now calls the
+  library `sub` kernel, which answers the same endpoints. Canonical ordering
+  places a negated product before a bare symbol (`x - y z` is
+  `Add(Negate(y z), x)`), and interval addition is commutative endpoint for
+  endpoint, so that shape compiles to `_IA.sub(x, y z)` too; an impure
+  operand keeps its evaluation order.
 - **Code generation, after the Tycho code-generation audit of 2026-09-08.**
   The JavaScript, GLSL and WGSL targets now fold the literal arithmetic their
   own emission creates (an unrolled `Sum` substitutes the index at the

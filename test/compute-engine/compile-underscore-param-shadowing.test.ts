@@ -148,8 +148,12 @@ describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () =
       ),
       { constantFold: false }
     );
+    // The `_` parameter keeps its name; only the broadcast-aware wrapper the
+    // literal is handed out under stands between it and the stream.
     expect(r?.code).toBe(
-      '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_) => (_ * _))), 10)).reduce((_a, _b) => _a + _b, 0)'
+      '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_tv1) => (_tv2) => ' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((_) => (_ * _)))), 10))' +
+        '.reduce((_a, _b) => _a + _b, 0)'
     );
     expect(r?.run?.({})).toBe(385);
   });

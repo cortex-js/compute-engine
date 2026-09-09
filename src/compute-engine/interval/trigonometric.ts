@@ -13,11 +13,20 @@ import {
   liftJump,
   jump,
 } from './util.js';
-import { div } from './arithmetic.js';
+import { divUnrounded } from './arithmetic.js';
+import {
+  outward,
+  outwardUnlessExact,
+  eitherExact,
+  exactAtOrigin,
+  exactAtPoint,
+  exactInRange,
+} from './rounding.js';
 import {
   fresnelS as scalarFresnelS,
   fresnelC as scalarFresnelC,
 } from '../numerics/special-functions.js';
+import { nextDown, nextUp } from '../numerics/numeric.js';
 
 const TWO_PI = 2 * Math.PI;
 const PI = Math.PI;
@@ -342,8 +351,13 @@ function atan2Raw(
   // takes the corner evaluation below. A plain bounded `interval` on the
   // cut let an implicit-curve classifier read the sign change of
   // `atan2(y, x) − 3` across the cut as a crossing (Tycho item 255).
+  // The enclosure is spelled from the DOUBLE `Math.PI`, which is below the
+  // real π, while `atan2(0, x)` for a negative `x` attains the real π exactly.
+  // The written bounds are therefore stepped one ulp outward here, at the
+  // point they are written, so the hull encloses the value even before the
+  // outward decorator sees it.
   if (xVal.lo < 0 && yVal.lo < 0 && yVal.hi >= 0)
-    return jump(0, 'right', { lo: -PI, hi: PI });
+    return jump(0, 'right', { lo: nextDown(-PI), hi: nextUp(PI) });
 
   return ok({ lo: Math.min(...angles), hi: Math.max(...angles) });
 }
@@ -488,7 +502,7 @@ function acscRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return asin(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+  return asinRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
@@ -503,7 +517,7 @@ function asecRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return acos(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+  return acosRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
@@ -518,7 +532,7 @@ function cothRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return div(cosh(xVal), sinh(xVal));
+  return divUnrounded(coshRaw(xVal), sinhRaw(xVal));
 }
 
 /**
@@ -533,7 +547,7 @@ function cschRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return div(ok({ lo: 1, hi: 1 }), sinh(xVal));
+  return divUnrounded(ok({ lo: 1, hi: 1 }), sinhRaw(xVal));
 }
 
 /**
@@ -542,7 +556,7 @@ function cschRaw(x: Interval | IntervalResult): IntervalResult {
  * Always valid since cosh(x) >= 1.
  */
 function sechRaw(x: Interval | IntervalResult): IntervalResult {
-  return div(ok({ lo: 1, hi: 1 }), cosh(x));
+  return divUnrounded(ok({ lo: 1, hi: 1 }), coshRaw(x));
 }
 
 /**
@@ -557,7 +571,7 @@ function acothRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return atanh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+  return atanhRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
@@ -572,7 +586,7 @@ function acschRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return asinh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+  return asinhRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
@@ -587,7 +601,7 @@ function asechRaw(x: Interval | IntervalResult): IntervalResult {
   if (containsZero(xVal)) {
     return { kind: 'singular', at: 0 };
   }
-  return acosh(div(ok({ lo: 1, hi: 1 }), ok(xVal)));
+  return acoshRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
@@ -764,31 +778,71 @@ function fresnelCRaw(x: Interval | IntervalResult): IntervalResult {
 // Every operation above is exported through `liftJump` so that a finite
 // jump in an operand (a `singular` result carrying a `value`) is re-tagged
 // on the result instead of being forgotten — see `liftJump` in `util.ts`.
-export const sin = liftJump(sinRaw);
-export const cos = liftJump(cosRaw);
-export const tan = liftJump(tanRaw);
-export const cot = liftJump(cotRaw);
-export const sec = liftJump(secRaw);
-export const csc = liftJump(cscRaw);
-export const asin = liftJump(asinRaw);
-export const acos = liftJump(acosRaw);
-export const atan = liftJump(atanRaw);
-export const atan2 = liftJump(atan2Raw);
-export const sinh = liftJump(sinhRaw);
-export const cosh = liftJump(coshRaw);
-export const tanh = liftJump(tanhRaw);
-export const asinh = liftJump(asinhRaw);
-export const acosh = liftJump(acoshRaw);
-export const atanh = liftJump(atanhRaw);
-export const acot = liftJump(acotRaw);
-export const acsc = liftJump(acscRaw);
-export const asec = liftJump(asecRaw);
-export const coth = liftJump(cothRaw);
-export const csch = liftJump(cschRaw);
-export const sech = liftJump(sechRaw);
-export const acoth = liftJump(acothRaw);
-export const acsch = liftJump(acschRaw);
-export const asech = liftJump(asechRaw);
-export const sinc = liftJump(sincRaw);
-export const fresnelS = liftJump(fresnelSRaw);
-export const fresnelC = liftJump(fresnelCRaw);
+//
+// Every operation is also exported through `outward`, which moves each finite
+// endpoint one ulp outward so the answer is an enclosure rather than a
+// round-to-nearest approximation — see `rounding.ts`. These are
+// approximations of transcendental functions, so one ulp is the minimum
+// outward step, not a proof. The odd functions through the origin carry
+// `exactAtOrigin` instead, which keeps `f([0, 0])` the exact point 0.
+//
+// The routines built from other routines — `acsc`, `asec`, `coth`, `csch`,
+// `sech`, `acoth`, `acsch`, `asech` — compose the RAW kernels above and the
+// unrounded `divUnrounded` (`arithmetic.ts`), not the exported forms. Each
+// routine takes exactly ONE outward step, at its own export. Composing the
+// exported forms instead took a step per composed operation on top of that,
+// which cost `sech([0, 0])` the exact value 1 and made `acsc([2, 2])` four
+// ulps wide for one division and one arc sine.
+export const sin = liftJump(
+  outwardUnlessExact(sinRaw, eitherExact(exactAtOrigin, exactInRange(-1, 1)))
+);
+export const cos = liftJump(outwardUnlessExact(cosRaw, exactInRange(-1, 1)));
+export const tan = liftJump(outwardUnlessExact(tanRaw, exactAtOrigin));
+export const cot = liftJump(outward(cotRaw));
+export const sec = liftJump(outward(secRaw));
+export const csc = liftJump(outward(cscRaw));
+export const asin = liftJump(outwardUnlessExact(asinRaw, exactAtOrigin));
+export const acos = liftJump(
+  outwardUnlessExact(acosRaw, exactInRange(0, Infinity))
+);
+export const atan = liftJump(outwardUnlessExact(atanRaw, exactAtOrigin));
+export const atan2 = liftJump(outward(atan2Raw));
+export const sinh = liftJump(outwardUnlessExact(sinhRaw, exactAtOrigin));
+export const cosh = liftJump(
+  outwardUnlessExact(coshRaw, exactInRange(1, Infinity))
+);
+export const tanh = liftJump(
+  outwardUnlessExact(tanhRaw, eitherExact(exactAtOrigin, exactInRange(-1, 1)))
+);
+export const asinh = liftJump(outwardUnlessExact(asinhRaw, exactAtOrigin));
+export const acosh = liftJump(
+  outwardUnlessExact(acoshRaw, exactInRange(0, Infinity))
+);
+export const atanh = liftJump(outwardUnlessExact(atanhRaw, exactAtOrigin));
+export const acot = liftJump(outward(acotRaw));
+export const acsc = liftJump(outward(acscRaw));
+export const asec = liftJump(outward(asecRaw));
+export const coth = liftJump(outward(cothRaw));
+export const csch = liftJump(outward(cschRaw));
+// `sech` reaches its maximum of 1 at x = 0, where `cosh(0)` is exactly 1 and
+// the reciprocal of 1 is exactly 1: at the degenerate operand [0, 0] both
+// endpoints of the answer are that exact value, which `exactInRange` alone
+// cannot say (it certifies only an upper bound that reads 1).
+export const sech = liftJump(
+  outwardUnlessExact(
+    sechRaw,
+    eitherExact(exactInRange(0, 1), exactAtPoint(0, 1))
+  )
+);
+export const acoth = liftJump(outward(acothRaw));
+export const acsch = liftJump(outward(acschRaw));
+export const asech = liftJump(outward(asechRaw));
+export const sinc = liftJump(
+  outwardUnlessExact(sincRaw, exactInRange(-Infinity, 1))
+);
+export const fresnelS = liftJump(
+  outwardUnlessExact(fresnelSRaw, exactAtOrigin)
+);
+export const fresnelC = liftJump(
+  outwardUnlessExact(fresnelCRaw, exactAtOrigin)
+);

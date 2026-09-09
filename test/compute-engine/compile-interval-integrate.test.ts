@@ -56,13 +56,13 @@ function contains(r: IntervalRun, v: number): boolean {
 /**
  * Whether the enclosure contains `v` allowing a last-bit slack.
  *
- * The interval library does not round outward anywhere, so a DEGENERATE
- * enclosure — what the closed-form path produces from point inputs — is just a
- * double-precision evaluation of the closed form, and can sit an ulp away from
- * the interpreter's higher-precision `.N()` of the same integral (`1 − cos 1`
- * is 0.45969769413186023 compiled, 0.45969769413186035 interpreted). The slack
- * is for that gap only: every enclosure-emitter case below is orders of
- * magnitude wider and uses the strict `contains`.
+ * The closed-form path evaluates in double precision and rounds each endpoint
+ * it cannot prove exact one ulp outward, which is a few ulps wide in all. The
+ * interpreter's `.N()` of the same integral works at higher precision, so the
+ * two can differ by more than that narrow enclosure covers when the closed
+ * form loses digits to cancellation. The slack is for that gap only: every
+ * enclosure-emitter case below is orders of magnitude wider and uses the
+ * strict `contains`.
  */
 function containsWithin(r: IntervalRun, v: number, tol = 1e-14): boolean {
   const iv = enclosureOf(r);
@@ -115,8 +115,11 @@ describe('COMPILE interval-js Integrate — antiderivative-first', () => {
 
     const expected = reference('\\int_0^1 \\sin t\\,dt'); // 1 − cos 1
     const out = r.run({ x: { lo: 1, hi: 1 } });
-    expect(containsWithin(out, expected)).toBe(true);
-    expect(widthOf(out)).toBe(0);
+    // `cos 1` is irrational: the enclosure is the outward-rounded
+    // neighbourhood of the closed form, a few ulps wide, and it contains the
+    // interpreter's value exactly because it rounds outward.
+    expect(contains(out, expected)).toBe(true);
+    expect(widthOf(out)).toBeLessThan(1e-15);
   });
 
   test('∫₀ˣ sin t dt over a WIDE x encloses the whole range of values', () => {

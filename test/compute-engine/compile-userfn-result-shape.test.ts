@@ -19,14 +19,16 @@
  *
  *  - the runtime broadcast takes the callee itself when no argument needs a
  *    complex coercion, instead of an arrow that only eta-expands it;
- *  - inside an emitted body, a call that passes on a parameter whose type the
- *    author DECLARED scalar is a direct call. Every emitted call site of such
- *    a function hands that parameter a scalar: a call whose argument is not
- *    provably one is dispatched element-wise or guarded, so the body sees one
- *    element, and the only form that passes an argument straight through is
- *    the one an explicit caller declaration already exempts. A parameter whose
- *    scalar type was INFERRED from the body carries no such promise and keeps
- *    its dispatch.
+ *  - inside an emitted body, a call that passes on a parameter whose type in
+ *    the function's signature is a scalar one is a direct call — the author
+ *    wrote that type or the engine inferred it, which makes no difference
+ *    (user ruling 2026-09-08). Every emitted call site of such a function
+ *    hands that parameter a scalar: a call whose argument is not provably one
+ *    is dispatched element-wise or guarded, so the body sees one element, and
+ *    the only form that passes an argument straight through is the one an
+ *    explicit caller declaration already exempts. A parameter typed
+ *    `unknown`, `any` or a collection keeps its dispatch, because such a body
+ *    may receive a list whole.
  *
  * Every expected value is checked against the interpreter's own answer for the
  * same expression.
@@ -301,17 +303,27 @@ describe('the runtime broadcast takes the callee itself', () => {
   });
 });
 
-describe('a DECLARED scalar parameter is a scalar inside the body', () => {
-  /** `r_e: (a, b) ↦ a + b`, plus `q: (x, y) ↦ r_e(x, y) + 1` declared as
-   * `declaration` says. */
-  function nested(declaration: 'none' | 'signature' | 'annotation') {
+describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
+  /** `r_e: (a, b) ↦ a + b`, plus `q: (x, y) ↦ r_e(x, y) + 1` typed as
+   * `typing` says.
+   *
+   * `inferred-signature` gives `q` a scalar signature that is NOT the
+   * author's contract: the definition keeps `inferredSignature: true`, the
+   * state a host reaches by vouching for a name
+   * (`ce.declare(h, { signature, inferredSignature: true })`) or by declaring
+   * a function in a source language whose types the engine works out. The
+   * signature is written after the assignment because assigning an
+   * unannotated literal re-infers the signature from the body. */
+  function nested(
+    typing: 'none' | 'signature' | 'annotation' | 'inferred-signature'
+  ) {
     const ce = new ComputeEngine();
     ce.assign('r_e', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
     const body = ['Add', ['r_e', 'x', 'y'], 1];
-    if (declaration === 'signature') {
+    if (typing === 'signature') {
       ce.declare('q', '(number, number) -> number');
       ce.assign('q', ce.box(['Function', body, 'x', 'y'] as any));
-    } else if (declaration === 'annotation') {
+    } else if (typing === 'annotation') {
       ce.assign(
         'q',
         ce.box([
@@ -323,6 +335,10 @@ describe('a DECLARED scalar parameter is a scalar inside the body', () => {
       );
     } else {
       ce.assign('q', ce.box(['Function', body, 'x', 'y'] as any));
+      if (typing === 'inferred-signature') {
+        const def = (ce as any).lookupDefinition('q');
+        def.operator._setSignature(() => ce.type('(number, number) -> number'));
+      }
     }
     return ce;
   }
@@ -339,13 +355,69 @@ describe('a DECLARED scalar parameter is a scalar inside the body', () => {
     expect(r.preamble).toContain('const _fn_q = (x, y) => _fn_r_e(x, y) + 1;');
   });
 
-  test('an INFERRED parameter type keeps the inner dispatch', () => {
+  test('an INFERRED scalar signature makes the inner call direct too', () => {
+    const ce = nested('inferred-signature');
+    const def = (ce as any).lookupDefinition('q');
+    expect(def.operator.signature.toString()).toBe(
+      '(number, number) -> number'
+    );
+    expect(def.operator.inferredSignature).toBe(true);
+    const r = build(ce, ['q', 'u', 2]);
+    expect(r.preamble).toContain('const _fn_q = (x, y) => _fn_r_e(x, y) + 1;');
+    // The direct call is still safe for a list argument, because the CALL
+    // SITE broadcasts: `u` is a free symbol here, so the whole call is
+    // dispatched element-wise and the body sees one element at a time.
+    expect(r.code).toContain('_SYS.bcastFn(_fn_q, _.u, 2)');
+    expect(r.run({ u: [1, 2, 3] })).toEqual([4, 5, 6]);
+    expect(r.run({ u: 5 })).toBe(8);
+    expect(
+      ce
+        .box(['q', ['List', 1, 2, 3], 2])
+        .evaluate()
+        .toString()
+    ).toBe('[4,5,6]');
+    expect(ce.box(['q', 5, 2]).evaluate().toString()).toBe('8');
+  });
+
+  test('an `unknown` parameter type keeps the inner dispatch', () => {
     const ce = nested('none');
+    // Inference gives an unannotated literal `unknown` parameters — a use of
+    // a parameter at a SCALAR parameter of another function narrows nothing,
+    // because broadcasting admits a list there. So the body may receive a
+    // list whole and the dispatch stays.
+    const def = (ce as any).lookupDefinition('q');
+    expect(def.operator.signature.toString()).toBe(
+      '(unknown, unknown) -> number'
+    );
     const r = build(ce, ['q', 'u', 2]);
     expect(r.preamble).toContain('_SYS.bcastFn(_fn_r_e, x, y)');
   });
 
-  test('a list still broadcasts through a declared-parameter body', () => {
+  test('a COLLECTION parameter type keeps the inner dispatch', () => {
+    // `qL(L: list<number>) := Sum(r_e(L, 2)) + 1` binds `L` whole, so the
+    // inner call of the scalar-parameter `r_e` is what maps over it.
+    const ce = new ComputeEngine();
+    ce.assign('r_e', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any));
+    ce.assign(
+      'qL',
+      ce.box([
+        'Function',
+        ['Add', ['Sum', ['r_e', 'L', 2]], 1],
+        ['Typed', 'L', "'list<number>'"],
+      ] as any)
+    );
+    const r = build(ce, ['qL', ['List', 1, 2, 3]]);
+    expect(r.preamble).toContain('_SYS.bcastFn(_fn_r_e, L, 2)');
+    expect(r.run({})).toBe(13);
+    expect(
+      ce
+        .box(['qL', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('13');
+  });
+
+  test('a list still broadcasts through a scalar-parameter body', () => {
     const ce = nested('signature');
     const r = build(ce, ['q', 'u', 2]);
     // The CALLER's guard is what maps the body over the list, so the body
@@ -359,5 +431,317 @@ describe('a DECLARED scalar parameter is a scalar inside the body', () => {
         .toString()
     ).toBe('[4,5,6]');
     expect(ce.box(['q', 5, 2]).evaluate().toString()).toBe('8');
+  });
+
+  test('a declared-number caller symbol keeps the direct top-level call', () => {
+    const ce = nested('inferred-signature');
+    ce.declare('u', 'number');
+    const r = build(ce, ['q', 'u', 2]);
+    // `ce.declare('u', 'number')` is the caller's input contract, so the top
+    // level needs no shape test either.
+    expect(r.code).toBe('_fn_q(_.u, 2)');
+    expect(r.run({ u: 5 })).toBe(8);
+  });
+});
+
+describe('a user function REFERENCED AS A VALUE broadcasts', () => {
+  /** The consumer of a function value hands the callee whatever element the
+   * source holds, and an element can itself be a collection — a row of a
+   * matrix. The interpreter applies a scalar-parameter function element-wise
+   * there (`f([1, 2])` is `[2, 4]`), so the emitted value reference must do
+   * the same; without it the whole row went into scalar arithmetic and the
+   * answer was NaN. */
+
+  test('an inferred scalar signature: Map over ROWS maps element-wise', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(['Function', ['Multiply', 2, 't'], 't'] as any));
+    ce.assign('f', ce.box(['Function', ['g', 'x'], 'x'] as any));
+    // The signature is written after the assignment because assigning an
+    // unannotated literal re-infers it from the body.
+    const def = (ce as any).lookupDefinition('f');
+    def.operator._setSignature(() => ce.type('(number) -> number'));
+    expect(def.operator.signature.toString()).toBe('(number) -> number');
+
+    // The source is a caller input, so its element shape is unknown to the
+    // emission — the run-time test in the wrapper is what decides.
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'f', 'xs']);
+    expect(r.code).toContain('_fn_f$b');
+    expect(r.preamble).toContain(
+      'const _fn_f$b = (_tv1) => Array.isArray(_tv1) ? ' +
+        '_SYS.bcastFn(_fn_f, _tv1) : _fn_f(_tv1);'
+    );
+    expect(
+      r.run({
+        xs: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+    // The interpreter's own answer for one such element.
+    expect(
+      ce
+        .box(['f', ['List', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4]');
+  });
+
+  test('a DECLARED scalar parameter: Map over ROWS maps element-wise', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(['Function', ['Multiply', 2, 't'], 't'] as any));
+    ce.declare('f', '(number) -> number');
+    ce.assign('f', ce.box(['Function', ['g', 'x'], 'x'] as any));
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'f', 'xs']);
+    expect(r.code).toContain('_fn_f$b');
+    expect(
+      r.run({
+        xs: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+    expect(
+      ce
+        .box(['f', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate()
+        .toString()
+    ).toBe('[[2,4],[6,8]]');
+  });
+
+  test('an UNANNOTATED body of scalar arithmetic broadcasts too', () => {
+    // `f(x) := 2x` infers `(unknown) -> number`, which the interpreter still
+    // broadcasts (an `unknown` parameter reads as scalar there), so the
+    // emitted value reference does too.
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    const r = build(ce, ['Map', 'f', ['List', ['List', 1, 2], ['List', 3, 4]]]);
+    expect(r.run({})).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+    expect(
+      ce
+        .box(['Map', 'f', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate()
+        .toString()
+    ).toBe('[[2,4],[6,8]]');
+  });
+
+  test('scalar elements are unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    const r = build(ce, ['Map', 'f', ['List', 1, 2, 3]]);
+    expect(r.run({})).toEqual([2, 4, 6]);
+    expect(
+      ce
+        .box(['Map', 'f', ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
+  });
+
+  test('an EMPTY element zips to an empty list, as applying the function does', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'f', 'xs']);
+    expect(r.run({ xs: [[], [1, 2]] })).toEqual([[], [2, 4]]);
+    expect(
+      ce
+        .box(['f', ['List']])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
+  });
+
+  test('a Filter predicate and a Reduce combiner take the wrapper too', () => {
+    const ce = new ComputeEngine();
+    ce.assign('p_1', ce.box(['Function', ['Greater', 'x', 1], 'x'] as any));
+    const f = build(ce, ['Filter', ['List', 1, 2, 3], 'p_1']);
+    expect(f.code).toContain('_fn_p_1$b');
+    expect(f.run({})).toEqual([2, 3]);
+
+    const ce2 = new ComputeEngine();
+    ce2.assign(
+      'r_c',
+      ce2.box(['Function', ['Add', 'a', 'b'], 'a', 'b'] as any)
+    );
+    const r = build(ce2, ['Reduce', ['List', 1, 2, 3], 'r_c', 0]);
+    expect(r.preamble).toContain(
+      'const _fn_r_c$b = (_tv1, _tv2) => ' +
+        'Array.isArray(_tv1) || Array.isArray(_tv2) ? ' +
+        '_SYS.bcastFn(_fn_r_c, _tv1, _tv2) : _fn_r_c(_tv1, _tv2);'
+    );
+    expect(r.run({})).toBe(6);
+  });
+
+  test('a COLLECTION-parameter function keeps the bare reference', () => {
+    // `k(L: list<number>) := Sum(L)` consumes a list whole, and the
+    // interpreter does not broadcast it, so no wrapper is emitted.
+    const ce = new ComputeEngine();
+    ce.declare('k', '(list<number>) -> number');
+    ce.assign('k', ce.box(['Function', ['Sum', 'L'], 'L'] as any));
+    const r = build(ce, ['Map', 'k', ['List', ['List', 1, 2], ['List', 3, 4]]]);
+    expect(r.code).toContain('(_fn_k)');
+    expect(r.code).not.toContain('_fn_k$b');
+    expect(r.run({})).toEqual([3, 7]);
+    expect(
+      ce
+        .box(['Map', 'k', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate()
+        .toString()
+    ).toBe('[3,7]');
+  });
+});
+
+describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
+  // `Map(Sin, xs)` eta-expands the operator into the shared local
+  // `_fn_Sin = (_tv1) => Math.sin(_tv1)`, a SCALAR kernel, while the consumer
+  // of that value hands it whatever element the collection holds. An element
+  // that is itself a collection reached `Math.sin` whole, which coerces
+  // through `Number` and answers NaN for `[1, 2]` and `0` for `[]`. The
+  // interpreter applies the operator's own broadcast to such an element.
+  //
+  // The wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast: an
+  // empty operator position is `Nothing` (`Sin([])` evaluates to `"Nothing"`),
+  // which a real-valued target spells NaN — where a function literal applied
+  // to `[]` zips zero elements into an empty list.
+
+  test('an element that is a collection is broadcast, not coerced', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'Sin', 'xs']);
+    expect(r.code).toContain('_fn_Sin$b');
+    expect(r.preamble).toContain(
+      'const _fn_Sin$b = (_tv2) => Array.isArray(_tv2) ? ' +
+        '_SYS.bcast(_fn_Sin, _tv2) : _fn_Sin(_tv2);'
+    );
+    const out = r.run({ xs: [[1, 2], [3]] }) as number[][];
+    expect(out[0][0]).toBeCloseTo(Math.sin(1), 12);
+    expect(out[0][1]).toBeCloseTo(Math.sin(2), 12);
+    expect(out[1][0]).toBeCloseTo(Math.sin(3), 12);
+    // The interpreter's own answer for such an element.
+    const interpreted = ce
+      .box(['Sin', ['List', 1, 2]])
+      .evaluate()
+      .N();
+    expect(interpreted.ops![0].re).toBeCloseTo(Math.sin(1), 12);
+    expect(interpreted.ops![1].re).toBeCloseTo(Math.sin(2), 12);
+  });
+
+  test('an EMPTY element projects to NaN, as the empty operator position does', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'Sin', 'xs']);
+    expect(r.run({ xs: [[]] })).toEqual([NaN]);
+    expect(
+      ce
+        .box(['Sin', ['List']])
+        .evaluate()
+        .toString()
+    ).toBe('"Nothing"');
+  });
+
+  test('a SCALAR element is unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'Sin', 'xs']);
+    const out = r.run({ xs: [1, 2, 3] }) as number[];
+    expect(out[0]).toBeCloseTo(Math.sin(1), 12);
+    expect(out[1]).toBeCloseTo(Math.sin(2), 12);
+    expect(out[2]).toBeCloseTo(Math.sin(3), 12);
+  });
+
+  test('a NON-broadcastable built-in keeps the bare name', () => {
+    // `First` consumes its argument whole — the interpreter does not apply it
+    // element by element — so a collection element must reach its kernel
+    // intact.
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', 'First', 'xs']);
+    expect(r.code).toContain('(_fn_First)');
+    expect(r.code).not.toContain('_fn_First$b');
+    expect(
+      r.run({
+        xs: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([1, 3]);
+    ce.assign('xs', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    expect(ce.box(['Map', 'First', 'xs']).evaluate().toString()).toBe('[1,3]');
+  });
+});
+
+describe('an INLINE function literal in value position broadcasts', () => {
+  // The spliced arrow's body is emitted for scalars only, so `Map((x) ↦ 2x,
+  // xs)` multiplied a whole row as a number. The literal is bound to a name
+  // once and handed out through the same `_SYS.bcastFn` wrapper a NAMED
+  // scalar-parameter function gets, so the two spellings agree.
+  const DOUBLE = ['Function', ['Multiply', 2, 'x'], 'x'];
+
+  test('an element that is a collection is broadcast, not coerced', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', DOUBLE, 'xs']);
+    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.run({ xs: [[1, 2], [], [3]] })).toEqual([[2, 4], [], [6]]);
+    expect(
+      ce
+        .box(['Map', DOUBLE, ['List', ['List', 1, 2], ['List'], ['List', 3]]])
+        .evaluate()
+        .toString()
+    ).toBe('[[2,4],[],[6]]');
+  });
+
+  test('the arrow is bound ONCE, not rebuilt per element', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', DOUBLE, 'xs']);
+    expect(r.code.split('2 * x').length - 1).toBe(1);
+  });
+
+  test('a SCALAR element is unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const r = build(ce, ['Map', DOUBLE, 'xs']);
+    expect(r.run({ xs: [1, 2, 3] })).toEqual([2, 4, 6]);
+    expect(
+      ce
+        .box(['Map', DOUBLE, ['List', 1, 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4,6]');
+  });
+
+  test('a COLLECTION-parameter literal keeps the bare arrow', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list');
+    const literal = [
+      'Function',
+      ['Sum', 'L'],
+      ['Typed', 'L', { str: 'list<number>' }],
+    ];
+    const r = build(ce, ['Map', literal, 'xs']);
+    expect(r.code).not.toContain('_SYS.bcastFn');
+    expect(
+      r.run({
+        xs: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([3, 7]);
   });
 });

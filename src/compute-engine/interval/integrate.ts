@@ -196,21 +196,27 @@ interface Accumulation {
  * Widen an accumulated enclosure by a bound on the rounding error of its own
  * arithmetic.
  *
- * This library computes in round-to-nearest doubles and rounds nothing
- * outward, so the products and partial sums the bracket accumulates can each
- * err by half an ulp in either direction — enough, on a degenerate case such
- * as a constant integrand with point bounds, for a result that misses the
- * exact value by a few ulps. The accumulation is a dot product of the
- * per-piece hull magnitudes against the piece widths, and the standard forward
- * error bound for a dot product of n terms is `γₙ·Σ|termₖ|` with
- * `γₙ ≈ n·u` for unit roundoff `u` (Higham, *Accuracy and Stability of
- * Numerical Algorithms*, §3.1). `Number.EPSILON` is 2u, so `ops·EPSILON·mag`
- * carries a factor-two margin over that bound; one extra `EPSILON·mag` covers
- * the subinterval widths, each rounded once when computed from its endpoints.
+ * The products and the partial sums the bracket accumulates go through `mul`
+ * and `add`, which round their answer outward (`rounding.ts`), so those steps
+ * are enclosures already. What is left is the PARTITION arithmetic, which is
+ * plain round-to-nearest: each subinterval width is computed as `hi − lo` and
+ * can come out half an ulp short, and a short width makes its term short by
+ * half an ulp of that term's magnitude. Summed over the pieces this is the
+ * standard forward error bound for a dot product of n terms, `γₙ·Σ|termₖ|`
+ * with `γₙ ≈ n·u` for unit roundoff `u` (Higham, *Accuracy and Stability of
+ * Numerical Algorithms*, §3.1).
  *
- * This accounts for the accumulation's rounding only. What the integrand's
- * own interval extension returns is taken as given: it is as rigorous as the
- * rest of this library, which does not round outward either.
+ * `ops` still counts THREE operations per term — the width, the product and
+ * the addition — even though the product and the addition are enclosed and
+ * only the width is left to account for. That is deliberate slack, not an
+ * oversight: `Number.EPSILON` is 2u, so `(ops + 1)·EPSILON·mag` is about six
+ * times the `n·u·Σ|termₖ|` the width alone needs, and the margin covers the
+ * `mag` accumulation's own arithmetic as well. Tightening the count to one
+ * operation per term would still be sound; it would just leave less room.
+ *
+ * This accounts for the accumulation's own arithmetic only. What the
+ * integrand's interval extension returns is taken as given: it is as rigorous
+ * as the rest of this library.
  */
 function widen(acc: Accumulation): Interval {
   const delta = (acc.ops + 1) * Number.EPSILON * acc.mag;

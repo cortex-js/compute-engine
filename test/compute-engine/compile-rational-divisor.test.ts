@@ -274,13 +274,21 @@ describe('COMPILE rational divisor agrees with the interpreter', () => {
 });
 
 describe('INTERVAL div divides its endpoints', () => {
-  test('a point quotient is exact', () => {
+  test('a point quotient is exact when the division rounds nothing', () => {
     // `_div` used to multiply by the reciprocal interval `[1/b.hi, 1/b.lo]`,
-    // which rounds twice. `49 * (1 / 4.9)` is `9.999999999999998`, while
-    // `49 / 4.9` is exactly 10 — and that divisor never reaches the rational
-    // rewrite, so this pins the library fix on its own.
+    // which rounds twice: `49 * (1 / 4.9)` is `9.999999999999998`, two ulps
+    // off. Dividing the endpoints rounds once, and `49 / 49` is then the
+    // exact point 1 — that divisor never reaches the rational rewrite, so
+    // this pins the library fix on its own.
     expect(intervalRunPoint('\\frac{x}{49}', 49)).toEqual({ lo: 1, hi: 1 });
-    expect(intervalRunPoint('\\frac{x}{4.9}', 49)).toEqual({ lo: 10, hi: 10 });
+    // `49 / 4.9` is the double 10, but 10 is NOT the true quotient: the
+    // double written `4.9` is a little ABOVE 4.9, so the real value is just
+    // under 10. The point `[10, 10]` would exclude it, and the library
+    // therefore reports the one-ulp neighbourhood of 10 instead.
+    const q = intervalRunPoint('\\frac{x}{4.9}', 49);
+    expect(q.lo).toBeLessThan(10);
+    expect(q.hi).toBeGreaterThan(10);
+    expect(q.hi - q.lo).toBeLessThan(1e-14);
   });
 
   test('an unbounded operand keeps its enclosure', () => {

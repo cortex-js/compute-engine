@@ -34,8 +34,13 @@ describe('COMPILE lazy infinite collections', () => {
     // `_SYS` stream emission this test pins would not appear in the code.
     const r = compile(ce.parse(SUM_TAKE_MAP), { constantFold: false });
     expect(r?.success).toBe(true);
+    // The mapper is a scalar-parameter literal, so the stream is handed the
+    // broadcast-aware wrapper — the arrow bound once, then dispatched per
+    // element (`_SYS.bcastFn` when the element is itself a collection).
     expect(r?.code).toBe(
-      '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_) => (_ * _))), 10)).reduce((_a, _b) => _a + _b, 0)'
+      '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_tv1) => (_tv2) => ' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((_) => (_ * _)))), 10))' +
+        '.reduce((_a, _b) => _a + _b, 0)'
     );
     expect(r?.run?.({})).toBe(385); // 1+4+9+…+100, the interpreter's result
   });

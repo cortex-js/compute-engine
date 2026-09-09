@@ -46,13 +46,22 @@ describe('COMPILE DERIVATIVE — closed-form lowering', () => {
   test("Derivative-spelled \\sin'(x) compiles on javascript", () => {
     const result = compile(ce.parse("\\sin'(x)"));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('(((x) => Math.cos(x)))(_.x)');
+    // The derivative's closed form is a function literal, which a
+    // scalar-parameter literal's broadcast-aware wrapper binds before the
+    // application.
+    expect(result.code).toBe(
+      '(((_tv1) => (_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : ' +
+        '_tv1(_tv2))(((x) => Math.cos(x))))(_.x)'
+    );
   });
 
   test('a bare Derivative(Sin) compiles to a callable on javascript', () => {
     const result = compile(ce.box(['Derivative', 'Sin']));
     expect(result.success).toBe(true);
-    expect(result.code).toBe('((x) => Math.cos(x))');
+    expect(result.code).toBe(
+      '((_tv1) => (_tv2) => Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : ' +
+        '_tv1(_tv2))(((x) => Math.cos(x)))'
+    );
   });
 
   test('ND at a numeric point compiles to its value', () => {

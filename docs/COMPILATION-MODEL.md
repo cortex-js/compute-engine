@@ -155,18 +155,56 @@ Two values inherit that same "scalar by construction" standing. A call of an
 engine-defined function whose every argument is such a value is one, when the
 callee's body yields a single scalar under scalar parameters — the body's
 static type says so, or its `Block`, `If`/`Which` arms and nested calls all
-do. And inside an emitted body, a parameter whose type the AUTHOR declared
-scalar is one: every emitted call site of such a function hands that parameter
-a scalar, because a call whose argument is not provably scalar is dispatched
-element-wise or guarded, and the only form that passes an argument straight
-through is the one an explicit caller declaration already exempts. A parameter
-whose scalar type was inferred from the body carries no such promise and keeps
-its dispatch.
+do. And inside an emitted body, a parameter whose type in the function's
+signature is a scalar one — `number` and its subtypes, `boolean`, `string`,
+whether the author wrote that type or the engine inferred it (user ruling
+2026-09-08) — is one. Every emitted call site of such a function hands that
+parameter a scalar, because a call whose argument is not provably scalar is
+dispatched element-wise or guarded, and the only form that passes an argument
+straight through is the one an explicit caller declaration already exempts —
+a caller that hands that form a list has broken its own declared contract.
+The inference is trusted here, unlike at a top-level input, because the body
+never chooses what reaches it: the call sites do, and they are all
+broadcast-aware.
+
+A parameter typed `unknown`, `any` or a collection is the exception and keeps
+its dispatch: such a body may legitimately receive a list whole, the way
+`k(L) := Sum(L)` does.
 
 The runtime broadcast of a user-function call is handed the emitted function
 itself (`_SYS.bcastFn(_fn_f, …)`). A closure is emitted only when an argument
 needs the `{ re, im }` coercion inside it; otherwise the closure would be an
 eta-expansion of the callee.
+
+A function REFERENCED AS A VALUE — the callback of `Map`, `Filter`, `Reduce`,
+a comparator, a `PointList` role — is a call site too, and it is
+broadcast-aware for the same reason the others are. The consumer of a function
+value hands the callee whatever element the source holds, and an element can
+itself be a collection: a row of a matrix. So a function whose parameters are
+all scalar is handed out as a broadcast-aware wrapper (`_fn_f$b`) instead of
+the bare name — one closure per function, emitted next to the function itself,
+which tests its arguments and applies `_SYS.bcastFn` only when one of them is
+an array. That reproduces the interpreter, which applies such a function
+element-wise to a collection argument. A function with a parameter that is not
+scalar keeps the bare reference, because the interpreter binds its arguments
+whole as well. Where a parameter also needs the `{ re, im }` coercion, the
+broadcast wrapper takes the coercing shim as its callee, so an element reaches
+the body coerced.
+
+The other two things that can stand in a callback position take the same
+wrapper. A bare BUILT-IN operator name (`Map(Sin, xs)`) is eta-expanded into a
+scalar kernel, so an element-wise operator is handed out as `_fn_Sin$b`; its
+wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast, because an
+empty operator position evaluates to `Nothing` — `Sin([])` — which a
+real-valued target spells NaN, where applying a function literal to `[]` zips
+zero elements into an empty list. A built-in that consumes its argument whole,
+such as `Length` or `First`, is not broadcast by the interpreter either and
+keeps the bare name. An INLINE function literal (`Map((x) ↦ 2x, xs)`) takes
+the `_SYS.bcastFn` wrapper a named user function gets; having no name of its
+own, the arrow is bound once — a `const` where a statement sink exists, an
+immediately applied arrow otherwise — so the wrapper's two mentions of its
+callee do not build a fresh closure per element. A literal with a
+collection-typed parameter keeps the bare arrow.
 
 Implicit Map compilation obeys the engine-wide `jit` gate. Exact-mode Map
 compilation requires an explicit proof that native-number execution preserves

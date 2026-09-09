@@ -50,7 +50,7 @@ describe('CSE HARVEST — constants', () => {
   it('exports the tuned thresholds by name', () => {
     expect(CSE_MIN_SIZE).toBe(4);
     expect(CSE_MIN_SCORE).toBe(8);
-    expect(CSE_MAX_BINDINGS_PER_REGION).toBe(32);
+    expect(CSE_MAX_BINDINGS_PER_REGION).toBe(64);
     expect(CSE_MAX_VERIFY_NODES_PER_BUCKET).toBe(10_000);
   });
 });

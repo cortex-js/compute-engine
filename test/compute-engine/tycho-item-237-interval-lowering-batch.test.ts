@@ -115,8 +115,14 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
     ];
     const r = compile(ce().box(mj), { to: 'interval-js' });
     expect(r.success).toBe(true);
-    // x(1 + 1/2 + 1/3 + 1/4 + 1/5) at x = 1.
-    expect(pointOf(r.run({ x: 1 }))).toBeCloseTo(137 / 60, 12);
+    // x(1 + 1/2 + 1/3 + 1/4 + 1/5) at x = 1. The thirds and the fifths are
+    // not doubles, so each of those terms is rounded outward and the answer
+    // is a narrow enclosure of the value rather than a point.
+    const v: any = r.run({ x: 1 });
+    const iv = v.value ?? v;
+    expect(iv.lo).toBeLessThanOrEqual(137 / 60);
+    expect(iv.hi).toBeGreaterThanOrEqual(137 / 60);
+    expect(iv.hi - iv.lo).toBeLessThan(1e-12);
   });
 
   test('undecomposable collection bodies fail closed', () => {

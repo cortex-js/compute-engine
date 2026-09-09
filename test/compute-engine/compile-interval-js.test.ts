@@ -41,9 +41,10 @@ describe('INTERVAL JS COMPILATION - ARITHMETIC', () => {
   test('compiles subtraction', () => {
     const expr = ce.parse('x - y');
     const fn = compile(expr, { to: 'interval-js' });
-    // Subtraction may compile to add(x, negate(y)) or sub(x, y)
-    const code = fn.code;
-    expect(code.includes('_IA.sub') || code.includes('_IA.negate')).toBe(true);
+    // `Subtract` canonicalizes to `Add(x, Negate(y))`, and the `Add` chain
+    // subtracts a negated operand instead of adding its negation. See
+    // `compile-interval-sub.test.ts` for the full set of positions.
+    expect(fn.code).toContain('_IA.sub');
   });
 
   test('compiles multiplication', () => {

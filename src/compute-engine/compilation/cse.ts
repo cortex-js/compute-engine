@@ -50,8 +50,14 @@ export const CSE_MIN_SCORE = 8;
 
 /** Upper bound on the temporaries bound in one region. Beyond it the
  * highest-scoring candidates are kept (ties broken by first
- * occurrence, so the choice is deterministic) and the rest emit inline. */
-export const CSE_MAX_BINDINGS_PER_REGION = 32;
+ * occurrence, so the choice is deterministic) and the rest emit inline.
+ * Raised from 32 to 64 because a body that inlines nine user functions over
+ * `(x, y)` (a Voronoi cell distance, measured in the Tycho code-generation
+ * audit of 2026-09-08) produced 208 surviving candidates in one region and
+ * discarded 167 at the old cap, so `floor(n * x)` was recomputed nine times.
+ * The cap still bounds the register pressure of a shader region; reducing
+ * the inlining of such bodies is a separate effort. */
+export const CSE_MAX_BINDINGS_PER_REGION = 64;
 
 /** Deterministic verification budget, in compared nodes, for one structural
  * hash bucket. A bucket that exhausts it is dropped whole: its
