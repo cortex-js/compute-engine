@@ -65,6 +65,25 @@
 
 ### Resolved Issues
 
+- **A user function that cannot be emitted, referenced as a VALUE, refuses
+  instead of compiling to a broken artifact.** A function name in value
+  position — the callback of a `Map`, a `Filter`, a `CountIf` or a `Find`, a
+  `Reduce`/`Scan` combiner, a `Tabulate` generator, an argument to a
+  higher-order user function — fell through to the ordinary free-symbol read
+  `_.<name>` when the target declined to emit its definition. With a nominal
+  `type meters = number`, the clause set `w(d: meters) := 2` and
+  `w(x, y) := x + y` has no faithful JavaScript guard for its first clause, so
+  `Map(w, [1, 2, 3])` compiled to
+  `((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_.w)`: the artifact reported
+  `success: true` and then threw `TypeError: _f is not a function` at run time,
+  because nothing binds that key. Such a reference is now refused at compile
+  time, naming the function and the property of the definition the target could
+  not express — here `no faithful JavaScript guard for a clause parameter typed
+  'meters'` — and the default `fallback: true` route answers the interpreter's
+  value. This is the same repair a bare BUILT-IN operator name in that position
+  already had (`Map(Sin, xs)` reading `_.Sin`). A symbol that is not a
+  user-defined function — a caller `vars` key, a declared value symbol, an
+  unknown name — keeps the free-symbol read it had.
 - **A MULTI-CLAUSE function referenced as a VALUE is shape-aware.** The
   callback of a `Map`, a `Filter` or a `Reduce` receives whatever element the
   source holds, and an element can be a collection — a row of a matrix. A

@@ -1002,41 +1002,11 @@ rewrite. What remains:
   is compiled inside `withLocalShapeFrame` (`compileCombinerLiteral`), and
   placing the hoist correctly relative to that frame is a `base-compiler.ts`
   change. Missing optimization, not a defect.
-- **The interval `PointX`/`PointY`/`PointZ` decline text is stale.**
-  `compileIntervalPointComponent` (`interval-javascript-target.ts`) still says the
-  interval target's result is "a single interval, not a collection"; the
-  2026-08-22 collection-root ruling made a collection an ARRAY of intervals
-  (`IntervalValue`, `compilation/types.ts`). The accurate reason for the decline
-  that remains (a list-of-points operand that is not a wide literal list, such as a
-  `list<tuple>` symbol) is that the target has no per-element projection over a
-  runtime array. Comment-only fix, not made in the 2026-09-08 round because the
-  file carried a peer session's unstaged rewrite at the time.
 - **Consumer-side fact for Tycho:** on `glsl`/`interval-js` the by-reference
   route needs the plot variables DECLARED (or supplied through `vars`): an
   `unknown`-typed argument could hold a collection the by-reference call would
   broadcast, so `provablyScalarArg` refuses to inline over it. This is a
   soundness guard, not a defect.
-
-### A user function that cannot be emitted, referenced as a VALUE, compiles to a broken artifact (OPEN, correctness — found 2026-09-09 while fixing the multi-clause callback)
-
-A function name in VALUE position (the callback of `Map`, `Filter`, a `Reduce`
-combiner) is emitted through `BaseCompiler.ensureUserFunctionValueRef`. When
-that returns `undefined` — the function declined emission — the symbol falls
-through to the ordinary free-symbol read `_.<name>`, and the artifact reports
-`success: true` and then throws `TypeError: _f is not a function` at run time.
-A multi-clause function whose clause parameter has no faithful JavaScript guard
-declines that way: with `type meters = number`, `function w(d: meters) { 2 }`
-and `function w(x, y) { x + y }`, `Map(w, [1, 2, 3])` compiles to
-`((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_.w)`, which throws.
-
-The same fall-through was fixed for a BUILT-IN operator name in value position
-(`Map(Sin, xs)` used to read `_.Sin`); the comment on that repair in
-`compileExpr` states the principle this case still breaks — the artifact must
-either work or be refused at compile time, so the interpreted fallback answers.
-The fix is to refuse in the value position when the symbol names a user-defined
-function whose emission declined. It is a fail-closed change: measure how many
-compile pins currently assert `success: true` for such an artifact before
-landing it.
 
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 

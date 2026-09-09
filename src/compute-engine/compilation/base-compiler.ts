@@ -325,6 +325,24 @@ type EnclosingDefinition = {
 const NO_NAMES: ReadonlySet<string> = new Set<string>();
 
 /**
+ * A sink an emission route writes its DECLINE reason into on its way out.
+ *
+ * `ensureUserFunctionEmitted` and the routes below it report a decline by
+ * returning `undefined`, which carries no explanation. Most callers only need
+ * to know that the function was not emitted, so the sink is optional and
+ * costs an absent argument. A caller that turns the decline into a
+ * user-visible refusal — the value-position fail-closed refusal in
+ * `compileExpr` — passes one and quotes `reason` in its message, so the
+ * author is told WHICH property of the definition the target could not
+ * express instead of only that it could not.
+ *
+ * The last writer wins: each route sets the field immediately before it
+ * returns `undefined`, so the reason belongs to the decline that actually
+ * ended the emission.
+ */
+type DeclineNote = { reason?: string };
+
+/**
  * How a target spells "the numeric fragment `x` holds a value a comparison can
  * DECIDE" — equivalently, "`x` is not this target's NaN".
  *
@@ -1576,6 +1594,60 @@ export class BaseCompiler {
       `(Add/Subtract/Multiply/Divide) lower to a combiner lambda. ` +
       `Fail closed (D6).`
     );
+  }
+
+  /**
+   * The fail-closed (D6) refusal for a USER-DEFINED function name used in
+   * value position — the callback of `Map`/`Filter`/`CountIf`/`Find`, a
+   * `Reduce`/`Scan` combiner, a `Tabulate` generator, an argument to a
+   * higher-order user function — whose definition the target declined to
+   * emit (`ensureUserFunctionValueRef` returned `undefined`).
+   *
+   * Without the refusal the name fell through to the ordinary free-symbol
+   * read `_.<name>`: the artifact reported `success: true` and then threw
+   * `TypeError: _f is not a function` at run time, because nothing binds
+   * that key. This is the same defect the bare BUILT-IN operator name in
+   * value position had (`Map(Sin, xs)` reading `_.Sin`), and it takes the
+   * same answer — either working code or a compile-time refusal, which the
+   * default `fallback: true` route turns into interpreted evaluation.
+   *
+   * `reason` is what the emission route recorded on its way out (see
+   * {@link DeclineNote}); it is omitted when a route declined without
+   * recording one.
+   */
+  private static userFunctionValueRefRefusal(
+    s: string,
+    target: CompileTarget<Expression>,
+    reason: string | undefined
+  ): string {
+    return (
+      `${s}: cannot compile — this user function is referenced as a value ` +
+      `but its definition cannot be emitted on target ` +
+      `'${target.language ?? 'unknown'}'` +
+      (reason === undefined ? '' : ` (${reason})`) +
+      `. A caller using the default \`fallback: true\` falls back to ` +
+      `interpreted evaluation. Fail closed (D6).`
+    );
+  }
+
+  /**
+   * True when `s` names a function the USER defined — a symbol whose engine
+   * definition holds a function literal (`f(x) := …`, `x ↦ …`,
+   * `ce.assign(name, lambda)`), or an operator definition carrying a
+   * multi-clause set. False for a built-in operator name, a value symbol, a
+   * caller `vars` key, and an unknown name, each of which keeps the ordinary
+   * free-symbol read.
+   *
+   * This is exactly the pair of storage routes `ensureUserFunctionEmitted`
+   * dispatches on, so the predicate and the emission agree on what counts as
+   * a user function.
+   */
+  private static isUserDefinedFunction(
+    engine: ComputeEngine,
+    s: string
+  ): boolean {
+    if (BaseCompiler.userFunctionLiteral(engine, s) !== undefined) return true;
+    return multiClauseState(engine.lookupDefinition(s)) !== undefined;
   }
 
   /**
@@ -5159,10 +5231,12 @@ export class BaseCompiler {
         // The VALUE position, so a declared-complex parameter needs the
         // coercing shim: this reference may end up as `Map`'s callback, which
         // passes raw elements (see `ensureUserFunctionValueRef`).
+        const decline: DeclineNote = {};
         const userFn = BaseCompiler.ensureUserFunctionValueRef(
           expr.engine,
           s,
-          target
+          target,
+          decline
         );
         // A target whose language has no function VALUES (the shader targets)
         // decides what this reference means — in practice, fails closed (D6).
@@ -5171,6 +5245,23 @@ export class BaseCompiler {
         if (userFn !== undefined && registry.lowering)
           return registry.lowering.value({ id: s, name: userFn, target });
         if (userFn !== undefined) return userFn;
+        // The symbol names a function the USER defined, and the target
+        // declined to emit its definition. Falling through to the
+        // free-symbol read `_.<s>` produced an artifact that reported
+        // `success: true` and then threw `TypeError: _f is not a function`,
+        // because nothing binds that key: with a nominal `type meters =
+        // number`, the clause set `w(d: meters) := 2` / `w(x, y) := x + y`
+        // has no faithful JavaScript guard for its first clause, and
+        // `Map(w, [1, 2, 3])` compiled to
+        // `((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_.w)`. Refuse instead,
+        // the same answer a built-in operator name in this position gets
+        // just below; with the default `fallback: true` the caller reads the
+        // interpreter's value. A symbol that is NOT a user function keeps
+        // the free-symbol read and the negative memo below.
+        if (BaseCompiler.isUserDefinedFunction(expr.engine, s))
+          throw new Error(
+            BaseCompiler.userFunctionValueRefRefusal(s, target, decline.reason)
+          );
         // Memoize the negative lookup so a repeated free symbol doesn't re-hit
         // `lookupDefinition` on every occurrence during this compile.
         (registry.misses ??= new Set()).add(s);
@@ -18149,7 +18240,8 @@ export class BaseCompiler {
   static ensureUserFunctionEmitted(
     engine: ComputeEngine,
     h: string,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    decline?: DeclineNote
   ): string | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
@@ -18158,7 +18250,12 @@ export class BaseCompiler {
     // A multi-clause function has no single literal — it compiles to a guard
     // chain over its clause set (function-polymorphism design §8).
     if (literal === undefined)
-      return BaseCompiler.tryEmitMultiClauseFunction(engine, h, target);
+      return BaseCompiler.tryEmitMultiClauseFunction(
+        engine,
+        h,
+        target,
+        decline
+      );
 
     // A GENERIC user function is emitted as its BOUND reading, and declines
     // whole-fn when it has none (G3, generic-function-literals design §2.7).
@@ -18186,9 +18283,21 @@ export class BaseCompiler {
     // literal's own polytype covers the bare-assign route.
     let emitted = literal;
     if (BaseCompiler.userFunctionIsGeneric(engine, h, literal)) {
-      if (target.language !== 'javascript') return undefined;
+      if (target.language !== 'javascript') {
+        if (decline)
+          decline.reason =
+            'a generic function is emitted as its bound reading, which is a ' +
+            'JavaScript-target convention';
+        return undefined;
+      }
       const ground = BaseCompiler.userFunctionSignature(engine, h);
-      if (ground === undefined) return undefined;
+      if (ground === undefined) {
+        if (decline)
+          decline.reason =
+            'a generic function whose type variables have no ground bound ' +
+            'names no signature to emit against';
+        return undefined;
+      }
       emitted = BaseCompiler.literalAtGroundSignature(engine, literal, ground);
     }
 
@@ -18551,9 +18660,15 @@ export class BaseCompiler {
   static ensureUserFunctionValueRef(
     engine: ComputeEngine,
     h: string,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    decline?: DeclineNote
   ): string | undefined {
-    const name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    const name = BaseCompiler.ensureUserFunctionEmitted(
+      engine,
+      h,
+      target,
+      decline
+    );
     if (name === undefined) return undefined;
     if (target.language !== 'javascript') return name;
     const registry = target.userFunctions;
@@ -19425,7 +19540,8 @@ export class BaseCompiler {
   private static tryEmitMultiClauseFunction(
     engine: ComputeEngine,
     h: string,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    decline?: DeclineNote
   ): string | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
@@ -19433,7 +19549,14 @@ export class BaseCompiler {
     const state = multiClauseState(engine.lookupDefinition(h));
     if (state === undefined) return undefined; // genuinely unknown operator
 
-    if (target.language !== 'javascript' || registry.lowering) return undefined; // fail closed on non-JS targets (§8)
+    if (target.language !== 'javascript' || registry.lowering) {
+      // Fail closed on non-JS targets (§8).
+      if (decline)
+        decline.reason =
+          'a multi-clause function compiles to a guard chain, which only ' +
+          'the JavaScript target emits';
+      return undefined;
+    }
 
     const name = BaseCompiler.userFunctionName(registry, h);
     if (registry.defs.has(name) || registry.compiling.has(name)) return name;
@@ -19451,18 +19574,39 @@ export class BaseCompiler {
     for (const clause of clauses) {
       const sig = clause.signature;
       // Optional/variadic clauses have no v1 guard spelling.
-      if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined)
+      if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined) {
+        if (decline)
+          decline.reason =
+            'a clause with an optional or variadic parameter has no guard ' +
+            'spelling';
         return undefined;
-      if (!isFunction(clause.literal, 'Function')) return undefined;
+      }
+      if (!isFunction(clause.literal, 'Function')) {
+        if (decline)
+          decline.reason = 'a clause body is not a plain function literal';
+        return undefined;
+      }
       const arity = sig.args?.length ?? 0;
-      if (clause.literal.ops.length - 1 !== arity) return undefined;
+      if (clause.literal.ops.length - 1 !== arity) {
+        if (decline)
+          decline.reason =
+            'a clause literal takes a different number of parameters than ' +
+            'its signature declares';
+        return undefined;
+      }
       const guards: (string | null)[] = [];
       for (let i = 0; i < arity; i++) {
         const g = BaseCompiler.jsClauseParamGuard(
           sig.args![i].type,
           `_$n[${i}]`
         );
-        if (g === undefined) return undefined;
+        if (g === undefined) {
+          if (decline)
+            decline.reason =
+              `no faithful JavaScript guard for a clause parameter typed ` +
+              `'${typeToString(sig.args![i].type)}'`;
+          return undefined;
+        }
         guards.push(g);
       }
       plans.push({ clause, literal: clause.literal, arity, guards });
