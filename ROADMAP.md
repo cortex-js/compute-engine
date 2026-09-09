@@ -1049,6 +1049,14 @@ rewrite. What remains:
   is compiled inside `withLocalShapeFrame` (`compileCombinerLiteral`), and
   placing the hoist correctly relative to that frame is a `base-compiler.ts`
   change. Missing optimization, not a defect.
+- **A point VALUE has no `interval-js` lowering.** `PointList(a, b)` and
+  `Tuple(a, b)` alone decline on that target ("no lowering for target
+  'interval-javascript'"), although a coordinate read of either compiles
+  (`PointX(PointList(a, b))` is `_.a` after the fixed-width fold). The target's
+  value model is one interval per quantity; a point would be an array of two
+  intervals, which the collection-root ruling of 2026-08-22 admits but no
+  lowering builds. Not needed by the Voronoi row after the fold; recorded so
+  the gap is not rediscovered.
 - **Consumer-side fact for Tycho:** on `glsl`/`interval-js` the by-reference
   route needs the plot variables DECLARED (or supplied through `vars`): an
   `unknown`-typed argument could hold a collection the by-reference call would
