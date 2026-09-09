@@ -341,11 +341,11 @@ To search the library by concept rather than by name, use
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `asHsl` | `AsHsl` | `(color) -> color` | Convert any color to HSL (hue degrees, s/l 0-1) |
-| `asHsv` | `AsHsv` | `(color) -> color` | Convert any color to HSV (hue degrees, s/v 0-1) |
-| `asOklab` | `AsOklab` | `(color) -> color` | Convert any color to OKLab |
-| `asOklch` | `AsOklch` | `(color) -> color` | Convert any color to OKLCh |
-| `asRgb` | `AsRgb` | `(color) -> color` | Convert any color to sRGB (channels 0-1) |
+| `asHsl` | `AsHsl` | `(color \| string \| tuple) -> color` | Convert any color to HSL (hue degrees, s/l 0-1) |
+| `asHsv` | `AsHsv` | `(color \| string \| tuple) -> color` | Convert any color to HSV (hue degrees, s/v 0-1) |
+| `asOklab` | `AsOklab` | `(color \| string \| tuple) -> color` | Convert any color to OKLab |
+| `asOklch` | `AsOklch` | `(color \| string \| tuple) -> color` | Convert any color to OKLCh |
+| `asRgb` | `AsRgb` | `(color \| string \| tuple) -> color` | Convert any color to sRGB (channels 0-1) |
 | `color` | `Color` | `(string) -> color` | Parse a CSS-style color string to an Oklch color |
 | `colorContrast` | `ColorContrast` | `(color \| string \| tuple, color \| string \| tuple) -> number` | APCA contrast ratio between two colors |
 | `colorDelta` | `ColorDelta` | `(color \| string \| tuple, color \| string \| tuple) -> number` | Perceptual color difference (ΔE_OK) between two colors |

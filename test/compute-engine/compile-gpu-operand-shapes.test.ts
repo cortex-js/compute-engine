@@ -191,8 +191,10 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     expect(
       g(['ColorMix', ['Tuple', 0.5, 0.2, 120], ['Tuple', 0.8, 0.1, 30], 0.25])
     ).toBe('_gpu_color_mix(vec3(0.5, 0.2, 120.0), vec3(0.8, 0.1, 30.0), 0.25)');
+    // The background is the SECOND argument of each contrast, matching the
+    // argument order the interpreter uses.
     expect(g(['ContrastingColor', ['Tuple', 0.5, 0.2, 120]])).toContain(
-      '_gpu_apca(vec3(0.5, 0.2, 120.0)'
+      '_gpu_apca(vec3(1.0, 0.0, 0.0), vec3(0.5, 0.2, 120.0))'
     );
   });
 

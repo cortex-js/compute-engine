@@ -177,23 +177,48 @@ needs the `{ re, im }` coercion inside it; otherwise the closure would be an
 eta-expansion of the callee.
 
 A function REFERENCED AS A VALUE — the callback of `Map`, `Filter`, `Reduce`,
-a comparator, a `PointList` role — is a call site too, and it is
-broadcast-aware for the same reason the others are. The consumer of a function
-value hands the callee whatever element the source holds, and an element can
-itself be a collection: a row of a matrix. So a function whose parameters are
-all scalar is handed out as a broadcast-aware wrapper (`_fn_f$b`) instead of
-the bare name — one closure per function, emitted next to the function itself,
-which tests its arguments and applies `_SYS.bcastFn` only when one of them is
-an array. That reproduces the interpreter, which applies such a function
-element-wise to a collection argument. A function with a parameter that is not
-scalar keeps the bare reference, because the interpreter binds its arguments
-whole as well. Where a parameter also needs the `{ re, im }` coercion, the
-broadcast wrapper takes the coercing shim as its callee, so an element reaches
-the body coerced.
+a comparator, a `PointList` role — is a call site too, and it is shape-aware
+for the same reason the others are. The consumer of a function value hands the
+callee whatever element the source holds, and an element can itself be a
+collection: a row of a matrix. So a function whose parameters are all scalar
+is handed out as a wrapper instead of the bare name — one closure per
+function, emitted next to the function itself, which tests its arguments with
+`Array.isArray`. There are three forms of it, and which one a function gets
+follows what the INTERPRETER does with a collection element at that callback:
 
-The other two things that can stand in a callback position take the same
-wrapper. A bare BUILT-IN operator name (`Map(Sin, xs)`) is eta-expanded into a
-scalar kernel, so an element-wise operator is handed out as `_fn_Sin$b`; its
+- A function whose parameters are typed `unknown` — every signature the engine
+  infers from a body, whatever the body computes — is applied ELEMENT-WISE by
+  the interpreter: `Map(f, [[1, 2], [3, 4]])` over `f(x) := 2x` answers
+  `[[2, 4], [6, 8]]`. It is handed out as a broadcasting wrapper (`_fn_f$b`)
+  that dispatches through `_SYS.bcastFn`.
+- A function whose parameters are typed as DEFINITE scalars — which in
+  practice means a declared signature such as `(number) -> number` — is
+  REFUSED by the interpreter at that position: the same map answers
+  `Map(Error(ErrorCode("incompatible-type", …)), …)`, because a row is not a
+  number. It is handed out as a guarding wrapper (`_fn_f$s`) that projects an
+  array argument to NaN, which is how the compiled routes spell an error
+  value. That guard is the run-time half only: when the source's element type
+  is provably a collection, the error is already in the expression, which
+  makes it invalid, so the compile declines and the interpreter reports the
+  error. (Applying such a function DIRECTLY still broadcasts — `f([1, 2])` is
+  `[2, 4]` — which is an asymmetry of the interpreter between an application
+  and a callback position, and the compiled routes keep it.) One case divides
+  the two routes: a source only SOME of whose elements are collections. The
+  interpreter reads the element type of the whole source, finds a union that
+  a scalar satisfies, and broadcasts each collection element, so
+  `[[1, 2], 3]` answers `[[2, 4], 6]`; the guard tests one element at a time
+  and answers `[NaN, 6]`. There is no static element type to decline on
+  there, and a per-element test cannot reconstruct the type of the source.
+- A function with a parameter that is not scalar at all keeps the bare
+  reference, because the interpreter binds its arguments whole as well.
+
+Where a parameter also needs the `{ re, im }` coercion, the wrapper takes the
+coercing shim as its callee, so an element reaches the body coerced.
+
+The other two things that can stand in a callback position both broadcast, and
+take a wrapper of the first kind. A bare BUILT-IN operator name
+(`Map(Sin, xs)`) is eta-expanded into a scalar kernel, so an element-wise
+operator is handed out as `_fn_Sin$b`; its
 wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast, because an
 empty operator position evaluates to `Nothing` — `Sin([])` — which a
 real-valued target spells NaN, where applying a function literal to `[]` zips

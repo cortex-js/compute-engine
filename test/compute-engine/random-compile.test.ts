@@ -807,8 +807,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
         ['Tuple', 0.5, 0.1, 30],
       ])
     ).toBe(
-      '(abs(_gpu_apca(vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 0.0))) >= ' +
-        'abs(_gpu_apca(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.1, 30.0))) ? ' +
+      '(abs(_gpu_apca(vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0))) >= ' +
+        'abs(_gpu_apca(vec3(0.5, 0.1, 30.0), vec3(1.0, 1.0, 1.0))) ? ' +
         'vec3(0.0, 0.0, 0.0) : vec3(0.5, 0.1, 30.0))'
     );
     expect(

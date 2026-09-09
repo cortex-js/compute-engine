@@ -1498,11 +1498,14 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     const r = compile(expr, { constantFold: false });
     expect(r.success).toBe(true);
     // The callback passed to `Map` is the shim, not the bare definition. It
-    // reaches `Map` through the broadcast wrapper `$b`, which every
-    // scalar-parameter function takes in value position; the wrapper's callee
-    // is the shim, so a raw element is still coerced.
-    expect(r.code).toContain('_fn_Q$b');
-    expect(r.preamble).toContain('_SYS.bcastFn(_fn_Q$v,');
+    // reaches `Map` through the wrapper every scalar-parameter function takes
+    // in value position — here the guarding form `$s`, because `complex` is a
+    // DECLARED scalar parameter and the interpreter answers an
+    // incompatible-type error when such a callback meets an element that is
+    // itself a collection. The wrapper's callee is the shim, so a raw element
+    // is still coerced.
+    expect(r.code).toContain('_fn_Q$s');
+    expect(r.preamble).toContain('? NaN : _fn_Q$v(');
     expect(r.run!({})).toEqual([
       { re: 1, im: 1 },
       { re: 2, im: 1 },

@@ -607,6 +607,10 @@ function gpuRgbBoundary(
   return `_gpu_oklch_to_srgb(${code})`;
 }
 
+/** The five typed color heads. Their operands are components in their own
+ *  color space. */
+const GPU_COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
+
 /**
  * Fail closed (D6) on a color constructor given a 4th (alpha) operand.
  *
@@ -6242,46 +6246,55 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ContrastingColor: (args, compile, target) => {
     if (args.length === 0) throw new Error('ContrastingColor: no argument');
-    const bg = compile(args[0]);
     // WGSL has no ternary operator: the selection must be spelled `select`.
     // GLSL keeps the EXACT `?:` text it has always emitted (pinned).
     // `select` evaluates BOTH arms eagerly, unlike `?:` — sound here because
-    // every operand of this head is pure (an impure one declines below, and in
-    // the 1-argument form both arms are literal `vec3` constants).
+    // every operand of this head is pure (an impure one declines below).
     const pick = (cond: string, whenTrue: string, whenFalse: string): string =>
       target?.language === 'wgsl'
         ? `select(${whenFalse}, ${whenTrue}, ${cond})`
         : `(${cond} ? ${whenTrue} : ${whenFalse})`;
+    // Every operand is spliced TWICE by the comparison below (the background
+    // in both arms of the comparison, each foreground in its arm and in the
+    // result). A color operand is `vec3`-shaped, so there is no scalar (or
+    // `vec2`) temporary to bind it to — an impure (Random-family) operand
+    // would be re-drawn, and `_gpu_rnd_draw` advances a runtime counter, so
+    // the two splices compare DIFFERENT colors and every later draw in the
+    // shader shifts. No safe reading — decline (the `gpuOperandOnce` rule for
+    // a non-scalar operand).
+    if (args.slice(0, 3).some((a) => a.isPure === false))
+      throw new Error(
+        `ContrastingColor: an impure (Random) operand cannot be bound to a ` +
+          `temporary at this position — a repeated draw would shift every ` +
+          `later value in the shader. Fail closed (D6).`
+      );
+    const bg = compile(args[0]);
+    // The comparison is the one the interpreter makes through the
+    // `contrastingColor()` routine of `@arnog/colors`: the candidate with the
+    // larger ABSOLUTE APCA contrast wins, and the candidate is the FIRST
+    // argument of the contrast. That order matters — APCA is not symmetric,
+    // and the reversed order picked the other candidate for some
+    // backgrounds.
     if (args.length >= 3) {
-      // Each of the three operands is spliced TWICE by the comparison below.
-      // A color operand is `vec3`-shaped, so there is no scalar (or `vec2`)
-      // temporary to bind it to — an impure (Random-family) operand would be
-      // re-drawn, and `_gpu_rnd_draw` advances a runtime counter, so the two
-      // splices compare DIFFERENT colors and every later draw in the shader
-      // shifts. No safe reading — decline (the `gpuOperandOnce` rule for a
-      // non-scalar operand).
-      if (args.slice(0, 3).some((a) => a.isPure === false))
-        throw new Error(
-          `ContrastingColor: an impure (Random) operand cannot be bound to a ` +
-            `temporary at this position — a repeated draw would shift every ` +
-            `later value in the shader. Fail closed (D6).`
-        );
       const fg1 = compile(args[1]);
       const fg2 = compile(args[2]);
       return pick(
-        `abs(_gpu_apca(${bg}, ${fg1})) >= abs(_gpu_apca(${bg}, ${fg2}))`,
+        `abs(_gpu_apca(${fg1}, ${bg})) >= abs(_gpu_apca(${fg2}, ${bg}))`,
         fg1,
         fg2
       );
     }
-    // Default: pick black or white in OKLCh. Black is vec3(0); white is L=1
-    // achromatic — vec3(1.0, 0.0, 0.0). Heuristic from the JS path: low-luma
-    // backgrounds get white text and vice versa.
+    // Default: choose between white and black in OKLCh. Black is vec3(0);
+    // white is L=1 achromatic — vec3(1.0, 0.0, 0.0).
     const isWGSL = target?.language === 'wgsl';
     const v3 = isWGSL ? 'vec3f' : 'vec3';
     const black = `${v3}(0.0)`;
     const white = `${v3}(1.0, 0.0, 0.0)`;
-    return pick(`(_gpu_apca(${bg}, ${black}) > 50.0)`, black, white);
+    return pick(
+      `abs(_gpu_apca(${white}, ${bg})) >= abs(_gpu_apca(${black}, ${bg}))`,
+      white,
+      black
+    );
   },
   ColorToColorspace: ([color, space], compile, target) => {
     if (color === null || space === null)
@@ -6311,7 +6324,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         );
     }
   },
-  ColorFromColorspace: ([components, space], compile) => {
+  ColorFromColorspace: ([components, space], compile, target) => {
     if (components === null || space === null)
       throw new Error('ColorFromColorspace: need components and space');
     // Components are in the named space; build a canonical OKLCh value.
@@ -6321,12 +6334,28 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // A 4-component tuple carries alpha. Same fail-closed policy as the typed
     // color heads: the `_gpu_*` chain is `vec3` end to end, so a `vec4` here
     // would either not type-check or silently drop the alpha downstream.
-    if (
+    const typedHead =
+      isFunction(components) && GPU_COLOR_HEADS.has(components.operator)
+        ? components
+        : null;
+    if (typedHead) assertNoGPUAlpha('ColorFromColorspace', typedHead.ops);
+    else if (
       isFunction(components) &&
       (components.operator === 'Tuple' || components.operator === 'List')
     )
       assertNoGPUAlpha('ColorFromColorspace', components.ops);
-    const c = compile(components);
+    // This operand is read as raw COMPONENTS in the named space — that is how
+    // the interpreter reads a typed color head here. The head's own lowering
+    // turns it into a canonical OKLCh color value instead, so compiling it
+    // the ordinary way applied the space conversion a second time and
+    // `ColorFromColorspace(Rgb(1, 0, 0), 'rgb')` answered a color that was
+    // not red.
+    const c = typedHead
+      ? `${gpuVec3(target)}(${typedHead.ops
+          .slice(0, 3)
+          .map((op) => compile(op))
+          .join(', ')})`
+      : compile(components);
     switch (spaceName) {
       case 'oklch':
         return c;
@@ -8512,6 +8541,16 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  * special-cases achromatic endpoints (C ≈ 0) so e.g. mixing red with white
  * preserves red's hue rather than drifting through arbitrary hues.
  *
+ * `_gpu_apca` is the APCA contrast the interpreter's `ColorContrast` answers,
+ * component for component: the simple 2.4-power luminance the APCA method
+ * asks for (NOT the piecewise sRGB transfer), the black-level soft clamp, the
+ * separate light-on-dark and dark-on-light exponents, the low-contrast clip
+ * and its offset. The value is the APCA Lc divided by 100, so black text on
+ * white is about 1.06 and white on black about -1.08. An earlier
+ * approximation dropped every correction and multiplied by 100 instead, so
+ * the same expression answered about -114 on a shader and about -1.08 in the
+ * interpreter.
+ *
  * WGSL targets must adapt syntax (vec3f, atan2→atan2, etc.).
  */
 export const GPU_COLOR_PREAMBLE_GLSL = `
@@ -8667,21 +8706,23 @@ vec3 _gpu_color_mix(vec3 lch1, vec3 lch2, float t) {
   return vec3(L, C, H);
 }
 
+float _gpu_apca_luma(vec3 srgb) {
+  float Y = 0.2126729 * pow(srgb.x, 2.4)
+          + 0.7151522 * pow(srgb.y, 2.4)
+          + 0.0721750 * pow(srgb.z, 2.4);
+  return Y >= 0.022 ? Y : Y + pow(0.022 - Y, 1.414);
+}
+
 float _gpu_apca(vec3 lch_bg, vec3 lch_fg) {
-  vec3 bg = _gpu_oklch_to_srgb(lch_bg);
-  vec3 fg = _gpu_oklch_to_srgb(lch_fg);
-  float bgR = _gpu_srgb_to_linear(bg.x);
-  float bgG = _gpu_srgb_to_linear(bg.y);
-  float bgB = _gpu_srgb_to_linear(bg.z);
-  float fgR = _gpu_srgb_to_linear(fg.x);
-  float fgG = _gpu_srgb_to_linear(fg.y);
-  float fgB = _gpu_srgb_to_linear(fg.z);
-  float bgY = 0.2126729 * bgR + 0.7151522 * bgG + 0.0721750 * bgB;
-  float fgY = 0.2126729 * fgR + 0.7151522 * fgG + 0.0721750 * fgB;
-  float bgC = pow(bgY, 0.56);
-  float fgC = pow(fgY, 0.57);
-  float contrast = (bgC - fgC) * 1.14;
-  return contrast * 100.0;
+  float Ybg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_bg));
+  float Yfg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_fg));
+  float C = 0.0;
+  if (abs(Ybg - Yfg) >= 0.0005) {
+    if (Ybg > Yfg) C = (pow(Ybg, 0.56) - pow(Yfg, 0.57)) * 1.14;
+    else           C = (pow(Ybg, 0.65) - pow(Yfg, 0.62)) * 1.14;
+  }
+  if (abs(C) < 0.1) return 0.0;
+  return C > 0.0 ? C - 0.027 : C + 0.027;
 }
 `;
 
@@ -8856,21 +8897,26 @@ fn _gpu_color_mix(lch1: vec3f, lch2: vec3f, t: f32) -> vec3f {
   return vec3f(L, C, H);
 }
 
+fn _gpu_apca_luma(srgb: vec3f) -> f32 {
+  let Y = 0.2126729 * pow(srgb.x, 2.4)
+        + 0.7151522 * pow(srgb.y, 2.4)
+        + 0.0721750 * pow(srgb.z, 2.4);
+  return select(Y + pow(0.022 - Y, 1.414), Y, Y >= 0.022);
+}
+
 fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
-  let bg = _gpu_oklch_to_srgb(lch_bg);
-  let fg = _gpu_oklch_to_srgb(lch_fg);
-  let bgR = _gpu_srgb_to_linear(bg.x);
-  let bgG = _gpu_srgb_to_linear(bg.y);
-  let bgB = _gpu_srgb_to_linear(bg.z);
-  let fgR = _gpu_srgb_to_linear(fg.x);
-  let fgG = _gpu_srgb_to_linear(fg.y);
-  let fgB = _gpu_srgb_to_linear(fg.z);
-  let bgY = 0.2126729 * bgR + 0.7151522 * bgG + 0.0721750 * bgB;
-  let fgY = 0.2126729 * fgR + 0.7151522 * fgG + 0.0721750 * fgB;
-  let bgC = pow(bgY, 0.56);
-  let fgC = pow(fgY, 0.57);
-  let contrast = (bgC - fgC) * 1.14;
-  return contrast * 100.0;
+  let Ybg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_bg));
+  let Yfg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_fg));
+  var C = 0.0;
+  if (abs(Ybg - Yfg) >= 0.0005) {
+    if (Ybg > Yfg) {
+      C = (pow(Ybg, 0.56) - pow(Yfg, 0.57)) * 1.14;
+    } else {
+      C = (pow(Ybg, 0.65) - pow(Yfg, 0.62)) * 1.14;
+    }
+  }
+  if (abs(C) < 0.1) { return 0.0; }
+  return select(C + 0.027, C - 0.027, C > 0.0);
 }
 `;
 

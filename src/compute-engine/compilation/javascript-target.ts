@@ -1987,6 +1987,30 @@ function tryGetJSComplexParts(
   return undefined;
 }
 
+/** The five typed color heads. Their operands are components in their own
+ *  color space. */
+const COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
+
+/**
+ * Compile an operand that is read as color COMPONENTS rather than as a color
+ * value (`ColorFromColorspace`'s first argument).
+ *
+ * A typed color head compiles to a canonical OKLCh color value, so passing
+ * that value on to a routine that converts FROM the named space applied the
+ * conversion a second time: `ColorFromColorspace(Rgb(1, 0, 0), 'rgb')` read
+ * the OKLCh triple of red back as sRGB channels and answered a color that was
+ * not red at all. The interpreter takes the head's components verbatim at
+ * this position, so emit them the same way.
+ */
+function compileColorComponents(
+  components: Expression,
+  compile: (expr: Expression) => string
+): string {
+  if (isFunction(components) && COLOR_HEADS.has(components.operator))
+    return `[${components.ops.map((op) => compile(op)).join(', ')}]`;
+  return compile(components);
+}
+
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
@@ -5179,9 +5203,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ColorFromColorspace: ([components, space], compile) => {
     if (components === null || space === null)
       throw new Error('ColorFromColorspace: need components and space');
-    return `_SYS.colorFromColorspace(${compile(components)}, ${compile(
-      space
-    )})`;
+    return `_SYS.colorFromColorspace(${compileColorComponents(
+      components,
+      compile
+    )}, ${compile(space)})`;
   },
   Colormap: (args, compile) => {
     if (args.length === 0) throw new Error('Colormap: no argument');
@@ -5508,7 +5533,7 @@ function toRgb255(input: string | number[]): {
   alpha?: number;
 } {
   if (typeof input === 'string') {
-    const c = parseColor(input);
+    const c = parseColorStringOrThrow(input);
     const rgb: { r: number; g: number; b: number; alpha?: number } = {
       r: (c >>> 24) & 0xff,
       g: (c >>> 16) & 0xff,
@@ -5539,7 +5564,7 @@ function toOklch(input: string | number[]): {
   alpha?: number;
 } {
   if (typeof input === 'string') {
-    const c = parseColor(input);
+    const c = parseColorStringOrThrow(input);
     const r = (c >>> 24) & 0xff;
     const g = (c >>> 16) & 0xff;
     const b = (c >>> 8) & 0xff;
@@ -5561,6 +5586,25 @@ function toOklch(input: string | number[]): {
   };
 }
 
+/**
+ * Parse a CSS-style color string to a packed `0xRRGGBBAA` integer.
+ *
+ * `parseColor()` answers 0 both for an unrecognized string and for
+ * transparent black, so the two are told apart here by the spelling — the
+ * same test the interpreter applies (`parseColorString`, `library/colors.ts`).
+ * A string that names no color throws, which is how the neighbouring helpers
+ * already report an unusable name ("Unknown palette", "Unknown color
+ * space"). Reading it as transparent black instead made a misspelled color
+ * compile to a silent, plausible-looking value where the interpreter
+ * answered `incompatible-type`.
+ */
+function parseColorStringOrThrow(input: string): number {
+  const c = parseColor(input as HexColor);
+  if (c === 0 && input.trim().toLowerCase() !== 'transparent')
+    throw new Error(`Unknown color: ${input}`);
+  return c;
+}
+
 /** Packed 0xRRGGBBAA integer to Oklch `[L, C, H]` or `[L, C, H, alpha]`. */
 function packedToOklch(c: number): number[] {
   const r = (c >>> 24) & 0xff;
@@ -5576,7 +5620,7 @@ function packedToOklch(c: number): number[] {
 /** Color runtime helpers shared by both SYS objects. */
 const colorHelpers = {
   color(input: string): number[] {
-    return packedToOklch(parseColor(input));
+    return packedToOklch(parseColorStringOrThrow(input));
   },
   colorToString(input: string | number[], format?: string): string {
     const rgb = toRgb255(input);
@@ -5613,12 +5657,17 @@ const colorHelpers = {
         return `hsl(${h} ${s}% ${l}%)`;
       }
       case 'oklch': {
-        const c = rgbToOklch(rgb);
+        // Read the OKLCh components directly rather than through the sRGB
+        // form above: a color value on this target IS an OKLCh triple, and
+        // routing it through sRGB clipped any chroma outside that gamut. The
+        // interpreter keeps the same wide-gamut path for this format, so
+        // `ColorToString(Oklch(0.6, 0.25, 29), 'oklch')` answered
+        // `oklch(0.6 0.246 29)` here and `oklch(0.6 0.25 29)` there.
+        const c = toOklch(input);
         const L = Math.round(c.L * 1000) / 1000;
         const C = Math.round(c.C * 1000) / 1000;
         const H = Math.round(c.H * 10) / 10;
-        if (rgb.alpha !== undefined)
-          return `oklch(${L} ${C} ${H} / ${rgb.alpha})`;
+        if (c.alpha !== undefined) return `oklch(${L} ${C} ${H} / ${c.alpha})`;
         return `oklch(${L} ${C} ${H})`;
       }
       default:
@@ -5685,6 +5734,11 @@ const colorHelpers = {
       case 'hsl': {
         const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
         result = [hsl.h, hsl.s, hsl.l];
+        break;
+      }
+      case 'hsv': {
+        const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+        result = [hsv.h, hsv.s, hsv.v];
         break;
       }
       case 'oklch': {
@@ -5793,6 +5847,11 @@ const colorHelpers = {
         break;
       case 'hsl': {
         const rgb = hslToRgb(c0, c1, c2);
+        oklch = rgbToOklch(rgb);
+        break;
+      }
+      case 'hsv': {
+        const rgb = hsvToRgb(c0, c1, c2);
         oklch = rgbToOklch(rgb);
         break;
       }

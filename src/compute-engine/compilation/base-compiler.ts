@@ -17041,6 +17041,57 @@ export class BaseCompiler {
     });
   }
 
+  /**
+   * Is `t` a DEFINITE scalar type — a number, a boolean or a string, or a
+   * subtype of one? `unknown` and `any` answer `false`: they accept a
+   * collection as well, so a parameter typed that way says nothing about the
+   * shape of the value it receives.
+   */
+  private static isDefiniteScalarType(t: Type | undefined): boolean {
+    if (t === undefined || t === 'unknown' || t === 'any') return false;
+    return (
+      isSubtype(t, 'number') ||
+      isSubtype(t, 'boolean') ||
+      isSubtype(t, 'string')
+    );
+  }
+
+  /**
+   * Does user-defined function `h` REFUSE a collection argument, rather than
+   * broadcast over it? That is the case when every parameter of the signature
+   * it compiles as is a definite scalar (`isDefiniteScalarType`).
+   *
+   * The interpreter checks the type of a callback's parameter against the
+   * element type of the collection the callback is applied over. With `f`
+   * declared `(number) -> number`, `Map(f, [[1, 2], [3, 4]])` answers
+   * `Map(Error(ErrorCode("incompatible-type", …)), …)`, because a row is not
+   * a number; the same map over a function typed `(unknown) -> number`
+   * applies the function element-wise to each row and answers
+   * `[[2, 4], [6, 8]]`. So a definite scalar parameter refuses, and an open
+   * one broadcasts. (Applying such a function DIRECTLY still broadcasts —
+   * `f([1, 2])` is `[2, 4]` — which is the interpreter's own asymmetry
+   * between an application and a callback position.)
+   *
+   * In practice only a DECLARED signature carries definite parameter types:
+   * a signature the engine infers from a body leaves every parameter
+   * `unknown`, even when the body is scalar arithmetic and even when the
+   * literal's own parameter carries a `Typed` annotation.
+   */
+  private static userFunctionRefusesCollectionArg(
+    engine: ComputeEngine,
+    h: string
+  ): boolean {
+    const signature = BaseCompiler.userFunctionSignature(engine, h);
+    if (signature === undefined) return false;
+    const params = [
+      ...(signature.args ?? []),
+      ...(signature.optArgs ?? []),
+      ...(signature.variadicArg ? [signature.variadicArg] : []),
+    ];
+    if (params.length === 0) return false;
+    return params.every(({ type: t }) => BaseCompiler.isDefiniteScalarType(t));
+  }
+
   private static userFunctionParamsAreScalar(
     engine: ComputeEngine,
     h: string
@@ -18348,18 +18399,21 @@ export class BaseCompiler {
    * for `f(x) := 2x`, `Map(f, [[1, 2], [3, 4]])` handed a whole ROW to a body
    * that multiplies, and answered `[NaN, NaN]` where the interpreter answers
    * `[[2, 4], [6, 8]]`. So a scalar-parameter function is handed out as a
-   * broadcast-aware wrapper under its own name, emitted ONCE next to the
+   * shape-aware wrapper under its own name, emitted ONCE next to the
    * function itself — a consumer that maps over a million elements pays one
-   * closure, not one per element. A function with a parameter that is NOT
-   * scalar binds its arguments whole and keeps the plain reference, because
-   * the interpreter does not broadcast it either.
+   * closure, not one per element. The wrapper BROADCASTS (`$b`) where the
+   * interpreter does, and GUARDS (`$s`, an array answers NaN) where the
+   * interpreter refuses instead: see `userFunctionRefusesCollectionArg`. A
+   * function with a parameter that is NOT scalar binds its arguments whole
+   * and keeps the plain reference, because the interpreter does not broadcast
+   * it either.
    *
-   * The broadcast wrapper takes the complex-coercing shim as its callee where
-   * both apply, so an element reaches the body coerced, the same order the
+   * The wrapper takes the complex-coercing shim as its callee where both
+   * apply, so an element reaches the body coerced, the same order the
    * call route dispatches in (`dispatchCall`).
    *
-   * Returns the plain name unchanged when there is nothing to coerce and
-   * nothing to broadcast.
+   * Returns the plain name unchanged when there is nothing to coerce and no
+   * argument that could be a collection.
    */
   static ensureUserFunctionValueRef(
     engine: ComputeEngine,
@@ -18410,32 +18464,47 @@ export class BaseCompiler {
     )
       return callee;
 
-    const bcastName = `${name}$b`;
-    if (!registry.defs.has(bcastName))
+    // A function whose parameters are DEFINITE scalars refuses a collection
+    // argument in a callback position instead of broadcasting over it (see
+    // `userFunctionRefusesCollectionArg`), so its wrapper guards rather than
+    // dispatches: an element that is an array projects to NaN, which is how
+    // the compiled routes spell an error value. The guard is the run-time
+    // half only. When the source's element type is PROVABLY a collection, the
+    // canonicalization of `Map`/`Filter`/`Reduce` already puts that error in
+    // the callback's place, which makes the expression invalid, and an
+    // invalid expression is refused before any lowering runs; the interpreter
+    // then evaluates it and reports the error.
+    const refuses = BaseCompiler.userFunctionRefusesCollectionArg(engine, h);
+    const wrapperName = `${name}${refuses ? '$s' : '$b'}`;
+    if (!registry.defs.has(wrapperName))
       registry.defs.set(
-        bcastName,
-        `const ${bcastName} = ${BaseCompiler.broadcastingWrapper(
+        wrapperName,
+        `const ${wrapperName} = ${BaseCompiler.broadcastingWrapper(
           callee,
           nParams,
           target,
-          'bcastFn'
+          refuses ? 'refuse' : 'bcastFn'
         )};`
       );
-    return bcastName;
+    return wrapperName;
   }
 
   /**
-   * A wrapper around `callee` that applies it element-wise when any of its
-   * `nParams` arguments is an array, and calls it directly otherwise:
+   * A wrapper around `callee` that calls it directly when none of its
+   * `nParams` arguments is an array, and takes the `helper` route otherwise:
    * `(_tv1) => Array.isArray(_tv1) ? _SYS.<helper>(callee, _tv1) : callee(_tv1)`.
    *
-   * `helper` selects which runtime broadcast the wrapper dispatches through,
-   * because the two forms disagree about an EMPTY position. `bcastFn` is the
+   * `helper` selects what the wrapper does with an array argument. The two
+   * broadcasting forms disagree about an EMPTY position: `bcastFn` is the
    * user-function form: it zips zero elements into an empty list, which is
    * what applying a function literal to `[]` answers in the interpreter.
    * `bcast` is the OPERATOR form: an empty operator position answers
    * `Nothing`, which the real-valued targets spell NaN (`Sin([])` evaluates to
-   * `Nothing`). Both recurse into nested arrays.
+   * `Nothing`). Both recurse into nested arrays. `refuse` is the third form:
+   * it broadcasts nothing and projects the array to NaN, because a callee
+   * whose parameters are definite scalars answers an error rather than a
+   * collection there (`userFunctionRefusesCollectionArg`), and NaN is how the
+   * compiled routes spell an error value.
    *
    * The wrapper takes a FIXED number of parameters, read from the function
    * literal, rather than a rest argument. A consumer that hands the value
@@ -18451,16 +18520,17 @@ export class BaseCompiler {
     callee: string,
     nParams: number,
     target: CompileTarget<Expression>,
-    helper: 'bcast' | 'bcastFn'
+    helper: 'bcast' | 'bcastFn' | 'refuse'
   ): string {
     const params: string[] = [];
     for (let i = 0; i < nParams; i++) params.push(BaseCompiler.tempVar(target));
     const args = params.join(', ');
     const test = params.map((p) => `Array.isArray(${p})`).join(' || ');
-    return (
-      `(${args}) => ${test} ? _SYS.${helper}(${callee}, ${args}) : ` +
-      `${callee}(${args})`
-    );
+    // Every caller of this helper emits JavaScript, so the NaN of the
+    // refusing form is spelled with the JavaScript literal.
+    const applied =
+      helper === 'refuse' ? 'NaN' : `_SYS.${helper}(${callee}, ${args})`;
+    return `(${args}) => ${test} ? ${applied} : ${callee}(${args})`;
   }
 
   /**

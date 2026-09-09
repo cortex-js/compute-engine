@@ -985,9 +985,15 @@ describe('WGSL ContrastingColor uses select, never a ternary', () => {
   it('compiles the 1-argument (black/white) form to select(...)', () => {
     const code = wgsl.compile(ce.box(['ContrastingColor', ['Tuple', 1, 1, 1]]))
       .code;
+    // The choice is the one the interpreter makes: the candidate with the
+    // larger absolute APCA contrast against the background wins, and the
+    // candidate is the FIRST argument of the contrast. An earlier emission
+    // compared against a fixed 50 threshold, on a contrast scale 100 times
+    // the interpreter's.
     expect(code).toBe(
-      'select(vec3f(1.0, 0.0, 0.0), vec3f(0.0), ' +
-        '(_gpu_apca(vec3f(1.0, 1.0, 1.0), vec3f(0.0)) > 50.0))'
+      'select(vec3f(0.0), vec3f(1.0, 0.0, 0.0), ' +
+        'abs(_gpu_apca(vec3f(1.0, 0.0, 0.0), vec3f(1.0, 1.0, 1.0))) >= ' +
+        'abs(_gpu_apca(vec3f(0.0), vec3f(1.0, 1.0, 1.0))))'
     );
     expect(code).not.toContain('?');
   });
@@ -1001,10 +1007,14 @@ describe('WGSL ContrastingColor uses select, never a ternary', () => {
         ['Tuple', 0.5, 0.1, 30],
       ])
     ).code;
+    // Each foreground candidate is the FIRST argument of its contrast, the
+    // background the second — the argument order the interpreter uses. APCA
+    // is not symmetric in its two arguments, so the reversed order this
+    // emission used before chose the other candidate for some backgrounds.
     expect(code).toBe(
       'select(vec3f(0.5, 0.1, 30.0), vec3f(0.0, 0.0, 0.0), ' +
-        'abs(_gpu_apca(vec3f(1.0, 1.0, 1.0), vec3f(0.0, 0.0, 0.0))) >= ' +
-        'abs(_gpu_apca(vec3f(1.0, 1.0, 1.0), vec3f(0.5, 0.1, 30.0))))'
+        'abs(_gpu_apca(vec3f(0.0, 0.0, 0.0), vec3f(1.0, 1.0, 1.0))) >= ' +
+        'abs(_gpu_apca(vec3f(0.5, 0.1, 30.0), vec3f(1.0, 1.0, 1.0))))'
     );
     expect(code).not.toContain('?');
   });

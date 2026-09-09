@@ -139,6 +139,51 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
+### Colour handling residue (audit of 2026-09-08, requested by the owner)
+
+The audit inventoried every operator that takes or produces a colour
+(`library/colors.ts`, the JavaScript and GPU lowerings) and fixed eight
+cross-route disagreements (see the CHANGELOG). What remains is design, not
+wrong values, except where noted.
+
+- **Ruling D1: what colour space does a bare tuple denote at a colour
+  argument?** `ColorMix((1,0,0), (0,0,1), 0.5)` reads the tuples as sRGB in
+  the interpreter (`Oklch(0.540, 0.285, 326.6)`) and as OKLCh triples on
+  the JavaScript and GPU targets (`[0.5, 0, 0]`); `ColorToString((1,0,0))`
+  is `"#ff0000"` on one route and `"#ffffff"` on the other, and
+  `ContrastingColor((1,0,0))` is white and black. Both readings are pinned
+  by tests (`colors.test.ts` uses `(1,1,1)` as white; the GPU shape tests
+  use `(0.5, 0.2, 120)` as an OKLCh triple). Options: (A) a tuple is 0–1
+  sRGB everywhere — the compiled targets convert a syntactic tuple at a
+  colour position (matches the interpreter and `doc/86-reference-colors.md`;
+  four GPU tests change; a tuple that arrives through a variable keeps the
+  OKLCh reading, since its shape is unknowable at compile time); (B) keep
+  the per-route reading (today: the same expression gives different colours
+  on different routes, silently); (C) refuse a bare tuple and require
+  `Rgb(…)`/`Oklch(…)`/a string. Recommendation: (A). Doing nothing is (B).
+- **D2.** `ColorFromColorspace((0,1,0.5), "hsl")` returns sRGB components
+  `(1, 0, 0)` in the interpreter and an OKLCh colour value on the compiled
+  targets; each is coherent when chained, they differ when read. Resolving
+  D1 as (A) makes "components in the route's canonical form" a defensible
+  contract to document; otherwise pick a route to change.
+- **D3.** `#00000000` and `rgba(0,0,0,0)` are refused as colours (they parse
+  to the same 0 as garbage); only `transparent` spells transparent black.
+  Pre-existing in `Color`, now uniform across operators.
+- **D4.** Should a `List` of three numbers be a colour like a `Tuple`?
+  `ColorMix([1,0,0], …)` is `incompatible-type` in the interpreter while the
+  GPU `ColorFromColorspace` accepts a `List`.
+- **D5.** `ContrastingColor` answers an `Rgb` head where `Color`, `ColorMix`
+  and `Colormap` answer `Oklch`, and its three-argument form re-encodes the
+  chosen candidate as `Rgb`.
+- **Work, not decisions:** `doc/86-reference-colors.md` says `Color` returns
+  a `Tuple` (it returns an `Oklch` head); `src/math-json/OPERATORS.json` and
+  `src/epsil/docs/library.md` carry the old `As*` signature until their
+  generators run; `AsRgb("#ff0000")` and `AsRgb((1,0,0))` decline on the
+  JavaScript target (fail closed, the interpreter answers) because the
+  compiler treats a string or tuple at a `broadcastable` head as an
+  unlowerable broadcast — an operand shape listed in `broadcastExemptions`
+  should compile whole (`base-compiler.ts`).
+
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 
 The audit (`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md`,
@@ -146,30 +191,11 @@ CE 0.126.2, 862 records over 71 documents) was worked in eight slices; what
 follows is what the slices measured and did not change. Each line names the
 decision or the work that remains.
 
-- **Ruling: `powRational` is not an enclosure for a large or small base.**
-  The routine rounds the exponent `p/q` to a double before calling
-  `Math.pow`, and `x^(e+δ) = x^e · (1 + δ ln x)`, so the relative error grows
-  with `|ln x|`; a fixed outward step cannot cover it. Measured over 20 000
-  random `powRational(point(x), p, q)` with `x ∈ (0, 1000]`, `p ∈ [1, 5]`,
-  `q ∈ {3, 5, 7}` against a 21-digit reference: 1 056 endpoint misses with
-  the 3-ulp step, worst about 2 ulps beyond it; `nthRoot` has 0 misses in
-  the same sweep. Pre-existing (found by the review of the outward-rounding
-  change, 2026-09-08). Options: (a) a data-dependent step
-  (`steps ≈ 3 + |ln x| · |p/q| / 2⁵³` in ulps — the decorator's step count is
-  fixed at wrap time, so this is an API change), or (b) compute `x^(p/q)` as
-  `(x^(1/q))^p` with the exact integer-power chain, which is sound with the
-  existing provers and also makes `8^(2/3)` the exact point 4 (today
-  `3.9999999999999996`). Recommendation: (b); it changes `powRational`'s
-  numeric output, so it is a decision.
-- **Interval-js: `Round(x, n)` with a negative `n` bakes its scale `10^n` as
-  a degenerate point** (`interval-javascript-target.ts`, the `Round`
-  handler); the scale sits inside a step function whose result depends on
-  it exactly, so widening it is a judgement call, not a mechanical fix. The
-  library itself rounds outward since 2026-09-08; eight composite routines
-  (`acsc`, `asec`, `coth`, `csch`, `sech`, `acoth`, `acsch`, `asech`,
-  `remainder`) call exported kernels internally and so take an inner step
-  plus their own — sound, one ulp wider than one seam; and `integrate.ts`
-  keeps its `widen()` margin for the partition widths.
+- **Interval-js library residue after outward rounding (2026-09-08).**
+  `integrate.ts` keeps its `widen()` margin for the partition widths, with a
+  deliberate factor of three; the composed hyperbolic and reciprocal
+  routines are built from unrounded kernels and take one step at their own
+  export, except `remainder`, whose three-operation composition takes three.
 - **Identity lowerings that return their operand's code, other targets.** The
   JavaScript handlers were fixed this round (`identityPassthrough`,
   `javascript-target.ts`). The same pattern — `return compile(op)` spliced
@@ -185,23 +211,6 @@ decision or the work that remains.
   answers 0 where `Math.hypot` answers `5e-200`. The split real-part lowering
   added this round uses `Math.hypot`; the object form still goes through
   `cabs`. Consider `Math.hypot(z.re, z.im)` in the helper.
-- **Decision: should inference narrow an unannotated parameter to `number`
-  when its only uses are at scalar positions?** The owner ruled 2026-09-08
-  that a scalar-typed parameter, declared or inferred, makes the calls inside
-  the body direct — and that landed. But the engine infers `unknown` for
-  `q(x, y) := r(x, y) + 1` and for every other shape tried (`\sin(r(x, y))`,
-  `r(x, 2) + 1`, a parameter used both as a scalar and passed along), because
-  a use at a scalar parameter position admits a list that broadcasts. Only a
-  use at a COLLECTION parameter narrows (`q2(L) := k(L)` with
-  `k: (list<number>) -> number` gives `(list<number>) -> number`). So the
-  297 in-body dispatch wrappers of the Tycho corpus remain until either the
-  importer declares the Desmos functions' signatures (the call-site broadcast
-  keeps the Desmos list semantics) or inference narrows such a parameter to
-  `number`. The second is a type-system change: a list passed to `q` would
-  then be a broadcast over a `number` parameter, which is what the call site
-  already does, but every reader of the parameter type — the compiler's
-  shape gates, the `broadcastable<T>` lift, the static checker — would see
-  `number` where it sees `unknown` today. Decide before changing inference.
 - **Audit item J3 is not reproducible at HEAD.** The 496 `_SYS.bcast` sites
   over user-function results needed the call to type top; every construction
   tried (assign, declared `-> unknown`, `Block`, `If`, `Which`, piecewise)
@@ -239,6 +248,35 @@ decision or the work that remains.
   Hand off to Tycho.
 - **Audit item I4 (interval piecewise arms as per-call closures; the `Sum`
   bound read through an inline shape probe) was not worked** this round.
+- **A record reaching an `unknown`-typed parameter through a callback value
+  is broadcast over its fields.** The broadcast-aware wrapper a function
+  value receives decides with `Array.isArray`, and a record, tuple or
+  nominal value lowers to a bare JavaScript array. A parameter TYPED as one
+  of those keeps the bare reference (`signatureParamsLowerToScalars`,
+  `base-compiler.ts`); a parameter left `unknown` is admitted, as the
+  interpreter's own broadcast gate admits it, so `Map(f, persons)` with an
+  unannotated `f(p)` would map over each person's fields. Objects have no
+  compiled representation yet, so no corpus reaches this; recorded so the
+  gate is tightened when they do.
+- **The broadcast wrapper around an inline function literal is wider than
+  callback position.** The `Function`-literal lowering cannot see its parent,
+  so the wrapper also lands on a block-local definition (`let g = (k) ↦ …`,
+  whose call sites are already broadcast-aware), on an `Apply` head
+  (`\sin'(x)`) and on a whole-artifact function result. Redundant, not
+  wrong: one extra call frame and one `Array.isArray` per call. Narrowing it
+  means moving the wrap into the callback funnel of `javascript-target.ts`
+  (`hoistedCallbackLambda` / `fnArg`), which was carrying a peer's in-flight
+  work when this landed (2026-09-08). Also: `Map(Length, xs)` does not
+  compile on the JavaScript target — the synthesized parameter is typed
+  `unknown`, so `Length` declines (a fallback, not a wrong value).
+- **A partly nested source diverges between the routes.** With
+  `k(L: list) := Map(f, L)` and `f: (number) -> number`, the interpreter types
+  the whole source `[[1, 2], 3]` as a union a scalar satisfies and broadcasts
+  each row (`[[2, 4], 6]`), while the compiled reference tests one element at
+  a time and answers `[NaN, 6]` — the ruling of 2026-09-08 (a declared-scalar
+  callback refuses a collection element) spelled per element. A per-element
+  test cannot reconstruct the source's type; documented in
+  `docs/COMPILATION-MODEL.md` § Collections.
 - **A record reaching an `unknown`-typed parameter through a callback value
   is broadcast over its fields.** The broadcast-aware wrapper a function
   value receives decides with `Array.isArray`, and a record, tuple or

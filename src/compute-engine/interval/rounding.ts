@@ -219,7 +219,8 @@ function widenResult(
  * the extra ones would be dropped. An optional parameter is the case to watch,
  * because it does not count toward the declared arity — `chop(x, tolerance)`
  * declares one parameter and is exported unwrapped for that reason. A kernel
- * with three or more declared parameters (`powRational`) takes the rest path.
+ * with three or more declared parameters falls through to the rest path, which
+ * allocates one argument array per call.
  */
 function decorate<F extends (...args: never[]) => unknown>(
   fn: F,
@@ -727,77 +728,6 @@ export function exactAtPoint(x0: number, v0: number): ExactnessProver {
     if (x === undefined || x.lo !== x0 || x.hi !== x0) return INEXACT;
     return exactness(value.lo === v0, value.hi === v0);
   };
-}
-
-/**
- * The prover for `nthRoot(x, n)`.
- *
- * `Math.pow(|x|, 1/n)` rounds twice — once on the reciprocal `1/n` and once on
- * the power — so an endpoint `r` cannot be trusted from the computation. It
- * can be trusted from the ANSWER: when the exact product chain `r^n`
- * reproduces the operand endpoint with no rounding at any factor, `r` is the
- * true real n-th root of it. `nthRoot` is monotone increasing for a positive
- * degree, so the lower endpoint of the enclosure is the root of the lower
- * operand endpoint and the upper endpoint the root of the upper one.
- *
- * A lower bound of exactly 0 is a true bound for a positive degree without any
- * candidate: the routine writes it down either because the operand endpoint is
- * 0, whose root is 0, or because an even degree clips the domain at 0 and no
- * root over the remaining part is below it. Stepping it outward would put a
- * negative number in the enclosure of a non-negative function, which a later
- * `sqrt` reports as a domain-clipped `partial`.
- */
-export function exactNthRoot(
-  args: readonly unknown[],
-  value: Interval
-): Exactness {
-  const x = operandInterval(args[0]);
-  const n = args[1];
-  if (x === undefined || typeof n !== 'number' || !(n > 0)) return INEXACT;
-  return exactness(
-    value.lo === 0 || exactIntegerPower(value.lo, n) === x.lo,
-    exactIntegerPower(value.hi, n) === x.hi
-  );
-}
-
-/**
- * The prover for `powRational(x, p, q)`, the real-root reading of `x^(p/q)`
- * for an odd denominator.
- *
- * The endpoint `r` is the true value at an operand endpoint `e` when the exact
- * product chains `r^q` and `e^p` agree: `r^q = e^p` with no rounding on either
- * side means `r` is the real q-th root of `e^p`, signs included (`(−8)^(2/3)`
- * has `r^3 = 64 = (−8)^2`). Both chains answer `NaN` when they cannot be built
- * exactly, and `NaN` never equals itself, so an undecidable pair is never
- * certified.
- *
- * A NEGATIVE numerator goes through a reciprocal or a pole and is not decided
- * here. For a positive one the correspondence between operand and result
- * endpoints has to be known before an endpoint can be read off: it is the
- * monotone-increasing one when the numerator is odd or the base is
- * non-negative, and a degenerate operand has only one endpoint to correspond
- * to. An even numerator over a base that reaches below 0 makes the routine
- * even, where either operand endpoint can produce either result endpoint, and
- * nothing is certified. The zero lower bound is a true bound for a positive
- * exponent for the same reason as in `exactNthRoot`.
- */
-export function exactPowRational(
-  args: readonly unknown[],
-  value: Interval
-): Exactness {
-  const x = operandInterval(args[0]);
-  const p = args[1];
-  const q = args[2];
-  if (x === undefined || typeof p !== 'number' || typeof q !== 'number')
-    return INEXACT;
-  if (!(p > 0)) return INEXACT;
-  const increasing = p % 2 !== 0 || x.lo >= 0 || x.lo === x.hi;
-  const isRoot = (r: number, e: number): boolean =>
-    increasing && exactIntegerPower(r, q) === exactIntegerPower(e, p);
-  return exactness(
-    value.lo === 0 || isRoot(value.lo, x.lo),
-    isRoot(value.hi, x.hi)
-  );
 }
 
 /**

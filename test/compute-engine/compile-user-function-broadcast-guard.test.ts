@@ -264,24 +264,26 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     expect(r?.run?.({})).toEqual([2, 4, 6]);
   });
 
-  test('the NAMED path: the coercion rides on the `$v` shim, under the broadcast wrapper', () => {
+  test('the NAMED path: the coercion rides on the `$v` shim, under the shape wrapper', () => {
     const ce = fresh();
     ce.declare('Q', '(x: complex) -> complex');
     ce.assign('Q', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
     const r = compile(ce.box(['Map', 'Q', ['List', 1, 2, 3]] as any), {
       constantFold: false,
     });
-    // `complex` is a scalar parameter type, so the value reference is also
-    // broadcast-aware (`$b`): the consumer of a function value may hand it a
-    // nested element, which the interpreter maps over. The broadcast wraps
-    // the coercing shim, so an element reaches the body coerced.
-    expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$b)');
+    // The consumer of a function value may hand the callee a nested element,
+    // so the value reference is shape-aware. `complex` is a DECLARED scalar
+    // parameter, and the interpreter refuses such a callback over a nested
+    // element (`Map(Q, [[1, 2], [3, 4]])` answers an incompatible-type
+    // error), so the reference takes the GUARDING form `$s`, which projects
+    // an array to NaN. It wraps the coercing shim, so a scalar element still
+    // reaches the body coerced.
+    expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$s)');
     expect(r?.preamble).toContain(
       'const _fn_Q$v = (_tv1) => _fn_Q(_SYS.cplx(_tv1));'
     );
     expect(r?.preamble).toContain(
-      'const _fn_Q$b = (_tv2) => Array.isArray(_tv2) ? ' +
-        '_SYS.bcastFn(_fn_Q$v, _tv2) : _fn_Q$v(_tv2);'
+      'const _fn_Q$s = (_tv2) => Array.isArray(_tv2) ? NaN : _fn_Q$v(_tv2);'
     );
     expect(r?.run?.({})).toEqual([2, 4, 6]);
     expect(

@@ -4,7 +4,6 @@ import {
   apca,
   oklabDeltaE,
   contrastingColor,
-  interpolateOklch,
   asOklch,
   rgbToOklch,
   oklchToRgb,
@@ -73,16 +72,40 @@ function normalizeColorHead(ce: any, expr: any): any {
   return expr;
 }
 
+/**
+ * Parse a CSS-style color string to a packed `0xRRGGBBAA` integer. Returns
+ * `null` when the string does not name a color.
+ *
+ * `parseColor()` answers 0 both for an unrecognized string and for
+ * transparent black, so the two are told apart here by the spelling. Every
+ * operator that accepts a color string goes through this function, so a
+ * misspelled color is refused the same way everywhere instead of silently
+ * becoming transparent black in some operators and an error in others.
+ *
+ * A fully transparent color written in a way other than the keyword
+ * `transparent` (for example `#00000000`) also parses to 0 and is refused.
+ */
+function parseColorString(s: string | undefined | null): number | null {
+  if (!s) return null;
+  const color = parseColor(s);
+  if (color === 0 && s.trim().toLowerCase() !== 'transparent') return null;
+  return color;
+}
+
+/** Convert a 0xRRGGBBAA packed integer to an `OklchColor`. */
+function colorNumberToOklchColor(color: number): OklchColor {
+  const c = rgbToOklch({
+    r: (color >>> 24) & 0xff,
+    g: (color >>> 16) & 0xff,
+    b: (color >>> 8) & 0xff,
+  });
+  const alpha = normalizeAlpha((color & 0xff) / 255);
+  return alpha !== undefined ? { ...c, alpha } : c;
+}
+
 /** Convert a 0xRRGGBBAA packed integer to an Oklch boxed expression. */
 function colorNumberToOklch(ce: any, color: number): any {
-  const r = (color >>> 24) & 0xff;
-  const g = (color >>> 16) & 0xff;
-  const b = (color >>> 8) & 0xff;
-  const a = normalizeAlpha((color & 0xff) / 255);
-  const c = rgbToOklch({ r, g, b });
-  const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
-  if (a !== undefined) args.push(ce.number(a));
-  return ce.function('Oklch', args);
+  return oklchToExpr(ce, colorNumberToOklchColor(color));
 }
 
 const ALL_PALETTES: Record<string, readonly string[]> = {
@@ -107,10 +130,18 @@ function samplePalette(ce: any, palette: readonly string[], t: number): any {
 
   if (frac < 1e-9) return colorNumberToOklch(ce, parseColor(palette[i]));
 
-  // interpolateOklch returns an RgbColor (gamut-clipped). Rewrap as Oklch.
+  // Interpolate the two stops directly in OKLCh, with the same routine
+  // `ColorMix` uses. The library's `interpolateOklch()` returns a
+  // gamut-clipped sRGB color instead, so it answered a slightly different
+  // color than `ColorMix` on the same pair of stops, and a different one
+  // again from the compiled runtime, which also interpolates the OKLCh stops.
   return oklchToExpr(
     ce,
-    asOklch(interpolateOklch(palette[i], palette[i + 1], frac))
+    lerpOklchColor(
+      colorNumberToOklchColor(parseColor(palette[i])),
+      colorNumberToOklchColor(parseColor(palette[i + 1])),
+      frac
+    )
   );
 }
 
@@ -262,9 +293,8 @@ function oklchToExpr(ce: any, c: OklchColor): any {
  */
 function extractRgb(ce: any, arg: any): RgbColor | undefined {
   if (isString(arg)) {
-    const s = arg.string;
-    if (!s) return undefined;
-    const color = parseColor(s);
+    const color = parseColorString(arg.string);
+    if (color === null) return undefined;
     const rgb: RgbColor = {
       r: (color >>> 24) & 0xff,
       g: (color >>> 16) & 0xff,
@@ -322,20 +352,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       const input = isString(ops[0]) ? ops[0].string : undefined;
       if (!input) return ce.error('incompatible-type');
 
-      const color = parseColor(input);
-      // parseColor returns 0 for both invalid input and "transparent"
-      // Distinguish: "transparent" is valid (returns [0,0,0,0])
-      if (color === 0 && input.trim().toLowerCase() !== 'transparent')
-        return ce.error('incompatible-type');
+      const color = parseColorString(input);
+      if (color === null) return ce.error('incompatible-type');
 
-      const r = (color >>> 24) & 0xff;
-      const g = (color >>> 16) & 0xff;
-      const b = (color >>> 8) & 0xff;
-      const a = normalizeAlpha((color & 0xff) / 255);
-      const c = rgbToOklch({ r, g, b });
-      const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];
-      if (a !== undefined) args.push(ce.number(a));
-      return ce.function('Oklch', args);
+      return colorNumberToOklch(ce, color);
     },
   },
 
@@ -498,6 +518,11 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           return componentsTuple(ce, [hsl.h, hsl.s, hsl.l], alpha);
         }
 
+        case 'hsv': {
+          const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+          return componentsTuple(ce, [hsv.h, hsv.s, hsv.v], alpha);
+        }
+
         case 'oklch': {
           const c = rgbToOklch(rgb);
           return componentsTuple(ce, [c.L, c.C, c.H], alpha);
@@ -556,6 +581,15 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
         case 'hsl': {
           const result = hslToRgb(c0, c1, c2);
+          return componentsTuple(
+            ce,
+            [result.r / 255, result.g / 255, result.b / 255],
+            alpha
+          );
+        }
+
+        case 'hsv': {
+          const result = hsvToRgb(c0, c1, c2);
           return componentsTuple(
             ce,
             [result.r / 255, result.g / 255, result.b / 255],
@@ -672,23 +706,35 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   },
 
   // ---------------------------------------------------------------------------
-  // Color-space conversions. Each accepts any of the five color heads and
-  // returns the same color in the named space. If the input is already in
-  // the target space, returns the input unchanged.
+  // Color-space conversions. Each accepts any of the five color heads, a color
+  // string, or a 0-1 sRGB tuple — the same argument spellings as `ColorMix`
+  // and the other color operators — and returns the same color in the named
+  // space. If the input is already in the target space, returns the input
+  // unchanged.
+  //
+  // Each one is `broadcastable`, so `AsRgb([c1, c2])` maps over a list of
+  // colors. A numeric TUPLE at the parameter is one color in 0-1 sRGB
+  // instead, consumed whole by the handler, so every definition below exempts
+  // that shape from the generic broadcast (`broadcastExemptions: ['tuples']`).
+  // Without the exemption `AsRgb((1, 0, 0))` was fanned into three one-number
+  // applications and answered a tuple of three `incompatible-type` errors.
   // ---------------------------------------------------------------------------
 
   AsRgb: {
     description: 'Convert any color to sRGB (channels 0-1)',
     complexity: 8000,
     broadcastable: true,
-    signature: '(color) -> color',
+    // A numeric tuple is one color, not three colors — see the block comment
+    // above.
+    broadcastExemptions: ['tuples'],
+    signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
       if (isFunction(arg) && arg.operator === 'Rgb')
         return normalizeColorHead(ce, arg);
-      const rgb = colorExprToRgb(arg);
+      const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
-      // colorExprToRgb returns 0-255 channels (the `@arnog/colors` internal
+      // `extractRgb` returns 0-255 channels (the `@arnog/colors` internal
       // form); divide to bring back to the Rgb head's 0-1 convention.
       const args = [
         ce.number(rgb.r / 255),
@@ -703,12 +749,15 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     description: 'Convert any color to HSV (hue degrees, s/v 0-1)',
     complexity: 8000,
     broadcastable: true,
-    signature: '(color) -> color',
+    // A numeric tuple is one color, not three colors — see the block comment
+    // above.
+    broadcastExemptions: ['tuples'],
+    signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
       if (isFunction(arg) && arg.operator === 'Hsv')
         return normalizeColorHead(ce, arg);
-      const rgb = colorExprToRgb(arg);
+      const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
       const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsv.h), ce.number(hsv.s), ce.number(hsv.v)];
@@ -720,12 +769,15 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     description: 'Convert any color to HSL (hue degrees, s/l 0-1)',
     complexity: 8000,
     broadcastable: true,
-    signature: '(color) -> color',
+    // A numeric tuple is one color, not three colors — see the block comment
+    // above.
+    broadcastExemptions: ['tuples'],
+    signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
       if (isFunction(arg) && arg.operator === 'Hsl')
         return normalizeColorHead(ce, arg);
-      const rgb = colorExprToRgb(arg);
+      const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
       const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsl.h), ce.number(hsl.s), ce.number(hsl.l)];
@@ -737,7 +789,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     description: 'Convert any color to OKLab',
     complexity: 8000,
     broadcastable: true,
-    signature: '(color) -> color',
+    // A numeric tuple is one color, not three colors — see the block comment
+    // above.
+    broadcastExemptions: ['tuples'],
+    signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
       if (isFunction(arg) && arg.operator === 'Oklab')
@@ -751,7 +806,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         if (lab.alpha !== undefined) args.push(ce.number(lab.alpha));
         return ce.function('Oklab', args);
       }
-      const rgb = colorExprToRgb(arg);
+      const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
       const lab = rgbToOklab(rgb);
       const args = [ce.number(lab.L), ce.number(lab.a), ce.number(lab.b)];
@@ -763,7 +818,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
     description: 'Convert any color to OKLCh',
     complexity: 8000,
     broadcastable: true,
-    signature: '(color) -> color',
+    // A numeric tuple is one color, not three colors — see the block comment
+    // above.
+    broadcastExemptions: ['tuples'],
+    signature: '(color | string | tuple) -> color',
     evaluate: (ops, { engine: ce }) => {
       const arg = ops[0];
       if (isFunction(arg) && arg.operator === 'Oklch')
@@ -786,7 +844,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         if (oklch.alpha !== undefined) args.push(ce.number(oklch.alpha));
         return ce.function('Oklch', args);
       }
-      const rgb = colorExprToRgb(arg);
+      const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
       const c = rgbToOklch(rgb);
       const args = [ce.number(c.L), ce.number(c.C), ce.number(c.H)];

@@ -444,23 +444,26 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
   });
 });
 
-describe('a user function REFERENCED AS A VALUE broadcasts', () => {
+describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', () => {
   /** The consumer of a function value hands the callee whatever element the
    * source holds, and an element can itself be a collection — a row of a
-   * matrix. The interpreter applies a scalar-parameter function element-wise
-   * there (`f([1, 2])` is `[2, 4]`), so the emitted value reference must do
-   * the same; without it the whole row went into scalar arithmetic and the
-   * answer was NaN. */
+   * matrix. What the wrapper does with such an element is what the
+   * INTERPRETER does at that callback: a function whose parameters are typed
+   * `unknown` (every signature the engine infers) is applied element-wise, so
+   * the wrapper broadcasts; a function whose parameters are typed as definite
+   * scalars (a declared `(number) -> number`) is refused with an
+   * incompatible-type error, so the wrapper answers NaN, the compiled
+   * spelling of an error value. Without either, the whole row went into
+   * scalar arithmetic behind `success: true`. */
 
-  test('an inferred scalar signature: Map over ROWS maps element-wise', () => {
+  test('an INFERRED signature leaves the parameter open, and broadcasts', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 't'], 't'] as any));
     ce.assign('f', ce.box(['Function', ['g', 'x'], 'x'] as any));
-    // The signature is written after the assignment because assigning an
-    // unannotated literal re-infers it from the body.
+    // The engine infers an OPEN parameter, whatever the body computes with
+    // it, and the interpreter broadcasts such a function over a row.
     const def = (ce as any).lookupDefinition('f');
-    def.operator._setSignature(() => ce.type('(number) -> number'));
-    expect(def.operator.signature.toString()).toBe('(number) -> number');
+    expect(def.operator.signature.toString()).toBe('(unknown) -> number');
 
     // The source is a caller input, so its element shape is unknown to the
     // emission — the run-time test in the wrapper is what decides.
@@ -482,23 +485,48 @@ describe('a user function REFERENCED AS A VALUE broadcasts', () => {
       [2, 4],
       [6, 8],
     ]);
-    // The interpreter's own answer for one such element.
+    // The interpreter's own answer for the same map.
     expect(
       ce
-        .box(['f', ['List', 1, 2]])
+        .box(['Map', 'f', ['List', ['List', 1, 2], ['List', 3, 4]]])
         .evaluate()
         .toString()
-    ).toBe('[2,4]');
+    ).toBe('[[2,4],[6,8]]');
   });
 
-  test('a DECLARED scalar parameter: Map over ROWS maps element-wise', () => {
+  test('a DECLARED scalar parameter refuses a row instead of broadcasting', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 't'], 't'] as any));
     ce.declare('f', '(number) -> number');
     ce.assign('f', ce.box(['Function', ['g', 'x'], 'x'] as any));
+
+    // A row is not a number, so the interpreter puts an incompatible-type
+    // error in the callback's place rather than mapping `f` over the row.
+    expect(
+      ce
+        .box(['Map', 'f', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .evaluate()
+        .toString()
+    ).toContain('incompatible-type');
+    // That error is in the expression, which makes it invalid, so a source
+    // whose elements are provably rows fails closed and the interpreter —
+    // which reports the error — evaluates it.
+    const declined = build(ce, [
+      'Map',
+      'f',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+    ]);
+    expect(declined.success).toBe(false);
+
+    // A caller-supplied source has no static element shape, so the refusal is
+    // spelled at run time: an element that is an array projects to NaN, the
+    // compiled spelling of an error value, and a scalar element is unchanged.
     ce.declare('xs', 'list');
     const r = build(ce, ['Map', 'f', 'xs']);
-    expect(r.code).toContain('_fn_f$b');
+    expect(r.code).toContain('_fn_f$s');
+    expect(r.preamble).toContain(
+      'const _fn_f$s = (_tv1) => Array.isArray(_tv1) ? NaN : _fn_f(_tv1);'
+    );
     expect(
       r.run({
         xs: [
@@ -506,10 +534,11 @@ describe('a user function REFERENCED AS A VALUE broadcasts', () => {
           [3, 4],
         ],
       })
-    ).toEqual([
-      [2, 4],
-      [6, 8],
-    ]);
+    ).toEqual([NaN, NaN]);
+    expect(r.run({ xs: [1, 2] })).toEqual([2, 4]);
+
+    // Applying such a function DIRECTLY still broadcasts, which is the
+    // interpreter's own asymmetry between an application and a callback.
     expect(
       ce
         .box(['f', ['List', ['List', 1, 2], ['List', 3, 4]]])

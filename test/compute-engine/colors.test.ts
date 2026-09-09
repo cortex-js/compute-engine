@@ -735,7 +735,7 @@ describe('GPU color compilation', () => {
     const compiled = compile(expr, { to: 'wgsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_apca');
-    expect(compiled.preamble).toContain('fn _gpu_srgb_to_linear');
+    expect(compiled.preamble).toContain('fn _gpu_apca(');
     // WGSL uses vec3f
     expect(compiled.preamble).toContain('vec3f');
   });
@@ -846,7 +846,11 @@ describe('GPU compile: HSL space', () => {
       ['Tuple', 0.7, 0.1, 30],
       "'hsv'",
     ]);
-    const compiled = compile(expr, { to: 'glsl' });
+    // `constantFold: false`: the operands are literals and the interpreter
+    // now knows the `hsv` space, so the whole subtree would otherwise be
+    // evaluated at compile time and emitted as one `vec3` literal — erasing
+    // the lowering this test pins.
+    const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_rgb_to_hsv');
   });

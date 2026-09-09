@@ -932,8 +932,16 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const n = args[1];
     if (!isNumber(n) || n.im !== 0 || !Number.isInteger(n.re))
       throw new Error('Round: interval target requires a constant precision');
-    const factor = `_IA.point(${Math.pow(10, n.re)})`;
-    return `_IA.div(_IA.round(_IA.mul(${compile(args[0])}, ${factor})), ${factor})`;
+    // The scale is always spelled as the EXACT integer power `10^|n|`, so the
+    // constant is a true point: for `n < 0` the operand is divided by `10^-n`
+    // before rounding and multiplied back afterwards (`Round(x, -2)` rounds to
+    // hundreds through `100`, not through the double nearest `0.01`, which
+    // would need an enclosure of its own inside a step function).
+    const scale = `_IA.point(${Math.pow(10, Math.abs(n.re))})`;
+    const x = compile(args[0]);
+    if (n.re >= 0)
+      return `_IA.div(_IA.round(_IA.mul(${x}, ${scale})), ${scale})`;
+    return `_IA.mul(_IA.round(_IA.div(${x}, ${scale})), ${scale})`;
   },
   Heaviside: (args, compile) => `_IA.heaviside(${compile(args[0])})`,
   Sign: (args, compile) => `_IA.sign(${compile(args[0])})`,

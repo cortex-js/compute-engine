@@ -1329,10 +1329,23 @@ describe('OUTWARD ROUNDING', () => {
   });
 
   test('a root the exact product chain reproduces stays the point it is', () => {
-    // `nthRoot` and `powRational` round the reciprocal exponent and then the
-    // power, so their step is three ulps — but an endpoint whose integer
-    // power reproduces the operand endpoint is the true real root.
+    // Each endpoint of a root is VALIDATED against the operand: it is moved
+    // outward until the enclosure of its integer power is on the right side of
+    // the operand endpoint. An exact root passes that test where it stands, so
+    // it stays the point it is — `Math.pow` is not even the right double for
+    // some of these (`Math.pow(64, 1/3)` is 3.9999999999999996), and the
+    // three-ulp band the routine used to answer was centred on that.
     expect(getValue(nthRoot({ lo: 4, hi: 4 }, 2))).toEqual({ lo: 2, hi: 2 });
+    expect(getValue(nthRoot({ lo: 64, hi: 64 }, 3))).toEqual({ lo: 4, hi: 4 });
+    expect(getValue(nthRoot({ lo: 1000, hi: 1000 }, 3))).toEqual({
+      lo: 10,
+      hi: 10,
+    });
+    expect(getValue(nthRoot({ lo: -32, hi: -32 }, 5))).toEqual({
+      lo: -2,
+      hi: -2,
+    });
+    // `powRational` inherits the proof through the root it is built from.
     expect(getValue(powRational({ lo: 8, hi: 8 }, 1, 3))).toEqual({
       lo: 2,
       hi: 2,
@@ -1346,10 +1359,92 @@ describe('OUTWARD ROUNDING', () => {
     const r = getValue(nthRoot({ lo: 0, hi: 8 }, 3))!;
     expect(r.lo).toBe(0);
     expect(sqrt(nthRoot({ lo: 0, hi: 8 }, 3)).kind).toBe('interval');
-    // An irrational root still moves three ulps on each side.
+    // An irrational root moves as far as the validation needs and no further:
+    // one ulp on each side here, where the three-ulp step used to move three.
     const two = getValue(nthRoot({ lo: 2, hi: 2 }, 2))!;
-    expect(two.lo).toBe(nextDown(nextDown(nextDown(Math.SQRT2))));
-    expect(two.hi).toBe(nextUp(nextUp(nextUp(Math.SQRT2))));
+    expect(two.lo).toBe(nextDown(Math.SQRT2));
+    expect(two.hi).toBe(Math.SQRT2);
+    expect(exactly(two.lo).lt(new BigDecimal('1.414213562373095048801688724')))
+      .toBe(true);
+    expect(exactly(two.hi).gt(new BigDecimal('1.414213562373095048801688724')))
+      .toBe(true);
+  });
+
+  test('a root of a large operand encloses the value the rounded degree missed', () => {
+    // The exponent `1/n` is a rounded double, and `x^(e+δ) = x^e·(1 + δ·ln x)`,
+    // so the error of `Math.pow(x, 1/n)` grows with `|ln x|`: at 10³⁰⁰ its cube
+    // root is 65 ulps below the true one, which no three-ulp band reaches. The
+    // validation scales the operand by an exact power of two first, so the
+    // guess it validates is within an ulp whatever the magnitude.
+    //
+    // Every double at this magnitude is a whole number, so the enclosure is
+    // checked by cubing its endpoints in exact integer arithmetic: the cube of
+    // the lower one must be at or below the operand and the cube of the upper
+    // one at or above it.
+    const operand = BigInt(1e300);
+    const r = getValue(nthRoot(point(1e300), 3))!;
+    expect(BigInt(r.lo) ** 3n <= operand).toBe(true);
+    expect(BigInt(r.hi) ** 3n >= operand).toBe(true);
+    expect(r.hi - r.lo).toBeLessThan(4 * (nextUp(r.hi) - r.hi));
+    // The three-ulp band around `Math.pow` lies entirely below the root: even
+    // its upper end cubes to less than the operand.
+    let oldHi = Math.pow(1e300, 1 / 3);
+    for (let i = 0; i < 3; i++) oldHi = nextUp(oldHi);
+    expect(BigInt(oldHi) ** 3n < operand).toBe(true);
+    // The smallest subnormal is 2⁻¹⁰⁷⁴, whose cube root is the exact 2⁻³⁵⁸.
+    // `Math.pow` answers a double 62 ulps above it.
+    expect(getValue(nthRoot(point(Number.MIN_VALUE), 3))).toEqual({
+      lo: 2 ** -358,
+      hi: 2 ** -358,
+    });
+    expect(Math.pow(Number.MIN_VALUE, 1 / 3)).not.toBe(2 ** -358);
+  });
+
+  test('a rational power is the root then the integer power, so an exact one is a point', () => {
+    // `x^(p/q)` is built as `(x^(1/q))^p`. Computing it as
+    // `Math.pow(x, p/q)` instead has to round the exponent to a double, and
+    // `x^(e+δ) = x^e·(1 + δ·ln x)`, so that form is not even exact where the
+    // answer is an integer: `Math.pow(27, 2/3)` is 8.999999999999998. The
+    // root of an exact power is exact and the integer power of an exact root
+    // is exact, so the composition answers the point.
+    expect(getValue(powRational(point(8), 2, 3))).toEqual({ lo: 4, hi: 4 });
+    expect(getValue(powRational(point(27), 2, 3))).toEqual({ lo: 9, hi: 9 });
+    expect(getValue(powRational(point(4), 3, 2))).toEqual({ lo: 8, hi: 8 });
+    // The real-root convention of an odd denominator holds for a negative
+    // base: `(−8)^(2/3) = 4`.
+    expect(getValue(powRational(point(-8), 2, 3))).toEqual({ lo: 4, hi: 4 });
+    // A negative numerator is the reciprocal of the positive power, and the
+    // division of 1 by 4 is exact.
+    expect(getValue(powRational(point(8), -2, 3))).toEqual({
+      lo: 0.25,
+      hi: 0.25,
+    });
+  });
+
+  test('a rational power with no exact value encloses what the rounded exponent missed', () => {
+    // 62^(4/3) to 40 digits. `Math.pow(62, 4/3)` is more than three ulps
+    // below it, so the three-ulp band this routine used to answer did not
+    // contain the true value at all. The root-then-power composition widens
+    // the root's enclosure by the factor the exponent 4 amplifies its error
+    // by, and contains it.
+    const truth = new BigDecimal('245.3892798001851396940412056992044185827');
+    let oldHi = Math.pow(62, 4 / 3);
+    for (let i = 0; i < 3; i++) oldHi = nextUp(oldHi);
+    expect(exactly(oldHi).lt(truth)).toBe(true);
+    const r = getValue(powRational(point(62), 4, 3))!;
+    expect(exactly(r.lo).lt(truth)).toBe(true);
+    expect(exactly(r.hi).gt(truth)).toBe(true);
+
+    // A numerator of 1 raises the root to the power 1, which changes nothing:
+    // the answer is the root's own enclosure of the cube root of 2, here to 40
+    // digits. The validated root is two ulps wide, so a bound of four ulps
+    // fails on any answer that goes back to a fixed step.
+    const cbrt2 = new BigDecimal('1.259921049894873164767210607278228350570');
+    const c = getValue(powRational(point(2), 1, 3))!;
+    expect(exactly(c.lo).lt(cbrt2)).toBe(true);
+    expect(exactly(c.hi).gt(cbrt2)).toBe(true);
+    expect(c).toEqual(getValue(nthRoot(point(2), 3)));
+    expect(c.hi - c.lo).toBeLessThan(4 * (nextUp(c.hi) - c.hi));
   });
 
   test('a logarithm of 1, and of an exact power of its base, is exact', () => {

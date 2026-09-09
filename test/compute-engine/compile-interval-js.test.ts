@@ -951,6 +951,30 @@ describe('INTERVAL JS - WP-2.17 INTERPRETER ALIGNMENT', () => {
     expect(r2.hi).toBeCloseTo(-8, 9);
   });
 
+  test('a rational power encloses the interpreter, and is the cube root squared', () => {
+    // `_IA.powRational` computes `x^(2/3)` as `(x^(1/3))^2` — the same
+    // composition the target emits for `\sqrt[3]{x}^2` — so the two
+    // spellings answer the same enclosure. At x = 8 the root is the exact 2
+    // and the square the exact 4, and the enclosure is the point the
+    // interpreter answers.
+    const expr = ce.parse('x^{\\frac{2}{3}}');
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.code).toContain('_IA.powRational');
+    const r = unwrapInterval(fn.run!({ x: { lo: 8, hi: 8 } }));
+    expect(r).toEqual({ lo: 4, hi: 4 });
+    expect(r.lo).toBe(expr.subs({ x: 8 }).N().re);
+
+    // A point with no exact value: the enclosure contains the interpreter's
+    // float rather than reproducing it.
+    const truth = expr.subs({ x: 5 }).N().re!;
+    const r5 = unwrapInterval(fn.run!({ x: { lo: 5, hi: 5 } }));
+    expect(r5.lo).toBeLessThan(truth);
+    expect(r5.hi).toBeGreaterThan(truth);
+
+    const rooted = compile(ce.parse('\\sqrt[3]{x}^2'), { to: 'interval-js' });
+    expect(unwrapInterval(rooted.run!({ x: { lo: 5, hi: 5 } }))).toEqual(r5);
+  });
+
   test('Mod is floored: Mod(-1, 3) = 2, Mod(5, -3) = -1', () => {
     const fn = compile(ce.box(['Mod', 'x', 'y']), { to: 'interval-js' });
     const r1 = unwrapInterval(

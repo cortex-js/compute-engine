@@ -13,7 +13,12 @@ import {
   liftJump,
   jump,
 } from './util.js';
-import { subUnrounded, mulUnrounded, divUnrounded } from './arithmetic.js';
+import {
+  div,
+  subUnrounded,
+  mulUnrounded,
+  divUnrounded,
+} from './arithmetic.js';
 import {
   outward,
   outwardUnlessExact,
@@ -26,10 +31,9 @@ import {
   exactIntegerGridPoint,
   exactAtOrigin,
   exactAtZeroBound,
-  exactNthRoot,
-  exactPowRational,
   exactLog,
 } from './rounding.js';
+import { prodExact } from '../numerics/interval-arithmetic.js';
 import {
   gamma as scalarGamma,
   gammaln as scalarGammaln,
@@ -308,31 +312,41 @@ function powIntervalRaw(
   return ok({ lo: Math.min(...corners), hi: Math.max(...corners) });
 }
 
-/**
- * Real value of `x^(p/q)` for an odd denominator `q` (so the root is real for
- * every real `x`), following the interpreter's real convention:
- *   - `p` even  → even function, `|x|^(p/q)` (≥ 0)
- *   - `p` odd   → odd function,  `sign(x)·|x|^(p/q)`
- * At `x = 0`: `0` for a positive exponent, `+∞` for a negative one.
- */
-function realRatPow(x: number, p: number, exp: number): number {
-  if (x === 0) return exp > 0 ? 0 : exp < 0 ? Infinity : 1;
-  const m = Math.pow(Math.abs(x), exp);
-  return x < 0 && p % 2 !== 0 ? -m : m;
-}
+/** The point interval 1, the dividend of the reciprocal in `powRationalRaw`.
+ *  An operand is only read, never written, so one shared object is enough. */
+const POINT_ONE: Interval = { lo: 1, hi: 1 };
 
 /**
- * `base^(p/q)` on an interval where `q` is ODD, using the real-root convention
- * (e.g. `(-8)^(2/3) = 4`, `(-32)^(3/5) = -8`). For a non-negative base this is
- * identical to `pow(base, p/q)`; the extension only matters when the base is
- * (partly) negative, where `Math.pow` would return `NaN` even though a real
- * value exists.
+ * `base^(p/q)` on an interval, using the real-root convention for an ODD
+ * denominator (e.g. `(-8)^(2/3) = 4`, `(-32)^(3/5) = -8`). For a non-negative
+ * base this is the ordinary `base^(p/q)`; the extension only matters when the
+ * base is (partly) negative, where `Math.pow` would return `NaN` even though a
+ * real value exists. An EVEN denominator has no real value over a negative
+ * base, and the root below reports the `empty` or domain-clipped answer.
  *
- * `x^(p/q)` (q odd) is monotone on each side of 0: increasing everywhere when
- * `p` is odd; decreasing on `x < 0` and increasing on `x > 0` when `p` is even
- * (a minimum of 0 at the origin for a positive exponent). The endpoints — plus
- * the point 0 when it is interior and the exponent is positive — therefore
- * bracket the range. A negative exponent has a pole at 0.
+ * The value is built as `(x^(1/q))^p` — the q-th ROOT first, then the integer
+ * power — rather than from `Math.pow(x, p/q)`. The direct form has to round the
+ * exponent `p/q` to a double, and `x^(e+δ) = x^e·(1 + δ·ln x)`, so its error
+ * grows with `|ln x|` and with `p/q`: no fixed number of ulps bounds it. The
+ * three-ulp step this routine used to take at its export missed the true value
+ * on about 5% of a random sweep over `x ∈ (0, 1000]`, `p ∈ [1, 5]`,
+ * `q ∈ {3, 5, 7}`, by up to two further ulps. The composition rounds no
+ * exponent at all.
+ *
+ * It also settles the parity and the origin on its own: the integer-exponent
+ * branch of `pow` is what gives an even numerator its minimum of 0 at the
+ * origin and an odd one its monotone increase, so this routine states no
+ * endpoint rule of its own.
+ *
+ * This is the one routine of the library that takes NO outward step at its own
+ * export. It composes the ROUNDED `nthRoot`, `pow` and `div`, each of which
+ * encloses its own answer, because the integer power amplifies the width of the
+ * root by the factor `p` — and so amplifies the root's error by the same
+ * factor. A step taken at the export is a fixed number of ulps and cannot
+ * account for that; composing the raw kernels under one such step is exactly
+ * what was unsound. Exactness survives the composition, since each of the three
+ * carries a prover: `8^(2/3)` is the point 4, `4^(3/2)` the point 8 and
+ * `8^(-2/3)` the point 0.25.
  */
 function powRationalRaw(
   base: Interval | IntervalResult,
@@ -342,25 +356,183 @@ function powRationalRaw(
   const unwrapped = unwrapOrPropagate(base);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [b] = unwrapped;
-  const exp = p / q;
 
-  // Even denominator: real only for a non-negative base — `pow` already models
-  // the empty/partial/monotone cases correctly.
-  // The raw power, for the one-outward-step-per-routine reason given in
-  // `powIntervalRaw` above.
-  if (q % 2 === 0) return powRaw(ok(b), exp);
+  // A negative exponent over a base that reaches BELOW 0 with an odd
+  // denominator has a pole at the origin. The location is reported here
+  // because the reciprocal below only sees a divisor that straddles 0, which
+  // does not say where the pole is.
+  if (q % 2 !== 0 && p < 0 && b.lo < 0 && b.hi >= 0)
+    return { kind: 'singular', at: 0 };
 
-  // Odd denominator, non-negative base: ordinary `pow` is exact.
-  if (b.lo >= 0) return powRaw(ok(b), exp);
+  const root = nthRoot(ok(b), q);
+  if (p >= 0) return pow(root, p);
+  // A negative numerator is the reciprocal of the positive power. The division
+  // is the rounded `div`, whose prover keeps an exact quotient exact, and it
+  // reports the pole or the domain clip of a root that reaches 0.
+  return div(POINT_ONE, pow(root, -p));
+}
 
-  const hasZero = b.lo <= 0 && b.hi >= 0;
-  // Negative exponent has a pole at 0.
-  if (p < 0 && hasZero) return { kind: 'singular', at: 0 };
+/**
+ * An UPPER bound of `v^n` for a non-negative `v` and a positive integer `n`.
+ *
+ * The power is built by squaring, and every product that Dekker's TwoProduct
+ * cannot certify as exact is moved one ulp up. A double multiplication is
+ * correctly rounded, so the true product always lies between the two
+ * neighbours of the computed one: one ulp is a proof here, and it is the only
+ * arithmetic fact `rootEnclosure` rests on. A product that overflows answers
+ * `Infinity`, which bounds the true value from above as well.
+ */
+function powChainUp(v: number, n: number): number {
+  let acc = 1;
+  let sq = v;
+  let k = n;
+  while (k > 0) {
+    if (k % 2 === 1) {
+      const p = acc * sq;
+      acc = prodExact(acc, sq, p) ? p : nextUp(p);
+    }
+    k = Math.floor(k / 2);
+    if (k > 0) {
+      const p = sq * sq;
+      sq = prodExact(sq, sq, p) ? p : nextUp(p);
+    }
+  }
+  return acc;
+}
 
-  const candidates = [realRatPow(b.lo, p, exp), realRatPow(b.hi, p, exp)];
-  // 0 is the interior minimum for an even numerator (positive exponent).
-  if (hasZero && p > 0) candidates.push(0);
-  return ok({ lo: Math.min(...candidates), hi: Math.max(...candidates) });
+/** A LOWER bound of `v^n`, by the same chain as `powChainUp` with every
+ *  uncertified product moved one ulp down. An overflowed product answers
+ *  `Number.MAX_VALUE`, which is below the true value it stands for. */
+function powChainDown(v: number, n: number): number {
+  let acc = 1;
+  let sq = v;
+  let k = n;
+  while (k > 0) {
+    if (k % 2 === 1) {
+      const p = acc * sq;
+      acc = prodExact(acc, sq, p) ? p : nextDown(p);
+    }
+    k = Math.floor(k / 2);
+    if (k > 0) {
+      const p = sq * sq;
+      sq = prodExact(sq, sq, p) ? p : nextDown(p);
+    }
+  }
+  return acc;
+}
+
+/** `v · 2^e`, in chunks because `2^e` is not a double for `|e| > 1023`. The
+ *  scaling is exact for a normal result, and every chunk moves the value the
+ *  same way, so no chunk can overflow or underflow when the answer is in
+ *  range. */
+function scalePow2(v: number, e: number): number {
+  let r = v;
+  let k = e;
+  while (k > 1000) {
+    r *= 2 ** 1000;
+    k -= 1000;
+  }
+  while (k < -1000) {
+    r *= 2 ** -1000;
+    k += 1000;
+  }
+  return r * 2 ** k;
+}
+
+/** How many attempts an endpoint of `rootEnclosure` gets before the search
+ *  gives up. The move DOUBLES at each attempt, so this covers 4095 ulps — and
+ *  bounds the WORK at 4095 single-ulp moves, which is what keeps a degree
+ *  whose product chain cannot be validated at all from stepping for hours.
+ *  The scaled guess is within a few ulps of the root, so no ordinary operand
+ *  uses more than three attempts; the fallback exists to make the loop
+ *  provably finite. */
+const MAX_ROOT_SEARCH_ATTEMPTS = 12;
+
+/**
+ * An enclosure of the real n-th root of a NON-NEGATIVE `v`, for a positive
+ * integer degree `n`.
+ *
+ * `Math.pow(v, 1/n)` rounds the exponent `1/n` to a double, and
+ * `v^(e+δ) = v^e·(1 + δ·ln v)`, so its error grows with `|ln v|`: at
+ * `v = 10³⁰⁰` the cube root it answers is 65 ulps below the true one. No fixed
+ * outward step bounds that. Two mechanisms replace the step:
+ *
+ * - The operand is first scaled to `|log₂ vs| ≤ n/2` by an exact power of two
+ *   whose exponent is a MULTIPLE of the degree, so the root scales back by the
+ *   exact `2^m`. Over that window the error of the rounded exponent is
+ *   `|ln vs|/n ≤ 0.35` ulps whatever `n` and `v` were, so the guess is within
+ *   an ulp or two of the root and the search below is short. The scaling also
+ *   keeps the product chain away from the subnormals, where a product cannot
+ *   be certified exact and every step of the chain would widen.
+ * - Each endpoint is then VALIDATED rather than trusted: the lower one is
+ *   moved down until an upper bound of `lo^n` is at or below `vs` (so
+ *   `lo^n ≤ vs` and `lo` is at or below the true root), the upper one up until
+ *   a lower bound of `hi^n` is at or above `vs`. The move doubles at each
+ *   attempt, so an operand whose guess is far out is reached in a few
+ *   attempts instead of one attempt per ulp.
+ *
+ * The validation accepts equality, which is what keeps an exact root exact:
+ * the chain for `1³ = 1` is exact, so neither endpoint moves and
+ * `nthRoot([8, 8], 3)` is the point 2.
+ */
+function rootEnclosure(v: number, n: number): Interval {
+  // 0, +∞ and NaN are their own root, and the first degree is the identity.
+  if (!(v > 0) || !Number.isFinite(v) || n === 1) return { lo: v, hi: v };
+
+  // Scale the operand by `2^(n·m)`, which the root undoes by the exact `2^m`.
+  // The window is `|log₂ vs| ≤ n/2`, so the scaled operand is a double for
+  // every degree up to the bound below and the product chain stays normal. A
+  // degree past it needs no scaling anyway: the error of the rounded exponent
+  // is `|ln v|/n` ulps, which is under an ulp once the degree passes the 745
+  // that the largest `|ln v|` of a double reaches.
+  let m = 0;
+  let vs = v;
+  if (n <= 2000) {
+    m = Math.round(Math.log2(v) / n);
+    if (m !== 0) vs = scalePow2(v, -n * m);
+  }
+
+  const guess = Math.pow(vs, 1 / n);
+  let lo = guess;
+  let move = 1;
+  for (let attempt = 0; powChainUp(lo, n) > vs; attempt++) {
+    // Giving up is sound, not merely conservative: 0 is below every root of a
+    // positive number, and `Infinity` is above every root.
+    if (attempt >= MAX_ROOT_SEARCH_ATTEMPTS) {
+      lo = 0;
+      break;
+    }
+    for (let i = 0; i < move; i++) lo = nextDown(lo);
+    move += move;
+  }
+  let hi = guess;
+  move = 1;
+  for (let attempt = 0; powChainDown(hi, n) < vs; attempt++) {
+    if (attempt >= MAX_ROOT_SEARCH_ATTEMPTS) {
+      hi = Infinity;
+      break;
+    }
+    for (let i = 0; i < move; i++) hi = nextUp(hi);
+    move += move;
+  }
+  if (m === 0) return { lo, hi };
+  // One power of two for both endpoints. The exponent is at most half the
+  // degree away from `log₂ v`, so it is a double, and the products are exact.
+  const back = 2 ** m;
+  return { lo: lo * back, hi: hi * back };
+}
+
+/** The lower end of the enclosure of the real n-th root of `x`, for an odd
+ *  degree or a non-negative `x`. The root is an odd function of `x` for an odd
+ *  degree, so a negative operand reads the OTHER end of the enclosure of its
+ *  magnitude. */
+function rootLow(x: number, n: number): number {
+  return x < 0 ? -rootEnclosure(-x, n).hi : rootEnclosure(x, n).lo;
+}
+
+/** The upper end of the same enclosure. */
+function rootHigh(x: number, n: number): number {
+  return x < 0 ? -rootEnclosure(-x, n).lo : rootEnclosure(x, n).hi;
 }
 
 /**
@@ -368,8 +540,11 @@ function powRationalRaw(
  *
  * For ODD `n` the root is real for every real `x` and monotonically increasing,
  * so `[root(lo), root(hi)]` (matching the interpreter: `Root(-8, 3) = -2`). For
- * EVEN `n` it reduces to `x^(1/n)`, which requires a non-negative base — a
- * negative base has no real value (`empty`/`partial`), as with `sqrt`.
+ * EVEN `n` it requires a non-negative base — a negative base has no real value
+ * (`empty`/`partial`), as with `sqrt`.
+ *
+ * Each endpoint is a VALIDATED root (`rootEnclosure`), which is why this
+ * routine takes no outward step at its export.
  */
 function nthRootRaw(
   base: Interval | IntervalResult,
@@ -378,14 +553,25 @@ function nthRootRaw(
   const unwrapped = unwrapOrPropagate(base);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [b] = unwrapped;
-  // The raw power, for the one-outward-step-per-routine reason given in
+  // A degree that is not a positive integer is not a root the validation can
+  // certify: `v^(1/n)` is then an ordinary fractional power, and it goes to
+  // the raw power for the one-outward-step-per-routine reason given in
   // `powIntervalRaw` above.
-  if (!Number.isInteger(n) || n === 0) return powRaw(ok(b), 1 / n);
-  if (n % 2 === 0) return powRaw(ok(b), 1 / n);
+  if (!Number.isInteger(n) || n <= 0) return powRaw(ok(b), 1 / n);
+  if (n % 2 === 0) {
+    // Even degree: real only over the non-negative part of the base. The
+    // shape of the answer is the one `pow` gives a fractional exponent.
+    if (isNegative(b)) return { kind: 'empty' };
+    if (b.lo < 0)
+      return {
+        kind: 'partial',
+        value: { lo: 0, hi: rootHigh(b.hi, n) },
+        domainClipped: 'lo',
+      };
+    return ok({ lo: rootLow(b.lo, n), hi: rootHigh(b.hi, n) });
+  }
   // Odd degree: real everywhere, monotone increasing.
-  const root = (x: number): number =>
-    Math.sign(x) * Math.pow(Math.abs(x), 1 / n);
-  return ok({ lo: root(b.lo), hi: root(b.hi) });
+  return ok({ lo: rootLow(b.lo, n), hi: rootHigh(b.hi, n) });
 }
 
 /**
@@ -1270,19 +1456,20 @@ export const pow = liftJump(outwardUnlessExact(powRaw, exactPow));
 export const powInterval = liftJump(
   outwardUnlessExact(powIntervalRaw, exactPowInterval)
 );
-// `powRational` rounds the exponent `p/q` and then powers with it, on each of
-// the endpoint candidates it takes the extremum over; `nthRoot` of an ODD
-// degree computes `Math.pow(|x|, 1/n)`, where the reciprocal `1/n` rounds and
-// the power rounds on top of it. Three ulps is the minimum outward step for
-// that chain, not a proof — but a root the prover reproduces exactly by an
-// integer product chain takes no step at all, so `nthRoot([4, 4], 2)` stays
-// the point 2 and the exact lower bound 0 of `nthRoot([0, 8], 3)` stays 0.
-export const powRational = liftJump(
-  outwardUnlessExact(powRationalRaw, exactPowRational, 3)
-);
-export const nthRoot = liftJump(
-  outwardUnlessExact(nthRootRaw, exactNthRoot, 3)
-);
+// `nthRoot` and `powRational` take NO step at their export, and are the two
+// exceptions to the one-step-per-routine rule. Both answer an enclosure that
+// is already a proof:
+//
+// - `nthRoot` VALIDATES each endpoint against the operand instead of trusting
+//   `Math.pow(|x|, 1/n)`, whose error grows with `|ln x|` and which no fixed
+//   step bounds (see `rootEnclosure`). An exact root is reproduced exactly by
+//   the validation, so `nthRoot([4, 4], 2)` is the point 2 and the exact lower
+//   bound 0 of `nthRoot([0, 8], 3)` stays 0.
+// - `powRational` is built from the ROUNDED `nthRoot`, `pow` and `div` — see
+//   the comment on `powRationalRaw` for why a step at its export cannot bound
+//   its error.
+export const powRational = liftJump(powRationalRaw);
+export const nthRoot = liftJump(nthRootRaw);
 export const exp = liftJump(
   outwardUnlessExact(expRaw, exactInRange(0, Infinity))
 );

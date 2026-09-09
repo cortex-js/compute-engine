@@ -135,6 +135,15 @@
   now handed out as a broadcast-aware wrapper, emitted once per function; a
   function with a collection parameter keeps the direct reference, because
   it consumes a list whole.
+- **A user function referenced as a value whose parameters are declared
+  scalar refuses a collection element, as the interpreter does.** The
+  interpreter answers an `incompatible-type` error for
+  `Map(f, [[1, 2], [3, 4]])` with `f: (number) -> number`, and canonicalization
+  already makes that expression invalid so it never compiles; for a
+  caller-supplied source the compiled reference now answers NaN for such an
+  element instead of a mapped row. A callback with an `unknown` parameter,
+  an inline function literal and a built-in operator name keep their
+  broadcast, which is what the interpreter does for them.
 - **A built-in operator name or an inline function literal used as a compiled
   callback broadcasts over a collection element.** `Map(Sin, xs)` and
   `Map((x) ↦ 2x, xs)` applied a scalar-only body to whatever element the
@@ -145,6 +154,54 @@
   empty operand) and the second `[[2, 4], [], [6]]`. A built-in that consumes
   its argument whole, such as `First`, and a literal with a collection-typed
   parameter keep the bare reference.
+- **`Round(x, n)` on the interval-js target scales through an exact integer
+  power.** A negative precision multiplied by the double nearest `10^n`
+  (`0.01` has no double) inside a step function whose result depends on the
+  scale exactly; the operand is now divided by the exact `10^-n` and
+  multiplied back, so the scale is a true point and an exact multiple of the
+  step stays a point.
+- **A rational power on the interval-js target is the root followed by the
+  integer power.** `_IA.powRational(x, p, q)` computed `Math.pow(x, p/q)`,
+  which rounds the exponent; that error grows with `|ln x|` and with `p/q`,
+  so no fixed outward step bounded it: over 20 000 random points with
+  `x ∈ (0, 1000]`, `p ≤ 5` and an odd denominator, the enclosure did not
+  contain the true value in about 5% of cases. It is now `(x^(1/q))^p`,
+  built from the enclosed root and the exact integer-power chain, contains
+  the true value in every case of a 100 000-point sweep, and an exactly
+  representable answer stays a point: `8^(2/3)` is 4, `27^(2/3)` is 9 (it was
+  8.999999999999998), `(-8)^(2/3)` is 4 and `8^(-2/3)` is 0.25.
+- **Colour operators handle their arguments consistently across the
+  interpreter, the JavaScript target and the shader targets** (an audit of
+  every operator that takes or produces a colour). A colour string that
+  names no colour is refused by every operator: `parseColor()` answers 0 for
+  an unrecognized string and for transparent black alike, and only `Color`
+  told them apart, so `ColorMix("bogus", "#ffffff")` silently answered a
+  half-transparent grey and the compiled `Color("bogus")` answered
+  transparent black. `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab` and `AsOklch`
+  accept a colour string and a 0–1 sRGB tuple like the other colour
+  operators (`AsRgb("#ff0000")` was `incompatible-type`; `AsRgb((1, 0, 0))`
+  was fanned element-wise into three errors). The APCA contrast a shader
+  computes now matches the interpreter: `ColorContrast(Rgb(0,0,0), Rgb(1,1,1))`
+  answered about −114 on GLSL and WGSL where the engine answers about
+  −1.079, and `ContrastingColor` compared that scale against a fixed
+  threshold, choosing black for a 0.6 grey where the interpreter chooses
+  white. `ColorFromColorspace` no longer converts a typed colour head twice
+  on the compiled targets (`ColorFromColorspace(Rgb(1,0,0), "rgb")` was not
+  red). `ColorToColorspace`/`ColorFromColorspace` accept `"hsv"` on every
+  route (only the shaders knew it). `Colormap` samples the same colour as
+  `ColorMix` and the compiled runtime (the interpreter interpolated through
+  a gamut-clipped sRGB routine). `ColorToString(c, "oklch")` keeps chroma
+  outside the sRGB gamut on the compiled route.
+- **`_IA.nthRoot` validates each endpoint instead of stepping a fixed three
+  ulps around `Math.pow(|x|, 1/n)`**, whose error grows with `|ln x|` and
+  passed three ulps at about `x = 3·10⁶`: over `|ln x| ∈ [50, 100)`, 3 594
+  of 4 000 random enclosures did not contain the root. The operand is scaled
+  by an exact power of two and each endpoint is moved until the enclosure of
+  its n-th power lands on the right side of the operand, so the answer is a
+  proof rather than an estimate, about half as wide as before, and an exact
+  root stays a point: `Root(64, 3)` is 4 and `Root(1000, 3)` is 10, which
+  the rounded exponent never reached. About twice the previous cost per
+  call.
 - **The interval-arithmetic runtime library rounds every result outward.**
   The library the `interval-js` target injects computed in round-to-nearest
   doubles, so a product, a quotient or a transcendental of non-degenerate

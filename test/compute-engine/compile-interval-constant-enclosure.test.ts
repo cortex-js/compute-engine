@@ -379,3 +379,33 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
     expect(v.hi).toBeLessThan(1.645);
   });
 });
+
+describe('INTERVAL-JS — Round(x, n) scales through an exact integer power', () => {
+  const ce = new ComputeEngine();
+  test('a negative precision divides by 10^-n and multiplies back', () => {
+    // `10^-2 = 0.01` has no double; rounding to hundreds goes through the
+    // exact `100` instead, so the scale is a true point and an exact
+    // multiple of a hundred stays an exact point.
+    const r = compile(ce.box(['Round', 'x', -2]), { to: 'interval-js' });
+    expect(r.code).toBe('_IA.mul(_IA.round(_IA.div(_.x, _k1)), _k1)');
+    expect(r.run!({ x: { lo: 1234.5, hi: 1234.5 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 1200, hi: 1200 },
+    });
+    expect(r.run!({ x: { lo: 1250, hi: 1250 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 1300, hi: 1300 },
+    });
+  });
+  test('a positive precision multiplies by the exact 10^n first', () => {
+    const r = compile(ce.box(['Round', 'x', 2]), { to: 'interval-js' });
+    expect(r.code).toBe('_IA.div(_IA.round(_IA.mul(_.x, _k1)), _k1)');
+    const v = r.run!({ x: { lo: 0.125, hi: 0.125 } }) as {
+      value: { lo: number; hi: number };
+    };
+    // 13/100 has no double; the quotient is an enclosure of it.
+    expect(v.value.lo).toBeLessThanOrEqual(0.13);
+    expect(v.value.hi).toBeGreaterThanOrEqual(0.13);
+    expect(v.value.hi - v.value.lo).toBeLessThan(1e-15);
+  });
+});
