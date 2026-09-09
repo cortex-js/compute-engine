@@ -2141,6 +2141,18 @@ describe('COMPILE COMPLEX - broadcast closure promotion verdict', () => {
   });
 });
 
+/**
+ * The channels of a COMPILED color value. A compiled color is the object
+ * `{ space, c0, c1, c2, alpha }`, and the alpha is appended here when the
+ * color carries one.
+ */
+function colorChannels(v: unknown): number[] {
+  const c = v as { c0: number; c1: number; c2: number; alpha?: number };
+  const channels = [c.c0, c.c1, c.c2];
+  if (c.alpha !== undefined) channels.push(c.alpha);
+  return channels;
+}
+
 describe('COMPILE COMPLEX - real-only color constructors guard promoted operands', () => {
   // Tycho item 204: `Hsv(90·√(x+1), 1, 1)` under the default `auto` handed
   // `_SYS.hsv` the promoted `{re, im}` object and returned NaN at EVERY
@@ -2158,36 +2170,40 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
     expect(s.success).toBe(true);
     expect(a.success).toBe(true);
     for (const x of [0, 3]) {
-      const sv = s.run!({ x }) as number[];
-      const av = a.run!({ x }) as number[];
+      const sv = colorChannels(s.run!({ x }));
+      const av = colorChannels(a.run!({ x }));
       expect(av).toHaveLength(3);
       av.forEach((c, i) => expect(c).toBeCloseTo(sv[i], 10));
     }
   });
 
-  it('a genuinely complex hue yields a NaN-filled COLOR, same shape as success', () => {
+  it('a genuinely complex hue yields the NON-FINITE COLOR, same shape as success', () => {
     // The failing branch must have the same shape the head returns when the
-    // guard passes: a caller destructuring `[L, C, H]` must never receive a
-    // bare scalar NaN (review finding: the first guard version did exactly
+    // guard passes: a caller reading the color's channels must never receive
+    // a bare scalar NaN (review finding: the first guard version did exactly
     // that, and this test's original form papered over it with an
-    // `Array.isArray` workaround).
+    // `Array.isArray` workaround). A compiled color is now the object
+    // `{ space, c0, c1, c2, alpha }`, so the failing branch is that object
+    // with NaN channels.
     const a = compile(hsv(), { mode: 'auto', fallback: false });
-    const v = a.run!({ x: -2 });
-    expect(Array.isArray(v)).toBe(true);
-    expect(v).toHaveLength(3);
-    expect((v as number[]).every((c) => Number.isNaN(c))).toBe(true);
+    expect(a.run!({ x: -2 })).toEqual({
+      space: 'oklch',
+      c0: NaN,
+      c1: NaN,
+      c2: NaN,
+      alpha: undefined,
+    });
   });
 
-  it('every color head: auto matches strict on real inputs, NaN-array on complex', () => {
+  it('every color head: auto matches strict on real inputs, NaN color on complex', () => {
     const sqrtX = ['Sqrt', ['Add', 'x', 1]];
-    const shapes: [string, unknown, number][] = [
-      ['Rgb', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5], 3],
-      ['Rgb alpha', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5, 0.8], 4],
-      ['Colormap', ['Colormap', { str: 'viridis' }, ['Multiply', 0.25, sqrtX]], 3],
+    const shapes: [string, unknown][] = [
+      ['Rgb', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5]],
+      ['Rgb alpha', ['Rgb', ['Multiply', 0.2, sqrtX], 0.5, 0.5, 0.8]],
+      ['Colormap', ['Colormap', { str: 'viridis' }, ['Multiply', 0.25, sqrtX]]],
       [
         'ColorMix',
         ['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], ['Multiply', 0.25, sqrtX]],
-        3,
       ],
       [
         'ColorFromColorspace',
@@ -2196,22 +2212,27 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
           ['Tuple', ['Multiply', 0.2, sqrtX], 0.5, 0.5],
           { str: 'rgb' },
         ],
-        3,
       ],
     ];
-    for (const [label, json, channels] of shapes) {
+    for (const [label, json] of shapes) {
       const expr = ce.expr(json as Parameters<typeof ce.expr>[0]);
       const s = compile(expr, { mode: 'strict', fallback: false });
       const a = compile(expr, { mode: 'auto', fallback: false });
       expect(`${label}: ${s.success}/${a.success}`).toBe(`${label}: true/true`);
-      const sv = s.run!({ x: 3 }) as number[];
-      const av = a.run!({ x: 3 }) as number[];
-      expect(Array.isArray(av)).toBe(true);
+      const sv = colorChannels(s.run!({ x: 3 }));
+      const av = colorChannels(a.run!({ x: 3 }));
       av.forEach((c, i) => expect(c).toBeCloseTo(sv[i], 10));
-      const bad = a.run!({ x: -2 });
-      expect(Array.isArray(bad)).toBe(true);
-      expect(bad).toHaveLength(channels);
-      expect((bad as number[]).every((c) => Number.isNaN(c))).toBe(true);
+      // An alpha is lost on the FAILING branch, which the color
+      // representation absorbs: `alpha` is a key that is always present and
+      // `undefined` for an opaque color, so the failing value has the same
+      // keys as the successful one.
+      expect(a.run!({ x: -2 })).toEqual({
+        space: 'oklch',
+        c0: NaN,
+        c1: NaN,
+        c2: NaN,
+        alpha: undefined,
+      });
     }
   });
 
@@ -2225,9 +2246,13 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
       { mode: 'strict', fallback: false }
     );
     expect(cm.success).toBe(true);
-    const v = cm.run!({ nanpos: NaN });
-    expect(Array.isArray(v)).toBe(true);
-    expect((v as number[]).every((c) => Number.isNaN(c))).toBe(true);
+    expect(cm.run!({ nanpos: NaN })).toEqual({
+      space: 'oklch',
+      c0: NaN,
+      c1: NaN,
+      c2: NaN,
+      alpha: undefined,
+    });
   });
 });
 

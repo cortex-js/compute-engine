@@ -139,6 +139,8 @@ import type {
   CompileMode,
   CompileTarget,
   CompilationResult,
+  CompiledColor,
+  CompiledColorSpace,
   CompiledFunction,
   CompiledRunner,
   ComplexResult,
@@ -149,6 +151,7 @@ import type {
   TargetSource,
 } from './types.js';
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
+import { isColorValued } from './color-space-fact.js';
 import {
   candidateAt,
   descendantRegionAt,
@@ -324,6 +327,38 @@ type EnclosingDefinition = {
 
 /** The empty name set, shared so an unremarkable case allocates nothing. */
 const NO_NAMES: ReadonlySet<string> = new Set<string>();
+
+/**
+ * The color space each of the interpreter's five typed color heads names.
+ *
+ * The heads are the ones `library/colors.ts` builds after `.evaluate()`, and
+ * their operand order is the channel order of the space they name — sRGB
+ * `r, g, b` in 0-1 for `Rgb`, `h, s, v` for `Hsv`, and so on — which is
+ * exactly the `c0, c1, c2` layout of a compiled color value.
+ */
+const INTERPRETED_COLOR_SPACES: Readonly<Record<string, CompiledColorSpace>> = {
+  Rgb: 'rgb',
+  Hsv: 'hsv',
+  Hsl: 'hsl',
+  Oklab: 'oklab',
+  Oklch: 'oklch',
+};
+
+/**
+ * The interpreter's typed color head for each color space a compiled color
+ * value can carry — the inverse of {@link INTERPRETED_COLOR_SPACES}.
+ *
+ * It is what lets the interpreter fallback CONSUME a color: a color a
+ * compiled runner produced, handed back in as a `vars` value, boxes to the
+ * head that names its space with its channels as operands.
+ */
+const COLOR_SPACE_HEADS: Readonly<Record<CompiledColorSpace, string>> = {
+  rgb: 'Rgb',
+  hsv: 'Hsv',
+  hsl: 'Hsl',
+  oklab: 'Oklab',
+  oklch: 'Oklch',
+};
 
 /**
  * A sink an emission route writes its DECLINE reason into on its way out.
@@ -2628,11 +2663,10 @@ export class BaseCompiler {
     emit: () => TargetSource,
     // The shape of the failing branch, forwarded to the target's
     // `realGuard`. It must match the shape the head returns when the guard
-    // passes — see the `realGuard` contract in `types.ts`. The color
-    // constructors pass `{ array: n }` so a genuinely-complex operand
-    // yields an n-element NaN-filled color, never a bare scalar that flips
-    // the caller's destructuring at runtime.
-    resultKind: 'boolean' | 'number' | { array: number }
+    // passes — see the `realGuard` contract in `types.ts`. The color heads
+    // pass `'color'` so a genuinely-complex operand yields the non-finite
+    // COLOR, never a bare scalar that flips the caller's reading at runtime.
+    resultKind: 'boolean' | 'number' | 'color'
   ): TargetSource | undefined {
     // The rule belongs to the `auto` and `complex` disciplines; in strict
     // mode nothing changes — a typed-complex or provably non-real operand of
@@ -2693,13 +2727,12 @@ export class BaseCompiler {
     // the head returns is then array-shaped (or a reduction of one), and the
     // per-element projection of every maybe-complex operand, scalars
     // included, is what keeps that shape. The exception is a head whose
-    // failing value has a statically known array shape (`resultKind`
-    // `{ array: n }`: the color constructors): its scalar operands keep the
-    // whole-value guard, so a complex scalar channel still yields the
-    // documented NaN-filled color rather than a raw NaN fed to the color
+    // failing value is a COLOR (`resultKind` `'color'`): its scalar operands
+    // keep the whole-value guard, so a complex scalar channel still yields
+    // the documented non-finite color rather than a raw NaN fed to the color
     // kernel.
     const elementwise = args.some(positional);
-    const projectScalars = elementwise && typeof resultKind !== 'object';
+    const projectScalars = elementwise && resultKind !== 'color';
     const projectElements = target.complexRealElements;
     if (elementwise && projectElements === undefined) return undefined;
     const bindings: Array<[string, string]> = [];
@@ -4406,6 +4439,23 @@ export class BaseCompiler {
     // infinite pipeline (`Sum(Take(Map(_ ↦ _^2, 1..∞), 10))`) has its `∞`
     // inside the collection operand, not an indexing set, and still folds.
     if (BaseCompiler.containsUnboundedBigOp(expr)) return undefined;
+    // A COLOR value has a representation of its own on the JavaScript target —
+    // the object `{ space, c0, c1, c2, alpha }` — and the interpreter's value
+    // does not carry it: a color evaluates to a typed head, whose literal
+    // emission is a bare numeric array, and a bare numeric array is a LIST on
+    // this target, never a color. So a color-valued expression is left to its
+    // own lowering, which builds the target's color value. The test is the
+    // expression's TYPE (`isColorValued`), so every color-valued expression is
+    // covered whatever its head, while an expression that answers components
+    // rather than a color — `ColorToColorspace`, whose interpreted value is a
+    // `Tuple` and whose compiled value is the same array — folds like any
+    // other tuple.
+    //
+    // The shader targets are unaffected: a color there IS a bare `vec3` and
+    // the folded literal is the right shape, with `gpuColorOperand` converting
+    // it from the space `colorSpaceOf` reports for the unfolded expression.
+    if (target.language === 'javascript' && isColorValued(expr))
+      return undefined;
     if (
       (target.varsKeys !== undefined || target.foldExcludedOps !== undefined) &&
       BaseCompiler.mentionsExcludedName(
@@ -5770,7 +5820,7 @@ export class BaseCompiler {
             guardArgs,
             target,
             () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-            BaseCompiler.realOnlyResultKind(h, args)
+            BaseCompiler.realOnlyResultKind(h)
           );
           if (guarded !== undefined) return guarded;
           // The rule declined (a maybe-complex set or dictionary operand, an
@@ -5854,10 +5904,9 @@ export class BaseCompiler {
       // operand (`CompileTarget.collectionAwareHeads`) is not this gate's
       // business: that codegen owns the shape — it emits its own run-time
       // dispatch, or declines with its own diagnostic. The color-space
-      // conversions are the case: a color value on this target is one flat
-      // array of channels, so no generic element-wise lowering can serve
-      // them, and only their own codegen can tell one color from a list of
-      // colors.
+      // conversions are the case: their operand may be a list of colors at
+      // any depth, and only their own color-aware map recurses to the leaves
+      // and refuses a collection whose type does not prove a color there.
       const collectionAwareHead = target.collectionAwareHeads?.has(h) === true;
       if (
         isBroadcastableHead &&
@@ -7538,7 +7587,7 @@ export class BaseCompiler {
             guardArgs,
             target,
             () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-            BaseCompiler.realOnlyResultKind(h, args)
+            BaseCompiler.realOnlyResultKind(h)
           );
           if (guarded !== undefined) return guarded;
           throw new Error(
@@ -7785,7 +7834,7 @@ export class BaseCompiler {
    *    `ColorFromColorspace` tuple component failed identically. With the
    *    guard, a real-at-runtime promoted value unwraps and yields the true
    *    color; a genuinely complex one yields an equally-sized NaN-filled
-   *    array (`realOnlyResultKind` — never a bare scalar, which would flip
+   *    color (`realOnlyResultKind` — never a bare scalar, which would flip
    *    the result shape at runtime under a caller's destructuring).
    *    `ColorFromColorspace` carries its scalars inside a literal
    *    components tuple, so the gate scans and binds the tuple's ELEMENTS
@@ -7881,34 +7930,28 @@ export class BaseCompiler {
 
   /**
    * The failing-branch shape for a guarded real-only head (the `realGuard`
-   * kind): the color heads return `[L, C, H]` or `[L, C, H, alpha]`, so
-   * their guard emits an equally-sized NaN-filled array — a caller
-   * destructuring the color must never see the result shape flip at
-   * runtime on data. Everything else in `REAL_ONLY_CODEGEN_HEADS` returns
-   * a scalar. `Colormap`'s guarded form is the two-argument sample (the
-   * one-argument palette form has no numeric operand to promote) and
-   * `ColorMix` mixes to one color; both answer a 3-channel array — alpha,
-   * when present, is lost on the FAILING branch only.
+   * kind): a head that produces a COLOR answers the target's non-finite
+   * color, so a caller reading the color's channels never sees the result
+   * shape flip at runtime on data. Everything else in
+   * `REAL_ONLY_CODEGEN_HEADS` returns a scalar. `Colormap`'s guarded form is
+   * the two-argument sample — the one-argument palette form has no numeric
+   * operand to promote — and `ColorMix` mixes to one color. An alpha is lost
+   * on the FAILING branch, which the color representation absorbs: the color
+   * carries its alpha in a key that is always present and `undefined` for an
+   * opaque color, so the failing value has the same keys as the successful
+   * one.
    */
-  private static realOnlyResultKind(
-    h: string,
-    args: ReadonlyArray<Expression>
-  ): 'number' | { array: number } {
+  private static realOnlyResultKind(h: string): 'number' | 'color' {
     switch (h) {
       case 'Rgb':
       case 'Hsv':
       case 'Hsl':
       case 'Oklab':
       case 'Oklch':
-        return { array: args.length >= 4 ? 4 : 3 };
-      case 'ColorFromColorspace': {
-        const comps = args[0];
-        const n = isFunction(comps) ? (comps.ops?.length ?? 3) : 3;
-        return { array: n >= 4 ? 4 : 3 };
-      }
+      case 'ColorFromColorspace':
       case 'Colormap':
       case 'ColorMix':
-        return { array: 3 };
+        return 'color';
       default:
         return 'number';
     }
@@ -21199,6 +21242,42 @@ export class BaseCompiler {
       kind: 'capability',
       message: error,
     };
+    // The color value of an evaluated color node, or `undefined` when `e` is
+    // not one. The interpreter spells a color as one of five typed heads
+    // (`library/colors.ts`), and the head names the space its three channels
+    // are in — the same five spaces a compiled color value carries.
+    //
+    // The alpha follows the compiled runtime's rule (`normalizeAlpha`): an
+    // absent, non-finite or effectively-1 alpha is `undefined`, so the two
+    // routes answer the same object for an opaque color.
+    const interpretedColorValue = (
+      e: Expression
+    ): CompiledColor | undefined => {
+      if (!isFunction(e)) return undefined;
+      const space = INTERPRETED_COLOR_SPACES[e.operator];
+      if (space === undefined) return undefined;
+      const ops = e.ops;
+      if (ops.length < 3) return undefined;
+      // Each channel is numericized before it is read, for the reason
+      // `interpretedRunValue` numericizes a scalar leaf: `evaluate()` stays
+      // symbolic for an exact argument, and `.re` of a symbolic expression is
+      // `NaN`.
+      const channel = (i: number): number => ops[i].N().re;
+      let alpha = ops.length >= 4 ? channel(3) : undefined;
+      if (
+        alpha === undefined ||
+        !Number.isFinite(alpha) ||
+        Math.abs(alpha - 1) < 1e-9
+      )
+        alpha = undefined;
+      return {
+        space,
+        c0: channel(0),
+        c1: channel(1),
+        c2: channel(2),
+        alpha,
+      };
+    };
     // Materialize an interpreted result matching the compiled-runner value
     // contract: a scalar yields a `number` (imaginary part exactly zero), a
     // `{re, im}` object (otherwise) or a boolean; a finite indexed collection
@@ -21209,7 +21288,17 @@ export class BaseCompiler {
     // no non-symbolic evaluation would run to NaN instead of its value.
     const interpretedRunValue = (
       e: Expression
-    ): number | boolean | ComplexResult | unknown[] => {
+    ): number | boolean | ComplexResult | CompiledColor | unknown[] => {
+      // A COLOR node keeps its space. The interpreter answers a color as a
+      // typed head — `Rgb(r, g, b)`, `Hsv(h, s, v)`, … — and the compiled
+      // runtime's color value carries the same three channels plus the space
+      // the head names, so a declining color expression comes back as the
+      // color it denotes. Without this the numericization below reduced the
+      // whole head to `NaN` (`.re` of a non-numeric expression), and a
+      // declined color expression ran to a scalar `NaN` under the default
+      // `fallback: true`.
+      const color = interpretedColorValue(e);
+      if (color !== undefined) return color;
       if (e.isCollection) return [...e.each()].map(interpretedRunValue);
       if (isSymbol(e, 'True')) return true;
       if (isSymbol(e, 'False')) return false;
@@ -21229,6 +21318,16 @@ export class BaseCompiler {
       v !== null &&
       typeof (v as ComplexResult).re === 'number' &&
       typeof (v as ComplexResult).im === 'number';
+    // A COLOR argument: the value shape a compiled runner answers for a color
+    // (`CompiledColor`). The same test the compiled runtime makes — an object
+    // whose `space` is one of the five spellings — so a color one runner
+    // produced can be handed straight back in as a `vars` value.
+    const isColorArg = (v: unknown): v is CompiledColor =>
+      typeof v === 'object' &&
+      v !== null &&
+      typeof (v as CompiledColor).space === 'string' &&
+      (v as CompiledColor).space in COLOR_SPACE_HEADS &&
+      typeof (v as CompiledColor).c0 === 'number';
     // A JS ARRAY is a collection VALUE — the runner-argument shape of a list
     // or point parameter (`{ P: [[0, 0], [3, 4]] }`) — not MathJSON:
     // `ce.expr([1, 2])` reads it as an application and boxes an
@@ -21241,6 +21340,16 @@ export class BaseCompiler {
     // compiled runtime give a bare array.
     const boxArg = (v: unknown, type?: Type): Expression => {
       if (isComplexArg(v)) return ce.number(ce.complex(v.re, v.im));
+      // A color VALUE boxes to the typed head that names its space, with its
+      // channels as operands and its alpha as a fourth. Without this the
+      // object reached `ce.expr` as MathJSON and boxed to an error, so a
+      // color a compiled runner produced could not be fed back into a
+      // declining color expression.
+      if (isColorArg(v)) {
+        const ops = [ce.number(v.c0), ce.number(v.c1), ce.number(v.c2)];
+        if (v.alpha !== undefined) ops.push(ce.number(v.alpha));
+        return ce.function(COLOR_SPACE_HEADS[v.space], ops);
+      }
       if (Array.isArray(v)) {
         const t = type === undefined ? undefined : resolveTypeAlias(type);
         if (typeof t !== 'string' && t?.kind === 'tuple')
@@ -21332,6 +21441,14 @@ export class BaseCompiler {
             if (isComplexArg(v)) {
               ce.declare(k, 'complex');
               ce.assign(k, ce.number(ce.complex(v.re, v.im)));
+            } else if (isColorArg(v)) {
+              // A COLOR argument: the shadow takes the boxed color's own type
+              // (`color`), which is what a color position admits. Declaring it
+              // `number` below would reject the assignment and run the
+              // expression against an unbound symbol.
+              const boxed = boxArg(v);
+              ce.declare(k, boxed.type.type);
+              ce.assign(k, boxed);
             } else if (Array.isArray(v)) {
               // A collection argument: the shadow takes the value's own
               // type (a `List` of points types `list<tuple<…>>`), which is

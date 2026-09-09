@@ -228,7 +228,20 @@ describe('Tycho item 233 — OKLCh hue is folded into [0, 360)', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.box(['Hsv', 180, 1, 1]), { to: 'javascript' });
     expect(r.success).toBe(true);
-    const [L, C, H] = r.run({}) as number[];
+    // A compiled color is the object `{ space, c0, c1, c2, alpha }`, with the
+    // OKLCh channels in `c0, c1, c2`.
+    const {
+      space,
+      c0: L,
+      c1: C,
+      c2: H,
+    } = r.run({}) as unknown as {
+      space: string;
+      c0: number;
+      c1: number;
+      c2: number;
+    };
+    expect(space).toBe('oklch');
     expect(L).toBeCloseTo(0.9054, 3);
     expect(C).toBeCloseTo(0.1546, 3);
     expect(H).toBeCloseTo(194.77, 2);

@@ -1,5 +1,43 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A compiled color value on the JavaScript target is an OBJECT, not a numeric
+  array.** `compile()` now answers a color as
+  `{ space, c0, c1, c2, alpha }` — `space` is one of `'oklch'`, `'rgb'`,
+  `'hsv'`, `'hsl'`, `'oklab'`, the three channels follow that space, and
+  `alpha` is `undefined` when the color carries none. Before this a color was
+  a flat `[L, C, H]` (or `[L, C, H, alpha]`) array in OKLCh, and a conversion
+  such as `AsRgb` answered a flat array of channels in the space it named,
+  with nothing at run time telling the two apart.
+
+  A consumer that reads `raw[0]`, `raw[1]`, `raw[2]` must now read `raw.space`
+  and `raw.c0`, `raw.c1`, `raw.c2`, and decide what to do when `raw.space` is
+  not the space it expected. A bare numeric array is no longer a color at all:
+  an ARRAY is a list, and a color helper handed a numeric array throws a
+  `TypeError` naming the expected shape rather than reading it as channels. An
+  object whose `space` is not one of the five spellings throws the same way,
+  naming the offending spelling — the helpers switch on the space, so a color
+  tagged `srgb` would have been read as OKLCh. A LIST of colors is a
+  JavaScript array of these objects; a color STRING is still a string.
+
+  `ColorToColorspace` is NOT affected: it answers COMPONENTS, not a color. It
+  is declared `-> tuple`, the interpreter evaluates it to a `Tuple`, and
+  consumers index the result (`At(ColorToColorspace(c, "rgb"), 1)`), so its
+  compiled value stays the plain array of three channels — four with an alpha
+  — that it has always been.
+
+  The tag is what makes a nested conversion correct: `AsRgb(AsRgb(c))` now
+  equals `AsRgb(c)` channel for channel, `AsHsv(AsRgb(c))` equals `AsHsv(c)`,
+  and `ColorDelta(AsRgb(a), b)` equals `ColorDelta(a, b)`. The interpreter
+  fallback answers the same object, so a color expression that declines no
+  longer runs to a scalar `NaN`; it also CONSUMES one, so a color a compiled
+  runner produced can be passed straight back in as a `vars` value.
+
+  Nothing changes on the GLSL and WGSL targets, where a color stays a `vec3`
+  in OKLCh; the space is proved at compile time there instead. See "Color
+  values" in `docs/COMPILATION-MODEL.md`.
+
 ### New Features
 
 - **More fixed-width collection shapes compile to straight-line scalar code.**
@@ -94,19 +132,31 @@
   it as one CSS color, where the generic fan-out over a collection had
   intercepted it as a list of grapheme clusters.
 
-- **A color operand that is itself a color conversion now declines instead of
-  answering a wrong color.** The compiled runtime has two spellings for a
-  color: a color VALUE is the canonical OKLCh triple, while a conversion
-  answers bare channels in the space it names. So the consumer read those
-  channels as `[L, C, H]`, and `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
+- **A color operand that is itself a color conversion answers the interpreter's
+  color.** The compiled runtime used to have two spellings for a color: a
+  color VALUE was the canonical OKLCh triple, while a conversion answered bare
+  channels in the space it named. The consumer read those channels as
+  `[L, C, H]`, so `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
   `[0.7137, 0, 0.3686]` where the interpreter answers
-  `Rgb(0.5, 0.2513, 0.25)`. Every head that reads a color operand now fails
-  closed (D6) when that nesting is visible at compile time — the five
-  conversions, `ColorDelta`, `ColorMix`, `ColorContrast`, `ContrastingColor`,
-  `ColorToString` and `ColorToColorspace` — so the expression falls back to
-  the interpreter. A color value, a color string or a variable at the same
-  position is unaffected.
+  `Rgb(0.5, 0.2513, 0.25)`. A compiled color value now carries its space (see
+  the breaking change above) and every helper that consumes a color converts
+  from that space, so the five conversions, `ColorDelta`, `ColorMix`,
+  `ColorContrast`, `ContrastingColor`, `ColorToString` and
+  `ColorToColorspace` all answer the interpreter's color for a nested
+  conversion. On the GLSL and WGSL targets, where a color is a `vec3` with no
+  run-time tag, the space is proved at compile time and the conversion back to
+  OKLCh is emitted. That proof follows a value through a return-type
+  ascription, a block, a user function's visible body, and the ARMS of a
+  `Which` or an `If`, which answer the space their arms agree on; a selection
+  whose arms name DIFFERENT spaces is declined on those targets rather than
+  read as OKLCh.
 
+- **`ContrastingColor` answers a canonical color on the JavaScript target.** It
+  used to answer the chosen candidate in the candidate's own color space while
+  the compiler recorded the head as canonical, so
+  `AsOklch(ContrastingColor(bg, AsRgb(a), AsRgb(b)))` skipped the conversion it
+  still needed and read the candidate's sRGB channels as `[L, C, H]`. The
+  chosen candidate is now converted to OKLCh before it is answered.
 - **`AsHsv` and `AsHsl` of a non-finite color answer the `NaN` triple.** The
   hue is read off `max`/`min` comparisons, and every comparison with `NaN` is
   false, so `AsHsv(Hsv(h, 0.5, 0.5))` with `h` non-finite answered

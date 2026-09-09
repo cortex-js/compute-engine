@@ -82,6 +82,20 @@ const GLSL_BUILTINS = {
   length: (v: Vec) => Math.hypot(v.x, v.y, ...(v.z === undefined ? [] : [v.z])),
   /** The `.yz` swizzle of a triple. */
   __yz: (v: Vec) => V2(v.y, v.z as number),
+  // GLSL's component-wise comparisons answer a `bvec3`, which `all` reduces
+  // to one boolean. `_gpu_srgb_roundtrip` is the only preamble helper that
+  // uses them, to test whether an sRGB triple is already in gamut.
+  lessThanEqual: (a: Vec, b: Vec) => ({
+    x: a.x <= b.x,
+    y: a.y <= b.y,
+    z: (a.z as number) <= (b.z as number),
+  }),
+  greaterThanEqual: (a: Vec, b: Vec) => ({
+    x: a.x >= b.x,
+    y: a.y >= b.y,
+    z: (a.z as number) >= (b.z as number),
+  }),
+  all: (v: { x: boolean; y: boolean; z: boolean }) => v.x && v.y && v.z,
   clamp: (v: Vec | number, lo: number, hi: number) =>
     isVec(v)
       ? V3(
@@ -144,6 +158,34 @@ function jsDeclines(expr: any): boolean {
   return compiled?.code === '';
 }
 
+/**
+ * Run a COLOR-valued expression through the JavaScript target and answer its
+ * channels as a flat array — `[c0, c1, c2]`, with the alpha appended when the
+ * color carries one.
+ *
+ * A compiled color is the object `{ space, c0, c1, c2, alpha }`, so the pins
+ * below that compare a color's VALUE against the interpreter read through this
+ * helper. The pins that are about the SPACE assert on `.space` directly.
+ */
+function runJSChannels(expr: any): number[] {
+  const c = runJS(expr) as {
+    space: string;
+    c0: number;
+    c1: number;
+    c2: number;
+    alpha?: number;
+  };
+  expect(typeof c).toBe('object');
+  const channels = [c.c0, c.c1, c.c2];
+  if (c.alpha !== undefined) channels.push(c.alpha);
+  return channels;
+}
+
+/** The `space` a compiled color value carries. */
+function runJSSpace(expr: any): string {
+  return (runJS(expr) as { space: string }).space;
+}
+
 /** The `[L, C, H]` components of an interpreted color, in OKLCh. */
 function interpOklch(expr: any): number[] {
   const r = interp(['AsOklch', expr]);
@@ -180,7 +222,7 @@ describe('color strings are refused the same way by every operator', () => {
     const r = interp(['Color', "'transparent'"]);
     expect(r.operator).toBe('Oklch');
     expect(r.ops!.map((op) => op.re)).toEqual([0, 0, 0, 0]);
-    expect(runJS(['Color', "'transparent'"])).toEqual([0, 0, 0, 0]);
+    expect(runJSChannels(['Color', "'transparent'"])).toEqual([0, 0, 0, 0]);
   });
 });
 
@@ -202,7 +244,7 @@ describe('a bare tuple is 0-1 sRGB on every route', () => {
 
     // Before the ruling the compiled routes read the same two tuples as OKLCh
     // triples and answered [0.5, 0, 0] — a dark red, not the red/blue mix.
-    const js = runJS(expr);
+    const js = runJSChannels(expr);
     for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(components[i], 12);
 
     const code = glsl.compile(ce.expr(expr), NO_FOLD as any).code!;
@@ -230,6 +272,8 @@ describe('a bare tuple is 0-1 sRGB on every route', () => {
     const space = ['ColorToColorspace', ['Tuple', 1, 0, 0], "'hsl'"];
     const expected = interp(space).ops!.map((op) => op.re);
     expect(expected).toEqual([0, 1, 0.5]);
+    // `ColorToColorspace` answers COMPONENTS on both routes: the interpreter
+    // a `Tuple`, this target the plain array of the same channels.
     expect(runJS(space)).toEqual(expected);
   });
 
@@ -239,7 +283,7 @@ describe('a bare tuple is 0-1 sRGB on every route', () => {
     // is L = 1 — a white background — and the compiled routes chose black.
     const picked = interp(expr);
     expect(picked.ops![0].re).toBe(1);
-    const js = runJS(expr);
+    const js = runJSChannels(expr);
     // The compiled form of white is L = 1, achromatic.
     expect(js[0]).toBeCloseTo(1, 6);
     expect(js[1]).toBeCloseTo(0, 6);
@@ -291,7 +335,7 @@ describe('a well-formed color spelling that packs to zero is transparent black',
       const r = interp(['Color', `'${spelling}'`]);
       expect(r.operator).toBe('Oklch');
       expect(r.ops!.map((op) => op.re)).toEqual([0, 0, 0, 0]);
-      expect(runJS(['Color', `'${spelling}'`])).toEqual([0, 0, 0, 0]);
+      expect(runJSChannels(['Color', `'${spelling}'`])).toEqual([0, 0, 0, 0]);
     }
   );
 
@@ -299,7 +343,7 @@ describe('a well-formed color spelling that packs to zero is transparent black',
     const expr = ['ColorMix', "'#00000000'", "'#ffffff'", 0.5];
     const r = interp(expr);
     expect(r.operator).toBe('Oklch');
-    const js = runJS(expr);
+    const js = runJSChannels(expr);
     expect(js).toHaveLength(4);
     for (let i = 0; i < 4; i++) expect(js[i]).toBeCloseTo(r.ops![i].re, 12);
   });
@@ -359,7 +403,7 @@ describe('a four-digit hex color is #rgba', () => {
     const r = interp(['Color', "'#0000'"]);
     expect(r.operator).toBe('Oklch');
     expect(r.ops!.map((op) => op.re)).toEqual([0, 0, 0, 0]);
-    expect(runJS(['Color', "'#0000'"])).toEqual([0, 0, 0, 0]);
+    expect(runJSChannels(['Color', "'#0000'"])).toEqual([0, 0, 0, 0]);
   });
 
   test('#f00 still expands to opaque red', () => {
@@ -415,9 +459,14 @@ describe('the HSV color space is available on every route', () => {
         (op) => op.re
       )
     ).toEqual([0, 1, 1]);
+    // The compiled value is the same components the interpreter's `Tuple`
+    // holds, as a plain array.
     expect(runJS(['ColorToColorspace', ['Rgb', 1, 0, 0], "'hsv'"])).toEqual([
       0, 1, 1,
     ]);
+    // `AsHsv` reaches the same channels, as a color VALUE tagged `hsv`.
+    expect(runJSSpace(['AsHsv', ['Rgb', 1, 0, 0]])).toBe('hsv');
+    expect(runJSChannels(['AsHsv', ['Rgb', 1, 0, 0]])).toEqual([0, 1, 1]);
     expect(
       glsl.compile(
         ce.expr(['ColorToColorspace', ['Rgb', 1, 0, 0], "'hsv'"]),
@@ -433,7 +482,11 @@ describe('the HSV color space is available on every route', () => {
     ]);
     // The compiled routes answer the same color in their own OKLCh form.
     const red = interpOklch(['Rgb', 1, 0, 0]);
-    const js = runJS(['ColorFromColorspace', ['Tuple', 0, 1, 1], "'hsv'"]);
+    const js = runJSChannels([
+      'ColorFromColorspace',
+      ['Tuple', 0, 1, 1],
+      "'hsv'",
+    ]);
     for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(red[i], 9);
   });
 });
@@ -501,7 +554,7 @@ describe('ContrastingColor answers the candidate the caller passed', () => {
     // The same color in the compiled target's canonical form. Both routes
     // used to hand the chosen candidate back through an 8-bit sRGB packing,
     // which moved its components.
-    expect(runJS(expr)).toEqual([0.2, 0.1, 29]);
+    expect(runJSChannels(expr)).toEqual([0.2, 0.1, 29]);
   });
 
   test('the one-argument form still answers white or black', () => {
@@ -520,7 +573,11 @@ describe('ColorFromColorspace does not convert a typed color head twice', () => 
     expect(t.ops!.map((op) => op.re)).toEqual([1, 0, 0]);
 
     const red = interpOklch(['Rgb', 1, 0, 0]);
-    const js = runJS(['ColorFromColorspace', ['Rgb', 1, 0, 0], "'rgb'"]);
+    const js = runJSChannels([
+      'ColorFromColorspace',
+      ['Rgb', 1, 0, 0],
+      "'rgb'",
+    ]);
     for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(red[i], 9);
 
     const shader = evalGLSL(['ColorFromColorspace', ['Rgb', 1, 0, 0], "'rgb'"]);
@@ -537,7 +594,7 @@ describe('Colormap samples agree between the interpreter and the compiled runtim
   test.each([0.25, 0.5, 0.75])('viridis at %p', (t) => {
     const expr = ['Colormap', "'viridis'", t];
     const expected = interp(expr).ops!.map((op) => op.re);
-    const js = runJS(expr);
+    const js = runJSChannels(expr);
     for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(expected[i], 12);
   });
 
@@ -583,7 +640,7 @@ describe('a color string reaches the same color through every operator', () => {
       0.5,
     ]);
     expect(fromStrings.toString()).toBe(fromHeads.toString());
-    const js = runJS(['ColorMix', "'#ff0000'", "'#0000ff'", 0.5]);
+    const js = runJSChannels(['ColorMix', "'#ff0000'", "'#0000ff'", 0.5]);
     const expected = fromHeads.ops!.slice(0, 3).map((op) => op.re);
     for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(expected[i], 12);
   });
@@ -682,5 +739,60 @@ describe('a color channel must be a scalar on the compiled routes', () => {
         NO_FOLD as any
       )
     ).toThrow(/Fail closed/);
+  });
+});
+
+describe('a nested color conversion computes the same color on every route', () => {
+  // The shader emission for a nested conversion is checked in
+  // `compile-color-value-representation.test.ts`. Here the emitted source is
+  // EVALUATED, because a lowering can emit a plausible chain of helpers and
+  // still compute a different color: a shader color is a bare `vec3` with no
+  // run-time tag, so a conversion left out of the chain is invisible in the
+  // code and shows up only in the value.
+  //
+  // The comparison is against the JavaScript route, whose color carries its
+  // space, at this file's tolerance: the compiled converters round to 8-bit
+  // integer channels inside `toRgb255`, which moves the third significant
+  // digit of a channel and about a degree of a hue.
+  const A = ['Hsv', 200, 0.5, 0.5];
+
+  /** Compare a shader `vec3` against the channels of a compiled color. */
+  function expectShaderMatchesJS(expr: any): void {
+    const shader = evalGLSL(expr);
+    const js = runJSChannels(expr);
+    expect(Math.abs(shader.x - js[0])).toBeLessThanOrEqual(
+      0.005 + 0.02 * Math.abs(js[0])
+    );
+    expect(Math.abs(shader.y - js[1])).toBeLessThanOrEqual(
+      0.005 + 0.02 * Math.abs(js[1])
+    );
+    expect(Math.abs(shader.z - js[2])).toBeLessThanOrEqual(
+      0.005 + 0.02 * Math.abs(js[2])
+    );
+  }
+
+  test('AsHsv(AsRgb(c)) recovers the same HSV color on both routes', () => {
+    expectShaderMatchesJS(['AsHsv', ['AsRgb', A]]);
+  });
+
+  test('AsOklab(AsHsv(c)) agrees too', () => {
+    expectShaderMatchesJS(['AsOklab', ['AsHsv', A]]);
+  });
+
+  test('a selection whose arms agree on a space converts', () => {
+    // `Which` selects between two `AsHsv` results, so the compile-time fact
+    // for the whole selection is `hsv` and the operand is converted back to
+    // OKLCh before the outer conversion reads it. Read as OKLCh instead, the
+    // shader answered a different color from the JavaScript route.
+    expectShaderMatchesJS([
+      'AsRgb',
+      [
+        'Which',
+        ['Greater', 0.5, 0],
+        ['AsHsv', A],
+        'True',
+        ['AsHsv', ['Hsv', 20, 0.5, 0.5]],
+      ],
+    ]);
   });
 });

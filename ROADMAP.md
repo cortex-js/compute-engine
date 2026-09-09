@@ -1041,12 +1041,21 @@ What remains:
   bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters emitted),
   and making the inliner the primary route retargets 374 `_fn_*` call shapes
   across 35 test files. Tycho was asked to re-measure on 0.127.0 before this
-  is reconsidered.
+  is reconsidered. Corpus count (tycho-perf, 2026-09-09, 71 documents): a
+  collection-valued helper reached from two or more definitions occurs in 2
+  of 30 core documents, and only ONE plotted row anywhere — this Voronoi
+  diamond — reaches such a helper through two callers. An array-result memo
+  would fire on that one row; it is not a general mechanism on this corpus.
 - **A fixed width known only from a TYPE** (`P: list<tuple<number, number>^9>`
   as a symbol, `At(P, i)` reads) is not unrolled; the pass needs a literal
   `List`. Unrolling from the type would rewrite `Map(f, P)` to
   `[f(At(P, 1)), …, f(At(P, 9))]`, which then needs an `At` lowering over a
-  declared list on the shader targets. No consumer has asked for it.
+  declared list on the shader targets. Corpus count (tycho-perf, 2026-09-09):
+  0 sites on every target — Tycho expands value macros before compiling, so a
+  wide list reaches the engine as a literal `List`. The only witness is the
+  by-reference Voronoi row, which the audit harness cannot see: its
+  by-reference records fail at binding on Tycho's side (`Unknown operator
+  d`). Not built.
 - **A point bound to an untyped parameter that cannot be inlined fails
   closed.** The call-site substitution declines for an impure point argument,
   a recursive or multi-clause callee, and a body that is invalid over a point
@@ -1067,6 +1076,10 @@ What remains:
   `compileIntervalCollectionOperand` (`interval-javascript-target.ts`). A
   point-valued arithmetic lowering (componentwise `_IA.mul` over the array)
   would be a new value model for the target, not a gap filled by a handler.
+  Corpus count (tycho-perf, 2026-09-09): 4 declines at HEAD, all in one 3-D
+  art document (`art/n7uhaaoq1q`), and all of them LIST arithmetic over
+  `list<number>` operands rather than a scalar point under a kernel; the 3
+  root-point declines of 0.127.0 now compile. Decided: the decline stands.
 - **Consumer-side fact for Tycho:** on `glsl`/`interval-js` the by-reference
   route needs the plot variables DECLARED (or supplied through `vars`): an
   `unknown`-typed argument could hold a collection the by-reference call would

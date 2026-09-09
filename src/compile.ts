@@ -24,6 +24,8 @@ export type {
   CompilationResult,
   ExecutableTarget,
   ComplexResult,
+  CompiledColor,
+  CompiledColorSpace,
   CompiledValue,
   CompiledRunner,
   ExpressionRunner,

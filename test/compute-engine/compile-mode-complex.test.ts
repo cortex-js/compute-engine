@@ -536,16 +536,19 @@ describe('complex mode — D2/D6 runtime rules', () => {
       expect(
         compile(e2.box(['Less', 'w', 'bc']), { mode: 'auto' }).success
       ).toBe(false);
-      // A color constructor's failing value has a statically known shape:
-      // its complex scalar channel keeps the whole-value guard even beside a
-      // list channel, so the value is the documented NaN-filled color.
+      // A color head's failing value is a COLOR: its complex scalar channel
+      // keeps the whole-value guard even beside a list channel, so the value
+      // is the documented non-finite color — the same five-key object a
+      // successful color is, with NaN channels.
       const rgb = compile(e.box(['Rgb', 'w', 'L', 1]), AUTO);
       expect(rgb.code).toContain('_SYS.cisreal(');
-      expect(rgb.run!({ w: { re: 0.5, im: 1 }, L: [0.2, 0.4] })).toEqual([
-        NaN,
-        NaN,
-        NaN,
-      ]);
+      expect(rgb.run!({ w: { re: 0.5, im: 1 }, L: [0.2, 0.4] })).toEqual({
+        space: 'oklch',
+        c0: NaN,
+        c1: NaN,
+        c2: NaN,
+        alpha: undefined,
+      });
     });
 
     it('a list literal every element of which is non-real is still the compile-time decline', () => {

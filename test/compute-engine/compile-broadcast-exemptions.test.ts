@@ -41,6 +41,18 @@ const interpComponents = (expr: any): number[] =>
     .evaluate()
     .ops!.map((op) => op.re);
 
+/**
+ * The channels of a COMPILED color value. A compiled color is the object
+ * `{ space, c0, c1, c2, alpha }`, and a compiled list of colors is a
+ * JavaScript array of those objects.
+ */
+function colorChannels(v: unknown): number[] {
+  const c = v as { c0: number; c1: number; c2: number; alpha?: number };
+  const channels = [c.c0, c.c1, c.c2];
+  if (c.alpha !== undefined) channels.push(c.alpha);
+  return channels;
+}
+
 describe('BROADCAST EXEMPTION — a tuple operand of an exempt head is ATOMIC', () => {
   let warn: jest.SpyInstance;
   beforeAll(() => {
@@ -53,7 +65,19 @@ describe('BROADCAST EXEMPTION — a tuple operand of an exempt head is ATOMIC', 
     expect(r.success).toBe(true);
     // The tuple is converted once, as one color — not mapped over.
     expect(r.code).toBe('_SYS.asRgb(_SYS.rgb(1, 0, 0))');
-    expect(r.run({})).toEqual(interpComponents(['AsRgb', ['Tuple', 1, 0, 0]]));
+    // A compiled color is the object `{ space, c0, c1, c2, alpha }`; the
+    // interpreter's `Rgb(...)` head carries the same channels and the same
+    // space.
+    expect(r.run({})).toEqual({
+      space: 'rgb',
+      c0: 1,
+      c1: 0,
+      c2: 0,
+      alpha: undefined,
+    });
+    expect(colorChannels(r.run({}))).toEqual(
+      interpComponents(['AsRgb', ['Tuple', 1, 0, 0]])
+    );
   });
 
   test('AsOklch of a tuple compiles on the JavaScript target and agrees with the interpreter', () => {
@@ -61,7 +85,7 @@ describe('BROADCAST EXEMPTION — a tuple operand of an exempt head is ATOMIC', 
     const r = js(expr);
     expect(r.success).toBe(true);
     const expected = interpComponents(expr);
-    const actual = r.run({}) as number[];
+    const actual = colorChannels(r.run({}));
     expect(actual).toHaveLength(3);
     for (let i = 0; i < expected.length; i++)
       expect(actual[i]).toBeCloseTo(expected[i], 10);
@@ -128,7 +152,8 @@ describe('BROADCAST EXEMPTION — the shapes it does NOT cover', () => {
       '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), ' +
         '[_SYS.rgb(1, 0, 0), _SYS.rgb(0, 1, 0)])'
     );
-    expect(r.run()).toEqual([
+    // A LIST of colors is a JavaScript ARRAY of color values.
+    expect((r.run() as unknown[]).map(colorChannels)).toEqual([
       [1, 0, 0],
       [0, 1, 0],
     ]);

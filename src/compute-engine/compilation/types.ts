@@ -620,11 +620,11 @@ export interface CompileTarget<Expr = unknown> {
    * head's own codegen owns the shape: it emits a run-time dispatch of its
    * own, or declines with its own diagnostic.
    *
-   * The JavaScript target names the color-space conversions. A color VALUE
-   * there is one flat array of three or four channels, or a color string, so
-   * only a color-aware dispatch can tell one color from a list of colors
-   * (`_SYS.bcastColor`); the generic broadcast would convert each channel of
-   * a single color as though it were a color of its own.
+   * The JavaScript target names the color-space conversions. Their operand
+   * may be one color or a list of colors at any depth, and the color-aware
+   * dispatch `_SYS.bcastColor` is what recurses to the leaves; the generic
+   * broadcast descends only one level and would apply the conversion to a
+   * nested list rather than to the colors inside it.
    */
   collectionAwareHeads?: ReadonlySet<MathJsonSymbol>;
 
@@ -961,12 +961,12 @@ export interface CompileTarget<Expr = unknown> {
     guards: ReadonlyArray<TargetSource>,
     body: TargetSource,
     // The failing branch must have the SAME shape the head returns when the
-    // guard passes — a caller destructuring the result must never see the
-    // shape flip at runtime on data. `'number'` → the target's NaN,
-    // `'boolean'` → the target's false, `{ array: n }` → an n-element
-    // NaN-filled array (the color constructors return `[L, C, H]` /
-    // `[L, C, H, a]`, so their guard emits `[NaN, NaN, NaN(, NaN)]`).
-    kind: 'boolean' | 'number' | { array: number }
+    // guard passes — a caller reading the result must never see the shape
+    // flip at runtime on data. `'number'` → the target's NaN, `'boolean'` →
+    // the target's false, `'color'` → the target's NON-FINITE COLOR, which on
+    // the JavaScript target is a {@link CompiledColor} with `NaN` channels in
+    // the canonical OKLCh space.
+    kind: 'boolean' | 'number' | 'color'
   ) => TargetSource;
 
   /**
@@ -1837,6 +1837,58 @@ export type ExecutableTarget = 'javascript' | 'interval-js';
 export type ComplexResult = { re: number; im: number };
 
 /**
+ * The color space a {@link CompiledColor} carries.
+ *
+ * `oklch` is the preferred internal space: every color constructor and every
+ * operator that produces a color answers a value in it. The four other
+ * spellings appear only where an explicit conversion asked for them
+ * (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`). `ColorToColorspace` is not one of
+ * them: it answers COMPONENTS — a plain array of channels, as its `-> tuple`
+ * signature says — and never a color value.
+ */
+export type CompiledColorSpace = 'oklch' | 'rgb' | 'hsv' | 'hsl' | 'oklab';
+
+/**
+ * A color value on the JavaScript compilation target.
+ *
+ * The value is a flat object that carries its own color space, so a consumer
+ * — a downstream color operator, or the caller — can tell an sRGB triple from
+ * an OKLCh one. Before this representation a color was a bare numeric array,
+ * nothing at run time told the spaces apart, and a conversion result reaching
+ * a second color operator was read as OKLCh and answered a different color.
+ *
+ * The channel meaning follows the space:
+ *
+ * | `space`  | `c0`             | `c1`            | `c2`            |
+ * | -------- | ---------------- | --------------- | --------------- |
+ * | `oklch`  | L (0-1)          | C (chroma)      | H (degrees)     |
+ * | `rgb`    | r (0-1 sRGB)     | g (0-1 sRGB)    | b (0-1 sRGB)    |
+ * | `hsv`    | h (degrees)      | s (0-1)         | v (0-1)         |
+ * | `hsl`    | h (degrees)      | s (0-1)         | l (0-1)         |
+ * | `oklab`  | L (0-1)          | a               | b               |
+ *
+ * `alpha` is `undefined` when the color carries no alpha, and the key is
+ * always present so every color value has the same five keys in the same
+ * order (one hidden class, so a property read stays monomorphic).
+ *
+ * A color whose channels are not all finite is this same object with `NaN`
+ * channels: it is the numeric projection of the interpreter's
+ * `incompatible-type` rejection of an infinite or `NaN` channel.
+ *
+ * A color STRING stays a JavaScript string until a helper consumes it, and a
+ * LIST of colors is a JavaScript array of these objects (or of strings). A
+ * bare numeric array is therefore never a color: a color helper handed one
+ * throws a `TypeError` that names the expected shape.
+ */
+export interface CompiledColor {
+  space: CompiledColorSpace;
+  c0: number;
+  c1: number;
+  c2: number;
+  alpha: number | undefined;
+}
+
+/**
  * Every value a compiled runner can hand back.
  *
  * Wider than the numeric case most callers have in mind, because the compiled
@@ -1850,6 +1902,8 @@ export type ComplexResult = { re: number; im: number };
  * - `boolean` — a predicate is NOT numericized: `Greater(x, 0)` runs to
  *   `true`, never to `1`.
  * - `string` — a string-valued expression compiles to a JavaScript string.
+ * - {@link CompiledColor} — a color-valued expression, a flat object carrying
+ *   its color space and its three channels (plus an optional alpha).
  * - a (possibly nested) array — a collection-valued expression, one element
  *   per entry, matrices nesting one array per row.
  * - a callable — a FUNCTION-valued expression compiles to a JavaScript
@@ -1877,6 +1931,7 @@ export type ComplexResult = { re: number; im: number };
 export type CompiledValue =
   | number
   | ComplexResult
+  | CompiledColor
   | boolean
   | string
   | CompiledValue[]

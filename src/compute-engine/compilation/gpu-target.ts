@@ -32,6 +32,7 @@ import {
 import type {
   CompileMode,
   CompileTarget,
+  CompiledColorSpace,
   CompiledOperators,
   CompiledFunction,
   CompiledFunctions,
@@ -41,6 +42,7 @@ import type {
   StorageKind,
 } from './types.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import { colorSpaceIsUnsettled, colorSpaceOf } from './color-space-fact.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
   BaseCompiler,
@@ -632,6 +634,21 @@ const GPU_COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
  * and it answers `incompatible-type` for a list, so a shader must not quietly
  * read as a color what the engine calls an error. A literal tuple of any
  * width other than 3 or 4 is refused for the same reason.
+ *
+ * An operand that is itself a color CONVERSION holds channels in the space it
+ * names, not OKLCh. A shader color is a bare `vec3` with no run-time tag, so
+ * the space has to be known at compile time: `colorSpaceOf` supplies it and
+ * the conversion back to OKLCh is emitted here. An operand whose space is
+ * UNKNOWN — a symbol, a `vars` input, a user function whose body is not
+ * visible — keeps today's reading and is taken to be OKLCh, which is the
+ * shader's `vec3` color contract.
+ *
+ * That reading is only safe for a PLAIN unknown. An operand the compiler can
+ * see holds a converted color at one of the positions its value comes from,
+ * without being able to say which — `Which(cond, AsRgb(x), AsHsv(y))`, whose
+ * arms name two different spaces — is declined instead: reading it as OKLCh
+ * would answer a different color from the interpreter for at least one of its
+ * run-time values.
  */
 function gpuColorOperand(
   head: string,
@@ -644,7 +661,17 @@ function gpuColorOperand(
       `${head}: a list is not a color — a color operand must be a color, a ` +
         `color string or a tuple of 3 or 4 components. Fail closed (D6).`
     );
-  if (!isFunction(color) || color.operator !== 'Tuple') return compile(color);
+  if (!isFunction(color) || color.operator !== 'Tuple') {
+    if (colorSpaceIsUnsettled(color))
+      throw new Error(
+        `${head}: cannot settle the color space of the operand at compile ` +
+          `time — it holds a converted color at one of the positions its ` +
+          `value comes from, and a shader color is a bare vector with no ` +
+          `run-time tag, so the channels cannot be converted back to OKLCh. ` +
+          `Fail closed (D6).`
+      );
+    return gpuToOklch(compile(color), colorSpaceOf(color));
+  }
   const ops = color.ops;
   if (ops.length < 3 || ops.length > 4)
     throw new Error(
@@ -662,6 +689,33 @@ function gpuColorOperand(
     .slice(0, 3)
     .map((op) => compile(op))
     .join(', ')}))`;
+}
+
+/**
+ * Convert compiled color code from the space `colorSpaceOf` proved for it back
+ * to the canonical OKLCh `vec3` a shader color operand must be.
+ *
+ * Every conversion here already exists in the shader preamble, so no nesting
+ * has to be declined for want of a reverse helper. An unknown space is read as
+ * OKLCh — the `vec3` contract of a color that reaches the shader through a
+ * symbol or a uniform.
+ */
+function gpuToOklch(
+  code: string,
+  space: CompiledColorSpace | undefined
+): string {
+  switch (space) {
+    case 'rgb':
+      return `_gpu_srgb_to_oklch(${code})`;
+    case 'oklab':
+      return `_gpu_oklab_to_oklch(${code})`;
+    case 'hsl':
+      return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${code}))`;
+    case 'hsv':
+      return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${code}))`;
+    default:
+      return code;
+  }
 }
 
 /**

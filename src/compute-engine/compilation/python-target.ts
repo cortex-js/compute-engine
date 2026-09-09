@@ -3438,9 +3438,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
           : `((${body}) if (${guards.join(' and ')}) else ${
               kind === 'boolean'
                 ? 'False'
-                : typeof kind === 'object'
-                  ? `[float('nan')] * ${kind.array}`
-                  : "float('nan')"
+                : // `'color'` cannot reach here: this target lowers no color
+                  // head, so a color expression declines before a real-only
+                  // guard is built around it. A color lowering added to Python
+                  // must give this arm a non-finite color of its own.
+                  "float('nan')"
             })`,
       // Chained relations join with Python's `and`, not `&&`.
       chainOp: 'and',

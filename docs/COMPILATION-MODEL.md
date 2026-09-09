@@ -307,6 +307,125 @@ relied upon: the emitted helper guards before indexing. Aggregate widths and
 index types are read from the GPU declaration frame when the boxed expression
 itself is typed `unknown`.
 
+## Color values
+
+A color VALUE on the JavaScript target is a flat object that carries the color
+space of its channels:
+
+```ts
+type CompiledColorSpace = 'oklch' | 'rgb' | 'hsv' | 'hsl' | 'oklab';
+interface CompiledColor {
+  space: CompiledColorSpace;
+  c0: number;
+  c1: number;
+  c2: number;
+  alpha: number | undefined;
+}
+```
+
+The five keys are always created in that order, so every color shares one
+hidden class and a channel read stays monomorphic. `alpha` is present and
+`undefined` when the color carries no alpha; it is never omitted. An alpha that
+is absent, non-finite, or within `1e-9` of 1 is `undefined`, on the compiled
+route and on the interpreter fallback alike.
+
+The channel meaning follows the space. `oklch` holds `L`, `C` and `H` in
+degrees; `rgb` holds `r`, `g` and `b` as 0-1 sRGB; `hsv` and `hsl` hold a hue in
+degrees and two 0-1 components; `oklab` holds `L`, `a` and `b`.
+
+OKLCh is the preferred internal space. Every color constructor (`Rgb`, `Hsv`,
+`Hsl`, `Oklab`, `Oklch`) and every operator that produces a color (`Color`,
+`Colormap`, `ColorMix`, `ContrastingColor`, `ColorFromColorspace`) answers a
+color in it. `ContrastingColor` normalizes the candidate it chooses, so its
+value is canonical whatever space the candidate was written in. An EXPLICIT
+conversion answers a color tagged with the space it names: `AsRgb` answers
+`rgb`, `AsHsv` answers `hsv`, `AsOklab` answers `oklab`.
+
+`ColorToColorspace` is NOT one of these. It answers COMPONENTS — it is
+declared `-> tuple`, the interpreter evaluates it to a `Tuple`, and consumers
+index the result (`At(ColorToColorspace(c, "rgb"), 1)`) — so its compiled value
+is the plain array of three channels, four with an alpha. To get a color from
+components, pass them to `ColorFromColorspace`.
+
+A color value whose `space` is not one of the five spellings is not a color:
+the readers switch on the space, so an object tagged `srgb` reaching a helper
+through `vars` throws the same `TypeError` a bare numeric array gets, naming
+the offending spelling.
+
+Every helper that CONSUMES a color reads the tag through one internal
+`toOklch`, so a conversion result reaching a second color operator is
+understood rather than misread. `AsRgb(AsRgb(c))` therefore equals `AsRgb(c)`
+channel for channel, and `ColorDelta(AsRgb(a), b)` measures the same distance
+as `ColorDelta(a, b)`. Before the tag existed these nestings answered a
+different color from the interpreter, and the compiler declined them
+statically; the decline is gone.
+
+A color STRING stays a JavaScript string until a helper parses it, and a LIST
+of colors is a JavaScript array of color objects or color strings. So a bare
+numeric array is NEVER a color on this target: it is a list. A color helper
+handed one throws a `TypeError` naming the expected shape. The static gates
+refuse a literal list at a color position, so that throw is a run-time backstop
+for the shapes they cannot see: a `vars` input, a caller still passing the
+pre-2026-09 array representation, and a COMPONENTS tuple whose width is not
+visible at compile time — a tuple-typed variable, or `ColorToColorspace` —
+which is passed through unconverted and reaches the helper as a bare array.
+
+A color whose channels are not all finite is the same object with `NaN`
+channels, in the space the answering helper names. It is the numeric projection
+of the interpreter's `incompatible-type` rejection of an infinite or `NaN`
+channel.
+
+A color-VALUED expression is NOT constant-folded on this target. The
+interpreter's value for a color is a typed head, whose literal emission is a
+bare numeric array — a list on this target, never a color — so the color
+lowering runs instead and builds the object. The test is the expression's TYPE,
+so every color-valued expression is covered whatever head built it, and an
+expression that answers components rather than a color folds like any other
+tuple: `ColorToColorspace(c, s)` with `s` a symbol bound to a string folds to
+the interpreter's tuple, which is the same 3-array its lowering emits.
+`ColorFromColorspace` is the one head the type cannot speak for — it is
+declared `-> tuple` while its lowering answers a color value — and it is
+excluded by name.
+
+The interpreter FALLBACK answers the same object, and CONSUMES one. A declining
+color expression run under `fallback: true` comes back as
+`{space, c0, c1, c2, alpha}` read off the interpreter's typed color head
+(`Rgb(...)` → `rgb`, `Hsv(...)` → `hsv`, and so on), and a list of colors comes
+back as an array of those objects. In the other direction, a color object a
+compiled runner produced is boxed back to the head that names its space when it
+is passed in as a `vars` value, recursively inside arrays, so a color can cross
+from a compiled runner into a declining expression.
+
+On the SHADER targets (GLSL, WGSL) a color is a bare `vec3` in OKLCh, end to
+end, with no run-time tag and no alpha. The space is a COMPILE-TIME fact
+instead (`colorSpaceOf`, `compilation/color-space-fact.ts`): the constructors
+and the color-producing operators answer `oklch`, each `As*` answers the space
+it names, and `ColorToColorspace(c, "<literal>")` answers that literal space. A
+color operand whose fact is a named space other than `oklch` is converted back
+to OKLCh statically, with the `_gpu_srgb_to_oklch`, `_gpu_oklab_to_oklch`,
+`_gpu_hsl_to_rgb` and `_gpu_hsv_to_rgb` helpers the preamble already carries,
+so no nesting has to be declined for want of a reverse conversion.
+
+The fact follows a value through the shapes that FORWARD one: a block's last
+statement, a return-type ascription (`Typed`, the normalized spelling of a
+function literal's return type), the body of a user function the engine holds,
+and the arms of a selection. `Which` and `If` answer the space their value arms
+agree on.
+
+An operand whose fact is UNKNOWN — a symbol, a `vars` input, or a user function
+whose body is not visible — is read as OKLCh, which is the shader's `vec3`
+color contract. Where the compiler can SEE a converted color at one of the
+positions the value comes from but cannot say which position it comes from —
+`Which(cond, AsRgb(x), AsHsv(y))`, whose arms name two different spaces — the
+operand is DECLINED instead, because reading it as OKLCh would answer a
+different color for at least one of its run-time values. A plain unknown keeps
+the OKLCh reading; only a visible disagreement declines.
+
+The space is deliberately NOT a type. There is no `color<space>` in the type
+lattice: on the JavaScript target the value carries the space, on the shader
+targets the compiler proves it, and the interpreter already carries it in the
+color's head.
+
 ## Sums and objects
 
 A sum with representation-disjoint variants erases tags. A sum whose variants

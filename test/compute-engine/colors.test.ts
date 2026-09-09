@@ -520,14 +520,42 @@ describe('ContrastingColor', () => {
   });
 });
 
+/**
+ * The channels of a compiled color value, as the flat array the pins in this
+ * file read before a compiled color carried its space. A compiled color is now
+ * the object `{ space, c0, c1, c2, alpha }`, so the pins about a color's VALUE
+ * read through this helper, and the pins about the REPRESENTATION assert on
+ * `space` and the channel keys directly.
+ */
+function channelsOf(v: unknown): number[] {
+  const c = v as {
+    space: string;
+    c0: number;
+    c1: number;
+    c2: number;
+    alpha?: number;
+  };
+  expect(typeof c).toBe('object');
+  const channels = [c.c0, c.c1, c.c2];
+  if (c.alpha !== undefined) channels.push(c.alpha);
+  return channels;
+}
+
+/** The `space` a compiled color value carries. */
+function spaceOf(v: unknown): string {
+  return (v as { space: string }).space;
+}
+
 describe('Color compilation', () => {
   test('compile Color', () => {
     const expr = ce.expr(['Color', "'#ff0000'"]);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
     expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as number[];
-    // Compiled `Color` matches interpreted: returns Oklch [L, C, H].
+    const raw = compiled.run!();
+    // Compiled `Color` matches interpreted: an OKLCh color value.
+    expect(spaceOf(raw)).toBe('oklch');
+    const result = channelsOf(raw);
     expect(result).toHaveLength(3);
     expect(result[0]).toBeCloseTo(0.628, 2);
     expect(result[1]).toBeCloseTo(0.258, 2);
@@ -557,8 +585,9 @@ describe('Color compilation', () => {
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
     expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as number[];
-    expect(result).toHaveLength(3);
+    const raw = compiled.run!();
+    expect(spaceOf(raw)).toBe('oklch');
+    expect(channelsOf(raw)).toHaveLength(3);
   });
 
   test('compile ColorToColorspace', () => {
@@ -566,7 +595,11 @@ describe('Color compilation', () => {
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
     expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as number[];
+    // `ColorToColorspace` answers COMPONENTS in the space it names — the
+    // plain array of channels the interpreter's `Tuple` also holds, not a
+    // color value.
+    const result = compiled.run!() as number[];
+    expect(Array.isArray(result)).toBe(true);
     expect(result).toHaveLength(3);
     expect(result[0]).toBeGreaterThan(0.5);
   });
@@ -576,7 +609,7 @@ describe('Color compilation', () => {
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
     expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as number[];
+    const result = channelsOf(compiled.run!());
     // Should be black
     expect(result[0]).toBeCloseTo(0, 1);
   });
@@ -586,25 +619,27 @@ describe('Color compilation', () => {
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
     expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as number[][];
+    // A list of colors is a JavaScript ARRAY of color values.
+    const result = compiled.run!() as unknown as unknown[];
     expect(result.length).toBe(11);
-    expect(result[0]).toHaveLength(3);
+    expect(spaceOf(result[0])).toBe('oklch');
+    expect(channelsOf(result[0])).toHaveLength(3);
   });
 
   test('compile Colormap with integer n', () => {
     const expr = ce.expr(['Colormap', "'viridis'", 5]);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[][];
+    const result = compiled.run!() as unknown as unknown[];
     expect(result.length).toBe(5);
-    expect(result[0]).toHaveLength(3);
+    expect(channelsOf(result[0])).toHaveLength(3);
   });
 
   test('compile Colormap with float t', () => {
     const expr = ce.expr(['Colormap', "'viridis'", 0.5]);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
+    const result = channelsOf(compiled.run!());
     expect(result).toHaveLength(3);
     // Each component should be in [0, 1]
     expect(result[0]).toBeGreaterThanOrEqual(0);
@@ -613,24 +648,29 @@ describe('Color compilation', () => {
 
   // ---------------------------------------------------------------------
   // Compile-target support for the new color heads (Rgb/Hsv/Hsl/Oklab/
-  // Oklch constructors, As* converters, ColorDelta, Distance). All compile
-  // to OKLCh arrays at runtime, mirroring the GPU target's design.
+  // Oklch constructors, As* converters, ColorDelta, Distance). Every
+  // constructor answers a color value in the canonical OKLCh space; each
+  // `As*` conversion answers a color tagged with the space it names.
   // ---------------------------------------------------------------------
 
-  test('compile Rgb to JS produces OKLCh array', () => {
+  test('compile Rgb to JS produces an OKLCh color value', () => {
     const compiled = compile(ce.expr(['Rgb', 1, 0, 0]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
+    const raw = compiled.run!();
+    expect(spaceOf(raw)).toBe('oklch');
+    const result = channelsOf(raw);
     expect(result).toHaveLength(3);
     expect(result[0]).toBeCloseTo(0.628, 2); // L
     expect(result[1]).toBeCloseTo(0.258, 2); // C
     expect(result[2]).toBeCloseTo(29.23, 0); // H
   });
 
-  test('compile Hsv to JS produces OKLCh array', () => {
+  test('compile Hsv to JS produces an OKLCh color value', () => {
     const compiled = compile(ce.expr(['Hsv', 0, 1, 1]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
+    const raw = compiled.run!();
+    expect(spaceOf(raw)).toBe('oklch');
+    const result = channelsOf(raw);
     expect(result).toHaveLength(3);
     // hsv(0,1,1) is red — same OKLCh as Rgb(255,0,0)
     expect(result[0]).toBeCloseTo(0.628, 2);
@@ -639,14 +679,19 @@ describe('Color compilation', () => {
   test('compile Oklch to JS is identity', () => {
     const compiled = compile(ce.expr(['Oklch', 0.7, 0.2, 30]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
-    expect(result).toEqual([0.7, 0.2, 30]);
+    expect(compiled.run!()).toEqual({
+      space: 'oklch',
+      c0: 0.7,
+      c1: 0.2,
+      c2: 30,
+      alpha: undefined,
+    });
   });
 
   test('compile Rgb with alpha to JS', () => {
     const compiled = compile(ce.expr(['Rgb', 1, 0, 0, 0.5]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
+    const result = channelsOf(compiled.run!());
     expect(result).toHaveLength(4);
     expect(result[3]).toBeCloseTo(0.5, 4);
   });
@@ -656,7 +701,9 @@ describe('Color compilation', () => {
     // interpreted-layer Rgb head.
     const compiled = compile(ce.expr(['AsRgb', ['Hsv', 0, 1, 1]]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
+    const raw = compiled.run!();
+    expect(spaceOf(raw)).toBe('rgb');
+    const result = channelsOf(raw);
     expect(result[0]).toBeCloseTo(1, 2); // r=1 in 0-1 sRGB
     expect(result[1]).toBeCloseTo(0, 2);
     expect(result[2]).toBeCloseTo(0, 2);
@@ -665,7 +712,9 @@ describe('Color compilation', () => {
   test('compile AsHsv to JS produces hue/sat/val', () => {
     const compiled = compile(ce.expr(['AsHsv', ['Rgb', 1, 0, 0]]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
+    const raw = compiled.run!();
+    expect(spaceOf(raw)).toBe('hsv');
+    const result = channelsOf(raw);
     expect(result[0]).toBeCloseTo(0, 1);
     expect(result[1]).toBeCloseTo(1, 2);
     expect(result[2]).toBeCloseTo(1, 2);
@@ -675,8 +724,13 @@ describe('Color compilation', () => {
     // AsOklch on canonical OKLCh input is identity.
     const compiled = compile(ce.expr(['AsOklch', ['Oklch', 0.7, 0.2, 30]]));
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
-    expect(result).toEqual([0.7, 0.2, 30]);
+    expect(compiled.run!()).toEqual({
+      space: 'oklch',
+      c0: 0.7,
+      c1: 0.2,
+      c2: 30,
+      alpha: undefined,
+    });
   });
 
   test('compile ColorDelta to JS', () => {
@@ -1614,9 +1668,9 @@ describe('Regression: achromatic hue handling in ColorMix', () => {
     const expr = ce.expr(['ColorMix', "'#ff0000'", "'#ffffff'", 0.5]);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
-    // Compiled output is Oklch [L, C, H]; H should be ≈ 29 (red's hue,
-    // not interpolated through 0 with white's placeholder hue).
+    const result = channelsOf(compiled.run!());
+    // Compiled output is an OKLCh color; H should be ≈ 29 (red's hue, not
+    // interpolated through 0 with white's placeholder hue).
     expect(result).toHaveLength(3);
     expect(result[2]).toBeCloseTo(29.23, 0);
   });
@@ -1712,16 +1766,15 @@ describe('Regression: alpha normalization', () => {
     const expr = ce.expr(['ColorMix', "'#ff0000ff'", "'#ff0000ff'", 0.5]);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
-    // Both inputs opaque, so result should have no 4th component.
+    const result = channelsOf(compiled.run!());
+    // Both inputs opaque, so the color carries no alpha.
     expect(result).toHaveLength(3);
   });
 
-  test('compiled _SYS.rgb with alpha=1 emits 3-component output', () => {
+  test('compiled _SYS.rgb with alpha=1 carries no alpha', () => {
     const expr = ce.expr(['Rgb', 1, 0, 0, 1]);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number[];
-    expect(result).toHaveLength(3);
+    expect(channelsOf(compiled.run!())).toHaveLength(3);
   });
 });

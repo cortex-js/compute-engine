@@ -212,6 +212,7 @@ import {
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import type {
   CompileMode,
   CompileTarget,
@@ -220,6 +221,8 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
+  CompiledColor,
+  CompiledColorSpace,
   CompiledRunner,
   CompiledValue,
   ComplexResult,
@@ -2020,84 +2023,23 @@ const JS_COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The heads whose compiled value is channels in the color space they NAME,
- * not the canonical OKLCh triple that a color value on this target is.
- * `ColorToColorspace` belongs here for the same reason: `_SYS.colorToColorspace`
- * answers components in the space its second operand names.
- */
-const COLOR_CONVERSION_HEADS: ReadonlySet<string> = new Set([
-  'AsRgb',
-  'AsHsv',
-  'AsHsl',
-  'AsOklab',
-  'AsOklch',
-  'ColorToColorspace',
-]);
-
-/**
- * The conversion head inside `color`, when the operand is one — searched
- * through a literal `List`, whose elements reach a conversion one at a time
- * through `_SYS.bcastColor`.
- */
-function nestedColorConversionHead(color: Expression): string | undefined {
-  if (!isFunction(color)) return undefined;
-  if (COLOR_CONVERSION_HEADS.has(color.operator)) return color.operator;
-  if (color.operator === 'List')
-    for (const op of color.ops) {
-      const inner = nestedColorConversionHead(op);
-      if (inner !== undefined) return inner;
-    }
-  return undefined;
-}
-
-/**
- * Decline a color OPERAND that is itself a color conversion.
- *
- * The compiled runtime has no one representation for a color: a color VALUE
- * is the canonical OKLCh triple, while `_SYS.asRgb` and its siblings answer
- * bare channels in the space they name. Any head that reads a color operand
- * therefore reads sRGB (or HSV, or HSL, or Oklab) channels as though they
- * were `[L, C, H]` when that operand is a conversion, and answers a different
- * color from the interpreter: `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
- * `[0.714, 0, 0.369]` where the interpreter answers `Rgb(0.5, 0.251, 0.25)`,
- * and `ColorDelta(AsRgb(c1), c2)` measured the distance to the wrong color.
- * Until a compiled color value carries its space, the nesting fails closed
- * (D6) instead of answering a wrong color.
- *
- * This is called from the two places a color operand can be lowered:
- * `compileColorOperand`, which every color head goes through, and
- * `tryCompileColorBroadcast`, the one route that does not.
- *
- * Only the STATIC nesting is caught. An operand that is a color value, a
- * color string or a variable compiles as before — a variable may hold the
- * output of a conversion at run time, and nothing in the value says so.
- */
-function refuseNestedColorConversion(head: string, color: Expression): void {
-  const inner = nestedColorConversionHead(color);
-  if (inner === undefined) return;
-  throw new Error(
-    `${head}: cannot compile a color conversion whose operand is itself the ` +
-      `conversion ${inner} — the compiled value of a conversion is channels ` +
-      'in the space it names, while a color value is the canonical OKLCh ' +
-      'triple, so the outer conversion would read those channels as OKLCh ' +
-      'and answer a different color from the interpreter. Fail closed (D6).'
-  );
-}
-
-/**
  * Compile an operand that sits at a COLOR position.
  *
  * A bare tuple written at a color position denotes 0-1 sRGB components on
  * every route, so `ColorMix((1, 0, 0), (0, 0, 1), 0.5)` mixes red with blue
- * exactly as the interpreter does. A color VALUE on this target is the
- * canonical OKLCh triple, so a tuple written at the call site is converted
- * here with the same conversion `Rgb(r, g, b)` takes. Without it the compiled
- * routes read that tuple as an OKLCh triple and answered a different color
- * than the interpreter for the same expression.
+ * exactly as the interpreter does. A tuple is a bare array of numbers with no
+ * color space on it, so it is converted here with the same conversion
+ * `Rgb(r, g, b)` takes. Without it the compiled routes read that tuple as a
+ * color value and answered a different color than the interpreter for the
+ * same expression.
  *
  * Only a tuple written LITERALLY at the call site can be recognized. A tuple
- * that reaches this position through a variable has no shape at compile time,
- * so it keeps the canonical reading: it is taken to be a color value already.
+ * that reaches this position any other way — a tuple-typed variable, or
+ * `ColorToColorspace`, whose value is components in the space it names — has
+ * no shape at compile time and is passed through unconverted. Its value is a
+ * bare array at run time, which this target reads as a LIST, so the color
+ * helper it reaches throws the color-shape `TypeError` rather than answering
+ * a color it cannot vouch for.
  *
  * A `List` written at a color position is refused; only an operand of unknown
  * shape keeps the canonical reading. The interpreter's signatures say `tuple`
@@ -2105,16 +2047,16 @@ function refuseNestedColorConversion(head: string, color: Expression): void {
  * quietly read as a color what the engine calls an error. A literal tuple of
  * any width other than 3 or 4 is refused for the same reason.
  *
- * An operand that is itself a color CONVERSION is refused here as well, for
- * every head that reads a color through this function — see
- * `refuseNestedColorConversion`. `head` names the head for that diagnostic.
+ * An operand that is itself a color CONVERSION needs no special handling: a
+ * color value carries its own space, and every helper that consumes a color
+ * reads that space (`toOklch`), so a nested conversion answers the
+ * interpreter's color. `head` names the head in the diagnostics below.
  */
 function compileColorOperand(
   head: string,
   color: Expression,
   compile: (expr: Expression) => string
 ): string {
-  refuseNestedColorConversion(head, color);
   if (isFunction(color, 'List')) refuseColorList();
   if (!isFunction(color, 'Tuple')) return compile(color);
   const ops = color.ops;
@@ -2139,9 +2081,9 @@ function compileColorOperand(
  * time; answer `undefined` when it is one color and the caller's ordinary
  * `compileColorOperand` route applies.
  *
- * The map is `_SYS.bcastColor`, not the generic `_SYS.bcast`, because a color
- * value on this target is itself an array of channels — see that helper for
- * why the run-time discriminator is the nesting.
+ * The map is `_SYS.bcastColor`, not the generic `_SYS.bcast`: it recurses to
+ * any depth, as the interpreter's broadcast does, and it answers the
+ * non-finite color at an absent position — see that helper.
  *
  * Three operand shapes keep the one-color reading and answer `undefined`. A
  * literal `Tuple` is one color in 0-1 sRGB, which is the shape the
@@ -2180,11 +2122,6 @@ function tryCompileColorBroadcast(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string | undefined {
-  // The broadcast route is the one color-operand route that does NOT reach
-  // `compileColorOperand`, which carries the same guard: an operand that maps
-  // element by element never passes through it. So the nesting is refused
-  // here as well, and both routes of the five conversions are covered.
-  refuseNestedColorConversion(head, color);
   if (isFunction(color, 'Tuple')) return undefined;
   if (color.type.matches('string')) return undefined;
   const mayBeList =
@@ -2197,9 +2134,9 @@ function tryCompileColorBroadcast(
     throw new Error(
       `${head}: cannot compile a color conversion over an operand that may ` +
         'be a collection at run time and whose type does not prove a color ' +
-        'at every element position, at every depth — one color is itself an ' +
-        'array of channels, so the run-time dispatch can tell it from a ' +
-        'list of colors only where the type promises colors. Fail closed (D6).'
+        'at every element position, at every depth — a list of plain numbers ' +
+        'there is a list of errors in the interpreter, and the compiled map ' +
+        'would throw at the first element instead. Fail closed (D6).'
     );
   }
   const temp = BaseCompiler.tempVar(target);
@@ -2229,8 +2166,8 @@ function refuseColorTupleWidth(n: number): never {
  * A typed color head compiles to a canonical OKLCh color value, so passing
  * that value on to a routine that converts FROM the named space applied the
  * conversion a second time: `ColorFromColorspace(Rgb(1, 0, 0), 'rgb')` read
- * the OKLCh triple of red back as sRGB channels and answered a color that was
- * not red at all. The interpreter takes the head's components verbatim at
+ * the OKLCh channels of red back as sRGB channels and answered a color that
+ * was not red at all. The interpreter takes the head's components verbatim at
  * this position, so emit them the same way.
  *
  * A `List` written here is refused, not read as components: the interpreter's
@@ -5474,10 +5411,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // -----------------------------------------------------------------------
-  // Color constructor heads. All compile to OKLCh arrays at runtime — the
-  // canonical color representation in this target. The constructors take
-  // their own colorspace's components and convert internally.
-  // (Mirrors the GPU target's design: color values are vec3 OKLCh.)
+  // Color constructor heads. All compile to a color VALUE in the canonical
+  // OKLCh space — the object `{ space, c0, c1, c2, alpha }`. The constructors
+  // take their own colorspace's components and convert internally.
+  // (The GPU target keeps the same canonical space in a bare `vec3`.)
   // -----------------------------------------------------------------------
   Rgb: (args, compile) => {
     if (args.length < 3) throw new Error('Rgb: need 3 components');
@@ -5501,10 +5438,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // -----------------------------------------------------------------------
-  // As* converters. Compile-time output convention matches the engine and
-  // the GPU target: each returns components in the named space as a 3- or
-  // 4-element array. `AsRgb` uses 0-1 sRGB channels (consistent across all
-  // layers). `AsOklch` is the identity (canonical form).
+  // As* converters. Each answers a color VALUE tagged with the space it
+  // names, so a conversion result reaching a second color operator is
+  // understood rather than misread as OKLCh. `AsRgb` uses 0-1 sRGB channels
+  // (consistent across all layers). `AsOklch` is the identity for an operand
+  // the compiler can see is already canonical.
   // -----------------------------------------------------------------------
   // Each converter is `broadcastable`, so an operand that may be a LIST of
   // colors at run time takes the color-aware map instead of the direct call
@@ -5560,7 +5498,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // The element of a color list goes through `_SYS.asOklch` rather than
     // through the identity below: an element may be a color STRING, and the
     // identity would hand that string back where the interpreter answers an
-    // OKLCh triple.
+    // OKLCh color value.
     const list = tryCompileColorBroadcast(
       'AsOklch',
       c,
@@ -5571,19 +5509,27 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (list !== undefined) return list;
     // A provably STRING operand is a CSS color spelling, not a color value,
     // so the identity below would answer the string itself where the
-    // interpreter answers the OKLCh triple it names — measured on a
+    // interpreter answers the OKLCh color it names — measured on a
     // `string`-declared symbol, which emitted the bare `_.s`.
     if (c.type.matches('string')) return `_SYS.asOklch(${compile(c)})`;
-    // Identity for a color value — it is already in the canonical form. A
-    // tuple at this position is sRGB components and still has to be
-    // converted. The identity case hands the parent the OPERAND's own code,
-    // which may be an infix expression, so it is parenthesized like every
-    // other identity lowering (`identityPassthrough`).
-    return parenthesizeIdentity(
-      c,
-      compileColorOperand('AsOklch', c, compile),
-      target
-    );
+    // The identity holds only for an operand the compiler can SEE is both a
+    // color VALUE and already in the canonical space. A conversion
+    // (`AsRgb(c)`) answers a color tagged with its own space, and a symbol or
+    // a `vars` input may hold one at run time, so those go through the
+    // converter, which reads the tag. `ColorToColorspace(c, "oklch")` has the
+    // canonical space but answers bare COMPONENTS, which the identity would
+    // hand on as though they were a color. A literal tuple is sRGB components
+    // and is converted by `compileColorOperand`, whose `_SYS.rgb(…)` value is
+    // canonical.
+    const operand = compileColorOperand('AsOklch', c, compile);
+    const canonical =
+      isFunction(c, 'Tuple') ||
+      (colorSpaceOf(c) === 'oklch' && isColorValued(c));
+    if (!canonical) return `_SYS.asOklch(${operand})`;
+    // The identity case hands the parent the OPERAND's own code, which may be
+    // an infix expression, so it is parenthesized like every other identity
+    // lowering (`identityPassthrough`).
+    return parenthesizeIdentity(c, operand, target);
   },
 
   // Perceptual color difference (ΔE_OK).
@@ -5820,24 +5766,115 @@ function finiteChannels(c0: number, c1: number, c2: number): boolean {
   return Number.isFinite(c0) && Number.isFinite(c1) && Number.isFinite(c2);
 }
 
+/**
+ * Build a color value.
+ *
+ * The five keys are always written in this order, so every color on this
+ * target shares one hidden class and a channel read from a mixed stream of
+ * colors stays monomorphic. `alpha` is present and `undefined` for a color
+ * that carries no alpha; it is never omitted.
+ */
+function mkColor(
+  space: CompiledColorSpace,
+  c0: number,
+  c1: number,
+  c2: number,
+  alpha: number | undefined
+): CompiledColor {
+  return { space, c0, c1, c2, alpha };
+}
+
+/** The five color spaces a compiled color value can carry. */
+const COMPILED_COLOR_SPACES: ReadonlySet<string> = new Set([
+  'oklch',
+  'rgb',
+  'hsv',
+  'hsl',
+  'oklab',
+]);
+
+/**
+ * Is `v` a color VALUE (not a color string, and not a list)?
+ *
+ * The `space` must be one of the five spellings, not merely a string: the
+ * readers below switch on it, and an unrecognized spelling — `srgb` from a
+ * `vars` input, say — would take the OKLCh arm and answer a plausible but
+ * wrong color. An object with some other `space` is not a color at all and
+ * `asCompiledColor` refuses it by name.
+ */
+function isCompiledColor(v: unknown): v is CompiledColor {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    COMPILED_COLOR_SPACES.has((v as CompiledColor).space)
+  );
+}
+
+/** The shape a color helper accepts, named in the `TypeError` it throws for
+ * anything else. */
+const COLOR_SHAPE =
+  "a color value — an object `{ space, c0, c1, c2, alpha }` with `space` one of 'oklch', " +
+  "'rgb', 'hsv', 'hsl', 'oklab' — or a CSS color string. A bare numeric array is a LIST, " +
+  'not a color.';
+
 /** The compiled value of a color with a non-finite channel: the `NaN`
- * triple, the numeric projection of the interpreter's `incompatible-type`
- * error, keeping the alpha slot when one was given so the arity matches the
- * finite case. */
-function nonFiniteColor(alpha: number | undefined): number[] {
-  const a = normalizeAlpha(alpha);
-  return a !== undefined ? [NaN, NaN, NaN, a] : [NaN, NaN, NaN];
+ * channels, the numeric projection of the interpreter's `incompatible-type`
+ * error, in the space the answering helper names and keeping the alpha slot
+ * when one was given. */
+function nonFiniteColor(
+  alpha: number | undefined,
+  space: CompiledColorSpace = 'oklch'
+): CompiledColor {
+  return mkColor(space, NaN, NaN, NaN, normalizeAlpha(alpha));
 }
 
 /**
- * Normalize a color input to an `RgbColor` (0-255 channels).
+ * Resolve any accepted color input to a color VALUE.
  *
- * Strings are parsed as CSS colors; arrays are interpreted as Oklch
- * `[L, C, H]` (or `[L, C, H, alpha]`) — the canonical compiled-runtime
- * representation produced by `_SYS.color`, `_SYS.colorMix`, etc. Arrays
- * cross the sRGB gamut clip via `oklchToRgb` here.
+ * A CSS color string is parsed to the canonical OKLCh form. A color value
+ * passes through unchanged, whatever its space — this is the single point
+ * where a consumer learns the space of the color it was handed.
+ *
+ * A NON-FINITE number is the absent-position sentinel of a broadcast
+ * (`_SYS.bcastColor` maps a `NaN` element through the same conversion as a
+ * color), and it answers the non-finite color, which is what the
+ * interpreter's per-position `incompatible-type` error projects to on this
+ * target.
+ *
+ * Anything else throws. A bare numeric array reaches here from a `vars` input
+ * or from a consumer that still passes the pre-2026-09 array representation,
+ * and reading it as a color would answer a plausible but wrong value, so it
+ * fails closed at run time with a message that names the shape. An object
+ * that carries an unrecognized `space` fails the same way, and the message
+ * names the offending spelling: the readers switch on the space, so a color
+ * tagged `srgb` would silently take the OKLCh arm.
  */
-function toRgb255(input: string | number[]): {
+function asCompiledColor(input: unknown): CompiledColor {
+  if (typeof input === 'string')
+    return packedToColor(parseColorStringOrThrow(input));
+  if (isCompiledColor(input)) return input;
+  if (typeof input === 'number' && !Number.isFinite(input))
+    return nonFiniteColor(undefined);
+  if (
+    typeof input === 'object' &&
+    input !== null &&
+    typeof (input as CompiledColor).space === 'string'
+  )
+    throw new TypeError(
+      `Not a color: "${(input as CompiledColor).space}" is not a color ` +
+        `space. Expected ${COLOR_SHAPE}`
+    );
+  throw new TypeError(`Not a color. Expected ${COLOR_SHAPE}`);
+}
+
+/**
+ * Normalize any color input to an `RgbColor` (0-255 channels).
+ *
+ * The conversion is chosen from the value's own space: a color already in
+ * sRGB is scaled, never routed through OKLCh, so `AsRgb(AsRgb(c))` answers
+ * `AsRgb(c)` channel for channel instead of taking a second gamut clip.
+ */
+function toRgb255(input: unknown): {
   r: number;
   g: number;
   b: number;
@@ -5854,47 +5891,83 @@ function toRgb255(input: string | number[]): {
     if (alpha !== undefined) rgb.alpha = alpha;
     return rgb;
   }
-  const rgb = oklchToRgb({ L: input[0], C: input[1], H: input[2] }) as {
-    r: number;
-    g: number;
-    b: number;
-    alpha?: number;
-  };
-  if (input.length >= 4) {
-    const alpha = normalizeAlpha(input[3]);
-    if (alpha !== undefined) rgb.alpha = alpha;
+  const c = asCompiledColor(input);
+  const alpha = c.alpha;
+  // A non-finite color stays non-finite. The conversions below compute a hue
+  // from `max`/`min` comparisons, and every comparison with `NaN` is false,
+  // so without this test an HSV `NaN` color came back as a finite red.
+  if (!finiteChannels(c.c0, c.c1, c.c2))
+    return alpha !== undefined
+      ? { r: NaN, g: NaN, b: NaN, alpha }
+      : { r: NaN, g: NaN, b: NaN };
+  let rgb: { r: number; g: number; b: number };
+  switch (c.space) {
+    case 'rgb':
+      rgb = { r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255 };
+      break;
+    case 'hsv':
+      rgb = hsvToRgb(c.c0, c.c1, c.c2);
+      break;
+    case 'hsl':
+      rgb = hslToRgb(c.c0, c.c1, c.c2);
+      break;
+    case 'oklab':
+      rgb = oklchToRgb(oklabToOklch({ L: c.c0, a: c.c1, b: c.c2 }));
+      break;
+    case 'oklch':
+      rgb = oklchToRgb({ L: c.c0, C: c.c1, H: c.c2 });
+      break;
+    default:
+      // Unreachable: `asCompiledColor` admits only the five spellings, each
+      // of which has an arm above. An arm is missing if this ever throws —
+      // never a color read in a space it is not in.
+      throw new TypeError(`Not a color: unhandled color space "${c.space}"`);
   }
-  return rgb;
+  return alpha !== undefined
+    ? { r: rgb.r, g: rgb.g, b: rgb.b, alpha }
+    : { r: rgb.r, g: rgb.g, b: rgb.b };
 }
 
-/** Resolve any color input to Oklch components, preserving alpha if present. */
-function toOklch(input: string | number[]): {
+/** Resolve any color input to Oklch components, preserving alpha if present.
+ *
+ * This is the ONE reader every color-consuming helper goes through: it reads
+ * the value's `space` and converts from it, so a color produced by an
+ * explicit conversion (`AsRgb`, `AsHsv`, …) is understood as the space it
+ * names rather than misread as OKLCh. */
+function toOklch(input: unknown): {
   L: number;
   C: number;
   H: number;
   alpha?: number;
 } {
-  if (typeof input === 'string') {
-    const c = parseColorStringOrThrow(input);
-    const r = (c >>> 24) & 0xff;
-    const g = (c >>> 16) & 0xff;
-    const b = (c >>> 8) & 0xff;
-    const oklch = rgbToOklch({ r, g, b }) as {
-      L: number;
-      C: number;
-      H: number;
-      alpha?: number;
-    };
-    const alpha = normalizeAlpha((c & 0xff) / 255);
-    if (alpha !== undefined) oklch.alpha = alpha;
-    return oklch;
+  const c = asCompiledColor(input);
+  const alpha = c.alpha;
+  if (!finiteChannels(c.c0, c.c1, c.c2))
+    return { L: NaN, C: NaN, H: NaN, alpha };
+  let oklch: { L: number; C: number; H: number };
+  switch (c.space) {
+    case 'oklab':
+      oklch = oklabToOklch({ L: c.c0, a: c.c1, b: c.c2 });
+      break;
+    case 'rgb':
+      oklch = rgbToOklch({ r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255 });
+      break;
+    case 'hsv':
+      oklch = rgbToOklch(hsvToRgb(c.c0, c.c1, c.c2));
+      break;
+    case 'hsl':
+      oklch = rgbToOklch(hslToRgb(c.c0, c.c1, c.c2));
+      break;
+    case 'oklch':
+      oklch = { L: c.c0, C: c.c1, H: c.c2 };
+      break;
+    default:
+      // Unreachable: `asCompiledColor` admits only the five spellings, each
+      // of which has an arm above. An arm is missing if this ever throws —
+      // never a color read in a space it is not in.
+      throw new TypeError(`Not a color: unhandled color space "${c.space}"`);
   }
-  return {
-    L: input[0],
-    C: input[1],
-    H: input[2],
-    alpha: input.length >= 4 ? normalizeAlpha(input[3]) : undefined,
-  };
+  return { L: oklch.L, C: oklch.C, H: oklch.H, alpha };
 }
 
 /**
@@ -5975,24 +6048,28 @@ function parseColorStringOrThrow(input: string): number {
   return refuse();
 }
 
-/** Packed 0xRRGGBBAA integer to Oklch `[L, C, H]` or `[L, C, H, alpha]`. */
-function packedToOklch(c: number): number[] {
+/** Packed 0xRRGGBBAA integer to a canonical OKLCh color value. */
+function packedToColor(c: number): CompiledColor {
   const r = (c >>> 24) & 0xff;
   const g = (c >>> 16) & 0xff;
   const b = (c >>> 8) & 0xff;
   const oklch = rgbToOklch({ r, g, b });
-  const alpha = normalizeAlpha((c & 0xff) / 255);
-  return alpha !== undefined
-    ? [oklch.L, oklch.C, oklch.H, alpha]
-    : [oklch.L, oklch.C, oklch.H];
+  return mkColor(
+    'oklch',
+    oklch.L,
+    oklch.C,
+    oklch.H,
+    normalizeAlpha((c & 0xff) / 255)
+  );
 }
 
 /** Color runtime helpers shared by both SYS objects. */
 const colorHelpers = {
-  color(input: string): number[] {
-    return packedToOklch(parseColorStringOrThrow(input));
+  color(input: unknown): CompiledColor {
+    const c = toOklch(input);
+    return mkColor('oklch', c.L, c.C, c.H, c.alpha);
   },
-  colorToString(input: string | number[], format?: string): string {
+  colorToString(input: unknown, format?: string): string {
     const rgb = toRgb255(input);
     const fmt = (format ?? 'hex').toLowerCase();
     switch (fmt) {
@@ -6028,8 +6105,8 @@ const colorHelpers = {
       }
       case 'oklch': {
         // Read the OKLCh components directly rather than through the sRGB
-        // form above: a color value on this target IS an OKLCh triple, and
-        // routing it through sRGB clipped any chroma outside that gamut. The
+        // form above: an OKLCh color value already holds these components,
+        // and routing it through sRGB clipped any chroma outside that gamut. The
         // interpreter keeps the same wide-gamut path for this format, so
         // `ColorToString(Oklch(0.6, 0.25, 29), 'oklch')` answered
         // `oklch(0.6 0.246 29)` here and `oklch(0.6 0.25 29)` there.
@@ -6044,11 +6121,7 @@ const colorHelpers = {
         throw new Error(`Unknown color format: ${fmt}`);
     }
   },
-  colorMix(
-    input1: string | number[],
-    input2: string | number[],
-    ratio = 0.5
-  ): number[] {
+  colorMix(input1: unknown, input2: unknown, ratio = 0.5): CompiledColor {
     const c1 = toOklch(input1);
     const c2 = toOklch(input2);
     ratio = Math.max(0, Math.min(1, ratio));
@@ -6075,16 +6148,12 @@ const colorHelpers = {
     const a1 = c1.alpha ?? 1;
     const a2 = c2.alpha ?? 1;
     const alpha = normalizeAlpha(a1 + (a2 - a1) * ratio);
-    return alpha !== undefined ? [L, C, H, alpha] : [L, C, H];
+    return mkColor('oklch', L, C, H, alpha);
   },
-  colorContrast(bg: string | number[], fg: string | number[]): number {
+  colorContrast(bg: unknown, fg: unknown): number {
     return apca(toRgb255(bg), toRgb255(fg));
   },
-  contrastingColor(
-    bg: string | number[],
-    fg1?: string | number[],
-    fg2?: string | number[]
-  ): number[] {
+  contrastingColor(bg: unknown, fg1?: unknown, fg2?: unknown): CompiledColor {
     const bgRgb = toRgb255(bg);
     if (fg1 !== undefined && fg2 !== undefined) {
       // Answer the CHOSEN candidate itself, in this target's canonical OKLCh
@@ -6094,6 +6163,13 @@ const colorHelpers = {
       // interpreter no longer takes, where the chosen operand is answered
       // verbatim in the color space it was written in.
       //
+      // `ContrastingColor` is a color-PRODUCING operator, so its value is
+      // canonical whatever space the chosen candidate was written in. That is
+      // the space `colorSpaceOf` reports for this head, and it is what makes
+      // `AsOklch(ContrastingColor(bg, AsRgb(a), AsRgb(b)))` skip a conversion
+      // it would otherwise need: answering the candidate in its own space
+      // made that skip read sRGB channels as OKLCh.
+      //
       // The comparison is the library's: the larger ABSOLUTE APCA contrast
       // wins, with the candidate as the FIRST argument of the contrast (APCA
       // is not symmetric in its two arguments).
@@ -6101,15 +6177,19 @@ const colorHelpers = {
       const rgb2 = toRgb255(fg2);
       const chosen =
         Math.abs(apca(rgb1, bgRgb)) >= Math.abs(apca(rgb2, bgRgb)) ? fg1 : fg2;
-      return typeof chosen === 'string'
-        ? packedToOklch(parseColorStringOrThrow(chosen))
-        : [...chosen];
+      const c = toOklch(chosen);
+      return mkColor('oklch', c.L, c.C, c.H, c.alpha);
     }
     // Default: the better of the built-in white and black. Neither is a
     // caller value, so there is no color space to preserve.
-    return packedToOklch(contrastingColor(bgRgb));
+    return packedToColor(contrastingColor(bgRgb));
   },
-  colorToColorspace(input: string | number[], space: string): number[] {
+  // `ColorToColorspace` answers COMPONENTS, not a color: its interpreter
+  // signature is `-> tuple` and consumers index the result
+  // (`At(ColorToColorspace(c, "rgb"), 1)`). So the compiled value is a plain
+  // array of three channels, four with the alpha, which is the same array a
+  // folded call emits for the interpreter's `Tuple`.
+  colorToColorspace(input: unknown, space: string): number[] {
     const rgb = toRgb255(input);
     const alpha = rgb.alpha;
     let result: number[];
@@ -6141,10 +6221,20 @@ const colorHelpers = {
       default:
         throw new Error(`Unknown color space: ${space}`);
     }
+    // A non-finite color converts to non-finite components. The hue
+    // conversions above read the hue off `max`/`min` comparisons, and every
+    // comparison with `NaN` is false, so they answered a hue of zero — red —
+    // where every `As*` conversion answers `NaN` for the same input. The
+    // components are replaced after the switch so an unknown space still
+    // throws for a non-finite color, as it does for a finite one.
+    if (!finiteChannels(rgb.r, rgb.g, rgb.b)) result = [NaN, NaN, NaN];
     if (alpha !== undefined) result.push(alpha);
     return result;
   },
-  colormap(name: string, arg?: number): number[] | number[][] | number {
+  colormap(
+    name: string,
+    arg?: number
+  ): CompiledColor | CompiledColor[] | number {
     const allPalettes = {
       ...SEQUENTIAL_PALETTES,
       ...CATEGORICAL_PALETTES,
@@ -6153,10 +6243,11 @@ const colorHelpers = {
     const palette = allPalettes[name as keyof typeof allPalettes];
     if (!palette) throw new Error(`Unknown palette: ${name}`);
 
-    // Each palette stop is stored as Oklch [L, C, H] for perceptually-uniform
-    // interpolation and to match the compiled-runtime color representation.
+    // Each palette stop is stored as an OKLCh color value for
+    // perceptually-uniform interpolation and to match the compiled-runtime
+    // color representation.
     const colors = (palette as readonly string[]).map((hex: HexColor) =>
-      packedToOklch(parseColor(hex))
+      packedToColor(parseColor(hex))
     );
 
     // No second arg → return full palette
@@ -6167,7 +6258,7 @@ const colorHelpers = {
     if (Number.isInteger(arg) && arg >= 2) {
       const n = arg;
       if (n > MAX_COLORMAP_SAMPLES) return NaN;
-      const result: number[][] = [];
+      const result: CompiledColor[] = [];
       for (let i = 0; i < n; i++) {
         const t = n === 1 ? 0 : i / (n - 1);
         result.push(this._interpolatePalette(colors, t));
@@ -6180,28 +6271,30 @@ const colorHelpers = {
     // cannot index the palette: `colors[NaN]` is `undefined` and the
     // destructuring in `_interpolatePalette` throws "undefined is not
     // iterable" at run time. NaN-in/NaN-out, like compiled real arithmetic.
-    if (!Number.isFinite(arg)) return [NaN, NaN, NaN];
+    if (!Number.isFinite(arg)) return nonFiniteColor(undefined);
 
     // Float t in [0, 1] → interpolate at position t
     const t = Math.max(0, Math.min(1, arg));
     return this._interpolatePalette(colors, t);
   },
 
-  _interpolatePalette(colors: number[][], t: number): number[] {
-    if (colors.length === 0) return [0, 0, 0];
-    if (t <= 0) return [...colors[0]];
-    if (t >= 1) return [...colors[colors.length - 1]];
+  _interpolatePalette(colors: CompiledColor[], t: number): CompiledColor {
+    const copy = (c: CompiledColor): CompiledColor =>
+      mkColor(c.space, c.c0, c.c1, c.c2, c.alpha);
+    if (colors.length === 0) return mkColor('oklch', 0, 0, 0, undefined);
+    if (t <= 0) return copy(colors[0]);
+    if (t >= 1) return copy(colors[colors.length - 1]);
 
     const pos = t * (colors.length - 1);
     const i = Math.floor(pos);
     const frac = pos - i;
 
     if (frac === 0 || i >= colors.length - 1)
-      return [...colors[Math.min(i, colors.length - 1)]];
+      return copy(colors[Math.min(i, colors.length - 1)]);
 
     // Interpolate directly in Oklch (palette stops are already Oklch).
-    const [L1, C1, H1] = colors[i];
-    const [L2, C2, H2] = colors[i + 1];
+    const { c0: L1, c1: C1, c2: H1 } = colors[i];
+    const { c0: L2, c1: C2, c2: H2 } = colors[i + 1];
 
     const c1Achromatic = C1 < 1e-6;
     const c2Achromatic = C2 < 1e-6;
@@ -6218,14 +6311,35 @@ const colorHelpers = {
       if (H >= 360) H -= 360;
     }
 
-    return [L1 + (L2 - L1) * frac, C1 + (C2 - C1) * frac, H];
+    return mkColor(
+      'oklch',
+      L1 + (L2 - L1) * frac,
+      C1 + (C2 - C1) * frac,
+      H,
+      undefined
+    );
   },
 
-  colorFromColorspace(components: number[], space: string): number[] {
-    const c0 = components[0];
-    const c1 = components[1];
-    const c2 = components[2];
-    const alpha = components.length >= 4 ? components[3] : undefined;
+  colorFromColorspace(components: unknown, space: string): CompiledColor {
+    // The operand is raw COMPONENTS in the named space. A tuple compiles to a
+    // numeric array; a typed color head reaches here as a color VALUE, and
+    // the interpreter reads such a head's channels as components too
+    // (`ColorFromColorspace`, `library/colors.ts`), so its channels are used
+    // as they are and its own space is ignored.
+    let c0: number, c1: number, c2: number;
+    let alpha: number | undefined;
+    if (Array.isArray(components)) {
+      c0 = components[0];
+      c1 = components[1];
+      c2 = components[2];
+      alpha = components.length >= 4 ? components[3] : undefined;
+    } else {
+      const c = asCompiledColor(components);
+      c0 = c.c0;
+      c1 = c.c1;
+      c2 = c.c2;
+      alpha = c.alpha;
+    }
     let oklch: { L: number; C: number; H: number };
     switch (space.toLowerCase()) {
       case 'rgb':
@@ -6251,16 +6365,14 @@ const colorHelpers = {
       default:
         throw new Error(`Unknown color space: ${space}`);
     }
-    return alpha !== undefined
-      ? [oklch.L, oklch.C, oklch.H, alpha]
-      : [oklch.L, oklch.C, oklch.H];
+    return mkColor('oklch', oklch.L, oklch.C, oklch.H, normalizeAlpha(alpha));
   },
 
   // -----------------------------------------------------------------------
   // Color constructors. Each accepts components in its colorspace's natural
-  // units and returns the canonical OKLCh array `[L, C, H]` (or with alpha).
+  // units and returns a color value in the canonical OKLCh space.
   //
-  // A NON-FINITE channel yields the `NaN` triple. The interpreter's
+  // A NON-FINITE channel yields the `NaN` color. The interpreter's
   // `readColorExpr` (`library/colors.ts`) rejects an infinite or `NaN`
   // channel with `incompatible-type`, and `NaN` is that error's projection
   // on a numeric target. An infinite value or saturation used to be CLAMPED
@@ -6270,51 +6382,45 @@ const colorHelpers = {
   // both routes. Alpha is separate: a non-finite alpha reads as opaque on
   // both routes (`normalizeAlpha`).
   // -----------------------------------------------------------------------
-  rgb(r: number, g: number, b: number, alpha?: number): number[] {
+  rgb(r: number, g: number, b: number, alpha?: number): CompiledColor {
     if (!finiteChannels(r, g, b)) return nonFiniteColor(alpha);
     // Inputs are 0-1 sRGB; `rgbToOklch` expects 0-255 channels.
     const c = rgbToOklch({ r: r * 255, g: g * 255, b: b * 255 });
-    const a = normalizeAlpha(alpha);
-    return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
+    return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
-  hsv(h: number, s: number, v: number, alpha?: number): number[] {
+  hsv(h: number, s: number, v: number, alpha?: number): CompiledColor {
     if (!finiteChannels(h, s, v)) return nonFiniteColor(alpha);
     const rgb = hsvToRgb(h, s, v);
     const c = rgbToOklch(rgb);
-    const a = normalizeAlpha(alpha);
-    return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
+    return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
-  hsl(h: number, s: number, l: number, alpha?: number): number[] {
+  hsl(h: number, s: number, l: number, alpha?: number): CompiledColor {
     if (!finiteChannels(h, s, l)) return nonFiniteColor(alpha);
     const rgb = hslToRgb(h, s, l);
     const c = rgbToOklch({ r: rgb.r, g: rgb.g, b: rgb.b });
-    const a = normalizeAlpha(alpha);
-    return a !== undefined ? [c.L, c.C, c.H, a] : [c.L, c.C, c.H];
+    return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
-  oklab(L: number, a: number, b: number, alpha?: number): number[] {
+  oklab(L: number, a: number, b: number, alpha?: number): CompiledColor {
     if (!finiteChannels(L, a, b)) return nonFiniteColor(alpha);
     const c = oklabToOklch({ L, a, b });
-    const al = normalizeAlpha(alpha);
-    return al !== undefined ? [c.L, c.C, c.H, al] : [c.L, c.C, c.H];
+    return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
-  oklch(L: number, C: number, H: number, alpha?: number): number[] {
+  oklch(L: number, C: number, H: number, alpha?: number): CompiledColor {
     if (!finiteChannels(L, C, H)) return nonFiniteColor(alpha);
-    const a = normalizeAlpha(alpha);
-    return a !== undefined ? [L, C, H, a] : [L, C, H];
+    return mkColor('oklch', L, C, H, normalizeAlpha(alpha));
   },
 
   // -----------------------------------------------------------------------
-  // As* converters. Inputs are anything `toOklch` accepts (string, packed
-  // int, or OKLCh array). Outputs are 3- or 4-element arrays in the named
-  // space. sRGB-based outputs (asRgb/asHsv/asHsl) use 0-1 channels for
-  // consistency with the GPU target's shader convention.
+  // As* converters. Inputs are anything `toOklch` accepts (a color value in
+  // any space, or a color string). Each output is a color value TAGGED with
+  // the space it names, so a conversion result reaching a second color
+  // operator is understood rather than misread as OKLCh. sRGB-based outputs
+  // (asRgb/asHsv/asHsl) use 0-1 channels for consistency with the GPU
+  // target's shader convention.
   // -----------------------------------------------------------------------
-  asRgb(input: string | number[]): number[] {
+  asRgb(input: unknown): CompiledColor {
     const rgb = toRgb255(input);
-    const r = rgb.r / 255;
-    const g = rgb.g / 255;
-    const b = rgb.b / 255;
-    return rgb.alpha !== undefined ? [r, g, b, rgb.alpha] : [r, g, b];
+    return mkColor('rgb', rgb.r / 255, rgb.g / 255, rgb.b / 255, rgb.alpha);
   },
   // `rgbToHsv` and `rgbToHsl` compute the hue from `max`/`min` comparisons,
   // and every comparison with `NaN` is false, so a non-finite color came out
@@ -6323,40 +6429,37 @@ const colorHelpers = {
   // triple is what the interpreter's `incompatible-type` rejection projects
   // to on this target, so the guard is explicit here rather than left to the
   // comparisons.
-  asHsv(input: string | number[]): number[] {
+  asHsv(input: unknown): CompiledColor {
     const rgb = toRgb255(input);
-    if (!finiteChannels(rgb.r, rgb.g, rgb.b)) return nonFiniteColor(rgb.alpha);
+    if (!finiteChannels(rgb.r, rgb.g, rgb.b))
+      return nonFiniteColor(rgb.alpha, 'hsv');
     const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
-    return rgb.alpha !== undefined
-      ? [hsv.h, hsv.s, hsv.v, rgb.alpha]
-      : [hsv.h, hsv.s, hsv.v];
+    return mkColor('hsv', hsv.h, hsv.s, hsv.v, rgb.alpha);
   },
-  asHsl(input: string | number[]): number[] {
+  asHsl(input: unknown): CompiledColor {
     const rgb = toRgb255(input);
-    if (!finiteChannels(rgb.r, rgb.g, rgb.b)) return nonFiniteColor(rgb.alpha);
+    if (!finiteChannels(rgb.r, rgb.g, rgb.b))
+      return nonFiniteColor(rgb.alpha, 'hsl');
     const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-    return rgb.alpha !== undefined
-      ? [hsl.h, hsl.s, hsl.l, rgb.alpha]
-      : [hsl.h, hsl.s, hsl.l];
+    return mkColor('hsl', hsl.h, hsl.s, hsl.l, rgb.alpha);
   },
-  asOklab(input: string | number[]): number[] {
+  asOklab(input: unknown): CompiledColor {
     const c = toOklch(input);
+    if (!finiteChannels(c.L, c.C, c.H)) return nonFiniteColor(c.alpha, 'oklab');
     const lab = oklchToOklab({ L: c.L, C: c.C, H: c.H });
-    return c.alpha !== undefined
-      ? [lab.L, lab.a, lab.b, c.alpha]
-      : [lab.L, lab.a, lab.b];
+    return mkColor('oklab', lab.L, lab.a, lab.b, c.alpha);
   },
   // `AsOklch` of a color VALUE is the identity, and the compile-time
   // pass-through covers it. This helper is for the element of a color
   // BROADCAST (`_SYS.bcastColor`), where the element may be a color STRING
   // that the pass-through would hand back unconverted.
-  asOklch(input: string | number[]): number[] {
+  asOklch(input: unknown): CompiledColor {
     const c = toOklch(input);
-    return c.alpha !== undefined ? [c.L, c.C, c.H, c.alpha] : [c.L, c.C, c.H];
+    return mkColor('oklch', c.L, c.C, c.H, c.alpha);
   },
 
   // Perceptual color difference (ΔE_OK).
-  colorDelta(a: string | number[], b: string | number[]): number {
+  colorDelta(a: unknown, b: unknown): number {
     const labA = oklchToOklab(toOklch(a));
     const labB = oklchToOklab(toOklch(b));
     return oklabDeltaE(labA, labB);
@@ -6507,47 +6610,35 @@ function bcastFn(
  * to one color, and maps over a list of colors.
  *
  * The generic `_SYS.bcast` cannot serve here, because it descends into any
- * array: a color value on this target is a FLAT array of three or four
- * channels (`_SYS.hsv` and `_SYS.rgb` answer `[L, C, H]` or `[L, C, H, a]`),
- * so `bcast` would convert each channel of a single color as though the
- * channel were a color of its own.
+ * array and would then apply `f` to each element of a nested list twice over.
+ * The test this helper makes is the one the color representation allows: a
+ * color VALUE is an OBJECT carrying its space (or a CSS color STRING), and an
+ * ARRAY is always a LIST, at any depth. So an array maps element by element
+ * and the map recurses — a nested list of colors stays nested, as the
+ * interpreter's broadcast does.
  *
- * The sound discriminator on this target is therefore the NESTING, not the
- * array-ness. A color is a flat array of three or four NUMBERS, or a CSS
- * color string; a LIST of colors is an array holding arrays or strings, which
- * the channels of one color never are. So an array holding at least one array
- * or string is a list, and the map recurses — a nested list of colors stays
- * nested, as the interpreter's broadcast does. An empty array holds no
- * channels, so it is the empty list, and the interpreter answers `Nothing`
- * for a broadcast over an empty operand (`AsRgb([])` measured); this target
+ * An empty array is the empty list, and the interpreter answers `Nothing` for
+ * a broadcast over an empty operand (`AsRgb([])` measured); this target
  * spells that `NaN`, which is also what `_SYS.bcast` answers at an empty
  * position.
  *
- * EVERY element is examined, not just the first. An upstream broadcast spells
- * an absent position `NaN`, so a ragged operand reaches this helper with a
- * number and a color side by side: `AsRgb(Hsv(u, 0.5, 0.5))` with
- * `u = [[], [20]]` hands over `[NaN, [[L, C, H]]]`. Reading the first element
- * alone called that whole array one color and converted it as a channel
- * triple. A `NaN` element goes through `f` like any other element, and the
- * converters answer the non-finite color for it — the same projection the
+ * An upstream broadcast spells an absent position `NaN`, so a ragged operand
+ * reaches this helper with a number and a color side by side: `AsRgb(Hsv(u,
+ * 0.5, 0.5))` with `u = [[], [20]]` hands over `[NaN, [color]]`. A `NaN`
+ * element goes through `f` like any other element, and the converters answer
+ * the non-finite color for it (`asCompiledColor`) — the same projection the
  * interpreter's per-position `incompatible-type` error takes on this target.
  *
- * Two inputs the test still cannot tell apart, both excluded by the static
- * type of the operand rather than by this helper. A list of plain NUMBERS at
- * a color position reads as one color, while the interpreter broadcasts and
- * answers an `incompatible-type` error per element; this helper is emitted
- * only where the operand's type promises colors (`NESTED_COLOR_BROADCAST_TYPE`),
- * and a literal list of numbers is refused at compile time
- * (`refuseColorList`). A list whose every element is an absent `NaN` reads as
- * one color too, because nothing in it is an array or a string; it answers
- * one non-finite color where the interpreter answers a list of errors.
+ * A list of plain NUMBERS at a color position is a list of errors in the
+ * interpreter, and each element reaches `f` here and throws the color-shape
+ * `TypeError`. The static gates refuse such an operand first
+ * (`NESTED_COLOR_BROADCAST_TYPE`, `refuseColorList`); the throw is the
+ * run-time backstop for a value that arrives through `vars`.
  */
 function bcastColor(f: (c: unknown) => unknown, v: unknown): unknown {
   if (!Array.isArray(v)) return f(v);
   if (v.length === 0) return NaN;
-  if (v.some((e) => Array.isArray(e) || typeof e === 'string'))
-    return v.map((e) => bcastColor(f, e));
-  return f(v);
+  return v.map((e) => bcastColor(f, e));
 }
 
 /**
@@ -9802,8 +9893,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           : `((${guards.join(' && ')}) ? (${body}) : ${
               kind === 'boolean'
                 ? 'false'
-                : typeof kind === 'object'
-                  ? `[${Array(kind.array).fill('NaN').join(', ')}]`
+                : kind === 'color'
+                  ? // The non-finite color, spelled inline with the same five
+                    // keys in the same order every color value has, so the
+                    // guarded and the failing branch share one hidden class.
+                    "{ space: 'oklch', c0: NaN, c1: NaN, c2: NaN, alpha: undefined }"
                   : 'NaN'
             })`,
       // Per-compilation naming state for generated temporaries. Created here —
