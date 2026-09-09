@@ -247,9 +247,15 @@ const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
  *
  * The operand must be a SINGLE point: a literal `Tuple` (whose coordinate is
  * selected at compile time) or an operand whose static type is a tuple. A LIST
- * of points is refused: the interpreter and the JavaScript target broadcast the
- * coordinate over the list, and a list of coordinates is not a value this
- * target can hold — its result is one interval.
+ * of points is refused here: the interpreter and the JavaScript target
+ * broadcast the coordinate over the list, and this target has no lowering
+ * that projects one coordinate out of each element of a runtime array. A
+ * collection-valued result is representable on this target (an array of
+ * intervals, see `IntervalValue`), but only where a lowering builds it, such
+ * as a comprehension root. A WIDE literal list of points never reaches this
+ * function: the fixed-width unroll pass (`compilation/fixed-width-unroll.ts`)
+ * rewrites the accessor over it into a literal list of scalar coordinates
+ * before any target runs.
  */
 function compileIntervalPointComponent(
   name: string,
@@ -273,8 +279,9 @@ function compileIntervalPointComponent(
     throw new Error(
       `${name}: cannot compile — the operand is not a single point (its type ` +
         `is \`${arg.type.toString()}\`, not a tuple). A list of points would ` +
-        `give one coordinate per element, and the interval target's result is ` +
-        `a single interval, not a collection. Fail closed (D6).`
+        `give one coordinate per element, and this target has no lowering ` +
+        `that projects a coordinate out of each element of a runtime array. ` +
+        `Fail closed (D6).`
     );
   return `_IA.component(${compile(arg)}, ${k})`;
 }
@@ -780,16 +787,18 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `target's value is a numeric interval. Fail closed (D6).`
       );
     // A COLLECTION index is a gather or a boolean mask, whose result is itself
-    // a collection — one element per index entry. This target's value is a
-    // single interval, so there is nothing to put that in.
+    // a collection — one element per index entry. This target has no lowering
+    // that builds such a per-entry selection at run time (a collection-valued
+    // result exists only where a lowering builds it, such as a comprehension
+    // root).
     if (
       isIndexedCollectionOperand(index) ||
       index.type.matches('collection<any>')
     )
       throw new Error(
         `At: cannot compile — a collection-valued index (a gather or a ` +
-          `boolean mask) selects several elements, and the interval target's ` +
-          `value is a single interval, not a collection. Fail closed (D6).`
+          `boolean mask) selects several elements, and the interval target has ` +
+          `no lowering that builds that selection at run time. Fail closed (D6).`
       );
     // A literal collection indexed by a literal integer folds to the selected
     // element (or to the absence marker when the index selects nothing),

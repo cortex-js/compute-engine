@@ -2,19 +2,44 @@
 
 ### New Features
 
+- **Fixed-width collections compile to straight-line scalar code on every
+  target, and a callback lambda no longer recomputes its loop-invariant parts
+  per element.** A collection whose width is a compile-time literal `List` —
+  written as such, or exposed when a user function is inlined at its call site
+  or emitted by reference — used to lower on the JavaScript target as a runtime
+  array (`_SYS.bcast` closures, `.map`, `reduce`) and to fail closed on `glsl`,
+  `wgsl` and `interval-js`. A new target-independent pass
+  (`compilation/fixed-width-unroll.ts`) now distributes
+  `PointX`/`PointY`/`PointZ` over a literal list of points and folds them
+  through `Tuple`, all-scalar `PointList`, sums and scalar multiples of points;
+  unrolls `Map(f, List(…))`; makes `Min`/`Max`/`Sum`/`Product` over a literal
+  list n-ary at every width; and distributes scalar-versus-list arithmetic per
+  element. Lists of two to four elements keep their native lowering (a `vecN` on
+  the shader targets); a caller `operators`/`functions` override keeps receiving
+  whole list operands. On the JavaScript target, a pure loop-invariant
+  subexpression of a `Map`/`Filter`/`CountIf`/`Find`/… callback body (a
+  user-function call `m(x, y)` inside the lambda, for instance) is now bound
+  once, on the first call, instead of once per element; lazy-stream stages
+  deliberately keep per-element evaluation because an upstream stage runs
+  between two calls. And when a user function is emitted by reference, nested
+  calls to pure collection-valued user functions are substituted into its body
+  before the unroll, so the definition itself becomes scalar code. Measured on a
+  nine-point Voronoi row defined as user functions over `(x, y)`: by reference
+  on JavaScript 58 → 2 µs per sample, and the row compiles on `glsl`, `wgsl` and
+  `interval-js` where it declined before (with `x` and `y` declared).
+
 - **Sampler-backed `At` on the WGSL target, and the static-index and gather
   tiers over a texture on both shader targets.** With the `storage` compile
   option (`{ storage: { S: 'sampler2D' } }`) the WGSL target now lowers
-  `At(S, k)` to a helper generated per texture binding,
-  `_gpu_texat_S_1600(k)`, whose body names the module-scope texture
-  (`textureDimensions` for the width, `textureLoad` for the fetch, no
-  sampler); a `vars` mapping picks the binding identifier. On both targets a
-  literal index reads through the same guarded helper
-  (`_gpu_texat1600(S, 3.0)`; an out-of-range literal folds to NaN), and a
+  `At(S, k)` to a helper generated per texture binding, `_gpu_texat_S_1600(k)`,
+  whose body names the module-scope texture (`textureDimensions` for the width,
+  `textureLoad` for the fetch, no sampler); a `vars` mapping picks the binding
+  identifier. On both targets a literal index reads through the same guarded
+  helper (`_gpu_texat1600(S, 3.0)`; an out-of-range literal folds to NaN), and a
   gather or mask is a vector of one guarded read per selected slot
-  (`vec2(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0))`). These tiers
-  declined before, naming the storage kind, and a consumer fell back to the
-  slower lane for them.
+  (`vec2(_gpu_texat1600(S, 1.0), _gpu_texat1600(S, 3.0))`). These tiers declined
+  before, naming the storage kind, and a consumer fell back to the slower lane
+  for them.
 
 - **Rest parameters on function literals.** The last parameter of a function
   literal can now collect every remaining argument: `(a, ...rest) => …` in
@@ -30,8 +55,8 @@
   collects the trailing arguments. A NAMED Epsil definition takes one too, in
   the equation form and the braced form alike — `h(a, ...rest) = Length(rest)`
   and `function h(a, ...rest) { Length(rest) }` both behave exactly like
-  `let h = (a, ...rest) => Length(rest)`, and a misplaced or malformed spread
-  in a definition head is diagnosed the way it is in a lambda's parameter list.
+  `let h = (a, ...rest) => Length(rest)`, and a misplaced or malformed spread in
+  a definition head is diagnosed the way it is in a lambda's parameter list.
 - **`Primes`, the set of all prime numbers.** A lazy, infinite set constant like
   `Integers`: `Element(7, Primes)` is `True`, iteration yields 2, 3, 5, … on
   demand, `Primes ⊂ Integers` holds, and a big operator over it
@@ -40,33 +65,49 @@
 
 ### Resolved Issues
 
+- **A user function that takes its callee as a parameter compiled against the
+  engine's function of the same name.** With `gsh(t) := sin t + t²` and
+  `psh(gsh, t) := gsh(t) + 1`, the call-site inliner substituted the parameter
+  as a VALUE but left the head `gsh` in place, so `psh(u, u)` compiled to
+  `_fn_gsh(u) + 1` and ignored its first argument. The inliner now declines when
+  the callee's body calls a name it is substituting, and every spelling of the
+  case fails closed with the same message, as the 2026-08-14 ruling on calls of
+  a bound parameter requires.
+- **A callee body substituted at a call site skipped the angular-unit rewrite.**
+  The `rewriteAngularUnit` pass runs at compile entries only, so a `Sin` inside
+  a user-function body that the inliner substituted into a caller compiled
+  unscaled under `angularUnit = 'deg'` (a `Sin(x)` where the interpreter
+  computes `Sin(x·π/180)`). The callee's body is now rewritten before
+  substitution; the rewrite is not idempotent, so this is the only correct
+  order.
+
 - **A symbol holding a function with a rest parameter reports a variadic
   signature.** The arrow inferred for a user function was assembled from the
-  parameter OPERANDS, one positional slot each, so `f := (a, ...rest) =>
-  Length(rest)` declared `(unknown, unknown) -> integer` — a fixed arity the
-  function does not have — while the literal's own arrow already said
-  `(unknown, any*) -> integer`. The rest parameter now leaves the argument list
-  and becomes the variadic tail on every derivation, so a type-strict call site
-  accepts `f(1)` and `f(1, 2, 3)` and still reports the missing argument of
-  `f()`. Reconciling a literal against a DECLARED signature follows the same
-  rule: a literal with a rest parameter implements a variadic declaration whose
-  MINIMUM call arity is the literal's fixed count — `(integer, any*)` and
-  `(unknown+)` both fit `(a, ...rest) => …` — and never implements a
-  fixed-arity one. The declared argument types are ascribed onto the fixed
-  parameters as they are for a fixed-arity literal, and the same minimum-arity
-  rule governs the Epsil clause route, so `let f: (integer, any*) -> integer`
-  followed by `f(a, ...rest) = …` installs. Operand descriptors mark the
-  parameter with `rest: true` rather than reporting it as one more positional
-  slot.
+  parameter OPERANDS, one positional slot each, so
+  `f := (a, ...rest) => Length(rest)` declared `(unknown, unknown) -> integer` —
+  a fixed arity the function does not have — while the literal's own arrow
+  already said `(unknown, any*) -> integer`. The rest parameter now leaves the
+  argument list and becomes the variadic tail on every derivation, so a
+  type-strict call site accepts `f(1)` and `f(1, 2, 3)` and still reports the
+  missing argument of `f()`. Reconciling a literal against a DECLARED signature
+  follows the same rule: a literal with a rest parameter implements a variadic
+  declaration whose MINIMUM call arity is the literal's fixed count —
+  `(integer, any*)` and `(unknown+)` both fit `(a, ...rest) => …` — and never
+  implements a fixed-arity one. The declared argument types are ascribed onto
+  the fixed parameters as they are for a fixed-arity literal, and the same
+  minimum-arity rule governs the Epsil clause route, so
+  `let f: (integer, any*) -> integer` followed by `f(a, ...rest) = …` installs.
+  Operand descriptors mark the parameter with `rest: true` rather than reporting
+  it as one more positional slot.
 - **An Epsil definition that carries an effect specifier or a type-parameter
   clause states its rest parameter as a variadic tail.** Such a definition
   lowers a full-signature marker mirroring its parameter list, and the marker
-  gave the rest parameter an ordinary fixed slot: `function h<T>(x: T, ...rest)
-  -> T { … }` typed `h` as `(T, unknown) -> T where T`, so `h(1)` reported a
-  missing argument and `h(1, 2, 3)` an unexpected one. The marker now spells the
-  tail (`(x: T, any*) -> T where T`), and a literal's marker is well-formed
-  exactly when its variadic tail and its rest parameter are both present or both
-  absent.
+  gave the rest parameter an ordinary fixed slot:
+  `function h<T>(x: T, ...rest) -> T { … }` typed `h` as
+  `(T, unknown) -> T where T`, so `h(1)` reported a missing argument and
+  `h(1, 2, 3)` an unexpected one. The marker now spells the tail
+  (`(x: T, any*) -> T where T`), and a literal's marker is well-formed exactly
+  when its variadic tail and its rest parameter are both present or both absent.
 - **A canonical-handler operator with a generic numeric signature now types a
   valueless operand.** The boxing seam re-validates a canonical handler's result
   with inference off and ran its numeric inference only for concrete numeric
@@ -79,10 +120,10 @@
   `function | number`. An arithmetic result type now comes from the number arm
   of a provisionally admitted `function | number` operand.
 
-- **An assumed inequality bound is stored and compared exactly.** The bound
-  was summed in a JavaScript number, so an exact bound the machine cannot
-  represent was rounded to the nearest double in either direction before it
-  was stored, and every reader then took the stored value as exact:
+- **An assumed inequality bound is stored and compared exactly.** The bound was
+  summed in a JavaScript number, so an exact bound the machine cannot represent
+  was rounded to the nearest double in either direction before it was stored,
+  and every reader then took the stored value as exact:
   `assume(v > 1 - 10^{-30})` stored a strict lower bound of exactly 1, from
   which `v > 1` was "proven" — refuted by `v = 1 - 10^{-31}` — and
   `assume(v < 1)` was then refused as a contradiction. The query side rounded
@@ -91,13 +132,13 @@
   expression the inequality carries, and every reader — the relational
   operators, `isGreater` and the other comparison predicates, the sign of a
   symbol, the tautology and contradiction checks of `assume()` — compares
-  exactly, without tolerance. `ce.ask(['Greater', 'x', '_k'])` answers the
-  exact bound (`1/3`, not `0.333…`). The ranged type an assumption
-  contributes already projected its bound in the weakening direction.
+  exactly, without tolerance. `ce.ask(['Greater', 'x', '_k'])` answers the exact
+  bound (`1/3`, not `0.333…`). The ranged type an assumption contributes already
+  projected its bound in the weakening direction.
 - **`Covariance` and `PopulationCovariance` no longer overflow at machine
   precision on data of machine range.** The sums were taken over the raw
-  deviations, so a product of two deviations around `10²⁰⁰` overflowed while
-  the covariance itself was an ordinary number:
+  deviations, so a product of two deviations around `10²⁰⁰` overflowed while the
+  covariance itself was an ordinary number:
   `Covariance([1e200, -1e200, 0], [1e200, 1e200, -2e200])` is 0 and answered
   `NaN`. The deviations are scaled by a power of two per column first, as
   `Correlation` already did, and the scales are multiplied back exactly. A
@@ -109,187 +150,182 @@
   coefficient form: `LinearRegression([1,2,3],[2,4,6],x)` was typed
   `tuple<number, number>` while it evaluates to `2x`.
 - **The LaTeX pipe shorthand has a static type.** `[1,2,3] |> \_^2` typed
-  `unknown` while it evaluates to `[1,4,9]`; the LaTeX parser leaves the
-  stage as the application `Power(_, 2)`, which the `Pipe` type handler did
-  not read (the Epsil parser wraps it as a function literal, which it did).
-  A broadcastable head over a list of scalars is typed element-wise
+  `unknown` while it evaluates to `[1,4,9]`; the LaTeX parser leaves the stage
+  as the application `Power(_, 2)`, which the `Pipe` type handler did not read
+  (the Epsil parser wraps it as a function literal, which it did). A
+  broadcastable head over a list of scalars is typed element-wise
   (`list<integer<0..>^3>`), a whole-collection head such as `Length(\_)` or a
-  scalar topic types the applied body, and the shapes the derivation cannot
-  type soundly stay `unknown`.
+  scalar topic types the applied body, and the shapes the derivation cannot type
+  soundly stay `unknown`.
 - **A second pipe on the same engine no longer throws after an
-  operator-shorthand pipe.** Lifting `\_^2` into a function literal
-  substituted `_` with `_1` through a canonicalizing substitution, which
-  auto-declared `_1` in the caller's scope with the type the body inferred
-  for it. After `xs |> \_^2`, the next lift of `Take(\_, 2)` bound its
-  parameter to that stray `_1: number`, put an `incompatible-type` error in
-  the body, and threw "Function body must be a scoped Block expression";
-  `[1,2,3] |> Sum(\_)` answered the list itself for the same reason. The
-  substitution is no longer canonicalized, and the body is canonicalized
-  inside the literal's own scope, where its parameter is declared.
-- **A user-defined function passed as a value broadcasts over an element that
-  is itself a collection.** The callback of `Map`, `Filter` or `Reduce`, or a
-  comparator, was handed out as the bare compiled function, so for
-  `f(x) := 2x` the compiled `Map(f, xs)` over `[[1, 2], [3, 4]]` fed a whole
-  row into scalar arithmetic and answered `[NaN, NaN]` where evaluating it
-  answers `[[2, 4], [6, 8]]`. A function whose parameters are all scalar is
-  now handed out as a broadcast-aware wrapper, emitted once per function; a
-  function with a collection parameter keeps the direct reference, because
-  it consumes a list whole.
-- **A user function referenced as a value whose parameters are declared
-  scalar refuses a collection element, as the interpreter does.** The
-  interpreter answers an `incompatible-type` error for
-  `Map(f, [[1, 2], [3, 4]])` with `f: (number) -> number`, and canonicalization
-  already makes that expression invalid so it never compiles; for a
-  caller-supplied source the compiled reference now answers NaN for such an
-  element instead of a mapped row. A callback with an `unknown` parameter,
-  an inline function literal and a built-in operator name keep their
-  broadcast, which is what the interpreter does for them.
+  operator-shorthand pipe.** Lifting `\_^2` into a function literal substituted
+  `_` with `_1` through a canonicalizing substitution, which auto-declared `_1`
+  in the caller's scope with the type the body inferred for it. After
+  `xs |> \_^2`, the next lift of `Take(\_, 2)` bound its parameter to that stray
+  `_1: number`, put an `incompatible-type` error in the body, and threw
+  "Function body must be a scoped Block expression"; `[1,2,3] |> Sum(\_)`
+  answered the list itself for the same reason. The substitution is no longer
+  canonicalized, and the body is canonicalized inside the literal's own scope,
+  where its parameter is declared.
+- **A user-defined function passed as a value broadcasts over an element that is
+  itself a collection.** The callback of `Map`, `Filter` or `Reduce`, or a
+  comparator, was handed out as the bare compiled function, so for `f(x) := 2x`
+  the compiled `Map(f, xs)` over `[[1, 2], [3, 4]]` fed a whole row into scalar
+  arithmetic and answered `[NaN, NaN]` where evaluating it answers
+  `[[2, 4], [6, 8]]`. A function whose parameters are all scalar is now handed
+  out as a broadcast-aware wrapper, emitted once per function; a function with a
+  collection parameter keeps the direct reference, because it consumes a list
+  whole.
+- **A user function referenced as a value whose parameters are declared scalar
+  refuses a collection element, as the interpreter does.** The interpreter
+  answers an `incompatible-type` error for `Map(f, [[1, 2], [3, 4]])` with
+  `f: (number) -> number`, and canonicalization already makes that expression
+  invalid so it never compiles; for a caller-supplied source the compiled
+  reference now answers NaN for such an element instead of a mapped row. A
+  callback with an `unknown` parameter, an inline function literal and a
+  built-in operator name keep their broadcast, which is what the interpreter
+  does for them.
 - **A built-in operator name or an inline function literal used as a compiled
   callback broadcasts over a collection element.** `Map(Sin, xs)` and
   `Map((x) ↦ 2x, xs)` applied a scalar-only body to whatever element the
   collection held, so an element that was itself a collection answered NaN
-  behind `success: true`. Both are now handed out broadcast-aware, matching
-  the interpreter: over `[[1, 2], [], [3]]` the first answers
-  `[[sin 1, sin 2], NaN, [sin 3]]` (the operator answers `Nothing` for an
-  empty operand) and the second `[[2, 4], [], [6]]`. A built-in that consumes
-  its argument whole, such as `First`, and a literal with a collection-typed
+  behind `success: true`. Both are now handed out broadcast-aware, matching the
+  interpreter: over `[[1, 2], [], [3]]` the first answers
+  `[[sin 1, sin 2], NaN, [sin 3]]` (the operator answers `Nothing` for an empty
+  operand) and the second `[[2, 4], [], [6]]`. A built-in that consumes its
+  argument whole, such as `First`, and a literal with a collection-typed
   parameter keep the bare reference.
 - **`Round(x, n)` on the interval-js target scales through an exact integer
-  power.** A negative precision multiplied by the double nearest `10^n`
-  (`0.01` has no double) inside a step function whose result depends on the
-  scale exactly; the operand is now divided by the exact `10^-n` and
-  multiplied back, so the scale is a true point and an exact multiple of the
-  step stays a point.
+  power.** A negative precision multiplied by the double nearest `10^n` (`0.01`
+  has no double) inside a step function whose result depends on the scale
+  exactly; the operand is now divided by the exact `10^-n` and multiplied back,
+  so the scale is a true point and an exact multiple of the step stays a point.
 - **A rational power on the interval-js target is the root followed by the
-  integer power.** `_IA.powRational(x, p, q)` computed `Math.pow(x, p/q)`,
-  which rounds the exponent; that error grows with `|ln x|` and with `p/q`,
-  so no fixed outward step bounded it: over 20 000 random points with
-  `x ∈ (0, 1000]`, `p ≤ 5` and an odd denominator, the enclosure did not
-  contain the true value in about 5% of cases. It is now `(x^(1/q))^p`,
-  built from the enclosed root and the exact integer-power chain, contains
-  the true value in every case of a 100 000-point sweep, and an exactly
-  representable answer stays a point: `8^(2/3)` is 4, `27^(2/3)` is 9 (it was
-  8.999999999999998), `(-8)^(2/3)` is 4 and `8^(-2/3)` is 0.25.
-- **Colour operators handle their arguments consistently across the
-  interpreter, the JavaScript target and the shader targets** (an audit of
-  every operator that takes or produces a colour). A colour string that
-  names no colour is refused by every operator: `parseColor()` answers 0 for
-  an unrecognized string and for transparent black alike, and only `Color`
-  told them apart, so `ColorMix("bogus", "#ffffff")` silently answered a
-  half-transparent grey and the compiled `Color("bogus")` answered
-  transparent black. `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab` and `AsOklch`
-  accept a colour string and a 0–1 sRGB tuple like the other colour
-  operators (`AsRgb("#ff0000")` was `incompatible-type`; `AsRgb((1, 0, 0))`
-  was fanned element-wise into three errors). The APCA contrast a shader
-  computes now matches the interpreter: `ColorContrast(Rgb(0,0,0), Rgb(1,1,1))`
-  answered about −114 on GLSL and WGSL where the engine answers about
-  −1.079, and `ContrastingColor` compared that scale against a fixed
-  threshold, choosing black for a 0.6 grey where the interpreter chooses
-  white. `ColorFromColorspace` no longer converts a typed colour head twice
-  on the compiled targets (`ColorFromColorspace(Rgb(1,0,0), "rgb")` was not
-  red). `ColorToColorspace`/`ColorFromColorspace` accept `"hsv"` on every
-  route (only the shaders knew it). `Colormap` samples the same colour as
-  `ColorMix` and the compiled runtime (the interpreter interpolated through
-  a gamut-clipped sRGB routine). `ColorToString(c, "oklch")` keeps chroma
-  outside the sRGB gamut on the compiled route.
-- **`_IA.nthRoot` validates each endpoint instead of stepping a fixed three
-  ulps around `Math.pow(|x|, 1/n)`**, whose error grows with `|ln x|` and
-  passed three ulps at about `x = 3·10⁶`: over `|ln x| ∈ [50, 100)`, 3 594
-  of 4 000 random enclosures did not contain the root. The operand is scaled
-  by an exact power of two and each endpoint is moved until the enclosure of
-  its n-th power lands on the right side of the operand, so the answer is a
-  proof rather than an estimate, about half as wide as before, and an exact
-  root stays a point: `Root(64, 3)` is 4 and `Root(1000, 3)` is 10, which
-  the rounded exponent never reached. About twice the previous cost per
-  call.
-- **The interval-arithmetic runtime library rounds every result outward.**
-  The library the `interval-js` target injects computed in round-to-nearest
-  doubles, so a product, a quotient or a transcendental of non-degenerate
-  operands could answer a bound that excludes the value it claims to bound,
-  and a proof built on it (a curve misses a cell, a function has no root in
-  a box) was not a proof. Every routine that rounds now steps an inexact
-  endpoint outward (one ulp for a correctly rounded operation, two for
-  `hypot`, three for `nthRoot` and a rational power); an endpoint the
-  operation can prove exact — an integer, a dyadic fraction, `2 · 0.5`,
-  `49/49`, `(−1)^k`, an odd function at 0, a range bound such as `cos = 1` —
-  stays the point it is, so `floor` over it still answers one integer. The
-  compile-time constant fold, which widened on its own, now evaluates through
-  the library and emits the same enclosures. An endpoint that overflowed
-  from finite operands steps back to `±Number.MAX_VALUE` instead of staying
-  at infinity, a jump's enclosure is widened like a point's (`atan2` across
-  its branch cut now contains π), the point arm of `mod` no longer rounds
-  `-10⁻²⁰ mod 1` to exactly 0, and the logarithms, roots and composed
-  hyperbolic and reciprocal routines keep their exact points. Cost: a
-  40-term unrolled sum went from 32 to 72 µs per call (2.2×); the exactness
-  proofs are two thirds of it.
+  integer power.** `_IA.powRational(x, p, q)` computed `Math.pow(x, p/q)`, which
+  rounds the exponent; that error grows with `|ln x|` and with `p/q`, so no
+  fixed outward step bounded it: over 20 000 random points with `x ∈ (0, 1000]`,
+  `p ≤ 5` and an odd denominator, the enclosure did not contain the true value
+  in about 5% of cases. It is now `(x^(1/q))^p`, built from the enclosed root
+  and the exact integer-power chain, contains the true value in every case of a
+  100 000-point sweep, and an exactly representable answer stays a point:
+  `8^(2/3)` is 4, `27^(2/3)` is 9 (it was 8.999999999999998), `(-8)^(2/3)` is 4
+  and `8^(-2/3)` is 0.25.
+- **Colour operators handle their arguments consistently across the interpreter,
+  the JavaScript target and the shader targets** (an audit of every operator
+  that takes or produces a colour). A colour string that names no colour is
+  refused by every operator: `parseColor()` answers 0 for an unrecognized string
+  and for transparent black alike, and only `Color` told them apart, so
+  `ColorMix("bogus", "#ffffff")` silently answered a half-transparent grey and
+  the compiled `Color("bogus")` answered transparent black. `AsRgb`, `AsHsv`,
+  `AsHsl`, `AsOklab` and `AsOklch` accept a colour string and a 0–1 sRGB tuple
+  like the other colour operators (`AsRgb("#ff0000")` was `incompatible-type`;
+  `AsRgb((1, 0, 0))` was fanned element-wise into three errors). The APCA
+  contrast a shader computes now matches the interpreter:
+  `ColorContrast(Rgb(0,0,0), Rgb(1,1,1))` answered about −114 on GLSL and WGSL
+  where the engine answers about −1.079, and `ContrastingColor` compared that
+  scale against a fixed threshold, choosing black for a 0.6 grey where the
+  interpreter chooses white. `ColorFromColorspace` no longer converts a typed
+  colour head twice on the compiled targets
+  (`ColorFromColorspace(Rgb(1,0,0), "rgb")` was not red).
+  `ColorToColorspace`/`ColorFromColorspace` accept `"hsv"` on every route (only
+  the shaders knew it). `Colormap` samples the same colour as `ColorMix` and the
+  compiled runtime (the interpreter interpolated through a gamut-clipped sRGB
+  routine). `ColorToString(c, "oklch")` keeps chroma outside the sRGB gamut on
+  the compiled route.
+- **`_IA.nthRoot` validates each endpoint instead of stepping a fixed three ulps
+  around `Math.pow(|x|, 1/n)`**, whose error grows with `|ln x|` and passed
+  three ulps at about `x = 3·10⁶`: over `|ln x| ∈ [50, 100)`, 3 594 of 4 000
+  random enclosures did not contain the root. The operand is scaled by an exact
+  power of two and each endpoint is moved until the enclosure of its n-th power
+  lands on the right side of the operand, so the answer is a proof rather than
+  an estimate, about half as wide as before, and an exact root stays a point:
+  `Root(64, 3)` is 4 and `Root(1000, 3)` is 10, which the rounded exponent never
+  reached. About twice the previous cost per call.
+- **The interval-arithmetic runtime library rounds every result outward.** The
+  library the `interval-js` target injects computed in round-to-nearest doubles,
+  so a product, a quotient or a transcendental of non-degenerate operands could
+  answer a bound that excludes the value it claims to bound, and a proof built
+  on it (a curve misses a cell, a function has no root in a box) was not a
+  proof. Every routine that rounds now steps an inexact endpoint outward (one
+  ulp for a correctly rounded operation, two for `hypot`, three for `nthRoot`
+  and a rational power); an endpoint the operation can prove exact — an integer,
+  a dyadic fraction, `2 · 0.5`, `49/49`, `(−1)^k`, an odd function at 0, a range
+  bound such as `cos = 1` — stays the point it is, so `floor` over it still
+  answers one integer. The compile-time constant fold, which widened on its own,
+  now evaluates through the library and emits the same enclosures. An endpoint
+  that overflowed from finite operands steps back to `±Number.MAX_VALUE` instead
+  of staying at infinity, a jump's enclosure is widened like a point's (`atan2`
+  across its branch cut now contains π), the point arm of `mod` no longer rounds
+  `-10⁻²⁰ mod 1` to exactly 0, and the logarithms, roots and composed hyperbolic
+  and reciprocal routines keep their exact points. Cost: a 40-term unrolled sum
+  went from 32 to 72 µs per call (2.2×); the exactness proofs are two thirds of
+  it.
 - **A product with an exact rational factor compiles as a division.** The
   canonical form of `x/49` is `Multiply(Rational(1, 49), x)`, and every compile
-  target emitted the rounded reciprocal, `0.02040816326530612 * x`. That
-  product is not correctly rounded, so `floor(x/49)` compiled to 0 at
-  `x = 49` where the interpreter answers 1; 82 of the divisors below 1000
-  miss at some exact multiple. The JavaScript, GLSL, WGSL, Python and
-  interval-js targets now emit `x / 49` (`x / 49 * 3` for `3x/49`, the
-  division first so the product cannot overflow before it), which
-  IEEE division rounds correctly. A power-of-two denominator (`x/2`) keeps the
-  exact product `0.5 * x`, and a decimal divisor (`x/1.6`) is unchanged. The
-  interval-js runtime library divided by multiplying with a rounded
-  reciprocal, so `49/49` was not 1 there either; it now divides the endpoints
-  directly (a subnormal divisor no longer overflows to an unsound `+oo`
-  lower bound).
+  target emitted the rounded reciprocal, `0.02040816326530612 * x`. That product
+  is not correctly rounded, so `floor(x/49)` compiled to 0 at `x = 49` where the
+  interpreter answers 1; 82 of the divisors below 1000 miss at some exact
+  multiple. The JavaScript, GLSL, WGSL, Python and interval-js targets now emit
+  `x / 49` (`x / 49 * 3` for `3x/49`, the division first so the product cannot
+  overflow before it), which IEEE division rounds correctly. A power-of-two
+  denominator (`x/2`) keeps the exact product `0.5 * x`, and a decimal divisor
+  (`x/1.6`) is unchanged. The interval-js runtime library divided by multiplying
+  with a rounded reciprocal, so `49/49` was not 1 there either; it now divides
+  the endpoints directly (a subnormal divisor no longer overflows to an unsound
+  `+oo` lower bound).
 - **The interval-js target emits enclosures for irrational constants and for
   exact literals that have no double.** `\pi`, `e`, the golden ratio and the
-  other irrational constants, an exact rational with a denominator that is not
-  a power of two (`1/49`, `1/3`) and an exact radical (`\sqrt{2}`) compiled to
-  a degenerate point `{lo: v, hi: v}` that excludes the real value; they are
-  now two-ulp enclosures `{lo: nextDown(v), hi: nextUp(v)}`. The compile-time
-  fold of a constant interval subtree evaluates through a wrapper that widens
-  every inexact endpoint outward by one ulp (an exact endpoint — proven by an
+  other irrational constants, an exact rational with a denominator that is not a
+  power of two (`1/49`, `1/3`) and an exact radical (`\sqrt{2}`) compiled to a
+  degenerate point `{lo: v, hi: v}` that excludes the real value; they are now
+  two-ulp enclosures `{lo: nextDown(v), hi: nextUp(v)}`. The compile-time fold
+  of a constant interval subtree evaluates through a wrapper that widens every
+  inexact endpoint outward by one ulp (an exact endpoint — proven by an
   error-free transformation for `+`, `-`, `*`, `/`, `sqrt` and small integer
   powers — stays exact, so `(1 + -0.5)` still folds to the point `0.5`). The
   runtime library itself still does not round outward; see ROADMAP.
 - **Identity lowerings kept their operand's parentheses.** A compile handler
   that returns its operand's own code — `Abs` of a provably non-negative
-  operand, `Floor`/`Ceil`/`Round`/`Truncate` of an integer, `Re`/`Conjugate`
-  of a real, `Identity`, a one-operand `Max`/`Min` — spliced an infix operand
-  bare on every target, so `3·Re(x + 1)` compiled to `3 * _.x + 1` and ran
-  to 7 where the interpreter answers 9, GLSL `3·⌊n + 1⌋` emitted
-  `3.0 * n + 1.0`, and Python `Identity(-x)^2` emitted `-x ** 2`. Such an
-  operand is now parenthesized on the JavaScript, GLSL, WGSL and Python
-  targets. The GLSL/WGSL argument and conjugate of a complex sum spliced a
-  swizzle onto the last term only (`atan(w + z.y, w + z.x)`); they now read
-  the whole value.
-- **WGSL emitted a two-argument `atan`, which WGSL does not have.**
-  `Arctan2` and the argument of a complex value now emit `atan2`.
+  operand, `Floor`/`Ceil`/`Round`/`Truncate` of an integer, `Re`/`Conjugate` of
+  a real, `Identity`, a one-operand `Max`/`Min` — spliced an infix operand bare
+  on every target, so `3·Re(x + 1)` compiled to `3 * _.x + 1` and ran to 7 where
+  the interpreter answers 9, GLSL `3·⌊n + 1⌋` emitted `3.0 * n + 1.0`, and
+  Python `Identity(-x)^2` emitted `-x ** 2`. Such an operand is now
+  parenthesized on the JavaScript, GLSL, WGSL and Python targets. The GLSL/WGSL
+  argument and conjugate of a complex sum spliced a swizzle onto the last term
+  only (`atan(w + z.y, w + z.x)`); they now read the whole value.
+- **WGSL emitted a two-argument `atan`, which WGSL does not have.** `Arctan2`
+  and the argument of a complex value now emit `atan2`.
 - **A compiled `Mod` with a compound divisor evaluated it three times.** The
-  floored-modulo template splices the divisor three times; a non-literal
-  divisor (`2 mod sin(0.2θ)`, or `Random()`) is now bound to one temporary.
-- **`f(L) := Sum(L)` infers `L` a collection, so `f([1, 2, 3])` is 6.** The
-  body slot of `Sum` and `Product` accepts anything, so the parameter kept the
-  type `unknown`, and a call with a list broadcast over its elements — an
-  unknown parameter is scalar by default — answering `[1, 2, 3]`
-  (`Sum(1)`, `Sum(2)`, `Sum(3)`). A no-index `Sum(L)` or `Product(L)` over a
-  symbol with no type evidence yet now reads the symbol as the collection it
-  reduces, as `Length(L)` does through its signature: `f` is typed
-  `(collection) -> number` and binds the list whole. A symbol that already
-  carries evidence, or a declared type, is not touched, and a user function
-  over an unannotated scalar parameter (`h(x) := [x, -x]` maps each element)
-  is unchanged. The same reading applies to a global sum written without
-  limits: after `\sum x`, the symbol `x` is typed `collection`.
+  floored-modulo template splices the divisor three times; a non-literal divisor
+  (`2 mod sin(0.2θ)`, or `Random()`) is now bound to one temporary.
+- **`f(L) := Sum(L)` infers `L` a collection, so `f([1, 2, 3])` is 6.** The body
+  slot of `Sum` and `Product` accepts anything, so the parameter kept the type
+  `unknown`, and a call with a list broadcast over its elements — an unknown
+  parameter is scalar by default — answering `[1, 2, 3]` (`Sum(1)`, `Sum(2)`,
+  `Sum(3)`). A no-index `Sum(L)` or `Product(L)` over a symbol with no type
+  evidence yet now reads the symbol as the collection it reduces, as `Length(L)`
+  does through its signature: `f` is typed `(collection) -> number` and binds
+  the list whole. A symbol that already carries evidence, or a declared type, is
+  not touched, and a user function over an unannotated scalar parameter
+  (`h(x) := [x, -x]` maps each element) is unchanged. The same reading applies
+  to a global sum written without limits: after `\sum x`, the symbol `x` is
+  typed `collection`.
 - **A `type` handler's `context.derive` applies the broadcast lift.** The
   descriptor derivation called an operator's `type` handler and stopped, so
-  `derive('Power', [d, 2])` with `d` typed `list<integer^3>` answered the
-  scalar `number` while `v^2` for such a `v` types `vector<3>`: the expression
-  route re-shapes a broadcastable operator's per-element result over a
-  collection operand after the handler, the descriptor route did not. Every
-  handler that types a body over a collection operand through `derive` — a
-  `Map` body over a collection element, a pipe stage — got a scalar type for a
-  collection value. The lift is now one shared function over the few facts an
-  operand supplies (`broadcast-lift-type.ts`), read through the expression
-  route's own predicates on one side and a descriptor's type, facts and
-  structure on the other, so the two routes agree by construction. The LaTeX
-  pipe shorthand reaches it through its whole-topic branch:
-  `[1,2,3] |> \mathrm{Length}(\_^2)` and `[1,2,3] |> \mathrm{Length}(\_) + 1`
-  are typed `integer`, where the previous round left them `unknown`.
+  `derive('Power', [d, 2])` with `d` typed `list<integer^3>` answered the scalar
+  `number` while `v^2` for such a `v` types `vector<3>`: the expression route
+  re-shapes a broadcastable operator's per-element result over a collection
+  operand after the handler, the descriptor route did not. Every handler that
+  types a body over a collection operand through `derive` — a `Map` body over a
+  collection element, a pipe stage — got a scalar type for a collection value.
+  The lift is now one shared function over the few facts an operand supplies
+  (`broadcast-lift-type.ts`), read through the expression route's own predicates
+  on one side and a descriptor's type, facts and structure on the other, so the
+  two routes agree by construction. The LaTeX pipe shorthand reaches it through
+  its whole-topic branch: `[1,2,3] |> \mathrm{Length}(\_^2)` and
+  `[1,2,3] |> \mathrm{Length}(\_) + 1` are typed `integer`, where the previous
+  round left them `unknown`.
 - **A `Sum`/`Product` index over an `Element` clause takes the type of the
   collection's elements.** The index was pinned to `integer` whatever the
   indexing set held, so `Sum(chi(n), Element(chi, G))` over a set of functions
@@ -309,67 +345,65 @@
 ### Improvements
 
 - **The common-subexpression cap per region is 64 (was 32).** A body that
-  inlines several user functions over `(x, y)` — a Voronoi cell distance in
-  the Tycho corpus — produced 208 candidates that passed the sharing
-  threshold in one region and discarded 167 of them at the old cap, so
-  `floor(n x)` was recomputed nine times. The cap still bounds the register
-  pressure of a shader region.
+  inlines several user functions over `(x, y)` — a Voronoi cell distance in the
+  Tycho corpus — produced 208 candidates that passed the sharing threshold in
+  one region and discarded 167 of them at the old cap, so `floor(n x)` was
+  recomputed nine times. The cap still bounds the register pressure of a shader
+  region.
 - **Inside a compiled user-function body, a call that passes on a parameter
   whose signature type is a scalar is a direct call**, whether the author
-  declared that type or the engine holds it as inferred. Such a parameter is
-  a run-time scalar by construction: every emitted call site of a
-  scalar-parameter function either maps a list argument element-wise or is
-  the bare call an explicit caller declaration exempts. A parameter typed
-  `unknown`, `any` or a collection keeps its run-time shape dispatch, so a
-  body that receives a list whole — `k(L) := Sum(L)` — is unaffected. Note
-  that the engine's own inference leaves an unannotated parameter used at a
-  scalar position as `unknown` (a list may broadcast there), so today the
-  direct call appears for declared signatures and for signatures a host
-  installs as inferred.
+  declared that type or the engine holds it as inferred. Such a parameter is a
+  run-time scalar by construction: every emitted call site of a scalar-parameter
+  function either maps a list argument element-wise or is the bare call an
+  explicit caller declaration exempts. A parameter typed `unknown`, `any` or a
+  collection keeps its run-time shape dispatch, so a body that receives a list
+  whole — `k(L) := Sum(L)` — is unaffected. Note that the engine's own inference
+  leaves an unannotated parameter used at a scalar position as `unknown` (a list
+  may broadcast there), so today the direct call appears for declared signatures
+  and for signatures a host installs as inferred.
 - **The interval-js target emits `_IA.sub` for a subtraction.** `Subtract`
   canonicalizes to `Add(a, Negate(b))`, so the target emitted
-  `_IA.add(a, _IA.negate(b))` — one extra call and one extra interval object
-  per subtraction on every evaluation. A negated operand now calls the
-  library `sub` kernel, which answers the same endpoints. Canonical ordering
-  places a negated product before a bare symbol (`x - y z` is
-  `Add(Negate(y z), x)`), and interval addition is commutative endpoint for
-  endpoint, so that shape compiles to `_IA.sub(x, y z)` too; an impure
-  operand keeps its evaluation order.
-- **Code generation, after the Tycho code-generation audit of 2026-09-08.**
-  The JavaScript, GLSL and WGSL targets now fold the literal arithmetic their
-  own emission creates (an unrolled `Sum` substitutes the index at the
-  variable level, so `(1 + -0.5)` and `0.025 * (1 + -0.5)` reached the output;
-  a leading run of literal factors such as `2 * Math.PI * s` folds too, and
-  GPU folds are computed in float32 so they match what the shader computes).
-  Scalar loop-invariant subexpressions of a `Sum`/`Product` body are computed
-  once before the loop on the JavaScript and GPU targets, and a computed loop
-  bound is bound to a local. GPU user-function bodies get their own
-  common-subexpression locals, and a shared term wrapped in a negation is
-  keyed on the inner term. The GPU preamble now includes only the helper
-  functions the shader references, with their transitive callees (an
-  `hsv` row no longer carries the full colour library, a Mandelbrot row no
-  longer carries the Julia kernel). GLSL peepholes: `mod(x, 1.0)` → `fract(x)`,
-  `(c ? 1.0 : 0.0)` → `float(c)`, `pow(2.0, n)` → `exp2(n)`, small integer
-  powers up to 8 inline, a summed square of a vector → `dot(v, v)`, a
-  `_gpu_round` helper (round half away from zero, as the interpreter), an
-  argument over a `vec2` constructor reads the components, and consecutive
-  `Which` arms with identical pure values merge into one disjunction.
-  JavaScript peepholes: an equality between provably integer operands
-  compiles to `===` instead of a tolerance test; `\arg(a + i b)`, `|a + i b|`,
-  `Re`, `Im` over real parts compile to `Math.atan2`, `Math.hypot` and the
-  parts; `1/t^2` compiles to `1 / (t * t)`; a literal index into a symbol
-  bound to a literal list folds to the element; the counted-range prologue
-  drops its dead zero-step arm and folds when the bounds compile to literals.
-  User-function calls: `_SYS.bcastFn((a, b) => _fn_f(a, b), x, y)` is
-  eta-reduced to `_SYS.bcastFn(_fn_f, x, y)`; a call whose arguments are
-  constructed scalars, and whose callee's body is scalar under scalar
-  parameters, is itself a constructed scalar, so arithmetic over it and a
-  `PointList` component built from it skip the runtime shape dispatch; inside
-  a body whose parameter types are explicitly declared scalar, calls that pass
-  those parameters are direct. A runtime helper `_SYS.atNoWrap` provides the
-  Desmos-style positional access (no negative-from-the-end indexing) as one
-  call for hosts that replace the `At` lowering. Repeated interval constants
-  are hoisted into the interval-js preamble.
+  `_IA.add(a, _IA.negate(b))` — one extra call and one extra interval object per
+  subtraction on every evaluation. A negated operand now calls the library `sub`
+  kernel, which answers the same endpoints. Canonical ordering places a negated
+  product before a bare symbol (`x - y z` is `Add(Negate(y z), x)`), and
+  interval addition is commutative endpoint for endpoint, so that shape compiles
+  to `_IA.sub(x, y z)` too; an impure operand keeps its evaluation order.
+- **Code generation, after the Tycho code-generation audit of 2026-09-08.** The
+  JavaScript, GLSL and WGSL targets now fold the literal arithmetic their own
+  emission creates (an unrolled `Sum` substitutes the index at the variable
+  level, so `(1 + -0.5)` and `0.025 * (1 + -0.5)` reached the output; a leading
+  run of literal factors such as `2 * Math.PI * s` folds too, and GPU folds are
+  computed in float32 so they match what the shader computes). Scalar
+  loop-invariant subexpressions of a `Sum`/`Product` body are computed once
+  before the loop on the JavaScript and GPU targets, and a computed loop bound
+  is bound to a local. GPU user-function bodies get their own
+  common-subexpression locals, and a shared term wrapped in a negation is keyed
+  on the inner term. The GPU preamble now includes only the helper functions the
+  shader references, with their transitive callees (an `hsv` row no longer
+  carries the full colour library, a Mandelbrot row no longer carries the Julia
+  kernel). GLSL peepholes: `mod(x, 1.0)` → `fract(x)`, `(c ? 1.0 : 0.0)` →
+  `float(c)`, `pow(2.0, n)` → `exp2(n)`, small integer powers up to 8 inline, a
+  summed square of a vector → `dot(v, v)`, a `_gpu_round` helper (round half
+  away from zero, as the interpreter), an argument over a `vec2` constructor
+  reads the components, and consecutive `Which` arms with identical pure values
+  merge into one disjunction. JavaScript peepholes: an equality between provably
+  integer operands compiles to `===` instead of a tolerance test;
+  `\arg(a + i b)`, `|a + i b|`, `Re`, `Im` over real parts compile to
+  `Math.atan2`, `Math.hypot` and the parts; `1/t^2` compiles to `1 / (t * t)`; a
+  literal index into a symbol bound to a literal list folds to the element; the
+  counted-range prologue drops its dead zero-step arm and folds when the bounds
+  compile to literals. User-function calls:
+  `_SYS.bcastFn((a, b) => _fn_f(a, b), x, y)` is eta-reduced to
+  `_SYS.bcastFn(_fn_f, x, y)`; a call whose arguments are constructed scalars,
+  and whose callee's body is scalar under scalar parameters, is itself a
+  constructed scalar, so arithmetic over it and a `PointList` component built
+  from it skip the runtime shape dispatch; inside a body whose parameter types
+  are explicitly declared scalar, calls that pass those parameters are direct. A
+  runtime helper `_SYS.atNoWrap` provides the Desmos-style positional access (no
+  negative-from-the-end indexing) as one call for hosts that replace the `At`
+  lowering. Repeated interval constants are hoisted into the interval-js
+  preamble.
 
 ## 0.126.2 _2026-09-08_
 
