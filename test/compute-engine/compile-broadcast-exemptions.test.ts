@@ -114,16 +114,24 @@ describe('BROADCAST EXEMPTION — the shapes it does NOT cover', () => {
 
   test('a LIST operand of an exempt head is still a collection', () => {
     // The exemption names the TUPLE shape only, so a list of colors is mapped
-    // over by the interpreter and keeps the compiled lanes it had: the
-    // JavaScript target has no element-wise lowering for it and fails closed,
-    // so `compile()` falls back to the interpreter.
+    // over on both routes: the interpreter broadcasts, and the JavaScript
+    // target emits its color-aware map (`_SYS.bcastColor` — the generic
+    // broadcast cannot serve, because one color is itself an array of
+    // channels). See `compile-color-broadcast.test.ts`.
     const expr = ['AsRgb', ['List', ['Rgb', 1, 0, 0], ['Rgb', 0, 1, 0]]];
     expect(ce.box(expr).evaluate().toString()).toBe(
       '[Rgb(1, 0, 0),Rgb(0, 1, 0)]'
     );
     const r = js(expr);
-    expect(r.success).toBe(false);
-    expect(String(r.error)).toMatch(/Fail closed \(D6\)/);
+    expect(r.success).toBe(true);
+    expect(r.code).toBe(
+      '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), ' +
+        '[_SYS.rgb(1, 0, 0), _SYS.rgb(0, 1, 0)])'
+    );
+    expect(r.run()).toEqual([
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
   });
 
   test('the arithmetic heads keep their element-wise compiled lanes', () => {

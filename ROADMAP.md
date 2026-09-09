@@ -152,6 +152,61 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   unknowable at compile time. Documented in the handler comments and pinned;
   no better answer exists without a runtime tag on colour values.
 
+### Compiled colour values are not one representation (OPEN, ruling — found 2026-09-09 while fixing the `AsRgb` broadcast regression)
+
+The JavaScript compile target has two different runtime spellings for a
+colour, and nothing in a value says which one it is.
+
+- A colour VALUE is the canonical OKLCh triple. `_SYS.rgb`, `_SYS.hsv`,
+  `_SYS.hsl`, `_SYS.oklab` and `_SYS.oklch` all convert their operands to
+  `[L, C, H]` (or `[L, C, H, alpha]`), and every helper that consumes a colour
+  reads an array that way.
+- A CONVERSION answers bare channels in the space it names. `_SYS.asRgb`
+  answers 0–1 sRGB, `_SYS.asHsv` answers `[h, s, v]`, and
+  `_SYS.colorToColorspace` answers whatever its space operand asks for. The
+  arrays are the same shape as a colour value and carry no space of their own.
+
+Two consequences, both measured.
+
+- A conversion of a conversion misreads its operand. With
+  `constantFold: false`, `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` compiled to
+  `_SYS.asRgb(_SYS.asRgb(_SYS.hsv(0.3, 0.5, 0.5)))` and ran to
+  `[0.7137, 0, 0.3686]`, where the interpreter answers
+  `Rgb(0.5, 0.2513, 0.25)`. `AsHsv(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
+  `[329.01, 1, 0.7137]` against the interpreter's `Hsv(0.3, 0.5, 0.5)`.
+- The default `compile()` fallback cannot carry a colour back. A declined
+  colour expression falls back to the interpreter, and `interpretedRunValue`
+  has no serialization for a colour head, so the caller receives a scalar
+  `NaN` instead of a colour.
+
+What is done about it for now: every head that reads a colour operand fails
+closed when the STATIC nesting is visible — an operand that is itself one of
+`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch` or `ColorToColorspace`,
+including inside a literal `List`. The guard sits in `compileColorOperand`,
+which every colour head goes through, and in `tryCompileColorBroadcast`, the
+one route that does not (both in
+`src/compute-engine/compilation/javascript-target.ts`). A wrong colour is
+replaced by a decline, and the decline states the mechanism. What is still
+NOT caught is nesting that reaches a conversion through a variable: the value
+carries no space, so `c := AsRgb(x); ColorDelta(c, y)` still misreads the
+channels at run time.
+
+Two candidate resolutions, one of which the user has to choose:
+
+- Tag a compiled colour value with its space — an object, or a leading
+  sentinel channel — so that every consumer can convert from whatever it is
+  handed. This costs an allocation per colour and touches every `_SYS` colour
+  helper and both shader targets, which have no such tag available.
+- Make every conversion answer the canonical OKLCh triple, and apply the named
+  space only where the value LEAVES the compiled code (the runner's result
+  projection). This keeps one representation inside the compiled program, but
+  changes what `AsRgb(c)` evaluates to for a caller that reads the compiled
+  array directly, which Tycho does.
+
+If nothing is decided, the static decline stands: the nested forms fall back
+to the interpreter, and the fallback answers `NaN` for them until
+`interpretedRunValue` learns to serialize a colour.
+
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 
 The audit (`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md`,

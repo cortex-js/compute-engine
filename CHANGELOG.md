@@ -1,3 +1,49 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A color-space conversion of an operand that may be a list of colors
+  compiles again on the JavaScript target.** With `w` declared
+  `broadcastable<color>`, or `u` declared `broadcastable<number>`,
+  `AsRgb(w)` and `AsRgb(Hsv(u, 0.5, 0.5))` both declined in 0.127.0 with
+  "cannot compile scalar arithmetic over a list-valued operand", so
+  `compile()` fell back to the interpreter. The five conversions
+  (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch`) had gained a broadcast
+  exemption for a numeric tuple, and the compiler declines every generic
+  element-wise broadcast of a head that declares one. The lowering they had
+  before was not right either: it mapped the generic broadcast over the
+  operand, and a color VALUE on this target is itself an array of three or
+  four channels, so one color was converted channel by channel and came back
+  as a list of three colors. The conversions now carry a color-aware
+  broadcast (`_SYS.bcastColor`), which reads a nested array — an array holding
+  arrays or color strings — as a list of colors and anything else as one
+  color. A literal list of color-typed elements maps as well, and so does a
+  list of lists; a list of numbers, and any other collection whose type does
+  not prove a color at every element position, still fails closed. A literal
+  color string (`AsRgb("red")`) compiles again as well: the conversion reads
+  it as one CSS color, where the generic fan-out over a collection had
+  intercepted it as a list of grapheme clusters.
+
+- **A color operand that is itself a color conversion now declines instead of
+  answering a wrong color.** The compiled runtime has two spellings for a
+  color: a color VALUE is the canonical OKLCh triple, while a conversion
+  answers bare channels in the space it names. So the consumer read those
+  channels as `[L, C, H]`, and `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
+  `[0.7137, 0, 0.3686]` where the interpreter answers
+  `Rgb(0.5, 0.2513, 0.25)`. Every head that reads a color operand now fails
+  closed (D6) when that nesting is visible at compile time — the five
+  conversions, `ColorDelta`, `ColorMix`, `ColorContrast`, `ContrastingColor`,
+  `ColorToString` and `ColorToColorspace` — so the expression falls back to
+  the interpreter. A color value, a color string or a variable at the same
+  position is unaffected.
+
+- **`AsHsv` and `AsHsl` of a non-finite color answer the `NaN` triple.** The
+  hue is read off `max`/`min` comparisons, and every comparison with `NaN` is
+  false, so `AsHsv(Hsv(h, 0.5, 0.5))` with `h` non-finite answered
+  `[0, NaN, NaN]` — a hue of zero, which is red — where the three other
+  conversions answered the triple that the interpreter's `incompatible-type`
+  rejection projects to.
+
 ## 0.127.0 _2026-09-09_
 
 ### New Features

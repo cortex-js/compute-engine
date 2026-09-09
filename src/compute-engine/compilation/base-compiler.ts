@@ -5846,8 +5846,18 @@ export class BaseCompiler {
           def.operator.broadcastable === true &&
           !isRelationalOperator(h) &&
           !BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h));
+      // A head whose own codegen on this target accepts a possibly-collection
+      // operand (`CompileTarget.collectionAwareHeads`) is not this gate's
+      // business: that codegen owns the shape — it emits its own run-time
+      // dispatch, or declines with its own diagnostic. The color-space
+      // conversions are the case: a color value on this target is one flat
+      // array of channels, so no generic element-wise lowering can serve
+      // them, and only their own codegen can tell one color from a list of
+      // colors.
+      const collectionAwareHead = target.collectionAwareHeads?.has(h) === true;
       if (
         isBroadcastableHead &&
+        !collectionAwareHead &&
         args.some(
           (a) =>
             // A STRING is not a list-valued operand FOR THIS PURPOSE. It
@@ -5882,9 +5892,17 @@ export class BaseCompiler {
         const opMap = target.operators?.(h);
         const lowersToScalarInfix =
           opMap === undefined || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(opMap[0]);
+        // Two wordings, because two different lowerings reach here. An
+        // ARITHMETIC head (`SCALAR_ARITHMETIC_HEADS`) really does emit scalar
+        // arithmetic — a `+` or a `*` the operand turns into string
+        // concatenation or NaN. Any other broadcastable head emits its own
+        // scalar codegen instead, so naming arithmetic there sent the reader
+        // looking for a `+` that is not in the expression.
         if (lowersToScalarInfix)
           throw new Error(
-            `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
+            BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h)
+              ? `${h}: cannot compile scalar arithmetic over a list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
+              : `${h}: cannot compile a broadcastable head over a possibly list-valued operand — the JavaScript compile target has no list-arithmetic support. Fail closed (D6). Materialize the list with evaluate() and compile a scalar element function instead.`
           );
       }
     }
@@ -7540,12 +7558,24 @@ export class BaseCompiler {
       // consumes it whole, so the fan-out stands aside and the head's own
       // codegen (`fn`, below) receives the tuple entire — see
       // `isBroadcastExemptTupleOperand`.
+      //
+      // A head named in `CompileTarget.collectionAwareHeads` stands the
+      // fan-out down for the whole operand, for the same reason and with the
+      // same consequence: its codegen dispatches on the collection itself, or
+      // declines. A provably STRING operand is included: a string is a
+      // finite indexed collection of its grapheme clusters, so the fan-out
+      // used to intercept `AsRgb("red")` and decline for want of a
+      // `broadcastUnary` lowering, while the head's own codegen reads that
+      // string as ONE CSS color and compiles it.
       const def = engine.lookupDefinition(h);
+      const collectionAwareHead =
+        target.collectionAwareHeads?.has(h) === true && args.length === 1;
       if (
         isOperatorDef(def) &&
         def.operator.broadcastable &&
         args.length === 1 &&
         isFiniteIndexedCollection(args[0]) &&
+        !collectionAwareHead &&
         !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, args[0])
       ) {
         const broadcast = BaseCompiler.compileBroadcastUnary(

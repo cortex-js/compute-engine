@@ -608,6 +608,27 @@ export interface CompileTarget<Expr = unknown> {
   ) => void;
 
   /**
+   * The heads whose own codegen on this target accepts an operand that may be
+   * a COLLECTION at run time, and fails closed itself when it cannot.
+   *
+   * A `broadcastable` head over a possibly list-valued operand normally fails
+   * closed in the base compiler: the generic element-wise lowerings map the
+   * head's SCALAR codegen over the array, which is wrong for a head whose
+   * definition exempts a shape from broadcasting (`broadcastExemptions`). For
+   * a head named here the base compiler stands both of those gates down — the
+   * list-arithmetic gate and the single-collection fan-out — because the
+   * head's own codegen owns the shape: it emits a run-time dispatch of its
+   * own, or declines with its own diagnostic.
+   *
+   * The JavaScript target names the color-space conversions. A color VALUE
+   * there is one flat array of three or four channels, or a color string, so
+   * only a color-aware dispatch can tell one color from a list of colors
+   * (`_SYS.bcastColor`); the generic broadcast would convert each channel of
+   * a single color as though it were a color of its own.
+   */
+  collectionAwareHeads?: ReadonlySet<MathJsonSymbol>;
+
+  /**
    * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
    * that a non-boolean value (notably `NaN`) fails closed at run time, matching
    * the interpreter — which throws `Condition must evaluate to "True" or

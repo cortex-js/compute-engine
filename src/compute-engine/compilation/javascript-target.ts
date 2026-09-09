@@ -2005,6 +2005,86 @@ function tryGetJSComplexParts(
 const COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
 
 /**
+ * The color-space conversions own a possibly-collection operand themselves —
+ * see `CompileTarget.collectionAwareHeads` and `tryCompileColorBroadcast`.
+ * They are the only heads on this target that do: every other color operator
+ * takes its color operand whole in the interpreter too (none of them is
+ * `broadcastable`), so the base compiler's list gates never applied to them.
+ */
+const JS_COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
+  'AsRgb',
+  'AsHsv',
+  'AsHsl',
+  'AsOklab',
+  'AsOklch',
+]);
+
+/**
+ * The heads whose compiled value is channels in the color space they NAME,
+ * not the canonical OKLCh triple that a color value on this target is.
+ * `ColorToColorspace` belongs here for the same reason: `_SYS.colorToColorspace`
+ * answers components in the space its second operand names.
+ */
+const COLOR_CONVERSION_HEADS: ReadonlySet<string> = new Set([
+  'AsRgb',
+  'AsHsv',
+  'AsHsl',
+  'AsOklab',
+  'AsOklch',
+  'ColorToColorspace',
+]);
+
+/**
+ * The conversion head inside `color`, when the operand is one — searched
+ * through a literal `List`, whose elements reach a conversion one at a time
+ * through `_SYS.bcastColor`.
+ */
+function nestedColorConversionHead(color: Expression): string | undefined {
+  if (!isFunction(color)) return undefined;
+  if (COLOR_CONVERSION_HEADS.has(color.operator)) return color.operator;
+  if (color.operator === 'List')
+    for (const op of color.ops) {
+      const inner = nestedColorConversionHead(op);
+      if (inner !== undefined) return inner;
+    }
+  return undefined;
+}
+
+/**
+ * Decline a color OPERAND that is itself a color conversion.
+ *
+ * The compiled runtime has no one representation for a color: a color VALUE
+ * is the canonical OKLCh triple, while `_SYS.asRgb` and its siblings answer
+ * bare channels in the space they name. Any head that reads a color operand
+ * therefore reads sRGB (or HSV, or HSL, or Oklab) channels as though they
+ * were `[L, C, H]` when that operand is a conversion, and answers a different
+ * color from the interpreter: `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
+ * `[0.714, 0, 0.369]` where the interpreter answers `Rgb(0.5, 0.251, 0.25)`,
+ * and `ColorDelta(AsRgb(c1), c2)` measured the distance to the wrong color.
+ * Until a compiled color value carries its space, the nesting fails closed
+ * (D6) instead of answering a wrong color.
+ *
+ * This is called from the two places a color operand can be lowered:
+ * `compileColorOperand`, which every color head goes through, and
+ * `tryCompileColorBroadcast`, the one route that does not.
+ *
+ * Only the STATIC nesting is caught. An operand that is a color value, a
+ * color string or a variable compiles as before — a variable may hold the
+ * output of a conversion at run time, and nothing in the value says so.
+ */
+function refuseNestedColorConversion(head: string, color: Expression): void {
+  const inner = nestedColorConversionHead(color);
+  if (inner === undefined) return;
+  throw new Error(
+    `${head}: cannot compile a color conversion whose operand is itself the ` +
+      `conversion ${inner} — the compiled value of a conversion is channels ` +
+      'in the space it names, while a color value is the canonical OKLCh ' +
+      'triple, so the outer conversion would read those channels as OKLCh ' +
+      'and answer a different color from the interpreter. Fail closed (D6).'
+  );
+}
+
+/**
  * Compile an operand that sits at a COLOR position.
  *
  * A bare tuple written at a color position denotes 0-1 sRGB components on
@@ -2024,11 +2104,17 @@ const COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
  * and it answers `incompatible-type` for a list, so a compiled route must not
  * quietly read as a color what the engine calls an error. A literal tuple of
  * any width other than 3 or 4 is refused for the same reason.
+ *
+ * An operand that is itself a color CONVERSION is refused here as well, for
+ * every head that reads a color through this function — see
+ * `refuseNestedColorConversion`. `head` names the head for that diagnostic.
  */
 function compileColorOperand(
+  head: string,
   color: Expression,
   compile: (expr: Expression) => string
 ): string {
+  refuseNestedColorConversion(head, color);
   if (isFunction(color, 'List')) refuseColorList();
   if (!isFunction(color, 'Tuple')) return compile(color);
   const ops = color.ops;
@@ -2044,6 +2130,80 @@ function compileColorOperand(
           'color channel. Fail closed (D6).'
       );
   return `_SYS.rgb(${ops.map((op) => compile(op)).join(', ')})`;
+}
+
+/**
+ * The color-space conversions (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`,
+ * `AsOklch`) are `broadcastable`, so a LIST of colors at their operand is one
+ * conversion per element. Emit that map when the operand may be a list at run
+ * time; answer `undefined` when it is one color and the caller's ordinary
+ * `compileColorOperand` route applies.
+ *
+ * The map is `_SYS.bcastColor`, not the generic `_SYS.bcast`, because a color
+ * value on this target is itself an array of channels — see that helper for
+ * why the run-time discriminator is the nesting.
+ *
+ * Three operand shapes keep the one-color reading and answer `undefined`. A
+ * literal `Tuple` is one color in 0-1 sRGB, which is the shape the
+ * definitions exempt from broadcasting (`broadcastExemptions: ['tuples']`). A
+ * provably STRING operand is one CSS color, not a list of its grapheme
+ * clusters. And an operand that is not collection-shaped at all is one color
+ * by its type.
+ *
+ * An operand that MAY be a list at run time must prove that every leaf it
+ * holds is a color, and the proof is the type matching
+ * `NESTED_COLOR_BROADCAST_TYPE`. Without that proof the shape fails closed
+ * (D6): a list of plain numbers is what the run-time dispatch cannot tell
+ * from one color, and the interpreter answers an `incompatible-type` error
+ * for it rather than a color.
+ */
+/**
+ * The type an operand of a color conversion must match for the color-aware
+ * broadcast to be sound.
+ *
+ * `broadcastable<T>` admits a scalar `T` and a LIST of `T`, but not a list of
+ * lists of `T`: the nesting has to be spelled out one wrapper per level. The
+ * interpreter broadcasts to any depth, and `_SYS.bcastColor` recurses to any
+ * depth, so the type is written with several wrappers. Each wrapper only ADDS
+ * shapes — `broadcastable<broadcastable<color>>` still admits a bare `color`
+ * — so one test at the deepest spelling answers every shallower one. The
+ * depth is finite because the spelling must be; a declared color collection
+ * nested deeper than this is refused rather than guessed at.
+ */
+const NESTED_COLOR_BROADCAST_TYPE =
+  'broadcastable<broadcastable<broadcastable<broadcastable<color>>>>';
+
+function tryCompileColorBroadcast(
+  head: string,
+  color: Expression,
+  element: (temp: string) => string,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  // The broadcast route is the one color-operand route that does NOT reach
+  // `compileColorOperand`, which carries the same guard: an operand that maps
+  // element by element never passes through it. So the nesting is refused
+  // here as well, and both routes of the five conversions are covered.
+  refuseNestedColorConversion(head, color);
+  if (isFunction(color, 'Tuple')) return undefined;
+  if (color.type.matches('string')) return undefined;
+  const mayBeList =
+    color.isCollection ||
+    color.type.matches('collection<any>') ||
+    isPossiblyCollectionTypedJS(color);
+  if (!mayBeList) return undefined;
+  if (!color.type.matches(NESTED_COLOR_BROADCAST_TYPE)) {
+    if (isFunction(color, 'List')) refuseColorList();
+    throw new Error(
+      `${head}: cannot compile a color conversion over an operand that may ` +
+        'be a collection at run time and whose type does not prove a color ' +
+        'at every element position, at every depth — one color is itself an ' +
+        'array of channels, so the run-time dispatch can tell it from a ' +
+        'list of colors only where the type promises colors. Fail closed (D6).'
+    );
+  }
+  const temp = BaseCompiler.tempVar(target);
+  return `_SYS.bcastColor((${temp}) => ${element(temp)}, ${compile(color)})`;
 }
 
 /** Decline a `List` written where a color is expected. */
@@ -5246,15 +5406,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ColorToString: (args, compile) => {
     if (args.length === 0) throw new Error('ColorToString: no argument');
-    const c = compileColorOperand(args[0], compile);
+    const c = compileColorOperand('ColorToString', args[0], compile);
     if (args.length >= 2)
       return `_SYS.colorToString(${c}, ${compile(args[1])})`;
     return `_SYS.colorToString(${c})`;
   },
   ColorMix: (args, compile) => {
     if (args.length < 2) throw new Error('ColorMix: need two colors');
-    const c1 = compileColorOperand(args[0], compile);
-    const c2 = compileColorOperand(args[1], compile);
+    const c1 = compileColorOperand('ColorMix', args[0], compile);
+    const c2 = compileColorOperand('ColorMix', args[1], compile);
     if (args.length >= 3)
       return `_SYS.colorMix(${c1}, ${c2}, ${compile(args[2])})`;
     return `_SYS.colorMix(${c1}, ${c2})`;
@@ -5263,24 +5423,27 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (bg === null || fg === null)
       throw new Error('ColorContrast: need two colors');
     return `_SYS.colorContrast(${compileColorOperand(
+      'ColorContrast',
       bg,
       compile
-    )}, ${compileColorOperand(fg, compile)})`;
+    )}, ${compileColorOperand('ColorContrast', fg, compile)})`;
   },
   ContrastingColor: (args, compile) => {
     if (args.length === 0) throw new Error('ContrastingColor: no argument');
-    const bg = compileColorOperand(args[0], compile);
+    const bg = compileColorOperand('ContrastingColor', args[0], compile);
     if (args.length >= 3)
       return `_SYS.contrastingColor(${bg}, ${compileColorOperand(
+        'ContrastingColor',
         args[1],
         compile
-      )}, ${compileColorOperand(args[2], compile)})`;
+      )}, ${compileColorOperand('ContrastingColor', args[2], compile)})`;
     return `_SYS.contrastingColor(${bg})`;
   },
   ColorToColorspace: ([color, space], compile) => {
     if (color === null || space === null)
       throw new Error('ColorToColorspace: need color and space');
     return `_SYS.colorToColorspace(${compileColorOperand(
+      'ColorToColorspace',
       color,
       compile
     )}, ${compile(space)})`;
@@ -5343,30 +5506,84 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // 4-element array. `AsRgb` uses 0-1 sRGB channels (consistent across all
   // layers). `AsOklch` is the identity (canonical form).
   // -----------------------------------------------------------------------
-  AsRgb: ([c], compile) => {
+  // Each converter is `broadcastable`, so an operand that may be a LIST of
+  // colors at run time takes the color-aware map instead of the direct call
+  // (`tryCompileColorBroadcast`). The base compiler's list gates stand aside
+  // for these five heads and leave the shape to them — see
+  // `CompileTarget.collectionAwareHeads`.
+  AsRgb: ([c], compile, target) => {
     if (c === null) throw new Error('AsRgb: no argument');
-    return `_SYS.asRgb(${compileColorOperand(c, compile)})`;
+    const list = tryCompileColorBroadcast(
+      'AsRgb',
+      c,
+      (t) => `_SYS.asRgb(${t})`,
+      compile,
+      target
+    );
+    return list ?? `_SYS.asRgb(${compileColorOperand('AsRgb', c, compile)})`;
   },
-  AsHsv: ([c], compile) => {
+  AsHsv: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsv: no argument');
-    return `_SYS.asHsv(${compileColorOperand(c, compile)})`;
+    const list = tryCompileColorBroadcast(
+      'AsHsv',
+      c,
+      (t) => `_SYS.asHsv(${t})`,
+      compile,
+      target
+    );
+    return list ?? `_SYS.asHsv(${compileColorOperand('AsHsv', c, compile)})`;
   },
-  AsHsl: ([c], compile) => {
+  AsHsl: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsl: no argument');
-    return `_SYS.asHsl(${compileColorOperand(c, compile)})`;
+    const list = tryCompileColorBroadcast(
+      'AsHsl',
+      c,
+      (t) => `_SYS.asHsl(${t})`,
+      compile,
+      target
+    );
+    return list ?? `_SYS.asHsl(${compileColorOperand('AsHsl', c, compile)})`;
   },
-  AsOklab: ([c], compile) => {
+  AsOklab: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklab: no argument');
-    return `_SYS.asOklab(${compileColorOperand(c, compile)})`;
+    const list = tryCompileColorBroadcast(
+      'AsOklab',
+      c,
+      (t) => `_SYS.asOklab(${t})`,
+      compile,
+      target
+    );
+    return list ?? `_SYS.asOklab(${compileColorOperand('AsOklab', c, compile)})`;
   },
   AsOklch: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklch: no argument');
+    // The element of a color list goes through `_SYS.asOklch` rather than
+    // through the identity below: an element may be a color STRING, and the
+    // identity would hand that string back where the interpreter answers an
+    // OKLCh triple.
+    const list = tryCompileColorBroadcast(
+      'AsOklch',
+      c,
+      (t) => `_SYS.asOklch(${t})`,
+      compile,
+      target
+    );
+    if (list !== undefined) return list;
+    // A provably STRING operand is a CSS color spelling, not a color value,
+    // so the identity below would answer the string itself where the
+    // interpreter answers the OKLCh triple it names — measured on a
+    // `string`-declared symbol, which emitted the bare `_.s`.
+    if (c.type.matches('string')) return `_SYS.asOklch(${compile(c)})`;
     // Identity for a color value — it is already in the canonical form. A
     // tuple at this position is sRGB components and still has to be
     // converted. The identity case hands the parent the OPERAND's own code,
     // which may be an infix expression, so it is parenthesized like every
     // other identity lowering (`identityPassthrough`).
-    return parenthesizeIdentity(c, compileColorOperand(c, compile), target);
+    return parenthesizeIdentity(
+      c,
+      compileColorOperand('AsOklch', c, compile),
+      target
+    );
   },
 
   // Perceptual color difference (ΔE_OK).
@@ -5374,9 +5591,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (a === null || b === null)
       throw new Error('ColorDelta: need two colors');
     return `_SYS.colorDelta(${compileColorOperand(
+      'ColorDelta',
       a,
       compile
-    )}, ${compileColorOperand(b, compile)})`;
+    )}, ${compileColorOperand('ColorDelta', b, compile)})`;
   },
 
   // Euclidean distance between two tuples (any positive dimension).
@@ -6098,8 +6316,16 @@ const colorHelpers = {
     const b = rgb.b / 255;
     return rgb.alpha !== undefined ? [r, g, b, rgb.alpha] : [r, g, b];
   },
+  // `rgbToHsv` and `rgbToHsl` compute the hue from `max`/`min` comparisons,
+  // and every comparison with `NaN` is false, so a non-finite color came out
+  // of `asHsv` as `[0, NaN, NaN]` — a hue of zero, which is red. The four
+  // other conversions answer the `NaN` triple for the same input, and that
+  // triple is what the interpreter's `incompatible-type` rejection projects
+  // to on this target, so the guard is explicit here rather than left to the
+  // comparisons.
   asHsv(input: string | number[]): number[] {
     const rgb = toRgb255(input);
+    if (!finiteChannels(rgb.r, rgb.g, rgb.b)) return nonFiniteColor(rgb.alpha);
     const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
     return rgb.alpha !== undefined
       ? [hsv.h, hsv.s, hsv.v, rgb.alpha]
@@ -6107,6 +6333,7 @@ const colorHelpers = {
   },
   asHsl(input: string | number[]): number[] {
     const rgb = toRgb255(input);
+    if (!finiteChannels(rgb.r, rgb.g, rgb.b)) return nonFiniteColor(rgb.alpha);
     const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
     return rgb.alpha !== undefined
       ? [hsl.h, hsl.s, hsl.l, rgb.alpha]
@@ -6119,7 +6346,14 @@ const colorHelpers = {
       ? [lab.L, lab.a, lab.b, c.alpha]
       : [lab.L, lab.a, lab.b];
   },
-  // asOklch is identity — handled at compile time as a pass-through
+  // `AsOklch` of a color VALUE is the identity, and the compile-time
+  // pass-through covers it. This helper is for the element of a color
+  // BROADCAST (`_SYS.bcastColor`), where the element may be a color STRING
+  // that the pass-through would hand back unconverted.
+  asOklch(input: string | number[]): number[] {
+    const c = toOklch(input);
+    return c.alpha !== undefined ? [c.L, c.C, c.H, c.alpha] : [c.L, c.C, c.H];
+  },
 
   // Perceptual color difference (ΔE_OK).
   colorDelta(a: string | number[], b: string | number[]): number {
@@ -6265,6 +6499,55 @@ function bcastFn(
   ...args: unknown[]
 ): BcastValue {
   return bcastWith(true, f, args);
+}
+
+/**
+ * `bcast` for a head that consumes a COLOR VALUE whole — the color-space
+ * conversions `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab` and `AsOklch`. Applies `f`
+ * to one color, and maps over a list of colors.
+ *
+ * The generic `_SYS.bcast` cannot serve here, because it descends into any
+ * array: a color value on this target is a FLAT array of three or four
+ * channels (`_SYS.hsv` and `_SYS.rgb` answer `[L, C, H]` or `[L, C, H, a]`),
+ * so `bcast` would convert each channel of a single color as though the
+ * channel were a color of its own.
+ *
+ * The sound discriminator on this target is therefore the NESTING, not the
+ * array-ness. A color is a flat array of three or four NUMBERS, or a CSS
+ * color string; a LIST of colors is an array holding arrays or strings, which
+ * the channels of one color never are. So an array holding at least one array
+ * or string is a list, and the map recurses — a nested list of colors stays
+ * nested, as the interpreter's broadcast does. An empty array holds no
+ * channels, so it is the empty list, and the interpreter answers `Nothing`
+ * for a broadcast over an empty operand (`AsRgb([])` measured); this target
+ * spells that `NaN`, which is also what `_SYS.bcast` answers at an empty
+ * position.
+ *
+ * EVERY element is examined, not just the first. An upstream broadcast spells
+ * an absent position `NaN`, so a ragged operand reaches this helper with a
+ * number and a color side by side: `AsRgb(Hsv(u, 0.5, 0.5))` with
+ * `u = [[], [20]]` hands over `[NaN, [[L, C, H]]]`. Reading the first element
+ * alone called that whole array one color and converted it as a channel
+ * triple. A `NaN` element goes through `f` like any other element, and the
+ * converters answer the non-finite color for it — the same projection the
+ * interpreter's per-position `incompatible-type` error takes on this target.
+ *
+ * Two inputs the test still cannot tell apart, both excluded by the static
+ * type of the operand rather than by this helper. A list of plain NUMBERS at
+ * a color position reads as one color, while the interpreter broadcasts and
+ * answers an `incompatible-type` error per element; this helper is emitted
+ * only where the operand's type promises colors (`NESTED_COLOR_BROADCAST_TYPE`),
+ * and a literal list of numbers is refused at compile time
+ * (`refuseColorList`). A list whose every element is an absent `NaN` reads as
+ * one color too, because nothing in it is an array or a string; it answers
+ * one non-finite color where the interpreter answers a list of errors.
+ */
+function bcastColor(f: (c: unknown) => unknown, v: unknown): unknown {
+  if (!Array.isArray(v)) return f(v);
+  if (v.length === 0) return NaN;
+  if (v.some((e) => Array.isArray(e) || typeof e === 'string'))
+    return v.map((e) => bcastColor(f, e));
+  return f(v);
 }
 
 /**
@@ -7348,6 +7631,7 @@ function enterIntegral(): boolean {
 const SYS_HELPERS = {
   bcast,
   bcastFn,
+  bcastColor,
   // Establish the representation used by the fused numeric selection loop.
   // Scan every cell: a declaration alone cannot exclude nested or absent cells.
   numericSelectionInputs: (...arrays: unknown[]): boolean => {
@@ -9441,6 +9725,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       operators: (op) => JAVASCRIPT_OPERATORS[op],
       functions: (id) => JAVASCRIPT_FUNCTIONS[id],
       constant: (id) => JAVASCRIPT_CONSTANTS[id],
+      collectionAwareHeads: JS_COLLECTION_AWARE_HEADS,
       // Free symbols read through the vars object bound to `_` (see the
       // `_.<id>` emissions below), so a lambda parameter spelled `_` must not
       // shadow it — see `CompileTarget.varsObjectName`.

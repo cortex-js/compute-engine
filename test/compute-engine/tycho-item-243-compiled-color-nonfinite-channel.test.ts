@@ -44,6 +44,26 @@ describe('a non-finite channel', () => {
     expect(run('\\operatorname{Hsv}(90,1,1/0,0.5)')).toEqual([NaN, NaN, NaN, 0.5]);
   });
 
+  test.each(['AsRgb', 'AsHsv', 'AsHsl', 'AsOklab', 'AsOklch'])(
+    'every conversion of a non-finite color answers the NaN triple (%s)',
+    (head) => {
+      // `rgbToHsv` and `rgbToHsl` read the hue off `max`/`min` comparisons,
+      // and every comparison with `NaN` is false, so `_SYS.asHsv` answered
+      // `[0, NaN, NaN]` — a hue of zero, which is red — where the other four
+      // conversions answered the triple. The guard is now explicit in both
+      // helpers.
+      expect(run(`\\operatorname{${head}}(\\operatorname{Hsv}(90,1,1/0))`)).toEqual(
+        NAN3
+      );
+    }
+  );
+
+  test('a conversion of a non-finite color keeps the alpha slot', () => {
+    expect(run('\\operatorname{AsHsv}(\\operatorname{Hsv}(90,1,1/0,0.5))')).toEqual(
+      [NaN, NaN, NaN, 0.5]
+    );
+  });
+
   test('a free variable bound to Infinity at run time', () => {
     const r = compile(ce.parse('\\operatorname{Hsv}(90,1,v)'), { to: 'javascript' });
     expect(r.run!({ v: Infinity })).toEqual(NAN3);
