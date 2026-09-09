@@ -1295,6 +1295,21 @@ export interface CompileTarget<Expr = unknown> {
      */
     complexShaped?: Set<string>;
     /**
+     * The emitted user-function definitions (by local name) that a LAST-CALL
+     * MEMO may wrap, with what the wrapper needs: the emitted parameter names
+     * and the compiled body (an expression, or a source the statement
+     * emitter of the target has registered). A definition is recorded
+     * when its body has no observable effect (the skippability oracle of
+     * `BaseCompiler.isEmissionSkippable`), every parameter is scalar, and the
+     * body is compiled in the real lane. Whether the wrap is applied is
+     * decided when the preamble is assembled (`memoizeSharedDefinitions` in
+     * `javascript-target.ts`), because that needs the whole artifact: the
+     * number of places that reference the definition, and whether its value
+     * can differ between two calls with the same arguments. Recorded by
+     * `BaseCompiler.emitFunctionLiteralDefinition`.
+     */
+    memoizable?: Map<string, { params: ReadonlyArray<string>; body: string }>;
+    /**
      * Whether the body of user function `id` yields a single scalar when
      * every parameter holds a scalar — the memo of the result-shape oracle in
      * `javascript-value-facts.ts`. The answer depends on the callee's own

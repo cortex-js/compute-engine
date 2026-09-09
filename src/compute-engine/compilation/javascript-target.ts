@@ -8973,6 +8973,221 @@ function normalizeRunResult(r: unknown): unknown {
 }
 
 /**
+ * A pattern that matches the emitted identifier `name` as a whole word: not
+ * preceded by an identifier character or a `.` (so a member `obj.name` and
+ * a longer identifier `_name` do not match) and not followed by an
+ * identifier character (so `name$b`, the broadcast wrapper of `name`, does
+ * not match either). Textual, like every test in this preamble analysis: an
+ * emitted definition is a string by the time it is classified.
+ */
+function identifierPattern(name: string, flags = 'u'): RegExp {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\w$.])${escaped}(?![\\w$])`, flags);
+}
+
+/** A read of the vars object, `_.<id>` — the one spelling the emitted code
+ * uses for a per-call binding on the expression route (`varsObjectAccess`). */
+const VARS_OBJECT_READ = /(?<![\w$])_\.(?=[\p{L}_$])/u;
+
+/**
+ * The smallest emitted body, in characters, that a last-call memo wraps.
+ *
+ * Below this size the memo LOSES: the JavaScript engine inlines a small
+ * definition at each call site and then shares its pure subexpressions
+ * across the two inlined copies itself, while the wrapper's closure state
+ * and branches keep it from inlining at all. Measured 2026-09-09 on
+ * `g(x) := f(x) + 1` with `g(x) + f(x)` at the root, `f` a sum of `k` sine
+ * terms, per sample through the compiled runner (through a module-level
+ * splice in parentheses): a 346-character body 155 → 256 ns (96 → 147)
+ * with the memo; a 682-character body 472 → 412 ns (421 → 285); a 1354-
+ * character body 1394 → 673 ns (1191 → 540); the 2 456-character
+ * nine-distance block the memo exists for, 3.4 → 2.7 µs on its row. The
+ * emitted length stands in for the engine's inlining budget, which is what
+ * actually decides; it is the signal this pass has.
+ */
+const MEMO_MIN_BODY_LENGTH = 600;
+
+/**
+ * Wrap, in place in `registry.defs`, every emitted user-function definition
+ * that a LAST-CALL MEMO can serve: a closure that remembers the arguments
+ * and the result of its most recent call and answers a repeated call with
+ * the same arguments from that record. The definition is recorded as a
+ * candidate when it is emitted (`userFunctions.memoizable`: pure body,
+ * scalar parameters, real lane — `BaseCompiler.lastCallMemoEligible`); this
+ * pass adds the two conditions that need the whole artifact.
+ *
+ * The artifact must call the definition from inside ANOTHER definition, and
+ * from two or more places in all — counted as occurrences of its name in
+ * the emitted text: the root code, and the definitions other than the
+ * definition itself and its own call-site shims (`<name>$b`, `<name>$v`,
+ * …). Two calls with the same arguments inside one region are already
+ * merged by common-subexpression elimination, which admits pure user-
+ * function applications; what CSE cannot merge is a call inside one
+ * definition and the same call in the code that also calls that definition
+ * — `m(x, y)` inside `m2`, and again in the row that calls `m2(x, y)` —
+ * and that is the shape the memo answers. A definition called from the
+ * root only, or only by itself, is emitted exactly as before: for it the
+ * memo would add its checks to every call and answer none. So is a
+ * definition whose emitted body is shorter than `MEMO_MIN_BODY_LENGTH`:
+ * a hit on it could not save more than a miss costs.
+ *
+ * And the definition's value must depend on its arguments alone. The memo
+ * state lives in the definition's closure, so it lives as long as the
+ * preamble does: once per call of a compiled runner, but as long as the
+ * module when a consumer splices `preamble` at module level and calls
+ * `code` many times. A body that reads a per-call binding — the vars object
+ * (`_.<id>`) on the expression route, a lambda parameter on the function-
+ * literal route — or that references a definition that reads one, could then
+ * answer a call from a record made under different bindings. Such a
+ * definition is left alone. The reads are found textually, the same way
+ * `splitPreambleDefs` classifies a definition as per-call, and the
+ * dependency through other definitions is closed by iterating to a fixed
+ * point, because a mutually recursive pair is emitted in an order where
+ * the earlier one references the later one. (A folded symbol value that a
+ * body references, `_val_<id>`, is emitted into the same preamble as the
+ * memo, so the two are always evaluated together and cannot disagree.)
+ *
+ * The wrapper keeps the definition's name, arity, and `const` declaration
+ * — every call site, broadcast dispatch (`_SYS.bcastFn(_fn_f, …)`), and
+ * value-position use is unchanged. Its private names carry a `$memo`
+ * suffix; `$` cannot appear in a MathJSON symbol, so they collide with no
+ * emitted name.
+ */
+function memoizeSharedDefinitions(
+  registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+  rootCode: string,
+  perCallIdentifiers: ReadonlyArray<string>,
+  varsObject: boolean,
+  statements: ReturnType<typeof javascriptStatements>
+): void {
+  const memoizable = registry.memoizable;
+  if (memoizable === undefined || memoizable.size === 0) return;
+  const defs = registry.defs;
+  // A user-function definition (every name allocated under the `_fn_`
+  // prefix: a definition, a call-site shim, an eta-expanded built-in) is
+  // compiled against the root target and can never read a lambda parameter;
+  // only a folded symbol value (`_val_<id>`) can, and then only on the
+  // function-literal route, whose preamble sits inside the lambda body.
+  // Testing a definition's text against the parameter names would mark
+  // `f(x) := …` varying under `x ↦ f(x)` because of its own parameter `x`.
+  const userFunctionNames = new Set<string>();
+  for (const [key, name] of registry.names ?? [])
+    if (key.startsWith('_fn_')) userFunctionNames.add(name);
+  const parameterReaders = perCallIdentifiers.map((n) => identifierPattern(n));
+  const readsPerCallBinding = (name: string, code: string): boolean =>
+    (varsObject && VARS_OBJECT_READ.test(code)) ||
+    (!userFunctionNames.has(name) &&
+      parameterReaders.some((r) => r.test(code)));
+  const patterns = new Map<string, RegExp>();
+  for (const name of defs.keys()) patterns.set(name, identifierPattern(name));
+  // The definitions whose value can differ between two calls of the artifact
+  // with the same arguments, closed under "references such a definition".
+  const varying = new Set<string>();
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [name, code] of defs) {
+      if (varying.has(name)) continue;
+      const reads =
+        readsPerCallBinding(name, code) ||
+        [...varying].some((v) => patterns.get(v)!.test(code));
+      if (reads) {
+        varying.add(name);
+        changed = true;
+      }
+    }
+  }
+  const count = (text: string, pattern: RegExp): number =>
+    (text.match(pattern) ?? []).length;
+  for (const [name, entry] of memoizable) {
+    if (!defs.has(name) || varying.has(name)) continue;
+    if (entry.body.length < MEMO_MIN_BODY_LENGTH) continue;
+    const pattern = identifierPattern(name, 'gu');
+    let inDefinitions = 0;
+    for (const [other, code] of defs) {
+      if (other === name || other.startsWith(`${name}$`)) continue;
+      inDefinitions += count(code, pattern);
+    }
+    if (inDefinitions === 0) continue;
+    if (inDefinitions + count(rootCode, pattern) < 2) continue;
+    defs.set(name, memoizedDefinition(name, entry, statements));
+  }
+}
+
+/**
+ * The emitted text of the last-call memo around a definition (see
+ * `memoizeSharedDefinitions`). The body is emitted INSIDE the wrapper, not
+ * as an inner function it calls: the call indirection alone cost as much as
+ * the memo's checks (measured on `f(x) := 2x + 1`, 2026-09-09). On a call:
+ *
+ *  - an argument that is not a number, a string or a boolean — an array (a
+ *    broadcast element, a point, a collection) or a `{re, im}` record, which
+ *    compare by identity and may be mutated by the runtime helpers, and
+ *    `undefined`, which the empty record would match — bypasses the memo:
+ *    the body runs and nothing is recorded (one `typeof` per argument on a
+ *    number, the common case);
+ *  - the arguments are compared to the recorded ones by value, with `NaN`
+ *    matching `NaN` (a `NaN` input recurs in plotting, and `===` alone
+ *    would silently defeat the memo there) and `0` NOT matching `-0` (`1/x`
+ *    differs on them; the sign is tested only once `===` has matched a
+ *    zero, so a miss pays nothing for it);
+ *  - a result that is an object or a function is not recorded either, for
+ *    the same identity reason (a function may carry properties its consumer
+ *    adds), so the record only ever holds a number, a boolean, a string or
+ *    `undefined`.
+ *
+ * The record is written only after the body has produced its value, so a
+ * recursive definition never reads a half-written record: a self-call sees
+ * the record of the last call that COMPLETED, which is a correct answer for
+ * its arguments. The recorded arguments start `undefined`, which never
+ * matches a number, so no flag is needed for "no record yet".
+ *
+ * A multi-statement body (CSE temporaries in a block, a `Block` body) is
+ * registered with the statement emitter; its exits — every `return` — are
+ * rewritten to record before returning, through the same `exit` mechanism
+ * that turns the body into a function body. Every local of the wrapper is
+ * declared with `let`: a test that counts `const <name>` occurrences must
+ * keep counting one.
+ */
+function memoizedDefinition(
+  name: string,
+  entry: { params: ReadonlyArray<string>; body: string },
+  statements: ReturnType<typeof javascriptStatements>
+): string {
+  const params = entry.params.join(', ');
+  const keys = entry.params.map((_, i) => `${name}$memo_k${i}`);
+  const value = `${name}$memo_v`;
+  const scalar = `${name}$memo_s`;
+  const result = `${name}$memo_r`;
+  const isScalar = entry.params
+    .map(
+      (p) =>
+        `(typeof ${p} === 'number' || typeof ${p} === 'string' || typeof ${p} === 'boolean')`
+    )
+    .join(' && ');
+  const hit = entry.params
+    .map(
+      (p, i) =>
+        `(${p} === ${keys[i]} ? (${p} !== 0 || 1 / ${p} === 1 / ${keys[i]}) : ` +
+        `(${p} !== ${p} && ${keys[i]} !== ${keys[i]}))`
+    )
+    .join(' && ');
+  const record = entry.params.map((p, i) => `${keys[i]} = ${p}; `).join('');
+  const exit = (v: string): string =>
+    `{ let ${result} = ${v}; ` +
+    `if (${scalar} && typeof ${result} !== 'object' && typeof ${result} !== 'function') { ${record}${value} = ${result}; } ` +
+    `return ${result}; }`;
+  const body = statements?.has(entry.body)
+    ? statements.emit(entry.body, exit)
+    : exit(entry.body);
+  return (
+    `const ${name} = (() => { let ${[...keys, value].join(', ')}; ` +
+    `return (${params}) => { let ${scalar} = ${isScalar}; ` +
+    `if (${scalar} && ${hit}) return ${value}; ` +
+    `${body} }; })();`
+  );
+}
+
+/**
  * The preamble definitions of a compilation split into the ones the runner
  * may evaluate ONCE per compiled artifact (`hoisted`) and the ones that must
  * run on every call (`perCall`), each in emission order.
@@ -9003,12 +9218,9 @@ function splitPreambleDefs(
 ): { hoisted: string; perCall: string } {
   const defs = registry.defs;
   if (defs.size === 0) return { hoisted: '', perCall: '' };
-  const escape = (name: string): string =>
-    name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const identifier = (name: string): RegExp =>
-    new RegExp(`(?<![\\w$.])${escape(name)}(?![\\w$])`, 'u');
+  const identifier = (name: string): RegExp => identifierPattern(name);
   const readers = perCallIdentifiers.map(identifier);
-  if (varsObject) readers.push(/(?<![\w$])_\.(?=[\p{L}_$])/u);
+  if (varsObject) readers.push(VARS_OBJECT_READ);
   const perCallDefNames: RegExp[] = [];
   const hoisted: string[] = [];
   const perCall: string[] = [];
@@ -9719,7 +9931,18 @@ function compileToTarget(
         )
     );
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
-    // definitions as a preamble inside the lambda's own body.
+    // definitions as a preamble inside the lambda's own body. A pure
+    // definition the artifact calls from two or more places is wrapped in a
+    // last-call memo first (`memoizeSharedDefinitions`), so that both the
+    // spliced `code` and the runner below carry the same definitions.
+    if (target.userFunctions)
+      memoizeSharedDefinitions(
+        target.userFunctions,
+        body,
+        params,
+        false,
+        javascriptStatements(target)
+      );
     const userDefs = BaseCompiler.userFunctionsPreamble(target);
     // A compiled lambda is called with its declared parameters only — there is
     // no vars object in scope — so a free symbol emitted as `_.<id>` (here or
@@ -9795,7 +10018,18 @@ function compileToTarget(
   // Collect any user-defined function definitions accumulated while compiling
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // and prepend them to the preamble so their named local functions are in
-  // scope for the compiled body.
+  // scope for the compiled body. A pure definition the artifact calls from
+  // two or more places is wrapped in a last-call memo first
+  // (`memoizeSharedDefinitions`), so that the spliced `preamble` and the
+  // runner below carry the same definitions.
+  if (target.userFunctions)
+    memoizeSharedDefinitions(
+      target.userFunctions,
+      js,
+      [],
+      true,
+      javascriptStatements(target)
+    );
   const userDefs = BaseCompiler.userFunctionsPreamble(target);
   const preamble = userDefs
     ? target.preamble

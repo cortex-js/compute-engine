@@ -938,21 +938,54 @@ parameter used as a callee was substituted against the engine's function of
 the same name, and a substituted callee body never received the angular-unit
 rewrite. What remains:
 
-- **Cross-definition CSE.** The remaining 2.5× between the by-reference row
-  (about 2 µs) and the inlined row (0.8 µs) is three evaluations of the
-  nine-point block: `m2` computes the distances and calls `m`, and the row calls
-  `m` again. Sharing them needs one CSE harvest scope spanning several emitted
-  definitions. A feature for its own round, not a defect. Inlining small scalar
-  callees at call sites was measured and rejected: a size bound on the AUTHORED
-  body does not bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters
-  emitted), and making the inliner the primary route retargets 374 `_fn_*`
-  call shapes across 35 test files.
-- **A call of a user function from a definition whose parameters type `unknown`
-  goes through `_SYS.bcastFn`** (`_fn_row` calling `_fn_m`) rather than the
-  cheaper `Array.isArray` guard. The evidence that would allow a direct call
-  (`userFunctionParamsAreScalar`) exists, but that seam is governed by the
-  2026-08-30 / 2026-09-07 ruling that keeps the dispatch for inferred-type
-  arguments. A ruling question, not a bug.
+- **Cross-definition CSE: the shared block inside two definitions.** The
+  2026-09-09 last-call memo (`memoizeSharedDefinitions`, `javascript-target.ts`)
+  removed one of the three evaluations of the nine-point block per sample: the
+  row's second call of `m(x, y)` is now answered from the record of the call
+  inside `m2` (by-reference row 3.4 → 2.7 µs per sample; the inlined row is
+  1.2 µs on the same machine at the same time). The remaining 2× is the block
+  itself, computed once inside `m2` (its own inlined `d(x, y)`) and once inside
+  `m`. Sharing it means emitting the block once as a helper over `(x, y)` that
+  returns the nine distances, memoized the same way, and reading from it in
+  both bodies. Scoped 2026-09-09 and NOT built, because it needs two new
+  concepts: a CSE harvest whose region spans several emitted definitions
+  (`cse.ts` regions are per root today, and a candidate found in two bodies
+  must be materialized as a call that passes the bodies' parameters, not as a
+  `const` at a region entry), and an alignment of parameter names across the
+  bodies (`m(x, y)` and `m2(x, y)` share names by luck of authorship; `m(u, v)`
+  would not match without alpha-renaming the harvest). The memo of an ARRAY
+  result — which the helper would return — is a third question the current
+  memo deliberately declines (an array compares by identity and may be
+  mutated by its consumer). Inlining small scalar callees at call sites was
+  measured and rejected earlier: a size bound on the AUTHORED body does not
+  bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters emitted),
+  and making the inliner the primary route retargets 374 `_fn_*` call shapes
+  across 35 test files.
+- **The last-call memo declines a body that reads a per-call binding.** A
+  Desmos macro that reads a slider (`f(x) := a·x²`, `a` supplied through
+  `vars`) is emitted as `_.a` and is never memoized, because the record could
+  outlive the binding when a consumer splices the preamble at module level.
+  Extending the record's key with the values of the `_.<id>` reads the body
+  makes (found textually, the way `splitPreambleDefs` finds them) would admit
+  such bodies at one more comparison per read. Missed optimization, not a
+  defect.
+- **A POINT that reaches an untyped parameter compiles to NaN.** With
+  `p(P) := q(P)`, `q(P) := r(P)` and `r(P) := 2·P`, the application `p((a, b))`
+  binds a point to parameters nothing types: a parameter's type is inferred
+  from the uses in its own body, never from a call site, so `P` stays
+  `unknown` and the body `2·P` is emitted as scalar arithmetic over the JS
+  array a point lowers to. The compiled answer is NaN, where the interpreter
+  scales the point and answers `(2a, 2b)`. The direct call `r((a, b))` has
+  always answered NaN this way. Before the 2026-09-09 direct-call ruling the
+  two nested calls of the chain emitted a runtime broadcast, which mapped the
+  body over the point's COORDINATES and so agreed with the interpreter for a
+  body whose arithmetic is the same per coordinate; the agreement was
+  accidental, and the same chain over `P·P` answered `[9, 16]` where the
+  interpreter reports `no-product-between-points`. A body that reads the point
+  as a point (`PointX(P)`) types the parameter and is unaffected. A fix needs a
+  way for the CALL SITE to tell the callee that its argument is a point,
+  because the parameter's own type cannot say it. Pinned as it stands in
+  `test/compute-engine/compile-scalar-param-direct-call.test.ts`.
 - **The capture guard on substituted callee bodies is conservative on
   binders.** `statement.symbols` includes names bound INSIDE the callee's body
   (a `Map(p ↦ …)` binder's `p`), so a collision of such a name with an enclosing
@@ -983,6 +1016,27 @@ rewrite. What remains:
   `unknown`-typed argument could hold a collection the by-reference call would
   broadcast, so `provablyScalarArg` refuses to inline over it. This is a
   soundness guard, not a defect.
+
+### A user function that cannot be emitted, referenced as a VALUE, compiles to a broken artifact (OPEN, correctness — found 2026-09-09 while fixing the multi-clause callback)
+
+A function name in VALUE position (the callback of `Map`, `Filter`, a `Reduce`
+combiner) is emitted through `BaseCompiler.ensureUserFunctionValueRef`. When
+that returns `undefined` — the function declined emission — the symbol falls
+through to the ordinary free-symbol read `_.<name>`, and the artifact reports
+`success: true` and then throws `TypeError: _f is not a function` at run time.
+A multi-clause function whose clause parameter has no faithful JavaScript guard
+declines that way: with `type meters = number`, `function w(d: meters) { 2 }`
+and `function w(x, y) { x + y }`, `Map(w, [1, 2, 3])` compiles to
+`((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_.w)`, which throws.
+
+The same fall-through was fixed for a BUILT-IN operator name in value position
+(`Map(Sin, xs)` used to read `_.Sin`); the comment on that repair in
+`compileExpr` states the principle this case still breaks — the artifact must
+either work or be refused at compile time, so the interpreted fallback answers.
+The fix is to refuse in the value position when the symbol names a user-defined
+function whose emission declined. It is a fail-closed change: measure how many
+compile pins currently assert `success: true` for such an artifact before
+landing it.
 
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 

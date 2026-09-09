@@ -18802,6 +18802,67 @@ export class BaseCompiler {
   }
 
   /**
+   * May the emitted JavaScript definition of user function `h` be wrapped in
+   * a LAST-CALL MEMO — a closure that remembers the arguments and the result
+   * of its most recent call and answers a repeated call with the same
+   * arguments from that record instead of running the body again?
+   *
+   * The memo exists because common-subexpression elimination never crosses a
+   * definition boundary: each call of an emitted definition is a fresh
+   * evaluation of its body. On the Voronoi row of Desmos state 62urmx2dcm,
+   * `m(x, y)` is called twice per sample with the same `(x, y)` — once from
+   * inside `m2` and once from the row — so its nine-distance block ran twice
+   * per sample. The memo costs a type test and a comparison per argument on
+   * every call (measured at 5 to 7 ns per call on `f(x) := 2x + 1`,
+   * 2026-09-09) and no code growth, whichever way the artifact is spliced.
+   *
+   * A memo answer is only the answer the body would have computed when:
+   *
+   *  - running the body has no observable effect other than its value — the
+   *    skippability oracle (`isEmissionSkippable`), which refuses a draw
+   *    (`Random()`), a write, a caller-supplied implementation nothing
+   *    vouches for, and a symbol spliced from string-valued `vars` — and
+   *    none through an assigned symbol value either (`foldValueImpure`):
+   *    the oracle stops at a symbol, while the emission folds the symbol's
+   *    value into the body, so `f(x) := x + r` with `r := Random()` draws
+   *    inline and a memo would answer the second call with the first draw;
+   *  - every parameter is scalar (`userFunctionParamsAreScalar`), so every
+   *    call site is broadcast-aware and the body only ever sees one element
+   *    at a time. A collection-typed parameter binds its argument whole, and
+   *    an array compares by identity and may be rebuilt by the runtime
+   *    helpers, so such a definition would gain nothing from a memo. (The
+   *    wrapper itself still bypasses the memo at run time for any argument
+   *    that is not a plain number — a broadcast element that is an array, a
+   *    point, a `{re, im}` record — with one `typeof` test per argument.)
+   *  - the body is compiled in the real lane: a complex-shaped body returns
+   *    a `{re, im}` object, which the wrapper never records (an object may
+   *    be mutated by its consumer), so the memo would be dead weight;
+   *  - the definition takes at least one parameter (a nullary pure body is
+   *    a constant, which the fold already handles).
+   *
+   * Whether the memo is worth emitting — whether the artifact references
+   * the definition from two or more places, and whether the body reads a
+   * per-call binding that could change between two calls with the same
+   * arguments — is decided when the preamble is assembled, on the JavaScript
+   * target (`memoizeSharedDefinitions`). This predicate answers only the
+   * properties of the definition itself.
+   */
+  private static lastCallMemoEligible(
+    h: string,
+    bodyExpr: Expression,
+    params: ReadonlyArray<string>,
+    bodyTarget: CompileTarget<Expression>,
+    complexShaped: boolean
+  ): boolean {
+    if (bodyTarget.language !== 'javascript') return false;
+    if (params.length === 0 || complexShaped) return false;
+    const engine = bodyExpr.engine as unknown as ComputeEngine;
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return false;
+    if (BaseCompiler.foldValueImpure(bodyExpr)) return false;
+    return BaseCompiler.isEmissionSkippable([bodyExpr], params, bodyTarget);
+  }
+
+  /**
    * Emit `literal` once into `registry.defs` as the named local function for
    * `h` (`const _fn_h = …`) and return that local name.
    *
@@ -19002,6 +19063,16 @@ export class BaseCompiler {
             ? `const ${name} = (${params.join(', ')}) => { ${statements.functionBody(body)} };`
             : `const ${name} = (${params.join(', ')}) => ${body};`
         );
+        if (
+          BaseCompiler.lastCallMemoEligible(
+            h,
+            bodyExpr,
+            params,
+            bodyTarget,
+            complexShaped
+          )
+        )
+          (registry.memoizable ??= new Map()).set(name, { params, body });
       } finally {
         registry.compiling.delete(name);
       }

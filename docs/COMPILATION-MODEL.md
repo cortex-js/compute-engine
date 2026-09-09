@@ -133,6 +133,21 @@ Protocol calls resolve directly when static typing proves one implementation.
 Dynamic JavaScript dispatch uses the receiver's runtime nominal tag. Targets
 without the tag representation decline.
 
+Common-subexpression elimination never crosses a definition boundary: each call
+of a definition emitted by reference is a fresh evaluation of its body. On the
+JavaScript target, a definition whose body has no observable effect, whose
+parameters are all scalar, and whose value depends on its arguments alone (it
+reads no per-call binding, directly or through another definition) is wrapped
+in a last-call memo when the artifact calls it from inside another definition
+and from two or more places in all: the wrapper remembers the arguments and
+result of the most recent call and answers a repeated call with the same
+arguments from that record. Arguments are compared by value, with `NaN` equal to
+`NaN` and `0` distinct from `-0`; an argument that is not a plain number, or a
+result that is an object, bypasses the record. The record lives in the
+definition's closure, so two artifacts never share it. A definition called from
+one place, or only from the root, is emitted unchanged. The rule is implemented
+by `memoizeSharedDefinitions` in `javascript-target.ts`.
+
 ## Collections
 
 Compiled broadcasting preserves the interpreter's strict lifted regime.

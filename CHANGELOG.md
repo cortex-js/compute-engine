@@ -396,6 +396,29 @@
 
 ### Improvements
 
+- **A pure user function called from inside another user function is
+  wrapped in a last-call memo on the JavaScript target.** Common-subexpression
+  elimination never crosses a definition boundary, so a function emitted by
+  reference (`_fn_f`) ran its body again at every call. A definition whose body
+  has no observable effect, whose parameters are all scalar, and whose value
+  depends on its arguments alone now remembers the arguments and result of its
+  most recent call and answers a repeated call with the same arguments from
+  that record, when the compiled artifact calls it from inside another
+  definition and from two or more places in all and its emitted body is at
+  least 600 characters (below that size the JavaScript engine inlines the
+  definition and shares its subexpressions itself, and the memo's checks cost
+  more than they save). Arguments are compared by value, with `NaN` equal to
+  `NaN` and `0` distinct from `-0`; an argument that is not a number, a string
+  or a boolean, and a result that is an object or a function, bypass the
+  record; a body that draws `Random()`,
+  reads a per-call binding, or calls a definition that does is never
+  memoized; the record lives in the definition's own closure, so two compiled
+  artifacts never share it. Measured on the nine-point Voronoi row of a Desmos
+  state defined as user functions over `(x, y)` — `m(x, y)` is called once
+  inside `m2` and once more by the row — the by-reference row went from 3.4 to
+  2.7 µs per sample (the fully inlined row is 1.2 µs on the same machine at
+  the same time); a definition called from one place, or from the root only,
+  is emitted exactly as before.
 - **The common-subexpression cap per region is 64 (was 32).** A body that
   inlines several user functions over `(x, y)` — a Voronoi cell distance in the
   Tycho corpus — produced 208 candidates that passed the sharing threshold in
