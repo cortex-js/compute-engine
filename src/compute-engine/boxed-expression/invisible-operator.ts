@@ -11,10 +11,29 @@ import {
   isLinearAlgebraCollection,
 } from '../collection-utils.js';
 import { noteProvisionalApplication } from './provisional-application.js';
+import { numericMissingSlot } from '../../common/type/utils.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
 const LIST_TYPE = new BoxedType('list');
+
+/**
+ * Whether the operand is numeric once an absence marker is set aside: either
+ * its type is below `number`, or it is a `missing`-carrying union whose other
+ * members are all numeric (`missing | real`).
+ *
+ * A piecewise expression with no default arm — a `Which` with no literal-`True`
+ * clause, or an `If` with no else branch — types `missing | T`: the value may
+ * be absent, but when it is present it is a number. `matches('number')` alone
+ * answers `false` for such a type, because the `missing` member is not a
+ * number, and a juxtaposition operand rejected that way became a silent
+ * `Tuple` instead of a product. Stripping only the `missing` arm keeps the
+ * gate tight: `string | number` — which `couldMatch('number')` would let
+ * through — still fails and stays a `Tuple`.
+ */
+function isNumericIgnoringAbsence(x: Expression): boolean {
+  return x.type.matches('number') || numericMissingSlot(x.type.type);
+}
 
 export function canonicalInvisibleOperator(
   ops: ReadonlyArray<Expression>,
@@ -393,7 +412,7 @@ export function canonicalInvisibleOperator(
           // caught by `isLinearAlgebraCollection`/`couldBeNumericTuple`/
           // `isIndexedCollection` below.
           x.type.type === 'value' ||
-          x.type.matches('number') ||
+          isNumericIgnoringAbsence(x) ||
           // A `broadcastable<…>`-typed operand — arithmetic over an
           // unknown-return call, e.g. `(2h(x)-1)` with `h: (number) ->
           // unknown` — is a number OR an indexed collection of numbers
@@ -723,7 +742,7 @@ function combineFunctionApplications(
  */
 function isScalable(x: Expression): boolean {
   return (
-    x.type.matches('number') ||
+    isNumericIgnoringAbsence(x) ||
     x.type.matches(MATRIX_TYPE) ||
     x.type.matches(LIST_TYPE) ||
     // A `broadcastable<…>`-typed head is a number OR an indexed collection

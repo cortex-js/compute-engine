@@ -194,17 +194,15 @@ describe('finite Sum/Product still compiles and runs', () => {
       constantFold: false,
     });
     // Ten terms is past the threshold at which the unrolled terms accumulate
-    // as statements carrying a NaN exit between them, so the emission is no
-    // longer a flat `+` chain. It is still an UNROLL, which is what this
-    // pins: no loop, and no bound-finiteness guard — constant bounds are
-    // statically finite and never get one.
+    // as statements, so the emission is no longer a flat `+` chain. It is
+    // still an UNROLL, which is what this pins: no loop, and no
+    // bound-finiteness guard — constant bounds are statically finite and never
+    // get one. The between-term NaN exits are absent for a second reason: the
+    // body is the index, typed `integer`, and every term is a bare literal, so
+    // no term can be NaN and the exits would be dead.
     expect(result.code).toBe(
-      '(() => { let _tv1 = (1); if (_tv1 !== _tv1) return NaN; _tv1 += (2); ' +
-        'if (_tv1 !== _tv1) return NaN; _tv1 += (3); if (_tv1 !== _tv1) return NaN; ' +
-        '_tv1 += (4); if (_tv1 !== _tv1) return NaN; _tv1 += (5); ' +
-        'if (_tv1 !== _tv1) return NaN; _tv1 += (6); if (_tv1 !== _tv1) return NaN; ' +
-        '_tv1 += (7); if (_tv1 !== _tv1) return NaN; _tv1 += (8); ' +
-        'if (_tv1 !== _tv1) return NaN; _tv1 += (9); if (_tv1 !== _tv1) return NaN; ' +
+      '(() => { let _tv1 = (1); _tv1 += (2); _tv1 += (3); _tv1 += (4); ' +
+        '_tv1 += (5); _tv1 += (6); _tv1 += (7); _tv1 += (8); _tv1 += (9); ' +
         '_tv1 += (10); return _tv1; })()'
     );
     expect(result.code).not.toMatch(/while/);

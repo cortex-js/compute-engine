@@ -323,11 +323,16 @@ describe('Tycho item 248 — Comprehension', () => {
 describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
   it('a temporary bound at the root is read inside a comprehension body', () => {
     // Min(P) + 1 occurs three times at the root (a CSE candidate there —
-    // size 4 × two saved evaluations clears the score threshold — bound as
-    // `_cse1`) and again inside the comprehension body, in a Which arm. The
-    // root heads are real-only (`Floor`, `Ceil`, `Round`) so the expression
-    // stays in the real lane — a maybe-complex head would route the operand
-    // through the runtime real-operand guard instead of CSE.
+    // size 4 × two saved evaluations clears the score threshold) and again
+    // inside the comprehension body, in a Which arm. The root heads are
+    // real-only (`Floor`, `Ceil`, `Round`) so the expression stays in the
+    // real lane — a maybe-complex head would route the operand through the
+    // runtime real-operand guard instead of CSE.
+    //
+    // The min/max family is admitted as a candidate in its own right (a call
+    // whose runtime cost its syntax size understates), so `Min(P)` takes the
+    // first temporary and `Min(P) + 1` the second. The pass over `P` still
+    // happens exactly once, and the body reads the SUM's temporary.
     const x = ['Add', ['Min', 'P'], 1];
     const expr = ce.box([
       'Add',
@@ -345,17 +350,21 @@ describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
     ]);
     const { code, run } = js(expr);
     expect(count(code, 'Math.min(')).toBe(1);
-    expect(code).toMatch(/const _cse1 = .*Math\.min.*result\.push\(.*_cse1/);
+    expect(code).toMatch(/const _cse1 = .*Math\.min/);
+    expect(code).toMatch(/const _cse2 = _cse1 \+ 1/);
+    expect(code).toMatch(/result\.push\(.*_cse2/);
     const P = [3, 1, 2, 5];
     expect(run({ P })).toBe(2 + 2 + 2 + (0 + 2 + 2));
     expect(run({ P })).toBe(interpret(expr, { P }));
   });
 
   it('a reduction under a node the enclosing temporary already covers is not hoisted', () => {
-    // The loop body's `Floor(Min(P) + 1)` resolves its operand to the
-    // root's `_cse1` (the body keeps it under `Floor` so canonicalization
-    // does not flatten it into the sum), so hoisting `Min(P)` out of the
-    // loop would bind a pass over `P` that nothing reads.
+    // The loop body's `Floor(Min(P) + 1)` resolves its operand to the root's
+    // temporary for `Min(P) + 1` (the body keeps it under `Floor` so
+    // canonicalization does not flatten it into the sum), so hoisting
+    // `Min(P)` out of the loop would bind a pass over `P` that nothing reads.
+    // That temporary is `_cse2`: `Min(P)` is a candidate in its own right and
+    // takes `_cse1`, while the pass over `P` still happens exactly once.
     const x = ['Add', ['Min', 'P'], 1];
     const expr = ce.box([
       'Add',
@@ -370,7 +379,7 @@ describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
     ]);
     const { code, run } = js(expr);
     expect(count(code, 'Math.min(')).toBe(1);
-    expect(whileBodies(code)[0]).toContain('_cse1');
+    expect(whileBodies(code)[0]).toContain('_cse2');
     const P = [3, 1, 2, 5];
     expect(run({ P })).toBe(2 + 2 + 2 + (4 * 2 + 11));
   });

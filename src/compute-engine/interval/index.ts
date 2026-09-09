@@ -38,6 +38,8 @@ import {
   mul as _mul,
   div as _div,
   negate as _negate,
+  scale as _scale,
+  scaleDiv as _scaleDiv,
 } from './arithmetic.js';
 import {
   sqrt as _sqrt,
@@ -149,7 +151,16 @@ export {
 } from './util.js';
 
 // Arithmetic operations
-export { add, sub, mul, div, negate, _mul } from './arithmetic.js';
+export {
+  add,
+  sub,
+  mul,
+  div,
+  negate,
+  scale,
+  scaleDiv,
+  _mul,
+} from './arithmetic.js';
 
 // Elementary functions
 export {
@@ -275,6 +286,8 @@ export const IntervalArithmetic = {
   mul: _mul,
   div: _div,
   negate: _negate,
+  scale: _scale,
+  scaleDiv: _scaleDiv,
 
   // Elementary
   sqrt: _sqrt,

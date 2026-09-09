@@ -314,7 +314,7 @@ describe('GPU HANDLER CONSTANT FOLDING', () => {
       // GPU has no `cbrt`, and `pow` is NaN for a negative base. The odd-degree
       // real root is `sign(x)·|x|^(1/3)`, matching the interpreter for x < 0.
       expect(glsl.compile(ce.expr(['Root', 'x', 3])).code).toBe(
-        '(sign(x) * pow(abs(x), 0.3333333333333333))'
+        '(sign(x) * pow(abs(x), 0.33333334))'
       );
     });
   });
@@ -484,7 +484,9 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       // `complex`, so it folds to the complex principal value — the same
       // vec2(re, im) convention, and the same ruling as the JS target's
       // `complexSqrtLiteral` — rather than declining.
-      expect(gpuFold(['Sqrt', -5])).toBe(`vec2(0.0, ${Math.sqrt(5)})`);
+      expect(gpuFold(['Sqrt', -5])).toBe(
+        `vec2(0.0, ${formatFloat(Math.sqrt(5))})`
+      );
       // SUPERSEDED CONTRACT (2026-07-30 ruling). These two used to assert
       // `_gpu_nan()`, on the then-true grounds that a `Root`/`Power` with no
       // real value was typed `number`. The type handlers now narrow an
@@ -494,9 +496,13 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       // must match it. A scalar NaN there is silently scalar-broadcast into
       // `vec2(NaN, NaN)`. Do NOT restore the `_gpu_nan()` assertion.
       const r = principalComplexPow(-8, 0.25);
-      expect(gpuFold(['Root', -8, 4])).toBe(`vec2(${r.re}, ${r.im})`);
+      expect(gpuFold(['Root', -8, 4])).toBe(
+        `vec2(${formatFloat(r.re)}, ${formatFloat(r.im)})`
+      );
       const p = principalComplexPow(-2, 0.3);
-      expect(gpuFold(['Power', -2, 0.3])).toBe(`vec2(${p.re}, ${p.im})`);
+      expect(gpuFold(['Power', -2, 0.3])).toBe(
+        `vec2(${formatFloat(p.re)}, ${formatFloat(p.im)})`
+      );
       // An ODD denominator keeps a real principal root and stays
       // `number`, so it folds to that real value — `pow` alone yields
       // only NaN for a negative base.
@@ -507,7 +513,7 @@ describe('TYPE-BASED OPTIMIZATIONS', () => {
       // rational, so this folds to the real `+2^(100/3)`, matching the type
       // (`number`) and `.N()`. It used to fold to `_gpu_nan()`.
       expect(gpuFold(['Power', -2, ['Divide', 100, 3]])).toBe(
-        `${Math.pow(2, 100 / 3)}`
+        formatFloat(Math.pow(2, 100 / 3))
       );
     });
   });

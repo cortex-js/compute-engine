@@ -3,6 +3,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import {
   foldEmittedJavaScriptCode,
   foldEmittedGPUCode,
+  formatFloat,
 } from '../../src/compute-engine/compilation/constant-folding';
 
 /**
@@ -131,13 +132,13 @@ describe('the emitted-code folder', () => {
       // What the shader computes for `_gpu_pow2(0.025 * (1.0 + -0.5))`.
       const half = Math.fround(Math.fround(0.025) * Math.fround(0.5));
       expect(foldEmittedGPUCode('_gpu_pow2(0.025 * (1.0 + -0.5))')).toBe(
-        String(Math.fround(half * half))
+        formatFloat(Math.fround(half * half))
       );
       expect(foldEmittedGPUCode('2.0 * 3.14159265359 * w')).toBe(
-        `${Math.fround(2 * Math.fround(3.14159265359))} * w`
+        `${formatFloat(Math.fround(2 * Math.fround(3.14159265359)))} * w`
       );
       expect(foldEmittedGPUCode('sqrt(2.0)')).toBe(
-        String(Math.fround(Math.sqrt(2)))
+        formatFloat(Math.fround(Math.sqrt(2)))
       );
     });
 
@@ -196,7 +197,7 @@ describe('an unrolled Sum leaves no literal arithmetic', () => {
     expect(glsl).not.toMatch(/_gpu_pow2\(/);
     // The first term, computed the way the shader would compute it.
     const half = Math.fround(Math.fround(0.025) * Math.fround(0.5));
-    expect(glsl).toContain(`-${Math.fround(half * half)} + s`);
+    expect(glsl).toContain(`-${formatFloat(Math.fround(half * half))} + s`);
   });
 
   it('WGSL: no substituted index survives', () => {

@@ -95,12 +95,22 @@ describe('Tycho item 255: Arctan2 across its branch cut', () => {
     }
   });
 
-  test('Argument of a complex expression still fails closed on the interval target', () => {
+  test('Argument of a complex expression inherits the same branch cut', () => {
     // The item asks for the same contract from `Arg`. The interval lane is
-    // real-only and `Arg(x + iy)` has no lowering there, so it is refused
-    // rather than answered wrongly; this pins that a future lowering must
-    // come with its own branch-cut handling, not a bounded `interval`.
+    // real-only, so `Arg(x + iy)` compiles only by splitting the value into
+    // its two REAL parts and reading the phase off `atan2` of them — which
+    // brings this kernel's branch-cut handling with it, rather than the
+    // bounded `interval` the item refused.
     const r = compile(ce.parse('\\arg(x+iy)'), { to: 'interval-js' });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_IA.atan2(_.y, _.x)');
+    const cut = r.run!(box([-1.2, -0.8], [-0.1, 0.1]));
+    expect(cut.kind).toBe('singular');
+    expect(cut.at).toBe(0);
+    expect(cut.continuity).toBe('right');
+    const clear = r.run!(box([0.5, 1], [0.5, 1]));
+    expect(clear.kind).toBe('interval');
+    expect(clear.value.lo).toBeCloseTo(Math.atan2(0.5, 1), 12);
+    expect(clear.value.hi).toBeCloseTo(Math.atan2(1, 0.5), 12);
   });
 });

@@ -2,6 +2,27 @@
 
 ### Breaking Changes
 
+- **A false restriction answers `Missing`, not `Undefined`.** `When(e, c)`
+  — the `e \{c\}` restriction of a plot expression — evaluated to the
+  `Undefined` symbol when `c` was false. It now evaluates to `Missing`, the
+  position-preserving absent datum, which is also what a `Which` with no
+  selected clause and an `If` with no else branch answer. The element-wise
+  form masks each cell the same way: `[10,20,30]\{[1,2,3] > 2\}` is
+  `[Missing, Missing, 30]`. `Undefined` had no place in the error model (its
+  type is `unknown`) and nothing read it: the only engine reader was the
+  `Add` fold that turned it into `NaN`, and plots take the mask from
+  compiled code, where every target already emitted `NaN`. Compiled output is
+  unchanged. A consumer that tested `symbol === "Undefined"` on an evaluated
+  restriction must test `"Missing"` (or `IsMissing`, which now answers
+  `True` for a masked value).
+
+  The type of a restriction now carries the absent case: `When(5, x > 0)` is
+  `integer | missing`, and a list holding a masked cell is
+  `list<integer | missing>` rather than a full `vector<integer^3>`. Only a
+  restriction whose condition is the literal `True` keeps the bare type. A
+  consumer that gates on `type.matches("number")` must strip the `missing`
+  member first, as it already must for a default-less `Which`.
+
 - **A compiled color value on the JavaScript target is an OBJECT, not a numeric
   array.** `compile()` now answers a color as
   `{ space, c0, c1, c2, alpha }` — `space` is one of `'oklch'`, `'rgb'`,
@@ -40,6 +61,18 @@
 
 ### New Features
 
+- **`Arg` compiles on the `interval-js` target.** The phase of a complex
+  value has no interval spelling of its own, so `\arg((x - 0.3127) +
+  i(y - 0.329))` used to fail closed and fall back to the interpreter. When
+  the value is BUILT in the expression — the form `a + i·b` that
+  `Complex(a, b)` and an authored `x + iy` both canonicalize to — the phase is
+  `atan2(b, a)` over two REAL parts, which the interval domain does have, and
+  the target now emits that. The enclosure `_IA.atan2` answers is outward
+  rounded like every other kernel, and a box that straddles the branch cut on
+  the negative real axis reports the jump with the hull `[−π, π]`. An operand
+  that cannot be split — an opaque complex call such as `Sin(z)`, a
+  complex-typed symbol — still fails closed (D6).
+
 - **More fixed-width collection shapes compile to straight-line scalar code.**
   The fixed-width unroll pass (`compilation/fixed-width-unroll.ts`) now
   rewrites two shapes it left alone in 0.127.0. `Map(h, [e1, …, eN])` with a
@@ -74,6 +107,149 @@
   `PointList` through the `functions` option keeps their implementation.
 
 ### Resolved Issues
+
+- **A restriction, or a default-less selection, over a non-numeric value no
+  longer turns a juxtaposition into a `Tuple`.** `t P\{0 \le t \le 1\}`
+  over a point list `P`, `2x\{x>0\}` over an undeclared `x`, and
+  `2\,\mathrm{If}(c, x)` each parsed to a two-element `Tuple` instead of a
+  product, because the juxtaposition gates tested the raw `missing | T` type
+  and every test (`matches("number")`, `matches("list")`, `isUnknown`)
+  answers `false` for a union with a `missing` member. The gates now read
+  the operand's type with the absence marker stripped, so a `missing | T`
+  operand multiplies exactly as a `T` does; a type that fails the gate on its
+  own merits (`string | number`) still fails it.
+
+- **The value-form else-less `If` compiles.** `\mathrm{If}(x > 0, x + 1)`
+  was refused by every compile target with "If: wrong number of arguments",
+  while the interpreter answered `Missing` when the condition was false. It
+  is now lowered as the one-clause `\mathrm{Which}(x > 0, x + 1)` on every
+  target — JavaScript, Python, GLSL, WGSL and interval arithmetic — and answers
+  the codomain's absence marker (`NaN` for a number) when the condition is
+  false. A two-operand `If` whose arm is a statement (an assignment, a block,
+  a loop, a jump) keeps its guard-statement reading: plain JavaScript compiles
+  it as an `if` statement, and the other targets still decline it.
+
+- **An unrolled `Sum` or `Product` no longer promotes a radical whose radicand
+  is constant in every term to the complex lane.** `B(s, j) := \sum_{i=1}^{6}
+  (1 - j(1 - \sqrt{1 - 0.025^2(i - 0.5)^2}))\cdot s` compiled to six
+  `_SYS.csqrt` calls over `{re, im}` objects, and the whole sum was
+  accumulated as a complex pair, even though every term is plain real
+  arithmetic. A small constant range is unrolled by mapping the index NAME to
+  a literal in the emitted code, so the shape analysis still read a free index
+  and could not decide the sign of the radicand. The unrolled terms now hand
+  their index VALUES to the analysis: a radicand that folds to a non-negative
+  real takes `Math.sqrt`, and the terms and the accumulator stay real. A
+  radicand that folds negative still takes the complex kernel, a clause whose
+  terms disagree keeps the uniform lowering it had, and the enclosing
+  expression reads the same verdict the terms were emitted under.
+
+- **A product with exactly one complex factor scales the real factors once.**
+  `a·b·z·c` with a complex `z` ran every real factor through a full complex
+  multiplication step — four multiplications and two temporaries per factor,
+  computing an imaginary half known to be zero. A real factor now scales the
+  running real and imaginary parts with two multiplications, in the same
+  sequential, argument-ordered accumulation as before, so both the effect
+  order and the rounding order are unchanged: `z·a·b` with a tiny `z` and
+  two huge real factors stays finite where a product of the real factors
+  taken first would overflow. A product with two or more complex factors
+  keeps the full complex step for each of them.
+
+- **A `Range` no longer reads its element type off its UPPER bound.** An
+  element of `Range(lower, upper, step)` is `lower + k·step`, so the upper
+  bound only says where the run stops. It was still required to be an integer
+  before the elements were called integers, which typed `Range(1, 2.5)` —
+  whose elements are 1 and 2 — `indexed_collection<real>`, and typed
+  `Range(1, n)` over an `n` declared `real` the same way. Both are
+  `indexed_collection<integer>` now. The compiled code benefits directly: an
+  equality against such an index (`[… for k = 1..(N^2)]` with `N` a slider)
+  now lowers to the exact `k === 9543` instead of the tolerance test
+  `Math.abs(9543 - k) <= 1e-10`.
+
+- **An equality over an operand typed `integer | nan` compiles to `===`/`!==`
+  instead of the tolerance test.** That type is what an element read answers
+  (`P[i]`: an out-of-range index gives `NaN`). On `NaN` the exact form is the
+  one that agrees with the interpreter: `NotEqual(NaN, 3)` is `True` there and
+  `NaN !== 3` reports it, where `Math.abs(NaN - 3) > 1e-10` answers `false`.
+
+- **A comparison against a compiled loop index no longer carries a run-time
+  decidedness test.** A name an emitted loop binds to the successive values of
+  a range with a finite literal start and step holds a value the loop computes
+  itself, so it can be neither `NaN` nor the `undefined` an absent caller
+  variable reads as. Such a comparison now emits
+  `(k === 9543 ? 1 : 0)` where it emitted `((k === k) ? (k === 9543 ? 1 : 0) :
+  NaN)`.
+
+- **An unrolled `Sum`/`Product` over a body that cannot be `NaN` drops its
+  per-term `NaN` test.** The test is an early exit, not a correctness device —
+  `NaN` absorbs both `+` and `*`, so the accumulator ends at the same value
+  either way — and it is emitted after every one of the unrolled terms. It is
+  now omitted when the body's type is a `real` subtype (finite, so no `NaN`)
+  and no emitted term mentions `NaN`.
+
+- **Shader float literals print the shortest decimal that reads back as the
+  same single-precision value.** A GLSL/WGSL literal is rounded to IEEE single
+  when the shader is compiled, so digits past that are noise. The folded `2π`
+  was emitted as `6.2831854820251465`; it is now `6.2831855`. Both shader
+  number formatters share the one spelling.
+
+- **A `Sum`/`Product` over a COLLECTION declines with a message that names the
+  clause.** `Sum(2n, Element(n, [3, 5, 7]))` evaluates to 30 in the
+  interpreter, and the JavaScript emitter has no lowering for it: it builds a
+  counted loop and needs a `Limits` clause. It used to read the missing bounds
+  off the `Element` clause, which answered the `Nothing` erasure marker, and
+  fail several steps later with "Nothing: the erasure marker is not a value",
+  after two `console.assert` failures. The fallback to the interpreter is
+  unchanged; only the diagnostic is.
+
+- **The emitted-code constant fold now reaches a parenthesized group.** The
+  fold could reduce a leading run of literal factors (`2 * Math.PI * _.s` →
+  `6.283185307179586 * _.s`) but not the same run inside the parentheses a
+  quotient puts around its numerator, so `\frac{2\pi s}{P}` with `P` assigned
+  100 emitted `(2 * Math.PI * s) / 100` — at the root and inside a
+  user-function body alike. It now emits `(6.283185307179586 * s) / 100`.
+
+- **A juxtaposition with a piecewise operand that has no default arm is a
+  product again.** With `g(t) := \begin{cases} 0.5 & t < 1 \end{cases}`, the
+  call `g(0)` types `missing | real` — the value can be absent. Juxtaposition
+  read that type as non-numeric and silently produced a `Tuple`, so `2g(0)`
+  was `(2, g(0))` instead of `2 \cdot g(0)`, and `\sin(0)g(0)` was a pair
+  instead of a product. The operand test now sets the `missing` member aside
+  and asks whether what remains is numeric. A genuinely non-numeric operand
+  still makes a `Tuple`: a string, a heterogeneous tuple, and a piecewise
+  over strings (`missing | string`) are unaffected.
+
+- **`Add` and `Multiply` absorb an absence produced by evaluating an
+  operand.** In a numeric slot the `Missing` marker is normalized to `NaN`
+  (`docs/ERROR-MODEL.md` §3), and every other numeric head already did it —
+  `\sin(g(3))` is `NaN`. But `Add` and `Multiply` hold their operands, so the
+  engine's absence gate only ever saw a `Missing` written in the source:
+  `g(3) + 1` stayed `Add(Missing, 1)` and `2 \cdot g(3)` stayed
+  `Multiply(2, Missing)`, where `Add(Missing, 1)` written literally gave
+  `NaN`. Both now answer `NaN`. A collection operand still broadcasts the
+  absence one cell at a time (`Add(Missing, [3, 4])` is `[NaN, NaN]`).
+
+- **A summation or product bound that may be absent is no longer a type
+  error.** `\sum_{x=g(0)}^{3} x` reported `incompatible-type` for the bound
+  `g(0)` typed `missing | real`. Such a bound is not provably non-numeric —
+  its present values are numbers — so it is accepted, and an absence is
+  normalized at evaluation. A provably non-numeric bound (`Sum(x, (x, "lo",
+  10))`) is still refused.
+
+- **Assigning a function whose result is a union with `missing` to a symbol
+  declared with the bare type `function` no longer drops the result type to
+  `unknown`.** A piecewise head with no default arm — a `Which` with no
+  literal-`True` clause, or the else-less `If` — has the result type
+  `missing | T`. After `ce.declare('l', 'function')`, assigning such a function
+  made `l(t)` report `unknown`, while a plain numeric body correctly reported
+  `number`. The bare `function` wildcard reports `unknown` as its result type,
+  and the assign route ascribed that placeholder onto the body whenever the
+  body's own result was not a subtype of `unknown`. Because `unknown` excludes
+  the absence markers, a `missing | T` (or `nothing`) result failed that test
+  and was overwritten. A declared result of `unknown` is now never ascribed:
+  it is a placeholder the definition refines, not a contract. Consumers of the
+  call recover their types with it — `\sin(l(t))` reports `number` again
+  instead of `broadcastable<number>`, so a product around such a call
+  multiplies instead of broadcasting.
 
 - **A point bound to an UNTYPED user-function parameter no longer compiles to
   `NaN`.** With `r(P) := 2·P` and no declared type for `P`, the compiled
@@ -163,6 +339,70 @@
   `[0, NaN, NaN]` — a hue of zero, which is red — where the three other
   conversions answered the triple that the interpreter's `incompatible-type`
   rejection projects to.
+
+### Performance
+
+- **Compiled code no longer repeats a `Min`/`Max` call, the modulo template,
+  an identity factor, a point it just built, or a root it could take
+  directly.** Five code-generation improvements, all measured on the
+  JavaScript target:
+
+  - Common-subexpression elimination now binds a repeated `Min`, `Max`,
+    `ElementMin` or `ElementMax` call. A two-operand call is three syntax
+    nodes, one below the size threshold, so it was re-emitted at every
+    occurrence while the `Math.cos` beside it was bound to a temporary.
+  - `Mod(a, 1)` emits `((a - Math.floor(a)) % 1)` instead of the
+    three-operation floored template `((a % 1) + 1) % 1`: one floor, one
+    subtraction and one remainder that is exact on `[0, 1)` and only maps a
+    result that rounded up to `1` back to `0`, so the answer stays inside
+    the floored modulo's codomain. A dividend that is not a plain symbol or
+    literal, or a symbol the caller re-mapped through `vars`, goes through
+    the `_SYS.fract` helper (the same arithmetic on its one argument), so it
+    is evaluated once without a closure per evaluation. On the shader targets
+    the emitted-code fold now takes `abs` of a literal, which is exact, so a
+    `sqrt(abs(<literal>))` folds to one literal.
+  - A factor the emitted-code fold reduced to the literal `1` is dropped from
+    a product (`x · 1` is `x` for every IEEE value). A `0` factor and a `0`
+    summand are deliberately kept: a `real` type describes the value, not the
+    emitted code (an out-of-range indexed read answers NaN at run time), an
+    operand with an effect must still run, and `-0 + 0` is `+0`.
+  - `PointX`/`PointY`/`PointZ` over a point the same expression builds emit
+    the component: `PointX(PointList(a, b))` is `a`, not an index into a
+    literal array. An impure component that would be dropped stands the
+    shortcut down, and an opaque component keeps its run-time guard.
+  - A power with a root in its exponent takes that root instead of
+    `Math.pow`: `√a³` and `a^(3/2)` emit `a * Math.sqrt(a)`, and `|x|^(2/3)`
+    emits the square of `Math.cbrt(x)`. Both are cheaper and closer to the
+    true value — `Math.pow(Math.abs(x), 2/3)` is 77 units in the last place
+    off at a base of 1e200.
+
+- **A product or quotient by a constant point runs half the endpoint
+  arithmetic on the `interval-js` target.** `0.5 x` used to emit
+  `_IA.mul({ lo: 0.5, hi: 0.5 }, x)`, which computes all four endpoint
+  products of a general interval product and takes the extremes of them. Two
+  kernels answer exactly the same endpoints for a degenerate operand with two
+  multiplications (or two divisions) and no intermediate array, and the
+  emitter now uses them wherever a factor — or a divisor — is a constant
+  point: `_IA.scale(_IA.point(0.5), x)` and
+  `_IA.scaleDiv(x, _IA.point(49))`.
+
+- **A constant factor absorbs an exact rational divisor on the `interval-js`
+  target.** `2πs/100` used to multiply by an enclosure of `π` and then divide
+  by 100 on every evaluation. The whole constant `π/50` is now computed once,
+  at compile time, through the run-time library itself, so the emitted code
+  multiplies by one enclosure and does not divide. The fold is taken only
+  when the other constant factors are already inexact: `2x/49` keeps its
+  division, because `x/49` is exact at every multiple of 49 and a folded
+  `2/49` — a value no double holds — would answer an interval there instead.
+
+- **A constant interval inside a user-function body or a loop body is bound
+  once per call on the `interval-js` target.** Only a constant repeated in
+  the root expression used to be hoisted to a preamble local, so a body that
+  writes `_IA.point(2)` once allocated that object on every CALL of the
+  function — once per term of an unrolled forty-term sum — and a `\sum` past
+  the unroll limit allocated its `_IA.point(0.3)` once per iteration.
+  A constant written where the code runs repeatedly is now bound at its first
+  occurrence.
 
 ## 0.127.0 _2026-09-09_
 

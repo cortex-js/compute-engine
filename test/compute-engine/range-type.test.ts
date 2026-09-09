@@ -47,10 +47,15 @@ describe('Range dynamic type narrowing', () => {
     expect(t).not.toMatch(/integer/);
   });
 
-  test('Range with fractional upper bound types as real, not integer', () => {
+  // The UPPER bound says where the run stops; it is not an element unless it
+  // is itself `lower + k·step`, which the lower bound and the step already
+  // decide. `Range(1, 4.5)` iterates 1, 2, 3, 4 — every one an integer — so
+  // the element type must not follow the fractional bound. (This test asserted
+  // `real` until the values were checked against it.)
+  test('a fractional upper bound leaves the elements integer', () => {
+    expect(ce.expr(['Range', 1, 4.5]).evaluate().toString()).toBe('[1,2,3,4]');
     const t = String(ce.expr(['Range', 1, 4.5]).type);
-    expect(t).toContain('real');
-    expect(t).not.toMatch(/integer/);
+    expect(t).toBe('indexed_collection<integer>');
   });
 
   // Ruling L10: an infinite endpoint marks unbounded EXTENT, it does not name

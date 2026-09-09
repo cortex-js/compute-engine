@@ -9738,14 +9738,14 @@ const GPU_CONSTANTS: Record<string, string> = {
  * already does (`gpuNaN`). A `NaN` / `±∞` constant therefore routes through the
  * same `gpuNonFiniteLiteral` symbols instead of failing the compilation, which
  * is why this formatter needs to know the language.
+ *
+ * One spelling for the whole compiler: this is `formatFloat`, which the
+ * emitted-code constant fold prints its shader literals with. The two must not
+ * drift, or one constant would reach the shader in two spellings depending on
+ * which stage produced it.
  */
 export function formatGPUNumber(n: number, language?: string): string {
-  if (!Number.isFinite(n)) return gpuNonFiniteLiteral(n, language);
-  const str = n.toString();
-  if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
-    return `${str}.0`;
-  }
-  return str;
+  return formatFloat(n, language);
 }
 
 // ---------------------------------------------------------------------------

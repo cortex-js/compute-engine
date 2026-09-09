@@ -8,7 +8,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * emits the body once. Two properties have to be built into the unrolled one:
  *
  * - it stops accumulating at the first NaN, instead of evaluating every
- *   remaining term to reach an answer NaN already determined;
+ *   remaining term to reach an answer NaN already determined — when a term
+ *   can be NaN at all. The exit is an optimization, not a correctness device
+ *   (NaN absorbs both `+` and `*`), so a body whose type is a `real` subtype
+ *   and whose terms name no NaN gets none;
  * - a subexpression whose value does not depend on the index is emitted once,
  *   instead of once per term.
  *
@@ -341,11 +344,14 @@ describe('unrolled Sum/Product: the flat chain survives below the threshold', ()
       to: 'javascript',
       constantFold: false,
     });
+    // The body is the index, typed `integer` — finite in this lattice — and
+    // the terms are bare literals, so no term can be NaN and the between-term
+    // exits are dead code. The statement form itself is what this pins.
     expect(r.code).toBe(
-      '(() => { let _tv1 = (1); if (_tv1 !== _tv1) return NaN; _tv1 += (2); ' +
-        'if (_tv1 !== _tv1) return NaN; _tv1 += (3); ' +
-        'if (_tv1 !== _tv1) return NaN; _tv1 += (4); return _tv1; })()'
+      '(() => { let _tv1 = (1); _tv1 += (2); _tv1 += (3); _tv1 += (4); ' +
+        'return _tv1; })()'
     );
+    expect(nanExits(r.code!)).toBe(0);
     expect(r.run!({})).toBe(10);
   });
 });

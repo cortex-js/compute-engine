@@ -126,6 +126,59 @@ function mulRaw(
 }
 
 /**
+ * Multiply a POINT interval by an interval.
+ *
+ * A degenerate first operand `[c, c]` makes two of the four endpoint products
+ * of `_mul` duplicates of the other two, so the range is the hull of
+ * `c · b.lo` and `c · b.hi` alone. The answer is bit for bit the one `mulRaw`
+ * gives — the same two values selected by the same `Math.min`/`Math.max` —
+ * with two multiplications and no intermediate array. The compiler emits this
+ * routine wherever one factor is a constant point, which is most products of
+ * a plotted expression: a coefficient times a variable.
+ *
+ * A first operand that is not a point (a NaN endpoint included) falls back to
+ * the general product, so the routine is safe to call with any operands.
+ */
+function scaleRaw(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [aVal, bVal] = unwrapped;
+  if (aVal.lo !== aVal.hi) return ok(_mul(aVal, bVal));
+  const lo = _prod(aVal.lo, bVal.lo);
+  const hi = _prod(aVal.lo, bVal.hi);
+  return ok({ lo: Math.min(lo, hi), hi: Math.max(lo, hi) });
+}
+
+/**
+ * Divide an interval by a POINT interval.
+ *
+ * The mirror of `scaleRaw` on the divisor side: a degenerate, non-zero second
+ * operand `[c, c]` makes two of the four corner quotients of `_div`
+ * duplicates, so the range is the hull of `a.lo / c` and `a.hi / c`. A point
+ * divisor is never the zero-crossing case, so none of the `singular`,
+ * `partial`, `entire` and `empty` answers of the general division can arise
+ * here.
+ *
+ * A divisor that is zero or is not a point falls back to the general
+ * division, which owns those answers.
+ */
+function scaleDivRaw(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [aVal, bVal] = unwrapped;
+  if (bVal.lo !== bVal.hi || bVal.lo === 0) return _div(aVal, bVal);
+  const lo = _quot(aVal.lo, bVal.lo);
+  const hi = _quot(aVal.hi, bVal.lo);
+  return ok({ lo: Math.min(lo, hi), hi: Math.max(lo, hi) });
+}
+
+/**
  * Divide two intervals (or IntervalResults).
  *
  * Division by an interval containing zero produces special results:
@@ -245,6 +298,12 @@ export const sub = liftJump(outwardUnlessExact(subRaw, exactSub));
 export const negate = liftJump(negateRaw);
 export const mul = liftJump(outwardUnlessExact(mulRaw, exactMul));
 export const div = liftJump(outwardUnlessExact(divRaw, exactDiv));
+// `scale` and `scaleDiv` answer the same endpoints as `mul` and `div` for the
+// operands they specialize, so they take the same outward step under the same
+// provers: the prover reads the two operands and the answered enclosure, none
+// of which the specialization changes.
+export const scale = liftJump(outwardUnlessExact(scaleRaw, exactMul));
+export const scaleDiv = liftJump(outwardUnlessExact(scaleDivRaw, exactDiv));
 
 // The same kernels WITHOUT the outward step, for the routines of other modules
 // that are BUILT from arithmetic and take their own outward step at their own

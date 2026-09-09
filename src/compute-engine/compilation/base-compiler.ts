@@ -8,10 +8,15 @@ import type {
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import {
+  boundNamesAddedBy,
+  clearDecidedLoopIndices,
   clearIntegerRanges,
   isConstructedScalar,
+  isDecidedLoopIndex,
+  recordDecidedLoopIndex,
   recordScalarParams,
   recordIntegerRange,
+  recordScopeParent,
 } from './javascript-value-facts.js';
 import {
   javascriptStatements,
@@ -182,6 +187,32 @@ import {
  * tail of a longer identifier (`a_tv1`).
  */
 const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
+
+/**
+ * The lane a `Sum`/`Product` takes once its clause is UNROLLED and each term
+ * binds the index to a literal integer, installed by `javascript-target.ts`
+ * at module load (`installUnrolledBigOpLane`). It lives there because the
+ * unroll conditions — the constant-bound reading, the term-count limit, the
+ * iteration budget — are that emitter's, and analysis and emission must read
+ * them from ONE place or they disagree about the value shape. Importing the
+ * target here would close a cycle, which the module graph forbids.
+ *
+ * The hook answers `false` only when the index-masked analysis calls the body
+ * complex while every unrolled term is real under its own index value, and
+ * `undefined` otherwise — so it can only ever move a verdict from complex to
+ * real. Until it is installed, and for every target that installs none, the
+ * ordinary masked analysis stands.
+ */
+let unrolledBigOpLaneHook:
+  | ((expr: Expression) => boolean | undefined)
+  | undefined;
+
+/** See {@link unrolledBigOpLaneHook}. */
+export function installUnrolledBigOpLane(
+  hook: (expr: Expression) => boolean | undefined
+): void {
+  unrolledBigOpLaneHook = hook;
+}
 
 /**
  * The work `foldCostEstimate` charges for ONE numeric quadrature, in
@@ -1457,6 +1488,35 @@ export function statementBodyHead(
 type ElementLane = boolean | 'mixed' | undefined;
 
 /**
+ * One entry of `BaseCompiler._unrolledIndexValues`: the integer value each
+ * index of an unrolled `Sum`/`Product` term holds, the names an inner binder
+ * has REBOUND (whose enclosing values must therefore not be read), the names
+ * whose own binder has not been entered yet, and the fold memo the frame owns.
+ * See the field's own documentation.
+ */
+type UnrolledIndexFrame = {
+  values: ReadonlyMap<string, number>;
+  masked: ReadonlySet<string>;
+  /**
+   * The frame's own names, less the ones whose binder has already been
+   * entered. The first scope that binds a name is the binder the frame was
+   * pushed FOR; every later one rebinds it. Mutated only by
+   * `_enterUnrolledIndexBinder`, which restores what it removed.
+   */
+  pending: Set<string>;
+  memo: WeakMap<Expression, Expression | null>;
+};
+
+/**
+ * What `BaseCompiler._enterUnrolledIndexBinder` must undo: whether it pushed a
+ * masking frame, and the (frame, name) pairs whose `pending` mark it consumed.
+ */
+type UnrolledIndexBinderEntry = {
+  pushed: boolean;
+  owned: Array<[UnrolledIndexFrame, string]>;
+};
+
+/**
  * One binding minted by {@link BaseCompiler.hoistLoopInvariants}: the local
  * name, the code its right-hand side compiled to, and the representative node
  * that code came from. The node is carried so a target whose local
@@ -2115,6 +2175,14 @@ export class BaseCompiler {
     // re-entrant routes), since verdicts cached under one latch state are
     // wrong under the other.
     const prevOracleFold = BaseCompiler._oracleFoldTarget;
+    // The unrolled-term index values belong to the outermost compilation that
+    // pushed them: they name an index THAT compilation binds at the emitted-
+    // code level. A fresh outermost compilation binds nothing of the kind, so
+    // it must start with no frames — a frame a previous compilation left
+    // behind would substitute its value for a symbol that is free here.
+    // Saved here, cleared at the depth-0 entry below and restored on the way
+    // out, the same boundary `_invalidateComplexMemo` uses.
+    const prevUnrolledIndexValues = BaseCompiler._unrolledIndexValues;
     const oracleFoldEligible =
       target.language === 'javascript' &&
       target.constantFold !== false &&
@@ -2147,6 +2215,9 @@ export class BaseCompiler {
       BaseCompiler._invalidateComplexMemo();
     }
     if (BaseCompiler._compileDepth === 0) {
+      // Written only after `resolveCompileMode`, like the latches above: its
+      // throw escapes the `try`/`finally` below, which is what restores this.
+      BaseCompiler._unrolledIndexValues = [];
       BaseCompiler._complexPromotion =
         target.complexPromotion === true &&
         BaseCompiler.COMPLEX_PROMOTION_LANGUAGES.has(target.language ?? '');
@@ -2174,6 +2245,19 @@ export class BaseCompiler {
       BaseCompiler._boundVarsCtx = nextBoundCtx;
       BaseCompiler._invalidateComplexMemo();
     }
+    // A scope that binds a name an unrolled term holds a value for REBINDS
+    // it: inside that scope the name stands for the inner binder's own
+    // variable, so the term's value must not be read there (see
+    // `_enterUnrolledIndexBinder`). The names come from the binder that built
+    // the set, not from a set difference against the enclosing one: a binder
+    // over the SAME name as the one enclosing it builds a set with the same
+    // content, and the difference would be empty.
+    const rebound =
+      nextBoundCtx !== prevBoundCtx
+        ? BaseCompiler._enterUnrolledIndexBinder(
+            boundNamesAddedBy(nextBoundCtx)
+          )
+        : undefined;
     // Set on the way out of a compilation that produced code. A decline
     // leaves the `try` by THROWING, so this stays `false` there and the
     // `finally` below knows not to freeze a report for code that was never
@@ -2276,6 +2360,11 @@ export class BaseCompiler {
         BaseCompiler._boundVarsCtx = prevBoundCtx;
         BaseCompiler._invalidateComplexMemo();
       }
+      BaseCompiler._exitUnrolledIndexBinder(rebound);
+      // The depth is already decremented, so this reads as "we were the
+      // outermost compilation" and undoes the clear made at its entry.
+      if (BaseCompiler._compileDepth === 0)
+        BaseCompiler._unrolledIndexValues = prevUnrolledIndexValues;
     }
   }
 
@@ -2290,6 +2379,16 @@ export class BaseCompiler {
    * literal and every analysis answer describe the same plain number.
    */
   private static _oracleFoldTarget: CompileTarget<Expression> | undefined;
+
+  /**
+   * The latch above, for the target-side code that must ask the same question
+   * this class asks: is a constant fold available in the compilation now
+   * running, and against which target? `undefined` outside one, and for every
+   * compilation that does not fold.
+   */
+  static get oracleFoldTarget(): CompileTarget<Expression> | undefined {
+    return BaseCompiler._oracleFoldTarget;
+  }
 
   /**
    * Fold-before-shape (Tycho item 229): downgrade a `true` complexness
@@ -2325,6 +2424,19 @@ export class BaseCompiler {
     if (isFunction(expr, 'At')) return verdict;
     const v = BaseCompiler.constantFoldValue(expr, target)?.value;
     if (v !== undefined && isNumber(v) && v.im === 0) return false;
+    // Inside an unrolled `Sum`/`Product` term the index still appears as a
+    // free symbol in the expression — the term binds it at the emitted-CODE
+    // level — so the fold above declines for every subtree that mentions it.
+    // Substituting the term's own index values settles those subtrees the
+    // same way, and the emitters read the same values through
+    // `assumedRealNonNegative`, so analysis and emission stay in step.
+    const underIndices = BaseCompiler.unrolledIndexValueFold(expr);
+    if (
+      underIndices !== undefined &&
+      isNumber(underIndices) &&
+      underIndices.im === 0
+    )
+      return false;
     return verdict;
   }
 
@@ -3029,6 +3141,11 @@ export class BaseCompiler {
   static assumedRealNonNegative(expr: Expression): boolean {
     if (expr.isNonNegative === true) return true;
     if (isNumber(expr)) return expr.im === 0 && expr.re >= 0;
+    // An unrolled `Sum`/`Product` term binds its index to a literal integer,
+    // so a subtree whose sign is unknown while the index is free can still be
+    // a closed constant in the term being emitted. Consult the term's index
+    // values before the syntactic rules below, which cannot see them.
+    if (BaseCompiler.unrolledIndexValuesProveNonNegative(expr)) return true;
     if (!isFunction(expr)) return false;
     const t = expr.type?.type;
     if (t !== undefined && isNonRealNumber(t)) return false;
@@ -6476,6 +6593,53 @@ export class BaseCompiler {
                   arg
                 );
               });
+              /**
+               * Drop a factor that the emitted code spells as the exact `1` of
+               * the product above it.
+               *
+               * Such a literal is made by the target's emitted-code fold, not
+               * by the expression tree: `Cos(0)` is emitted as `Math.cos(0)`
+               * and the fold reduces that code to `1`, so no tree-level
+               * simplification can ever see the unit factor. The result agrees
+               * with the interpreter, which evaluates `Cos(0)` to the exact
+               * `1` and then drops the unit factor at canonicalization.
+               *
+               * `x * 1` returns `x` for every IEEE value — a negative zero and
+               * a NaN included — so this drop is exact. The two neighbouring
+               * folds are deliberately NOT made:
+               *
+               * - A product with a `0` factor is not collapsed to `0`. `0 · ∞`
+               *   and `0 · NaN` are `NaN`, and an operand's type is no proof
+               *   that the emitted code stays finite: a type describes the
+               *   VALUE, while an out-of-range indexed read `P[i]` typed
+               *   `integer` answers `undefined`, hence `NaN`, at run time (the
+               *   `exactIntegerComparison` comment in `javascript-target.ts`
+               *   states the same rule). The collapse also discarded operands
+               *   with an observable effect: `Sin(0) · Random()` lost its draw,
+               *   which moves every later draw of a seeded sequence.
+               * - A `0` summand is not dropped. `x + 0` is not the identity for
+               *   a negative zero: `-0 + 0` is `+0`.
+               *
+               * JavaScript only, like the leading-numeric-run fold below. On a
+               * shader target a literal factor also carries a TYPE — WGSL has
+               * no implicit conversion between `i32` and `f32` — so dropping
+               * one could leave an operand of the wrong type for the position
+               * it sits in.
+               *
+               * `codes` is rewritten in place.
+               */
+              const foldEmittedIdentityOperands = (codes: string[]): void => {
+                if (
+                  target.language !== 'javascript' ||
+                  target.constantFold === false
+                )
+                  return;
+                if (h !== 'Multiply' || op[0] !== '*') return;
+                const identity = target.number(1);
+                const kept = codes.filter((c) => c !== identity);
+                if (kept.length > 0 && kept.length < codes.length)
+                  codes.splice(0, codes.length, ...kept);
+              };
               // Fold only a leading run of emitted numeric literals. It has
               // the same left-to-right rounding as the original product and
               // also catches constants introduced by lowering, such as degrees.
@@ -6536,6 +6700,7 @@ export class BaseCompiler {
                 ratIndex < 0 ? undefined : exactRationalDivisor(args[ratIndex]);
               if (rat !== undefined && divOp !== undefined) {
                 const factors = operandCodes.filter((_, i) => i !== ratIndex);
+                foldEmittedIdentityOperands(factors);
                 foldLeadingNumericRun(factors);
                 // A leading factor of exactly one is the multiplicative
                 // identity for every IEEE value, so it is dropped. It appears
@@ -6574,6 +6739,7 @@ export class BaseCompiler {
                   }
                 }
               } else {
+                foldEmittedIdentityOperands(operandCodes);
                 foldLeadingNumericRun(operandCodes);
                 resultStr = operandCodes.join(` ${op[0]} `);
               }
@@ -7036,7 +7202,8 @@ export class BaseCompiler {
       // `null` and gets the plain conditional expression below.
       const decidability = BaseCompiler.conditionDecidability(
         args[0],
-        target.bindExpr !== undefined
+        target.bindExpr !== undefined,
+        target
       );
       if (decidability === null)
         return `((${BaseCompiler.compile(
@@ -7142,7 +7309,8 @@ export class BaseCompiler {
         // expressions below.
         const decidability = BaseCompiler.conditionDecidability(
           cond,
-          target.bindExpr !== undefined
+          target.bindExpr !== undefined,
+          target
         );
         if (decidability === null) {
           const condCode =
@@ -11274,6 +11442,26 @@ export class BaseCompiler {
             Math.min(lo.re, hi.re),
             Math.max(lo.re, hi.re)
           );
+        // Whatever the UPPER bound is, both loop shapes this clause can take
+        // bind the name to `start + step · counter` with `counter` a whole
+        // number the emitted loop produces itself (`compileCountedRange` and
+        // `compileRangeIterable` agree on that element rule). So a finite
+        // literal start and step make every value the name ever holds a
+        // finite number — never NaN, never the `undefined` an absent caller
+        // variable reads as — which is what lets a comparison against it skip
+        // its decidedness test (`mayBeUndecided`). A CALLER-MAPPED source is
+        // excluded: the emitted loop then iterates the caller's own code
+        // instead of the range.
+        if (
+          isNumber(lo) &&
+          lo.im === 0 &&
+          Number.isFinite(lo.re) &&
+          (step === undefined ||
+            (isNumber(step) && step.im === 0 && Number.isFinite(step.re))) &&
+          target.cse?.harvestOptions !== undefined &&
+          !isCallerMapped(range, target.cse.harvestOptions)
+        )
+          recordDecidedLoopIndex(bodyTarget, binder.names[0]);
       }
     }
 
@@ -11286,6 +11474,7 @@ export class BaseCompiler {
     } finally {
       // Source expressions run outside their own iteration binding.
       clearIntegerRanges(bodyTarget);
+      clearDecidedLoopIndices(bodyTarget);
     }
     for (let i = narrowedElements.length - 1; i >= 0; i--) {
       const elem = narrowedElements[i];
@@ -11575,7 +11764,11 @@ export class BaseCompiler {
       // be false, and the difference has to be read off its operands — and,
       // for a condition built from `&&`/`||`/`!`, off the Kleene combination
       // of its leaves' verdicts.
-      const decidability = BaseCompiler.conditionDecidability(expr.ops[0]);
+      const decidability = BaseCompiler.conditionDecidability(
+        expr.ops[0],
+        true,
+        condTarget
+      );
       // A `Not` over a value-shaped condition is lowered by exchanging the two
       // constants the decided tests compare against, never by an emitted `!`:
       // `!undefined` is a confident `true` (see `peelNegations`).
@@ -12158,6 +12351,228 @@ export class BaseCompiler {
   private static _binderShield: Set<string>[] = [];
 
   /**
+   * The integer value each index of the unrolled `Sum`/`Product` terms
+   * currently being emitted holds, innermost frame last, together with a
+   * per-frame memo of `unrolledIndexValueFold` (`null` records "does not
+   * fold", which a `WeakMap` miss cannot express).
+   *
+   * An unrolled term substitutes its index at the emitted-CODE level — the
+   * compile target maps the index NAME to a literal — so the expression the
+   * shape analysis reads still carries the free index symbol. Without the
+   * value a radicand such as `1 − 0.025²·(i − 0.5)²` has an unknown sign and
+   * the radical promotes to the complex lane in every term; with it, the
+   * radicand is a closed constant that folds to a positive number and the
+   * real kernel stands.
+   *
+   * The memo hangs off the INNERMOST frame because that frame is pushed after
+   * every enclosing one and popped before them: while it is live the whole
+   * stack — and therefore the substitution the answers were computed under —
+   * is fixed.
+   *
+   * A frame is keyed by index NAME, so an inner binder that binds the same
+   * name — a `Map` lambda whose parameter is also called `i`, a nested `Sum`
+   * over `i` — must not read the enclosing term's value: inside it the name
+   * stands for the inner binder's own variable. Every scope crossing goes
+   * through `_enterUnrolledIndexBinder`, which pushes a MASKING frame for such
+   * a name and hides it from the fold below for the length of that scope.
+   */
+  private static _unrolledIndexValues: UnrolledIndexFrame[] = [];
+
+  /**
+   * Emit one unrolled `Sum`/`Product` term with its indices bound to the
+   * integer values that term computes, so the shape analysis and the
+   * emitters read the same closed constants the emitted code does.
+   *
+   * The complexness memo is layered around the frame: an answer that depends
+   * on these values cannot escape the term it was computed for.
+   *
+   * A caller must push this frame ONLY when every term of the unrolled clause
+   * gets the same complexness verdict under its own values. A clause whose
+   * terms disagree would emit a plain number for one term and a `{re, im}`
+   * object for the next, and the accumulator can hold only one of the two
+   * shapes.
+   */
+  static withUnrolledIndexValues<T>(
+    values: ReadonlyMap<string, number>,
+    f: () => T
+  ): T {
+    BaseCompiler._unrolledIndexValues.push({
+      values,
+      masked: NO_NAMES,
+      pending: new Set(values.keys()),
+      memo: new WeakMap(),
+    });
+    BaseCompiler._pushComplexMemoLayer();
+    try {
+      return f();
+    } finally {
+      BaseCompiler._popComplexMemoLayer();
+      BaseCompiler._unrolledIndexValues.pop();
+    }
+  }
+
+  /**
+   * Enter a scope that binds `names`, so the unrolled-index frames stop
+   * answering for a name this scope REBINDS.
+   *
+   * A frame is keyed by index name. Without this, the compiler descending into
+   * `Σ_{i=3}^{4} Σ_{i=0}^{1} s·√(i−2)` read the outer term's `i = 3` inside the
+   * inner clause, folded the radicand to the non-negative `1` and emitted the
+   * real `Math.sqrt` — which answers NaN at the inner `i = 0`, where the
+   * interpreter answers a complex value.
+   *
+   * The FIRST scope that binds a name is the binder the frame was pushed for
+   * (the `Sum` clause whose terms are being unrolled: its analysis masks the
+   * index, and its emission binds the index in the compile target), so that
+   * one consumes the name's `pending` mark and leaves the value readable.
+   * Every later scope that binds the same name is a different binder and is
+   * masked.
+   *
+   * The caller MUST pass the returned entry to `_exitUnrolledIndexBinder` on
+   * every path out of the scope, exceptions included.
+   */
+  private static _enterUnrolledIndexBinder(
+    names: ReadonlyArray<string>
+  ): UnrolledIndexBinderEntry | undefined {
+    const frames = BaseCompiler._unrolledIndexValues;
+    if (frames.length === 0 || names.length === 0) return undefined;
+    const owned: Array<[UnrolledIndexFrame, string]> = [];
+    const masked = new Set<string>();
+    // Deduplicated: a binder lists the same name twice (`withBinderMask`
+    // passes an index as both `real` and `shielded`), and a second visit would
+    // find the `pending` mark the first one consumed already gone and mask the
+    // binder against its own frame.
+    for (const name of new Set(names)) {
+      // The innermost frame that decides the name: a mask already hides it,
+      // and there is then nothing left to hide.
+      let holder: UnrolledIndexFrame | undefined;
+      for (let i = frames.length - 1; i >= 0; i--) {
+        if (frames[i].masked.has(name)) break;
+        if (frames[i].values.has(name)) {
+          holder = frames[i];
+          break;
+        }
+      }
+      if (holder === undefined) continue;
+      if (holder.pending.delete(name)) owned.push([holder, name]);
+      else masked.add(name);
+    }
+    if (owned.length === 0 && masked.size === 0) return undefined;
+    if (masked.size > 0)
+      frames.push({
+        values: new Map(),
+        masked,
+        pending: new Set(),
+        memo: new WeakMap(),
+      });
+    return { pushed: masked.size > 0, owned };
+  }
+
+  /** Leave the scope `_enterUnrolledIndexBinder` opened. */
+  private static _exitUnrolledIndexBinder(
+    entry: UnrolledIndexBinderEntry | undefined
+  ): void {
+    if (entry === undefined) return;
+    if (entry.pushed) BaseCompiler._unrolledIndexValues.pop();
+    for (const [frame, name] of entry.owned) frame.pending.add(name);
+  }
+
+  /**
+   * The constant VALUE of `expr` once the index values of the unrolled
+   * `Sum`/`Product` terms in progress are substituted into it, or `undefined`
+   * when those values do not settle it.
+   *
+   * Answers `undefined` unless a term is being emitted, the compilation folds
+   * constants (`_oracleFoldTarget` — the same latch `_withFoldedRealOverride`
+   * reads, so a `constantFold: false` or `symbolDeps` compilation is
+   * unaffected), and the substituted expression folds. So `undefined` means
+   * "not decided here", never "not constant": the caller's own conservative
+   * rules stand.
+   *
+   * An expression that does not MENTION one of the bound indices is left
+   * undecided as well, even though substituting into it would be harmless.
+   * Such a subtree is loop-invariant, so `hoistLoopInvariants` may compile it
+   * once OUTSIDE any term's frame and let every term emit the resulting
+   * temporary; deciding it differently inside a term would make the emitted
+   * binding and the term that reads it disagree about its value shape. An
+   * index-free constant is already answered by `_withFoldedRealOverride`
+   * itself, which needs no substitution.
+   */
+  private static unrolledIndexValueFold(
+    expr: Expression
+  ): Expression | undefined {
+    const frames = BaseCompiler._unrolledIndexValues;
+    if (frames.length === 0) return undefined;
+    const target = BaseCompiler._oracleFoldTarget;
+    if (target === undefined) return undefined;
+    const innermost = frames[frames.length - 1];
+    const hit = innermost.memo.get(expr);
+    if (hit !== undefined) return hit ?? undefined;
+    const values: Record<string, number> = {};
+    // Outermost frame first, so an inner frame's value — and an inner
+    // binder's MASK, which drops the name outright — overrides an enclosing
+    // term's value for the same name.
+    for (const frame of frames) {
+      for (const name of frame.masked) delete values[name];
+      for (const [name, value] of frame.values) values[name] = value;
+    }
+    const names = new Set(Object.keys(values));
+    let result: Expression | undefined;
+    // `.subs()` is not capture-avoiding, so a node that re-binds one of the
+    // index names would have the INNER binder's own occurrences rewritten
+    // with the outer term's value. Such a node is left undecided.
+    if (
+      BaseCompiler.mentionsAnyName(expr, names) &&
+      !BaseCompiler.rebindsAnyName(expr, names)
+    ) {
+      try {
+        result = BaseCompiler.constantFoldValue(
+          expr.subs(values),
+          target
+        )?.value;
+      } catch {
+        result = undefined;
+      }
+    }
+    innermost.memo.set(expr, result ?? null);
+    return result;
+  }
+
+  /**
+   * Is `expr` a non-negative real number under the index values of the
+   * unrolled `Sum`/`Product` term being emitted? See
+   * {@link unrolledIndexValueFold} for when the question can be answered at
+   * all; `false` means "not decided here", never "negative".
+   */
+  private static unrolledIndexValuesProveNonNegative(
+    expr: Expression
+  ): boolean {
+    const v = BaseCompiler.unrolledIndexValueFold(expr);
+    return v !== undefined && isNumber(v) && v.im === 0 && v.re >= 0;
+  }
+
+  /** Does a symbol of `expr` spell one of `names`? */
+  private static mentionsAnyName(
+    expr: Expression,
+    names: ReadonlySet<string>
+  ): boolean {
+    if (isSymbol(expr)) return names.has(expr.symbol);
+    if (!isFunction(expr)) return false;
+    return expr.ops.some((op) => BaseCompiler.mentionsAnyName(op, names));
+  }
+
+  /** Does `expr`, or any node inside it, bind one of `names`? */
+  private static rebindsAnyName(
+    expr: Expression,
+    names: ReadonlySet<string>
+  ): boolean {
+    for (const name of boundVariableNames(expr))
+      if (names.has(name)) return true;
+    if (!isFunction(expr)) return false;
+    return expr.ops.some((op) => BaseCompiler.rebindsAnyName(op, names));
+  }
+
+  /**
    * Promotion verdicts recorded for broadcast closures currently being
    * emitted (`tryCompileBroadcast`): for a promotable radical/`Power` head,
    * the verdict is decided ONCE on the node-level operands — which carry the
@@ -12540,9 +12955,20 @@ export class BaseCompiler {
     if (vector.size > 0) BaseCompiler._localVector.push(vector);
     BaseCompiler._binderShield.push(new Set(binder.shielded));
     BaseCompiler._pushComplexMemoLayer();
+    // A binder analyzed INSIDE an unrolled term must not read that term's
+    // index value for a name it binds itself — the analysis and the emission
+    // would then describe different values. See
+    // `_enterUnrolledIndexBinder`, which lets the unrolled clause's own
+    // index through and masks every deeper binder of the same name.
+    const rebound = BaseCompiler._enterUnrolledIndexBinder([
+      ...binder.real,
+      ...binder.shielded,
+      ...(binder.complex ?? []),
+    ]);
     try {
       return fn();
     } finally {
+      BaseCompiler._exitUnrolledIndexBinder(rebound);
       BaseCompiler._binderShield.pop();
       if (vector.size > 0) BaseCompiler._localVector.pop();
       BaseCompiler._localComplex.pop();
@@ -12724,6 +13150,20 @@ export class BaseCompiler {
     // analysis into the operand recursion and report complex. See
     // `_realOnlyHelperLookup` for the measured disagreement.
     if (BaseCompiler.isRealOnlyHelperHead(expr.operator)) return false;
+    // A `Sum`/`Product` whose clause the target UNROLLS answers from the
+    // terms the target will actually emit: each term binds the index to a
+    // literal integer, which can prove a radicand non-negative that has an
+    // unknown sign while the index is free. The hook and the emitter read one
+    // set of unroll conditions, so parent and emission agree on the value
+    // shape — the invariant compiled correctness rests on.
+    if (
+      (expr.operator === 'Sum' || expr.operator === 'Product') &&
+      unrolledBigOpLaneHook !== undefined &&
+      BaseCompiler._oracleFoldTarget !== undefined
+    ) {
+      const lane = unrolledBigOpLaneHook(expr);
+      if (lane !== undefined) return lane;
+    }
     // A `Sum`/`Product` over a COLLECTION (no indexing set) folds either with
     // the raw real operator or with the shape-agnostic combiner wrapped in
     // the complex lift (`collectionFoldsReal`); its value is complex-shaped
@@ -14174,10 +14614,20 @@ export class BaseCompiler {
    * An operand that does not hold a number — a string, a list — is never the
    * NaN value, and neither is a complex one: the JavaScript target represents
    * it as a `{ re, im }` object. Neither needs a test.
+   *
+   * The one numeric exemption is a name the emitted code itself binds to the
+   * successive values of a range with a finite literal start and step
+   * (`isDecidedLoopIndex`): the loop computes every value it ever holds, so it
+   * is a finite number at every read and no caller can leave it out.
    */
-  private static mayBeUndecided(expr: Expression): boolean {
+  private static mayBeUndecided(
+    expr: Expression,
+    target?: CompileTarget<Expression>
+  ): boolean {
     const t = expr.type;
     if (!t || !t.couldMatch('number')) return false;
+    if (isSymbol(expr) && isDecidedLoopIndex(expr.symbol, target?.boundVars))
+      return false;
     return !BaseCompiler.isComplexValued(expr);
   }
 
@@ -14210,9 +14660,10 @@ export class BaseCompiler {
    */
   static conditionDecidability(
     cond: Expression,
-    canBind = true
+    canBind = true,
+    target?: CompileTarget<Expression>
   ): ConditionNode | null {
-    const node = BaseCompiler.conditionNode(cond, canBind);
+    const node = BaseCompiler.conditionNode(cond, canBind, target);
     if (node === null || BaseCompiler.isDecidedByConstruction(node))
       return null;
     return node;
@@ -14228,7 +14679,8 @@ export class BaseCompiler {
    */
   private static conditionNode(
     cond: Expression,
-    canBind: boolean
+    canBind: boolean,
+    target?: CompileTarget<Expression>
   ): ConditionNode | null {
     if (isSymbol(cond, 'True') || isSymbol(cond, 'False'))
       return {
@@ -14245,11 +14697,11 @@ export class BaseCompiler {
     // `!` over the condition itself, which would turn an undecided value into
     // a confident `true`.
     if (h === 'Not' && cond.nops === 1) {
-      const inner = BaseCompiler.conditionNode(cond.ops[0], canBind);
+      const inner = BaseCompiler.conditionNode(cond.ops[0], canBind, target);
       return inner === null ? null : { ...inner, negate: !inner.negate };
     }
     if (h === 'And' || h === 'Or')
-      return BaseCompiler.connectiveNode(cond, h, canBind);
+      return BaseCompiler.connectiveNode(cond, h, canBind, target);
     if (!BaseCompiler.BRANCH_RELATIONS.has(h))
       return { negate: false, test: { kind: 'value', expr: cond } };
     // The operands are named again inside the test. An operand with effects
@@ -14276,7 +14728,9 @@ export class BaseCompiler {
       test: {
         kind: 'operands',
         expr: cond,
-        operands: cond.ops.filter((op) => BaseCompiler.mayBeUndecided(op)),
+        operands: cond.ops.filter((op) =>
+          BaseCompiler.mayBeUndecided(op, target)
+        ),
       },
     };
   }
@@ -14305,13 +14759,14 @@ export class BaseCompiler {
   private static connectiveNode(
     cond: Expression & FunctionInterface,
     op: 'And' | 'Or',
-    canBind: boolean
+    canBind: boolean,
+    target?: CompileTarget<Expression>
   ): ConditionNode | null {
     if (cond.nops === 0) return null;
     const operands: ConditionNode[] = [];
     for (const operand of cond.ops) {
       if (operand.type.matches('collection<any>')) return null;
-      const node = BaseCompiler.conditionNode(operand, canBind);
+      const node = BaseCompiler.conditionNode(operand, canBind, target);
       if (node === null) return null;
       operands.push(node);
     }
@@ -21489,6 +21944,12 @@ export class BaseCompiler {
    * user-function reference to capture — even when the binding form resolves
    * the name to non-identity code. See finding A2. Empty `names` returns the
    * existing set unchanged (no allocation).
+   *
+   * The new set records which set it extends and which names it adds
+   * (`recordScopeParent`). A fact keyed on a bound-variable set — a loop
+   * index whose values the emitted code produces itself — is then still
+   * readable from inside a nested binder, while a name that nested binder
+   * rebinds stops at its own frame.
    */
   static withBoundNames(
     target: CompileTarget<Expression>,
@@ -21498,6 +21959,7 @@ export class BaseCompiler {
     if (nonEmpty.length === 0) return target.boundVars;
     const s = new Set(target.boundVars);
     for (const n of nonEmpty) s.add(n);
+    recordScopeParent(s, target.boundVars, nonEmpty);
     return s;
   }
 

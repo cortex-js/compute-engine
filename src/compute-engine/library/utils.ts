@@ -13,6 +13,7 @@ import {
 import type { Type } from '../../common/type/types.js';
 import {
   collectionElementType,
+  numericMissingSlot,
   resolveTypeForCompilation,
 } from '../../common/type/utils.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
@@ -266,11 +267,28 @@ function hasNonZeroImaginaryPart(expr: Expression): boolean {
   return !Number.isNaN(im) && im !== 0;
 }
 
+/**
+ * Whether a `Limits` bound is ABSENT: the `Missing` symbol itself, or a closed
+ * pure expression that evaluates to it — a piecewise with no default arm whose
+ * conditions all fail, `Σ_{x=g(3)}^{3} x` with `g(t) := {0.5 if t < 1}`.
+ * Such a bound is not symbolic (nothing is left to resolve), so the big
+ * operator does not stay unevaluated: a numeric slot normalizes an absence to
+ * `NaN` (`docs/ERROR-MODEL.md` §3), and `classifyBigopDomain` reports it as
+ * its own verdict so the operator can answer `NaN`. A bound with free
+ * variables or an impure bound is left to the symbolic classification.
+ */
+function absentBigopBound(bound: Expression): boolean {
+  if (isSymbol(bound, 'Missing')) return true;
+  if (!isFunction(bound)) return false;
+  if (bound.unknowns.length > 0 || !bound.isPure) return false;
+  return isSymbol(bound.evaluate(), 'Missing');
+}
+
 export function classifyBigopDomain(
   body: Expression | undefined,
   indexes: ReadonlyArray<Expression>,
   ce: ComputeEngine
-): 'finite' | 'numeric' | 'symbolic' {
+): 'finite' | 'numeric' | 'symbolic' | 'absent' {
   let infinite = false;
   const indexNames = new Set<string>();
 
@@ -298,6 +316,11 @@ export function classifyBigopDomain(
       // symbolic. Without this check `normalizeIndexingSet` silently
       // substitutes its default iteration window for the unusable bound, so
       // `Sum(k, [k, 1, n])` evaluated as if `n` were 10001 (→ 50015001).
+      // An absent bound is decided before the symbolic test: its numeric
+      // reading is `NaN` too, which the symbolic test would mistake for an
+      // unresolved symbol and leave the operator unevaluated.
+      if (absentBigopBound(idx.op2) || absentBigopBound(idx.op3))
+        return 'absent';
       const symbolicBound = (b: Expression) =>
         !(isSymbol(b) && b.symbol === 'Nothing') &&
         Number.isNaN(bigopBoundValue(b));
@@ -1799,6 +1822,13 @@ export function canonicalLimits(
  * boolean) with a type error so the enclosing big-op stays symbolic instead of
  * silently coercing it — e.g. `Sum(x, (x, "lo", 10))` must not read "lo" as 1
  * and evaluate to 55.
+ *
+ * A bound that may be ABSENT is accepted too: a piecewise expression with no
+ * default arm — a `Which` with no literal-`True` clause, or an `If` with no
+ * else branch — types `missing | real`, which is not provably non-numeric.
+ * Its present values are numbers, and when it is absent the numeric slot
+ * normalizes the absence to `NaN` at evaluation (`docs/ERROR-MODEL.md` §3);
+ * a type error at boxing would blame the bound instead.
  */
 function checkBound(bound: Expression | null): Expression | null {
   if (bound === null) return null;
@@ -1807,7 +1837,7 @@ function checkBound(bound: Expression | null): Expression | null {
   if (bound.isNumber) return bound;
   const t = bound.type;
   if (t.isUnknown || t.type === 'any') return bound;
-  if (t.matches('number')) return bound;
+  if (t.matches('number') || numericMissingSlot(t.type)) return bound;
   return bound.engine.typeError('number', t, bound);
 }
 

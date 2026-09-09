@@ -147,10 +147,12 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
     const ce = degEngine();
     const glsl = ce._getCompilationTarget('glsl')!;
     expect(glsl.compile(ce.parse('\\sin(x)')).code).toContain(
-      'sin(0.017453292519943295 * x)'
+      // Shader literals print the shortest decimal that reads back as the
+      // same single-precision value: `Math.fround(π/180)` is `0.017453292`.
+      'sin(0.017453292 * x)'
     );
     expect(glsl.compile(ce.parse('\\arctan(x)')).code).toContain(
-      '57.29577951308232 * atan(x)'
+      '57.29578 * atan(x)'
     );
   });
 

@@ -64,7 +64,10 @@ describe('javascript: the runtime spelling matches the fold', () => {
 
   test('another base keeps the quotient of natural logarithms', () => {
     expect(js('\\log_{3}(p)', { p: 9 }).code).toBe('(Math.log(_.p) / Math.log(3))');
-    expect(js('\\log_{p}(8)', { p: 2 }).code).toBe('(Math.log(8) / Math.log(_.p))');
+    // The numerator is a closed constant, so the emitted-code fold writes
+    // its value (the same `Math.log(8)` the runtime would compute); the
+    // denominator stays the natural logarithm of the run-time base.
+    expect(js('\\log_{p}(8)', { p: 2 }).code).toBe('(2.0794415416798357 / Math.log(_.p))');
   });
 });
 

@@ -168,10 +168,13 @@ describe('Tycho item 218: the zip form of Map compiles over symbolic sources (ja
 });
 
 describe('Tycho item 218: a parameter annotation is checked against ITS source, position by position', () => {
-  // `Range(1, K)` with `K: integer` types `indexed_collection<integer>`;
-  // with `N: number` it types `indexed_collection<number>`, which does not
-  // provably satisfy an `integer` annotation — the same D6 decline the unary
-  // form gives (`BaseCompiler.assertCallbackAnnotations`).
+  // `Range(1, K)` with `K: integer` types `indexed_collection<integer>`.
+  // A range's element type comes from its lower bound and step only — the
+  // upper bound just says where the run stops — so `Range(2, N)` with
+  // `N: number` is still integer-valued, while `Range(2.5, N)` types
+  // `indexed_collection<real>`, which does not provably satisfy an `integer`
+  // annotation — the same D6 decline the unary form gives
+  // (`BaseCompiler.assertCallbackAnnotations`).
   function annotated(
     a: string | undefined,
     b: string | undefined
@@ -204,7 +207,7 @@ describe('Tycho item 218: a parameter annotation is checked against ITS source, 
       'Map',
       annotated('number', 'integer'),
       ['Range', 1, 'K'],
-      ['Range', 2, 'N'],
+      ['Range', 2.5, 'N'],
     ]);
     expect(r.success).toBe(false);
     expect(r.diagnostic?.message).toMatch(/callback parameter 'b'/);

@@ -21,6 +21,10 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import {
+  nextDown,
+  nextUp,
+} from '../../src/compute-engine/numerics/numeric';
 
 const ce = new ComputeEngine();
 
@@ -62,8 +66,21 @@ function count(haystack: string, needle: string): number {
  * order of operations is still accepted. See
  * `compile-interval-constant-enclosure.test.ts` for the soundness properties
  * the outward rounding buys.
+ *
+ * `ulpSlack` lets an endpoint of the folded result sit that many ulps INSIDE
+ * the structural one. It is for the folds that REASSOCIATE — a constant
+ * factor absorbing the rational divisor of its product turns `π·(x+5)/10`
+ * into `(π/10)·(x+5)`, which reaches the same real value through a different
+ * chain of outward roundings and can land an endpoint an ulp tighter. Both
+ * results still enclose the real value, because each operation of either
+ * chain rounds outward. It stays 0 for an order-preserving fold, where a
+ * tighter endpoint would mean the fold baked a point instead of an enclosure.
  */
-function expectEncloses(folded: unknown, reference: unknown): void {
+function expectEncloses(
+  folded: unknown,
+  reference: unknown,
+  ulpSlack = 0
+): void {
   const boundOf = (v: unknown): { lo: number; hi: number } => {
     const r = v as {
       value?: { lo: number; hi: number };
@@ -77,8 +94,13 @@ function expectEncloses(folded: unknown, reference: unknown): void {
   );
   const f = boundOf(folded);
   const s = boundOf(reference);
-  expect(f.lo).toBeLessThanOrEqual(s.lo);
-  expect(f.hi).toBeGreaterThanOrEqual(s.hi);
+  const inward = (x: number, dir: -1 | 1): number => {
+    let v = x;
+    for (let i = 0; i < ulpSlack; i++) v = dir < 0 ? nextUp(v) : nextDown(v);
+    return v;
+  };
+  expect(f.lo).toBeLessThanOrEqual(inward(s.lo, -1));
+  expect(f.hi).toBeGreaterThanOrEqual(inward(s.hi, 1));
   const scale = Math.max(1, Math.abs(s.lo), Math.abs(s.hi));
   expect(f.hi - f.lo - (s.hi - s.lo)).toBeLessThan(scale * 1e-12);
 }
@@ -128,12 +150,17 @@ describe('Tycho item 269: sound constant folding on the interval target', () => 
   test('a constant prefix of an n-ary chain folds although it is not a node', () => {
     // `Multiply(0.1, Pi, x + 5)` lowers as `mul(mul(0.1, π), x + 5)`; the
     // inner pair is an emission-time intermediate, folded by the chain.
+    // The exact rational factor 1/10 is absorbed into that constant, so the
+    // whole of `π/10` is one literal and no division survives.
     const r = compileInterval('\\frac{\\pi (x + 5)}{10}');
     expect(r.code).not.toContain('Math.PI');
     expect(count(r.code, '_IA.mul(')).toBe(1);
+    expect(r.code).not.toContain('_IA.div(');
     const structural = compileStructural('\\frac{\\pi (x + 5)}{10}');
     const x = { lo: 1, hi: 1.5 };
-    expectEncloses(r.run({ x }), structural.run({ x }));
+    // Reassociating: `(π/10)·(x+5)` where the structural code computes
+    // `(π·(x+5))/10` — see the `ulpSlack` note on `expectEncloses`.
+    expectEncloses(r.run({ x }), structural.run({ x }), 2);
   });
 
   test('a CSE temporary bound to a constant is folded too', () => {
@@ -249,7 +276,9 @@ describe('Tycho item 269: CSE and loop-invariant hoisting in an interval Sum', (
     );
     for (const lo of [-5, -2.3, 0, 1.7, 4.9]) {
       const x = { lo, hi: lo + 0.001 };
-      expectEncloses(r.run({ x }), structural.run({ x }));
+      // The `π(x+5)/10` inside the cosine reassociates — see the `ulpSlack`
+      // note on `expectEncloses`.
+      expectEncloses(r.run({ x }), structural.run({ x }), 2);
     }
   });
 

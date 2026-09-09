@@ -3390,6 +3390,21 @@ export function reconcileFunctionLiteralReturn(
   const declaredResult = functionResult(declaredType);
   if (declaredResult === undefined) return literal;
 
+  // A declared result of `unknown` is a PLACEHOLDER the definition refines,
+  // never a contract to ascribe. It is what the bare `function` wildcard
+  // reports, and what a `(…) -> unknown` declaration still holds when
+  // `refineDeclaredPlaceholders` found nothing in the literal to adopt.
+  // Ascribing it would REPLACE the body's own inferred result with `unknown`,
+  // the opposite of the refinement this route exists to perform.
+  //
+  // The covariant test below cannot catch this by itself: `unknown` excludes
+  // the absence markers, so a body result that contains `missing` or `nothing`
+  // — the type an else-less `If` or a default-less `Which` produces — is not a
+  // subtype of `unknown` and failed that test, while a body typing `number`
+  // passed and was left alone. The symbol therefore reported `unknown` for a
+  // piecewise body and the concrete type for a plain one.
+  if (declaredResult === 'unknown') return literal;
+
   // Respect an author-supplied return ascription. A full-signature marker with
   // a wide result declares no return type but is still the author's ascription
   // — never overwrite it with the declaration's return type.

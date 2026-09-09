@@ -93,6 +93,29 @@ and diagnostic.
 Unknown-sign radical operations are the promotion trigger. Real-only kernels
 guard and project only where the model explicitly permits it.
 
+A `Sum` or `Product` over a small constant range is unrolled by mapping the
+index NAME to a literal in the emitted code, so the analysis reads a body in
+which the index is still a free symbol. Each unrolled term therefore also
+hands the analysis its own index VALUES: a subtree that mentions the index and
+folds to a real constant under those values is real-emitted, which keeps a
+radical such as `√(1 − 0.025²(i − 0.5)²)` on the real kernel in every term.
+
+Three conditions hold this to the shape invariant. The clause must have a
+single indexing set with constant bounds inside the unroll limit, so the
+terms the analysis reads are the terms the emitter writes. Every term must be
+real under its own value, because the terms feed ONE accumulator, which holds
+plain numbers or `{re, im}` objects and never a mix; a clause whose terms
+disagree keeps the index-masked verdict and its uniform lowering. And the
+question is asked in one place — the target's `unrolledClauseLane` — which
+both the emitter and `isComplexValued`'s answer for the whole `Sum` read, so
+the enclosing expression expects the shape the terms produce.
+
+A subtree that does NOT mention the index is left to the ordinary
+fold-before-shape rule, because loop-invariant hoisting may compile it once
+outside any term. The whole mechanism is inert wherever the compilation does
+not fold constants (`constantFold: false`, a `symbolDeps` capture, a
+non-JavaScript target).
+
 A real-only head (an ordering comparison, `Floor`, `Mod`, `Min`, `Erf`, …)
 over an operand that may be complex at run time takes the runtime rule in the
 `auto` and `complex` modes: the operand is bound once, the head's real

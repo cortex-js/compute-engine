@@ -198,7 +198,10 @@ import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
-import { runtimeConformanceError } from './validate.js';
+import {
+  hasAbsentScalarOperand,
+  runtimeConformanceError,
+} from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
@@ -4627,24 +4630,14 @@ export class BoxedFunction
       //
       if (def instanceof _BoxedOperatorDefinition) {
         const behavior = def.resolvedMissingBehavior;
-        // The gate fires on the `Missing` SYMBOL only: a `NaN` operand already
-        // propagates through numeric evaluation natively (and some operators —
-        // e.g. `Rgb` — give a literal `NaN` operand a bespoke meaning), so it
-        // must NOT be hijacked here.
+        // The gate fires on the `Missing` SYMBOL only, and only when no
+        // operand is collection-shaped: both conditions live in
+        // `hasAbsentScalarOperand` (`validate.ts`), which the async twin
+        // (step 3a) and the lazy `Add`/`Multiply` handlers share, so the
+        // three routes decide the same question the same way.
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
-          tail.some((x) => isSymbol(x, 'Missing')) &&
-          // "No collection operand" must be read as collection-SHAPED, not as
-          // the `isCollection` CAPABILITY: an operand declared `list<number>`
-          // with no value yet is destined to broadcast, but cannot be
-          // enumerated now. Testing only `isCollection` fired the scalar gate
-          // for it, so `Add(Missing, L)` committed a scalar `NaN` where the
-          // same expression gives `[NaN, NaN]` once `L` is assigned. With the
-          // disjunct the gate stands down and the application stays symbolic
-          // until the value arrives, which is the honest undecided answer.
-          // This test must stay in lockstep with its twin in `evaluateAsync`
-          // (step 3a) — the two gates decide the same question on two routes.
-          !tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+          hasAbsentScalarOperand(tail)
         ) {
           if (behavior === 'reject')
             return this.engine.error([
@@ -5418,8 +5411,7 @@ export class BoxedFunction
         const behavior = def.resolvedMissingBehavior;
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
-          tail.some((x) => isSymbol(x, 'Missing')) &&
-          !tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+          hasAbsentScalarOperand(tail)
         ) {
           if (behavior === 'reject')
             return this.engine.error([

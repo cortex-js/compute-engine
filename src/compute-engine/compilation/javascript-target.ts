@@ -7,6 +7,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
+import { isCallerMapped } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
@@ -202,6 +203,7 @@ import {
   isProvablyStringOperand,
   isProvablyNonTupleCollectionParticipant,
   isProvablyTupleParticipant,
+  installUnrolledBigOpLane,
   pointHasBroadcastComponent,
   unfaithfulComparisonAggregate,
   unionAdmitsIndexedCollection,
@@ -646,26 +648,31 @@ function assertNoMixedStringOrdering(
  * coarsening the user asked for (it makes 3 and 4 equal), so the exact form is
  * not used there.
  *
- * The two forms also agree on `NaN`, the value an `integer`-typed lowering can
- * still produce at run time (an out-of-range element read, a `0/0`):
- * `NaN === NaN` is false, and `Math.abs(NaN - NaN) <= tol` is false as well,
- * because every comparison against `NaN` is false. They agree on the two
- * signed zeros too: `-0 === 0` is true, and `Math.abs(-0 - 0) <= tol` is true.
+ * An operand whose type carries a `nan` arm beside the integer one is admitted
+ * as well. `NaN` is what an out-of-range element read (`P[i]`) or a `0/0`
+ * answers, and on it the exact form is the one that agrees with the
+ * interpreter: `Equal(NaN, 3)` is `False` there, and both `NaN === 3` and
+ * `Math.abs(NaN - 3) <= tol` are `false`; `NotEqual(NaN, 3)` is `True` there,
+ * which `NaN !== 3` reports and the tolerance test does NOT — every comparison
+ * against `NaN` is false, so `Math.abs(NaN - 3) > tol` answers `false`. The
+ * two forms agree on the two signed zeros: `-0 === 0` is true, and
+ * `Math.abs(-0 - 0) <= tol` is true.
  *
  * The heads that carry an `integer` result type — and so take this form — are
- * `Sign`, `Floor`, `Ceil`, `Round`, `Length`, an integer literal, and a
- * `Sum`/`Product` index. The Tycho code-generation audit of 2026-09-08
- * measured 49 tolerance tests between such operands.
+ * `Sign`, `Floor`, `Ceil`, `Round`, `Length`, an integer literal, a
+ * `Sum`/`Product` index, and an index a comprehension binds over an integer
+ * range. The Tycho code-generation audit of 2026-09-08 measured 49 tolerance
+ * tests between such operands.
  */
 function exactIntegerComparison(
   operands: ReadonlyArray<Expression>,
   tolerance: number
 ): boolean {
+  const integerOrNaN = (a: Expression): boolean =>
+    BaseCompiler.isIntegerValued(a) || a.type?.matches('integer | nan') === true;
   return (
     tolerance < 1 &&
-    operands.every(
-      (a) => BaseCompiler.isIntegerValued(a) && !BaseCompiler.isComplexValued(a)
-    )
+    operands.every((a) => integerOrNaN(a) && !BaseCompiler.isComplexValued(a))
   );
 }
 
@@ -1423,6 +1430,63 @@ function scalarIfScalarBody(
 }
 
 /**
+ * The emitted code for the `idx`-th component of a SYNTACTIC point
+ * constructor — `PointList`, `Tuple`, or the flat `List` spelling of a point
+ * — or `undefined` when the operand is not one of those, has too few
+ * components, or holds work that must still run.
+ *
+ * `PointX(PointList(a, b))` built the whole point and then indexed the literal
+ * array straight back out of it — `([_SYS.pointSlot(_.a), _SYS.pointSlot(_.b)]
+ * [0] ?? NaN)`, measured at sixteen sites by the Tycho code-generation audit
+ * of 2026-09-09. The component is right there in the operand, so emit it.
+ *
+ * Three properties of the long form are kept. `PointList` wraps a component
+ * whose type does not prove it is a number in `_SYS.pointSlot`, which answers
+ * `NaN` when the value turns out to be an array; that guard belongs to the
+ * component, so the shortcut keeps it. The interpreter evaluates every operand
+ * of the constructor, so a component this shortcut would drop may not carry an
+ * observable evaluation — an impure component (a `Random()` draw), or one
+ * mentioning a symbol the caller re-mapped through `vars` (whose source this
+ * compiler never sees and cannot judge), stands the shortcut down. And the
+ * `?? NaN` absence suffix is kept for whatever the long form would have given
+ * it (`pointComponentAbsence`, keyed on the coordinate's domain): the
+ * component may itself evaluate to `undefined` — a `vars` entry the caller
+ * left out of a `run()` call — and `NaN` is the ABI's absence marker. A
+ * component that is a number literal cannot be absent and takes no suffix.
+ *
+ * The shortcut also stands down when the caller supplied its own
+ * implementation of the constructor's head: the point is then built by source
+ * this compiler never sees, and reading a component off the operand list is
+ * not what that source does.
+ */
+function pointConstructorComponent(
+  arg: Expression,
+  idx: number,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>,
+  coord: Type | undefined
+): string | undefined {
+  if (!isFunction(arg)) return undefined;
+  const h = arg.operator;
+  if (h !== 'PointList' && h !== 'Tuple' && h !== 'List') return undefined;
+  if (isCallerMapped(arg, target.cse?.harvestOptions)) return undefined;
+  const ops = arg.ops;
+  if (ops.length <= idx) return undefined;
+  const dropped = ops.filter((_o, i) => i !== idx);
+  if (dropped.some((o) => o.isPure === false)) return undefined;
+  if (target.varsKeys !== undefined && target.varsKeys.size > 0)
+    for (const o of dropped)
+      for (const s of o.symbols) if (target.varsKeys.has(s)) return undefined;
+  const code = compile(ops[idx]);
+  const guarded =
+    h === 'PointList' && !ops[idx].type.matches('number')
+      ? `_SYS.pointSlot(${code})`
+      : code;
+  const absence = isNumber(ops[idx]) ? '' : pointComponentAbsence(coord);
+  return absence === '' ? guarded : `(${guarded}${absence})`;
+}
+
+/**
  * Compile a point-coordinate accessor (`.x`/`.y`/`.z` → PointX/PointY/PointZ),
  * `idx` is the 0-based coordinate. On a single point (a tuple, compiled to a JS
  * array) it indexes the coordinate; on a list of points it broadcasts, mapping
@@ -1440,13 +1504,27 @@ function scalarIfScalarBody(
 function compilePointComponent(
   arg: Expression,
   idx: number,
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
 ): string {
-  const compiled = compile(arg);
   const t = jsType(arg);
+  // The operand's own code, compiled at most once and only on a route that
+  // needs it: the constructor shortcut emits one component instead and must
+  // not pay for building the point that component is read back out of.
+  let operandCode: string | undefined;
+  const compiled = (): string => (operandCode ??= compile(arg));
   // A single point (tuple): index the coordinate directly.
-  if (typeof t !== 'string' && t.kind === 'tuple')
-    return `(${compiled}[${idx}]${pointComponentAbsence(tupleElementType(t, idx))})`;
+  if (typeof t !== 'string' && t.kind === 'tuple') {
+    const direct = pointConstructorComponent(
+      arg,
+      idx,
+      compile,
+      target,
+      tupleElementType(t, idx)
+    );
+    if (direct !== undefined) return direct;
+    return `(${compiled()}[${idx}]${pointComponentAbsence(tupleElementType(t, idx))})`;
+  }
   // A list of points broadcasts the coordinate — but only when the operand is
   // confirmably a list of points, matching the interpreter's `pointComponentAt`
   // (which inspects concrete elements rather than trusting the declared element
@@ -1461,12 +1539,12 @@ function compilePointComponent(
     // below three never reaches here: the `PointZ` canonical handler already
     // rejected it.
     if (idx === 2 && staticPointArityOf(t) === undefined)
-      return `_SYS.pointComponent(${compiled}, ${idx})`;
+      return `_SYS.pointComponent(${compiled()}, ${idx})`;
     const coord =
       eltType !== undefined && typeof eltType !== 'string'
         ? tupleElementType(eltType, idx)
         : undefined;
-    return `(${compiled}).map((_pt) => _pt[${idx}]${pointComponentAbsence(coord)})`;
+    return `(${compiled()}).map((_pt) => _pt[${idx}]${pointComponentAbsence(coord)})`;
   }
   // The static type settles NEITHER reading: an `unknown`-typed operand, or a
   // type that admits a list of points beside a single point — the parameter
@@ -1479,8 +1557,10 @@ function compilePointComponent(
   // `PointX(v) + 1` over a two-point list answered `[2, 3, 4]` where the
   // interpreter answers `[2, 5]`, and a `PointList` body threw at run time
   // (Tycho item 238).
-  if (mayBePointList(t)) return `_SYS.pointComponent(${compiled}, ${idx})`;
-  return `(${compiled}[${idx}]${pointComponentAbsence(eltType)})`;
+  if (mayBePointList(t)) return `_SYS.pointComponent(${compiled()}, ${idx})`;
+  const direct = pointConstructorComponent(arg, idx, compile, target, eltType);
+  if (direct !== undefined) return direct;
+  return `(${compiled()}[${idx}]${pointComponentAbsence(eltType)})`;
 }
 
 /**
@@ -4541,6 +4621,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.cpow(${complexOperandCode(base, compile)}, ${complexOperandCode(exp, compile)})`;
     if (eConst === 0) return '1';
     if (eConst === 1) return compile(base);
+    const radical = realRadicalPower(base, eConst, compile, target);
+    if (radical !== undefined) return radical;
     if (
       eConst === 2 &&
       (isSymbol(base) || isNumber(base)) &&
@@ -4931,9 +5013,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     isProvablyStringOperand(args[0])
       ? `_SYS.chars(${compile(args[0])})[2]`
       : `${compile(args[0])}[2]`,
-  PointX: (args, compile) => compilePointComponent(args[0], 0, compile),
-  PointY: (args, compile) => compilePointComponent(args[0], 1, compile),
-  PointZ: (args, compile) => compilePointComponent(args[0], 2, compile),
+  PointX: (args, compile, target) =>
+    compilePointComponent(args[0], 0, compile, target),
+  PointY: (args, compile, target) =>
+    compilePointComponent(args[0], 1, compile, target),
+  PointZ: (args, compile, target) =>
+    compilePointComponent(args[0], 2, compile, target),
   // Reached only when the `PointList` definition handler declines — i.e. for
   // every shape but the all-scalar plain point (which it lowers itself,
   // byte-identically to `Tuple`). See `compileJSPointList`.
@@ -4952,6 +5037,36 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // a spliced draw re-draws at run time (`Mod(x, Random())` consumed three
     // draws).
     const impure = a.isPure === false || b.isPure === false;
+    // Dividing by one leaves the fractional part of the dividend under the
+    // floored convention, and `a - Math.floor(a)` computes it in two
+    // operations instead of the template's three.
+    //
+    // That subtraction can round UP to exactly `1` for a tiny negative
+    // dividend — no double holds `1 - 1e-20`, so `-1e-20 - Math.floor(-1e-20)`
+    // is `1` — which is outside the floored modulo's codomain `[0, 1)`. A
+    // palette index such as `Floor(Mod(x, 1) · n)` then reads one element past
+    // the end. The trailing `% 1` maps that rounded `1` back to `0` and is
+    // exact everywhere else on `[0, 1)`, where it returns its operand
+    // unchanged; `NaN` and the infinities still give `NaN`.
+    //
+    // The dividend is spliced twice by the inline form, so that form is used
+    // only when repeating it is free: a number literal, or a symbol the
+    // caller did NOT re-map through `vars` (a re-mapped name splices
+    // caller-supplied source — `_.draw()`, say — which must run exactly
+    // once). Any other dividend — a call, an arithmetic sub-expression, an
+    // impure operand — goes through the `_SYS.fract` helper, which computes
+    // the same `((x - Math.floor(x)) % 1)` on its one argument. A temporary
+    // bound in an immediately invoked function was the alternative, but that
+    // allocates a closure per evaluation at every such site (the Tycho
+    // corpus has about a thousand of them, nearly all with a call as the
+    // dividend), where the helper call is a plain call the engine inlines.
+    if (!fastPath && isNumber(b) && b.re === 1 && b.im === 0) {
+      const spliceableDividend =
+        isNumber(a) || (isSymbol(a) && !target.varsKeys?.has(a.symbol));
+      if (impure || !spliceableDividend) return `_SYS.fract(${compile(a)})`;
+      const ca = compile(a);
+      return `((${ca} - Math.floor(${ca})) % 1)`;
+    }
     // A divisor the floored template splices three times is also COMPUTED
     // three times when it is spliced directly. A symbol reference and a
     // number literal cost nothing to repeat; anything else — a call such as
@@ -5110,10 +5225,26 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     for (let i = 1; i < args.length; i++) {
       const t = temps[i];
       const tIsComplex = BaseCompiler.isComplexValued(args[i]);
-      const tRe = tIsComplex ? `${t}.re` : t;
-      const tIm = tIsComplex ? `${t}.im` : '0';
-      parts.push(`const _nre${i} = _re * ${tRe} - _im * ${tIm}`);
-      parts.push(`const _nim${i} = _re * ${tIm} + _im * ${tRe}`);
+      if (!tIsComplex) {
+        // A REAL factor scales the two components. The full complex step below
+        // would instead emit four multiplications and two temporaries per
+        // factor to compute an imaginary half that is known to be zero — the
+        // shape a plotted expression with one promoted radical and several
+        // real factors per term has.
+        //
+        // The accumulation stays SEQUENTIAL and in argument order, so the
+        // ROUNDING ORDER is preserved: each factor multiplies the running
+        // product, exactly as the interpreter's left-to-right product does.
+        // Collecting the real factors into one product first and scaling by it
+        // once would re-associate that arithmetic — for `z · a · b` with
+        // `z = {re: 1e-200, im: 1e-200}` and `a = b = 1e200`, `a * b`
+        // overflows to infinity while the stepwise product stays finite.
+        parts.push(`_re = _re * ${t}`);
+        parts.push(`_im = _im * ${t}`);
+        continue;
+      }
+      parts.push(`const _nre${i} = _re * ${t}.re - _im * ${t}.im`);
+      parts.push(`const _nim${i} = _re * ${t}.im + _im * ${t}.re`);
       parts.push(`_re = _nre${i}`);
       parts.push(`_im = _nim${i}`);
     }
@@ -5636,6 +5767,90 @@ function complexModulus(z: ComplexResult): number {
  *   arithmetic (`1 + {…}` → `"1[object Object]"`).
  */
 const NO_REAL_VALUE_FOLD = 'NaN';
+
+/**
+ * A `Power` whose exponent is a small rational with a root in it, lowered to
+ * that root and an integer power instead of `Math.pow` — or `undefined` when
+ * the node is not one of those shapes.
+ *
+ * `Math.pow` takes the logarithm of the base and exponentiates it back, so a
+ * root it could have taken exactly is lost. Measured against the value the
+ * engine computes at 60 digits, over bases from 1e-100 to 1e150:
+ *
+ * - `a^(3/2)`: `a * Math.sqrt(a)` stays within 0.82 ulp, `Math.pow(a, 1.5)`
+ *   reaches 0.93 ulp, and cubing the square root — the shape `(√a)³` emitted
+ *   before this — reaches 1.64 ulp.
+ * - `x^(2/3)`: squaring the cube root stays within 1.49 ulp while
+ *   `Math.pow(Math.abs(x), 2/3)` reaches 77 ulp at a base of 1e200.
+ *
+ * The cube root is SQUARED rather than taken of the square: `Math.cbrt(x * x)`
+ * is the more accurate of the two in the ordinary range, but `x * x` overflows
+ * to infinity for `|x|` above about 1.3e154, where the true value is only
+ * about 1e103 — a silently wrong answer this must not introduce.
+ *
+ * A square-root base is read through, so `(√u)^k` is treated as `u^(k/2)`: the
+ * radicand is the value to take the integer power of.
+ *
+ * Two conditions restrict the square-root routes. The base must be provably
+ * non-negative, because `Math.sqrt` of a negative value is `NaN`. And where
+ * the emitted form names the base twice it must be a symbol or a number
+ * literal, so that repeating it costs nothing and cannot duplicate arbitrary
+ * target source — the same guard the `Power(x, 2)` expansion uses. The cube
+ * root needs neither: it names the base once and is defined for a negative
+ * base, where it gives the real root the engine's own branch convention picks.
+ *
+ * Both look-throughs — dropping the `Abs` and reading the radicand out of a
+ * `Sqrt` — rewrite the base on the strength of what those heads MEAN. That
+ * holds only while they emit their built-in lowering: a caller who supplied an
+ * implementation of `Abs` through `functions`/`operators` decides what
+ * `Abs(x)` returns, so the identity "squaring removes the sign" is no longer
+ * about that value. Such a head is compiled whole instead.
+ */
+function realRadicalPower(
+  base: Expression,
+  eConst: number | undefined,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (eConst === undefined) return undefined;
+  // Squaring removes the sign, so an `Abs` under the two-thirds power is work
+  // the cube root does not need.
+  if (eConst === 2 / 3) {
+    const inner =
+      isFunction(base, 'Abs') &&
+      base.ops.length === 1 &&
+      base.ops[0].type.matches('real') &&
+      !isCallerMapped(base, target.cse?.harvestOptions)
+        ? base.ops[0]
+        : base;
+    return `_SYS.pow2(Math.cbrt(${compile(inner)}))`;
+  }
+  let radicand = base;
+  let e = eConst;
+  if (
+    isFunction(base, 'Sqrt') &&
+    base.ops.length === 1 &&
+    Number.isInteger(e) &&
+    e >= 2 &&
+    !isCallerMapped(base, target.cse?.harvestOptions)
+  ) {
+    radicand = base.ops[0];
+    e = e / 2;
+  }
+  if (e !== 1 && e !== 1.5 && e !== 2 && e !== 2.5) return undefined;
+  if (radicand === base && Number.isInteger(e)) return undefined;
+  if (!BaseCompiler.assumedRealNonNegative(radicand)) return undefined;
+  if (e === 1) return compile(radicand);
+  if (e === 2) return `_SYS.pow2(${compile(radicand)})`;
+  const spliceable =
+    isNumber(radicand) ||
+    (isSymbol(radicand) && !target.varsKeys?.has(radicand.symbol));
+  if (!spliceable) return undefined;
+  const code = compile(radicand);
+  return e === 1.5
+    ? `(${code} * Math.sqrt(${code}))`
+    : `(_SYS.pow2(${code}) * Math.sqrt(${code}))`;
+}
 
 /**
  * The complex principal square root of a negative real constant, as a JS
@@ -7875,6 +8090,11 @@ const SYS_HELPERS = {
   // kernel. Keep multiplication order explicit for small real powers.
   pow2: (x: number) => x * x,
   pow3: (x: number) => x * x * x,
+  // The fractional part under the floored convention, the value of
+  // `Mod(x, 1)`. The trailing `% 1` maps the one case where the subtraction
+  // rounds up to exactly `1` (a tiny negative `x`) back into `[0, 1)`; it
+  // is exact everywhere else on that range. NaN and the infinities give NaN.
+  fract: (x: number) => (x - Math.floor(x)) % 1,
   pow4: (x: number) => {
     const s = x * x;
     return s * s;
@@ -10556,7 +10776,21 @@ function extractLimits(limitsExpr: Expression): {
   lowerExpr: Expression;
   upperExpr: Expression;
 } {
-  console.assert(limitsExpr.operator === 'Limits');
+  // This lowering is the counted loop `for (i = lower; i <= upper; i++)`, so
+  // it can only read a `Limits` clause. The other indexing-set shape a big
+  // operator accepts — `Element(i, collection)`, which the interpreter
+  // iterates — has no lower and upper bound to read: reading `op2`/`op3` off
+  // it answered the `Nothing` erasure marker, and the emission failed several
+  // steps later with a message about that marker rather than about the clause.
+  // Decline here instead, with the clause named.
+  if (limitsExpr.operator !== 'Limits')
+    throw new Error(
+      `${limitsExpr.operator === 'Element' ? 'Element' : limitsExpr.operator}` +
+        ` indexing set: a Sum/Product over a COLLECTION is not lowered to ` +
+        `JavaScript — this emitter builds a counted loop from a \`Limits\` ` +
+        `clause and has no bounds to read. Fail closed (D6) — the ` +
+        `interpreter evaluates it.`
+    );
   const fn = limitsExpr as Expression & {
     op1: Expression;
     op2: Expression;
@@ -12017,11 +12251,94 @@ function isElementwiseBigOpBody(
   );
 }
 
+/**
+ * The lane an UNROLLED `Sum`/`Product` clause takes: `false` when the
+ * index-masked analysis calls the body complex while EVERY term is real under
+ * its own index value, `undefined` otherwise.
+ *
+ * An unrolled term binds the index at the emitted-CODE level, so the analysis
+ * reads a body in which the index is still free and cannot decide the sign of
+ * a radicand such as `1 − 0.025²(i − 0.5)²`. With the term's own value the
+ * radicand is a closed constant, and the terms are real arithmetic instead of
+ * `_SYS.csqrt` over `{re, im}` pairs.
+ *
+ * The verdict is adopted only when every term AGREES, because the terms feed
+ * one accumulator, which holds plain numbers or `{re, im}` objects and never a
+ * mix.
+ *
+ * Answering only `false`-or-`undefined` is what keeps this in step with the
+ * emitter's other unroll conditions: `isElementwiseBigOpBody` is false
+ * whenever the masked verdict is complex, so a clause this function decides
+ * can never be the element-wise one, and the remaining conditions (constant
+ * bounds, term count, iteration budget) are tested here with the same
+ * helpers the emitter uses.
+ *
+ * Both `emitSumProduct` and `BaseCompiler.isComplexValued` — the parent's
+ * question about the whole `Sum` — come through here, so the emitted terms
+ * and the shape the enclosing expression expects cannot drift apart.
+ */
+function unrolledClauseLane(
+  body: Expression,
+  indices: ReadonlyArray<string>,
+  index: string,
+  lowerNum: number,
+  upperNum: number,
+  target: CompileTarget<Expression>
+): boolean | undefined {
+  const termCount = upperNum - lowerNum + 1;
+  if (termCount < 1 || termCount > UNROLL_LIMIT) return undefined;
+  const budget = target.iterationBudget;
+  if (budget !== undefined && !(upperNum - lowerNum < budget)) return undefined;
+  if (!BaseCompiler.isComplexValuedUnderIndices(body, indices))
+    return undefined;
+  for (let k = lowerNum; k <= upperNum; k++) {
+    const complex = BaseCompiler.withUnrolledIndexValues(
+      new Map([[index, k]]),
+      () => BaseCompiler.isComplexValuedUnderIndices(body, indices)
+    );
+    if (complex) return undefined;
+  }
+  return false;
+}
+
+/**
+ * {@link unrolledClauseLane} for a whole `Sum`/`Product` NODE, as
+ * `BaseCompiler.isComplexValued` asks it. Restricted to a single indexing
+ * set: a multi-clause node's inner clauses are unrolled or looped by their
+ * own nested emission, which this reading does not model.
+ */
+function unrolledBigOpLane(expr: Expression): boolean | undefined {
+  if (!isFunction(expr) || expr.ops.length !== 2) return undefined;
+  if (expr.operator !== 'Sum' && expr.operator !== 'Product') return undefined;
+  const target = BaseCompiler.oracleFoldTarget;
+  if (target === undefined) return undefined;
+  const limits = expr.ops[1];
+  if (!isFunction(limits, 'Limits')) return undefined;
+  const { index, lowerExpr, upperExpr } = extractLimits(limits);
+  if (index === '_') return undefined;
+  const lowerNum = BaseCompiler.bigOpBoundConstant(lowerExpr, target);
+  const upperNum = BaseCompiler.bigOpBoundConstant(upperExpr, target);
+  if (lowerNum === undefined || upperNum === undefined) return undefined;
+  return unrolledClauseLane(
+    expr.ops[0],
+    [index],
+    index,
+    lowerNum,
+    upperNum,
+    target
+  );
+}
+
+installUnrolledBigOpLane(unrolledBigOpLane);
+
 function emitSumProduct(
   kind: 'Sum' | 'Product',
   body: Expression,
   clauses: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  /** `false` for the nested invocation of a multi-clause node's inner
+   * clauses, whose lane the whole-node reading above does not model. */
+  isRootClause = true
 ): string {
   const statements = javascriptStatements(target);
   const expression = (
@@ -12086,7 +12403,7 @@ function emitSumProduct(
   const sumNode = BaseCompiler.cseParentNode();
   const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
     rest.length > 0
-      ? emitSumProduct(kind, body, rest, innerTarget)
+      ? emitSumProduct(kind, body, rest, innerTarget, false)
       : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body);
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
@@ -12104,6 +12421,20 @@ function emitSumProduct(
   if (bothConstant && withinBudget && !elementwiseBody) {
     const termCount = upperNum - lowerNum + 1;
     if (termCount <= UNROLL_LIMIT) {
+      // `bodyIsComplex` above read the body with the index merely MASKED. The
+      // unrolled terms bind it to a literal integer, which can settle a sign
+      // the masked reading cannot — see `unrolledClauseLane`, which
+      // `BaseCompiler.isComplexValued` reads for the whole node as well, so
+      // the terms and the shape the enclosing expression expects agree. Only
+      // the ROOT clause of a single-indexing-set node is decided this way.
+      const indexValues = (k: number): ReadonlyMap<string, number> =>
+        new Map([[index, k]]);
+      const lane =
+        isRootClause && rest.length === 0
+          ? unrolledClauseLane(body, indices, index, lowerNum, upperNum, target)
+          : undefined;
+      const useIndexValues = lane !== undefined;
+      const unrolledIsComplex = lane ?? bodyIsComplex;
       const emitTerms = (): string[] => {
         const terms: string[] = [];
         for (let k = lowerNum; k <= upperNum; k++) {
@@ -12113,7 +12444,11 @@ function emitSumProduct(
             boundVars: BaseCompiler.withBoundNames(target, [index]),
           };
           recordIntegerRange(innerTarget, index, k, k);
-          const term = compileTerm(innerTarget);
+          const term = useIndexValues
+            ? BaseCompiler.withUnrolledIndexValues(indexValues(k), () =>
+                compileTerm(innerTarget)
+              )
+            : compileTerm(innerTarget);
           terms.push(statements?.parenthesize(term) ?? `(${term})`);
         }
         return terms;
@@ -12140,7 +12475,7 @@ function emitSumProduct(
         .map(([name, code]) => `const ${name} = ${code}; `)
         .join('');
 
-      if (!bodyIsComplex) {
+      if (!unrolledIsComplex) {
         if (!asStatements) return `(${terms.join(` ${op} `)})`;
 
         // May the accumulation stop at the first NaN? Only if skipping the
@@ -12153,26 +12488,46 @@ function emitSumProduct(
         // everything else) and refuses a spelling no oracle can answer for.
         // The trees a term emits are the body plus the bounds of the nested
         // clauses it unrolls or loops over.
-        const canExitEarly = BaseCompiler.isEmissionSkippable(
-          [
-            body,
-            ...rest.flatMap((c) => {
-              const l = extractLimits(c);
-              return [l.lowerExpr, l.upperExpr];
-            }),
-          ],
-          indexNames,
-          target
-        );
+        //
+        // The exit is an OPTIMIZATION, never a correctness device: NaN absorbs
+        // both `+` and `*`, so the accumulator ends at the same NaN whether or
+        // not the remaining terms run. It therefore earns its per-term test
+        // only when a term can carry NaN, and two facts together say it
+        // cannot. The body's TYPE must be a `real` subtype — a `real` in this
+        // lattice is finite, with no NaN and no infinity — which is the value
+        // contract. The emitted terms must also be free of the NaN marker,
+        // which is what catches the lowerings that answer NaN from a
+        // NaN-free type: an undecided branch condition, a read past the end
+        // of a collection. Only the INNERMOST clause is asked (`rest` empty),
+        // where the term is the body itself; an outer clause's term is a
+        // nested big operator, whose own bounds guard can answer NaN from a
+        // body that never could.
+        const termsExcludeNaN =
+          rest.length === 0 &&
+          body.type.matches('real') &&
+          !terms.some((t) => t.includes('NaN'));
+        const canExitEarly =
+          !termsExcludeNaN &&
+          BaseCompiler.isEmissionSkippable(
+            [
+              body,
+              ...rest.flatMap((c) => {
+                const l = extractLimits(c);
+                return [l.lowerExpr, l.upperExpr];
+              }),
+            ],
+            indexNames,
+            target
+          );
 
         // Accumulate in statements so the accumulator can be tested between
-        // terms. NaN absorbs both `+` and `*`, so once it is NaN no remaining
-        // term can change the answer and evaluating them is pure cost — the
-        // same exit the element-wise fold loop below takes, in the same place
-        // (after each accumulation, before the next term is reached). The test
-        // after the LAST accumulation is omitted: `return` hands back the same
-        // NaN either way. Without `canExitEarly` the statement form is still
-        // emitted — the hoisted bindings need it — but every term runs.
+        // terms. Once it is NaN no remaining term can change the answer and
+        // evaluating them is pure cost — the same exit the element-wise fold
+        // loop below takes, in the same place (after each accumulation, before
+        // the next term is reached). The test after the LAST accumulation is
+        // omitted: `return` hands back the same NaN either way. Without
+        // `canExitEarly` the statement form is still emitted — the hoisted
+        // bindings need it — but every term runs.
         const acc = BaseCompiler.tempVar(target);
         return expression((exit) => {
           const stmts = [
@@ -12193,7 +12548,11 @@ function emitSumProduct(
         });
       }
 
-      const temps = terms.map((_, i) => `_t${i}`);
+      // One hygienic temporary per term: a fixed spelling such as `_t0`
+      // is re-declared by an unrolled complex Sum nested inside another one
+      // (the inner block shadows the outer term before the outer sum reads
+      // it, and the emitted code throws reading `.re` of `undefined`).
+      const temps = terms.map(() => BaseCompiler.tempVar(target));
       const assignments = (): string =>
         terms.map((term, i) => initialize(temps[i], term)).join(' ');
 

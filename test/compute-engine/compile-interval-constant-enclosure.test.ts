@@ -231,7 +231,11 @@ describe('interval-js: the fold leaves a caller `vars` splice alone', () => {
     } as any) as IntervalRun;
     expect(r.success).toBe(true);
     expect(r.code).toContain('_IA.point(0.5)');
-    expect(r.code).toContain('_IA.mul(');
+    // The product is still computed on every call. A factor that is a
+    // constant point is emitted as the point-scaling kernel, which answers
+    // the same endpoints as the general product with half the endpoint
+    // multiplications (`interval/arithmetic.ts`).
+    expect(r.code).toContain('_IA.scale(');
   });
 
   test('a constant next to the splice still folds', () => {

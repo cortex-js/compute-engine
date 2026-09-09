@@ -4324,16 +4324,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `range <: indexed_collection<integer>`.
       if (isIndexSpanD(ops))
         return BoxedType.forResult('range', context.engine._typeResolver);
+      // Only the LOWER bound and the STEP decide the element type: an element
+      // is `lower + k·step`, and the upper bound merely says where the run
+      // stops. It is an element only when it is itself of that form, which
+      // the lower bound and the step already cover. So `Range(1, 2.5)`
+      // iterates 1 and 2 — `integer`, not `real` — and `Range(1, m)` over a
+      // slider `m` declared `real` iterates 1, 2, 3, … and is
+      // `indexed_collection<integer>` whatever `m` holds. A one-operand
+      // `Range(n)` is `Range(1, n)`, so it has no operand of its own to read:
+      // its implicit lower bound and step are both the integer 1.
+      const boundOps =
+        ops.length === 1 ? [] : ops.length === 2 ? [ops[0]] : [ops[0], ops[2]];
       // An infinite endpoint marks unbounded EXTENT; it does not name a last
       // element, so it says nothing about the elements and is dropped before
-      // the tests below. Every element of `Range(1, +oo)` is a finite
+      // the tests below. Every element of `Range(-oo, -1)` is a finite
       // integer, and the type must not leak the endpoint.
       // A signed infinity is recognized by its TYPE (`+oo`, `-oo`, or the
       // signed pair), with the sign fact as the fallback for a value held
       // behind a wider declaration (`w: number := +oo`). The unsigned
       // non-finite values (`NaN`, `~oo`) are not endpoints of an extent and
       // stay in, as they did when this read the operand's real part.
-      const elementOps = ops.filter((op) => {
+      const elementOps = boundOps.filter((op) => {
         if (isSubtype(op.type, SIGNED_INFINITY_TYPE)) return false;
         const { finite, sgn } = op.facts;
         return !(
@@ -4341,12 +4352,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           (sgn === 'positive' || sgn === 'negative')
         );
       });
-      // The remaining operands decide the element type: an element is
-      // `lower + k·step`, so it is an integer iff every one of them is
-      // integer-valued (Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — real, not
-      // integer), and a finite real iff every one of them is real. An operand
-      // that could be complex or is not yet known — a symbolic step declared
-      // `number` — keeps the wide `number`.
+      // The remaining operands are integer-valued iff every element is
+      // (Range(0.5, 2.5) iterates 0.5, 1.5, 2.5 — real, not integer), and
+      // real iff every element is a finite real. An operand that could be
+      // complex or is not yet known — a symbolic step declared `number` —
+      // keeps the wide `number`.
       if (elementOps.every((op) => isSubtype(op.type, 'integer')))
         return BoxedType.forResult(
           parseType('indexed_collection<integer>'),

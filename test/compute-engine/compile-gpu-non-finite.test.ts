@@ -22,7 +22,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
-import { principalComplexPow } from '../../src/compute-engine/compilation/constant-folding';
+import {
+  formatFloat,
+  principalComplexPow,
+} from '../../src/compute-engine/compilation/constant-folding';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
@@ -130,11 +133,11 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // vec2(re, im) complex codegen and the fold must agree with it — a scalar
     // NaN would be consumed as a real by the surrounding complex arithmetic.
     expect(ce.box(['Sqrt', -5]).type.toString()).toBe('complex');
-    expect(g(['Sqrt', -5])).toBe(`vec2(0.0, ${Math.sqrt(5)})`);
-    expect(w(['Sqrt', -5])).toBe(`vec2f(0.0, ${Math.sqrt(5)})`);
+    expect(g(['Sqrt', -5])).toBe(`vec2(0.0, ${formatFloat(Math.sqrt(5))})`);
+    expect(w(['Sqrt', -5])).toBe(`vec2f(0.0, ${formatFloat(Math.sqrt(5))})`);
     // …and it composes as a complex value.
     expect(g(['Add', 1, ['Sqrt', -5]])).toBe(
-      `vec2(1.0, 0.0) + vec2(0.0, ${Math.sqrt(5)})`
+      `vec2(1.0, 0.0) + vec2(0.0, ${formatFloat(Math.sqrt(5))})`
     );
   });
 
@@ -151,16 +154,22 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // ruling fixed. Do NOT restore the NaN assertion.
     expect(ce.box(['Power', -2, 0.3]).type.toString()).toBe('complex');
     const p = principalComplexPow(-2, 0.3);
-    expect(g(['Power', -2, 0.3])).toBe(`vec2(${p.re}, ${p.im})`);
-    expect(w(['Power', -2, 0.3])).toBe(`vec2f(${p.re}, ${p.im})`);
+    const pRe = formatFloat(p.re);
+    const pIm = formatFloat(p.im);
+    expect(g(['Power', -2, 0.3])).toBe(`vec2(${pRe}, ${pIm})`);
+    expect(w(['Power', -2, 0.3])).toBe(`vec2f(${pRe}, ${pIm})`);
     expect(ce.box(['Root', -8, 4]).type.toString()).toBe('complex');
     const r = principalComplexPow(-8, 0.25);
-    expect(g(['Root', -8, 4])).toBe(`vec2(${r.re}, ${r.im})`);
-    expect(w(['Root', -8, 4])).toBe(`vec2f(${r.re}, ${r.im})`);
+    expect(g(['Root', -8, 4])).toBe(
+      `vec2(${formatFloat(r.re)}, ${formatFloat(r.im)})`
+    );
+    expect(w(['Root', -8, 4])).toBe(
+      `vec2f(${formatFloat(r.re)}, ${formatFloat(r.im)})`
+    );
     // …and it composes as a complex value, rather than broadcasting a scalar
     // NaN into the parent's vec2 (`vec2(1.0, 0.0) + _gpu_nan()`).
     expect(g(['Add', 1, ['Power', -2, 0.3]])).toBe(
-      `vec2(1.0, 0.0) + vec2(${p.re}, ${p.im})`
+      `vec2(1.0, 0.0) + vec2(${pRe}, ${pIm})`
     );
 
     // The ODD-denominator branch keeps a REAL principal root, stays
@@ -184,7 +193,7 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     expect(ce.box(['Power', -2, ['Divide', 100, 3]]).type.toString()).toBe(
       'number'
     );
-    const real100over3 = `${Math.pow(2, 100 / 3)}`;
+    const real100over3 = formatFloat(Math.pow(2, 100 / 3));
     expect(g(['Power', -2, ['Divide', 100, 3]])).toBe(real100over3);
     expect(w(['Power', -2, ['Divide', 100, 3]])).toBe(real100over3);
   });

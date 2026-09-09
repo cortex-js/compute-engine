@@ -1051,9 +1051,20 @@ class Harvester {
     );
   }
 
-  /** A native transcendental call can pay for a temporary even when its
-   * syntax is only two nodes. Purity and caller mappings are checked by the
-   * same admission rules as every other CSE candidate. */
+  /** A built-in that lowers to a native library CALL can pay for a temporary
+   * even when its syntax is only two or three nodes: the emitted code repeats
+   * the whole call at every occurrence, and the size and benefit thresholds
+   * measure syntax, not the call.
+   *
+   * The transcendentals are here because each one is an expensive native
+   * routine. The min/max family is here because a two-operand `Min(v, 0.8)`
+   * is three nodes — one below the size threshold — and scores
+   * `(3 − 1) × 3 = 6` at three occurrences, below the benefit threshold, so
+   * neither gate ever admitted it while the `Cos(u)` beside it was bound
+   * (measured by the Tycho code-generation audit of 2026-09-09).
+   *
+   * Purity and caller mappings are checked by the same admission rules as
+   * every other CSE candidate. */
   private isExpensiveBuiltin(node: Expression): boolean {
     return (
       isFunction(node) &&
@@ -1070,6 +1081,10 @@ class Harvester {
         'Arcsin',
         'Arccos',
         'Arctan',
+        'Min',
+        'Max',
+        'ElementMin',
+        'ElementMax',
       ].includes(node.operator)
     );
   }

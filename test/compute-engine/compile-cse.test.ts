@@ -585,7 +585,7 @@ describe('COMPILE CSE — other targets', () => {
 
     expect(occurrences(result.code, '_IA.sin')).toBe(1);
     expect(result.code).toMatchInlineSnapshot(
-      `(() => { const _cse1 = _IA.sin(_IA.mul(_IA.point(6), _.u)); return _IA.add(_IA.square(_cse1), _IA.div(_cse1, _IA.add(_cse1, _IA.point(2)))); })()`
+      `(() => { const _cse1 = _IA.sin(_IA.scale(_IA.point(6), _.u)); return _IA.add(_IA.square(_cse1), _IA.div(_cse1, _IA.add(_cse1, _IA.point(2)))); })()`
     );
 
     // A point interval reproduces the scalar value; a proper interval encloses
@@ -690,8 +690,12 @@ describe('COMPILE CSE — capture', () => {
     // bound once as a preamble local (`_k1`) instead of being spelled
     // `_IA.point(6)` at each site.
     const six = '(?:_IA\\.point\\(6\\)|_k\\d+)';
+    // The constant factor is emitted as the point-scaling kernel when the
+    // emitter can see that it is a point, and as the general product when it
+    // has been hoisted to a preamble name the emitter cannot read.
+    const times = '_IA\\.(?:mul|scale)';
     const outer = new RegExp(
-      `const (_cse\\d+) = _IA\\.sin\\(_IA\\.mul\\(${six}, _\\.n\\)\\)`
+      `const (_cse\\d+) = _IA\\.sin\\(${times}\\(${six}, _\\.n\\)\\)`
     ).exec(code);
     expect(outer).not.toBeNull();
     const loop = code.slice(
@@ -701,7 +705,7 @@ describe('COMPILE CSE — capture', () => {
     expect(loop).not.toContain(outer![1]);
     expect(loop).toMatch(
       new RegExp(
-        `const (_cse\\d+) = _IA\\.sin\\(_IA\\.mul\\(${six}, _IA\\.point\\(n\\)\\)\\)`
+        `const (_cse\\d+) = _IA\\.sin\\(${times}\\(${six}, _IA\\.point\\(n\\)\\)\\)`
       )
     );
   });

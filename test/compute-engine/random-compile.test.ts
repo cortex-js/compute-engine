@@ -787,7 +787,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
       '(_gpu_round((x * 100.0)) / 100.0)'
     );
     expect(gpuCode(['Root', 'x', 3])).toBe(
-      '(sign(x) * pow(abs(x), 0.3333333333333333))'
+      '(sign(x) * pow(abs(x), 0.33333334))'
     );
     expect(gpuCode(['Variance', 'x', 'y'])).toBe(
       '(((x - ((x + y) / 2.0)) * (x - ((x + y) / 2.0)) + ' +
@@ -829,7 +829,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
         'vec2(x))) * vec2(lessThan(vec2(x), vec2(0.9, 0.8)))))'
     );
     expect(gpuCode(['Add', 1, ['Sqrt', -2]])).toBe(
-      'vec2(1.0, 0.0) + vec2(0.0, 1.4142135623730951)'
+      'vec2(1.0, 0.0) + vec2(0.0, 1.4142135)'
     );
     expect(gpuCode(['Add', 'x', 'ImaginaryUnit'])).toBe('vec2(x, 1.0)');
   });

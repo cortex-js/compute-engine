@@ -226,6 +226,157 @@ If nothing is decided, the static decline stands: the nested forms fall back
 to the interpreter, and the fallback answers `NaN` for them until
 `interpretedRunValue` learns to serialize a colour.
 
+### Findings of the Tycho code-generation audit of 2026-09-09 (OPEN — CE 0.127.0; report `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-09-report.md`, records in `ce-0.127.0.json` of that folder)
+
+The report was reviewed on 2026-09-09 and each item was reproduced against
+HEAD from source before it was listed here. The items are in the order of
+their expected effect on the corpus.
+
+- **Juxtaposition with a `missing | T` operand becomes a silent `Tuple`
+  (defect).** A piecewise with no default arm types `missing | T`
+  (`g(t) := \{0.5 if t < 1\}` gives `g(3): missing | real`), and the
+  invisible-operator canonicalization tests each operand with
+  `type.matches('number')` (`boxed-expression/invisible-operator.ts`, the
+  two tests near lines 396 and 726), which a `missing | real` type fails. So
+  `2 g(3)` parses to `["Tuple", 2, ["g", 3]]`, and the Desmos row
+  `0\cos(T_4(t))\cos(T_4(t))l_0(t)` (document `neyret/zstlwmmpkp`, record
+  #256) types `tuple<integer, number, number, missing | real>`; the
+  `PointList` around it then declines on every target. The earlier test in
+  the same file (line 194) already uses the looser `couldMatch('number')`.
+  Fix: strip the `missing` marker (or use `couldMatch`) at the two sites,
+  with a pin for the piecewise case. RULED 2026-09-09 (Option A): a
+  default-less `Which` and the else-less `If` KEEP the type `missing | T`
+  and the value `Missing`; the consumers that reject that type are fixed
+  (this file's juxtaposition sites, a sweep of the other `matches('number')`
+  gates, and Tycho's importer probe). Typing the result as `T` was rejected
+  because the 2026-09-01 "a type describes the successes" ruling covers
+  UNDECLARED partiality, while a missing default arm is absence the author
+  wrote down.
+- **`Add` and `Multiply` do not absorb a `Missing` that arrives as an
+  evaluated operand VALUE (defect).** With the same `g`, `g(3) + 1` and
+  `2 \cdot g(3)` evaluate to the symbolic `["Add", "Missing", 1]` and
+  `["Multiply", 2, "Missing"]` (`.N()` answers NaN), and the else-less
+  `If(3 < 1, 0.5) + 1` does the same, while a literal `Missing` operand
+  (`ce.box(["Add", "Missing", 1])`) and every other numeric head tried
+  (`Sin`, `Sqrt`, `Max`, `Power`, `Sum`) answer NaN as
+  `docs/ERROR-MODEL.md` §3 requires ("in a numeric slot, Missing is
+  normalized to NaN at the boundary"). The boundary normalization runs on the
+  syntactic operand, not on the operand's evaluated value.
+- **A user function declared `-> unknown` types `broadcastable<number>`
+  through every broadcastable head** (`\sin(u(t))` for
+  `u: (unknown) -> unknown`). This is the cause of the audit's largest item
+  (465 `_SYS.bcast` sites, 42 `PointList` declines on GLSL): Tycho's
+  importer declares each user function `(unknown, …) -> unknown` and refines
+  the result only when its probe reads a type that `matches('number')` —
+  `missing | number` (the default-less piecewise again) fails that test, so
+  the result stays `unknown`. The typing is honest on CE's side; the lever
+  is the piecewise typing above plus a Tycho-side change to accept
+  `missing | T` as scalar. The 2026-09-08 note "J3 is not reproducible at
+  HEAD" was true only for the constructions tried; the `-> unknown`
+  declaration with the body assigned in ANOTHER scope reproduces it.
+- **Complex arithmetic after the fixed-width `Sum` unroll (audit C2).**
+  `B(s, j) := \sum_{i=1}^{6} (1 - j(1 - \sqrt{1 - 0.025^2 (i - 0.5)^2})) s`
+  compiles to six `_SYS.csqrt` sites, the radicand emitted as
+  `-(0.25 * _tv1) + 1` with `_tv1` a hoisted constant — not a literal — so
+  the fold-before-shape override (`_withFoldedRealOverride`,
+  `base-compiler.ts`) never sees a literal and the complex hedge for the
+  unknown-sign radicand stands; the 80-factor product of the exoplanet row is
+  then multiplied as complex pairs (record #147, 33 KB). Two changes: re-run
+  the complexness analysis on the unrolled, substituted body (or fold the
+  hoisted constant radicand before the analysis), and multiply the real
+  factors of a product in real arithmetic when one factor is complex.
+- **CSE never binds a two-operand `Min`/`Max`/`ElementMin`/`ElementMax`
+  call.** `Math.min(_.v, 0.8)` repeated three times is left inline while
+  `Math.cos(_.u)` repeated twice is bound (record #766: six evaluations).
+  `sizeOf` in `compilation/cse.ts` is a plain node count, 3 for such a call,
+  below `CSE_MIN_SIZE = 4`. Weight a function call like the trig calls are.
+- **`Mod(a, 1)` on JavaScript is the three-operation idiom
+  `((a % 1) + 1) % 1`** (1 128 sites), and it answers `0` for
+  `a = -1e-20` where the interpreter answers `1 - 1e-20` and GLSL `fract`
+  answers `1`. `a - Math.floor(a)` is one floor and agrees with `fract`;
+  the general `a - b * Math.floor(a / b)` is the GLSL `mod` definition. A
+  non-literal divisor is still evaluated three times.
+- **Small peepholes, each reproduced:** a folded trig literal leaves
+  `* 1` and `0 *` factors in a product (`1 * x → x` is always safe;
+  `0 * x → 0` only when `x` is finite-typed); `PointX(PointList(a, b))`
+  lowers to `[a, b][0] ?? NaN` instead of `a`; `Equal(9543, k)` for a
+  comprehension index over an integer range still emits the tolerance
+  compare because the index is not typed `integer` (record #131, 53 terms ×
+  22 500 iterations, each followed by a NaN test the body type rules out);
+  the `throw new RangeError` prologue is emitted for literal bounds; the
+  GLSL fold prints float32(2π) at double precision (`6.2831854820251465`).
+- **Target gaps with corpus demand:** interval-js has no lowering for a
+  `List` of static length (4 declines) nor for `Arg(a + i b)` (2 declines;
+  the JavaScript target rewrites it to `Math.atan2(b, a)`, and `_IA.atan2`
+  exists); GLSL declines a `Comprehension` over literal domains (4 declines;
+  the seam is `compilation/fixed-width-unroll.ts`); the interval constant
+  hoist (`_k`) does not reach user-function bodies or the enclosure
+  literals (`{ kind: 'interval', … }`, 293 inline sites); a `scale`
+  primitive for a scalar factor is still open. The interval `negate`
+  (270 sites) and the piecewise-arm closures are unchanged.
+- **Absence at the boxing seam, residue found while fixing the consumers
+  (2026-09-09).** (1) `Partition(L, k(0))` with `k` a default-less piecewise
+  returning an integer is rejected as `incompatible-type` (`integer | missing`
+  against `((integer) any -> boolean) | integer`), while `At`, `Take`,
+  `Drop`, `Repeat`, `Range`, `Chunk`, `Round` accept the same operand:
+  the size parameter is a two-arm union, so the derived `missingBehavior` is
+  `pass-through` and `missingStrip` never strips the marker at that slot.
+  Needs per-slot granularity for a union-typed parameter, or a declared
+  behavior on `Partition` whose no-answer value is `Missing` (its codomain
+  is a list). (2) A bare `missing` big-operator bound
+  (`Sum(x, (x, Missing, 3))`) is still an `incompatible-type` error while a
+  `NaN` bound stays symbolic; `checkBound` (`library/utils.ts`) now accepts
+  `missing | numeric` only. Decide whether the early diagnostic or the §3
+  normalization wins. (3) `g(3) + 0` evaluates to `Missing` while
+  `g(3) + 1` evaluates to `NaN`, because the identity element is dropped at
+  canonicalization and no numeric slot remains for the absence gate. Judged
+  consistent with the ruling (`g(3) + 0` IS `g(3)`), recorded so the
+  difference is a known one.
+- **`Undefined` in a numeric slot stays symbolic (reported by the Tycho
+  re-measure of 2026-09-09).** The restriction form `expr\{cond\}` (a `When`)
+  answers the masking `Undefined` when its condition fails, and
+  `\cos(T_4(t))` with such a `T_4` evaluates under `.N()` to the symbolic
+  `cos("Undefined")` where the compiled lane answers `NaN`. Decide whether
+  `Undefined` in a numeric slot is normalized like `Missing` (`Cos(Missing)`
+  is `NaN`) or stays a symbolic marker on purpose; if it is normalized, the
+  `When` result type (`number` today) is the same question as the
+  `missing | T` arm of `Which`.
+- **Interval `atan2` reports no jump when `y` is exactly `[0, 0]` and `x`
+  straddles zero (found 2026-09-09 while lowering `Arg` on `interval-js`).**
+  `_IA.atan2([0,0], [-1,1])` answers the plain hull `[0, π]`, although the
+  function jumps from π (`x < 0`) to 0 (`x > 0`) inside that box. The hull is
+  sound; what is missing is the `singular` verdict the `y`-crossing case
+  carries. The jump test reads the crossing in the FIRST operand and the
+  `at` field is documented in that operand's coordinate, so this second-operand
+  jump cannot be expressed without widening the contract for existing
+  `Arctan2` callers. Needs a ruling before the condition is widened.
+- **Static-length `List` on `interval-js` (7 declines: `neyret/1dee4lkte2`
+  #580/#582/#585/#587, `oeupgr064p` #485/#490/#499).** A `List` entry in the
+  interval operator table is ruled out (it would make a literal list a legal
+  value in every scalar position; `b(t) := [t < 1, t < 2]` is pinned to
+  decline). The list has to be REMOVED before emission, in the shared
+  `compilation/fixed-width-unroll.ts` pass: (1) inline a list-valued user
+  function at its call site so `F(x, y)[1]` becomes `At` over a literal list,
+  which already compiles and alone fixes the three `oeupgr064p` rows; (2)
+  component-wise `Add`/`Subtract`/`Negate` of equal static widths, scalar ×
+  list, list ÷ scalar, and `Total` of a fixed-width list; (3) a decision on
+  `Power` of a list (component-wise or dot product) before the pass
+  distributes it. Widths that are not compile-time literals fail closed.
+- **Compiled `NotEqual` over a NaN operand disagrees with the interpreter
+  whenever the tolerance form is used (found 2026-09-09 while typing integer
+  range indices).** `compile(r \ne 3)` with `r: real` emits
+  `Math.abs(r - 3) > 1e-10`; called with no `r`, the difference is NaN,
+  `NaN > 1e-10` is false, and the compiled function answers "equal" where
+  the interpreter answers `NotEqual(NaN, 3) → True`. The fix is one operator,
+  `!(|a − b| <= tol)`, identical for every non-NaN pair, but the spelling is
+  pinned on the JavaScript and Python targets and the same seam lives in
+  `_SYS.neq` / `_ce_eqcoll`, so it is a cross-target contract change. The
+  exact `===` form (now admitted for `integer | nan` operands) already
+  agrees with the interpreter.
+- **Not CE's:** the inline `At` lambda (Tycho's own override), the "Unknown
+  operator" declines (importer binding), and the 2× re-compile of every
+  declined row.
+
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 
 The audit (`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md`,

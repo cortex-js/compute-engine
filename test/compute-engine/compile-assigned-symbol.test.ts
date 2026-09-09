@@ -135,7 +135,8 @@ describe('COMPILE: assigned-symbol folding', () => {
       ce.assign('a', 1.5);
       const t = ce._getCompilationTarget('interval-js')!;
       const { code, run } = t.compile(ce.parse('a x'));
-      expect(code).toBe('_IA.mul(_IA.point(1.5), _.x)');
+      // A constant point factor multiplies through the point-scaling kernel.
+      expect(code).toBe('_IA.scale(_IA.point(1.5), _.x)');
       // x = 2 → [3, 3]
       const r = run!({ x: 2 }) as { value: { lo: number; hi: number } };
       expect(r.value.lo).toBeCloseTo(3, 12);

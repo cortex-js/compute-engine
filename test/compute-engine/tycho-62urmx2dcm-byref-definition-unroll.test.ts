@@ -720,12 +720,14 @@ describe('BY-REFERENCE DEFINITION UNROLL — the angular unit', () => {
     };
 
     const deg = withUnit('deg');
-    expect(deg.viaCall).toContain('0.017453292519943295');
+    // The shader spelling of `Math.fround(π/180)` is its shortest single-
+    // precision decimal, `0.017453292`.
+    expect(deg.viaCall).toContain('0.017453292');
     expect(deg.viaCall).toBe(deg.written);
 
     // Radian mode is the no-op case: no factor, and nothing changed.
     const rad = withUnit('rad');
-    expect(rad.viaCall).not.toContain('0.017453292519943295');
+    expect(rad.viaCall).not.toContain('0.017453292');
     expect(rad.viaCall).toBe(rad.written);
     expect(rad.viaCall).toBe('y + sin(x)');
   });

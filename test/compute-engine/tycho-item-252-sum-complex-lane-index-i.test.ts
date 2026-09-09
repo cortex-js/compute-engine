@@ -59,7 +59,7 @@ describe('Tycho item 252: complex-lane Sum with an index named i', () => {
     }
   }
 
-  test('the i spelling emits the complex add chain, like the j spelling', () => {
+  test('the i spelling emits the same code as the j spelling', () => {
     const ce = engine();
     const code = (idx: string) =>
       String(
@@ -67,8 +67,14 @@ describe('Tycho item 252: complex-lane Sum with an index named i', () => {
           to: 'javascript',
         }).code
       );
-    expect(code('i')).toContain('.re');
+    // The two spellings must agree — the divergence is the defect. Which LANE
+    // they agree on is a separate question: each unrolled term binds the index
+    // to a literal, which makes `9.81 / k[i]` a positive constant, so the
+    // radical no longer promotes and both spellings emit real arithmetic. The
+    // values above are what pins the answer; this pins the two spellings
+    // against each other.
     expect(code('i').replace(/\bi\b/g, 'j')).toBe(code('j'));
+    expect(code('i')).not.toContain('_SYS.csqrt');
   });
 
   test('under mode complex the radical receives a complex object, not a bare number', () => {

@@ -595,6 +595,91 @@ function negatedIntervalOperand(expr: Expression): Expression | undefined {
   return expr.op1;
 }
 
+/** The compiled spelling of the interval `[0, 0]`, which is also how this
+ *  split reports "this side of the value contributes no term". */
+const INTERVAL_ZERO = '_IA.point(0)';
+
+/**
+ * The real and imaginary parts of a complex-valued expression as two pieces
+ * of interval code, or `undefined` when the expression cannot be taken apart
+ * structurally.
+ *
+ * The interval domain is real: one interval per quantity, and a complex value
+ * has no spelling in it. `Argument` is nonetheless computable whenever the
+ * complex value is BUILT in the expression — the shape `a + i·b` that
+ * `Complex(a, b)` and an authored `x + iy` both canonicalize to — because the
+ * argument of that value is `atan2(b, a)` over the two REAL parts, and both
+ * parts do have an interval spelling. This is the same split the JavaScript
+ * target takes (`tryGetJSComplexParts` there), in this target's dialect.
+ *
+ * Recognized: a real sub-expression (imaginary part zero), a number literal,
+ * the imaginary unit, a product with exactly one purely-imaginary factor and
+ * real remaining factors, and a sum of those. Anything else — an opaque
+ * complex call such as `Sin(z)`, a complex-typed symbol, a product of two
+ * complex factors — returns `undefined`, and the caller fails closed.
+ *
+ * Every operand is compiled exactly once, and each contributes its code to
+ * only one of the two parts, so no sub-expression is duplicated. An operand
+ * with observable effects declines the split: the parts are emitted
+ * imaginary-first in `_IA.atan2`, which would run the effects in an order the
+ * interpreter does not.
+ */
+function tryGetIntervalComplexParts(
+  expr: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): { re: string; im: string } | undefined {
+  if (expr.isPure === false) return undefined;
+  if (!BaseCompiler.isComplexValued(expr))
+    return { re: compile(expr), im: INTERVAL_ZERO };
+  // A complex NUMBER literal holds a machine double for each part, which is
+  // the value the interpreter computes with, so each part is a point.
+  if (isNumber(expr))
+    return { re: `_IA.point(${expr.re})`, im: `_IA.point(${expr.im})` };
+  if (isSymbol(expr, 'ImaginaryUnit'))
+    return { re: INTERVAL_ZERO, im: '_IA.point(1)' };
+  if (isFunction(expr, 'Multiply')) {
+    // The one purely-imaginary factor: the `ImaginaryUnit` symbol, or the
+    // number literal `Complex(0, k)` that canonicalization puts in its place.
+    const ops = expr.ops;
+    const scaleOf = (op: Expression): number | undefined =>
+      isSymbol(op, 'ImaginaryUnit')
+        ? 1
+        : isNumber(op) && op.re === 0 && op.im !== 0
+          ? op.im
+          : undefined;
+    const i = ops.findIndex((op) => scaleOf(op) !== undefined);
+    if (i < 0) return undefined;
+    const rest = ops.filter((_op, k) => k !== i);
+    if (rest.some((op) => BaseCompiler.isComplexValued(op))) return undefined;
+    const scale = scaleOf(ops[i])!;
+    const factors = rest.map((op) => compile(op));
+    if (scale !== 1) factors.unshift(`_IA.point(${scale})`);
+    let im = factors.length === 0 ? '_IA.point(1)' : factors[0];
+    for (let k = 1; k < factors.length; k++)
+      im = intervalMulStep(im, factors[k], target);
+    return { re: INTERVAL_ZERO, im };
+  }
+  if (isFunction(expr, 'Add')) {
+    const parts: string[][] = [[], []];
+    for (const op of expr.ops) {
+      const p = tryGetIntervalComplexParts(op, compile, target);
+      if (p === undefined) return undefined;
+      if (p.re !== INTERVAL_ZERO) parts[0].push(p.re);
+      if (p.im !== INTERVAL_ZERO) parts[1].push(p.im);
+    }
+    const sum = (terms: string[]): string => {
+      if (terms.length === 0) return INTERVAL_ZERO;
+      let code = terms[0];
+      for (let k = 1; k < terms.length; k++)
+        code = foldChainStep(`_IA.add(${code}, ${terms[k]})`, target);
+      return code;
+    };
+    return { re: sum(parts[0]), im: sum(parts[1]) };
+  }
+  return undefined;
+}
+
 /**
  * Interval arithmetic function implementations.
  */
@@ -683,6 +768,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // value 1 into the body. Keep it when it is the only factor left.
       const unitFree = codes.filter((code) => code !== '_IA.point(1)');
       const rest = unitFree.length > 0 ? unitFree : codes;
+      // An inexact constant factor absorbs the whole rational — the division
+      // disappears from the emitted code (`foldRationalConstantFactors`).
+      const absorbed = foldRationalConstantFactors(rest, rat, target);
+      if (absorbed !== undefined) {
+        let product = absorbed.constant;
+        for (const factor of absorbed.factors)
+          product = intervalMulStep(product, factor, target);
+        return product;
+      }
       // The seed, the quotient and the numerator factor all go through the
       // fold as well as each chain step: without the rational factor in front
       // of it, a leading constant such as the enclosure literal that `Pi`
@@ -691,29 +785,28 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       let numerator = foldChainStep(rest[0], target, true);
       if (rat.p === -1) numerator = `_IA.negate(${numerator})`;
       for (let i = 1; i < rest.length; i++) {
-        numerator = foldChainStep(`_IA.mul(${numerator}, ${rest[i]})`, target);
+        numerator = intervalMulStep(numerator, rest[i], target);
       }
-      const quotient = foldChainStep(
-        `_IA.div(${numerator}, _IA.point(${rat.q}))`,
+      const quotient = intervalDivStep(
+        numerator,
+        `_IA.point(${rat.q})`,
         target
       );
       if (rat.p === 1 || rat.p === -1) return quotient;
-      return foldChainStep(`_IA.mul(${quotient}, _IA.point(${rat.p}))`, target);
+      return intervalMulStep(quotient, `_IA.point(${rat.p})`, target);
     }
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = foldChainStep(`_IA.mul(${result}, ${compile(args[i])})`, target);
+      result = intervalMulStep(result, compile(args[i]), target);
     }
     return result;
   },
   Divide: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(1)';
     if (args.length === 1) return compile(args[0]);
-    if (args.length === 2)
-      return `_IA.div(${compile(args[0])}, ${compile(args[1])})`;
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
-      result = foldChainStep(`_IA.div(${result}, ${compile(args[i])})`, target);
+      result = intervalDivStep(result, compile(args[i]), target);
     }
     return result;
   },
@@ -1073,6 +1166,27 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Exp2: (args, compile) => `_IA.exp2(${compile(args[0])})`,
   Arctan2: (args, compile) =>
     `_IA.atan2(${compile(args[0])}, ${compile(args[1])})`,
+  // The argument (phase) of a complex value. The interval domain is real, so
+  // this compiles only when the operand splits into a real part `a` and an
+  // imaginary part `b` (`tryGetIntervalComplexParts`); the phase is then
+  // `atan2(b, a)` over two real intervals, which `_IA.atan2` encloses —
+  // including across the branch cut on the negative real axis, where it
+  // answers the hull [−π, π] as a jump (`interval/trigonometric.ts`).
+  //
+  // A REAL operand is the same call with an imaginary part of zero: the
+  // phase is 0 where the operand is positive and π where it is negative, and
+  // `atan2([0, 0], x)` is exactly that.
+  Argument: (args, compile, target) => {
+    const parts = tryGetIntervalComplexParts(args[0], compile, target);
+    if (parts === undefined)
+      throw new Error(
+        'Argument: the interval target compiles the phase of a complex value ' +
+          'only when the value is built in the expression (the form ' +
+          '`a + i·b` with real `a` and `b`), since the interval domain is ' +
+          'real and has no complex value of its own. Fail closed (D6).'
+      );
+    return `_IA.atan2(${parts.im}, ${parts.re})`;
+  },
   Hypot: (args, compile) =>
     `_IA.hypot(${compile(args[0])}, ${compile(args[1])})`,
 
@@ -1964,6 +2078,8 @@ const FOLDABLE_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
   'sub',
   'mul',
   'div',
+  'scale',
+  'scaleDiv',
   'negate',
   'sqrt',
   'square',
@@ -2250,6 +2366,171 @@ function foldChainStep(
   );
 }
 
+/**
+ * The two endpoints of `code` as they are spelled, when `code` is a whole
+ * CONSTANT interval; `undefined` for anything else.
+ *
+ * The three spellings this target emits a constant interval in are all
+ * accepted: `_IA.point(c)` (whose endpoints are both `c`), the bare
+ * `{ lo, hi }` an emitted or folded constant takes, and the wrapped
+ * `{ kind: 'interval', value: { lo, hi } }` a root-level fold answers. Each
+ * endpoint must be a numeric literal as the emitters spell one
+ * (`INTERVAL_CONSTANT_ENDPOINT`), which is what tells a constant from
+ * `_IA.point(k)` over a loop index or `_IA.point(ops.length)`.
+ */
+function constantIntervalEndpoints(
+  code: string
+): readonly [string, string] | undefined {
+  const point = /^_IA\.point\(([^(),]*)\)$/.exec(code);
+  if (point !== null) {
+    const c = point[1].trim();
+    return INTERVAL_CONSTANT_ENDPOINT.test(c) ? [c, c] : undefined;
+  }
+  const enclosure =
+    /^(?:\{ kind: 'interval', value: )?\{ lo: ([^,{}]+), hi: ([^,{}]+) \}(?: \})?$/.exec(
+      code
+    );
+  if (enclosure === null) return undefined;
+  const lo = enclosure[1].trim();
+  const hi = enclosure[2].trim();
+  if (
+    !INTERVAL_CONSTANT_ENDPOINT.test(lo) ||
+    !INTERVAL_CONSTANT_ENDPOINT.test(hi)
+  )
+    return undefined;
+  return [lo, hi];
+}
+
+/**
+ * Whether `code` is a constant POINT interval — a degenerate enclosure whose
+ * two endpoints are the same numeric literal.
+ *
+ * A NaN endpoint is refused: `NaN === NaN` is false in the emitted arithmetic
+ * too, so such an interval is not a point at run time and must keep the
+ * general product, whose NaN propagation the specialization does not
+ * reproduce.
+ */
+function isConstantPointCode(code: string): boolean {
+  const endpoints = constantIntervalEndpoints(code);
+  if (endpoints === undefined) return false;
+  return endpoints[0] === endpoints[1] && endpoints[0] !== 'NaN';
+}
+
+/**
+ * One step of a `Multiply` chain: `a · b`, folded when both sides are
+ * constant, and otherwise emitted as the point-scaling kernel when one side
+ * is a constant point.
+ *
+ * `_IA.scale(p, x)` answers the same endpoints as `_IA.mul(p, x)` for a point
+ * `p` (`interval/arithmetic.ts`) with two endpoint products instead of four,
+ * which is the shape a coefficient times a variable takes. Interval
+ * multiplication is commutative endpoint for endpoint, so a constant on the
+ * right is emitted as the left operand of the scaling; that reorders the two
+ * operands, which is unobservable because a constant runs no code.
+ *
+ * The fold is attempted FIRST and its answer is returned untouched: a step
+ * whose two sides are both constant becomes one literal, and there is nothing
+ * left to scale.
+ */
+function intervalMulStep(
+  left: string,
+  right: string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const product = `_IA.mul(${left}, ${right})`;
+  const folded = foldChainStep(product, target);
+  if (folded !== product) return folded;
+  if (isConstantPointCode(left)) return `_IA.scale(${left}, ${right})`;
+  if (isConstantPointCode(right)) return `_IA.scale(${right}, ${left})`;
+  return product;
+}
+
+/**
+ * One step of a `Divide` chain: `a / b`, folded when both sides are constant,
+ * and otherwise emitted as the point-dividing kernel when the DIVISOR is a
+ * constant point.
+ *
+ * `_IA.scaleDiv(x, p)` answers the same endpoints as `_IA.div(x, p)` for a
+ * non-zero point `p` with two corner quotients instead of four. The divisor
+ * position is fixed — division does not commute — so only the right operand
+ * is tested.
+ */
+function intervalDivStep(
+  left: string,
+  right: string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const quotient = `_IA.div(${left}, ${right})`;
+  const folded = foldChainStep(quotient, target);
+  if (folded !== quotient) return folded;
+  if (isConstantPointCode(right)) return `_IA.scaleDiv(${left}, ${right})`;
+  return quotient;
+}
+
+/**
+ * The constant factors of a product that also has an exact rational factor
+ * `p/q`, folded together with that rational into ONE enclosure — with the
+ * remaining, non-constant factors.
+ *
+ * `2πs/100` reaches the rational lowering as the divisor 100/2 = 50 and the
+ * factors `π` and `s`, and the structural emission multiplies by `π` and then
+ * divides by 50 on every evaluation: `_IA.div(_IA.mul(<π>, _.s), _IA.point(50))`.
+ * Both constants are known here, so `π/50` is computed ONCE, at compile time,
+ * through the run-time library itself (`foldConstantIntervalCode`, which
+ * rounds every endpoint it cannot prove exact outward). The emitted code
+ * multiplies by that enclosure and does not divide at all.
+ *
+ * The fold is taken only when the product of the OTHER constant factors is
+ * already INEXACT — an enclosure with two different endpoints. That is what
+ * keeps the reason the rational lowering divides rather than multiplying by a
+ * reciprocal: `2x/49` is exactly `2k` at `x = 49k` because the division `x/49`
+ * is exact there, and a folded `2/49` — a rounded enclosure, since no double
+ * holds that value — would answer an interval around `2k` instead, which a
+ * surrounding `floor` reads as a discontinuity. The test is on the constant
+ * factors, NOT on the folded answer: `2/49` is inexact and so would pass a
+ * test on the answer, while the emission it replaces is exact at every
+ * multiple of 49. A constant factor that is already an enclosure (`π`) makes
+ * the product inexact for every operand, so no exact multiple is lost.
+ *
+ * Reordering the factors is unobservable: a constant runs no code, so moving
+ * it in front of the remaining factors cannot change the order in which their
+ * effects run relative to each other.
+ */
+function foldRationalConstantFactors(
+  rest: readonly string[],
+  rat: { p: number; q: number },
+  target: CompileTarget<Expression> | undefined
+): { constant: string; factors: string[] } | undefined {
+  if (target?.foldEmittedConstant === undefined) return undefined;
+  const constants = rest.filter(
+    (code) => constantIntervalEndpoints(code) !== undefined
+  );
+  const factors = rest.filter(
+    (code) => constantIntervalEndpoints(code) === undefined
+  );
+  // With no constant factor there is nothing to fold the rational into; with
+  // no other factor the product is constant throughout and the ordinary chain
+  // fold already collapses it.
+  if (constants.length === 0 || factors.length === 0) return undefined;
+  const splices = intervalSpliceSources(target);
+  let product = constants[0];
+  if (constants.length > 1) {
+    for (let i = 1; i < constants.length; i++)
+      product = `_IA.mul(${product}, ${constants[i]})`;
+    const foldedProduct = foldConstantIntervalCode(product, false, splices);
+    if (foldedProduct === undefined) return undefined;
+    product = foldedProduct;
+  }
+  const endpoints = constantIntervalEndpoints(product);
+  if (endpoints === undefined || endpoints[0] === endpoints[1])
+    return undefined;
+  let code = `_IA.div(${product}, _IA.point(${rat.q}))`;
+  if (rat.p !== 1) code = `_IA.mul(${code}, _IA.point(${rat.p}))`;
+  const folded = foldConstantIntervalCode(code, false, splices);
+  if (folded === undefined) return undefined;
+  return { constant: folded, factors };
+}
+
 // ---------------------------------------------------------------------------
 // Hoisting repeated constant intervals out of the emitted expression.
 // ---------------------------------------------------------------------------
@@ -2311,8 +2592,42 @@ function maskStringLiterals(code: string): string {
 }
 
 /**
- * Bind each constant interval that appears more than once in `sources` to a
- * preamble local, and rewrite the sources to read that local.
+ * The character ranges the emitted `for` loops of `masked` cover, from the
+ * `{` that opens each body to the `}` that closes it.
+ *
+ * A loop body runs once per iteration, so a constant written once inside one
+ * is still allocated once per iteration. The scan reads the STRING-MASKED
+ * copy of the source, so a brace inside caller text cannot unbalance it. It
+ * is an approximation on purpose: binding a constant to a name is
+ * semantically safe wherever the constant stands, so a range that reaches
+ * too far only names a constant that did not need one, and one that stops
+ * too early only leaves an allocation where it was.
+ */
+function loopBodyRanges(masked: string): Array<readonly [number, number]> {
+  const ranges: Array<readonly [number, number]> = [];
+  let at = 0;
+  for (;;) {
+    const header = masked.indexOf('for (', at);
+    if (header < 0) break;
+    const open = masked.indexOf('{', header);
+    if (open < 0) break;
+    let depth = 0;
+    let i = open;
+    for (; i < masked.length; i++) {
+      if (masked[i] === '{') depth++;
+      else if (masked[i] === '}' && --depth === 0) break;
+    }
+    ranges.push([open, i]);
+    // A nested loop starts inside this body and gets its own range, which
+    // this one already covers.
+    at = open + 1;
+  }
+  return ranges;
+}
+
+/**
+ * Bind the constant intervals of `definitions` and `expression` to preamble
+ * locals, and rewrite both to read those locals.
  *
  * Every constant interval in the emitted code is an object LITERAL, so the
  * expression allocates one object per occurrence per call — 913 point
@@ -2320,6 +2635,16 @@ function maskStringLiterals(code: string): string {
  * measured. A constant bound once in the preamble is allocated once per
  * call instead of once per occurrence, which is what an unrolled sum of
  * twenty terms sharing the factor `1/2` needs.
+ *
+ * Two occurrences are needed to bind a constant of the root `expression`,
+ * which runs once per call: with one occurrence the binding would allocate
+ * the same one object and add a name. A constant written where the code runs
+ * REPEATEDLY is bound at its first occurrence instead — a user-function
+ * `definitions` body, which runs once per call of that function, and a `for`
+ * loop body, which runs once per iteration. The audit's transit kernel is
+ * the first case: its `_fn_S` body carries a `_IA.point(2)` written once and
+ * evaluated once per term of a forty-term sum. A summation over 200 terms
+ * that exceeds the unroll limit is the second.
  *
  * The preamble of this target is evaluated on every call (see
  * `ComputeEngineIntervalFunction`, which builds ONE function whose body is
@@ -2341,9 +2666,10 @@ function maskStringLiterals(code: string): string {
  * compilation carrying a caller-supplied function (see below).
  */
 function hoistIntervalConstants(
-  sources: readonly string[],
+  definitions: string,
+  expression: string,
   target: CompileTarget<Expression>
-): { declarations: string; sources: string[] } {
+): { declarations: string; definitions: string; expression: string } {
   // A caller-supplied function (the `functions` compilation option) is code
   // this compiler never sees. It receives an interval object as an argument
   // and may keep or write to it, and the rewrite below is textual: it would
@@ -2353,13 +2679,19 @@ function hoistIntervalConstants(
   // hoisted, because an occurrence's position in the emitted text does not
   // say whose argument it is.
   if ((target.foldExcludedOps?.size ?? 0) > 0)
-    return { declarations: '', sources: [...sources] };
+    return { declarations: '', definitions, expression };
+  // Index 0 is the user-function definitions, every line of which is a
+  // function body; index 1 is the root expression, where only a loop body
+  // runs repeatedly.
+  const sources = [definitions, expression];
   type Match = { source: number; start: number; end: number; text: string };
   const matches: Match[] = [];
   const counts = new Map<string, number>();
+  const repeated = new Set<string>();
   for (let s = 0; s < sources.length; s++) {
     const source = sources[s];
     const masked = maskStringLiterals(source);
+    const loops = s === 0 ? [] : loopBodyRanges(masked);
     HOISTABLE_INTERVAL_CONSTANT.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = HOISTABLE_INTERVAL_CONSTANT.exec(source)) !== null) {
@@ -2377,6 +2709,11 @@ function hoistIntervalConstants(
         text: m[0],
       });
       counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
+      if (
+        s === 0 ||
+        loops.some(([open, close]) => m!.index > open && m!.index < close)
+      )
+        repeated.add(m[0]);
     }
   }
 
@@ -2385,7 +2722,8 @@ function hoistIntervalConstants(
   const declarations: string[] = [];
   let counter = 0;
   for (const { text } of matches) {
-    if ((counts.get(text) ?? 0) < 2 || names.has(text)) continue;
+    if (names.has(text)) continue;
+    if ((counts.get(text) ?? 0) < 2 && !repeated.has(text)) continue;
     let name: string;
     do {
       name = `_k${++counter}`;
@@ -2394,7 +2732,7 @@ function hoistIntervalConstants(
     names.set(text, name);
     declarations.push(`const ${name} = ${text};`);
   }
-  if (names.size === 0) return { declarations: '', sources: [...sources] };
+  if (names.size === 0) return { declarations: '', definitions, expression };
 
   const rewritten = sources.map((source, s) => {
     let out = '';
@@ -2408,7 +2746,11 @@ function hoistIntervalConstants(
     }
     return out + source.slice(at);
   });
-  return { declarations: declarations.join('\n'), sources: rewritten };
+  return {
+    declarations: declarations.join('\n'),
+    definitions: rewritten[0],
+    expression: rewritten[1],
+  };
 }
 
 /** A bare `{ lo, hi }` with numeric endpoints and nothing else. */
@@ -2976,9 +3318,9 @@ function compileToIntervalTarget(
   // object at each occurrence. The declarations go AFTER the caller's own
   // preamble (which this pass never rewrites) and BEFORE the user-function
   // definitions, which may read them.
-  const hoisted = hoistIntervalConstants([userDefs, js], target);
-  const [hoistedDefs, hoistedJs] = hoisted.sources;
-  const preamble = [target.preamble, hoisted.declarations, hoistedDefs]
+  const hoisted = hoistIntervalConstants(userDefs, js, target);
+  const hoistedJs = hoisted.expression;
+  const preamble = [target.preamble, hoisted.declarations, hoisted.definitions]
     .filter((part) => part)
     .join('\n');
   const fn = new ComputeEngineIntervalFunction(hoistedJs, preamble);

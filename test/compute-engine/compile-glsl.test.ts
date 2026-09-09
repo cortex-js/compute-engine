@@ -549,7 +549,7 @@ describe('GLSL COMPILATION', () => {
 
     it('should compile complex / real (native)', () => {
       const code = glsl.compile(ce.expr(['Divide', 'z', 3])).code;
-      expect(code).toMatchInlineSnapshot(`(0.3333333333333333 * z)`);
+      expect(code).toMatchInlineSnapshot(`(0.33333334 * z)`);
     });
 
     it('should compile real / complex', () => {

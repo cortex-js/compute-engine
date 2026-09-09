@@ -193,13 +193,13 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — interval-js has no infix', () => 
     const expr = ce.box(['Multiply', 3, ['Floor', ['Add', 'n', 1]]]);
     const r = compile(expr, { to: 'interval-js', constantFold: false });
     expect(r.code).toBe(
-      '_IA.mul(_IA.point(3), _IA.floor(_IA.add(_.n, _IA.point(1))))'
+      '_IA.scale(_IA.point(3), _IA.floor(_IA.add(_.n, _IA.point(1))))'
     );
   });
 
   test('a scaled one-operand Max stays a nest of calls', () => {
     const expr = ce.box(['Multiply', 3, ['Max', ['Add', 'x', 1]]]);
     const r = compile(expr, { to: 'interval-js', constantFold: false });
-    expect(r.code).toBe('_IA.mul(_IA.point(3), _IA.add(_.x, _IA.point(1)))');
+    expect(r.code).toBe('_IA.scale(_IA.point(3), _IA.add(_.x, _IA.point(1)))');
   });
 });

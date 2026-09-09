@@ -46,9 +46,53 @@ export function gpuNonFiniteLiteral(n: number, language?: string): string {
 }
 
 /**
+ * The shortest decimal spelling that a shader reads back as the same single
+ * precision number.
+ *
+ * A shader float literal is rounded to IEEE single when the shader is
+ * compiled, so every decimal digit past the ones single precision can tell
+ * apart is noise. `Number.prototype.toString` gives the shortest spelling that
+ * round-trips through a DOUBLE, which for a value single precision produced —
+ * `Math.fround(2π)` — is the exact binary value written out in full:
+ * `6.2831854820251465`, seventeen digits for a number with about seven
+ * significant ones. This walks the precisions from one digit upward and stops
+ * at the first spelling that `Math.fround` reads back as the same single, so
+ * `Math.fround(2π)` prints as `6.2831855`. Nine significant digits always
+ * round-trip a single, so the walk always terminates.
+ *
+ * Three values are left to `toString`. One too large for single precision
+ * would round to an infinity that no decimal literal spells. An
+ * INTEGER-valued one keeps every digit it has, because an integer literal is
+ * what a loop bound, an array length and the argument of an `int()`/`i32()`
+ * conversion are made of: WGSL evaluates an unsuffixed float literal in a
+ * const expression at abstract-float precision, which is at least single and
+ * may be double, so moving `16777217.0` to its single-precision neighbour
+ * `16777216.0` could move such a bound by one where every value context reads
+ * both as the same single. One too small to survive rounding to single
+ * precision underflows to zero: `Math.fround(1e-300)` is `0`, and the
+ * shortest-decimal search below would then hand back the candidate `"0"`,
+ * silently losing the value, so a non-zero `n` that underflows to zero is
+ * also left to `toString`.
+ */
+function shortestFloat32Decimal(n: number): string {
+  if (Number.isInteger(n)) return n.toString();
+  const single = Math.fround(n);
+  if (!Number.isFinite(single)) return n.toString();
+  if (single === 0 && n !== 0) return n.toString();
+  for (let digits = 1; digits <= 9; digits++) {
+    const candidate = Number(single.toPrecision(digits));
+    if (Math.fround(candidate) === single) return candidate.toString();
+  }
+  return single.toString();
+}
+
+/**
  * Format a number as a GPU float literal, ensuring a decimal point.
  *
  * Examples: `5` → `"5.0"`, `3.14` → `"3.14"`, `-7` → `"-7.0"`.
+ *
+ * The digits are the shortest that read back as the same single precision
+ * value (`shortestFloat32Decimal`), which is all a shader can hold.
  *
  * A non-finite value has no literal spelling in either shader language, so it
  * is emitted through `gpuNonFiniteLiteral` instead (which needs `language` to
@@ -56,7 +100,7 @@ export function gpuNonFiniteLiteral(n: number, language?: string): string {
  */
 export function formatFloat(n: number, language?: string): string {
   if (!Number.isFinite(n)) return gpuNonFiniteLiteral(n, language);
-  const str = n.toString();
+  const str = shortestFloat32Decimal(n);
   if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
     return `${str}.0`;
   }
@@ -656,7 +700,7 @@ const EMITTED_SAFE_FOLLOWER = /^[-+*/%<>=!&|^?:,)\]};]/;
  * Fold the literal arithmetic in one emitted code string, or `undefined` when
  * there is nothing to fold or the code is not closed.
  *
- * Two folds, in order:
+ * Three folds, in order:
  *
  * 1. The WHOLE code, when it is a closed literal expression:
  *    `-Math.sqrt(-_SYS.pow2(0.025 * (1 + -0.5)) + 1) + 1` becomes one literal.
@@ -665,9 +709,16 @@ const EMITTED_SAFE_FOLLOWER = /^[-+*/%<>=!&|^?:,)\]};]/;
  *    expression and folds in the source's own left-to-right order, so every
  *    operation and every rounding is one the code already had — which is also
  *    why the run may not be extended across a non-literal operand. A chain
- *    whose FIRST operand is not literal, such as `(2 * Math.PI * s) / 100`,
- *    folds nothing: turning it into `0.0628… * s` would divide before
- *    multiplying and round differently.
+ *    whose FIRST operand is not literal folds nothing: turning
+ *    `_.s * 2 * Math.PI` into `_.s * 6.283…` would multiply in a different
+ *    order and round differently.
+ * 3. Failing both, the BODY of a redundant outer parenthesis pair, re-wrapped
+ *    in the same parentheses. A prefix run that the emitter enclosed —
+ *    `(2 * Math.PI * _.s)`, the numerator a quotient parenthesizes — is
+ *    invisible to fold 2, because the reader needs the whole group to close
+ *    before it can use it as one operand. Folding the body and putting the
+ *    parentheses back leaves the group in exactly the place, and with exactly
+ *    the associativity, the emitter gave it.
  *
  * A non-finite result declines: `1 / 0` keeps its structural code, whose pole
  * semantics the target chose deliberately. Code that APPLIES nothing declines
@@ -702,17 +753,50 @@ function evaluateEmittedCode(
 
   const prefix = new EmittedCodeReader(code, dialect);
   const head = prefix.multiplicative();
-  if (head === undefined || !prefix.applied) return undefined;
-  const consumed = code.slice(0, prefix.pos);
-  const rest = code.slice(prefix.pos);
-  const follower = rest.trimStart();
-  if (
-    !EMITTED_SAFE_FOLLOWER.test(follower) ||
-    follower.startsWith('**') ||
-    follower.startsWith('?.')
-  )
-    return undefined;
-  return emitFolded(head, consumed, rest, dialect);
+  if (head !== undefined && prefix.applied) {
+    const consumed = code.slice(0, prefix.pos);
+    const rest = code.slice(prefix.pos);
+    const follower = rest.trimStart();
+    if (
+      EMITTED_SAFE_FOLLOWER.test(follower) &&
+      !follower.startsWith('**') &&
+      !follower.startsWith('?.')
+    )
+      return emitFolded(head, consumed, rest, dialect);
+  }
+
+  const body = parenthesizedBody(code);
+  if (body === undefined) return undefined;
+  const foldedBody = evaluateEmittedCode(body, dialect);
+  return foldedBody === undefined ? undefined : `(${foldedBody})`;
+}
+
+/**
+ * The text between a redundant outer parenthesis pair — the whole code is one
+ * parenthesized group — or `undefined` when it is not of that shape.
+ *
+ * The scan counts parentheses, which is only a reliable reading of the code
+ * when no parenthesis can be part of something else. Emitted code that
+ * contains a QUOTE may hold one inside a string literal, so any quote
+ * character declines the whole reading rather than risk cutting a group at the
+ * wrong place. That is the same conservatism the reader itself has: it knows
+ * no string grammar.
+ */
+function parenthesizedBody(code: string): string | undefined {
+  const text = code.trim();
+  if (!text.startsWith('(') || !text.endsWith(')')) return undefined;
+  if (/['"`]/.test(text)) return undefined;
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') {
+      depth -= 1;
+      // The opening parenthesis closes before the end, so the code is not one
+      // group (`(a) * (b)`).
+      if (depth === 0 && i !== text.length - 1) return undefined;
+    }
+  }
+  return depth === 0 ? text.slice(1, -1) : undefined;
 }
 
 /** The folded `value` spelled for `dialect`, followed by the unfolded `rest`.
@@ -854,12 +938,15 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
  * `_gpu_pow2` and `_gpu_pow3` fold as the products the preamble helpers
  * compute (`x * x`, `x * x * x`), each product rounded like the shader's. The
  * per-width vector overloads (`_gpu_pow2_v2`) are absent on purpose: their
- * argument is a vector, which this reader has no value for.
+ * argument is a vector, which this reader has no value for. `abs` is exact in
+ * every IEEE format (it only clears the sign bit), so it folds too; without
+ * it a radicand written as `abs(literal)` blocked the `sqrt` fold around it.
  */
 const GPU_EMITTED_FOLD: EmittedFoldDialect = {
   constants: {},
   calls: {
     sqrt: unaryFold((x) => Math.fround(Math.sqrt(x))),
+    abs: unaryFold((x) => Math.abs(x)),
     _gpu_pow2: unaryFold((x) => Math.fround(x * x)),
     _gpu_pow3: unaryFold((x) => Math.fround(Math.fround(x * x) * x)),
   },

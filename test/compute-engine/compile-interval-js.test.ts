@@ -1336,7 +1336,7 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     );
     expect(fn.success).toBe(true);
     expect(fn.code).toBe(
-      '[_IA.mul(_IA.point(2), _.a), _IA.add(_.b, _IA.point(1))]'
+      '[_IA.scale(_IA.point(2), _.a), _IA.add(_.b, _IA.point(1))]'
     );
     expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
       { kind: 'interval', value: { lo: 2, hi: 4 } },

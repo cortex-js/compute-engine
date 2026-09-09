@@ -754,6 +754,39 @@ export function nonNumericOperandError(
   return ce.typeError('number', bad.type, bad);
 }
 
+/**
+ * Whether the operands carry a SCALAR absence, the condition under which an
+ * operator with `missingBehavior` `propagate` or `reject` answers instead of
+ * running its handler (`docs/ERROR-MODEL.md` §3: in a numeric slot `Missing`
+ * is normalized to `NaN` at the boundary).
+ *
+ * The absence has to be the `Missing` symbol: a `NaN` operand already
+ * propagates through numeric evaluation natively, and some operators give a
+ * literal `NaN` operand a bespoke meaning.
+ *
+ * "Scalar" means no operand is collection-SHAPED — read as the type, not only
+ * as the `isCollection` capability, because an operand declared `list<number>`
+ * with no value yet is destined to broadcast but cannot be enumerated now. A
+ * collection operand makes the application a broadcast, which carries the
+ * absence per cell through the operator's own kernel.
+ *
+ * The driver applies this gate to the operands it evaluated
+ * (`_computeValue`/`_computeValueAsync`, the missing-value behavior gate). A
+ * `lazy` operator gets its operands UNEVALUATED there, so the gate only sees a
+ * `Missing` that was already written in the source; such an operator must run
+ * this same test itself on the operands it evaluates, or an absence produced
+ * BY that evaluation survives into the result (`Add(g(3), 1)` stayed
+ * `Add(Missing, 1)` where `Add(Missing, 1)` gave `NaN`).
+ */
+export function hasAbsentScalarOperand(
+  ops: ReadonlyArray<Expression>
+): boolean {
+  return (
+    ops.some((x) => isSymbol(x, 'Missing')) &&
+    !ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
+  );
+}
+
 // ————————————————————————————————————————————————————————————————————————
 // Generic runtime conformance (R1/R8 — §4.4 of
 // `docs/plans/2026-08-22-type-handlers-on-types.md`)

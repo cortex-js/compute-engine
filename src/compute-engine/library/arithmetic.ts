@@ -10,6 +10,7 @@ import {
   checkType,
   checkTypes,
   checkNumericArgs,
+  hasAbsentScalarOperand,
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
 import {
@@ -1640,6 +1641,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evaluated = ops.map((x) => x.evaluate());
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
+        // The driver's missing-value gate saw the operands UNEVALUATED
+        // (`Add` is lazy), so an absence produced by the evaluation above —
+        // a piecewise with no default arm, `g(3)` — has not been absorbed
+        // yet. Apply the same normalization here: in a numeric slot
+        // `Missing` becomes `NaN` (`docs/ERROR-MODEL.md` §3). It runs
+        // AFTER the non-numeric check, and only when every evaluated operand
+        // is valid, because an error or a non-numeric operand outranks an
+        // absence: `Error` is the absorbing element of evaluation, and a
+        // type error names the offending operand where `NaN` would hide it.
+        if (
+          evaluated.every((x) => x.isValid) &&
+          hasAbsentScalarOperand(evaluated)
+        )
+          return engine!.NaN;
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
           if (
@@ -4102,6 +4117,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const evaluated = ops.map((x) => x.evaluate());
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
+        // See the matching note in `Add`: `Multiply` is lazy, so the driver's
+        // missing-value gate never saw the EVALUATED operands, and the
+        // absence normalization to `NaN` has to run here, after the
+        // non-numeric check and only over valid operands.
+        if (
+          evaluated.every((x) => x.isValid) &&
+          hasAbsentScalarOperand(evaluated)
+        )
+          return engine!.NaN;
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
           if (
@@ -6387,6 +6411,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const numeric = options.numericApproximation;
         const bounds = ops.slice(1);
         const mode = classifyBigopDomain(ops[0], bounds, ce);
+        if (mode === 'absent') return ce.NaN;
         if (mode === 'symbolic') {
           if (bounds.length === 1) {
             // Degenerate bounds (`Π_{i=x}^{x}`): one term, no enumeration.
@@ -6469,6 +6494,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const asyncTerms = hasAsyncOnlyApplication(ops[0]);
         {
           const mode = classifyBigopDomain(ops[0], bounds, ce);
+          if (mode === 'absent') return ce.NaN;
           if (mode === 'symbolic') {
             if (bounds.length === 1) {
               // Degenerate bounds (`Π_{i=x}^{x}`): one term, no enumeration.
@@ -6616,6 +6642,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // enumerable, under either mode.
         const numeric = numericApproximation;
         const mode = classifyBigopDomain(first, rest, engine);
+        if (mode === 'absent') return engine.NaN;
         if (mode === 'symbolic') {
           if (rest.length === 1) {
             // Degenerate bounds (`Σ_{i=x}^{x}`): one term, no enumeration.
@@ -6719,6 +6746,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const asyncTerms = hasAsyncOnlyApplication(first);
         {
           const mode = classifyBigopDomain(first, rest, engine);
+          if (mode === 'absent') return engine.NaN;
           if (mode === 'symbolic') {
             if (rest.length === 1) {
               // Degenerate bounds (`Σ_{i=x}^{x}`): one term, no enumeration.
