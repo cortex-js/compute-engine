@@ -379,18 +379,32 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
     expect(ce.box(['q', 5, 2]).evaluate().toString()).toBe('8');
   });
 
-  test('an `unknown` parameter type keeps the inner dispatch', () => {
+  test('an `unknown` parameter type makes the inner call direct as well', () => {
     const ce = nested('none');
     // Inference gives an unannotated literal `unknown` parameters — a use of
     // a parameter at a SCALAR parameter of another function narrows nothing,
-    // because broadcasting admits a list there. So the body may receive a
-    // list whole and the dispatch stays.
+    // because broadcasting admits a list there. The parameter is a run-time
+    // scalar all the same (user ruling 2026-09-09): no parameter of `q` binds
+    // its argument whole, so every emitted call site of `q` broadcasts or
+    // guards, and the body runs once per element. This is the shape a Desmos
+    // macro chain has, where no parameter can be annotated.
     const def = (ce as any).lookupDefinition('q');
     expect(def.operator.signature.toString()).toBe(
       '(unknown, unknown) -> number'
     );
     const r = build(ce, ['q', 'u', 2]);
-    expect(r.preamble).toContain('_SYS.bcastFn(_fn_r_e, x, y)');
+    expect(r.preamble).toContain('const _fn_q = (x, y) => _fn_r_e(x, y) + 1;');
+    expect(r.preamble).not.toContain('_SYS.bcastFn');
+    // The caller is what broadcasts, and the answer still matches the
+    // interpreter for both argument shapes.
+    expect(r.run({ u: [1, 2, 3] })).toEqual([4, 5, 6]);
+    expect(r.run({ u: 5 })).toBe(8);
+    expect(
+      ce
+        .box(['q', ['List', 1, 2, 3], 2])
+        .evaluate()
+        .toString()
+    ).toBe('[4,5,6]');
   });
 
   test('a COLLECTION parameter type keeps the inner dispatch', () => {

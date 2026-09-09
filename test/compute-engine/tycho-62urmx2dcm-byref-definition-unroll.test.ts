@@ -260,6 +260,26 @@ describe('BY-REFERENCE DEFINITION UNROLL — the emitted shapes', () => {
     expect(r.preamble).toContain('const _fn_m2 =');
     expect(r.preamble).toContain('const _fn_row =');
   });
+
+  it('calls the two scalar helpers of the row DIRECTLY', () => {
+    // `row`'s own parameters are unannotated, so their inferred type is
+    // `unknown`. They hold a run-time scalar all the same, because no
+    // parameter of `row` binds its argument whole and every emitted call site
+    // of `row` is broadcast-aware (user ruling 2026-09-09). The two nested
+    // calls are therefore bare, where they used to be `_SYS.bcastFn`
+    // dispatches — two run-time dispatches per pixel of the Voronoi row.
+    const ce = byReferenceEngine();
+    const r: any = compile(ce.box(['row', 'x', 'y']), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(r.success).not.toBe(false);
+
+    const row = definitionOf(r.preamble, 'row');
+    expect(row).toContain('_fn_m(x, y)');
+    expect(row).toContain('_fn_m2(x, y)');
+    expect(sourceOf(r)).not.toContain('_SYS.bcastFn');
+  });
 });
 
 describe('BY-REFERENCE DEFINITION UNROLL — what stays by reference', () => {

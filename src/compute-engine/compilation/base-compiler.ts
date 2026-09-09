@@ -16890,15 +16890,20 @@ export class BaseCompiler {
     // (NaN). Everything else — mismatch → NaN, scalar reuse, nesting — is
     // shared.
     //
-    // The three conditions that are NOT about the argument's shape class —
-    // the JavaScript target, a scalar-parameter callee, and no atomic (tuple
-    // or nominal) argument — gate BOTH emitted broadcast forms: the
-    // unconditional dispatch just below, and the runtime guard after it.
+    // The two conditions that are NOT about the argument's shape class — the
+    // JavaScript target and a scalar-parameter callee — gate every emitted
+    // broadcast form. An ATOMIC argument (a tuple or a nominal value, the two
+    // clauses just above) additionally bars the two forms below, which would
+    // hand that argument to the broadcast as a source; where such an argument
+    // has a sibling that may be a collection, the third form — the HOLDING
+    // dispatch further down — broadcasts over the sibling alone.
+    const atomicArg = args.map(
+      (a) => isTuple(a) || BaseCompiler.isNominalAtomicArg(a)
+    );
     const mayBroadcast =
       target.language === 'javascript' &&
       args.length > 0 &&
-      !args.some((a) => isTuple(a)) &&
-      !args.some((a) => BaseCompiler.isNominalAtomicArg(a)) &&
+      !atomicArg.some((x) => x) &&
       paramsAreScalar;
 
     /** The scalar call, with each argument's complex coercion applied. */
@@ -16958,6 +16963,67 @@ export class BaseCompiler {
 
     if (mayBroadcast && !args.every(directCallArg))
       return dispatchCall(compiledArgs);
+
+    // An ATOMIC argument beside one that may be a collection. The atomic one
+    // must reach the callee WHOLE — the runtime broadcast descends a nested
+    // array (`bcastWith`), so a point handed to it as a broadcast source is
+    // mapped over its coordinates, which is not what the interpreter does
+    // with a point — while the sibling still has to be mapped, because the
+    // callee's body is scalar code. So each atomic argument is bound to a
+    // temporary and the broadcast CLOSES OVER it, mapping the other
+    // arguments only: `((_t1, _t2) => _SYS.bcastFn((_t3) => _fn_f(_t1, _t3),
+    // _t2))(codeP, codeX)`. With `g(x) := 2x` and `f(p, x) := g(x)`, the
+    // application `f((a, b), [u, v])` answers the interpreter's `[2, 4]`
+    // this way, where the bare direct call computed `2 * [u, v]` and
+    // answered NaN.
+    //
+    // Every argument that is not a literal is bound in the outer call, so an
+    // argument is evaluated exactly once and in source order — `Random()` as
+    // a coordinate of the point draws one number, as it does in the direct
+    // call and under the `Array.isArray` guard below.
+    //
+    // When every non-atomic argument is provably scalar there is nothing to
+    // map over, and the bare direct call stands.
+    if (
+      target.language === 'javascript' &&
+      args.length > 0 &&
+      paramsAreScalar &&
+      atomicArg.some((x) => x) &&
+      !args.every((a, i) => atomicArg[i] || directCallArg(a))
+    ) {
+      // `bound`: the outer temporaries, in argument order. `element`: the
+      // closure parameter each mapped argument's ELEMENT arrives in.
+      const bound = new Map<number, string>();
+      const element = new Map<number, string>();
+      args.forEach((a, i) => {
+        if (atomicArg[i] || !BaseCompiler.certainlyScalarArg(a))
+          bound.set(i, BaseCompiler.tempVar(target));
+        if (!atomicArg[i]) element.set(i, BaseCompiler.tempVar(target));
+      });
+      const callArgs = args.map((a, i) => {
+        // An atomic argument is coerced where it is BOUND, so the coercion
+        // runs once instead of once per element; a mapped one is coerced
+        // inside the closure, on the element the broadcast selected, for the
+        // reason `dispatchCall` gives.
+        if (atomicArg[i]) return bound.get(i)!;
+        const p = element.get(i)!;
+        return coerceToComplex[i] ? complexWrap(p, a, target) : p;
+      });
+      const sources = [...element.keys()].map(
+        (i) => bound.get(i) ?? compiledArgs[i]
+      );
+      const outerArgs = [...bound.keys()].map((i) =>
+        atomicArg[i] && coerceToComplex[i]
+          ? complexWrap(compiledArgs[i], args[i], target)
+          : compiledArgs[i]
+      );
+      return (
+        `((${[...bound.values()].join(', ')}) => ` +
+        `_SYS.bcastFn((${[...element.values()].join(', ')}) => ` +
+        `${name}(${callArgs.join(', ')}), ${sources.join(', ')}))` +
+        `(${outerArgs.join(', ')})`
+      );
+    }
 
     // A statically scalar argument is still not a run-time scalar. Reaching
     // here, every argument's TYPE says it cannot be a collection — but that
@@ -18494,7 +18560,10 @@ export class BaseCompiler {
     if (!registry) return name;
 
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
-    if (literal === undefined) return name;
+    // A MULTI-CLAUSE function has no single literal to read a parameter list
+    // from, and takes its own wrapper.
+    if (literal === undefined)
+      return BaseCompiler.multiClauseValueRef(engine, h, name, target) ?? name;
     const nParams = literal.ops.length - 1;
     const complexParam: boolean[] = [];
     for (let i = 0; i < nParams; i++) {
@@ -18557,6 +18626,93 @@ export class BaseCompiler {
   }
 
   /**
+   * The value reference of a MULTI-CLAUSE user function `h`, emitted under
+   * `name`: the shape-aware wrapper `ensureUserFunctionValueRef` describes,
+   * or `undefined` when `h` is not a multi-clause function, when one of its
+   * clauses binds an argument whole, or when every clause is parameterless.
+   *
+   * A clause set has no single function literal, so the single-clause route
+   * cannot read a parameter list from it and the bare DISPATCHER used to be
+   * handed out. The consumer of a function value passes whatever element the
+   * source holds, and an element can itself be a collection — a row of a
+   * matrix. With `h(x) := 3x`, `mc(x) := h(x) + 1` and
+   * `mc(x, y) := h(x) + h(y)`, `Map(mc, [[1, 2], [3]])` handed a whole row to
+   * clause bodies that are scalar code, and answered `["3,61", "91"]` (the
+   * row's string coercion) where the interpreter answers `[[4, 7], [10]]`.
+   *
+   * The wrapper takes a REST parameter where a single-clause function's takes
+   * a fixed one: the dispatcher selects a clause on the NUMBER of arguments,
+   * so any fixed arity would answer `no-matching-clause` for every other
+   * overload. What makes the rest form safe here is that every emitted
+   * consumer applies a function value through an arrow of the arity it means
+   * to pass — `(_x) => _f(_x)` for `Map`, `(_a, _b) => _f(_a, _b)` for a
+   * `Reduce` combiner — so none of them supplies the extra index and source
+   * arguments `Array.prototype.map` would.
+   *
+   * The complex `{ re, im }` coercion needs no shim on this route: the
+   * dispatcher lifts a declared-complex parameter itself, per clause, after
+   * it has chosen one (`tryEmitMultiClauseFunction`).
+   */
+  private static multiClauseValueRef(
+    engine: ComputeEngine,
+    h: string,
+    name: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry) return undefined;
+    const clauses = multiClauseState(engine.lookupDefinition(h))?.clauses;
+    if (clauses === undefined || clauses.length === 0) return undefined;
+
+    // The same two gates the single-clause route applies, read over the
+    // clause set: a clause that binds a collection whole is not broadcast by
+    // the interpreter either (`paramsAreScalar` reads the clause
+    // intersection arm by arm), and a clause parameter that lowers to an
+    // array or an object — a tuple, a record, a nominal value — must reach
+    // the body whole (`signatureParamsLowerToScalars`, which reads one
+    // signature, so each clause is asked separately).
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return undefined;
+    if (
+      !clauses.every((c) =>
+        BaseCompiler.signatureParamsLowerToScalars(c.signature)
+      )
+    )
+      return undefined;
+    // A clause set whose every clause is parameterless has no argument that
+    // could be a collection, so it needs no wrapper.
+    const clauseParams = (c: FunctionClause) => [
+      ...(c.signature.args ?? []),
+      ...(c.signature.optArgs ?? []),
+      ...(c.signature.variadicArg ? [c.signature.variadicArg] : []),
+    ];
+    if (clauses.every((c) => clauseParams(c).length === 0)) return undefined;
+
+    // A clause set whose every parameter is a DEFINITE scalar refuses a
+    // collection argument in a callback position instead of broadcasting over
+    // it, for the reason `userFunctionRefusesCollectionArg` gives for a single
+    // signature; one clause with an open parameter is enough to broadcast.
+    const refuses = clauses.every((c) => {
+      const params = clauseParams(c);
+      return (
+        params.length > 0 &&
+        params.every(({ type: t }) => BaseCompiler.isDefiniteScalarType(t))
+      );
+    });
+    const wrapperName = `${name}${refuses ? '$s' : '$b'}`;
+    if (!registry.defs.has(wrapperName))
+      registry.defs.set(
+        wrapperName,
+        `const ${wrapperName} = ${BaseCompiler.broadcastingWrapper(
+          name,
+          'rest',
+          target,
+          refuses ? 'refuse' : 'bcastFn'
+        )};`
+      );
+    return wrapperName;
+  }
+
+  /**
    * A wrapper around `callee` that calls it directly when none of its
    * `nParams` arguments is an array, and takes the `helper` route otherwise:
    * `(_tv1) => Array.isArray(_tv1) ? _SYS.<helper>(callee, _tv1) : callee(_tv1)`.
@@ -18573,11 +18729,16 @@ export class BaseCompiler {
    * collection there (`userFunctionRefusesCollectionArg`), and NaN is how the
    * compiled routes spell an error value.
    *
-   * The wrapper takes a FIXED number of parameters, read from the function
-   * literal, rather than a rest argument. A consumer that hands the value
-   * straight to `Array.prototype.map` supplies the index and the source array
-   * as extra arguments, and a rest form would see that array and broadcast
-   * over it.
+   * The wrapper takes a FIXED number of parameters wherever the function has
+   * one, read from the function literal, rather than a rest argument: a
+   * consumer that hands the value straight to `Array.prototype.map` would
+   * supply the index and the source array as extra arguments, and a rest form
+   * would see that array and broadcast over it. `nParams` is `'rest'` for the
+   * one function that has no single parameter list — a MULTI-CLAUSE
+   * dispatcher, which selects its clause on the number of arguments, so a
+   * fixed arity would answer `no-matching-clause` for every other overload
+   * (`multiClauseValueRef`, which also records why the rest form is safe for
+   * the consumers this compiler emits).
    *
    * The `Array.isArray` test is done here rather than left to the runtime
    * helper so the scalar case — every element of an ordinary flat list — costs
@@ -18585,10 +18746,21 @@ export class BaseCompiler {
    */
   private static broadcastingWrapper(
     callee: string,
-    nParams: number,
+    nParams: number | 'rest',
     target: CompileTarget<Expression>,
     helper: 'bcast' | 'bcastFn' | 'refuse'
   ): string {
+    if (nParams === 'rest') {
+      const rest = BaseCompiler.tempVar(target);
+      // `Array.isArray` reads only its first argument, so it serves as the
+      // `some` predicate unchanged.
+      const applied =
+        helper === 'refuse' ? 'NaN' : `_SYS.${helper}(${callee}, ...${rest})`;
+      return (
+        `(...${rest}) => ${rest}.some(Array.isArray) ? ` +
+        `${applied} : ${callee}(...${rest})`
+      );
+    }
     const params: string[] = [];
     for (let i = 0; i < nParams; i++) params.push(BaseCompiler.tempVar(target));
     const args = params.join(', ');
@@ -19056,36 +19228,36 @@ export class BaseCompiler {
 
   /**
    * Record, for the body about to compile under `bodyTarget`, which of `h`'s
-   * parameters hold a run-time SCALAR because the type in `h`'s signature at
-   * that position is a scalar one. A call that passes such a parameter on
+   * parameters hold a run-time SCALAR. A call that passes such a parameter on
    * then compiles as a direct call instead of a runtime broadcast dispatch.
    * (The Tycho code-generation audit of 2026-09-08 measured 297 broadcast
    * dispatches inside function bodies.)
    *
-   * Two conditions, both necessary.
+   * The condition is a property of the FUNCTION, not of one parameter: every
+   * parameter of `h` must be scalar in the sense `userFunctionParamsAreScalar`
+   * reads — no parameter binds a collection, a tuple or a point whole. When
+   * that holds, EVERY parameter of `h` holds a run-time scalar, and all of
+   * them are recorded, whether the author annotated the parameter, the engine
+   * inferred a scalar type for it, or the type stayed `unknown` (user rulings
+   * 2026-09-08 and 2026-09-09).
    *
-   * The parameter's type must be a SCALAR one — `number` and its subtypes,
-   * `boolean`, `string`. Whether the author wrote that type or the engine
-   * inferred it makes no difference (user ruling 2026-09-08): a
-   * scalar-parameter function is a run-time scalar at that position by
-   * construction, because every emitted call site of it is broadcast-aware.
-   * A call whose argument is not provably a scalar is dispatched element-wise
-   * (`_SYS.bcastFn`) or guarded by `Array.isArray`, so the body sees one
-   * element; the only call form that passes an argument straight through is
-   * the one an explicit caller declaration already exempts, and a caller that
-   * hands that form a list has broken its own declared contract. A parameter
-   * typed `unknown`, `any` or a collection carries no such standing and keeps
-   * its dispatch: such a body may legitimately receive a list whole, the way
-   * `k(L) := Sum(L)` does. The two type spellings are read together: a
-   * `Typed(x, "number")` annotation on the literal, and the signature on the
-   * definition, whether pinned by `ce.declare(h, '(number) -> number')` or
-   * inferred from the body.
+   * The reason is that the body never chooses what reaches it — its call
+   * sites do, and they are all broadcast-aware. A call whose argument is not
+   * provably a scalar is dispatched element-wise (`_SYS.bcastFn`) or guarded
+   * by `Array.isArray`, so the body runs once per element with a scalar
+   * bound; a function REFERENCED AS A VALUE is handed out through a
+   * broadcasting or guarding wrapper for the same reason. The only call form
+   * that passes an argument straight through is the one an explicit caller
+   * declaration already exempts, and a caller that hands that form a list has
+   * broken its own declared contract. The body's own arithmetic already
+   * assumes this: `f(x) := x * x` computes a product, not a Hadamard product
+   * it wrote itself.
    *
-   * And EVERY parameter of `h` must be scalar, so that every emitted call
-   * site of `h` is broadcast-aware. A callee with a collection-typed
-   * parameter binds its arguments whole (`paramsAreScalar` is false) and
-   * emits a bare direct call, which would pass an array straight into a
-   * scalar sibling parameter.
+   * A definition with a parameter that binds its argument whole — the
+   * collection parameter of `k(L) := Sum(L)` — makes
+   * `userFunctionParamsAreScalar` false and records nothing, because such a
+   * call site emits a bare direct call and may hand a list to a scalar
+   * sibling parameter.
    */
   private static recordScalarParams(
     h: string,
@@ -19103,13 +19275,14 @@ export class BaseCompiler {
       const t =
         BaseCompiler.declaredParamType(p) ??
         BaseCompiler.signatureParamType(signature, i);
-      if (t === undefined || t === 'never') return;
-      if (
-        isSubtype(t, 'number') ||
-        isSubtype(t, 'boolean') ||
-        isSubtype(t, 'string')
-      )
-        names.add(name);
+      // Two parameter types are left out. `never` admits no value at all. A
+      // FUNCTION type is a higher-order callback slot, which
+      // `paramsAreScalar` exempts from its scalar test rather than proves
+      // scalar — its value is a function, and nothing downstream should read
+      // it as a number.
+      if (t === 'never') return;
+      if (t !== undefined && isSubtype(t, 'function')) return;
+      names.add(name);
     });
     recordScalarParams(bodyTarget, names);
   }
@@ -19275,6 +19448,11 @@ export class BaseCompiler {
             registry,
             h
           );
+        // Each clause body gets the same scalar-parameter standing the
+        // single-clause route records: `userFunctionParamsAreScalar` reads
+        // the clause set as one intersection signature, and a clause with a
+        // collection parameter makes it false for every clause.
+        BaseCompiler.recordScalarParams(h, plans[i].literal, bodyTarget);
         // A recursive clause body references `h` while `name` is in
         // `compiling`, so the self-call emits `name` — bound by the time any
         // call runs, since every def executes in the preamble first.

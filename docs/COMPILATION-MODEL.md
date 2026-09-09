@@ -167,14 +167,41 @@ The inference is trusted here, unlike at a top-level input, because the body
 never chooses what reaches it: the call sites do, and they are all
 broadcast-aware.
 
-A parameter typed `unknown`, `any` or a collection is the exception and keeps
-its dispatch: such a body may legitimately receive a list whole, the way
-`k(L) := Sum(L)` does.
+A parameter typed `unknown` or `any` has the same standing (user ruling
+2026-09-09). The argument for it is the one above, and it does not depend on
+the parameter's own type at all: what makes the parameter a run-time scalar is
+that every emitted call site of its function is broadcast-aware, which is a
+property of the FUNCTION — none of its parameters binds an argument whole — not
+of the type inference. So `f(x) := g(x) + 1` emits the bare `_fn_g(x)`, the
+same call an explicitly annotated `f(x: number)` emits, and a caller that
+passes a list is broadcast element-wise at its own call site, so the body runs
+once per element with a scalar bound. The body's own arithmetic already assumes
+this: `x * x` is written for a product, not for a Hadamard product. This
+matters because a whole class of consumer input cannot be annotated — a Desmos
+macro chain is a chain of small untyped functions of one or two variables — and
+each dispatch it used to emit cost roughly a factor of two in run time.
+
+A COLLECTION parameter is the exception and keeps its dispatch: such a body
+legitimately receives a list whole, the way `k(L) := Sum(L)` does, so its call
+sites emit a bare call that could hand a list to a scalar sibling parameter. A
+tuple- or point-typed parameter is excluded for the same reason.
 
 The runtime broadcast of a user-function call is handed the emitted function
 itself (`_SYS.bcastFn(_fn_f, …)`). A closure is emitted only when an argument
 needs the `{ re, im }` coercion inside it; otherwise the closure would be an
 eta-expansion of the callee.
+
+An ATOMIC argument — a tuple (a point) or a nominal value — is bound whole by
+the interpreter and never mapped over, yet it lowers to a JS array the runtime
+broadcast would descend into. Such an argument is therefore HELD: it is bound
+to a temporary once, and the broadcast closes over that temporary and maps the
+other arguments only. So `f((a, b), [u, v])` with `f(p, x) := g(x)` runs the
+body once per element of the list with the point bound whole, which is what the
+interpreter does. Every argument that is not a literal is bound in the same
+outer call, so an argument is evaluated exactly once and in source order — a
+random draw in a coordinate draws one number. When every argument that is not
+atomic is provably scalar, there is nothing to map over and the call is the
+bare direct one.
 
 A function REFERENCED AS A VALUE — the callback of `Map`, `Filter`, `Reduce`,
 a comparator, a `PointList` role — is a call site too, and it is shape-aware
@@ -211,6 +238,17 @@ follows what the INTERPRETER does with a collection element at that callback:
   there, and a per-element test cannot reconstruct the type of the source.
 - A function with a parameter that is not scalar at all keeps the bare
   reference, because the interpreter binds its arguments whole as well.
+
+A MULTI-CLAUSE function is handed out through the same wrapper, chosen by the
+same two rules read over the whole clause set: a clause that binds a
+collection, a tuple or a nominal value whole keeps the bare dispatcher, and a
+clause set whose every parameter is a definite scalar guards where the others
+broadcast. Its wrapper takes a REST parameter, where a single-clause one takes
+a fixed parameter list, because the dispatcher selects its clause on the number
+of arguments. That is safe because every consumer this compiler emits applies a
+function value through an arrow of the arity it means to pass — `(_x) => _f(_x)`
+for `Map`, `(_a, _b) => _f(_a, _b)` for a `Reduce` combiner — so none of them
+supplies the extra index and source arguments `Array.prototype.map` would.
 
 Where a parameter also needs the `{ re, im }` coercion, the wrapper takes the
 coercing shim as its callee, so an element reaches the body coerced.

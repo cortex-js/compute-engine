@@ -197,11 +197,15 @@ describe('callback lambda: loop-invariant hoist (JavaScript target)', () => {
     expect(result.preamble).not.toContain('const _fn_d');
 
     // `m` is SCALAR-valued, so it stays a shared definition, and `m2` calls it
-    // exactly once — in the guarded form, bound ahead of the nine element
-    // expressions instead of repeated inside each of them.
+    // exactly once — bound ahead of the nine element expressions instead of
+    // repeated inside each of them. The call is BARE: `m2`'s own parameters
+    // hold run-time scalars, because no parameter of `m2` binds its argument
+    // whole and every emitted call site of `m2` broadcasts or guards (user
+    // ruling 2026-09-09). It used to be a `_SYS.bcastFn` dispatch, for the
+    // sole reason that an unannotated parameter infers as `unknown`.
     const m2 = definitionOf(result.preamble, 'm2');
     expect(occurrences(m2, '_fn_m(')).toBe(1);
-    expect(occurrences(m2, '_SYS.bcastFn(_fn_m,')).toBe(1);
+    expect(occurrences(m2, '_SYS.bcastFn(')).toBe(0);
   });
 
   it('b: an inline `Sin(x)` in a Map body is emitted once, outside the callback', () => {

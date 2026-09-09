@@ -65,6 +65,17 @@
 
 ### Resolved Issues
 
+- **A MULTI-CLAUSE function referenced as a VALUE is shape-aware.** The
+  callback of a `Map`, a `Filter` or a `Reduce` receives whatever element the
+  source holds, and an element can be a collection — a row of a matrix. A
+  clause set has no single function literal, so it used to be handed out as the
+  bare dispatcher: with `h(x) := 3x`, `mc(x) := h(x) + 1` and
+  `mc(x, y) := h(x) + h(y)`, `Map(mc, [[1, 2], [3]])` answered
+  `["3,61", "91"]` — a row coerced to a string — where the interpreter answers
+  `[[4, 7], [10]]`. A clause set whose parameters are all scalar is now handed
+  out through the same broadcasting wrapper a single-clause function gets; one
+  whose clause binds a collection, a tuple or a nominal value whole keeps the
+  bare reference, because the interpreter does not broadcast it either.
 - **A user function that takes its callee as a parameter compiled against the
   engine's function of the same name.** With `gsh(t) := sin t + t²` and
   `psh(gsh, t) := gsh(t) + 1`, the call-site inliner substituted the parameter
@@ -391,17 +402,32 @@
   one region and discarded 167 of them at the old cap, so `floor(n x)` was
   recomputed nine times. The cap still bounds the register pressure of a shader
   region.
-- **Inside a compiled user-function body, a call that passes on a parameter
-  whose signature type is a scalar is a direct call**, whether the author
-  declared that type or the engine holds it as inferred. Such a parameter is a
-  run-time scalar by construction: every emitted call site of a scalar-parameter
-  function either maps a list argument element-wise or is the bare call an
-  explicit caller declaration exempts. A parameter typed `unknown`, `any` or a
-  collection keeps its run-time shape dispatch, so a body that receives a list
-  whole — `k(L) := Sum(L)` — is unaffected. Note that the engine's own inference
-  leaves an unannotated parameter used at a scalar position as `unknown` (a list
-  may broadcast there), so today the direct call appears for declared signatures
-  and for signatures a host installs as inferred.
+- **Inside a compiled user-function body, a call that passes on a parameter of
+  the enclosing definition is a direct call**, whatever that parameter's type
+  is — an author's annotation, an inferred scalar, or the `unknown` an
+  unannotated parameter keeps. Such a parameter holds a run-time scalar by
+  construction, as long as no parameter of the definition binds its argument
+  whole: every emitted call site of such a function either maps a list argument
+  element-wise or is the bare call an explicit caller declaration exempts, so
+  the body runs once per element. A definition with a COLLECTION parameter keeps
+  its run-time shape dispatch, so a body that receives a list whole —
+  `k(L) := Sum(L)` — is unaffected, and so is a tuple- or point-typed parameter.
+  This removes both broadcast dispatches from an untyped three-function chain
+  (`f(x) := g(x) + 1`, `g(x) := 2h(x)`, `h(x) := x²`), which is the shape of a
+  Desmos macro chain — no parameter there can be annotated. Each timing below
+  is the mean of 300 000 `run()` calls of that compiled chain after 5 000
+  warm-up calls, taken on one machine with the two builds in the same process
+  and each pair measured in both orders: 155 → 77 ns per sample with the
+  argument symbol declared `real`, and 174 → 106 ns with it undeclared, where
+  the root call keeps its own dispatch. The nine-point Voronoi row of the Tycho
+  corpus (the by-reference chain of the Desmos state `62urmx2dcm`, six named
+  functions of `(x, y)`) loses its last three dispatches per pixel the same
+  way, measured the same way at 2.25 → 2.11 µs per sample.
+  An ATOMIC argument — a tuple (a point) or a nominal value — is bound whole,
+  so a call that carries one alongside an argument that may be a collection
+  binds the atomic argument to a temporary, once, and broadcasts over the other
+  arguments with it closed over. Before the ruling such a call was emitted
+  direct for every argument, and the callee's own body dispatched.
 - **The interval-js target emits `_IA.sub` for a subtraction.** `Subtract`
   canonicalizes to `Add(a, Negate(b))`, so the target emitted
   `_IA.add(a, _IA.negate(b))` — one extra call and one extra interval object per
