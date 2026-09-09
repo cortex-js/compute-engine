@@ -173,26 +173,35 @@ function inlinedRow(): unknown {
 }
 
 describe('callback lambda: loop-invariant hoist (JavaScript target)', () => {
-  it('a: the by-reference chain calls `_fn_m` once, outside the per-element callback', () => {
+  it('a: the by-reference chain emits no per-element callback at all', () => {
+    // The nine-element map this hoist was written for is gone from the
+    // by-reference chain. A definition body now has its nested
+    // collection-valued calls substituted before it is emitted
+    // (`inlineCollectionValuedCallsInDefinitionBody` in
+    // `compilation/base-compiler.ts`), so `d2`'s `Map` runs over a literal
+    // nine-element list and the fixed-width unroll replaces it with
+    // straight-line code. `d` and `d2` are not emitted as definitions at all
+    // any more, and nothing is left to hoist here: the invariant `m(x, y)` is
+    // bound once as an ordinary common subexpression. The hoist itself is
+    // pinned by the inline-lambda cases below, whose collections have no
+    // fixed width to unroll.
     const ce = byReferenceEngine();
     const result = compile(ce.box(byReferenceRow('x', 'y')), {
       to: 'javascript',
     } as any) as any;
     expect(result.success).not.toBe(false);
 
-    const d2 = definitionOf(result.preamble, 'd2');
+    expect(`${result.preamble ?? ''}${result.code ?? ''}`).not.toContain(
+      '.map('
+    );
+    expect(result.preamble).not.toContain('const _fn_d');
 
-    // The invariant call is emitted ONCE, where nine elements used to emit
-    // nine calls.
-    expect(occurrences(d2, '_fn_m')).toBe(1);
-
-    // It sits in the once-only initializer, not in the code that runs per
-    // element.
-    expect(firstCallInit(d2)).toContain('_fn_m');
-    expect(perElement(d2)).not.toContain('_fn_m');
-
-    // The native `.map` callback is the bare dispatch it has always been.
-    expect(callbackOf(d2, '.map(')).not.toContain('_fn_m');
+    // `m` is SCALAR-valued, so it stays a shared definition, and `m2` calls it
+    // exactly once — in the guarded form, bound ahead of the nine element
+    // expressions instead of repeated inside each of them.
+    const m2 = definitionOf(result.preamble, 'm2');
+    expect(occurrences(m2, '_fn_m(')).toBe(1);
+    expect(occurrences(m2, '_SYS.bcastFn(_fn_m,')).toBe(1);
   });
 
   it('b: an inline `Sin(x)` in a Map body is emitted once, outside the callback', () => {

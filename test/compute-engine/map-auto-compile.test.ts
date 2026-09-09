@@ -478,6 +478,52 @@ describe('Map auto-compile', () => {
     expect(stats.recompiles).toBe(1);
   });
 
+  test('redefining a SUBSTITUTED collection-valued callee recompiles', () => {
+    // A definition body has its nested collection-valued calls substituted
+    // before it is emitted (`inlineCollectionValuedCallsInDefinitionBody`,
+    // `compilation/base-compiler.ts`), so the emitted source of `wr1` holds a
+    // copy of `vr1`'s body and never names `vr1` at all. The capture set must
+    // record it all the same, or the stale copy is served after `vr1` changes.
+    ce.assign(
+      'vr1',
+      ce.box([
+        'Function',
+        [
+          'List',
+          ['Add', 'x', 1],
+          ['Add', 'x', 2],
+          ['Add', 'x', 3],
+          ['Add', 'x', 4],
+          ['Add', 'x', 5],
+        ],
+        'x',
+      ])
+    );
+    ce.assign('wr1', ce.box(['Function', ['Min', ['vr1', 'x']], 'x']));
+    ce.assign('qr1', ce.box(['Function', ['Add', ['wr1', 'x'], 100], 'x']));
+    const m = broadcast('qr1', 120);
+    expect(drainRe(m.N())[0]).toBe(102); // min(2,3,4,5,6) + 100
+
+    ce.assign(
+      'vr1',
+      ce.box([
+        'Function',
+        [
+          'List',
+          ['Add', 'x', 10],
+          ['Add', 'x', 20],
+          ['Add', 'x', 30],
+          ['Add', 'x', 40],
+          ['Add', 'x', 50],
+        ],
+        'x',
+      ])
+    );
+    _resetMapAutoCompileStats();
+    expect(drainRe(m.N())[0]).toBe(111); // min(11,21,31,41,51) + 100
+    expect(stats.recompiles).toBe(1);
+  });
+
   test('changing angularUnit recompiles (compiler-baked input)', () => {
     ce.assign('fr2', ce.box(['Function', ['Sin', 'x'], 'x']));
     const m = broadcast('fr2', 120);

@@ -57,6 +57,7 @@ import {
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { boundVariableNames } from '../boxed-expression/binders.js';
+import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   hasFreeTypeVariables,
@@ -291,6 +292,37 @@ const MONTE_CARLO_FOLD_EXCLUSIONS: ReadonlySet<string> = new Set([
  * refusing what the `Range` handler would have accepted.
  */
 const CONSTANT_FOLD_MAX_INLINE_ELEMENTS = 49;
+
+/**
+ * What the substitution of nested calls needs to know about the user-defined
+ * function whose body it is rewriting, on the definition-emission route.
+ *
+ * `localNames` are the names the definition BINDS — its parameters, plus the
+ * locals its body `Block` declares. They shadow the engine inside the body:
+ * `q(g, t) := g(t) + g(t)^2` calls its own first parameter, whatever
+ * engine-level `g` exists beside it. So a call of such a name is never
+ * substituted, and neither is a callee whose body has a free symbol of that
+ * name, which the binding would capture.
+ *
+ * `scalarNames` are the parameters that hold a run-time SCALAR. A caller never
+ * passes a COLLECTION to a function whose formal parameters are all scalar:
+ * the interpreter broadcasts the call element-wise instead
+ * (`applyFunctionLiteral`, step 2b), and every emitted call site mirrors that,
+ * with an unconditional `_SYS.bcastFn` dispatch or a runtime `Array.isArray`
+ * guard around the direct call (`emitUserFunctionCall`). Each parameter
+ * therefore holds one element, whatever its static type says — and a
+ * definition body's parameters usually type `unknown`, so without this
+ * evidence the argument test declines every nested call and nothing is ever
+ * substituted. Empty when the definition's parameters are not all scalar,
+ * which falls back to the static argument test alone.
+ */
+type EnclosingDefinition = {
+  scalarNames: ReadonlySet<string>;
+  localNames: ReadonlySet<string>;
+};
+
+/** The empty name set, shared so an unremarkable case allocates nothing. */
+const NO_NAMES: ReadonlySet<string> = new Set<string>();
 
 /**
  * How a target spells "the numeric fragment `x` holds a value a comparison can
@@ -17557,6 +17589,20 @@ export class BaseCompiler {
    * point, no binder in the body that would capture the substitution, and a
    * declaration the body does not contradict.
    *
+   * `enclosing` describes the definition whose body this call sits in, when
+   * there is one (the definition-emission route). Its `scalarNames` name
+   * symbols that hold a run-time SCALAR although their static type does not
+   * say so, and so pass the argument test as if `provablyScalarArg` had
+   * answered `true`; see {@link EnclosingDefinition} for why they qualify.
+   * Its `localNames` are the names that definition BINDS: a free symbol of
+   * the callee's body that collides with one of them would be CAPTURED by the
+   * binding once the body lands inside the definition, and the whole
+   * substitution is declined.
+   *
+   * The result is rewritten for `ce.angularUnit` — the callee's body comes
+   * from the engine definition and has never been through the rewrite the
+   * public `compile()` entries apply to the tree they are handed.
+   *
    * Nothing is compiled here, and the result is not rewritten: the caller
    * decides what to do with the substituted body.
    */
@@ -17564,7 +17610,8 @@ export class BaseCompiler {
     engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    enclosing?: EnclosingDefinition
   ): Expression | undefined {
     if (!target.userFunctions) return undefined;
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
@@ -17586,7 +17633,9 @@ export class BaseCompiler {
       !args.every(
         (a) =>
           a.isPure === true &&
-          (BaseCompiler.provablyScalarArg(a) || isFunction(a, 'Tuple'))
+          (BaseCompiler.provablyScalarArg(a) ||
+            (isSymbol(a) && enclosing?.scalarNames.has(a.symbol) === true) ||
+            isFunction(a, 'Tuple'))
       )
     )
       return undefined;
@@ -17607,6 +17656,37 @@ export class BaseCompiler {
       if (name === undefined) return undefined;
       substitution[name] = args[i];
     }
+    // `subs` rewrites symbol OCCURRENCES, never a HEAD. A parameter that the
+    // body CALLS — `q(g, t) := g(t) + g(t)^2` — would therefore keep the
+    // engine-level function of that name in the substituted body and ignore
+    // the argument altogether, silently compiling a different function. The
+    // compiler has no lowering for a call of a bound parameter and fails
+    // closed on it (user ruling 2026-08-14: fail closed now, direct
+    // higher-order compilation is a possible future feature); declining here
+    // is what lets that decline stand.
+    const substitutedNames = new Set(Object.keys(substitution));
+    const callsParameter = (x: Expression): boolean =>
+      isFunction(x) &&
+      (substitutedNames.has(x.operator) || x.ops.some(callsParameter));
+    if (callsParameter(statement)) return undefined;
+    // The callee's body is written against the ENGINE's symbols, and it is
+    // about to land inside a definition that BINDS names of its own. A free
+    // symbol of the body that collides with one of those names would be read
+    // as the binding instead of the engine symbol, and the emitted definition
+    // would compute something else. The test has to run on the body BEFORE
+    // the substitution, because afterwards a parameter occurrence and an
+    // argument occurrence of the same name are indistinguishable: with a
+    // global `k := 100`, `V(t) := [t + k, …]` and `f(k, t) := Min(V(k))`, the
+    // substituted body is `[k + k, …]` whose two `k` mean different things,
+    // and the emitted `_fn_f` reads both as its own parameter. The callee's
+    // own parameter names are exempt — those occurrences become the
+    // arguments, which are already written in the enclosing scope and need no
+    // check.
+    if (enclosing !== undefined && enclosing.localNames.size > 0) {
+      for (const sym of statement.symbols)
+        if (!substitutedNames.has(sym) && enclosing.localNames.has(sym))
+          return undefined;
+    }
     // `subs` is not capture-avoiding: it rewrites through an inner
     // `Function`/`Block`/`Sum` binder blindly. The substitution is sound
     // exactly when no parameter name being substituted is REBOUND by a binder
@@ -17624,7 +17704,21 @@ export class BaseCompiler {
         for (const s of arg.symbols) if (binders.has(s)) return undefined;
       }
     }
-    return statement.subs(substitution);
+    // The callee's body has never been through `rewriteAngularUnit`: that
+    // rewrite runs once, on the tree a public `compile()` entry was handed,
+    // and this body comes from the engine definition instead. Without it a
+    // `Sin` inside the substituted body is emitted as a radian `Math.sin`
+    // while the engine interprets its argument in `ce.angularUnit`, so
+    // `v(t) := [Sin(t), …]` inlined into `f(x) := Min(v(x))` compiled to a
+    // different function than the interpreter runs in degree mode.
+    //
+    // The rewrite goes BEFORE the substitution, and that order is the only
+    // correct one: `rewriteAngularUnit` is NOT idempotent — it scales a trig
+    // ARGUMENT, so a second pass would produce `Sin(k·k·u)`. The arguments
+    // were already rewritten as part of the enclosing tree, so rewriting the
+    // body first and substituting them in afterwards scales each trig
+    // argument exactly once.
+    return rewriteAngularUnit(statement).subs(substitution);
   }
 
   /**
@@ -17654,13 +17748,26 @@ export class BaseCompiler {
    * total substitutions (see {@link MAX_NESTED_INLINES}). A subtree that BINDS
    * a name is left untouched: `subs` is not capture-avoiding, and rebuilding a
    * scoped node would re-canonicalize its scope.
+   *
+   * `enclosing` describes the definition whose body is being rewritten, on the
+   * definition-emission route. Its `scalarNames` reach
+   * {@link substitutedUserFunctionBody} as extra evidence that an argument is
+   * a run-time scalar. Its `localNames` are the names that definition BINDS,
+   * and they shadow the engine: a call of one of them is a call of the bound
+   * value, which no engine-level definition describes, so it is left as a
+   * call here. The other half of the shadowing — a callee body whose own free
+   * symbols one of those names would CAPTURE — is declined inside
+   * {@link substitutedUserFunctionBody}, which still has the body before the
+   * substitution and can therefore tell a captured symbol from a substituted
+   * argument.
    */
   private static inlineCollectionValuedCalls(
     engine: ComputeEngine,
     expr: Expression,
     target: CompileTarget<Expression>,
     onPath: Set<string>,
-    budget: { left: number }
+    budget: { left: number },
+    enclosing?: EnclosingDefinition
   ): Expression {
     if (!isFunction(expr)) return expr;
     if (boundVariableNames(expr).length > 0) return expr;
@@ -17670,7 +17777,8 @@ export class BaseCompiler {
         op,
         target,
         onPath,
-        budget
+        budget,
+        enclosing
       )
     );
     const node: Expression = ops.every((op, i) => op === expr.ops[i])
@@ -17693,12 +17801,20 @@ export class BaseCompiler {
       )
     )
       return node;
+    // A call of a name the enclosing definition BINDS is a call of that bound
+    // value — `q(g, t) := g(t) + g(t)^2` calls its own first parameter — and
+    // the engine-level definition of the same name describes a different
+    // function. The compiler has no lowering for a call of a bound parameter
+    // and fails closed on it; reading the engine here would silently compile
+    // the wrong body instead.
+    if (enclosing?.localNames.has(node.operator) === true) return node;
     if (BaseCompiler.provablyScalarArg(node)) return node;
     const body = BaseCompiler.substitutedUserFunctionBody(
       engine,
       node.operator,
       node.ops,
-      target
+      target,
+      enclosing
     );
     if (body === undefined) return node;
     budget.left -= 1;
@@ -17712,11 +17828,138 @@ export class BaseCompiler {
         body,
         target,
         onPath,
-        budget
+        budget,
+        enclosing
       );
     } finally {
       onPath.delete(node.operator);
     }
+  }
+
+  /**
+   * The body of a definition about to be EMITTED, with every nested
+   * user-function call whose value is not provably a scalar replaced by the
+   * callee's substituted body ({@link inlineCollectionValuedCalls}).
+   *
+   * The call-site inliner does this to the body it substitutes, and the
+   * definition route needs it for the same reason: a call is opaque to the
+   * shape-reading lowerings and to the fixed-width unroll. A body such as
+   * `PointX(V(x, y))`, whose collection comes from a nested call instead of a
+   * literal `List`, was emitted as runtime broadcast closures over an array
+   * (`_SYS.bcast`, `map`, `reduce`), while the same body written with the list
+   * in place compiles to straight-line scalar arithmetic. Substituting `V`
+   * exposes the list; the unroll pass that runs next produces the arithmetic.
+   *
+   * Only a call that is NOT provably a scalar is substituted, so a
+   * scalar-valued helper stays a single shared definition instead of being
+   * copied into each of its callers.
+   *
+   * A canonical function body is a `Block` that binds the parameters, and
+   * `inlineCollectionValuedCalls` leaves a name-binding node untouched. Each
+   * STATEMENT of such a `Block` is therefore substituted on its own and the
+   * `Block` is rebuilt ONTO ITS OWN SCOPE — a fresh scope is parented at the
+   * rebuilding site, so a binder nested in a statement would go on pointing at
+   * the original scope while the rebuilt node advertises another one
+   * (`docs/SCOPING-MODEL.md`). The names the `Block` itself declares join the
+   * parameters in `enclosing.localNames` for that walk, so a callee body that
+   * reads a global of the same name as a block-local declines instead of
+   * being captured by it. When no statement changes the body is returned
+   * unchanged, so a definition with no nested collection-valued call is not
+   * rebuilt at all.
+   *
+   * `enclosing` carries the definition's own parameter names, twice over: as
+   * `scalarNames` when they hold a run-time scalar, and as `localNames`
+   * always. Without the first, almost nothing is substituted here — a nested
+   * call inside a definition body is passed that body's parameters, whose
+   * static type is usually `unknown`, and the argument test would decline
+   * every one of them. The second keeps the substitution out of the names the
+   * definition binds.
+   */
+  private static inlineCollectionValuedCallsInDefinitionBody(
+    body: Expression,
+    target: CompileTarget<Expression>,
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    enclosing: EnclosingDefinition
+  ): Expression {
+    const engine = body.engine as unknown as ComputeEngine;
+    // The substitution reads the registry off the target to see which
+    // definitions are already being emitted (the re-entrancy guard that stops
+    // a mutually recursive pair). The caller may hold the registry separately
+    // from the target it passes, so make sure the two agree.
+    const inlineTarget: CompileTarget<Expression> =
+      target.userFunctions === registry
+        ? target
+        : { ...target, userFunctions: registry };
+    // One budget for the whole body, so a `Block` of several statements is
+    // capped in total rather than once per statement.
+    const budget = { left: BaseCompiler.MAX_NESTED_INLINES };
+    const substitute = (
+      expr: Expression,
+      within: EnclosingDefinition
+    ): Expression =>
+      BaseCompiler.inlineCollectionValuedCalls(
+        engine,
+        expr,
+        inlineTarget,
+        new Set<string>(),
+        budget,
+        within
+      );
+    if (isFunction(body, 'Block')) {
+      // A `Block` declares names of its own beside the parameters — a local
+      // the body assigns to and then reads. Those names shadow the engine
+      // exactly as a parameter does, so they join `localNames`: a callee body
+      // whose free symbol collides with one of them is declined
+      // (`substitutedUserFunctionBody`). They are NOT scalar evidence — only
+      // a parameter is covered by the promise `userFunctionParamsAreScalar`
+      // reads — so `scalarNames` is carried through unchanged.
+      const declared = boundVariableNames(body);
+      const within: EnclosingDefinition = declared.every((n) =>
+        enclosing.localNames.has(n)
+      )
+        ? enclosing
+        : {
+            scalarNames: enclosing.scalarNames,
+            localNames: new Set([...enclosing.localNames, ...declared]),
+          };
+      const ops = body.ops.map((op) => substitute(op, within));
+      if (ops.every((op, i) => op === body.ops[i])) return body;
+      const scope = scopeForRebuild(body.localScope, engine, 'Block', ops);
+      return scope === undefined
+        ? engine.function('Block', ops)
+        : engine.function('Block', ops, { scope });
+    }
+    return substitute(body, enclosing);
+  }
+
+  /**
+   * The {@link EnclosingDefinition} record for the function literal about to
+   * be emitted: its parameter names, and which of them hold a run-time scalar.
+   *
+   * The scalar half reads `userFunctionParamsAreScalar` — the same reading of
+   * the same property that the call sites use to choose their emission, so the
+   * two cannot disagree about which functions broadcast a collection argument
+   * rather than binding it whole. `h` is the id under which the definition is
+   * emitted; a synthesized emission that names no engine symbol passes
+   * `undefined`, which reads as "no scalar promise" and leaves the
+   * substitution to the static argument test alone.
+   */
+  private static enclosingDefinitionOf(
+    engine: ComputeEngine,
+    h: string | undefined,
+    literal: Expression & FunctionInterface
+  ): EnclosingDefinition {
+    const localNames = new Set<string>();
+    for (const p of literal.ops.slice(1)) {
+      const name = functionLiteralParameterName(p);
+      if (name) localNames.add(name);
+    }
+    const scalar =
+      h !== undefined && BaseCompiler.userFunctionParamsAreScalar(engine, h);
+    return {
+      scalarNames: scalar ? localNames : NO_NAMES,
+      localNames,
+    };
   }
 
   static ensureUserFunctionEmitted(
@@ -18296,7 +18539,7 @@ export class BaseCompiler {
       registry.compiling.add(name);
       try {
         const { params, bodyExpr, bodyTarget } =
-          BaseCompiler.prepareUserFunctionBody(literal, target, registry);
+          BaseCompiler.prepareUserFunctionBody(literal, target, registry, h);
         BaseCompiler.recordScalarParams(h, literal, bodyTarget);
         // A target with its own definition lowering (the shader targets)
         // synthesizes the signature and compiles the body itself — a shader
@@ -18609,7 +18852,8 @@ export class BaseCompiler {
   private static prepareUserFunctionBody(
     literal: Expression & FunctionInterface,
     target: CompileTarget<Expression>,
-    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    h?: string
   ): {
     params: string[];
     bodyExpr: Expression;
@@ -18626,8 +18870,22 @@ export class BaseCompiler {
     // never see this body — it comes from the engine definition — so the
     // heads the caller overrode are read from the target
     // (`CompileTarget.unrollSkipHeads`).
+    //
+    // The nested collection-valued calls are substituted FIRST: the unroll
+    // reads the width of a collection off a literal `List`, and a call that
+    // returns one hides that width
+    // (`inlineCollectionValuedCallsInDefinitionBody`).
     const bodyExpr = unrollFixedWidthCollections(
-      rewriteAngularUnit(literal.ops[0].canonical),
+      BaseCompiler.inlineCollectionValuedCallsInDefinitionBody(
+        rewriteAngularUnit(literal.ops[0].canonical),
+        target,
+        registry,
+        BaseCompiler.enclosingDefinitionOf(
+          literal.engine as unknown as ComputeEngine,
+          h,
+          literal
+        )
+      ),
       { skipHeads: target.unrollSkipHeads }
     );
     const root = registry.root ?? target;
@@ -18877,7 +19135,8 @@ export class BaseCompiler {
           BaseCompiler.prepareUserFunctionBody(
             plans[i].literal,
             target,
-            registry
+            registry,
+            h
           );
         // A recursive clause body references `h` while `name` is in
         // `compiling`, so the self-call emits `name` — bound by the time any
