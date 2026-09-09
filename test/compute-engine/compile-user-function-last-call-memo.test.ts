@@ -17,7 +17,7 @@
  * two sites in all, a body long enough to pay for a miss; never a root-only,
  * one-site or short-bodied definition); `NaN` and
  * signed-zero argument handling; the bypass for array arguments; no memo on
- * an impure body or on a body that reads a per-call binding; state private
+ * an impure body; a vars-object read (a slider) joining the key; state private
  * to each compiled artifact; a recursive definition; the function-literal
  * route.
  */
@@ -385,32 +385,6 @@ describe('LAST-CALL MEMO — what is never memoized', () => {
     );
   });
 
-  it('a body that reads a per-call binding (the vars object)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'number');
-    ce.declare('k', 'number');
-    ce.box(['DefineFunction', 'f', ['Function', ['Add', 'x', 'k', pad('x')], 'x']]).evaluate();
-    ce.box(['DefineFunction', 'g', ['Function', ['Add', ['f', 'x'], 1], 'x']]).evaluate();
-    const r = js(ce, ['Add', ['g', 'x'], ['f', 'x']]);
-    expect(definitionOf(r.preamble, 'f')).toContain('_.k');
-    expect(r.preamble).not.toContain('$memo');
-    expect(r.run({ x: 1, k: 10 })).toBe(12 + 11);
-    expect(r.run({ x: 1, k: 20 })).toBe(22 + 21);
-  });
-
-  it('a body that calls a definition reading a per-call binding', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'number');
-    ce.declare('k', 'number');
-    ce.box(['DefineFunction', 'f', ['Function', ['Add', 'x', 'k', pad('x')], 'x']]).evaluate();
-    ce.box(['DefineFunction', 'g', ['Function', ['Add', ['f', 'x'], 1, pad('x')], 'x']]).evaluate();
-    ce.box(['DefineFunction', 'h', ['Function', ['Multiply', ['g', 'x'], 2], 'x']]).evaluate();
-    const r = js(ce, ['Add', ['h', 'x'], ['g', 'x']]);
-    expect(definitionOf(r.preamble, 'g')).not.toContain('_.k');
-    expect(r.preamble).not.toContain('$memo');
-    expect(r.run({ x: 1, k: 10 })).toBe(24 + 12);
-  });
-
   it('a body with a collection-typed parameter', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<number>');
@@ -421,6 +395,95 @@ describe('LAST-CALL MEMO — what is never memoized', () => {
     const r = js(ce, ['Add', ['g', 'xs'], ['s', 'xs']]);
     expect(r.preamble).not.toContain('$memo');
     expect(r.run({ xs: [1, 2, 3] })).toBe(7 + 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vars-object reads (a Desmos slider reaches a compiled row this way)
+// ---------------------------------------------------------------------------
+
+/** The artifact spliced at module level: the preamble is evaluated ONCE and
+ * the vars object `_` is rebound per call, so the record outlives the vars
+ * object of one call. */
+function spliced(r: any): (vars: Record<string, unknown>) => unknown {
+  return new Function(
+    '_SYS',
+    `let _;\n${r.preamble}\nreturn (vars) => { _ = vars; return ${r.code}; };`
+  )({});
+}
+
+describe('LAST-CALL MEMO — vars-object reads join the key', () => {
+  /** `f(x) := x + k + pad(x)` over a free `k`, `g(x) := f(x) + 1`. */
+  function sliderEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.declare('k', 'number');
+    ce.box(['DefineFunction', 'f', ['Function', ['Add', 'x', 'k', pad('x')], 'x']]).evaluate();
+    ce.box(['DefineFunction', 'g', ['Function', ['Add', ['f', 'x'], 1], 'x']]).evaluate();
+    return ce;
+  }
+
+  it('a body that reads the vars object is memoized, keyed on that read', () => {
+    const r = js(sliderEngine(), ['Add', ['g', 'x'], ['f', 'x']]);
+    const f = definitionOf(r.preamble, 'f');
+    expect(f).toContain('let _fn_f$memo_b0 = _.k;');
+    expect(f).toContain("typeof _fn_f$memo_b0 === 'number'");
+    expect(f).toContain('_fn_f$memo_k0 = x; _fn_f$memo_k1 = _fn_f$memo_b0;');
+    expect(r.run({ x: 1, k: 10 })).toBe(12 + 11);
+    expect(r.run({ x: 1, k: 20 })).toBe(22 + 21);
+  });
+
+  it('a slider moved between two calls of a spliced artifact misses the record', () => {
+    const run = spliced(js(sliderEngine(), ['Add', ['g', 'x'], ['f', 'x']]));
+    expect(run({ x: 1, k: 10 })).toBe(12 + 11);
+    expect(run({ x: 1, k: 20 })).toBe(22 + 21);
+    expect(run({ x: 1, k: 10 })).toBe(12 + 11);
+  });
+
+  it('a read made through a called definition joins the caller key too', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.declare('k', 'number');
+    ce.box(['DefineFunction', 'f', ['Function', ['Add', 'x', 'k'], 'x']]).evaluate();
+    ce.box(['DefineFunction', 'g', ['Function', ['Add', ['f', 'x'], 1, pad('x')], 'x']]).evaluate();
+    ce.box(['DefineFunction', 'h', ['Function', ['Multiply', ['g', 'x'], 2], 'x']]).evaluate();
+    const r = js(ce, ['Add', ['h', 'x'], ['g', 'x']]);
+    const g = definitionOf(r.preamble, 'g');
+    // The only read of `k` in `g` is the key's: the body itself reads none.
+    expect(g.split('_.k').length - 1).toBe(1);
+    expect(g).toContain('let _fn_g$memo_b0 = _.k;');
+    const run = spliced(r);
+    expect(run({ x: 1, k: 10 })).toBe(24 + 12);
+    expect(run({ x: 1, k: 20 })).toBe(44 + 22);
+  });
+
+  it('keys on the whole name of a read whose symbol carries a combining mark', () => {
+    // `ce.box` reads a string with a combining mark as a string literal, so
+    // the symbol is built directly.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.declare('q\u0307', 'number');
+    const q = ce.symbol('q\u0307');
+    expect(q.symbol).toBe('q\u0307');
+    ce.box(['DefineFunction', 'f', ['Function', ['Add', 'x', q, pad('x')], 'x']]).evaluate();
+    ce.box(['DefineFunction', 'g', ['Function', ['Add', ['f', 'x'], 1], 'x']]).evaluate();
+    const r = js(ce, ['Add', ['g', 'x'], ['f', 'x']]);
+    expect(definitionOf(r.preamble, 'f')).toContain('let _fn_f$memo_b0 = _.q\u0307;');
+    const run = spliced(r);
+    // `q` is present too and never changes: a key cut at the mark would hit.
+    expect(run({ x: 1, 'q\u0307': 10, q: 99 })).toBe(12 + 11);
+    expect(run({ x: 1, 'q\u0307': 20, q: 99 })).toBe(22 + 21);
+  });
+
+  it('a slider value that is not a number, string or boolean bypasses the memo', () => {
+    const run = spliced(js(sliderEngine(), ['Add', ['g', 'x'], ['f', 'x']]));
+    // ONE array, mutated between two calls; the body runs on each call.
+    const k = [1, 2];
+    const first = run({ x: 1, k });
+    k[0] = 5;
+    const second = run({ x: 1, k });
+    expect(first).not.toBe(second);
+    expect(run({ x: 1, k: 10 })).toBe(12 + 11);
   });
 });
 

@@ -961,14 +961,6 @@ rewrite. What remains:
   bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters emitted),
   and making the inliner the primary route retargets 374 `_fn_*` call shapes
   across 35 test files.
-- **The last-call memo declines a body that reads a per-call binding.** A
-  Desmos macro that reads a slider (`f(x) := a·x²`, `a` supplied through
-  `vars`) is emitted as `_.a` and is never memoized, because the record could
-  outlive the binding when a consumer splices the preamble at module level.
-  Extending the record's key with the values of the `_.<id>` reads the body
-  makes (found textually, the way `splitPreambleDefs` finds them) would admit
-  such bodies at one more comparison per read. Missed optimization, not a
-  defect.
 - **A POINT that reaches an untyped parameter compiles to NaN.** With
   `p(P) := q(P)`, `q(P) := r(P)` and `r(P) := 2·P`, the application `p((a, b))`
   binds a point to parameters nothing types: a parameter's type is inferred

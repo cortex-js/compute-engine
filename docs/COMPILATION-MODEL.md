@@ -135,18 +135,21 @@ without the tag representation decline.
 
 Common-subexpression elimination never crosses a definition boundary: each call
 of a definition emitted by reference is a fresh evaluation of its body. On the
-JavaScript target, a definition whose body has no observable effect, whose
-parameters are all scalar, and whose value depends on its arguments alone (it
-reads no per-call binding, directly or through another definition) is wrapped
-in a last-call memo when the artifact calls it from inside another definition
-and from two or more places in all: the wrapper remembers the arguments and
-result of the most recent call and answers a repeated call with the same
-arguments from that record. Arguments are compared by value, with `NaN` equal to
-`NaN` and `0` distinct from `-0`; an argument that is not a plain number, or a
-result that is an object, bypasses the record. The record lives in the
-definition's closure, so two artifacts never share it. A definition called from
-one place, or only from the root, is emitted unchanged. The rule is implemented
-by `memoizeSharedDefinitions` in `javascript-target.ts`.
+JavaScript target, a definition whose body has no observable effect (directly
+or through an assigned symbol value) and whose parameters are all scalar is
+wrapped in a last-call memo when the artifact calls it from inside another
+definition and from two or more places in all, and its emitted body is at
+least 600 characters (below that the engine inlines the definition and shares
+its subexpressions itself): the wrapper remembers the arguments and result of
+the most recent call and answers a repeated call with the same arguments from
+that record. Every vars-object binding the body reads, directly or through a
+definition it calls (a slider reaches a compiled row this way), is part of the
+key next to the arguments. Keys are compared by value, with `NaN` equal to
+`NaN` and `0` distinct from `-0`; a key that is not a number, a string or a
+boolean, or a result that is an object or a function, bypasses the record. The
+record lives in the definition's closure, so two artifacts never share it. A
+definition called from one place, or only from the root, is emitted unchanged.
+The rule is implemented by `memoizeSharedDefinitions` in `javascript-target.ts`.
 
 ## Collections
 

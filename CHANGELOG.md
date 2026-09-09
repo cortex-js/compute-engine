@@ -429,9 +429,12 @@
   more than they save). Arguments are compared by value, with `NaN` equal to
   `NaN` and `0` distinct from `-0`; an argument that is not a number, a string
   or a boolean, and a result that is an object or a function, bypass the
-  record; a body that draws `Random()`,
-  reads a per-call binding, or calls a definition that does is never
-  memoized; the record lives in the definition's own closure, so two compiled
+  record; every vars-object binding the body reads, directly or through a
+  definition it calls — a Desmos slider reaches a compiled row this way — is
+  part of the key next to the arguments, so a slider moved between two calls
+  misses the record; a body that draws `Random()`, directly or through an
+  assigned symbol value, is never memoized; the record lives in the
+  definition's own closure, so two compiled
   artifacts never share it. Measured on the nine-point Voronoi row of a Desmos
   state defined as user functions over `(x, y)` — `m(x, y)` is called once
   inside `m2` and once more by the row — the by-reference row went from 3.4 to

@@ -9003,7 +9003,11 @@ const VARS_OBJECT_READ = /(?<![\w$])_\.(?=[\p{L}_$])/u;
  * character body 1394 → 673 ns (1191 → 540); the 2 456-character
  * nine-distance block the memo exists for, 3.4 → 2.7 µs on its row. The
  * emitted length stands in for the engine's inlining budget, which is what
- * actually decides; it is the signal this pass has.
+ * actually decides; it is the signal this pass has. The vars-object reads a
+ * key carries (`memoizedDefinition`) cost one type test and one comparison
+ * each and do not move the threshold: with four slider reads, a 710-
+ * character body went 351 → 229 ns and a 1382-character body 672 → 389 ns
+ * on a quiet box (same shape, 2026-09-09).
  */
 const MEMO_MIN_BODY_LENGTH = 600;
 
@@ -9031,21 +9035,29 @@ const MEMO_MIN_BODY_LENGTH = 600;
  * definition whose emitted body is shorter than `MEMO_MIN_BODY_LENGTH`:
  * a hit on it could not save more than a miss costs.
  *
- * And the definition's value must depend on its arguments alone. The memo
- * state lives in the definition's closure, so it lives as long as the
- * preamble does: once per call of a compiled runner, but as long as the
- * module when a consumer splices `preamble` at module level and calls
- * `code` many times. A body that reads a per-call binding — the vars object
- * (`_.<id>`) on the expression route, a lambda parameter on the function-
- * literal route — or that references a definition that reads one, could then
- * answer a call from a record made under different bindings. Such a
- * definition is left alone. The reads are found textually, the same way
- * `splitPreambleDefs` classifies a definition as per-call, and the
- * dependency through other definitions is closed by iterating to a fixed
- * point, because a mutually recursive pair is emitted in an order where
- * the earlier one references the later one. (A folded symbol value that a
- * body references, `_val_<id>`, is emitted into the same preamble as the
- * memo, so the two are always evaluated together and cannot disagree.)
+ * And the record must be keyed on everything the definition's value depends
+ * on. The memo state lives in the definition's closure, so it lives as long
+ * as the preamble does: once per call of a compiled runner, but as long as
+ * the module when a consumer splices `preamble` at module level and calls
+ * `code` many times. A body that reads the vars object (`_.<id>` on the
+ * expression route — a Desmos slider reaches a compiled row this way) could
+ * then answer a call from a record made under a different value of that
+ * binding. So every vars-object read the definition makes, directly or
+ * through a definition it calls, joins the record's key next to the
+ * arguments: one more comparison per read, and a slider moved between two
+ * calls — or reassigned by a compiled `Assign` between two calls of the same
+ * artifact — misses the record. A read whose value is not a number, a
+ * string or a boolean bypasses the memo like such an argument does. A
+ * lambda parameter (the function-literal route) has no such key: a folded
+ * symbol value that reads one is per-call by construction, and a
+ * definition that references such a value is left alone. Both dependencies
+ * are found textually, the same way `splitPreambleDefs` classifies a
+ * definition as per-call, and closed through other definitions by
+ * iterating to a fixed point, because a mutually recursive pair is emitted
+ * in an order where the earlier one references the later one. (A folded
+ * symbol value that reads no per-call binding, `_val_<id>`, is emitted into
+ * the same preamble as the memo, so the two are always evaluated together
+ * and cannot disagree.)
  *
  * The wrapper keeps the definition's name, arity, and `const` declaration
  * — every call site, broadcast dispatch (`_SYS.bcastFn(_fn_f, …)`), and
@@ -9074,25 +9086,38 @@ function memoizeSharedDefinitions(
   for (const [key, name] of registry.names ?? [])
     if (key.startsWith('_fn_')) userFunctionNames.add(name);
   const parameterReaders = perCallIdentifiers.map((n) => identifierPattern(n));
-  const readsPerCallBinding = (name: string, code: string): boolean =>
-    (varsObject && VARS_OBJECT_READ.test(code)) ||
-    (!userFunctionNames.has(name) &&
-      parameterReaders.some((r) => r.test(code)));
+  const readsLambdaParameter = (name: string, code: string): boolean =>
+    !userFunctionNames.has(name) && parameterReaders.some((r) => r.test(code));
   const patterns = new Map<string, RegExp>();
   for (const name of defs.keys()) patterns.set(name, identifierPattern(name));
-  // The definitions whose value can differ between two calls of the artifact
-  // with the same arguments, closed under "references such a definition".
+  // Per definition, the vars-object bindings its value depends on, and the
+  // definitions whose value depends on a lambda parameter — each closed under
+  // "references such a definition".
+  const varsReads = new Map<string, Set<string>>();
+  for (const [name, code] of defs)
+    varsReads.set(name, varsObject ? varsObjectReads(code) : new Set());
   const varying = new Set<string>();
   for (let changed = true; changed; ) {
     changed = false;
     for (const [name, code] of defs) {
-      if (varying.has(name)) continue;
-      const reads =
-        readsPerCallBinding(name, code) ||
-        [...varying].some((v) => patterns.get(v)!.test(code));
-      if (reads) {
-        varying.add(name);
-        changed = true;
+      if (!varying.has(name)) {
+        const reads =
+          readsLambdaParameter(name, code) ||
+          [...varying].some((v) => patterns.get(v)!.test(code));
+        if (reads) {
+          varying.add(name);
+          changed = true;
+        }
+      }
+      const own = varsReads.get(name)!;
+      for (const [other, theirs] of varsReads) {
+        if (other === name || theirs.size === 0) continue;
+        if (!patterns.get(other)!.test(code)) continue;
+        for (const id of theirs)
+          if (!own.has(id)) {
+            own.add(id);
+            changed = true;
+          }
       }
     }
   }
@@ -9109,8 +9134,35 @@ function memoizeSharedDefinitions(
     }
     if (inDefinitions === 0) continue;
     if (inDefinitions + count(rootCode, pattern) < 2) continue;
-    defs.set(name, memoizedDefinition(name, entry, statements));
+    defs.set(
+      name,
+      memoizedDefinition(name, entry, statements, [
+        ...varsReads.get(name)!,
+      ])
+    );
   }
+}
+
+/**
+ * The names read off the vars object in emitted `code` — every `_.<id>`,
+ * the spelling `varsObjectAccess` emits (its guarded form for a name that
+ * collides with an `Object.prototype` member contains the same member
+ * access). In first-occurrence order, so the record's key is stable.
+ *
+ * The name is a whole JavaScript identifier name — `ID_Start` then
+ * `ID_Continue` characters, plus `$` and the zero-width joiners the language
+ * admits — because that is what the emitter wrote after `_.`. A MathJSON
+ * symbol may carry a combining mark (`q̇` is `q` and U+0307, an
+ * `ID_Continue` character that `\w` does not match); a match that stopped
+ * there would key `_.q̇` on `_.q`.
+ */
+function varsObjectReads(code: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of code.matchAll(
+    /(?<![\w$])_\.([\p{ID_Start}_$][\p{ID_Continue}$\u200c\u200d]*)/gu
+  ))
+    names.add(m[1]);
+  return names;
 }
 
 /**
@@ -9135,6 +9187,15 @@ function memoizeSharedDefinitions(
  *    adds), so the record only ever holds a number, a boolean, a string or
  *    `undefined`.
  *
+ * The vars-object bindings the definition's value depends on (`reads`, see
+ * `memoizeSharedDefinitions`) are part of the key exactly like the
+ * arguments: read through `varsObjectAccess`, tested for the same three
+ * primitive kinds, compared the same way, recorded with the arguments. The
+ * wrapper reads each of them once at entry, on every call, whether or not
+ * the body would read it on that call (a binding read only in an
+ * unselected branch is read all the same) — the same one read per binding
+ * per call the runner's entry check performs (`CompileOptions.entryChecks`).
+ *
  * The record is written only after the body has produced its value, so a
  * recursive definition never reads a half-written record: a self-call sees
  * the record of the last call that COMPLETED, which is a correct answer for
@@ -9151,27 +9212,36 @@ function memoizeSharedDefinitions(
 function memoizedDefinition(
   name: string,
   entry: { params: ReadonlyArray<string>; body: string },
-  statements: ReturnType<typeof javascriptStatements>
+  statements: ReturnType<typeof javascriptStatements>,
+  reads: ReadonlyArray<string>
 ): string {
   const params = entry.params.join(', ');
-  const keys = entry.params.map((_, i) => `${name}$memo_k${i}`);
+  // The key: the arguments, then the vars-object bindings the value depends
+  // on. A binding is read once into a local so the test and the record see
+  // the same value.
+  const bindings = reads.map((id, i) => `${name}$memo_b${i}`);
+  const keyed = [...entry.params, ...bindings];
+  const keys = keyed.map((_, i) => `${name}$memo_k${i}`);
   const value = `${name}$memo_v`;
   const scalar = `${name}$memo_s`;
   const result = `${name}$memo_r`;
-  const isScalar = entry.params
+  const bind = reads
+    .map((id, i) => `let ${bindings[i]} = ${varsObjectAccess(id)}; `)
+    .join('');
+  const isScalar = keyed
     .map(
       (p) =>
         `(typeof ${p} === 'number' || typeof ${p} === 'string' || typeof ${p} === 'boolean')`
     )
     .join(' && ');
-  const hit = entry.params
+  const hit = keyed
     .map(
       (p, i) =>
         `(${p} === ${keys[i]} ? (${p} !== 0 || 1 / ${p} === 1 / ${keys[i]}) : ` +
         `(${p} !== ${p} && ${keys[i]} !== ${keys[i]}))`
     )
     .join(' && ');
-  const record = entry.params.map((p, i) => `${keys[i]} = ${p}; `).join('');
+  const record = keyed.map((p, i) => `${keys[i]} = ${p}; `).join('');
   const exit = (v: string): string =>
     `{ let ${result} = ${v}; ` +
     `if (${scalar} && typeof ${result} !== 'object' && typeof ${result} !== 'function') { ${record}${value} = ${result}; } ` +
@@ -9181,7 +9251,7 @@ function memoizedDefinition(
     : exit(entry.body);
   return (
     `const ${name} = (() => { let ${[...keys, value].join(', ')}; ` +
-    `return (${params}) => { let ${scalar} = ${isScalar}; ` +
+    `return (${params}) => { ${bind}let ${scalar} = ${isScalar}; ` +
     `if (${scalar} && ${hit}) return ${value}; ` +
     `${body} }; })();`
   );
