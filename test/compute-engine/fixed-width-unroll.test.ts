@@ -200,6 +200,103 @@ describe('FIXED-WIDTH UNROLL — Map over a literal list', () => {
   });
 });
 
+describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
+  // A callback written as a bare NAME rather than as a lambda. The JavaScript
+  // target lowered it as a runtime `.map` over an array, and the interval
+  // target, which holds one interval and cannot hold a collection, declined
+  // the whole expression.
+  const ce = scalarEngine();
+  const define = (name: string, body: any, ...params: string[]) =>
+    ce.box(['DefineFunction', name, ['Function', body, ...params]]).evaluate();
+  define('h', ['Multiply', 2, '_1'], '_1');
+  define('two', ['Add', '_1', '_2'], '_1', '_2');
+  define('noisy', ['Multiply', ['Random'], '_1'], '_1');
+  const unrolled = (json: any) => unrollFixedWidthCollections(ce.box(json));
+
+  it('applies the named function once per element', () => {
+    expect(unrolled(['Map', 'h', FIVE]).json).toEqual([
+      'List',
+      ['h', 'a'],
+      ['h', 'b'],
+      ['h', 'c'],
+      ['h', 'd'],
+      ['h', 's'],
+    ]);
+  });
+
+  it('emits a literal array of calls on javascript', () => {
+    const r: any = compile(ce.box(['Map', 'h', FIVE]), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(r.success).not.toBe(false);
+    const source = `${r.preamble ?? ''}${r.code ?? ''}`;
+    expect(source).toContain(
+      '[_fn_h(_.a), _fn_h(_.b), _fn_h(_.c), _fn_h(_.d), _fn_h(_.s)]'
+    );
+    expect(source).not.toContain('.map(');
+    // The compiled values are the interpreter's own, element by element.
+    const args = { a: 1, b: 2, c: 3, d: 4, s: 5 };
+    const want = Object.values(args).map((k) => ce.box(['h', k]).evaluate().re);
+    expect(r.run(args)).toEqual(want);
+  });
+
+  it('compiles `Min(Map(h, …))` on interval-js', () => {
+    // The reduction rule turns the unrolled list into an n-ary `Min`, which
+    // this target folds with `_IA.min`. Before the unroll the `Map` and its
+    // `List` had no lowering here at all.
+    const r: any = compile(ce.box(['Min', ['Map', 'h', FIVE]]), {
+      to: 'interval-js',
+      fallback: false,
+    } as any);
+    expect(r.success).not.toBe(false);
+    expect(`${r.preamble ?? ''}${r.code ?? ''}`).toContain('_IA.min');
+  });
+
+  it('leaves a TWO-PARAMETER head untouched', () => {
+    // `Map` calls its callback with one argument, so the canonical form of
+    // this expression is already a `callback-arity` error rather than a
+    // symbol operand. The pass is also asked directly, with the node built
+    // structurally, so the arity gate itself is exercised.
+    const canonical = ce.box(['Map', 'two', FIVE]);
+    expect(unrollFixedWidthCollections(canonical)).toBe(canonical);
+    const structural = ce.function('Map', [ce.symbol('two'), ce.box(FIVE)], {
+      form: 'structural',
+    } as any);
+    expect(unrollFixedWidthCollections(structural)).toBe(structural);
+  });
+
+  it('leaves an IMPURE element untouched', () => {
+    const expr = ce.box(['Map', 'h', ['List', ['Random'], 'b', 'c', 'd', 's']]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves an IMPURE call untouched', () => {
+    // Two elements of a list may be the same expression, and the emitters
+    // bind an identical call once. That would run an effect fewer times than
+    // the interpreter does.
+    const expr = ce.box(['Map', 'noisy', FIVE]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves a LIBRARY operator head untouched', () => {
+    // A target may lower an operator applied to a collection differently
+    // from a list of separate applications.
+    const expr = ce.box(['Map', 'Sin', FIVE]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves a list of unknown length untouched', () => {
+    const expr = ce.box(['Map', 'h', 'L']);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves a NARROW list untouched', () => {
+    const expr = ce.box(['Map', 'h', ['List', 'a', 'b']]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+});
+
 describe('FIXED-WIDTH UNROLL — reductions over a literal list', () => {
   const ce = scalarEngine();
   const unrolled = (json: any) => unrollFixedWidthCollections(ce.box(json));
@@ -276,6 +373,140 @@ describe('FIXED-WIDTH UNROLL — reductions over a literal list', () => {
 
   it('leaves a list of unknown length untouched', () => {
     const expr = ce.box(['Min', 'L']);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  // `Reduce(collection, combiner, initial?)` is the shape canonicalization
+  // gives `Product`, so a product over a literal list reaches the pass as a
+  // fold rather than under its own head. A left fold equals the flat n-ary
+  // form only for an ASSOCIATIVE and COMMUTATIVE combiner, so the rewrite
+  // reads the combiner and rewrites four of them.
+  it('makes a Product an n-ary Multiply', () => {
+    const product = ce.box(['Product', FIVE]);
+    expect(product.json).toEqual(['Reduce', FIVE, 'Multiply', 1]);
+    expect(unrollFixedWidthCollections(product).json).toEqual([
+      'Multiply',
+      'a',
+      'b',
+      'c',
+      'd',
+      's',
+    ]);
+  });
+
+  it.each(['javascript', 'interval-js'] as const)(
+    'compiles a Product as n-ary multiplication on %s',
+    (to) => {
+      const r: any = compile(ce.box(['Product', FIVE]), {
+        to,
+        fallback: false,
+      } as any);
+      expect(r.success).not.toBe(false);
+      expect(`${r.preamble ?? ''}${r.code ?? ''}`).not.toContain('reduce');
+    }
+  );
+
+  it('runs a compiled Product to the interpreter value', () => {
+    const r: any = compile(ce.box(['Product', FIVE]), {
+      to: 'javascript',
+      fallback: false,
+    } as any);
+    expect(r.success).not.toBe(false);
+    expect(`${r.preamble ?? ''}${r.code ?? ''}`).toContain(
+      '_.a * _.b * _.c * _.d * _.s'
+    );
+    expect(r.run({ a: 2, b: 3, c: 4, d: 5, s: 6 })).toBe(720);
+  });
+
+  it('drops an initial value that is the identity of the combiner', () => {
+    // `0` leaves a sum unchanged and `1` a product, so emitting it would only
+    // lengthen the generated code.
+    expect(unrolled(['Reduce', FIVE, 'Add', 0]).json).toEqual([
+      'Add',
+      'a',
+      'b',
+      'c',
+      'd',
+      's',
+    ]);
+    expect(unrolled(['Reduce', FIVE, 'Multiply', 1]).json).toEqual([
+      'Multiply',
+      'a',
+      'b',
+      'c',
+      'd',
+      's',
+    ]);
+  });
+
+  it('keeps a NON-IDENTITY initial value as the first operand', () => {
+    expect(unrolled(['Reduce', FIVE, 'Add', 10]).json).toEqual([
+      'Add',
+      10,
+      'a',
+      'b',
+      'c',
+      'd',
+      's',
+    ]);
+    // `Min` and `Max` have no finite identity, so any initial value is kept.
+    expect(unrolled(['Reduce', FIVE, 'Max', 3]).json).toEqual([
+      'Max',
+      3,
+      'a',
+      'b',
+      'c',
+      'd',
+      's',
+    ]);
+  });
+
+  it('rewrites a SEEDLESS fold with no extra operand', () => {
+    // A seedless fold starts from the first element, which the n-ary form
+    // does too.
+    expect(unrolled(['Reduce', FIVE, 'Min']).json).toEqual([
+      'Min',
+      'a',
+      'b',
+      'c',
+      'd',
+      's',
+    ]);
+  });
+
+  it('agrees with the interpreter on a seeded fold', () => {
+    const engine = new ComputeEngine();
+    const seeded = engine.box(['Reduce', ['List', 1, 2, 3, 4, 5], 'Max', 3]);
+    expect(unrollFixedWidthCollections(seeded).evaluate().re).toEqual(
+      seeded.evaluate().re
+    );
+  });
+
+  it('leaves a LAMBDA combiner untouched', () => {
+    // The pass cannot prove an arbitrary reducer associative and commutative.
+    const expr = ce.box([
+      'Reduce',
+      FIVE,
+      ['Function', ['Multiply', '_1', '_2'], '_1', '_2'],
+      1,
+    ]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves an IMPURE initial value untouched', () => {
+    // Dropping an identity seed would remove its effect, and keeping one would
+    // move it ahead of the first element.
+    const expr = ce.box(['Reduce', FIVE, 'Add', ['Random']]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves an EMPTY Reduce untouched', () => {
+    const expr = ce.box(['Reduce', ['List'], 'Add', 0]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves a Reduce over NUMBER LITERALS untouched', () => {
+    const expr = ce.box(['Reduce', ['List', 1, 2, 3, 4, 5], 'Add', 0]);
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
 });

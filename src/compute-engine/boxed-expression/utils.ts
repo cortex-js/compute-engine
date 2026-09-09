@@ -294,6 +294,51 @@ function betaReduceLambda(call: Expression): Expression | undefined {
   return body.subs(substitution);
 }
 
+/**
+ * The names that occur FREE in `expr`: every symbol occurrence that no
+ * `Function` literal on the path from `expr` down to that occurrence binds.
+ *
+ * `expr.symbols` is the wrong tool for a capture test, because it lists a
+ * name bound INSIDE `expr` as well — the `p` of a `Map(p ↦ …, list)` in the
+ * body — and a check against an enclosing binder then refuses a body whose
+ * only use of the colliding name is under its own lambda, where the lambda's
+ * parameter shadows the outer binding and nothing is captured. This walk
+ * drops a lambda's parameter names at the literal that binds them, so only
+ * the occurrences the enclosing scope can reach are reported. A name that is
+ * bound in one branch and free in another is still reported, from the free
+ * branch. The parameter operands of a `Function` literal are declarations,
+ * not occurrences, and are not walked.
+ *
+ * Only a `Function` literal shadows. Every other binder — a `Block` local, a
+ * `Sum` index, a comprehension variable — keeps its bound name REPORTED, as
+ * if free. A lambda's parameter is visible in exactly its body, but a scoped
+ * node's bindings are not visible in all of its operands: a comprehension
+ * clause reads the OUTER binding of a name a later clause binds, and a
+ * `Sum` bound may read the outer binding of its own index. Treating such a
+ * name as shadowed would hide the outer reference from a capture test. The
+ * conservative answer refuses a substitution that might have been safe; it
+ * never admits one that captures.
+ */
+export function freeSymbolNames(
+  expr: Expression,
+  acc: Set<string> = new Set()
+): Set<string> {
+  if (isSymbol(expr)) {
+    acc.add(expr.symbol);
+    return acc;
+  }
+  if (!isFunction(expr)) return acc;
+  if (expr.operator !== 'Function') {
+    for (const op of expr.ops) freeSymbolNames(op, acc);
+    return acc;
+  }
+  const inner = new Set<string>();
+  freeSymbolNames(expr.ops[0], inner);
+  for (const n of boundVariableNames(expr)) inner.delete(n);
+  for (const n of inner) acc.add(n);
+  return acc;
+}
+
 /** Every name bound by a binder anywhere within `expr` (its own bound names
  * plus those of every descendant), used to keep lambda inlining capture-safe. */
 export function collectBinderNames(

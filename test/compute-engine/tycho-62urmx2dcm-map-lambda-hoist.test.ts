@@ -525,3 +525,226 @@ describe('callback lambda: loop-invariant hoist (JavaScript target)', () => {
     }
   });
 });
+
+/**
+ * The same hoist for a `Reduce`/`Scan` COMBINER. A fold calls its combiner
+ * once per element, so a subexpression of the combiner body that mentions
+ * neither the accumulator nor the element was recomputed on every step. The
+ * combiner is compiled inside a local shape frame that binds its two
+ * parameters to the fold's lanes (`BaseCompiler.compileCombinerLiteral`);
+ * `customCombinerWithLanes` routes the literal through
+ * `hoistedCallbackLambda`, so the frame still wraps the literal's emission
+ * while the bindings are compiled and declared outside it.
+ */
+describe('fold combiner: loop-invariant hoist (JavaScript target)', () => {
+  /** `a…f` and `u`, `v` declared real; the source list is `[a, …, f]`. */
+  function foldEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    for (const name of ['a', 'b', 'c', 'd', 'e', 'f', 'u', 'v'])
+      ce.declare(name, 'real');
+    return ce;
+  }
+  const SOURCE = ['List', 'a', 'b', 'c', 'd', 'e', 'f'];
+  const VALUES = { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, u: 0.5, v: 0.25 };
+  /** `(acc, x) ↦ acc + x·sin(u)·cos(v)`: `sin(u)·cos(v)` is the invariant. */
+  const COMBINER = [
+    'Function',
+    ['Add', 'acc', ['Multiply', 'x', ['Sin', 'u'], ['Cos', 'v']]],
+    'acc',
+    'x',
+  ];
+  /** The same fold with every symbol replaced by its value in `VALUES`. */
+  const grounded = (expr: unknown): unknown =>
+    typeof expr === 'string' && expr in VALUES
+      ? VALUES[expr as keyof typeof VALUES]
+      : Array.isArray(expr)
+        ? expr.map(grounded)
+        : expr;
+
+  it('h: a Reduce combiner emits its invariant once, outside the fold', () => {
+    const ce = foldEngine();
+    const expr = ['Reduce', SOURCE, COMBINER, 0];
+    const result = compile(ce.box(expr as any), {
+      to: 'javascript',
+    } as any) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+    expect(occurrences(code, 'Math.cos')).toBe(1);
+    expect(firstCallInit(code)).toContain('Math.sin');
+    expect(firstCallInit(code)).toContain('Math.cos');
+    expect(perElement(code)).not.toContain('Math.sin');
+    expect(perElement(code)).not.toContain('Math.cos');
+
+    // The `Reduce` lowering still hands the native `reduce` a binary function.
+    expect(code).toContain('.reduce(');
+    expect(result.run(VALUES)).toBeCloseTo(
+      ce.box(grounded(expr) as any).N().re as number,
+      12
+    );
+  });
+
+  it('i: a Scan combiner hoists the same way', () => {
+    const ce = foldEngine();
+    const expr = ['Scan', SOURCE, COMBINER, 0];
+    const result = compile(ce.box(expr as any), {
+      to: 'javascript',
+    } as any) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+    expect(occurrences(code, 'Math.cos')).toBe(1);
+    expect(firstCallInit(code)).toContain('Math.sin');
+    expect(perElement(code)).not.toContain('Math.sin');
+
+    // `Scan` answers a LAZY collection, whose elements are read with `each()`
+    // — its `ops` are still the unevaluated `Scan` operands.
+    const expected = [...ce.box(grounded(expr) as any).N().each()].map(
+      (v) => v.re
+    );
+    expect(expected).toHaveLength(6);
+    const got: number[] = result.run(VALUES);
+    expect(got).toHaveLength(6);
+    got.forEach((v, i) => expect(v).toBeCloseTo(expected[i] as number, 12));
+  });
+
+  it('j: a combiner with nothing invariant emits the plain wrapper', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    for (const op of ['Reduce', 'Scan']) {
+      const result = compile(
+        ce.box([
+          op,
+          'L',
+          ['Function', ['Add', 'acc', ['Sin', 'x']], 'acc', 'x'],
+          0,
+        ] as any),
+        { to: 'javascript' } as any
+      ) as any;
+      expect(result.success).not.toBe(false);
+      const code: string = result.code;
+      // No bindings, so no once-only initializer and no holder: the combiner
+      // is the arity wrapper applied straight to the compiled lambda, exactly
+      // as it was emitted before the hoist reached this route.
+      expect(firstCallInit(code)).toBe('');
+      expect(code).toContain('((_f) => (_a, _b) => _f(_a, _b))(');
+      expect(occurrences(code, 'Math.sin')).toBe(1);
+    }
+    const reduce = compile(
+      ce.box([
+        'Reduce',
+        'L',
+        ['Function', ['Add', 'acc', ['Sin', 'x']], 'acc', 'x'],
+        0,
+      ] as any),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(reduce.run({ L: [1, 2, 3] })).toBeCloseTo(
+      Math.sin(1) + Math.sin(2) + Math.sin(3),
+      12
+    );
+  });
+
+  it('k: a COMPLEX-lane combiner keeps its `_SYS.cplx` lifts', () => {
+    const ce = foldEngine();
+    const expr = [
+      'Reduce',
+      SOURCE,
+      [
+        'Function',
+        ['Add', 'acc', ['Multiply', 'x', 'ImaginaryUnit', ['Sin', 'u']]],
+        'acc',
+        'x',
+      ],
+      0,
+    ];
+    const result = compile(ce.box(expr as any), {
+      to: 'javascript',
+    } as any) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    // The accumulator is lifted into the complex lane by the arity wrapper,
+    // and the real seed is lifted too.
+    expect(code).toContain('(_a, _b) => _f(_SYS.cplx(_a), _b)');
+    expect(code).toContain('_SYS.cplx(0)');
+    // The invariant is still hoisted, and only the invariant.
+    expect(occurrences(code, 'Math.sin')).toBe(1);
+    expect(firstCallInit(code)).toContain('Math.sin');
+    expect(perElement(code)).not.toContain('Math.sin');
+
+    const expected = ce.box(grounded(expr) as any).N();
+    const got = result.run(VALUES);
+    expect(got.re).toBeCloseTo(expected.re as number, 12);
+    expect(got.im).toBeCloseTo(expected.im as number, 12);
+  });
+
+  it('l: a bare user-function SYMBOL combiner is unaffected', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    ce.box([
+      'DefineFunction',
+      'g',
+      ['Function', ['Add', 'p', ['Multiply', 2, 'q']], 'p', 'q'],
+    ]).evaluate();
+    const result = compile(ce.box(['Reduce', 'L', 'g', 0]), {
+      to: 'javascript',
+    } as any) as any;
+    expect(result.success).not.toBe(false);
+
+    const code: string = result.code;
+    // A symbol has no body to rewrite here: the combiner is the arity wrapper
+    // around the function's value reference, with no once-only initializer.
+    expect(firstCallInit(code)).toBe('');
+    expect(code).toContain('((_f) => (_a, _b) => _f(_a, _b))(_fn_g');
+    expect(result.run({ L: [1, 2, 3] })).toBe(12);
+  });
+
+  it('m: the hoisted value is computed once per RUN, never over an empty fold', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    ce.declare('u', 'real');
+    const result = compile(
+      ce.box([
+        'Reduce',
+        'L',
+        ['Function', ['Add', 'acc', ['Multiply', 'x', ['Sin', 'u']]], 'acc', 'x'],
+        0,
+      ]),
+      { to: 'javascript' } as any
+    ) as any;
+    expect(result.success).not.toBe(false);
+
+    // A getter counts how often a run reads `u`. The counts are compared with
+    // EACH OTHER, never with a constant: the runner's own entry check reads
+    // the same variables on every call.
+    let reads = 0;
+    const count = (L: number[]): number => {
+      reads = 0;
+      const value = result.run({
+        L,
+        get u() {
+          reads++;
+          return 0.5;
+        },
+      });
+      expect(value).toBeCloseTo(
+        L.reduce((s, v) => s + v * Math.sin(0.5), 0),
+        12
+      );
+      return reads;
+    };
+
+    const empty = count([]);
+    const three = count([1, 2, 3]);
+    const six = count([1, 2, 3, 4, 5, 6]);
+    // Once per CALL, not once per element.
+    expect(three).toBe(six);
+    // An empty fold never calls the combiner, so it must not evaluate the
+    // hoisted subexpression either: an error it raised would be one the
+    // unhoisted code never raised.
+    expect(empty).toBe(three - 1);
+  });
+});

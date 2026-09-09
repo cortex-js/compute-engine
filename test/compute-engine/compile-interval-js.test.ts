@@ -1256,20 +1256,17 @@ describe('INTERVAL JS - collections decline where the value model has no room', 
   ceNo.declare('PL', 'list<tuple<number, number>>');
   ceNo.declare('S', 'string');
 
-  test('a bare List/Tuple root declines', () => {
-    // A collection is never this target's RESULT. That is enforced
+  test('a bare List root declines', () => {
+    // A general collection is not this target's RESULT. That is enforced
     // structurally: there is no `List`/`Tuple` lowering in the function table,
     // because the array spelling exists only in the operand position of an
     // accessor that immediately projects it back to one interval (see
-    // `compileIntervalCollectionOperand`). A bare constructor at the root
-    // therefore declines as an unlowered head.
-    for (const root of [
-      ceNo.box(['List', 1, 2, 3]),
-      ceNo.box(['Tuple', 1, 2]),
-    ]) {
-      const fn = compile(root, { to: 'interval-js' });
-      expect(fn.success).toBe(false);
-    }
+    // `compileIntervalCollectionOperand`). A bare `List` at the root therefore
+    // declines as an unlowered head. A single POINT at the root is the
+    // exception, and it is built by the root lowering rather than by a table
+    // entry — see the "a single point at the ROOT" tests below.
+    const fn = compile(ceNo.box(['List', 1, 2, 3]), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
   });
 
   test('PointX over a LIST of points declines', () => {
@@ -1292,6 +1289,104 @@ describe('INTERVAL JS - collections decline where the value model has no room', 
     });
     expect(fn.success).toBe(false);
     expect(fn.error).toContain('collection-valued index');
+  });
+});
+
+// A literal single point — a `Tuple` of scalars, or an all-scalar `PointList`
+// — compiles at the ROOT of a compilation to the JavaScript array of its
+// coordinate intervals. The value model is one interval per quantity, and a
+// point is two quantities. The spelling is confined to the root: the scalar
+// kernels read `.lo`/`.hi` off whatever they are handed, so a point in an
+// operand position still declines.
+describe('INTERVAL JS - a single point at the ROOT', () => {
+  const cePt = new ComputeEngine();
+  cePt.declare('a', 'real');
+  cePt.declare('b', 'real');
+
+  test('a Tuple of scalars at the root is an array of intervals', () => {
+    const fn = compile(cePt.box(['Tuple', 'a', 'b']), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('[_.a, _.b]');
+    expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
+      { lo: 1, hi: 2 },
+      { lo: 3, hi: 3 },
+    ]);
+  });
+
+  test('an all-scalar PointList at the root is an array of intervals', () => {
+    const fn = compile(cePt.box(['PointList', 'a', 'b']), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('[_.a, _.b]');
+    expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
+      { lo: 1, hi: 2 },
+      { lo: 3, hi: 3 },
+    ]);
+  });
+
+  test('a computed coordinate keeps its IntervalResult wrapper', () => {
+    // Each coordinate is emitted by its ordinary scalar lowering, so a
+    // coordinate that is a kernel result arrives as the `{ kind, value }`
+    // wrapper, exactly as it would as a scalar root. The wrapper is not
+    // unwrapped: it carries the `partial`/`jump` report of that coordinate.
+    const fn = compile(
+      cePt.box(['PointList', ['Multiply', 2, 'a'], ['Add', 'b', 1]]),
+      { to: 'interval-js' }
+    );
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe(
+      '[_IA.mul(_IA.point(2), _.a), _IA.add(_.b, _IA.point(1))]'
+    );
+    expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
+      { kind: 'interval', value: { lo: 2, hi: 4 } },
+      { kind: 'interval', value: { lo: 4, hi: 4 } },
+    ]);
+  });
+
+  test('a point in an OPERAND position still declines', () => {
+    const fn = compile(cePt.box(['Multiply', ['Tuple', 'a', 'b'], 2]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(false);
+    expect(fn.error).toContain('no lowering');
+    // The same in a `Which` value position.
+    const fw = compile(
+      cePt.box(['Which', ['Less', 'a', 1], ['Tuple', 'a', 'b'], 'True', 0]),
+      { to: 'interval-js' }
+    );
+    expect(fw.success).toBe(false);
+  });
+
+  test('a point with a broadcasting component declines', () => {
+    // A component that is itself a collection zips into one point per element,
+    // so the value is a LIST of points, which no lowering builds here.
+    for (const root of [
+      cePt.box(['PointList', ['List', 1, 2], 'b']),
+      cePt.box(['Tuple', ['List', 1, 2], 'b']),
+    ]) {
+      const fn = compile(root, { to: 'interval-js' });
+      expect(fn.success).toBe(false);
+    }
+  });
+
+  test('a coordinate that is not provably a number declines', () => {
+    const ceS = new ComputeEngine();
+    ceS.declare('a', 'real');
+    ceS.declare('S', 'string');
+    const fn = compile(ceS.box(['Tuple', 'a', 'S']), { to: 'interval-js' });
+    expect(fn.success).toBe(false);
+  });
+
+  test('a coordinate READ of a point is unchanged', () => {
+    // The fixed-width fold projects the coordinate at compile time, so the
+    // accessor still compiles to the coordinate's own code, not to an array.
+    const fn = compile(cePt.box(['PointX', ['PointList', 'a', 'b']]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_.a');
+    expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual({ lo: 1, hi: 2 });
   });
 });
 
@@ -1435,5 +1530,36 @@ describe('INTERVAL JS - COLLECTIONS: kernels fail closed, roots and fallbacks ar
       { lo: 2, hi: 2 },
       { lo: 1, hi: 1 },
     ]);
+  });
+});
+
+describe('INTERVAL JS - a root point keeps a caller-supplied lowering', () => {
+  // The root array spelling replaces the ordinary dispatch of the point's
+  // head, and that dispatch is where a `functions` override is reached. A
+  // caller who overrode `Tuple` or `PointList` gets their implementation.
+  test('an overridden `Tuple` head is called, not spelled as an array', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    ce.declare('b', 'real');
+    const r: any = compile(ce.box(['Tuple', 'a', 'b'] as any), {
+      to: 'interval-js',
+      fallback: false,
+      functions: { Tuple: 'myTuple' },
+    } as any);
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('myTuple(_.a, _.b)');
+  });
+
+  test('an overridden `PointList` head likewise', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    ce.declare('b', 'real');
+    const r: any = compile(ce.box(['PointList', 'a', 'b'] as any), {
+      to: 'interval-js',
+      fallback: false,
+      functions: { PointList: 'myPoint' },
+    } as any);
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('myPoint(_.a, _.b)');
   });
 });

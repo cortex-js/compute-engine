@@ -1,5 +1,9 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
-import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { isTupleShapedType } from '../collection-utils.js';
@@ -408,12 +412,19 @@ function literalPointOperands(
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
- * `Map(x ↦ body, [e1, …, eN])` rewritten to `[body[x := e1], …, body[x := eN]]`.
+ * `Map(callback, [e1, …, eN])` rewritten to one node per element. Two
+ * callbacks are rewritten: a `Function` LITERAL, whose body is substituted
+ * (see below), and a SYMBOL that names a user-defined function, which is
+ * applied to each element ({@link unrollMapOfNamedFunction}).
+ *
+ * For a `Function` literal, `Map(x ↦ body, [e1, …, eN])` becomes
+ * `[body[x := e1], …, body[x := eN]]`.
  *
  * Sound only when:
- *  - the lambda has exactly one named parameter — a mapped function of
- *    several parameters receives the index (and more) in the other slots,
- *    which this substitution does not supply;
+ *  - the lambda has exactly one named parameter: `Map` hands its callback
+ *    ONE argument, the element, and canonicalization rejects a callback of
+ *    any other arity as a `callback-arity` error, so only that shape is a
+ *    mapping the substitution can reproduce;
  *  - the body binds no name of its own: `subs` is not capture-avoiding, so an
  *    inner binder could rebind the parameter or capture a symbol of an
  *    element;
@@ -428,10 +439,13 @@ function literalPointOperands(
  */
 function tryUnrollMap(expr: Expression): Expression | undefined {
   if (!isFunction(expr, 'Map') || expr.nops !== 2) return undefined;
-  const lambda = expr.op1;
+  const callback = expr.op1;
   const list = expr.op2;
-  if (!isFunction(lambda, 'Function') || lambda.nops !== 2) return undefined;
   if (!isUnrollableList(list)) return undefined;
+  if (isSymbol(callback))
+    return unrollMapOfNamedFunction(callback.symbol, list);
+  const lambda = callback;
+  if (!isFunction(lambda, 'Function') || lambda.nops !== 2) return undefined;
 
   // A REST parameter — `["Spread", name]`, spelled `...r` — binds its ONE
   // name to a TUPLE of the arguments from its position onwards, so a mapped
@@ -459,6 +473,90 @@ function tryUnrollMap(expr: Expression): Expression | undefined {
   );
 }
 
+/**
+ * `Map(h, [e1, …, eN])`, where `h` NAMES a user-defined function of one
+ * parameter, rewritten to the literal list of the calls `[h(e1), …, h(eN)]`.
+ *
+ * A bare name is what a caller writes for a function defined once and mapped
+ * in several places, and it is the one callback shape the JavaScript target
+ * lowered as a runtime `.map` over an array: the interval target, which holds
+ * one interval and cannot hold a collection, declined the whole expression.
+ * The calls this rewrite writes are the same calls the interpreter makes, so
+ * every target compiles them.
+ *
+ * Sound only when:
+ *  - the name resolves to a `Function` LITERAL the user defined — a library
+ *    operator name such as `Sin` is left alone, because a target may lower an
+ *    operator applied to a collection differently from a list of separate
+ *    applications;
+ *  - that literal declares exactly one plain named parameter. `Map` calls its
+ *    callback with ONE argument, so this is the shape whose call is `h(e)`. A
+ *    variadic (rest) parameter binds a TUPLE of the arguments rather than the
+ *    element, and a destructuring pattern binds the components of one, so
+ *    both are left to the target's own `Map` lowering;
+ *  - every element is pure, and so is every call the rewrite writes. The
+ *    interpreter evaluates the elements first and applies `h` to them
+ *    afterwards, while the unrolled list interleaves the two, and identical
+ *    calls in the list are shared by common subexpression elimination and by
+ *    the emitters. Both are invisible only when nothing has an effect.
+ */
+function unrollMapOfNamedFunction(
+  name: string,
+  list: Expression & FunctionInterface
+): Expression | undefined {
+  const literal = userFunctionLiteral(list.engine, name);
+  // A `Function` literal is `["Function", body, …params]`, so one parameter
+  // is two operands.
+  if (literal === undefined || literal.nops !== 2) return undefined;
+  const parameter = literal.ops[1];
+  if (isRestParameter(parameter)) return undefined;
+  // A destructuring pattern is a raw `Tuple` operand, for which
+  // `functionLiteralParameterName` reports no name.
+  if (!functionLiteralParameterName(parameter)) return undefined;
+  if (!list.ops.every((e) => e.isPure === true)) return undefined;
+
+  const ce = list.engine;
+  const calls = list.ops.map((e) => ce.function(name, [e]));
+  if (!calls.every((call) => call.isPure === true)) return undefined;
+  return ce.function('List', calls);
+}
+
+/**
+ * The `["Function", body, …params]` literal the engine holds for a symbol the
+ * user defined as a function, or `undefined` for every other name — a library
+ * operator, a plain value, an unknown name.
+ *
+ * Two definition fields carry such a literal, and both are read here. A
+ * definition made with `f(x) := …`, `x ↦ …` or `ce.assign(name, lambda)` is an
+ * OPERATOR definition that keeps the literal in `_lambdaLiteral`; a symbol
+ * whose assigned VALUE is itself a `Function` literal keeps it in the value
+ * definition's `value`.
+ *
+ * `BaseCompiler.userFunctionLiteral` reads the same two fields for the
+ * emission side. It is reimplemented here rather than imported, because this
+ * pass runs before any target is chosen and must not depend on the compiler
+ * class.
+ */
+function userFunctionLiteral(
+  engine: Expression['engine'],
+  name: string
+): (Expression & FunctionInterface) | undefined {
+  // A definition is a tagged union of the two kinds, so each field is read
+  // behind the tag test that proves it is there.
+  const def = engine.lookupDefinition(name);
+  if (def === undefined) return undefined;
+  if ('operator' in def) {
+    const literal = (def.operator as { _lambdaLiteral?: Expression })
+      ._lambdaLiteral;
+    if (isFunction(literal, 'Function')) return literal;
+  }
+  if ('value' in def) {
+    const value = def.value.value;
+    if (isFunction(value, 'Function')) return value;
+  }
+  return undefined;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Rule 3 — a reduction over a literal list of scalars
 // ─────────────────────────────────────────────────────────────────────────
@@ -470,8 +568,8 @@ function tryUnrollMap(expr: Expression): Expression | undefined {
  * not collapse to something the emitters read differently.
  *
  * `Product` is here for a STRUCTURALLY built tree only: canonicalization
- * already turns `Product([a, …])` into `Reduce([a, …], Multiply, 1)`, a shape
- * this pass does not rewrite.
+ * turns `Product([a, …])` into `Reduce([a, …], Multiply, 1)`, which the
+ * `Reduce` arm of {@link reductionShape} recognizes instead.
  */
 const REDUCTION_HEADS: Readonly<Record<string, string>> = {
   __proto__: null as never,
@@ -481,24 +579,98 @@ const REDUCTION_HEADS: Readonly<Record<string, string>> = {
   Product: 'Multiply',
 };
 
+/**
+ * The combiners a `Reduce` may carry for this rule, as the bare SYMBOL naming
+ * an n-ary head. Each one is ASSOCIATIVE and COMMUTATIVE, which is what makes
+ * the left fold the interpreter runs — `F(F(F(init, e1), e2), e3)` — equal to
+ * the flat n-ary form `F(init, e1, e2, e3)`. A combiner written as a lambda,
+ * or naming anything else, is left to the target's own fold.
+ */
+const REDUCE_COMBINERS: ReadonlySet<string> = new Set([
+  'Add',
+  'Multiply',
+  'Min',
+  'Max',
+]);
+
+/**
+ * The value that leaves an n-ary head unchanged when it is one of the
+ * operands. A `Reduce` seeded with it computes what the seedless fold does, so
+ * the rewrite drops the seed rather than emit `1 * a * b`.
+ *
+ * `Min` and `Max` are absent on purpose: their identity is an infinity, which
+ * is not a value a caller writes as a seed, so any seed they carry is kept.
+ */
+const REDUCTION_IDENTITY: Readonly<Record<string, number>> = {
+  __proto__: null as never,
+  Add: 0,
+  Multiply: 1,
+};
+
+/**
+ * The n-ary head, the collection and the SEED of a reduction node, or
+ * `undefined` when the node is not one this rule rewrites.
+ *
+ * Two spellings reach the pass. A dedicated head — `Min([a, …])`,
+ * `Sum([a, …])` — carries the collection alone. A `Reduce` carries
+ * `(collection, combiner, initial?)` in that order, which is the shape
+ * canonicalization gives `Product` and `Fold`; its seed is optional, and a
+ * seedless fold starts from the FIRST element, so an absent seed simply
+ * contributes no operand to the n-ary form.
+ */
+function reductionShape(expr: Expression & FunctionInterface):
+  | {
+      head: string;
+      list: Expression;
+      seed: Expression | undefined;
+    }
+  | undefined {
+  const head = REDUCTION_HEADS[expr.operator];
+  if (head !== undefined) {
+    if (expr.nops !== 1) return undefined;
+    return { head, list: expr.op1, seed: undefined };
+  }
+  if (!isFunction(expr, 'Reduce') || expr.nops < 2 || expr.nops > 3)
+    return undefined;
+  const combiner = expr.op2;
+  if (!isSymbol(combiner) || !REDUCE_COMBINERS.has(combiner.symbol))
+    return undefined;
+  return { head: combiner.symbol, list: expr.op1, seed: expr.ops[2] };
+}
+
 function unrollReduction(
   expr: Expression & FunctionInterface
 ): Expression | undefined {
-  const head = REDUCTION_HEADS[expr.operator];
-  if (head === undefined || expr.nops !== 1) return undefined;
-  const list = expr.op1;
+  const reduction = reductionShape(expr);
+  if (reduction === undefined) return undefined;
+  const { head, list } = reduction;
   // An EMPTY list is left alone: each of these heads has its own identity
   // element for it, which the interpreter supplies and this rewrite would not.
   // Every other width is rewritten — the n-ary form is at least as good as a
   // reduce on every target, see {@link MIN_UNROLLED_WIDTH}.
   if (!isNonConstantLiteralList(list)) return undefined;
   // Only a list of provable numbers. A collection-valued element would make
-  // the n-ary form broadcast where the reduction folds.
+  // the n-ary form broadcast where the reduction folds. The seed is held to
+  // the same test, and for the same reason.
   if (!list.ops.every(isProvablyScalar)) return undefined;
+  const seed = reduction.seed;
+  if (seed !== undefined && !isProvablyScalar(seed)) return undefined;
+  // An IMPURE seed is left alone, whichever way the rewrite would go. Dropping
+  // an identity seed would remove its effect, and keeping one would move it
+  // ahead of the first element: the fold reads the seed only once it has an
+  // element to combine it with, while the n-ary form evaluates its operands
+  // from the left.
+  if (seed !== undefined && seed.isPure !== true) return undefined;
+  const identity = REDUCTION_IDENTITY[head];
+  const keepSeed =
+    seed !== undefined &&
+    !(identity !== undefined && isNumber(seed) && seed.isSame(identity));
   // STRUCTURAL, so the operand list reaches the target exactly as the list
   // held it — see the note on `isNonConstantLiteralList` about the numeric
   // fold a canonical rebuild would make behind `constantFold: false`.
-  return expr.engine.function(head, list.ops, { form: 'structural' });
+  return expr.engine.function(head, keepSeed ? [seed, ...list.ops] : list.ops, {
+    form: 'structural',
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -556,6 +728,7 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   ...Object.keys(POINT_ACCESSOR_POSITION),
   'Map',
   ...Object.keys(REDUCTION_HEADS),
+  'Reduce',
   ...ELEMENTWISE_HEADS,
 ]);
 

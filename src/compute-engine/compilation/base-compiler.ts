@@ -25,6 +25,7 @@ import {
   isOperatorDef,
   isValueDef,
   collectBinderNames,
+  freeSymbolNames,
 } from '../boxed-expression/utils.js';
 import {
   broadcastableParamSlots,
@@ -1357,7 +1358,10 @@ function isBoundPossiblyCollectionTyped(
  *   through `_SYS.norm`).
  */
 export function pointHasBroadcastComponent(expr: Expression): boolean {
-  if (isFunction(expr, 'Tuple'))
+  // A `PointList` component is read the same way as a `Tuple` component: an
+  // all-scalar `PointList` is one point, and a collection-valued component
+  // makes it a SOURCE of several points.
+  if (isFunction(expr, 'Tuple') || isFunction(expr, 'PointList'))
     return expr.ops.some(
       (op) =>
         !isTuple(op) &&
@@ -16632,6 +16636,39 @@ export class BaseCompiler {
           );
       }
     }
+    // A POINT bound to an UNTYPED parameter never goes by reference: the
+    // emitted body treats that parameter as a scalar and answers NaN over the
+    // array a point lowers to (`pointArgumentAtUntypedParameter` says why).
+    // The call is inlined, which hands the point itself to the body's
+    // arithmetic, where every target has its own point lowering. When the
+    // inlining is not sound — an impure argument, a recursive or multi-clause
+    // callee — the call fails closed: with `fallback: true` the caller falls
+    // back to the interpreter, which answers the point correctly.
+    const pointAt = BaseCompiler.pointArgumentAtUntypedParameter(
+      engine,
+      h,
+      args
+    );
+    if (pointAt >= 0) {
+      const inlined = BaseCompiler.tryInlineUserFunctionCall(
+        engine,
+        h,
+        args,
+        target
+      );
+      if (inlined !== undefined) return inlined;
+      throw new Error(
+        `Cannot compile a call of \`${h}\`: argument ${pointAt + 1} is a ` +
+          `point, and the parameter that receives it has no declared or ` +
+          `inferred type. The emitted definition treats that parameter as a ` +
+          `scalar and would compute a different value than the interpreter ` +
+          `does over a point, and the call could not be inlined instead. ` +
+          `Declare the parameter's type (for example ` +
+          `\`tuple<real, real>\`), or read it as a point in the body. ` +
+          `Fail closed (D6).`
+      );
+    }
+
     // A callee the target cannot emit as a definition — a shader target
     // given a point-typed parameter it has no static type for, the interval
     // target given a body with a head it has no lowering for — is compiled
@@ -17441,6 +17478,77 @@ export class BaseCompiler {
    * answers `incompatible-type` there, and no emitted form says that.
    */
   /**
+   * Is `a` ONE point — a value the interpreter treats as a single atomic
+   * operand in arithmetic (`2·P` scales it, `P + Q` adds componentwise), and
+   * never broadcasts over?
+   *
+   * Three spellings qualify: a literal `Tuple`; a `PointList` whose every
+   * operand is provably a number, which is one point with operand k as
+   * coordinate k (a `PointList` with a collection-typed operand is a SOURCE
+   * of several points instead, and is excluded by the same test the
+   * fixed-width unroll and the interval target apply); and any operand whose
+   * static type is tuple-shaped, such as a symbol declared
+   * `tuple<real, real>`.
+   */
+  private static isSinglePointArg(a: Expression): boolean {
+    if (isFunction(a, 'Tuple')) return true;
+    if (
+      isFunction(a, 'PointList') &&
+      a.nops > 0 &&
+      a.ops.every((op) => op.type.matches('number'))
+    )
+      return true;
+    return isTupleShapedType(a.type.type);
+  }
+
+  /**
+   * The 0-based position of the first argument that is a single point
+   * ({@link isSinglePointArg}) bound to a parameter of `h` that has NO type
+   * — `unknown` or `any`, the type an unannotated parameter keeps when no use
+   * in the body narrows it — or `-1` when there is none.
+   *
+   * Such a call cannot go by reference. A definition is emitted once, and its
+   * body's arithmetic is shaped by the parameter's STATIC type: with `P`
+   * untyped, `r(P) := 2·P` is emitted as scalar arithmetic, and the call
+   * `r((a, b))` hands that arithmetic the JavaScript array a point lowers
+   * to, which answers NaN where the interpreter answers the point
+   * `(2a, 2b)`. A parameter is typed from the uses in its own body, never
+   * from a call site, so the parameter cannot say it holds a point; the call
+   * site is the only place that knows. `tryCompileUserFunction` inlines such
+   * a call instead, so the point reaches the body and the target's own
+   * point lowering applies, and fails closed when it cannot.
+   *
+   * A parameter whose type IS tuple-shaped (`P: tuple<real, real>`, or one
+   * narrowed by a `PointX(P)` in the body) is not affected: the body was
+   * emitted for a point. Neither is a parameter the body never READS —
+   * `f(p, x) := g(x)` binds a point to `p` and does nothing with it, so the
+   * emitted body computes the same value whatever `p` holds, and the
+   * by-reference call (with its sibling broadcast) stands. A function with no
+   * single literal (a multi-clause function) is not examined: each clause
+   * dispatches on the run-time shape of its arguments.
+   */
+  private static pointArgumentAtUntypedParameter(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): number {
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return -1;
+    // FREE occurrences only: a parameter whose name the body uses only under
+    // an inner lambda of the same name (`f(p) := Map(p ↦ 2p, L)`) is never
+    // read, and the call goes by reference as an unmentioned parameter does.
+    const mentioned = freeSymbolNames(literal.ops[0]);
+    for (const [i, a] of args.entries()) {
+      if (!BaseCompiler.isSinglePointArg(a)) continue;
+      const name = functionLiteralParameterName(literal.ops[i + 1]);
+      if (!name || !mentioned.has(name)) continue;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      if (pt === undefined || pt === 'unknown' || pt === 'any') return i;
+    }
+    return -1;
+  }
+
+  /**
    * Is `a` PROVABLY not a collection (`number`/`boolean`/`string`-typed — a
    * plain numeric call such as `f(2)`), and so incapable of broadcasting at
    * run time? Note the direction: this decides only where the answer is
@@ -17845,11 +17953,28 @@ export class BaseCompiler {
       return undefined;
     const inlining = (registry.inlining ??= new Set<string>());
     if (inlining.has(h)) return undefined;
+    // The call may sit inside an emitted DEFINITION or a lambda, whose bound
+    // names — the definition's parameters, the lambda's — are the target's
+    // `boundVars` while their body is compiled. A free symbol of the callee's
+    // body that collides with one of them would be read as that binding once
+    // the body lands here: with a global `k := 10`, `r(P) := k·P` and
+    // `f(k, t) := r((t, t))`, the substituted `k·(t, t)` inside `_fn_f` would
+    // read the parameter `k`. The bound names are handed to the substitution
+    // as the enclosing local names, which is the same capture test the
+    // definition route runs (`inlineCollectionValuedCallsInDefinitionBody`).
+    // No scalar-name evidence is added: the argument test here is the static
+    // one alone.
+    const bound = target.boundVars;
+    const enclosing: EnclosingDefinition | undefined =
+      bound !== undefined && bound.size > 0
+        ? { scalarNames: NO_NAMES, localNames: bound }
+        : undefined;
     const substituted = BaseCompiler.substitutedUserFunctionBody(
       engine,
       h,
       args,
-      target
+      target,
+      enclosing
     );
     if (substituted === undefined) return undefined;
     const inlined = unrollFixedWidthCollections(
@@ -17858,7 +17983,8 @@ export class BaseCompiler {
         substituted,
         target,
         new Set([h]),
-        { left: BaseCompiler.MAX_NESTED_INLINES }
+        { left: BaseCompiler.MAX_NESTED_INLINES },
+        enclosing
       ),
       {
         // The accessor reads a point SUBSTITUTED for a parameter, in a body
@@ -17940,7 +18066,7 @@ export class BaseCompiler {
           a.isPure === true &&
           (BaseCompiler.provablyScalarArg(a) ||
             (isSymbol(a) && enclosing?.scalarNames.has(a.symbol) === true) ||
-            isFunction(a, 'Tuple'))
+            BaseCompiler.isSinglePointArg(a))
       )
     )
       return undefined;
@@ -17987,8 +18113,14 @@ export class BaseCompiler {
     // own parameter names are exempt — those occurrences become the
     // arguments, which are already written in the enclosing scope and need no
     // check.
+    //
+    // Only the FREE occurrences of the body count (`freeSymbolNames`). A name
+    // the body binds itself — the `p` of a `Map(p ↦ …, list)` — is read as
+    // that inner binding wherever the binder reaches, and the enclosing
+    // definition's `p` cannot capture it; `statement.symbols` would list it
+    // all the same and refuse a substitution that is safe.
     if (enclosing !== undefined && enclosing.localNames.size > 0) {
-      for (const sym of statement.symbols)
+      for (const sym of freeSymbolNames(statement))
         if (!substitutedNames.has(sym) && enclosing.localNames.has(sym))
           return undefined;
     }
@@ -18614,6 +18746,15 @@ export class BaseCompiler {
    * parameters in both stacks: a name left unmentioned would be answered by an
    * enclosing frame, which is neither this plan's lane nor a description of
    * this lambda.
+   *
+   * The JavaScript target calls this from inside `hoistedCallbackLambda`
+   * (`compilation/javascript-target.ts`), which gives a fold's combiner the
+   * same loop-invariant hoist the element-consuming callbacks get. The hoist
+   * compiles and declares its bindings AROUND this call, so a binding is
+   * emitted outside the frame this function pushes. That is what the hoist
+   * needs: a binding mentions neither parameter, so the frame has nothing to
+   * say about it, and the names the frame describes do not exist where the
+   * bindings are declared.
    */
   static compileCombinerLiteral(
     plan: { op: Expression; accComplex: boolean; eltComplex: boolean },

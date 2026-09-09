@@ -38,9 +38,9 @@ function freshEngine(): ComputeEngine {
 describe('PointList compile — scalar parity with Tuple', () => {
   const ce = freshEngine();
 
-  // Targets that lower a `Tuple` to a concrete value. `interval-javascript`
-  // has no `Tuple` lowering, so it is covered separately (both `Tuple` and
-  // `PointList` must fail closed there).
+  // Targets that lower a `Tuple` to a concrete value in every position.
+  // `interval-javascript` builds a point only at the compile ROOT, so it is
+  // covered separately (`Tuple` and `PointList` must agree there too).
   const targets: Array<[string, { compile: (e: any, o?: any) => any }]> = [
     ['javascript', new JavaScriptTarget()],
     ['glsl', new GLSLTarget()],
@@ -87,13 +87,29 @@ describe('PointList compile — scalar parity with Tuple', () => {
   });
 });
 
-describe('PointList compile — interval-js parity (both fail closed)', () => {
+describe('PointList compile — interval-js parity', () => {
   const ce = freshEngine();
   const iv = new IntervalJavaScriptTarget();
 
-  it('a scalar Tuple and PointList both fail closed on interval-js', () => {
+  it('a scalar Tuple and PointList are the same array of intervals at the root', () => {
+    // The interval value model is one interval per quantity, so a point at the
+    // compile ROOT is the array of its coordinate intervals. `Tuple` and
+    // `PointList` are the same point there, as they are on every other target.
     const tuple = iv.compile(ce.box(['Tuple', 'x', 'y']));
     const pointList = iv.compile(ce.box(['PointList', 'x', 'y']));
+    expect(tuple.success).toBe(true);
+    expect(pointList.success).toBe(true);
+    expect(tuple.code).toBe('[_.x, _.y]');
+    expect(pointList.code).toBe(tuple.code);
+  });
+
+  it('a scalar Tuple and PointList both fail closed in an OPERAND position', () => {
+    // The array spelling is confined to the root: the scalar kernels read
+    // `.lo`/`.hi` off whatever they are handed.
+    const tuple = iv.compile(ce.box(['Multiply', ['Tuple', 'x', 'y'], 2]));
+    const pointList = iv.compile(
+      ce.box(['Multiply', ['PointList', 'x', 'y'], 2])
+    );
     expect(tuple.success).toBe(false);
     expect(pointList.success).toBe(false);
   });

@@ -374,8 +374,10 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     ).toThrow(/no runtime broadcast dispatch/);
   });
 
-  it('an argument whose shape disagrees with the parameter fails closed', () => {
-    const ce = engineWithF();
+  it('an argument whose shape disagrees with a DECLARED parameter fails closed', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number) -> number');
+    ce.assign('f', ce.parse('x \\mapsto \\sin x + x^2'));
     // Constant folding is off for the same reason as the broadcast test
     // above: `f((1, 2))` binds the point whole to `x`, and the body's own
     // component-wise arithmetic (`sin` and the square of a tuple both map
@@ -386,6 +388,26 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     ).toThrow(
       /argument 1 `\(1, 2\)` lowers to "vec2" but parameter "x" is declared "float"/
     );
+  });
+
+  it('a point bound to an UNTYPED parameter is inlined and compiles componentwise', () => {
+    // With no declared signature the parameter `x` has no type, so the
+    // emitted definition would treat it as a `float`. The call site knows
+    // the argument is a point and substitutes the body instead
+    // (`pointArgumentAtUntypedParameter`, `compilation/base-compiler.ts`),
+    // which is the componentwise arithmetic the interpreter answers:
+    // `(1 + sin 1, 4 + sin 2)`.
+    const ce = engineWithF();
+    const r = glsl.compile(ce.expr(['f', ['Tuple', 1, 2]]), {
+      constantFold: false,
+    });
+    expect(r.code).toBe('sin(vec2(1.0, 2.0)) + _gpu_pow2_v2(vec2(1.0, 2.0))');
+    expect(
+      ce
+        .box(['f', ['Tuple', 1, 2]] as any)
+        .evaluate()
+        .toString()
+    ).toBe('(1 + sin(1), 4 + sin(2))');
   });
 
   it('an arity mismatch fails closed', () => {
@@ -571,8 +593,18 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
     return ce;
   }
 
+  /** `f` with a declared signature and an IMPURE body, which the call-site
+   * inliner refuses: an impure body would run its effect once per inlined
+   * occurrence. The definition's own decline is then what the caller sees. */
+  function engineWithImpureBody(signature: string): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('f', signature);
+    ce.assign('f', ce.expr(['Function', ['Add', 1, ['Random']], 'b']));
+    return ce;
+  }
+
   it('GLSL: a `tuple<boolean, boolean>` parameter fails closed, naming it', () => {
-    const ce = engineWithSignature('(tuple<boolean,boolean>) -> real');
+    const ce = engineWithImpureBody('(tuple<boolean,boolean>) -> real');
     // `vec2` is two floats: declaring one by LENGTH alone emitted
     // `vec2(true, false)` at the call site.
     expect(() => glsl.compile(ce.parse('f(p)'))).toThrow(
@@ -581,10 +613,19 @@ describe('GPU USER FUNCTIONS — a vecN needs REAL components', () => {
   });
 
   it('WGSL: the same', () => {
-    const ce = engineWithSignature('(tuple<boolean,boolean>) -> real');
+    const ce = engineWithImpureBody('(tuple<boolean,boolean>) -> real');
     expect(() => wgsl.compile(ce.parse('f(p)'))).toThrow(
       /f: parameter "b" has no static WGSL type/
     );
+  });
+
+  it('a PURE body over such a parameter is inlined at the call site instead', () => {
+    // The argument `p` is typed by the call as a boolean tuple and is a
+    // single point, so the call-site inliner substitutes the body, which
+    // here never reads the parameter and compiles to its constant.
+    const ce = engineWithSignature('(tuple<boolean,boolean>) -> real');
+    expect(glsl.compile(ce.parse('f(p)')).code).toBe('1.0');
+    expect(wgsl.compile(ce.parse('f(p)')).code).toBe('1.0');
   });
 
   it('a `tuple<real, real>` parameter still lowers to `vec2`', () => {

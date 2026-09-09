@@ -12,9 +12,12 @@
  * intervals (`IntervalValue`), and a collection may appear as the OPERAND of
  * an accessor — `At`, `Length`, `PointX`/`PointY`/`PointZ` — where it is the
  * same array at run time and the accessor projects it back down to a single
- * interval (see `interval/collections.ts`). The array spelling of a LITERAL
- * `List`/`Tuple` is emitted only in those operand positions, never as an
- * ordinary lowering: see `compileIntervalCollectionOperand` for why.
+ * interval (see `interval/collections.ts`). A literal single point — a `Tuple`
+ * of scalars, or an all-scalar `PointList` — is the third place an array
+ * spelling exists: at the ROOT it compiles to the array of its coordinate
+ * intervals (`literalRootPointOps`). The array spelling of a LITERAL
+ * `List`/`Tuple` is emitted only in those positions, never as an ordinary
+ * lowering: see `compileIntervalCollectionOperand` for why.
  *
  * @module compilation/interval-javascript-target
  */
@@ -194,6 +197,10 @@ function literalCollectionOps(
  * collection-valued operand, since `_IA.add`, `_IA.piecewise`, … read
  * `.lo`/`.hi` off whatever they are handed and would answer NaN bounds behind
  * `success: true`.
+ *
+ * This is one of the three places an array spelling exists on this target. The
+ * other two are the collection-valued ROOT of a comprehension, and a literal
+ * single point at the ROOT (`literalRootPointOps`).
  */
 function compileIntervalCollectionOperand(
   e: Expression,
@@ -231,6 +238,58 @@ function literalPointOps(
   )
     return literal.ops;
   return undefined;
+}
+
+/**
+ * The coordinates of a literal SINGLE point that is the ROOT of the
+ * compilation, or `undefined` when the root is anything else. The caller emits
+ * the JavaScript array of the compiled coordinates for such a root, and
+ * compiles every other root the ordinary way.
+ *
+ * A point is two (or three) quantities, and the value model of this target is
+ * one interval per quantity, so a point is an array of that many intervals.
+ * The `run` contract admits such a value (`IntervalValue`): a collection-valued
+ * result is an array of the results of its elements.
+ *
+ * The lowering is applied at the ROOT only, and there is deliberately no
+ * `Tuple`/`PointList` entry in `INTERVAL_JAVASCRIPT_FUNCTIONS` that would apply
+ * it in an operand position. The scalar kernels read `.lo` and `.hi` off
+ * whatever they are handed, so `_IA.add` given an array answers NaN bounds
+ * behind `success: true`; and if a point were a legal value everywhere, a
+ * contradicted `-> boolean` declaration whose body is a point would compile
+ * inside a scalar `Which` condition, which is pinned to decline. At the root
+ * there is no kernel above the value to misread it — the array goes straight to
+ * the caller of `run`.
+ *
+ * Each coordinate is emitted by its ordinary scalar lowering, so the array
+ * holds exactly what that lowering produces: a bare `Interval` for a constant
+ * or an input, an `IntervalResult` wrapper (`{ kind, value }`) for a kernel
+ * result. The wrapper is kept, not unwrapped, because that is what the elements
+ * of a comprehension root hold as well, both spellings are members of
+ * `IntervalValue`, and unwrapping would discard the `partial`/`jump` report a
+ * coordinate carries.
+ *
+ * A point declines in two cases, and then compiles the ordinary way — which
+ * refuses it, exactly as before this lowering existed. A coordinate that is not
+ * provably a number has no interval reading (a text or a nested collection
+ * component). A point with a BROADCASTING component is not one point at all: it
+ * zips into one point per element of that component, so it is a LIST of points,
+ * and this target has no lowering that builds one.
+ */
+function literalRootPointOps(
+  e: Expression,
+  target: CompileTarget<Expression>
+): ReadonlyArray<Expression> | undefined {
+  const ops = literalPointOps(e, target);
+  if (ops === undefined || ops.length === 0) return undefined;
+  const literal = assignedLiteral(e, target) ?? e;
+  // A head the caller overrode (the `functions` compilation option) keeps
+  // its ordinary dispatch, which reaches the caller's implementation; the
+  // array spelling here would silently replace that implementation.
+  if (target.unrollSkipHeads?.has(literal.operator) === true) return undefined;
+  if (!ops.every((op) => op.type.matches('number'))) return undefined;
+  if (pointHasBroadcastComponent(literal)) return undefined;
+  return ops;
 }
 
 /**
@@ -2876,7 +2935,24 @@ function compileToIntervalTarget(
 ): CompilationResult<'interval-js', IntervalValue> {
   let js: string;
   try {
-    js = BaseCompiler.compileCseRoot(expr, target);
+    // A literal single point at the ROOT is the one collection-shaped value
+    // this function builds itself: the JavaScript array of its compiled
+    // coordinates. `literalRootPointOps` says which roots qualify and why the
+    // spelling is confined to this position. Every other root, a point in an
+    // operand position included, compiles through its ordinary lowering.
+    const point = literalRootPointOps(expr, target);
+    js =
+      point === undefined
+        ? BaseCompiler.compileCseRoot(expr, target)
+        : BaseCompiler.compileCseRoot(
+            expr,
+            target,
+            0,
+            () =>
+              `[${point
+                .map((c) => BaseCompiler.compileValueOperand(c, target))
+                .join(', ')}]`
+          );
   } catch (e) {
     // Expression contains operators/functions not supported by the interval
     // target. Report failure so the caller can fall back to another target,

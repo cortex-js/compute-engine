@@ -395,6 +395,96 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
     expect(ce.box(['fcap', 1, 1] as any).N().re).toBe(101);
   });
 
+  it('substitutes a callee whose only use of the colliding name is under its OWN binder', () => {
+    // `Vbind`'s body binds `p` in a `Map` lambda, and `fbind` binds a
+    // PARAMETER of that name. The lambda's `p` is read as the lambda's
+    // binding wherever the lambda reaches, so the enclosing `p` captures
+    // nothing, and the substitution is sound. The capture test counts only
+    // the FREE occurrences of the callee's body (`freeSymbolNames`); a test
+    // on every symbol of the body refused this case.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number');
+    ce.box([
+      'DefineFunction',
+      'Vbind',
+      [
+        'Function',
+        [
+          'Map',
+          ['Function', ['Multiply', 2, 'p'], 'p'],
+          [
+            'List',
+            't',
+            ['Add', 't', 1],
+            ['Add', 't', 2],
+            ['Add', 't', 3],
+            ['Add', 't', 4],
+          ],
+        ],
+        't',
+      ],
+    ]).evaluate();
+    ce.box([
+      'DefineFunction',
+      'fbind',
+      ['Function', ['Min', ['Vbind', 't']], 'p', 't'],
+    ]).evaluate();
+
+    const r: any = compile(ce.box(['fbind', 'u', 'u']), {
+      to: 'javascript',
+      fallback: false,
+      constantFold: false,
+    } as any);
+    expect(r.success).not.toBe(false);
+    expect(r.preamble).not.toContain('const _fn_Vbind =');
+    expect(definitionOf(r.preamble, 'fbind')).not.toContain('_fn_Vbind');
+    expect(r.run({ u: 1 })).toBe(2);
+    expect(ce.box(['fbind', 1, 1] as any).N().re).toBe(2);
+  });
+
+  it('leaves a callee that binds the colliding name with a NON-lambda binder alone', () => {
+    // `Vsum`'s body binds `i` as a `Sum` index. Only a lambda parameter
+    // counts as shadowing for the capture test (`freeSymbolNames`): a scoped
+    // node's bindings are not visible in all of its operands, so its bound
+    // names stay reported and the substitution into a definition that binds
+    // `i` is declined. The value is right either way; the pin is that the
+    // conservative rule declines rather than admits.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'number');
+    ce.box([
+      'DefineFunction',
+      'Vsum',
+      [
+        'Function',
+        [
+          'List',
+          ['Sum', ['Multiply', 'i', 't'], ['Limits', 'i', 1, 3]],
+          ['Add', 't', 1],
+          ['Add', 't', 2],
+          ['Add', 't', 3],
+          ['Add', 't', 4],
+        ],
+        't',
+      ],
+    ]).evaluate();
+    ce.box([
+      'DefineFunction',
+      'fsum',
+      ['Function', ['Min', ['Vsum', 't']], 'i', 't'],
+    ]).evaluate();
+
+    const r: any = compile(ce.box(['fsum', 'u', 'u']), {
+      to: 'javascript',
+      fallback: false,
+      constantFold: false,
+    } as any);
+    expect(r.success).not.toBe(false);
+    expect(r.preamble).toContain('const _fn_Vsum =');
+    expect(definitionOf(r.preamble, 'fsum')).toContain('_fn_Vsum');
+    expect(r.run({ u: 1 })).toBe(2);
+    expect(ce.box(['fsum', 1, 1] as any).N().re).toBe(2);
+  });
+
   it('leaves a callee whose free symbol the definition BINDS alone, whichever argument it is passed', () => {
     // The same shadowing as above, with the colliding name PASSED as the
     // argument: `fcap2(k, t) := Min(Vcap2(k))`. Once `Vcap2`'s body is

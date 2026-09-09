@@ -11177,6 +11177,15 @@ function compileJSPad(
  *
  * A callback that is not a `Function` literal — a bare user-function symbol,
  * an operator symbol — has no body to rewrite here and compiles unchanged.
+ *
+ * The element-consuming callbacks reach this through `fnArg`/`zipFnArg` and
+ * the `Tabulate`/`Fill` lowerings. A `Reduce`/`Scan` COMBINER reaches it
+ * through `customCombinerWithLanes`, which passes a `compile` that wraps the
+ * emission in `BaseCompiler.compileCombinerLiteral`: the literal's own
+ * compilation then runs inside the fold's local shape frame, while the
+ * bindings are compiled and declared outside it. A combiner binds two
+ * parameters — the accumulator and the element — and both are varying, which
+ * `functionLiteralBoundNames` reports from the parameter operands.
  */
 function hoistedCallbackLambda(
   callback: Expression,
@@ -11573,6 +11582,16 @@ function customCombiner(
  * a seedless `Scan` whose accumulator widens starts from the RAW first
  * element (`Scan([1, 2], (a, x) ↦ a + i·x)` answered `[1, {re: null}]`
  * without the lift).
+ *
+ * An inline combiner also takes the loop-invariant hoist of
+ * {@link hoistedCallbackLambda}: a fold calls its combiner once per element,
+ * so a subexpression of the body that mentions neither the accumulator nor
+ * the element was recomputed on every step. The hoist scans the body and
+ * declares the bindings OUTSIDE the local shape frame, while
+ * `BaseCompiler.compileCombinerLiteral` still pushes that frame around the
+ * emission of the literal itself. A binding is invariant, so it names neither
+ * parameter, and the frame describes nothing else: compiling it outside the
+ * frame gives the same code the unhoisted body emitted.
  */
 function customCombinerWithLanes(
   op: Expression,
@@ -11583,7 +11602,11 @@ function customCombinerWithLanes(
   if (plan === undefined) return customCombiner(op, compile, target);
   const fn = isSymbol(plan.op)
     ? compile(plan.op)
-    : BaseCompiler.compileCombinerLiteral(plan, compile);
+    : hoistedCallbackLambda(
+        plan.op,
+        (e) => BaseCompiler.compileCombinerLiteral({ ...plan, op: e }, compile),
+        target
+      );
   const a = plan.accComplex ? '_SYS.cplx(_a)' : '_a';
   const b = plan.eltComplex ? '_SYS.cplx(_b)' : '_b';
   return `((_f) => (_a, _b) => _f(${a}, ${b}))(${fn})`;

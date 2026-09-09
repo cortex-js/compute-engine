@@ -16,6 +16,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * (`BaseCompiler.tryInlineUserFunctionCall`); the body is SUBSTITUTED, never
  * evaluated, and the inlining is declined for an impure, generic, recursive
  * or collection-argument call, where the definition's own decline stands.
+ *
+ * A SYMBOL whose declared type is a tuple is a single point too, and is
+ * substituted the same way: the body then reads the coordinates of that
+ * symbol (`P.x`, `_IA.component(P, 0)`), which both targets lower.
  */
 
 function engine(): ComputeEngine {
@@ -115,13 +119,27 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
     expect(code(ce, String.raw`F(x)`, 'glsl')).toBe('_fn_F(x)');
   });
 
-  test('declines that must stand: a symbolic point argument, an impure body, a list argument, a recursive callee', () => {
+  test('a point-typed SYMBOL argument inlines like a literal point', () => {
     const ce = engine();
     ce.declare('P', 'tuple<number, number>');
+    expect(code(ce, String.raw`f(P)`, 'glsl')).toBe(
+      'a * _gpu_pow2(P.x) + b * _gpu_pow2(P.y)'
+    );
+    expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe(
+      '_IA.add(_IA.mul(_.a, _IA.square(_IA.component(_.P, 0))), ' +
+        '_IA.mul(_.b, _IA.square(_IA.component(_.P, 1))))'
+    );
+    const point = (v: number) => ({ lo: v, hi: v });
+    const r = compile(ce.parse(String.raw`f(P)`), { to: 'interval-js' });
+    const out = r.run({ a: point(2), b: point(3), P: [point(1), point(2)] });
+    expect(out.value.lo).toBeCloseTo(14, 9);
+    expect(out.value.hi).toBeCloseTo(14, 9);
+  });
+
+  test('declines that must stand: an impure body, a list argument, a recursive callee', () => {
+    const ce = engine();
     ce.declare('L', 'list<number>');
     for (const [latex, to] of [
-      [String.raw`f(P)`, 'glsl'],
-      [String.raw`f(P)`, 'interval-js'],
       [String.raw`h((x,y))`, 'glsl'],
       [String.raw`h((x,y))`, 'interval-js'],
       [String.raw`f(L)`, 'glsl'],
