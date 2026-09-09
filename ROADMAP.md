@@ -996,21 +996,27 @@ pipeline now binds document functions as by-reference lambdas, and the item-225
 witness (`art/nxlddeh5zv`) no longer OOMs, though its interpreted member sweep
 still exceeds 300 s on the fallback.
 
-### Fixed-width collection chains: residue after the 2026-09-08 round (OPEN, compile performance — consult with Tycho, Desmos state 62urmx2dcm)
+### Fixed-width collection chains: residue after the 2026-09-08 and 2026-09-09 rounds (OPEN, compile performance — consult with Tycho, Desmos state 62urmx2dcm)
 
-Landed 2026-09-08 (steps 1 and 2 committed in 71d91afa, step 3 staged): a
-loop-invariant hoist over callback lambda bodies on the JavaScript target
-(`hoistedCallbackLambda`, `javascript-target.ts`); the target-independent
-fixed-width unroll pass (`compilation/fixed-width-unroll.ts`, run at every
-compile entry and inside the call-site inliner); and, on the definition-emission
-route, substitution of nested pure collection-valued user-function calls before
-the unroll (`inlineCollectionValuedCallsInDefinitionBody`, `base-compiler.ts`).
-The by-reference Voronoi row went from 58 µs/sample to about 2 µs on
-JavaScript (the inlined form is 0.8 µs) and compiles on `glsl`, `wgsl` and
-`interval-js`. Two pre-existing inliner defects were fixed alongside: a
-parameter used as a callee was substituted against the engine's function of
-the same name, and a substituted callee body never received the angular-unit
-rewrite. What remains:
+Landed 2026-09-08 (commits 71d91afa and a9cf103c): a loop-invariant hoist
+over callback lambda bodies on the JavaScript target (`hoistedCallbackLambda`,
+`javascript-target.ts`); the target-independent fixed-width unroll pass
+(`compilation/fixed-width-unroll.ts`, run at every compile entry and inside
+the call-site inliner); and, on the definition-emission route, substitution
+of nested pure collection-valued user-function calls before the unroll
+(`inlineCollectionValuedCallsInDefinitionBody`, `base-compiler.ts`). The
+by-reference Voronoi row went from 58 µs/sample to about 2 µs on JavaScript
+(the inlined form is 0.8 µs) and compiles on `glsl`, `wgsl` and
+`interval-js`. Landed 2026-09-09 on top of that: the last-call memo on pure
+scalar definitions (`memoizeSharedDefinitions`, row 3.4 → 2.7 µs); a point
+bound to an untyped parameter is inlined at the call site instead of reaching
+scalar arithmetic as a JavaScript array (`pointArgumentAtUntypedParameter`);
+the inliner's capture guard counts only the free symbols of the callee body
+(`freeSymbolNames`); `Map` with a bare user-function head and
+`Reduce(list, Add|Multiply|Min|Max, seed)` are unrolled; `Reduce`/`Scan`
+combiner lambdas get the callback hoist; and a literal single point at the
+compile ROOT lowers on `interval-js` to an array of coordinate intervals.
+What remains:
 
 - **Cross-definition CSE: the shared block inside two definitions.** The
   2026-09-09 last-call memo (`memoizeSharedDefinitions`, `javascript-target.ts`)
@@ -1034,48 +1040,33 @@ rewrite. What remains:
   measured and rejected earlier: a size bound on the AUTHORED body does not
   bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters emitted),
   and making the inliner the primary route retargets 374 `_fn_*` call shapes
-  across 35 test files.
-- **A POINT that reaches an untyped parameter compiles to NaN.** With
-  `p(P) := q(P)`, `q(P) := r(P)` and `r(P) := 2·P`, the application `p((a, b))`
-  binds a point to parameters nothing types: a parameter's type is inferred
-  from the uses in its own body, never from a call site, so `P` stays
-  `unknown` and the body `2·P` is emitted as scalar arithmetic over the JS
-  array a point lowers to. The compiled answer is NaN, where the interpreter
-  scales the point and answers `(2a, 2b)`. The direct call `r((a, b))` has
-  always answered NaN this way. Before the 2026-09-09 direct-call ruling the
-  two nested calls of the chain emitted a runtime broadcast, which mapped the
-  body over the point's COORDINATES and so agreed with the interpreter for a
-  body whose arithmetic is the same per coordinate; the agreement was
-  accidental, and the same chain over `P·P` answered `[9, 16]` where the
-  interpreter reports `no-product-between-points`. A body that reads the point
-  as a point (`PointX(P)`) types the parameter and is unaffected. A fix needs a
-  way for the CALL SITE to tell the callee that its argument is a point,
-  because the parameter's own type cannot say it. Pinned as it stands in
-  `test/compute-engine/compile-scalar-param-direct-call.test.ts`.
-- **The capture guard on substituted callee bodies is conservative on
-  binders.** `statement.symbols` includes names bound INSIDE the callee's body
-  (a `Map(p ↦ …)` binder's `p`), so a collision of such a name with an enclosing
-  local declines a substitution that would be safe. Missed optimization; a
-  binder-aware free-symbol walk would narrow it.
+  across 35 test files. Tycho was asked to re-measure on 0.127.0 before this
+  is reconsidered.
 - **A fixed width known only from a TYPE** (`P: list<tuple<number, number>^9>`
-  as a symbol, `At(P, i)` reads) is not unrolled; the pass needs a literal `List`.
-- **`Map(h, list)` with a bare user-function head** is not unrolled (only a
-  `Function` literal callback is).
-- **`Product(List(…))` reaches the pass as `Reduce(list, Multiply, 1)`** after
-  canonicalization, which the pass does not rewrite; a `Reduce` arm is a possible
-  follow-up.
-- **`Reduce`/`Scan` combiner bodies do not get the callback hoist**: the combiner
-  is compiled inside `withLocalShapeFrame` (`compileCombinerLiteral`), and
-  placing the hoist correctly relative to that frame is a `base-compiler.ts`
-  change. Missing optimization, not a defect.
-- **A point VALUE has no `interval-js` lowering.** `PointList(a, b)` and
-  `Tuple(a, b)` alone decline on that target ("no lowering for target
-  'interval-javascript'"), although a coordinate read of either compiles
-  (`PointX(PointList(a, b))` is `_.a` after the fixed-width fold). The target's
-  value model is one interval per quantity; a point would be an array of two
-  intervals, which the collection-root ruling of 2026-08-22 admits but no
-  lowering builds. Not needed by the Voronoi row after the fold; recorded so
-  the gap is not rediscovered.
+  as a symbol, `At(P, i)` reads) is not unrolled; the pass needs a literal
+  `List`. Unrolling from the type would rewrite `Map(f, P)` to
+  `[f(At(P, 1)), …, f(At(P, 9))]`, which then needs an `At` lowering over a
+  declared list on the shader targets. No consumer has asked for it.
+- **A point bound to an untyped parameter that cannot be inlined fails
+  closed.** The call-site substitution declines for an impure point argument,
+  a recursive or multi-clause callee, and a body that is invalid over a point
+  (`P·P`, `2P + 1`); the compile then reports the reason and the
+  `fallback: true` route answers through the interpreter. A parameter the
+  body never mentions keeps the by-reference call, whatever its argument is.
+  A per-shape specialization of the emitted definition would compile those
+  cases too; not built, no consumer has asked.
+- **`Map(h, list)` with a bare head is unrolled only for a user function with
+  ONE plain parameter.** A variadic `h` would be sound for a bare head (the
+  rewrite writes `h(e)` either way) but is declined with the lambda case for
+  now; a library operator head (`Map(Sin, list)`) is not unrolled either.
+  Both are missed optimizations, not defects.
+- **A point VALUE in an OPERAND position still has no `interval-js`
+  lowering** (`2·(a, b)`, a point under `Which`). The root lowering landed;
+  the target's kernels take one interval per operand by design and a general
+  `Tuple` lowering was refused for the reason stated on
+  `compileIntervalCollectionOperand` (`interval-javascript-target.ts`). A
+  point-valued arithmetic lowering (componentwise `_IA.mul` over the array)
+  would be a new value model for the target, not a gap filled by a handler.
 - **Consumer-side fact for Tycho:** on `glsl`/`interval-js` the by-reference
   route needs the plot variables DECLARED (or supplied through `vars`): an
   `unknown`-typed argument could hold a collection the by-reference call would

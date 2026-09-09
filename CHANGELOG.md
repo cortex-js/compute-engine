@@ -1,6 +1,76 @@
 ## [Unreleased]
 
+### New Features
+
+- **More fixed-width collection shapes compile to straight-line scalar code.**
+  The fixed-width unroll pass (`compilation/fixed-width-unroll.ts`) now
+  rewrites two shapes it left alone in 0.127.0. `Map(h, [e1, …, eN])` with a
+  BARE user-function head — not only a `Function` literal callback — becomes
+  the literal list of calls `[h(e1), …, h(eN)]` when `h` takes one plain
+  parameter and every element and every call is pure, so `Min(Map(h, list))`
+  compiles on `interval-js` as an n-ary minimum where it declined before. And
+  `Product([a, …])`, which canonicalization writes as
+  `Reduce([a, …], Multiply, 1)`, is rewritten with `Reduce` over the bare
+  symbols `Add`, `Multiply`, `Min` and `Max` to the n-ary form, the seed
+  dropped when it is the literal identity of the head and kept as the first
+  operand otherwise; an impure seed is left alone. The JavaScript target emits
+  `_.a * _.b * …` where it emitted a `reduce` over an array.
+
+- **A `Reduce`/`Scan` combiner lambda gets the loop-invariant hoist on the
+  JavaScript target.** A subexpression of the combiner body that reads neither
+  the accumulator nor the element — `Sin(u)·Cos(v)` in
+  `Reduce(list, (acc, x) ↦ acc + x·Sin(u)·Cos(v), 0)` — was recomputed once
+  per element. It is now bound once, on the first call, exactly as a `Map` or
+  `Filter` callback's invariants have been since 0.127.0. A combiner with no
+  invariant part emits byte-identical code.
+
+- **A single point at the compile ROOT lowers on `interval-js`.** `Tuple(a, b)`
+  and an all-scalar `PointList(a, b)` handed to `compile()` as the whole
+  expression compile to the JavaScript array of their coordinate intervals
+  (`[_.a, _.b]`) and `run()` returns that array, one `{lo, hi}` per coordinate.
+  Both declined before ("no lowering for target 'interval-javascript'"). The
+  lowering is confined to the root: a point in an operand position of a
+  kernel (`2·(a, b)`, a point under `Which`) still declines, because every
+  kernel of this target takes one interval per operand. A point with a
+  broadcasting component declines, and a caller who overrode `Tuple` or
+  `PointList` through the `functions` option keeps their implementation.
+
 ### Resolved Issues
+
+- **A point bound to an UNTYPED user-function parameter no longer compiles to
+  `NaN`.** With `r(P) := 2·P` and no declared type for `P`, the compiled
+  `r((a, b))` — and a chain `p(P) := q(P)`, `q(P) := r(P)` called as
+  `p((a, b))` — answered `NaN` on the JavaScript target where the interpreter
+  scales the point and answers `(2a, 2b)`. A parameter's type is inferred from
+  the uses in its own body, never from a call site, so the emitted definition
+  treated `P` as a scalar and its arithmetic ran over the JavaScript array a
+  point lowers to. The call site is the only place that knows the argument is
+  a point, so such a call is now substituted into the body instead of going by
+  reference, and every target lowers the point arithmetic it exposes:
+  `[6, 8]` on JavaScript, `2.0 * vec2(a, b)` on GLSL, componentwise `sin`
+  on a shader for `f((1, 2))` with `f(x) := sin x + x²`. A literal `Tuple`,
+  an all-scalar `PointList` and a symbol declared with a tuple type all count
+  as one point. When the substitution is not sound — an impure point argument,
+  a recursive or multi-clause callee, a callee whose free symbol the enclosing
+  definition binds, or a body the interpreter itself rejects over a point
+  (`P·P` is `no-product-between-points`, `2P + 1` is `incompatible-type`) —
+  the compile fails closed with the reason and the `fallback: true` route
+  answers through the interpreter, where it used to answer a wrong list
+  (`[9, 16]`, `[7, 9]`). A parameter the body never reads, or reads only under
+  an inner lambda of the same name, keeps the by-reference call. A parameter
+  whose type is declared or inferred as a tuple was already right and is
+  unchanged.
+
+- **The call-site inliner no longer refuses a callee whose only use of a
+  colliding name is under its own lambda.** Substituting a user function's
+  body into a definition that binds one of the body's free symbols would
+  capture that symbol, so the substitution is declined; the test counted every
+  symbol of the body, including a name bound by an inner `Map(p ↦ …, list)`
+  lambda, and so declined a body whose `p` the enclosing definition's `p`
+  cannot reach. Only the free occurrences are checked now. A name bound by a
+  `Sum`, a `Block` or a comprehension still counts as free for this test, on
+  purpose: a comprehension clause reads the OUTER binding of a name a later
+  clause binds, so treating it as shadowed would hide a capture.
 
 - **A color-space conversion of an operand that may be a list of colors
   compiles again on the JavaScript target.** With `w` declared
