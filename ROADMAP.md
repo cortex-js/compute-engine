@@ -916,6 +916,68 @@ pipeline now binds document functions as by-reference lambdas, and the item-225
 witness (`art/nxlddeh5zv`) no longer OOMs, though its interpreted member sweep
 still exceeds 300 s on the fallback.
 
+### Fixed-width collection chains: residue after the 2026-09-08 round (OPEN, compile performance — consult with Tycho, Desmos state 62urmx2dcm)
+
+Landed 2026-09-08 (steps 1 and 2 committed in 71d91afa, step 3 staged): a
+loop-invariant hoist over callback lambda bodies on the JavaScript target
+(`hoistedCallbackLambda`, `javascript-target.ts`); the target-independent
+fixed-width unroll pass (`compilation/fixed-width-unroll.ts`, run at every
+compile entry and inside the call-site inliner); and, on the definition-emission
+route, substitution of nested pure collection-valued user-function calls before
+the unroll (`inlineCollectionValuedCallsInDefinitionBody`, `base-compiler.ts`).
+The by-reference Voronoi row went from 58 µs/sample to about 2 µs on
+JavaScript (the inlined form is 0.8 µs) and compiles on `glsl`, `wgsl` and
+`interval-js`. Two pre-existing inliner defects were fixed alongside: a
+parameter used as a callee was substituted against the engine's function of
+the same name, and a substituted callee body never received the angular-unit
+rewrite. What remains:
+
+- **Cross-definition CSE.** The remaining 2.5× between the by-reference row
+  (about 2 µs) and the inlined row (0.8 µs) is three evaluations of the
+  nine-point block: `m2` computes the distances and calls `m`, and the row calls
+  `m` again. Sharing them needs one CSE harvest scope spanning several emitted
+  definitions. A feature for its own round, not a defect. Inlining small scalar
+  callees at call sites was measured and rejected: a size bound on the AUTHORED
+  body does not bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters
+  emitted), and making the inliner the primary route retargets 374 `_fn_*`
+  call shapes across 35 test files.
+- **A call of a user function from a definition whose parameters type `unknown`
+  goes through `_SYS.bcastFn`** (`_fn_row` calling `_fn_m`) rather than the
+  cheaper `Array.isArray` guard. The evidence that would allow a direct call
+  (`userFunctionParamsAreScalar`) exists, but that seam is governed by the
+  2026-08-30 / 2026-09-07 ruling that keeps the dispatch for inferred-type
+  arguments. A ruling question, not a bug.
+- **The capture guard on substituted callee bodies is conservative on
+  binders.** `statement.symbols` includes names bound INSIDE the callee's body
+  (a `Map(p ↦ …)` binder's `p`), so a collision of such a name with an enclosing
+  local declines a substitution that would be safe. Missed optimization; a
+  binder-aware free-symbol walk would narrow it.
+- **A fixed width known only from a TYPE** (`P: list<tuple<number, number>^9>`
+  as a symbol, `At(P, i)` reads) is not unrolled; the pass needs a literal `List`.
+- **`Map(h, list)` with a bare user-function head** is not unrolled (only a
+  `Function` literal callback is).
+- **`Product(List(…))` reaches the pass as `Reduce(list, Multiply, 1)`** after
+  canonicalization, which the pass does not rewrite; a `Reduce` arm is a possible
+  follow-up.
+- **`Reduce`/`Scan` combiner bodies do not get the callback hoist**: the combiner
+  is compiled inside `withLocalShapeFrame` (`compileCombinerLiteral`), and
+  placing the hoist correctly relative to that frame is a `base-compiler.ts`
+  change. Missing optimization, not a defect.
+- **The interval `PointX`/`PointY`/`PointZ` decline text is stale.**
+  `compileIntervalPointComponent` (`interval-javascript-target.ts`) still says the
+  interval target's result is "a single interval, not a collection"; the
+  2026-08-22 collection-root ruling made a collection an ARRAY of intervals
+  (`IntervalValue`, `compilation/types.ts`). The accurate reason for the decline
+  that remains (a list-of-points operand that is not a wide literal list, such as a
+  `list<tuple>` symbol) is that the target has no per-element projection over a
+  runtime array. Comment-only fix, not made in the 2026-09-08 round because the
+  file carried a peer session's unstaged rewrite at the time.
+- **Consumer-side fact for Tycho:** on `glsl`/`interval-js` the by-reference
+  route needs the plot variables DECLARED (or supplied through `vars`): an
+  `unknown`-typed argument could hold a collection the by-reference call would
+  broadcast, so `provablyScalarArg` refuses to inline over it. This is a
+  soundness guard, not a defect.
+
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands
