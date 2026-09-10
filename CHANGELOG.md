@@ -1,26 +1,27 @@
+## [Unreleased]
+
 ## 0.128.4 _2026-09-10_
 
 ### Resolved Issues
 
-- **Derivatives of odd roots retain the real branch at negative inputs.**
-  Exact rational powers with an odd denominator now compile to real arithmetic
-  for real bases, including the powers produced by symbolic differentiation.
-  For `f(x) := ∛x`, compiled `f''(-1.2)` now returns approximately `0.16399052`
+- **Derivatives of odd roots retain the real branch at negative inputs.** Exact
+  rational powers with an odd denominator now compile to real arithmetic for
+  real bases, including the powers produced by symbolic differentiation. For
+  `f(x) := ∛x`, compiled `f''(-1.2)` now returns approximately `0.16399052`
   instead of a complex value, matching the interpreter. JavaScript list
   broadcasts, Python, and shader output use the same branch rule. Explicitly
   complex bases and inexact exponents keep their existing behavior.
 - **Compiled closed-form derivatives handle complex arguments correctly.**
   Applying a derivative such as `f''(z)` for `f(x) := x^3` now uses complex
   arithmetic when `z` is complex, instead of returning `NaN`. Arithmetic around
-  the derivative uses the same result representation; a constant derivative
-  can still return a real number.
+  the derivative uses the same result representation; a constant derivative can
+  still return a real number.
 - **Compiled `Dot` broadcasts list-valued point coordinates.** For points
-  declared as `tuple<broadcastable<number>, broadcastable<number>>`,
-  `Dot(a, b)` with `a = [1, [1, 2]]` and `b = [3, 4]` now returns `[7, 11]`
-  instead of `NaN`. Written tuples with numeric list components use the same
-  compilation path, and scalar coordinates still produce a scalar result.
-  Broadcasting complex point coordinates remains unsupported and declines
-  compilation.
+  declared as `tuple<broadcastable<number>, broadcastable<number>>`, `Dot(a, b)`
+  with `a = [1, [1, 2]]` and `b = [3, 4]` now returns `[7, 11]` instead of
+  `NaN`. Written tuples with numeric list components use the same compilation
+  path, and scalar coordinates still produce a scalar result. Broadcasting
+  complex point coordinates remains unsupported and declines compilation.
 
 ### Improvements
 
