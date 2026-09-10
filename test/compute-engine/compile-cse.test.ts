@@ -585,7 +585,7 @@ describe('COMPILE CSE — other targets', () => {
 
     expect(occurrences(result.code, '_IA.sin')).toBe(1);
     expect(result.code).toMatchInlineSnapshot(
-      `(() => { const _cse1 = _IA.sin(_IA.scale(_IA.point(6), _.u)); return _IA.add(_IA.square(_cse1), _IA.div(_cse1, _IA.add(_cse1, _IA.point(2)))); })()`
+      `(() => { const _cse1 = _IA.sin(_IA.scale(_k1, _.u)); return _IA.add(_IA.square(_cse1), _IA.div(_cse1, _IA.add(_cse1, _k2))); })()`
     );
 
     // A point interval reproduces the scalar value; a proper interval encloses

@@ -315,7 +315,10 @@ describe('Arctan2 across its branch cut along x', () => {
       to: 'interval-js',
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.atan2(_IA.point(0), _.x)');
+    // The zero is bound in the constant table the preamble carries
+    // (`hoistIntervalConstants`).
+    expect(r.preamble).toContain('const _k1 = _IA.point(0);');
+    expect(r.code).toBe('_IA.atan2(_k1, _.x)');
     const straddle = r.run!({ x: { lo: -1, hi: 1 } });
     expect(straddle.kind).toBe('singular');
     expect(straddle.at).toBe(0);

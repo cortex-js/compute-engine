@@ -550,7 +550,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
         { fallback: false, constantFold: false }
       );
       expect(r.code).toMatchInlineSnapshot(
-        `"_SYS.eq((["a", "b"]), (["a", "b"]), 1e-10)"`
+        `"_SYS.eq((["a", "b"]), (["a", "b"]))"`
       );
     });
 
@@ -592,7 +592,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       const r = compile(expr, { fallback: false });
       expect(r.success).toBe(true);
       expect(r.code).toMatchInlineSnapshot(
-        `"_SYS.bcast((_tv1, _tv2) => ((_tv1) < (_tv2)), 1, [1, 2])"`
+        `"((_tv3) => [((1) < (_tv3[0])), ((1) < (_tv3[1]))])([1, 2])"`
       );
       expect(r.run!()).toEqual(interpretedBooleans(expr));
     });
@@ -601,7 +601,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       const expr = ce.box(['Equal', 1, ['List', 1, 2]]);
       const r = compile(expr, { fallback: false });
       expect(r.success).toBe(true);
-      expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((1), ([1, 2]), 1e-10)"`);
+      expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((1), ([1, 2]))"`);
       expect(r.run!()).toEqual(interpretedBooleans(expr));
     });
 
@@ -779,7 +779,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       ce.declare('Q', 'list<tuple<number, number>>');
       const eq = compile(ce.box(['Equal', 'P', 'Q']), { fallback: false });
       expect(eq.success).toBe(true);
-      expect(eq.code).toMatchInlineSnapshot(`"_SYS.eq((_.P), (_.Q), 1e-10)"`);
+      expect(eq.code).toMatchInlineSnapshot(`"_SYS.eq((_.P), (_.Q))"`);
       const less = compile(ce.box(['Less', 'P', 'Q']), { fallback: false });
       expect(less.success).toBe(true);
       expect(less.code).toMatchInlineSnapshot(
@@ -829,9 +829,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       fallback: false,
       constantFold: false,
     });
-    expect(r.code).toMatchInlineSnapshot(
-      `"_SYS.eq(([1, 2]), ([1, 2]), 1e-10)"`
-    );
+    expect(r.code).toMatchInlineSnapshot(`"_SYS.eq(([1, 2]), ([1, 2]))"`);
   });
 
   test('declared tuple-typed SYMBOLS with assigned values, run parity', () => {
@@ -863,9 +861,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     ] as any);
     const r = compile(f, { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(
-      `"(pt) => _SYS.eq((pt), ([0, 0]), 1e-10)"`
-    );
+    expect(r.code).toMatchInlineSnapshot(`"(pt) => _SYS.eq((pt), ([0, 0]))"`);
     expect((r.run as any)([0, 0])).toBe(true);
     expect((r.run as any)([1, 2])).toBe(false);
     // The interpreter's `Apply`, for the same two points.
@@ -1051,7 +1047,7 @@ describe('the string-evidence walk has no depth cutoff', () => {
     // through `_SYS.eq`, which compares a scalar as a scalar and a list
     // element-wise, as interpreted (Tycho item 249,
     // `unionAdmitsIndexedCollection`).
-    expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((_.nm), (4), 1e-10)"`);
+    expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((_.nm), (4))"`);
   });
 });
 
@@ -1082,16 +1078,14 @@ describe('the gate does not reach past string operands', () => {
   test('an unknown-typed symbol does not gate (plot shapes keep compiling)', () => {
     const r = compile(ce.box(['Equal', 'xq', 4]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(
-      `"((typeof (_.xq) === 'number' && (_.xq) === (4)) || Math.abs((_.xq) - (4)) <= 1e-10)"`
-    );
+    expect(r.code).toMatchInlineSnapshot(`"((_.xq) === (4))"`);
   });
 
   test('an inferred-parameter plot equality keeps its numeric fast path', () => {
     const r = compile(ce.parse('x^2 + y^2 = 4'), { fallback: false });
     expect(r.success).toBe(true);
     expect(r.code).toMatchInlineSnapshot(
-      `"((typeof ((_.x * _.x) + (_.y * _.y)) === 'number' && ((_.x * _.x) + (_.y * _.y)) === (4)) || Math.abs(((_.x * _.x) + (_.y * _.y)) - (4)) <= 1e-10)"`
+      `"(((_.x * _.x) + (_.y * _.y)) === (4))"`
     );
   });
 
@@ -1504,9 +1498,7 @@ describe('tier 2: NotEqual over `string | missing` keeps the Kleene guard', () =
     ce.declare('pq', 'number');
     const r = compile(ce.box(['NotEqual', 'pq', 3]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(
-      `"(!((typeof (_.pq) === 'number' && (_.pq) === (3)) || Math.abs((_.pq) - (3)) <= 1e-10))"`
-    );
+    expect(r.code).toMatchInlineSnapshot(`"((_.pq) !== (3))"`);
   });
 });
 

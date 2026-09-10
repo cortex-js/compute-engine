@@ -105,10 +105,11 @@ describe('a comparison against a compiled loop index', () => {
     expect(r.run!()).toEqual([1, 1, 1, 1, 1, 1, 0, 0, 0, 0]);
   });
 
-  test('a FREE symbol keeps both the tolerance test and the NaN tests', () => {
+  test('a FREE symbol keeps the NaN tests', () => {
     const ce = new ComputeEngine();
     // `x` is supplied by the caller, so it can be NaN or absent: the
-    // decidedness test and the per-term exit both earn their place.
+    // decidedness test and the per-term exit both earn their place. The
+    // comparison itself is exact (compiled equality carries no tolerance).
     const code = js(
       ce,
       ce.box([
@@ -118,7 +119,8 @@ describe('a comparison against a compiled loop index', () => {
       ])
     );
     expect(code).toContain('_.x === _.x');
-    expect(code).toContain('1e-10');
+    expect(code).toContain('((1) === (_.x))');
+    expect(code).not.toContain('1e-10');
     expect(code).toMatch(/!== _tv\d/);
   });
 });

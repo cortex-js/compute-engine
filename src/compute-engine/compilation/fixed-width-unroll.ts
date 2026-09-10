@@ -143,8 +143,16 @@ const MAX_REWRITE_ROUNDS = 16;
  * (`Math.min(a, b, c)`, `min(a, b, c)`, a fold of `_IA.min`) is at least as
  * good as a reduce over an array at every width, so rule 3 applies from one
  * element up.
+ *
+ * Exported because the JavaScript target reads the SAME boundary from the
+ * other side. Where this pass fans a literal collection out from five elements
+ * up, that target writes out the components of a narrower one — the shapes
+ * this pass leaves alone because every target has a native lowering for them.
+ * The two must not overlap, so both read this one constant
+ * (`staticBroadcastWidth` in `base-compiler.ts`, and the narrow-reduction fold
+ * in `javascript-target.ts`).
  */
-const MIN_UNROLLED_WIDTH = 5;
+export const MIN_UNROLLED_WIDTH = 5;
 
 /**
  * `settled` holds every node this pass has already brought to a fixed point.

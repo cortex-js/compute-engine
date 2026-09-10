@@ -330,9 +330,11 @@ describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
     // runtime real-operand guard instead of CSE.
     //
     // The min/max family is admitted as a candidate in its own right (a call
-    // whose runtime cost its syntax size understates), so `Min(P)` takes the
-    // first temporary and `Min(P) + 1` the second. The pass over `P` still
-    // happens exactly once, and the body reads the SUM's temporary.
+    // whose runtime cost its syntax size understates), but every occurrence
+    // of `Min(P)` sits inside an occurrence of `Min(P) + 1` and the two occur
+    // the same number of times, so subsumption keeps only the sum. One
+    // temporary holds it, the pass over `P` happens exactly once, and the
+    // body reads that temporary.
     const x = ['Add', ['Min', 'P'], 1];
     const expr = ce.box([
       'Add',
@@ -350,9 +352,8 @@ describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
     ]);
     const { code, run } = js(expr);
     expect(count(code, 'Math.min(')).toBe(1);
-    expect(code).toMatch(/const _cse1 = .*Math\.min/);
-    expect(code).toMatch(/const _cse2 = _cse1 \+ 1/);
-    expect(code).toMatch(/result\.push\(.*_cse2/);
+    expect(code).toMatch(/const _cse1 = .*Math\.min.*\+ 1/);
+    expect(code).toMatch(/result\.push\(.*_cse1/);
     const P = [3, 1, 2, 5];
     expect(run({ P })).toBe(2 + 2 + 2 + (0 + 2 + 2));
     expect(run({ P })).toBe(interpret(expr, { P }));
@@ -363,8 +364,9 @@ describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
     // temporary for `Min(P) + 1` (the body keeps it under `Floor` so
     // canonicalization does not flatten it into the sum), so hoisting
     // `Min(P)` out of the loop would bind a pass over `P` that nothing reads.
-    // That temporary is `_cse2`: `Min(P)` is a candidate in its own right and
-    // takes `_cse1`, while the pass over `P` still happens exactly once.
+    // That temporary is `_cse1`: `Min(P)` occurs only inside `Min(P) + 1`,
+    // just as often, so subsumption keeps only the sum and the pass over `P`
+    // still happens exactly once.
     const x = ['Add', ['Min', 'P'], 1];
     const expr = ce.box([
       'Add',
@@ -379,7 +381,7 @@ describe('Tycho item 248 — reuse of an enclosing CSE temporary', () => {
     ]);
     const { code, run } = js(expr);
     expect(count(code, 'Math.min(')).toBe(1);
-    expect(whileBodies(code)[0]).toContain('_cse2');
+    expect(whileBodies(code)[0]).toContain('_cse1');
     const P = [3, 1, 2, 5];
     expect(run({ P })).toBe(2 + 2 + 2 + (4 * 2 + 11));
   });

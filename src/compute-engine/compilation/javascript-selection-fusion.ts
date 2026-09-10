@@ -248,8 +248,10 @@ export function compileNumericSelection(
       rhs = `${names.get(value.args[0])}[${position}]`;
     } else if (value.kind === 'comparison') {
       if (op === 'Equal' || op === 'NotEqual') {
-        const equality = `(Math.abs(${operands[0]} - ${operands[1]}) <= ${value.expr.engine.tolerance})`;
-        rhs = op === 'Equal' ? equality : `!${equality}`;
+        // Exact, as compiled equality is everywhere (`compileJSEquality`, and
+        // the `eqTensor` leaf the unfused lowering reaches): `NaN` equals
+        // nothing, so `Equal` is false and `NotEqual` true on a `NaN` cell.
+        rhs = `(${operands[0]} ${op === 'Equal' ? '===' : '!=='} ${operands[1]})`;
       } else {
         const operator = {
           Less: '<',

@@ -26,10 +26,22 @@ function codeOf(latex: string, to: 'javascript' | 'glsl' | 'python'): string {
   return r.code!;
 }
 
+/**
+ * The emitted interval expression with the constant table folded back in:
+ * every `_kN` replaced by the constant it is bound to.
+ *
+ * The interval target binds every constant interval to a name in a table the
+ * preamble carries (`hoistIntervalConstants`), so the expression reads names
+ * rather than object literals. The pins in this file are about which DIVISION
+ * KERNEL an operation lowers to, not about where its constants live.
+ */
 function intervalCodeOf(latex: string): string {
   const r = compile(ce.parse(latex), { to: 'interval-js' });
   expect(r.success).toBe(true);
-  return r.code;
+  const constants = new Map<string, string>();
+  for (const m of (r.preamble ?? '').matchAll(/^const (_k\d+) = (.*);$/gm))
+    constants.set(m[1], m[2]);
+  return r.code.replace(/_k\d+/g, (name) => constants.get(name) ?? name);
 }
 
 /** The compiled JavaScript value of `latex` at `x`. */
@@ -160,9 +172,14 @@ describe('COMPILE a rational factor as a division', () => {
     expect(codeOf('-\\frac{x}{49}', 'javascript')).toBe('-(_.x / 49)');
     expect(codeOf('\\frac{x}{-49}', 'javascript')).toBe('-(_.x / 49)');
     expect(codeOf('-\\frac{x}{49}', 'glsl')).toBe('-(x / 49.0)');
+    // The interval target puts the sign on the DIVISOR instead: `x/(-49)` is
+    // the same correctly rounded quotient as `(-x)/49`, and it keeps the
+    // two-corner point-dividing kernel where a separate `_IA.negate` call
+    // would build an interval the division consumes at once.
     expect(intervalCodeOf('\\frac{x}{-49}')).toBe(
-      '_IA.scaleDiv(_IA.negate(_.x), _IA.point(49))'
+      '_IA.scaleDiv(_.x, _IA.point(-49))'
     );
+    expect(intervalRunPoint('\\frac{x}{-49}', 49)).toEqual({ lo: -1, hi: -1 });
     expect(jsRun('-\\frac{x}{49}', 49)).toBe(-1);
   });
 
@@ -196,12 +213,10 @@ describe('COMPILE a rational factor as a division', () => {
     expect(codeOf('\\sum_{n=1}^{3}\\frac{n x}{49}', 'javascript')).toBe(
       '((_.x / 49) + ((2 * _.x) / 49) + ((3 * _.x) / 49))'
     );
-    // The divisor constant occurs three times, so the interval target hoists
-    // it into one preamble constant (`_k1`) and the terms read the name.
     expect(intervalCodeOf('\\sum_{n=1}^{3}\\frac{n x}{49}')).toBe(
-      '_IA.add(_IA.scaleDiv(_.x, _k1), _IA.add(_IA.scaleDiv(_IA.scale(' +
-        '_IA.point(2), _.x), _k1), _IA.scaleDiv(_IA.scale(_IA.point(3), ' +
-        '_.x), _k1)))'
+      '_IA.add(_IA.scaleDiv(_.x, _IA.point(49)), _IA.add(_IA.scaleDiv(' +
+        '_IA.scale(_IA.point(2), _.x), _IA.point(49)), _IA.scaleDiv(' +
+        '_IA.scale(_IA.point(3), _.x), _IA.point(49))))'
     );
     // 6x/49 at x = 49 is exactly 6.
     expect(jsRun('\\sum_{n=1}^{3}\\frac{n x}{49}', 49)).toBe(6);

@@ -13,7 +13,7 @@ import * as path from 'path';
  * (JS-style ternaries, bare `NaN`, `and(a, b)` keyword-as-function calls, `&&`
  * chains) yet reported `success: true`. This suite compiles a battery of
  * expressions covering If / Which / When / And / Or / Not / relational chains /
- * NaN / tolerance-Equal, then **actually runs the emitted Python** through the
+ * NaN / exact Equal, then **actually runs the emitted Python** through the
  * repo's `./venv/bin/python3` and asserts the value matches the interpreter's
  * `.N()` (booleans, or floats within 1e-10, or NaN).
  *
@@ -103,10 +103,12 @@ const CASES: Case[] = [
     ],
   },
   {
-    name: 'equal_tol',
-    expr: ['Equal', ['Add', 'x', 0.2], 0.3],
+    // Compiled equality is exact, so the inputs are binary-exact sums: the
+    // interpreter's tolerant `Equal` and the emitted `==` agree on both.
+    name: 'equal_exact',
+    expr: ['Equal', ['Add', 'x', 0.25], 0.75],
     params: ['x'],
-    inputs: [{ x: 0.1 }, { x: 0.5 }],
+    inputs: [{ x: 0.5 }, { x: 0.1 }],
   },
   {
     name: 'not_equal',
@@ -260,8 +262,8 @@ const CASES: Case[] = [
     inputs: [{}],
   },
   {
-    name: 'eq_coll_within_tolerance',
-    expr: ['Equal', ['List', 1, 2], ['List', 1, 2.0000000000001]],
+    name: 'eq_coll_equal',
+    expr: ['Equal', ['List', 1, 2], ['List', 1, 2]],
     params: [],
     inputs: [{}],
   },

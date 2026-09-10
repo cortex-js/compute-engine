@@ -7,8 +7,16 @@
 import type { Interval, IntervalResult, BoolInterval } from './types.js';
 import { unionResults, unwrapOrPropagate, liftJump } from './util.js';
 
-/** Normalize a value that may be a plain Interval or an IntervalResult. */
-function toResult(x: Interval | IntervalResult): IntervalResult {
+/**
+ * Normalize a value that may be a plain Interval or an IntervalResult.
+ *
+ * Exported because the compiled, closure-free lowering of a conditional calls
+ * it on the arm a decided condition selected: `piecewise` normalizes its
+ * answer, so the ternary chain that replaced it has to normalize the same way
+ * or a conditional would answer a bare `{ lo, hi }` where it used to answer an
+ * `{ kind: 'interval', value }`.
+ */
+export function asResult(x: Interval | IntervalResult): IntervalResult {
   if ('kind' in x) return x;
   return { kind: 'interval', value: x };
 }
@@ -168,11 +176,11 @@ function piecewiseRaw(
     const falseBranchFn = trueOrFalse as () => Interval | IntervalResult;
     switch (cond) {
       case 'true':
-        return toResult(trueBranch());
+        return asResult(trueBranch());
       case 'false':
-        return toResult(falseBranchFn());
+        return asResult(falseBranchFn());
       case 'maybe':
-        return unionResults(toResult(trueBranch()), toResult(falseBranchFn()));
+        return unionResults(asResult(trueBranch()), asResult(falseBranchFn()));
     }
   }
 
@@ -190,16 +198,32 @@ function piecewiseRaw(
 
   switch (cond) {
     case 'true':
-      return toResult(trueBranch(xVal));
+      return asResult(trueBranch(xVal));
     case 'false':
-      return toResult(falseBranchFn(xVal));
+      return asResult(falseBranchFn(xVal));
     case 'maybe':
       // Condition is indeterminate - must evaluate both branches
       // and return their union
-      const t = toResult(trueBranch(xVal));
-      const f = toResult(falseBranchFn(xVal));
+      const t = asResult(trueBranch(xVal));
+      const f = asResult(falseBranchFn(xVal));
       return unionResults(t, f);
   }
+}
+
+/**
+ * The hull of the two branch values of a conditional whose condition is
+ * undecided — what `piecewise` answers for `'maybe'`.
+ *
+ * The compiler calls it directly from the closure-free lowering of a
+ * conditional: a ternary chain picks the arm for a decided condition and calls
+ * this routine for an undecided one, so neither arm has to be wrapped in a
+ * function the conditional would allocate on every evaluation.
+ */
+export function hull(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  return unionResults(asResult(a), asResult(b));
 }
 
 /**
@@ -222,7 +246,7 @@ export function restrict(
   value: () => Interval | IntervalResult
 ): IntervalResult {
   if (cond === 'false') return { kind: 'empty' };
-  const v = toResult(value());
+  const v = asResult(value());
   if (cond === 'true') return v;
   // 'maybe'
   if (v.kind === 'interval')

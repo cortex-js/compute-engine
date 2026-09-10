@@ -2,38 +2,31 @@
  * Compiled equality where the DIFFERENCE of the operands is `NaN` — that is, on
  * a `NaN` operand, and on two infinities of the SAME sign.
  *
- * The scalar tolerance test is `Math.abs(a - b) <= tol` (`abs(a - b) <= tol` on
- * the Python target). Every comparison against `NaN` is false, so that test
- * answered `false` for BOTH of those pairs, and two defects followed:
+ * Compiled `Equal`/`NotEqual` on numeric operands is the EXACT IEEE 754
+ * comparison (`===` on JavaScript, `==` on Python; compiled-equality ruling
+ * of 2026-09-09, `docs/COMPILATION-MODEL.md`). Two properties of that form
+ * are pinned here because an earlier tolerance form (`Math.abs(a - b) <= tol`)
+ * got both wrong:
  *
- *  - `NotEqual` was emitted as the `>` complement (`Math.abs(a - b) > tol`),
- *    which also answers `false` on a `NaN` operand — the compiled function
- *    reported that `NaN` EQUALS the other operand. The reproduction is
- *    ordinary: a compiled function reads an absent parameter as `undefined`,
- *    the subtraction is `NaN`, and `r != 3` answered "they are equal".
- *  - `Equal` reported two infinities of the same sign UNEQUAL, because
- *    `Math.abs(Infinity - Infinity)` is `NaN`, where the interpreter answers
- *    `Equal(oo, oo)` → `True`.
- *
- * Both are fixed by the same pair of changes, on both targets. An EXACT test
- * runs before the tolerance test (`a === b || Math.abs(a - b) <= tol`;
- * `a == b or abs(a - b) <= tol` in Python), which is the order the Python
- * `_ce_eqcoll` collection helper already used; and `NotEqual` is the NEGATION
- * of that whole test rather than a `>` comparison. `NaN` fails both tests, so
- * `NotEqual` on it answers `true` — the IEEE 754 convention, and what the
- * interpreter answers (`NotEqual(NaN, 3)` is `True`). A pair the exact test
- * accepts has a difference of exactly 0, which the tolerance test accepts too,
- * so no other pair changes answer.
+ *  - `NotEqual` is the NEGATION of the `Equal` test (`!==`), so it answers
+ *    `true` on a `NaN` operand — the IEEE 754 convention, and what the
+ *    interpreter answers (`NotEqual(NaN, 3)` is `True`). The `>` complement of
+ *    a tolerance test answered `false` there: a compiled function that read an
+ *    absent parameter as `undefined` reported that `NaN` EQUALS 3.
+ *  - two infinities of the same sign are EQUAL, as the interpreter answers
+ *    `Equal(oo, oo)` → `True`; `Math.abs(Infinity - Infinity)` is `NaN`, so
+ *    the tolerance test reported them unequal.
  *
  * Also pinned here: the lowerings that reach the same answers by a different
- * route — the exact `===`/`!==` form used when both operands are provably
- * integer (`exactIntegerComparison`), the JavaScript runtime dispatch
- * `_SYS.eq`/`_SYS.neq` (`eqTensor`, whose scalar leaf gained the same exact
- * pre-test), and the Python `_ce_eqcoll` helper.
+ * route — the JavaScript runtime dispatch `_SYS.eq`/`_SYS.neq` (`eqTensor`,
+ * whose scalar leaf is the same exact test), and the Python `_ce_eqcoll`
+ * helper.
  *
- * Both operands of the scalar form are now spliced twice, so an IMPURE operand
- * has to be bound to a temporary or it would be evaluated twice. The draw
- * counts below pin that.
+ * Two absent operands (`undefined`) are `===` to each other, where the
+ * interpreter answers `Missing` for `Equal(Missing, Missing)`, so a pair whose
+ * BOTH sides may be absent carries a `typeof` guard on the left operand; that
+ * guard splices the operand twice, so an IMPURE operand there is bound to a
+ * temporary. The draw counts below pin that.
  */
 
 import { engine as ce } from '../utils';
@@ -56,15 +49,18 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     ce.declare('nqs', 'real');
   });
 
-  test('the scalar emission is the exact test before the tolerance test', () => {
-    expect(js(ce.box(['Equal', 'nqr', 3])).code).toBe(
-      '((typeof (_.nqr) === \'number\' && (_.nqr) === (3)) || Math.abs((_.nqr) - (3)) <= 1e-10)'
+  test('the scalar emission is the exact test', () => {
+    expect(js(ce.box(['Equal', 'nqr', 3])).code).toBe('((_.nqr) === (3))');
+    // Two free symbols may both be absent: the left one is type-tested.
+    expect(js(ce.box(['Equal', 'nqr', 'nqs'])).code).toBe(
+      "(typeof (_.nqr) === 'number' && (_.nqr) === (_.nqs))"
     );
   });
 
   test('NotEqual is the negation of the whole Equal test', () => {
-    expect(js(ce.box(['NotEqual', 'nqr', 3])).code).toBe(
-      '(!((typeof (_.nqr) === \'number\' && (_.nqr) === (3)) || Math.abs((_.nqr) - (3)) <= 1e-10))'
+    expect(js(ce.box(['NotEqual', 'nqr', 3])).code).toBe('((_.nqr) !== (3))');
+    expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).code).toBe(
+      "(!(typeof (_.nqr) === 'number' && (_.nqr) === (_.nqs)))"
     );
   });
 
@@ -108,12 +104,13 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     expect(answer('NotEqual', NaN, NaN)).toBe('True');
   });
 
-  test('equal and unequal finite pairs are unchanged', () => {
+  test('equal and unequal finite pairs', () => {
     const ne = js(ce.box(['NotEqual', 'nqr', 'nqs']));
     expect(ne.run({ nqr: 2, nqs: 2 })).toBe(false);
     expect(ne.run({ nqr: 2, nqs: 3 })).toBe(true);
-    // Within the engine tolerance the two are EQUAL, as for the interpreter.
-    expect(ne.run({ nqr: 2, nqs: 2 + 1e-13 })).toBe(false);
+    // Exact: a pair within the engine tolerance is NOT equal compiled (the
+    // interpreter's `Equal` would call it equal — the ruled divergence).
+    expect(ne.run({ nqr: 2, nqs: 2 + 1e-13 })).toBe(true);
     expect(ne.run({ nqr: -0, nqs: 0 })).toBe(false);
   });
 
@@ -121,8 +118,8 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     ce.declare('nqt', 'real');
     const r = js(ce.box(['NotEqual', 'nqr', 'nqs', 'nqt']));
     expect(r.code).toBe(
-      '(!((typeof (_.nqr) === \'number\' && (_.nqr) === (_.nqs)) || Math.abs((_.nqr) - (_.nqs)) <= 1e-10)) && ' +
-        '(!((typeof (_.nqs) === \'number\' && (_.nqs) === (_.nqt)) || Math.abs((_.nqs) - (_.nqt)) <= 1e-10))'
+      "(!(typeof (_.nqr) === 'number' && (_.nqr) === (_.nqs))) && " +
+        "(!(typeof (_.nqs) === 'number' && (_.nqs) === (_.nqt)))"
     );
     expect(r.run({ nqr: NaN, nqs: 1, nqt: 2 })).toBe(true);
     expect(r.run({ nqr: 1, nqs: NaN, nqt: 2 })).toBe(true);
@@ -141,11 +138,11 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     expect(r.run({ nqi: 4 })).toBe(true);
   });
 
-  test('an impure operand is drawn ONCE even though it is spliced twice', () => {
-    // The scalar form splices each operand in the exact test and again in the
-    // difference. An unbound `Random()` would therefore be drawn twice, and the
-    // two draws would almost never be equal. `multiSpliced` binds it to a
-    // temporary instead, so the drawing call is emitted exactly once.
+  test('an impure operand is drawn ONCE', () => {
+    // A draw against a literal is spliced once, so it needs no temporary;
+    // a draw in a guarded pair (a MIDDLE operand of a chain is spliced by the
+    // two comparisons that straddle it) is bound so the drawing call is
+    // emitted exactly once.
     const engine = new ComputeEngine();
     for (const head of ['Equal', 'NotEqual']) {
       const r = compile(engine.box([head, ['Random'], 0.5]), {
@@ -153,22 +150,25 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
       });
       expect(r.success).toBe(true);
       expect(r.code!.match(/drawNextRandomNumber/g)).toHaveLength(1);
-      expect(r.code).toContain('=> {');
       expect(typeof r.run!({})).toBe('boolean');
     }
-    // Two SEPARATE draws stay two draws: each operand is bound on its own.
+    const middle = compile(engine.box(['Equal', 0.1, ['Random'], 0.9]), {
+      fallback: false,
+    });
+    expect(middle.code!.match(/drawNextRandomNumber/g)).toHaveLength(1);
+    expect(middle.code).toContain('=> {');
+    // Two SEPARATE draws stay two draws.
     const two = compile(engine.box(['Equal', ['Random'], ['Random']]), {
       fallback: false,
     });
     expect(two.code!.match(/drawNextRandomNumber/g)).toHaveLength(2);
   });
 
-  test('a host variable is read three times, and every read sees one value', () => {
+  test('a host variable is read twice, and every read sees one value', () => {
     // A `vars` read is PURE, so the splices need no temporary. This counts
     // the reads to say what the emission actually does — the decidedness
-    // guard, the `typeof` check of the exact test, and the exact comparison
-    // itself — and checks that a getter answering one value the whole call
-    // answers the pair correctly.
+    // guard and the exact comparison itself — and checks that a getter
+    // answering one value the whole call answers the pair correctly.
     const r = js(ce.box(['Equal', 'nqr', 3]));
     let reads = 0;
     const vars = {
@@ -178,7 +178,7 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
       },
     };
     expect(r.run(vars)).toBe(true);
-    expect(reads).toBe(3);
+    expect(reads).toBe(2);
   });
 
   test('the collection dispatch `_SYS.eq`/`_SYS.neq` agrees', () => {
@@ -207,22 +207,28 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
 });
 
 describe('compiled equality on NaN and on infinities — Python target', () => {
-  test('the scalar emission is the exact test before the tolerance test', () => {
+  test('the scalar emission is the exact test', () => {
     expect(python.compile(ce.box(['Equal', 'x', 3])).code).toBe(
-      '((x) is not None and ((x) == (3) or abs((x) - (3)) <= 1e-10))'
+      '((x) == (3))'
+    );
+    expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
+      '((x) is not None and (x) == (y))'
     );
   });
 
   test('NotEqual is the negation of the whole Equal test', () => {
     expect(python.compile(ce.box(['NotEqual', 'x', 3])).code).toBe(
-      '(not ((x) is not None and ((x) == (3) or abs((x) - (3)) <= 1e-10)))'
+      '((x) != (3))'
+    );
+    expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
+      '(not ((x) is not None and (x) == (y)))'
     );
   });
 
   test('a chained NotEqual conjoins the negated pairs with `and`', () => {
     expect(python.compile(ce.box(['NotEqual', 'x', 'y', 'z'])).code).toBe(
-      '(not ((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10))) and ' +
-        '(not ((y) is not None and (z) is not None and ((y) == (z) or abs((y) - (z)) <= 1e-10)))'
+      '(not ((x) is not None and (x) == (y))) and ' +
+        '(not ((y) is not None and (y) == (z)))'
     );
   });
 
@@ -230,9 +236,7 @@ describe('compiled equality on NaN and on infinities — Python target', () => {
     // Evaluated with the same semantics Python gives the emitted text: `==` is
     // exact (`inf == inf` is True, `nan == nan` is False) and every comparison
     // against `nan` is false.
-    const tol = 1e-10;
-    const equal = (a: number, b: number): boolean =>
-      a === b || Math.abs(a - b) <= tol;
+    const equal = (a: number, b: number): boolean => a === b;
     const notEqual = (a: number, b: number): boolean => !equal(a, b);
     expect(equal(Infinity, Infinity)).toBe(true);
     expect(equal(-Infinity, Infinity)).toBe(false);
@@ -245,14 +249,13 @@ describe('compiled equality on NaN and on infinities — Python target', () => {
   });
 
   test('the collection helper is negated with `not`', () => {
-    // `_ce_eqcoll` already tried an exact `==` before the tolerance test, so a
-    // `nan` element makes both tests fail and `not` answers `True`, while two
-    // matching infinities are equal.
+    // `_ce_eqcoll` compares with the exact `==`, so a `nan` element fails it
+    // and `not` answers `True`, while two matching infinities are equal.
     const code = python.compile(
       ce.box(['NotEqual', ['List', 1, 2], ['List', 1, 3]] as any)
     ).code;
     expect(code.split('\n').at(-1)).toBe(
-      '(not _ce_eqcoll([1, 2], [1, 3], 1e-10))'
+      '(not _ce_eqcoll([1, 2], [1, 3]))'
     );
   });
 });
@@ -274,10 +277,15 @@ describe('two absent operands are not equal', () => {
     expect(eq.code).toContain("typeof (_.x) === 'number'");
   });
 
-  test('python: the exact test excludes None', () => {
+  test('python: the exact test excludes None where both sides may be absent', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    const r = compile(ce.parse('x = 3'), { to: 'python' });
-    expect(r.code).toContain('((x) is not None and ((x) == (3) or abs((x) - (3)) <= 1e-10))');
+    ce.declare('y', 'real');
+    const r = compile(ce.parse('x = y'), { to: 'python' });
+    expect(r.code).toContain('((x) is not None and (x) == (y))');
+    // A literal on one side needs no guard: `None == 3` is already `False`.
+    expect(compile(ce.parse('x = 3'), { to: 'python' }).code).toBe(
+      '((x) == (3))'
+    );
   });
 });

@@ -54,6 +54,24 @@ accepted and pinned: compiled `Heaviside(~oo)` answers `1` and compiled
 `~oo > 0` answers `true`, where the interpreter leaves both symbolic
 (both formerly threw at the boundary).
 
+A second value carve-out is ruled (compiled-equality ruling, 2026-09-09):
+compiled `Equal` and `NotEqual` on numeric operands are EXACT, the IEEE 754
+comparison (`===` on JavaScript, `==` on Python, `==` on the shader targets),
+with no tolerance. The interpreter compares two numbers within
+`engine.tolerance`, so `0.1 + 0.2 = 0.3` evaluates to `True` and compiles to
+`false`. The compiled lanes serve plot kernels, where every comparison runs
+per sample and a tolerance test costs a subtraction, an absolute value and a
+compare each time, and where the exact answer is the one the reference
+graphing calculators give. The same rule covers `KroneckerDelta`, the
+element-wise and whole-collection equality helpers (`_SYS.eq`, `_ce_eqcoll`),
+and the `IndexOf` element test, which was already exact. `NotEqual` is the
+negation of the `Equal` test, so it answers `true` on a `NaN` operand, as the
+interpreter does. Two absent operands (`undefined` on JavaScript, `None` on
+Python) are not equal: the interpreter answers `Missing` for
+`Equal(Missing, Missing)`, and the emitted test guards the left operand when
+both sides may be absent. A consumer that needs tolerant equality evaluates
+through the interpreter, or asks for a compile option; none exists today.
+
 ## Target boundaries
 
 The JavaScript target supports the broadest dynamic representation. Python,

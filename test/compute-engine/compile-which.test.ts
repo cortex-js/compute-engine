@@ -96,7 +96,7 @@ describe('COMPILE Which', () => {
   });
 
   describe('Interval JavaScript target', () => {
-    it('should compile Which to interval-js with piecewise', () => {
+    it('should compile Which to a closure-free interval conditional', () => {
       const expr = ce.expr([
         'Which',
         ['Greater', 'x', 0],
@@ -106,7 +106,8 @@ describe('COMPILE Which', () => {
       ]);
       const result = compile(expr, { to: 'interval-js' })!;
       expect(result.success).toBe(true);
-      expect(result.code).toContain('_IA.piecewise');
+      expect(result.code).toContain("=== 'true' ?");
+      expect(result.code).not.toContain('() =>');
 
       // Test execution with point intervals
       // piecewise returns IntervalResult: {kind: 'interval', value: {lo, hi}}
@@ -121,7 +122,7 @@ describe('COMPILE Which', () => {
       expect(negVal.hi).toBe(-1);
     });
 
-    it('should compile multi-branch Which to nested piecewise', () => {
+    it('should compile multi-branch Which to nested conditionals', () => {
       const expr = ce.expr([
         'Which',
         ['Less', 'x', 0],
@@ -133,10 +134,13 @@ describe('COMPILE Which', () => {
       ]);
       const result = compile(expr, { to: 'interval-js' })!;
       expect(result.success).toBe(true);
-      // Should contain nested piecewise calls
-      const piecewiseCount = (result.code.match(/_IA\.piecewise/g) || [])
-        .length;
-      expect(piecewiseCount).toBe(2); // Two conditions, one default
+      // One nested conditional per condition, each with its own tri-state
+      // temporary. The temporaries are counted rather than the occurrences:
+      // the lowering writes each arm twice — once in the branch that selects
+      // it, once in the hull an undecided condition takes — so the inner
+      // conditional's text appears twice inside the outer one.
+      const conditionals = new Set(result.code.match(/_tv\d+ =/g) ?? []);
+      expect(conditionals.size).toBe(2); // Two conditions, one default
     });
 
     it('should compile Which nested inside Add', () => {
@@ -148,7 +152,7 @@ describe('COMPILE Which', () => {
       ]);
       const result = compile(expr, { to: 'interval-js' })!;
       expect(result.success).toBe(true);
-      expect(result.code).toContain('_IA.piecewise');
+      expect(result.code).toContain("=== 'true' ?");
       expect(result.code).toContain('_IA.add');
 
       // x=3 → 3 + 1 = 4

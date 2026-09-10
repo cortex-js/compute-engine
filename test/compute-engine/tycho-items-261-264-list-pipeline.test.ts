@@ -394,10 +394,12 @@ describe('TYCHO 264 — per-shape broadcast kernels keep the interpreter semanti
     ce.declare('L', 'list<number>');
     ce.declare('C', 'list<complex>');
     try {
+      // Exact element test: a value within the engine tolerance is NOT
+      // equal compiled (compiled-equality ruling, `docs/COMPILATION-MODEL.md`).
       expect(run(['Equal', 'L', 3], { L: [3, 3.5, 3 + 1e-12] })).toEqual([
         true,
         false,
-        true,
+        false,
       ]);
       expect(run(['Equal', 3, 'L'], { L: [3, 4] })).toEqual([true, false]);
       expect(
@@ -509,14 +511,14 @@ describe('TYCHO 261 — the CSE dominance rule', () => {
     ]);
     const harvest = harvestCse(expr as Expression);
     // The candidate is the one with exactly one own occurrence (the first
-    // condition) and two served ones (the two arms).
-    // `sin(6u) + cos(7u)` and its two summands each qualify (a served
-    // candidate takes no part in subsumption); the sum is the largest.
+    // condition) and two served ones (the two arms). Its two summands occur
+    // exactly where it does — same own count, same served count — so
+    // subsumption keeps only the sum.
     const served = harvest.root.candidates.filter(
       (cand) => cand.occurrences.length === 1 && cand.served.length === 2
     );
     expect(served.map((cand) => cand.representative.toString()).sort()).toEqual(
-      ['cos(7u)', 'sin(6u)', 'sin(6u) + cos(7u)']
+      ['sin(6u) + cos(7u)']
     );
     for (const cand of served) {
       expect(cand.score).toBe(2 * cand.size);

@@ -73,9 +73,11 @@ describe('a compiled Hypot consumes a point leg whole', () => {
 
   test('a LIST operand still broadcasts, one hypotenuse per element', () => {
     // The distinction the fix rests on: a list is a set of legs, a point is
-    // one leg. This case must keep the `_SYS.bcast` lowering.
+    // one leg. This case must keep the ELEMENT-WISE lowering — here the
+    // component one, since the list states its width.
     const { code, value } = compiled(['Hypot', ['List', 3, 4], 1]);
-    expect(code).toContain('_SYS.bcast');
+    expect(code).toContain('Math.hypot');
+    expect(code).toContain('[0]');
     expect(value).toEqual([Math.hypot(3, 1), Math.hypot(4, 1)]);
   });
 

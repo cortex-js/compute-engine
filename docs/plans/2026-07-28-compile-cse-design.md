@@ -552,27 +552,36 @@ interval). The candidate pipeline, in order:
    created when that occurrence is emitted. Emission follows DFS order for
    the constructs this targets (`Which` compiles its first condition before
    its arms for exactly this reason); an emitter that compiles operands out
-   of DFS order simply inlines the descendant occurrence. A served candidate
-   takes no part in subsumption (step 5), in either role, since its served
-   occurrences lie outside the region-local lists that step compares.
+   of DFS order simply inlines the descendant occurrence. Subsumption (step 7)
+   counts a served occurrence exactly like an own one: it is elided the same
+   way — the occurrence reads the region's temporary instead of evaluating
+   the term again.
 4. **G3 — mutation.** Drop a candidate if any of its free symbols is the
    target of `Assign`/`Declare` anywhere in the candidate's region subtree,
    **including all descendant regions**. Deliberately conservative
    (any-assign-anywhere); an ordering-aware relaxation is v2 (§11).
-5. **Subsumption.** Drop candidate A when every occurrence of A sits inside
-   an occurrence of candidate B with the same per-region count (O(1)
-   interval containment). Different counts: keep both.
-6. **Re-check region counts.** Drop candidates whose surviving per-region
+5. **Re-check region counts.** Drop candidates whose surviving per-region
    count fell below 2 (no single-use temps).
-7. **G4 — benefit threshold.** Applies uniformly to every surviving
+6. **G4 — benefit threshold.** Applies uniformly to every surviving
    candidate regardless of region kind. Only compound (operator-applied)
    subtrees are ever candidates — atoms (symbols, number/string literals)
    never are. `size ≥ CSE_MIN_SIZE` and
    `(regionCount − 1) × size ≥ CSE_MIN_SCORE`
-   where **`regionCount` is the per-region count after steps 3–6, never the
+   where **`regionCount` is the per-region count after steps 3–5, never the
    global bucket total**. Proposed `CSE_MIN_SIZE = 4`, `CSE_MIN_SCORE = 8`
    (admits the corpus's dominant size-4–7 patterns, skips `Negate(x)`
    trivia); named constants, tuned before landing (§8).
+7. **Subsumption.** Drop candidate A when every occurrence of A — own and
+   served alike — sits inside an occurrence of candidate B, and the two have
+   the same total occurrence count (O(log n) interval containment: two
+   occurrences of one structural class have the same size, so the lists are
+   pairwise disjoint and sorted). Different counts: keep both. Runs AFTER the
+   benefit threshold so a candidate can only be subsumed by one that is
+   itself going to be bound; running it before lost the sharing wherever the
+   container failed the threshold and the contained candidate would have
+   passed it on an exemption. An admitted user-function application is never
+   subsumed by a container that is not one, because the per-region cap ranks
+   such a call above every ordinary candidate.
 
 ### 5.3 Non-scalar candidates and aliasing
 
@@ -781,7 +790,7 @@ visibility and evaluate-once).
 | unroll parity (`Sum(sin(i)·sin(i)+i, i, 1, 5)`; loop-form variant; clause expressions inert) | value | value | shape |
 | DAG sharing (one node object in two regions; twice within one) | value+shape | — | — |
 | mutation (G3) | value | — | — |
-| subsumption + post-filter (nested same-count → outer only; surviving < 2 → no temp) | shape | — | — |
+| subsumption + post-filter (nested same-count → outer only, served occurrences counted; a sub-threshold container subsumes nothing; surviving < 2 → no temp) | shape | — | — |
 | name collision (params/locals/captures named `_cse1` and `_tv1`, cse on AND off) | value+shape | — | shape |
 | determinism (two compiles byte-identical: candidate-bearing + chained-relation expression; a GPU compile via `tempVar()` path) | shape | shape | shape (+GPU shape) |
 | threshold + per-region cap (sub-threshold inline; > cap keeps top-scoring deterministically) | shape | — | shape+pyexec (stress: source stays parseable) |

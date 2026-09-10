@@ -253,15 +253,23 @@ describe('degenerate big operator: unchanged behaviors', () => {
     );
   });
 
-  test('PIN: NaN bounds stay symbolic', () => {
+  test('PIN: a bound WRITTEN as NaN is rejected at boxing', () => {
+    // A bound slot types `number`, and `NaN` is an absence marker, so a
+    // literal `NaN` bound boxes as an `incompatible-type` error
+    // (`checkBound`, `library/utils.ts`) and the sum is invalid; evaluating
+    // it answers the error. A bound that only EVALUATES to an absence is a
+    // different case: the sum answers `NaN` (see `missing-union-parameter-slot`
+    // and the big-operator tests of `missing-marker-numeric-consumers`).
     const ce = new ComputeEngine();
     const sum = ce.box(['Sum', ['Square', 'i'], ['Limits', 'i', 'NaN', 'NaN']]);
-    expect(sum.evaluate().toString()).toBe('sum_(i=NaN)^(NaN)(i^2)');
-    expect(sum.N().toString()).toBe('sum_(i=NaN)^(NaN)(i^2)');
-    // Index unused: still no canonicalization fold.
+    expect(sum.isValid).toBe(false);
+    expect(sum.evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "number", "NaN"), NaN)'
+    );
+    // Index unused: the same rejection, no canonicalization fold.
     expect(
-      ce.box(['Sum', 'y', ['Limits', 'i', 'NaN', 'NaN']]).toString()
-    ).toBe('sum_(i=NaN)^(NaN)(y)');
+      ce.box(['Sum', 'y', ['Limits', 'i', 'NaN', 'NaN']]).isValid
+    ).toBe(false);
   });
 
   test('non-degenerate sums are unchanged', () => {

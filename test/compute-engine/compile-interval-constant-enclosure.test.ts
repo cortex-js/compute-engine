@@ -34,8 +34,17 @@ const ce = new ComputeEngine();
 type IntervalRun = {
   success: boolean;
   code: string;
+  preamble?: string;
   run: (arg: unknown) => any;
 };
+
+/** The whole emitted artifact: the constant table the preamble carries, then
+ *  the expression that reads it. Every constant interval is bound in that
+ *  table (`hoistIntervalConstants`), so a test that looks for a constant's
+ *  spelling has to look at both halves. */
+function emitted(r: { preamble?: string; code: string }): string {
+  return `${r.preamble ?? ''}\n${r.code}`;
+}
 
 function compileInterval(latex: string): IntervalRun {
   const expr = ce.parse(latex);
@@ -108,7 +117,9 @@ describe('interval-js: the constants table emits enclosures', () => {
   test('an exactly representable constant stays a point', () => {
     // `1/2` and the machine epsilon ARE doubles; widening them would give
     // away precision for nothing.
-    expect(compileInterval('\\frac{1}{2}').code).toBe('_IA.point(0.5)');
+    expect(emitted(compileInterval('\\frac{1}{2}'))).toContain(
+      '_IA.point(0.5)'
+    );
     const half = boundOf(compileInterval('\\frac{1}{2}').run({}));
     expect(half).toEqual({ lo: 0.5, hi: 0.5 });
   });
@@ -136,12 +147,12 @@ describe('interval-js: a literal with no double is emitted as an enclosure', () 
     // The interpreter computes with that same double, so the literal IS its
     // own value here; widening it would claim an uncertainty the caller did
     // not write.
-    expect(compileInterval('0.329 x').code).toContain('_IA.point(0.329)');
+    expect(emitted(compileInterval('0.329 x'))).toContain('_IA.point(0.329)');
   });
 
   test('an integer and a dyadic rational stay points', () => {
-    expect(compileInterval('5').code).toBe('_IA.point(5)');
-    expect(compileInterval('x + \\frac{3}{8}').code).toContain(
+    expect(emitted(compileInterval('5'))).toContain('_IA.point(5)');
+    expect(emitted(compileInterval('x + \\frac{3}{8}'))).toContain(
       '_IA.point(0.375)'
     );
   });
@@ -230,7 +241,7 @@ describe('interval-js: the fold leaves a caller `vars` splice alone', () => {
       vars: { s: '_IA.point(0.5)' },
     } as any) as IntervalRun;
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_IA.point(0.5)');
+    expect(emitted(r)).toContain('_IA.point(0.5)');
     // The product is still computed on every call. A factor that is a
     // constant point is emitted as the point-scaling kernel, which answers
     // the same endpoints as the general product with half the endpoint
@@ -244,9 +255,9 @@ describe('interval-js: the fold leaves a caller `vars` splice alone', () => {
       vars: { s: '_IA.point(0.5)' },
     } as any) as IntervalRun;
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_IA.point(0.5)');
+    expect(emitted(r)).toContain('_IA.point(0.5)');
     // `2π` has no splice in it, so it folds to one enclosure literal.
-    expect(r.code).toContain('lo: 6.28318530717958');
+    expect(emitted(r)).toContain('lo: 6.28318530717958');
   });
 });
 
@@ -315,10 +326,12 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
     const latex = '\\sum_{i=1}^{20} \\frac{1}{2}\\sin(i x)';
     const r = compileInterval(latex);
     // Before the hoist the twenty terms each spelled `_IA.point(0.5)`; now
-    // one preamble local carries it and the sites read the name. The twenty
-    // DISTINCT `_IA.point(i)` coefficients each occur once and stay inline.
-    expect(r.code).not.toContain('_IA.point(0.5)');
-    expect(r.code.split('_IA.point(').length - 1).toBe(20);
+    // one constant-table name carries it and the sites read that name. So do
+    // the twenty DISTINCT `_IA.point(i)` coefficients: the table binds every
+    // constant, not only a repeated one, because it is built once per
+    // compiled artifact rather than once per call.
+    expect(r.code).not.toContain('_IA.point(');
+    expect(r.preamble!.split('_IA.point(').length - 1).toBe(21);
     expect(r.code).toContain('_k1');
     // The binding does not change the value: the run still answers the sum
     // of the terms. The comparison carries a tolerance because the reference
@@ -347,10 +360,14 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
     expect(r.code.split('_k1').length - 1).toBe(2);
   });
 
-  test('a constant that occurs once is not bound', () => {
+  test('a constant that occurs once is bound too', () => {
+    // The table is evaluated once per compiled artifact, so a single
+    // occurrence in the root expression is worth binding: the consumer calls
+    // the kernel once per quadtree node, and the inline spelling built the
+    // same object on every one of them.
     const r = compileInterval('\\frac{x}{2}');
-    expect(r.code).toContain('_IA.point(0.5)');
-    expect(r.code).not.toContain('_k1');
+    expect(r.code).toBe('_IA.scale(_k1, _.x)');
+    expect(r.preamble).toBe('const _k1 = _IA.point(0.5);');
   });
 
   test('a caller-supplied function turns the hoist off', () => {

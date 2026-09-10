@@ -681,6 +681,153 @@ function tryGetIntervalComplexParts(
 }
 
 /**
+ * The condition temporaries the closure-free conditional lowering introduced,
+ * per compilation.
+ *
+ * Keyed by the naming context, which every target derived from a root shares
+ * with it — a user-function body compiles against a spread copy of the root
+ * target — so one list collects the names of the root expression and of every
+ * definition body. `compileToIntervalTarget` declares them.
+ */
+const INTERVAL_CONDITION_VARS = new WeakMap<object, string[]>();
+
+/** A fresh temporary for a compiled conditional's tri-state result, recorded
+ *  so the emitted code can declare it. */
+function intervalConditionVar(target: CompileTarget<Expression>): string {
+  const name = BaseCompiler.tempVar(target);
+  const naming = BaseCompiler.namingContext(target);
+  const names = INTERVAL_CONDITION_VARS.get(naming);
+  if (names === undefined) INTERVAL_CONDITION_VARS.set(naming, [name]);
+  else names.push(name);
+  return name;
+}
+
+/**
+ * The emitted spellings that already answer an `IntervalResult` — the
+ * conditionals `compileIntervalConditional` wrote — per compilation.
+ *
+ * Keyed by the naming context, like the condition temporaries above. An arm
+ * of a conditional is recognized by the WHOLE string it was recorded under.
+ * A test on the first characters of the arm would not prove that the call
+ * spans all of it, and it would also stop recognizing a chain if the
+ * temporaries were ever spelled differently.
+ */
+const INTERVAL_RESULT_CODES = new WeakMap<object, Set<string>>();
+
+/**
+ * Record `code` as a spelling that answers an `IntervalResult`, and return it.
+ */
+function markIntervalResultCode(
+  target: CompileTarget<Expression>,
+  code: string
+): string {
+  const naming = BaseCompiler.namingContext(target);
+  const codes = INTERVAL_RESULT_CODES.get(naming);
+  if (codes === undefined) INTERVAL_RESULT_CODES.set(naming, new Set([code]));
+  else codes.add(code);
+  return code;
+}
+
+/**
+ * Whether `code` is one of the spellings the conditional lowering itself
+ * writes, all of which answer an `IntervalResult` already, so wrapping them in
+ * `_IA.res` would only add a call. Every other arm — a kernel call, a symbol,
+ * a constant — may answer a bare `{ lo, hi }` and is wrapped.
+ */
+function isIntervalResultCode(
+  code: string,
+  target: CompileTarget<Expression>
+): boolean {
+  // The exhausted tail of a `Which` with no default arm, written by the
+  // `Which` entry of the function table.
+  if (code === `({ kind: 'empty' })`) return true;
+  const codes = INTERVAL_RESULT_CODES.get(BaseCompiler.namingContext(target));
+  return codes !== undefined && codes.has(code);
+}
+
+/**
+ * Drop what a compilation of `target` collected about its conditionals, so a
+ * second compilation against the same naming context starts empty.
+ *
+ * `BaseCompiler.resetNaming` restarts the numbering of the generated
+ * temporaries for a caller that compiles twice with one target. Without this
+ * reset the second compilation would declare the first compilation's condition
+ * temporaries as well as its own re-issued names (`let _tv1, _tv2, _tv1,
+ * _tv2;`), which is a syntax error: the runner would then answer `entire` for
+ * every input.
+ */
+function resetIntervalConditionals(target: CompileTarget<Expression>): void {
+  const naming = BaseCompiler.namingContext(target);
+  INTERVAL_CONDITION_VARS.delete(naming);
+  INTERVAL_RESULT_CODES.delete(naming);
+}
+
+/**
+ * The size, in characters of emitted code, above which a conditional keeps
+ * the two closures instead of the ternary chain.
+ *
+ * The ternary writes each arm TWICE — once in the branch that selects it,
+ * once in the hull the undecided condition takes — so a chain of `n` nested
+ * conditionals writes its innermost arm 2ⁿ times. Neither copy costs anything
+ * to EVALUATE (a decided condition runs one arm, an undecided one runs each
+ * arm once, exactly as the closure form does); the cost is the length of the
+ * emitted source, which the limit bounds. Above it the closure form is kept,
+ * so a deep `cases` chain does not grow its own source exponentially.
+ */
+const INTERVAL_CONDITIONAL_CODE_LIMIT = 2000;
+
+/**
+ * A conditional over a tri-state interval condition: `whenTrue` where the
+ * condition certainly holds, `whenFalse` where it certainly fails, and the
+ * hull of both where the input straddles the boundary.
+ *
+ * The lowering is a ternary chain, which is what `_IA.piecewise` does with
+ * its two arms — but `_IA.piecewise` has to receive them as functions, and
+ * those two closures are allocated on every evaluation of the expression, not
+ * only where the branch is taken. The consumer of this target evaluates the
+ * kernel once per quadtree node, so a conditional inside a plotted expression
+ * paid two closure allocations per node. The chain binds the condition to a
+ * temporary and reads it before it evaluates any arm, so an arm that
+ * re-enters the same code (a user function whose body carries a conditional)
+ * cannot disturb the branch that is already being taken.
+ *
+ * The arms stay lazily evaluated, which the `Which` lowering depends on: a
+ * later arm may divide by zero exactly where an earlier condition holds. The
+ * selected arm goes through `_IA.res`, which is the normalization
+ * `_IA.piecewise` applied on the way out (`asResult` in
+ * `interval/comparison.ts`): without it a conditional would answer a bare
+ * `{ lo, hi }` where it used to answer an `{ kind: 'interval', value }`.
+ * `_IA.hull` normalizes both of its operands itself.
+ */
+function compileIntervalConditional(
+  condition: string,
+  whenTrue: string,
+  whenFalse: string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const lazy = `_IA.piecewise(
+      ${condition},
+      () => ${whenTrue},
+      () => ${whenFalse}
+    )`;
+  if (target === undefined) return lazy;
+  // The chain writes the condition once and each arm twice, plus about eighty
+  // characters of punctuation, the two tri-state comparisons and the calls.
+  const size = condition.length + 2 * (whenTrue.length + whenFalse.length) + 80;
+  if (size > INTERVAL_CONDITIONAL_CODE_LIMIT)
+    return markIntervalResultCode(target, lazy);
+  const asResult = (code: string): string =>
+    isIntervalResultCode(code, target) ? code : `_IA.res(${code})`;
+  const c = intervalConditionVar(target);
+  return markIntervalResultCode(
+    target,
+    `((${c} = ${condition}) === 'true' ? ${asResult(whenTrue)} : ` +
+      `${c} === 'false' ? ${asResult(whenFalse)} : ` +
+      `_IA.hull(${whenTrue}, ${whenFalse}))`
+  );
+}
+
+/**
  * Interval arithmetic function implementations.
  */
 // Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
@@ -783,13 +930,17 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // emits in `pi (x + 5) / 10` has no pair to fold with, and a product of
       // constants alone folds only once the division closes over it.
       let numerator = foldChainStep(rest[0], target, true);
-      if (rat.p === -1) numerator = `_IA.negate(${numerator})`;
       for (let i = 1; i < rest.length; i++) {
         numerator = intervalMulStep(numerator, rest[i], target);
       }
+      // A numerator of −1 puts the sign on the DIVISOR rather than negating
+      // the quotient: `x/(−q)` and `−(x/q)` have the same correctly rounded
+      // endpoints (IEEE division takes its sign from the operand signs), and
+      // the negative divisor keeps the two-corner `scaleDiv` kernel where a
+      // separate `_IA.negate` call would allocate an interval per evaluation.
       const quotient = intervalDivStep(
         numerator,
-        `_IA.point(${rat.q})`,
+        `_IA.point(${rat.p === -1 ? -rat.q : rat.q})`,
         target
       );
       if (rat.p === 1 || rat.p === -1) return quotient;
@@ -810,7 +961,43 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return result;
   },
-  Negate: (args, compile) => `_IA.negate(${compile(args[0])})`,
+  // Each `_IA.negate` call allocates an interval its consumer reads once, so
+  // the sign is folded into the operand wherever that is exact:
+  //
+  // - a negation of a negation cancels (flipping the sign of each endpoint
+  //   twice restores the operand, and the kernel takes no outward step);
+  // - a negated CONSTANT point becomes the constant with the opposite sign,
+  //   which the constant table then binds once;
+  // - a point SCALING or point DIVISION takes the sign on its constant, since
+  //   IEEE multiplication and division take their sign from the operand signs
+  //   and their magnitude from the magnitudes, and the outward step and its
+  //   exactness proof read the magnitudes.
+  //
+  // A general `_IA.div` is NOT folded into `_IA.negDiv`: the division reports
+  // which END of a domain-clipped answer the clip is on, and negating the
+  // NUMERATOR mirrors that end while negating the ANSWER cannot recover it —
+  // `(-x)/[a, 0]` is clipped below where `-(x/[a, 0])` reports "clipped on
+  // both ends" (measured over the operand shapes in
+  // `interval-277-278-constant-table-sign-conditional.test.ts`).
+  Negate: (args, compile) => {
+    const operand = compile(args[0]);
+    const doubled = strippedIntervalNegate(operand);
+    if (doubled !== undefined) return doubled;
+    const constant = negatedConstantPointCode(operand);
+    if (constant !== undefined) return constant;
+    const quotient = splitIntervalCall(operand, 'scaleDiv');
+    if (quotient !== undefined) {
+      const divisor = negatedConstantPointCode(quotient[1]);
+      if (divisor !== undefined)
+        return `_IA.scaleDiv(${quotient[0]}, ${divisor})`;
+    }
+    const product = splitIntervalCall(operand, 'scale');
+    if (product !== undefined) {
+      const factor = negatedConstantPointCode(product[0]);
+      if (factor !== undefined) return `_IA.scale(${factor}, ${product[1]})`;
+    }
+    return `_IA.negate(${operand})`;
+  },
 
   // Elementary functions
   // Note: `Abs` of a fixed-arity point never reaches this handler — the
@@ -1210,17 +1397,18 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     compileIntervalIntegrate(args, compile, target),
 
   // Conditionals
-  If: (args, compile) => {
+  If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     // For interval arithmetic, we need to handle indeterminate conditions.
-    // Both arms are thunks — conditionally evaluated — so their operand
-    // indices are passed to the compile callback (`OperandCompiler`), which
-    // opens the matching CSE region.
-    return `_IA.piecewise(
-      ${compile(args[0])},
-      () => ${compile(args[1], 1)},
-      () => ${compile(args[2], 2)}
-    )`;
+    // Both arms are conditionally evaluated, so their operand indices are
+    // passed to the compile callback (`OperandCompiler`), which opens the
+    // matching CSE region.
+    return compileIntervalConditional(
+      compile(args[0]),
+      compile(args[1], 1),
+      compile(args[2], 2),
+      target
+    );
   },
   // Domain restriction: When(body, cond) → body where cond holds, empty
   // where it doesn't. Must NOT fall through to the generic JS ternary: the
@@ -1235,12 +1423,12 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // eager — matching the `When` entry of the lazy-operand inventory.
     return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0], 0)})`;
   },
-  Which: (args, compile) => {
+  Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error(
         'Which: expected even number of arguments (condition/value pairs)'
       );
-    // Build nested piecewise calls for each condition/value pair. Every value
+    // Build nested conditionals for each condition/value pair. Every value
     // arm, and every condition after the first, is conditionally evaluated —
     // pass its operand index so the CSE pass opens the matching region.
     const buildPiecewise = (i: number): string => {
@@ -1251,11 +1439,12 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (isSymbol(cond, 'True')) {
         return compile(val, i + 1);
       }
-      return `_IA.piecewise(
-      ${i === 0 ? compile(cond) : compile(cond, i)},
-      () => ${compile(val, i + 1)},
-      () => ${buildPiecewise(i + 2)}
-    )`;
+      return compileIntervalConditional(
+        i === 0 ? compile(cond) : compile(cond, i),
+        compile(val, i + 1),
+        buildPiecewise(i + 2),
+        target
+      );
     };
     return buildPiecewise(0);
   },
@@ -2078,6 +2267,7 @@ const FOLDABLE_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
   'sub',
   'mul',
   'div',
+  'negDiv',
   'scale',
   'scaleDiv',
   'negate',
@@ -2446,6 +2636,92 @@ function intervalMulStep(
 }
 
 /**
+ * The operand of `code` when `code` is a WHOLE `_IA.negate(…)` call, and
+ * `undefined` for anything else — a negation that is only part of a larger
+ * expression included.
+ *
+ * The scan matches the parenthesis that opens the call against the one that
+ * closes it, over the STRING-MASKED copy of the code, so a parenthesis inside
+ * caller text (a `String` operand, a spliced `vars` entry) cannot make an
+ * unbalanced pair look balanced.
+ */
+function strippedIntervalNegate(code: string): string | undefined {
+  const head = '_IA.negate(';
+  if (!code.startsWith(head) || !code.endsWith(')')) return undefined;
+  const masked = maskStringLiterals(code);
+  let depth = 0;
+  for (let i = head.length - 1; i < masked.length; i++) {
+    if (masked[i] === '(') depth++;
+    else if (masked[i] === ')' && --depth === 0)
+      return i === masked.length - 1
+        ? code.slice(head.length, masked.length - 1)
+        : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The two arguments of `code` when it is a WHOLE two-argument
+ * `_IA.<name>(a, b)` call, and `undefined` for anything else — a call that is
+ * only part of a larger expression, or one with any other number of
+ * arguments.
+ *
+ * The scan runs over the STRING-MASKED copy of the code, so a bracket or a
+ * comma inside caller text (a `String` operand, a spliced `vars` entry)
+ * cannot be read as structure.
+ */
+function splitIntervalCall(
+  code: string,
+  name: string
+): readonly [string, string] | undefined {
+  const head = `_IA.${name}(`;
+  if (!code.startsWith(head) || !code.endsWith(')')) return undefined;
+  const masked = maskStringLiterals(code);
+  let depth = 0;
+  let comma = -1;
+  for (let i = head.length - 1; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (--depth > 0) continue;
+      if (i !== masked.length - 1 || comma < 0) return undefined;
+      return [code.slice(head.length, comma), code.slice(comma + 1, i).trim()];
+    } else if (c === ',' && depth === 1) {
+      // A second top-level comma means a call this helper does not describe.
+      if (comma >= 0) return undefined;
+      comma = i;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The code for the NEGATION of a constant point interval, or `undefined` when
+ * `code` is not one or its endpoint is not a plain numeric literal.
+ *
+ * Only a finite decimal literal is negated: a named constant (`Math.PI`) and
+ * the non-finite endpoints have no negated spelling this function can write
+ * without evaluating the text, and the hoist reads the result back
+ * (`INTERVAL_CONSTANT_ENDPOINT`), so it has to stay in the same spelling.
+ */
+function negatedConstantPointCode(code: string): string | undefined {
+  if (!isConstantPointCode(code)) return undefined;
+  const endpoints = constantIntervalEndpoints(code)!;
+  if (!PLAIN_NUMERIC_ENDPOINT.test(endpoints[0])) return undefined;
+  const value = -Number(endpoints[0]);
+  if (!Number.isFinite(value)) return undefined;
+  const literal = intervalEndpointLiteral(value);
+  return code.startsWith('_IA.point(')
+    ? `_IA.point(${literal})`
+    : intervalLiteral(value, value);
+}
+
+/** A finite decimal endpoint, the one spelling `negatedConstantPointCode` can
+ *  negate by reading the text (`INTERVAL_CONSTANT_ENDPOINT` also admits the
+ *  named constants, `Infinity` and `NaN`). */
+const PLAIN_NUMERIC_ENDPOINT = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+
+/**
  * One step of a `Divide` chain: `a / b`, folded when both sides are constant,
  * and otherwise emitted as the point-dividing kernel when the DIVISOR is a
  * constant point.
@@ -2454,6 +2730,15 @@ function intervalMulStep(
  * non-zero point `p` with two corner quotients instead of four. The divisor
  * position is fixed — division does not commute — so only the right operand
  * is tested.
+ *
+ * A NEGATED numerator is folded into the division rather than building an
+ * interval the division consumes at once. With a general divisor that is the
+ * `_IA.negDiv` kernel, which answers what `_IA.div` of the negation answers
+ * (`interval/arithmetic.ts`). With a constant point divisor the sign moves
+ * onto the CONSTANT instead — `(−x)/p` and `x/(−p)` have the same correctly
+ * rounded endpoints, since IEEE division takes its sign from the operand signs
+ * and its magnitude from their magnitudes — which keeps the two-corner
+ * `scaleDiv` kernel.
  */
 function intervalDivStep(
   left: string,
@@ -2463,6 +2748,13 @@ function intervalDivStep(
   const quotient = `_IA.div(${left}, ${right})`;
   const folded = foldChainStep(quotient, target);
   if (folded !== quotient) return folded;
+  const numerator = strippedIntervalNegate(left);
+  if (numerator !== undefined) {
+    const negatedDivisor = negatedConstantPointCode(right);
+    if (negatedDivisor !== undefined)
+      return `_IA.scaleDiv(${numerator}, ${negatedDivisor})`;
+    return `_IA.negDiv(${numerator}, ${right})`;
+  }
   if (isConstantPointCode(right)) return `_IA.scaleDiv(${left}, ${right})`;
   return quotient;
 }
@@ -2563,12 +2855,16 @@ const INTERVAL_CONSTANT_ENDPOINT =
  * fillers of the same length, so the copy addresses the same positions as
  * the original.
  *
- * The search itself runs over the ORIGINAL source — the fold's own
- * `{ kind: 'interval', … }` spelling contains a string literal, so a search
- * over the masked copy would not find it. The mask is read only to REJECT a
- * match that starts inside caller text (a `String` operand, a spliced
- * `vars` entry): both spellings start with `{` or `_`, and masking turns
- * either into a `.`, so comparing the first character decides it.
+ * The constant-table search itself runs over the ORIGINAL source — the fold's
+ * own `{ kind: 'interval', … }` spelling contains a string literal, so a
+ * search over the masked copy would not find it. There the mask is read only
+ * to REJECT a match that starts inside caller text (a `String` operand, a
+ * spliced `vars` entry): both spellings start with `{` or `_`, and masking
+ * turns either into a `.`, so comparing the first character decides it.
+ *
+ * The bracket scans (`strippedIntervalNegate`, `splitIntervalCall`) read the
+ * masked copy instead, since what they look for is STRUCTURE: a bracket or a
+ * comma inside caller text must not be read as one of theirs.
  */
 function maskStringLiterals(code: string): string {
   let out = '';
@@ -2592,64 +2888,19 @@ function maskStringLiterals(code: string): string {
 }
 
 /**
- * The character ranges the emitted `for` loops of `masked` cover, from the
- * `{` that opens each body to the `}` that closes it.
- *
- * A loop body runs once per iteration, so a constant written once inside one
- * is still allocated once per iteration. The scan reads the STRING-MASKED
- * copy of the source, so a brace inside caller text cannot unbalance it. It
- * is an approximation on purpose: binding a constant to a name is
- * semantically safe wherever the constant stands, so a range that reaches
- * too far only names a constant that did not need one, and one that stops
- * too early only leaves an allocation where it was.
- */
-function loopBodyRanges(masked: string): Array<readonly [number, number]> {
-  const ranges: Array<readonly [number, number]> = [];
-  let at = 0;
-  for (;;) {
-    const header = masked.indexOf('for (', at);
-    if (header < 0) break;
-    const open = masked.indexOf('{', header);
-    if (open < 0) break;
-    let depth = 0;
-    let i = open;
-    for (; i < masked.length; i++) {
-      if (masked[i] === '{') depth++;
-      else if (masked[i] === '}' && --depth === 0) break;
-    }
-    ranges.push([open, i]);
-    // A nested loop starts inside this body and gets its own range, which
-    // this one already covers.
-    at = open + 1;
-  }
-  return ranges;
-}
-
-/**
- * Bind the constant intervals of `definitions` and `expression` to preamble
- * locals, and rewrite both to read those locals.
+ * Bind the constant intervals of `definitions` and `expression` to names, and
+ * rewrite both to read those names.
  *
  * Every constant interval in the emitted code is an object LITERAL, so the
  * expression allocates one object per occurrence per call — 913 point
  * intervals across the corpus the Tycho code-generation audit of 2026-09-08
- * measured. A constant bound once in the preamble is allocated once per
- * call instead of once per occurrence, which is what an unrolled sum of
- * twenty terms sharing the factor `1/2` needs.
- *
- * Two occurrences are needed to bind a constant of the root `expression`,
- * which runs once per call: with one occurrence the binding would allocate
- * the same one object and add a name. A constant written where the code runs
- * REPEATEDLY is bound at its first occurrence instead — a user-function
- * `definitions` body, which runs once per call of that function, and a `for`
- * loop body, which runs once per iteration. The audit's transit kernel is
- * the first case: its `_fn_S` body carries a `_IA.point(2)` written once and
- * evaluated once per term of a forty-term sum. A summation over 200 terms
- * that exceeds the unroll limit is the second.
- *
- * The preamble of this target is evaluated on every call (see
- * `ComputeEngineIntervalFunction`, which builds ONE function whose body is
- * `preamble; return expression`), so the binding removes the repetition,
- * not the allocation itself.
+ * measured. The declarations this function returns are evaluated ONCE, when
+ * the compiled runner is built (`ComputeEngineIntervalFunction`), so every
+ * occurrence of every constant reads a name that was allocated once for the
+ * lifetime of the artifact. That is why a constant is bound at its FIRST
+ * occurrence, with no repetition threshold: the consumer of this target
+ * evaluates the kernel once per quadtree node, so even a constant written
+ * once in the root expression was paying one allocation per node.
  *
  * The pass runs AFTER the constant fold, deliberately. The fold decides
  * admissibility by reading the emitted code (`foldConstantIntervalCode`),
@@ -2680,18 +2931,13 @@ function hoistIntervalConstants(
   // say whose argument it is.
   if ((target.foldExcludedOps?.size ?? 0) > 0)
     return { declarations: '', definitions, expression };
-  // Index 0 is the user-function definitions, every line of which is a
-  // function body; index 1 is the root expression, where only a loop body
-  // runs repeatedly.
+  // Index 0 is the user-function definitions, index 1 the root expression.
   const sources = [definitions, expression];
   type Match = { source: number; start: number; end: number; text: string };
   const matches: Match[] = [];
-  const counts = new Map<string, number>();
-  const repeated = new Set<string>();
   for (let s = 0; s < sources.length; s++) {
     const source = sources[s];
     const masked = maskStringLiterals(source);
-    const loops = s === 0 ? [] : loopBodyRanges(masked);
     HOISTABLE_INTERVAL_CONSTANT.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = HOISTABLE_INTERVAL_CONSTANT.exec(source)) !== null) {
@@ -2708,12 +2954,6 @@ function hoistIntervalConstants(
         end: m.index + m[0].length,
         text: m[0],
       });
-      counts.set(m[0], (counts.get(m[0]) ?? 0) + 1);
-      if (
-        s === 0 ||
-        loops.some(([open, close]) => m!.index > open && m!.index < close)
-      )
-        repeated.add(m[0]);
     }
   }
 
@@ -2723,7 +2963,6 @@ function hoistIntervalConstants(
   let counter = 0;
   for (const { text } of matches) {
     if (names.has(text)) continue;
-    if ((counts.get(text) ?? 0) < 2 && !repeated.has(text)) continue;
     let name: string;
     do {
       name = `_k${++counter}`;
@@ -2764,25 +3003,73 @@ function isPlainInterval(value: unknown): value is Interval {
 }
 
 /**
+ * A copy of a run result that shares no object with the constant table.
+ *
+ * The constant declarations are evaluated ONCE per artifact, so a constant
+ * interval is the SAME object on every call, and several routines hand an
+ * operand back rather than building a new answer — `piecewise` returns the
+ * arm it selected, `restrict` returns its value. A caller who writes to the
+ * `lo` of a returned interval would therefore change what every later call
+ * answers. Copying the result on the way out keeps the returned value the
+ * caller's own, at the cost of one small object per call.
+ *
+ * The copy is one level deep for a kinded result (the wrapper and the
+ * enclosure it carries), and elementwise for an array — the value a
+ * collection-valued root answers, whether it is the result itself or the
+ * value a kinded wrapper carries. A number, a string and a nested plain value
+ * copy through as they are.
+ */
+function freshIntervalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(freshIntervalValue);
+  if (!isRecord(value)) return value;
+  const copy: Record<string, unknown> = { ...value };
+  if (isPlainInterval(copy.value)) copy.value = { ...copy.value };
+  else if (Array.isArray(copy.value))
+    copy.value = copy.value.map(freshIntervalValue);
+  return copy;
+}
+
+/**
  * JavaScript function that wraps compiled interval arithmetic code.
  *
  * Injects the _IA library and provides input conversion from various formats.
+ *
+ * `constants` is the declaration list of the constant table
+ * (`hoistIntervalConstants`). It is evaluated ONCE, when the runner is built,
+ * in a scope that sees `_IA` and nothing per call; the inner function it
+ * returns runs the per-call `preamble` and the body on every call. A constant
+ * interval is the same on every call, and the consumer of this target
+ * evaluates the kernel once per quadtree node, so building the table per call
+ * paid one allocation per constant per node. The per-call preamble keeps the
+ * user-function definitions and the caller's own `preamble` option: a
+ * definition closes over the vars object, and the caller's source is arbitrary
+ * text that may hold per-call state.
  */
 export class ComputeEngineIntervalFunction extends Function {
   IA = IntervalArithmetic;
 
-  constructor(body: string, preamble = '') {
-    super(
-      '_IA',
-      '_',
-      preamble ? `${preamble};return ${body}` : `return ${body}`
-    );
+  constructor(body: string, preamble = '', constants = '') {
+    const perCallCode = preamble
+      ? `${preamble};return ${body}`
+      : `return ${body}`;
+    super('_IA', '_', perCallCode);
+    const inner =
+      constants === ''
+        ? undefined
+        : (
+            new Function(
+              '_IA',
+              `${constants}\nreturn function (_) { ${perCallCode} };`
+            ) as (ia: typeof IntervalArithmetic) => (v?: unknown) => unknown
+          )(this.IA);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
         try {
           // Process input arguments - convert to interval format
           const processedArgs = argumentsList.map(processInput);
-          return super.apply(thisArg, [this.IA, ...processedArgs]);
+          if (inner === undefined)
+            return super.apply(thisArg, [this.IA, ...processedArgs]);
+          return freshIntervalValue(inner(...processedArgs));
         } catch {
           // Runtime error (e.g., missing _IA method) — return "entire"
           // to signal "cannot bound this" rather than crashing.
@@ -3275,6 +3562,10 @@ function compileToIntervalTarget(
   expr: Expression,
   target: CompileTarget<Expression>
 ): CompilationResult<'interval-js', IntervalValue> {
+  // One compilation begins here: start from an empty record of the
+  // conditionals, whatever an earlier compilation against the same naming
+  // context left behind (see `resetIntervalConditionals`).
+  resetIntervalConditionals(target);
   let js: string;
   try {
     // A literal single point at the ROOT is the one collection-shaped value
@@ -3313,17 +3604,40 @@ function compileToIntervalTarget(
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // to the preamble so their named local functions are in scope.
   const userDefs = BaseCompiler.userFunctionsPreamble(target);
-  // Bind every constant interval that occurs more than once to a preamble
-  // local, so the expression reads a name instead of building the same
-  // object at each occurrence. The declarations go AFTER the caller's own
-  // preamble (which this pass never rewrites) and BEFORE the user-function
-  // definitions, which may read them.
+  // Bind every constant interval to a name, so the expression reads that name
+  // instead of building the same object at each occurrence and on every call.
+  // The declarations are evaluated once per artifact, in a scope that encloses
+  // the per-call code, so the user-function definitions — which may read them —
+  // still see them. In the reported text they go AFTER the caller's own
+  // preamble (which this pass never rewrites) and BEFORE those definitions.
   const hoisted = hoistIntervalConstants(userDefs, js, target);
   const hoistedJs = hoisted.expression;
-  const preamble = [target.preamble, hoisted.declarations, hoisted.definitions]
+  // The condition temporaries of the closure-free conditional lowering
+  // (`compileIntervalConditional`). Each is written and read back within one
+  // ternary chain, before that chain evaluates any arm, so one binding per
+  // name serves every call and every re-entry.
+  const conditionVars = INTERVAL_CONDITION_VARS.get(
+    BaseCompiler.namingContext(target)
+  );
+  const declarations = [
+    conditionVars && conditionVars.length > 0
+      ? `let ${conditionVars.join(', ')};`
+      : '',
+    hoisted.declarations,
+  ]
     .filter((part) => part)
     .join('\n');
-  const fn = new ComputeEngineIntervalFunction(hoistedJs, preamble);
+  const perCall = [target.preamble, hoisted.definitions]
+    .filter((part) => part)
+    .join('\n');
+  const preamble = [target.preamble, declarations, hoisted.definitions]
+    .filter((part) => part)
+    .join('\n');
+  const fn = new ComputeEngineIntervalFunction(
+    hoistedJs,
+    perCall,
+    declarations
+  );
   return {
     target: 'interval-js',
     success: true,

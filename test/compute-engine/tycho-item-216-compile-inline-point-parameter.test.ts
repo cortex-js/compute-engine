@@ -87,7 +87,7 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
       'sqrt((x * x) + (y * y)) + 1.0'
     );
     expect(code(ce, String.raw`e_2((x,y))`, 'interval-js')).toBe(
-      '_IA.add(_IA.sqrt(_IA.add(_IA.square(_.x), _IA.square(_.y))), _IA.point(1))'
+      '_IA.add(_IA.sqrt(_IA.add(_IA.square(_.x), _IA.square(_.y))), _k1)'
     );
   });
 

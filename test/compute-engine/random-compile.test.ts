@@ -620,21 +620,16 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   test('JS: Equal keeps the pure emission (byte-identical pins)', () => {
     expect(jsCode(['Equal', 0.1, 'x', 0.9])).toBe(
-      '(((typeof (0.1) === \'number\' && (0.1) === (_.x)) || Math.abs((0.1) - (_.x)) <= 1e-10) && ' +
-        '((typeof (_.x) === \'number\' && (_.x) === (0.9)) || Math.abs((_.x) - (0.9)) <= 1e-10))'
+      '(((0.1) === (_.x)) && ((_.x) === (0.9)))'
     );
     expect(
       jsCode(['Equal', ['Multiply', 'x', 'ImaginaryUnit'], ['Complex', 0, 0.5]])
     ).toBe(
-      '((((() => { const _a = ({ re: 0, im: 1 }), _r = _.x; return { re: ' +
+      '(((() => { const _a = ({ re: 0, im: 1 }), _r = _.x; return { re: ' +
         '_a.re * _r, im: _a.im * _r }; })()).re === (({ re: 0, im: 0.5 ' +
         '})).re && ((() => { const _a = ({ re: 0, im: 1 }), _r = _.x; return ' +
         '{ re: _a.re * _r, im: _a.im * _r }; })()).im === (({ re: 0, im: 0.5 ' +
-        '})).im) || _SYS.cabs({ re: ((() => { const _a = ({ re: 0, im: 1 }), ' +
-        '_r = _.x; return { re: _a.re * _r, im: _a.im * _r }; })()).re - (({ ' +
-        're: 0, im: 0.5 })).re, im: ((() => { const _a = ({ re: 0, im: 1 }), ' +
-        '_r = _.x; return { re: _a.re * _r, im: _a.im * _r }; })()).im - (({ ' +
-        're: 0, im: 0.5 })).im }) <= 1e-10)'
+        '})).im)'
     );
   });
 

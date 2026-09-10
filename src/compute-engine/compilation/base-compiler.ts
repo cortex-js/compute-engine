@@ -114,7 +114,10 @@ import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
-import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
+import {
+  MIN_UNROLLED_WIDTH,
+  unrollFixedWidthCollections,
+} from './fixed-width-unroll.js';
 import {
   isWildcard,
   wildcardName,
@@ -3406,6 +3409,29 @@ export class BaseCompiler {
   private static _userCallVisited: Set<string> = new Set();
 
   /**
+   * The VALUE expression of a user function's stored body, with the wrappers
+   * canonicalization adds around it removed: a `Block` holding a single
+   * statement, and the `Typed` ascription a declared result type adds.
+   *
+   * Only a SINGLE-statement block is unwrapped. A multi-statement body binds
+   * locals whose complex-ness `isBlockValueComplexValued` infers with a frame
+   * the analyses that call this do not build, so guessing at the value of such
+   * a body could disagree with what the emitter produces.
+   */
+  private static unwrappedFunctionBody(
+    body: Expression | undefined
+  ): Expression | undefined {
+    let e = body;
+    while (
+      e !== undefined &&
+      ((isFunction(e, 'Block') && e.ops.length === 1) ||
+        (isFunction(e, 'Typed') && e.ops.length >= 1))
+    )
+      e = e.ops[0];
+    return e;
+  }
+
+  /**
    * A user function's body reduced to the literal collection CONSTRUCTOR it
    * builds, so that operand k of the result is component k of the value the
    * call produces. Returns `undefined` when the body is anything else, and the
@@ -3418,18 +3444,7 @@ export class BaseCompiler {
   private static collectionConstructorBody(
     body: Expression | undefined
   ): (Expression & { ops: ReadonlyArray<Expression> }) | undefined {
-    // A function body is stored as a `Block`, and a declared result type wraps
-    // the value in a `Typed` ascription. Unwrap both, but only a SINGLE-
-    // statement block: a multi-statement body binds locals whose complex-ness
-    // `isBlockValueComplexValued` infers with a frame this element analysis
-    // does not build, so guessing here could disagree with the emitter.
-    let e = body;
-    while (
-      e !== undefined &&
-      ((isFunction(e, 'Block') && e.ops.length === 1) ||
-        (isFunction(e, 'Typed') && e.ops.length >= 1))
-    )
-      e = e.ops[0];
+    const e = BaseCompiler.unwrappedFunctionBody(body);
     if (e === undefined) return undefined;
     if (isFunction(e, 'List') || isFunction(e, 'Tuple')) return e;
     // An ALL-SCALAR `PointList` is a single point whose component k is operand
@@ -6626,9 +6641,8 @@ export class BaseCompiler {
                *   and `0 · NaN` are `NaN`, and an operand's type is no proof
                *   that the emitted code stays finite: a type describes the
                *   VALUE, while an out-of-range indexed read `P[i]` typed
-               *   `integer` answers `undefined`, hence `NaN`, at run time (the
-               *   `exactIntegerComparison` comment in `javascript-target.ts`
-               *   states the same rule). The collapse also discarded operands
+               *   `integer` answers `undefined`, hence `NaN`, at run time.
+               *   The collapse also discarded operands
                *   with an observable effect: `Sin(0) · Random()` lost its draw,
                *   which moves every later draw of a seeded sequence.
                * - A `0` summand is not dropped. `x + 0` is not the identity for
@@ -8397,6 +8411,146 @@ export class BaseCompiler {
     return `_SYS.rotv(${base}, ${shift}, ${dir})`;
   }
 
+  /**
+   * Source text that may be REPEATED in the emitted code without repeating any
+   * work: a numeric literal, a bare name, or a chain of property reads off one
+   * (`_.W` — what a declared input compiles to). Anything else — a call, an
+   * operator expression, an array literal — is bound once to a temporary and
+   * read from there, so the operand is still evaluated exactly once.
+   */
+  private static readonly REPEATABLE_SOURCE =
+    /^(?:-?\d+(?:\.\d+)?|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)$/;
+
+  /**
+   * Emit `body`, which reads one already-compiled operand SEVERAL times, so
+   * that the operand is still evaluated exactly once: `read` is the source
+   * text the body must use for it — `code` itself when repeating it is free
+   * ({@link REPEATABLE_SOURCE}), and otherwise the name of a temporary the
+   * result binds it to.
+   */
+  static withRepeatableSource(
+    code: string,
+    target: CompileTarget<Expression>,
+    body: (read: string) => string
+  ): string {
+    if (BaseCompiler.REPEATABLE_SOURCE.test(code)) return body(code);
+    const v = BaseCompiler.tempVar(target);
+    return `((${v}) => ${body(v)})(${code})`;
+  }
+
+  /**
+   * The number of elements an emitted source text holds when it is one array
+   * LITERAL — `[a, b, c]` gives three — and `undefined` when the text is
+   * anything else, so its run-time shape is not decided by reading it.
+   *
+   * The component fan-out of {@link tryCompileBroadcast} uses this to tell an
+   * operand it may read by index (an array literal of the right length, which
+   * a `List` node and an inner fan-out both compile to) from one it must test
+   * first (a `vars` read, a call result, an element read).
+   *
+   * A quote anywhere in the text is answered as "not a literal": a comma
+   * inside a string would be counted as an element separator, and a source
+   * that is refused here is only tested at run time, never mis-read.
+   */
+  private static arrayLiteralWidth(code: string): number | undefined {
+    if (!code.startsWith('[') || !code.endsWith(']')) return undefined;
+    if (/['"`]/.test(code)) return undefined;
+    if (code.slice(1, -1).trim() === '') return 0;
+    let depth = 0;
+    let n = 1;
+    for (let i = 0; i < code.length; i++) {
+      const c = code[i];
+      if (c === '[' || c === '(' || c === '{') depth += 1;
+      else if (c === ']' || c === ')' || c === '}') {
+        depth -= 1;
+        // The opening bracket closed before the end of the text, so the text
+        // is not one literal but an expression that starts with one
+        // (`[1, 2].concat(x)`).
+        if (depth === 0 && i !== code.length - 1) return undefined;
+      } else if (c === ',' && depth === 1) n += 1;
+    }
+    return depth === 0 ? n : undefined;
+  }
+
+  /**
+   * The number of elements a collection operand holds when its TYPE states it
+   * — a one-dimensional list of a fixed length whose elements are provably
+   * numbers (`list<number^4>`, spelled `vector<4>`) — and `undefined`
+   * otherwise.
+   *
+   * The element test keeps a point list, a nested list, a string and a
+   * dictionary out: component k of one of those is not a scalar the head's
+   * scalar codegen can consume. A tuple is out as well, because a tuple type
+   * carries no `dimensions`, which leaves every point-shaped operand to the
+   * dedicated point lanes of {@link tryCompileBroadcast}.
+   */
+  static staticCollectionWidth(a: Expression): number | undefined {
+    const t = compilationType(a);
+    if (typeof t === 'string' || t.kind !== 'list') return undefined;
+    const dims = t.dimensions;
+    if (dims === undefined || dims.length !== 1) return undefined;
+    const elt = collectionElementType(t);
+    if (elt === undefined || !isSubtype(elt, 'number')) return undefined;
+    return dims[0];
+  }
+
+  /**
+   * The number of COMPONENTS every operand of a broadcast agrees on, when the
+   * element-wise application may be emitted as one expression per component
+   * instead of a run-time `_SYS.bcast` dispatch — `undefined` when it may not.
+   *
+   * `_SYS.bcast` allocates a closure, tests the shape of every operand and
+   * fills the result array through a call per element. None of that is needed
+   * when the compiler can already count the components: `W + 1` for a `W`
+   * declared `list<number^4>` is four additions, which is what the interpreter
+   * computes and what the shader targets already emit.
+   *
+   * Admitted only when every operand is PURE — the fan-out reads a collection
+   * operand several times — and its shape is provable:
+   *
+   * - a collection operand states a static width in its type
+   *   ({@link staticCollectionWidth}), and every collection operand states the
+   *   SAME one, so no position is the length mismatch `_SYS.bcast` answers as
+   *   NaN;
+   * - every other operand is provably a single number, repeated at each
+   *   component exactly as the broadcast repeats a scalar;
+   * - no operand's run-time shape is unprovable. A `broadcastable<T>` node or
+   *   a top-typed application may be a scalar or an array of any length, and
+   *   only the run-time dispatch answers for both.
+   *
+   * The width must be below {@link MIN_UNROLLED_WIDTH}, the same boundary
+   * `unrollFixedWidthCollections` uses, read from the other side. That pass
+   * fans a collection out BEFORE any target sees it and leaves the narrow
+   * widths alone, because they have a native lowering everywhere — a
+   * `vec2`/`vec3`/`vec4` on the shader targets, and, until this fan-out, the
+   * `_SYS.bcast` closure on JavaScript. A collection still shaped as a runtime
+   * array at five elements or more is one whose elements that pass could not
+   * see (a declared `list<number^225>` input, say); for those the runtime
+   * helper is both the shorter and the faster lowering, since writing out 225
+   * expressions is neither.
+   */
+  private static staticBroadcastWidth(
+    args: ReadonlyArray<Expression>,
+    isArrayOperand: (a: Expression) => boolean
+  ): number | undefined {
+    let width: number | undefined;
+    for (const a of args) {
+      if (a.isPure !== true) return undefined;
+      if (isBoundPossiblyCollectionTyped(a)) return undefined;
+      if (!isArrayOperand(a)) {
+        if (!a.type.matches('number')) return undefined;
+        continue;
+      }
+      const n = BaseCompiler.staticCollectionWidth(a);
+      if (n === undefined) return undefined;
+      if (width === undefined) width = n;
+      else if (width !== n) return undefined;
+    }
+    if (width === undefined || width < 1 || width >= MIN_UNROLLED_WIDTH)
+      return undefined;
+    return width;
+  }
+
   private static tryCompileBroadcast(
     engine: ComputeEngine,
     h: string,
@@ -9047,16 +9201,19 @@ export class BaseCompiler {
     // (`realOperandGuard`) and re-enters here on the real lane.
     if (BaseCompiler.ORDERING_HEADS.has(h) && anyComplex) return null;
 
+    // The number of components this application has when every operand's
+    // width is known at compile time — the run-time dispatch is then replaced
+    // by one expression per component, further down.
+    const componentWidth =
+      atomicTuple === undefined
+        ? BaseCompiler.staticBroadcastWidth(args, isArrayOperand)
+        : undefined;
+
     // Bind one element parameter per operand and build the scalar body by
     // re-invoking the head's own scalar codegen with those parameters (shadow
     // `target.var` so they compile bare, not as `_.<name>` lookups — same
     // pattern as the Sum/Product loop index).
     const params = args.map(() => BaseCompiler.tempVar(target));
-    const innerTarget: CompileTarget<Expression> = {
-      ...target,
-      var: (id: string) => (params.includes(id) ? id : target.var(id)),
-      boundVars: BaseCompiler.withBoundNames(target, params),
-    };
     // The element parameters are bare symbols with no type of their own, so the
     // head's scalar codegen would read every one of them as REAL and emit
     // `_tv1 * _tv2` over a pair of `{re, im}` objects. Declaring their
@@ -9067,7 +9224,6 @@ export class BaseCompiler {
     // complex operand declined here and fell through to the fail-closed guard.
     const complexFrame = new Map<string, boolean>();
     params.forEach((p, i) => complexFrame.set(p, argIsComplex[i] === true));
-    BaseCompiler._pushLocalComplex(complexFrame);
     // For a promotable radical/`Power` head, the promotion verdict must be
     // decided on the NODE-LEVEL operands — the element temps the closure is
     // built from carry no sign or type evidence, so a verdict derived from
@@ -9075,35 +9231,70 @@ export class BaseCompiler {
     // (`√(x²+L²)` with a list `L`), diverging from the downstream
     // `isComplexValued` analysis that reads the real operands. Record the
     // node-level verdict for `promotesRadicalToComplex` to return when the
-    // scalar codegen re-asks with exactly these temps. Pushed strictly
+    // scalar codegen re-asks with exactly these temps. Decided strictly
     // inside the `_pushLocalComplex` frame so memoized analysis answers
     // stay in that frame's memo layer.
-    const radicalFrame =
-      h === 'Power' || BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
-        ? {
-            head: h,
-            params: new Set(params),
-            promotes: BaseCompiler.promotesRadicalToComplex(h, args),
-          }
-        : undefined;
-    if (radicalFrame !== undefined)
-      BaseCompiler._broadcastRadicalVerdict.push(radicalFrame);
-    let scalarBody: string;
+    BaseCompiler._pushLocalComplex(complexFrame);
+    let radicalFrame:
+      | { head: string; params: Set<string>; promotes: boolean }
+      | undefined;
     try {
-      scalarBody = dispatch
-        ? BaseCompiler.dispatchingScalarBody(h, params)
-        : typeof fn === 'function'
-          ? fn(
-              params.map((p) => engine.expr(p)),
-              (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
-              innerTarget
-            )
-          : `${fn}(${params.join(', ')})`;
+      radicalFrame =
+        h === 'Power' || BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
+          ? {
+              head: h,
+              params: new Set(params),
+              promotes: BaseCompiler.promotesRadicalToComplex(h, args),
+            }
+          : undefined;
     } finally {
-      if (radicalFrame !== undefined)
-        BaseCompiler._broadcastRadicalVerdict.pop();
       BaseCompiler._popLocalComplex();
     }
+    /**
+     * The head's own scalar lowering, with element parameter `i` standing for
+     * the source text `sources[i]`.
+     *
+     * The closure of the run-time broadcast passes the parameter names
+     * themselves; the component fan-out further down passes one component read
+     * per operand instead, so the same codegen — and with it every complex,
+     * constant-fold and precedence convention of the scalar lane — produces
+     * both spellings. Every source must be an ATOMIC expression (a name, a
+     * property or index read, a parenthesized expression), because the codegen
+     * splices it into operator positions without parenthesizing it.
+     *
+     * Both frames are pushed around each build, in the order the verdict above
+     * was decided in: the radical verdict strictly inside the local-complex
+     * frame, so the memo layer a build writes is the frame's own.
+     */
+    const buildScalarBody = (sources: ReadonlyArray<string>): string => {
+      const innerTarget: CompileTarget<Expression> = {
+        ...target,
+        var: (id: string) => {
+          const i = params.indexOf(id);
+          return i >= 0 ? sources[i] : target.var(id);
+        },
+        boundVars: BaseCompiler.withBoundNames(target, params),
+      };
+      BaseCompiler._pushLocalComplex(complexFrame);
+      if (radicalFrame !== undefined)
+        BaseCompiler._broadcastRadicalVerdict.push(radicalFrame);
+      try {
+        return dispatch
+          ? BaseCompiler.dispatchingScalarBody(h, sources)
+          : typeof fn === 'function'
+            ? fn(
+                params.map((p) => engine.expr(p)),
+                (expr) => BaseCompiler.compileValueOperand(expr, innerTarget),
+                innerTarget
+              )
+            : `${fn}(${sources.join(', ')})`;
+      } finally {
+        if (radicalFrame !== undefined)
+          BaseCompiler._broadcastRadicalVerdict.pop();
+        BaseCompiler._popLocalComplex();
+      }
+    };
+    const scalarBody = buildScalarBody(params);
     // A `RotateLeft`/`RotateRight` operand whose base provably holds scalars
     // is handed to the plain broadcast as an in-place VIEW (`_SYS.rotv`): the
     // element loop reads the base at a shifted index instead of first
@@ -9122,7 +9313,14 @@ export class BaseCompiler {
       atomicTuple === undefined && target.cseBind !== undefined
         ? BaseCompiler.cseAdmission(target, new Set())
         : undefined;
+    // A view is never used by the component fan-out below, which reads its
+    // operands by INDEX: `_SYS.rotv` answers a `RotView` object rather than an
+    // array, and only the element loop of `_SYS.bcast` knows how to read one.
+    // Nothing is lost — a rotation whose width is small enough for the fan-out
+    // copies four cells at most, which is the allocation the view exists to
+    // avoid on a forty-thousand-element board.
     const viewsAllowed =
+      componentWidth === undefined &&
       admission !== undefined &&
       admission.isOverriddenOperator?.(h) !== true &&
       args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
@@ -9134,6 +9332,62 @@ export class BaseCompiler {
     );
     const body = BaseCompiler.guardConnectiveAbsence(h, params, scalarBody);
     const closure = `(${params.join(', ')}) => ${body}`;
+    // Every operand's width is known: emit one expression per component and
+    // drop the run-time dispatch altogether. An operand whose compiled source
+    // cannot be repeated for free is bound once to a temporary, so each one is
+    // still evaluated exactly once, in operand order.
+    if (componentWidth !== undefined) {
+      const bindings: string[] = [];
+      const bound: string[] = [];
+      // A collection operand is read component by component, which trusts its
+      // DECLARED width. A declared type constrains what the ENGINE may assign,
+      // not what a caller may put in the kernel's `vars` object, so a
+      // `list<number^4>` input can arrive absent, shorter, longer, or as a
+      // plain number. Only a source that is provably an array of exactly the
+      // right length may be read by index without checking; every other one
+      // is tested at run time and, when the test fails, handed to the
+      // broadcast helper below, which answers those shapes the way the
+      // interpreter does (a missing operand gives NaN, a shorter list gives
+      // the shorter result, a scalar gives a scalar).
+      const guarded: string[] = [];
+      const sources = compiledArgs.map((code, i) => {
+        const needsGuard =
+          isArrayOperand(args[i]) &&
+          BaseCompiler.arrayLiteralWidth(code) !== componentWidth;
+        if (!needsGuard && BaseCompiler.REPEATABLE_SOURCE.test(code))
+          return code;
+        const v = BaseCompiler.tempVar(target);
+        bindings.push(v);
+        bound.push(code);
+        if (needsGuard) guarded.push(v);
+        return v;
+      });
+      const components: string[] = [];
+      for (let k = 0; k < componentWidth; k++) {
+        const cell = args.map((a, i) =>
+          isArrayOperand(a) ? `${sources[i]}[${k}]` : sources[i]
+        );
+        components.push(
+          BaseCompiler.guardConnectiveAbsence(h, cell, buildScalarBody(cell))
+        );
+      }
+      const literal = `[${components.join(', ')}]`;
+      if (guarded.length > 0) {
+        const test = guarded
+          .map(
+            (v) => `Array.isArray(${v}) && ${v}.length === ${componentWidth}`
+          )
+          .join(' && ');
+        const fallback = `_SYS.bcast(${closure}, ${sources.join(', ')})`;
+        return (
+          `((${bindings.join(', ')}) => ${test} ? ${literal} : ${fallback})` +
+          `(${bound.join(', ')})`
+        );
+      }
+      return bindings.length === 0
+        ? literal
+        : `((${bindings.join(', ')}) => ${literal})(${bound.join(', ')})`;
+    }
     // A point multiplied by a list (`[1,2,3]·(cos a, sin a)`, Tycho item 214):
     // broadcast over the LIST operands first, and at each of their elements
     // broadcast the scalar closure over the point's components — so the point
@@ -9857,12 +10111,24 @@ export class BaseCompiler {
    * producers defer to their source.
    */
   private static elementsRealByConstruction(coll: Expression): boolean {
-    // A symbol's elements are what its TYPE says: `list<real>` is real by
-    // construction, `list<complex>` (or a wide `list<number>` holding a
-    // `{re, im}` cell) is not.
+    // A symbol has no callback for the analysis to miss, so its elements are
+    // exactly what its TYPE says. An element type that is not a real one is
+    // rejected by the caller before this point; what is left is a real
+    // element type (`list<real>`) or a WIDE one (`list<number>`). A list whose
+    // element type is `unknown` is not admitted, since `unknown` is not a
+    // subtype of `number`. A wide element is REAL under every
+    // discipline but `complex` — the same rule every other wide binding
+    // follows (`wideIsComplex`), and the same answer the indexed form of the
+    // very same fold gets: `Σ_{k=a}^{b} P[k]` over a `list<number>` reads
+    // each element as a plain number and accumulates with `+`. Reading the
+    // symbol arm more strictly than that put a REAL list reduction in the
+    // complex lane — `total(P[a...b])` over a `list<number>` was emitted as
+    // `_SYS.cplx((…).reduce(_SYS.sadd, 0))`.
     if (isSymbol(coll)) {
       const elt = BaseCompiler.collectionElementTypeOf(coll);
-      return elt !== undefined && isSubtype(elt, 'real');
+      return (
+        elt !== undefined && isSubtype(elt, 'number') && !isNonRealNumber(elt)
+      );
     }
     if (!isFunction(coll)) return false;
     const h = coll.operator;
@@ -9901,8 +10167,68 @@ export class BaseCompiler {
         BaseCompiler.elementsRealByConstruction(coll.ops[0])
       );
     }
+    // ELEMENT-WISE ARITHMETIC builds element k of its result from element k of
+    // each operand and applies no callback of its own, so its elements are
+    // real exactly when every operand contributes real ones. A collection
+    // operand is asked this same question; every other operand contributes one
+    // scalar to every element, and for a scalar the analysis's own
+    // `isComplexValued` verdict is exact — it is the verdict the emitter picks
+    // its lowering from. Only heads that NEVER promote are listed: `Sqrt`,
+    // `Ln` and the inverse-trig family lower through the complex kernels for
+    // an operand of unknown sign or magnitude under a promoting discipline, so
+    // for those the operands' realness says nothing about the result's.
+    if (BaseCompiler.NON_PROMOTING_ELEMENTWISE_HEADS.has(h))
+      return coll.ops.every((op) =>
+        op.type.matches('collection<any>') || isPossiblyCollectionTyped(op)
+          ? BaseCompiler.elementsRealByConstruction(op)
+          : !BaseCompiler.isComplexValued(op)
+      );
+    // A call to a USER FUNCTION whose body BUILDS the collection: the elements
+    // are the ones that body builds, so the question passes through to it. The
+    // parameters are shielded — bound as declared, never read through a
+    // same-named engine symbol — which is the binding the emitted definition
+    // is compiled under, and a head already being looked through declines so
+    // that a self- or mutually-recursive definition terminates instead of
+    // looping. Both rules are the ones `withCollectionElements` follows for
+    // the element-level analysis; this arm differs only in asking about the
+    // body as a whole, because a body such as `[-y, x] / (x² + y²)` computes
+    // its collection rather than writing one out.
+    if (typeof h === 'string' && !BaseCompiler._userCallVisited.has(h)) {
+      const literal = BaseCompiler.userFunctionLiteral(coll.engine, h);
+      const body =
+        literal === undefined
+          ? undefined
+          : BaseCompiler.unwrappedFunctionBody(literal.ops[0]);
+      if (literal !== undefined && body !== undefined) {
+        const nextVisited = new Set(BaseCompiler._userCallVisited);
+        nextVisited.add(h);
+        const prevVisited = BaseCompiler._userCallVisited;
+        BaseCompiler._userCallVisited = nextVisited;
+        try {
+          return BaseCompiler.withBinderMask(
+            BaseCompiler.userCallMask(literal),
+            () => BaseCompiler.elementsRealByConstruction(body)
+          );
+        } finally {
+          BaseCompiler._userCallVisited = prevVisited;
+        }
+      }
+    }
     return false;
   }
+
+  /**
+   * The element-wise heads whose lowering combines its operands' elements
+   * WITHOUT ever promoting a real element to the complex lane. Read by
+   * {@link elementsRealByConstruction}, which passes the realness question
+   * through such a head to its operands.
+   *
+   * `Power` and the radicals are deliberately absent: under a promoting
+   * discipline `√x` and `x^0.5` lower through the complex kernels when the
+   * sign of `x` is unknown, so a real operand does not make the result real.
+   */
+  private static readonly NON_PROMOTING_ELEMENTWISE_HEADS: ReadonlySet<string> =
+    new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Square']);
 
   /**
    * Fail closed (D6) when a LOCKSTEP walk over several sources — the zip
@@ -11705,13 +12031,39 @@ export class BaseCompiler {
     // compiled to a non-zero literal is not zero either.
     const stepCouldBeZero =
       stepExpr !== undefined && (stepValue === undefined || stepValue === 0);
-    const countCode = `Math.max(0, Math.floor((${hi} - ${lo}) / ${step}) + 1)`;
+    // An OMITTED step is the auto-directed ±1, so `(hi - lo) / step` is
+    // `|hi - lo|`: never negative, which makes the `Math.max(0, …)` clamp
+    // dead. The clamp is dropped for no other range: an explicit step pointing
+    // away from the stop needs it (`Range(10, 1, 1)` is empty, and its raw
+    // count is −8).
+    //
+    // The `Math.floor` stays in every case. An INTEGER-typed bound is not an
+    // integer bound at run time: a declared type constrains what the ENGINE
+    // may assign, not what a caller may put in the kernel's `vars` object, so
+    // `a...b` with `a = 1` and `b = 2.5` gives the raw count 2.5, and without
+    // the floor the loop below runs a third time and yields the index 3, past
+    // the stop, where the interpreter answers two elements.
+    const noClamp =
+      stepExpr === undefined &&
+      BaseCompiler.isIntegerValued(loExpr) &&
+      BaseCompiler.isIntegerValued(hiExpr);
+    const countCode = noClamp
+      ? `Math.floor((${hi} - ${lo}) / ${step}) + 1`
+      : `Math.max(0, Math.floor((${hi} - ${lo}) / ${step}) + 1)`;
     return (
       `{ const ${lo} = ${loCode}; const ${hi} = ${hiCode}; ` +
       `const ${step} = ${stepCode}; ` +
       `const ${count} = ${stepCouldBeZero ? `${step} === 0 ? 0 : ${countCode}` : countCode}; ` +
       // Array.from treats NaN as a zero length and rejects lengths that
       // exceed the maximum Array length. Preserve both behaviors.
+      //
+      // The test survives an INTEGER-typed bound, whose count is a whole
+      // number by the rule above. A declared type constrains what the ENGINE
+      // may assign, not what a caller may put in the kernel's `vars` object,
+      // so an `integer` bound can still arrive as `+∞` at run time — and
+      // without this test the loop below would never reach its stop and would
+      // hang the calling thread instead of raising the error `Array.from`
+      // raised.
       `if (${count} > 4294967295) throw new RangeError('Invalid array length'); ` +
       `for (let ${index} = 0; ${index} < ${count}; ${index}++) { ` +
       `const ${name} = ${lo} + ${step} * ${index}; ${body} } }`
@@ -22820,7 +23172,9 @@ export class BaseCompiler {
     // node belongs to without an `isSame` against every class.
     const classes: Expression[][] = [];
     const byHash = new Map<number, Expression[][]>();
-    const record = (node: Expression): void => {
+    /** Add `node` to the structural class it belongs to, creating that class
+     * in `into` when it is the first member seen. */
+    const record = (node: Expression, into: Expression[][] = classes): void => {
       const bucket = byHash.get(node.hash);
       if (bucket !== undefined)
         for (const cls of bucket)
@@ -22829,7 +23183,7 @@ export class BaseCompiler {
             return;
           }
       const cls = [node];
-      classes.push(cls);
+      into.push(cls);
       if (bucket === undefined) byHash.set(node.hash, [cls]);
       else bucket.push(cls);
     };
@@ -22982,6 +23336,73 @@ export class BaseCompiler {
     visit(expr);
     if (classes.length === 0) return classes;
 
+    // A maximal invariant node is recorded WHOLE and never descended into, so
+    // a subexpression that two of those nodes share — or that one of them
+    // evaluates twice — is emitted once inside each binding that contains it.
+    // Ask the CSE harvest which subexpressions of `expr` repeat, and give
+    // each repeated INVARIANT one a binding of its own, placed ahead of the
+    // bindings that contain it. Without this a shader's hoisted block
+    // recomputed `fract(x)` six times and one `sin(dot(…))` hash twice — a
+    // heat-map kernel, pinned in
+    // `test/compute-engine/item-280-cse-shared-subterms.test.ts`.
+    //
+    // The harvest is what decides whether a subexpression repeats often
+    // enough to be worth a binding, so this pass inherits the CSE size and
+    // benefit thresholds unchanged. It reaches only the candidates of the
+    // harvest's ROOT region: a candidate of an inner region sits behind a
+    // condition or inside a nested binder, where a binding emitted before
+    // the loop would be evaluated when the original was not.
+    const shared: Expression[][] = [];
+    const members = new Set<Expression>();
+    for (const cls of classes) for (const node of cls) members.add(node);
+    const containsMemberMemo = new Map<Expression, boolean>();
+    const containsMember = (node: Expression): boolean => {
+      const cached = containsMemberMemo.get(node);
+      if (cached !== undefined) return cached;
+      const result =
+        members.has(node) ||
+        (isFunction(node) && node.ops.some(containsMember));
+      containsMemberMemo.set(node, result);
+      return result;
+    };
+    // Smallest first, so a shared subexpression of another shared one is
+    // bound before it and referenced by name inside it.
+    const candidates = [...harvestCse(expr, admission).root.candidates].sort(
+      (a, b) => a.size - b.size || a.id - b.id
+    );
+    for (const candidate of candidates) {
+      const node = candidate.representative;
+      // The exclusions `visit` applies to a node it might record, plus one:
+      // a candidate that CONTAINS a node an existing class already binds
+      // would be compiled before that class installs its name, emitting the
+      // enclosed structure a second time. The harvest has already applied
+      // the purity and emission-purity gates (`isPure`, `isCseAdmissible`),
+      // so only the rules it knows nothing about are restated here.
+      if (mentionsVarying(node)) continue;
+      if (node.operator === 'Function') continue;
+      if (BaseCompiler.isComplexValued(node)) continue;
+      if (isCallerMapped(node, admission)) continue;
+      if (
+        target.cse !== undefined &&
+        BaseCompiler.availableCseBinding(target.cse, node, true) !== undefined
+      )
+        continue;
+      if (containsMember(node)) continue;
+      for (const occurrence of candidate.nodes)
+        if (
+          !BaseCompiler._codeOverrides.has(occurrence) &&
+          // An occurrence an existing class already binds must not be
+          // recorded again: `record` finds that class by structure and would
+          // push the very same node into it a second time. The test above
+          // reads the REPRESENTATIVE only, and two occurrences of one
+          // structure need not have been recorded alike — `visit` skips a
+          // lazy operand region, so one occurrence can be a member while the
+          // representative is not.
+          !members.has(occurrence)
+        )
+          record(occurrence, shared);
+    }
+
     // Second pass: a node in a CONDITIONALLY evaluated position (a `Which`
     // arm, a short-circuited `And` operand) that has the same structure as a
     // recorded class joins that class. The binding is computed
@@ -23009,7 +23430,7 @@ export class BaseCompiler {
       for (const op of node.ops) attach(op);
     };
     attach(expr);
-    return classes;
+    return [...shared, ...classes];
   }
 
   /**

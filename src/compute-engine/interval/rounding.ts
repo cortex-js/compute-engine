@@ -455,6 +455,22 @@ export function exactDiv(args: readonly unknown[], value: Interval): Exactness {
   return quotientExactness(a, b, value);
 }
 
+/**
+ * The rule of `negDiv` (`arithmetic.ts`): the four corner quotients of the
+ * NEGATED numerator against the divisor. Negation only flips the sign of each
+ * endpoint, which is exact, so the corners are those of `[-a.hi, -a.lo]`
+ * against `b`.
+ */
+export function exactNegDiv(
+  args: readonly unknown[],
+  value: Interval
+): Exactness {
+  const a = operandInterval(args[0]);
+  const b = operandInterval(args[1]);
+  if (a === undefined || b === undefined) return INEXACT;
+  return quotientExactness({ lo: -a.hi, hi: -a.lo }, b, value);
+}
+
 /** The same one-walk rule as `productExactness`, over the four corner
  *  quotients. */
 function quotientExactness(

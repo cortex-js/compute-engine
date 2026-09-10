@@ -148,7 +148,11 @@ describe('a user-function result is a scalar by construction', () => {
   });
 });
 
-describe('a body that builds a collection keeps its broadcast', () => {
+describe('a body that builds a collection keeps its element-wise lowering', () => {
+  // The list body states its width, so the element-wise lowering is the
+  // component one — two expressions reading `[0]` and `[1]` — rather than the
+  // run-time `_SYS.bcast` dispatch. The point body below keeps the dispatch:
+  // a point is atomic under broadcast and takes the dedicated point lane.
   test('a list-returning body still broadcasts, and agrees with the interpreter', () => {
     const ce = new ComputeEngine();
     ce.declare('t', 'number');
@@ -157,7 +161,13 @@ describe('a body that builds a collection keeps its broadcast', () => {
       ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
     );
     const r = build(ce, ['Multiply', 2, ['m', 't']]);
-    expect(r.code).toContain('_SYS.bcast');
+    // The call result is tested for its shape before its components are read,
+    // so the `_SYS.bcast` dispatch survives as the ELSE branch of that test —
+    // never on the path a correctly shaped result takes.
+    expect(r.code.split('_SYS.bcast(').length).toBe(
+      r.code.split(' : _SYS.bcast(').length
+    );
+    expect(r.code).toContain('[0]');
     expect(r.run({ t: 3 })).toEqual([6, 12]);
     expect(
       ce

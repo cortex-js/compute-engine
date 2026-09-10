@@ -12,6 +12,7 @@ import {
   exactSub,
   exactMul,
   exactDiv,
+  exactNegDiv,
 } from './rounding.js';
 
 /**
@@ -200,6 +201,32 @@ function divRaw(
 }
 
 /**
+ * Divide the NEGATION of an interval by another interval: `(−a) / b`.
+ *
+ * The compiler emits this wherever a negated numerator meets a division
+ * (`−⌊n·x⌋ / n` is the shape a lattice snap takes), so the negation does not
+ * build an interval the division consumes at once. It answers what
+ * `div(negate(a), b)` answers: negation flips the sign of each endpoint, which
+ * is exact and needs no outward step, and the division then runs on those
+ * endpoints under its own step and its own exactness proof (`exactNegDiv`).
+ *
+ * The separate negation of the composition is a `liftJump` step of its own,
+ * and that step DROPS the jump of an operand whose negated enclosure is a
+ * single point. It cannot arise: an operand is only tagged as a jump when its
+ * enclosure spans the two sides of a break, so its endpoints differ (`jump` in
+ * `util.ts`, and `liftJump`, which re-tags only a non-degenerate enclosure).
+ */
+function negDivRaw(
+  a: Interval | IntervalResult,
+  b: Interval | IntervalResult
+): IntervalResult {
+  const unwrapped = unwrapOrPropagate(a, b);
+  if (!Array.isArray(unwrapped)) return unwrapped;
+  const [aVal, bVal] = unwrapped;
+  return _div({ lo: -aVal.hi, hi: -aVal.lo }, bVal);
+}
+
+/**
  * Internal division that works on plain Intervals.
  */
 function _div(a: Interval, b: Interval): IntervalResult {
@@ -298,6 +325,7 @@ export const sub = liftJump(outwardUnlessExact(subRaw, exactSub));
 export const negate = liftJump(negateRaw);
 export const mul = liftJump(outwardUnlessExact(mulRaw, exactMul));
 export const div = liftJump(outwardUnlessExact(divRaw, exactDiv));
+export const negDiv = liftJump(outwardUnlessExact(negDivRaw, exactNegDiv));
 // `scale` and `scaleDiv` answer the same endpoints as `mul` and `div` for the
 // operands they specialize, so they take the same outward step under the same
 // provers: the prover reads the two operands and the answered enclosure, none

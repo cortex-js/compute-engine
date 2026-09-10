@@ -13,6 +13,7 @@ import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   canIndexArrayDirectly,
   isConstructedScalar,
+  isDecidedLoopIndex,
   numericArrayCells,
   recordIntegerRange,
 } from './javascript-value-facts.js';
@@ -210,6 +211,7 @@ import {
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
+  MIN_UNROLLED_WIDTH,
   overriddenCompilationHeads,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
@@ -353,10 +355,9 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
   Subtract: ['-', 11],
   Multiply: ['*', 12],
   Divide: ['/', 13],
-  // Equal / NotEqual are NOT operators: a raw `===` is exact, but the
-  // interpreter compares numbers within `engine.tolerance`. They are handled as
-  // function forms (see `compileJSEquality`) so `0.1 + 0.2 === 0.3` matches the
-  // interpreter's `True`.
+  // Equal / NotEqual are NOT operators: they need the string, tuple and
+  // collection gates and the absence guard of `compileJSEquality`, which
+  // emits the exact `===`/`!==` for the scalar pairs that pass them.
   LessEqual: ['<=', 9],
   GreaterEqual: ['>=', 9],
   Less: ['<', 9],
@@ -370,22 +371,24 @@ const JAVASCRIPT_OPERATORS: CompiledOperators = {
  * Fail closed (D6) when EQUALITY (or the `IndexOf` element test) has a provably
  * string-valued operand — fully closed on any string evidence.
  *
- * Both lowerings are NUMERIC: equality is `Math.abs(a - b) <= tol`, which for
- * strings is `NaN <= tol` → a silent `false`, so a compiled `"a" == "a"`
- * answered `false` where the interpreter answers `True`. `IndexOf` uses the same
- * tolerance test, so a string needle was never found (0 instead of the
- * interpreter's 1-based index). String equality was never correct compiled, so
- * admitting it is a separate tier, not a soundness fix.
+ * Both lowerings are NUMERIC: equality is a raw `===` on the host values,
+ * which skips the content conditioning (NFC, well-formed surrogates) the
+ * interpreter applies before it compares text, and cannot bridge a character
+ * against a one-cluster string (`_SYS.eqt` does both). An earlier tolerance
+ * lowering (`Math.abs(a - b) <= tol`) was `NaN <= tol` on strings, so a
+ * compiled `"a" == "a"` answered `false` and a string needle was never found
+ * by `IndexOf`. String equality was never correct compiled, so admitting it is
+ * a separate tier, not a soundness fix.
  *
  * The ORDERINGS are governed by the narrower `assertNoMixedStringOrdering`:
  * they emit a raw `<`, which the interpreter agrees with for strings.
  *
  * Evidence is tested per PARTICIPANT, not per operand: the `_SYS.eq`/`_SYS.neq`
  * runtime dispatch compares a list against a scalar ELEMENT-WISE and two lists
- * with the same tolerance test, so a `list<string>` operand puts strings on the
+ * with the same numeric leaf, so a `list<string>` operand puts strings on the
  * numeric path even though its own type is not a subtype of `string`. That hole
- * let `Equal(["a"], ["a"])` compile to `false` where the interpreter answers
- * `True`.
+ * let `Equal(["a"], ["a"])` compile to `false` (under the tolerance leaf of
+ * the time) where the interpreter answers `True`.
  */
 function assertNoStringOperand(
   kind: string,
@@ -394,8 +397,8 @@ function assertNoStringOperand(
   if (args.some(isProvablyStringComparisonParticipant))
     throw new Error(
       `${kind}: cannot compile — string-valued operands are not supported by ` +
-        `this target (the lowering is numeric: a tolerance test on the ` +
-        `difference, which is NaN for strings). ` +
+        `this target (the lowering is numeric: a host \`===\` that skips the ` +
+        `interpreter's text conditioning). ` +
         `Fail closed (D6) — the interpreter evaluates it.`
     );
 }
@@ -494,8 +497,8 @@ function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
   // a character and a one-cluster string with the same NFC content are equal),
   // so the strict `===` is faithful for a character/character and a
   // character/string pair alike. Without this clause a two-character `Equal`
-  // would otherwise have no text evidence and fall through to numeric tolerance
-  // lowering, which is `Math.abs("a" - "a") <= tol` — `NaN <= tol` — so
+  // would otherwise have no text evidence and fall through to the numeric
+  // lowering, which skips the interpreter's content conditioning (NFC), so
   // `CharacterFrom("a") == CharacterFrom("a")` compiled to `false` where the
   // interpreter answers `True`.
   if (
@@ -545,13 +548,13 @@ function isStringCollectionEquality(args: ReadonlyArray<Expression>): boolean {
  * The interpreter compares such an aggregate as one value; both compiled
  * kernels see its JavaScript representation as something to look inside:
  *
- *  - `_SYS.eq`/`_SYS.neq` reduce to the numeric tolerance test, which for two
- *    equal `dictionary<integer>` / `record{…}` values is `Math.abs(obj - obj)`
- *    → `NaN <= tol` → `false`, where the interpreter answers `True`;
+ *  - `_SYS.eq`/`_SYS.neq` reduce to the numeric leaf, which for two equal
+ *    `dictionary<integer>` / `record{…}` values compares two distinct objects
+ *    by identity → `false`, where the interpreter answers `True`;
  *  - a `tuple` lowers to a JS array, so `Equal(Tuple(1, 2), 1)` runs element-wise
  *    to `[true, false]` and `Equal(Tuple(1, 2), List(1, 2))` to `true`, where
  *    the interpreter answers `False` to both (a point binds atomically);
- *  - `IndexOf`'s element test is the same tolerance test, so a tuple needle was
+ *  - `IndexOf`'s element test compares by identity too, so a tuple needle is
  *    never found — `IndexOf([[1,2],[3,4]], Tuple(3,4))` ran to `0` against the
  *    interpreter's `2`.
  *
@@ -575,9 +578,9 @@ function assertComparableAggregate(
     throw new Error(
       `${kind}: cannot compile — a ${aggregate} participant. The interpreter ` +
         `compares it as ONE value, whereas the compiled kernels look inside ` +
-        `its JavaScript representation: the numeric tolerance test answers ` +
-        `\`false\` for two EQUAL dictionaries or records (\`Math.abs(obj - ` +
-        `obj)\` is NaN), and a tuple's JS array is mapped over element-wise ` +
+        `its JavaScript representation: the numeric leaf answers \`false\` ` +
+        `for two EQUAL dictionaries or records (two distinct objects are ` +
+        `never \`===\`), and a tuple's JS array is mapped over element-wise ` +
         `(\`Equal(Tuple(1, 2), 1)\` → \`[true, false]\`) where a point binds ` +
         `atomically. Fail closed (D6) — the interpreter evaluates it.`
     );
@@ -637,68 +640,113 @@ function assertNoMixedStringOrdering(
 }
 
 /**
- * May the `operands` of an equality be compared with the exact `===`/`!==`
- * instead of the tolerance test on their difference?
- *
- * Yes when every one of them is PROVABLY integer-valued and none is
- * complex-shaped. Two distinct integers differ by at least 1, and equal
- * integers differ by exactly 0, so for any tolerance below 1 the tolerance
- * test and `===` accept exactly the same pairs — while `===` needs neither a
- * subtraction nor a `Math.abs` call. A tolerance of 1 or more is a deliberate
- * coarsening the user asked for (it makes 3 and 4 equal), so the exact form is
- * not used there.
- *
- * An operand whose type carries a `nan` arm beside the integer one is admitted
- * as well. `NaN` is what an out-of-range element read (`P[i]`) or a `0/0`
- * answers, and both forms agree with the interpreter on it: `Equal(NaN, 3)` is
- * `False` there, and `NaN === 3` is `false` while the tolerance form's two
- * tests (`NaN === 3` and `Math.abs(NaN - 3) <= tol`) are both `false` too;
- * `NotEqual(NaN, 3)` is `True` there, which `NaN !== 3` reports and which the
- * tolerance form reports as the negation of the same `Equal` test. The two
- * forms agree on the two signed zeros as well: `-0 === 0` is true, and so is
- * `Math.abs(-0 - 0) <= tol`.
- *
- * The heads that carry an `integer` result type — and so take this form — are
- * `Sign`, `Floor`, `Ceil`, `Round`, `Length`, an integer literal, a
- * `Sum`/`Product` index, and an index a comprehension binds over an integer
- * range. The Tycho code-generation audit of 2026-09-08 measured 49 tolerance
- * tests between such operands.
+ * Operator heads whose JavaScript lowering always produces a NUMBER (a `NaN`
+ * included) and never the absent value `undefined`. A free symbol read
+ * (`_.x`) answers `undefined` when the caller omits it, and so may a user
+ * function whose body returns a bare parameter, or an element read over a
+ * generic list; an arithmetic or elementary head applied to such an operand
+ * still answers a number, because JavaScript arithmetic on `undefined` is
+ * `NaN`. `compileJSEquality` uses this to decide whether an exact `===`
+ * needs an absence guard: two absent operands are `===` to each other, and
+ * the interpreter answers `Missing` for `Equal(Missing, Missing)`, not `True`.
  */
-function exactIntegerComparison(
-  operands: ReadonlyArray<Expression>,
-  tolerance: number
+const JS_ALWAYS_NUMBER_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+  'Abs',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Sign',
+  'Mod',
+  'Min',
+  'Max',
+  'Sum',
+  'Product',
+  'Length',
+  'Exp',
+  'Ln',
+  'Log',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Arctan',
+  'Arctan2',
+  'Arcsin',
+  'Arccos',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Dot',
+  'Norm',
+  'Hypot',
+  'Gamma',
+  'Factorial',
+  'Random',
+  'RandomInteger',
+]);
+
+/** A JavaScript numeric literal as the compiler spells one (`3`, `-0.5`,
+ * `1e-7`, `Infinity`, `NaN`). */
+const JS_NUMERIC_LITERAL =
+  /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$|^-?Infinity$|^NaN$/i;
+
+/**
+ * May this operand read the absent value `undefined` at run time? Never for:
+ * a number literal; an application of a head in `JS_ALWAYS_NUMBER_HEADS`;
+ * an operand whose EMITTED code is a numeric literal (an unrolled `Sum`
+ * substitutes its index at the emitted-code level, so the node is still the
+ * index symbol while the code is `1`); and a loop index the emitted loop
+ * itself binds (`isDecidedLoopIndex`). Every other shape — a free symbol read
+ * `_.x`, a user function call, an element read, a `Which` arm — is treated as
+ * possibly absent. The answer only decides whether an equality carries the
+ * `typeof` guard, so a conservative `true` costs one type test and never a
+ * wrong value.
+ */
+function mayReadUndefinedJS(
+  e: Expression,
+  code: string,
+  target: CompileTarget<Expression>
 ): boolean {
-  const integerOrNaN = (a: Expression): boolean =>
-    BaseCompiler.isIntegerValued(a) ||
-    a.type?.matches('integer | nan') === true;
-  return (
-    tolerance < 1 &&
-    operands.every((a) => integerOrNaN(a) && !BaseCompiler.isComplexValued(a))
-  );
+  if (isNumber(e)) return false;
+  if (JS_NUMERIC_LITERAL.test(code)) return false;
+  if (isSymbol(e) && isDecidedLoopIndex(e.symbol, target.boundVars))
+    return false;
+  if (isFunction(e) && typeof e.operator === 'string')
+    return !JS_ALWAYS_NUMBER_HEADS.has(e.operator);
+  return true;
 }
 
 /**
- * Emit a JavaScript equality test with the engine's numeric tolerance baked in
- * at compile time. The interpreter treats two numbers as equal when
- * `|a − b| <= engine.tolerance` (default 1e-10) — so `0.1 + 0.2 === 0.3` is
- * *true* — whereas a raw `===` is exact and would disagree. `kind` selects
- * Equal (`a === b || |a − b| <= tol`) vs NotEqual (the NEGATION of that same
- * test, not `|a − b| > tol`). Complex operands compare component-wise for
- * exactness and on the modulus of the difference (`_SYS.cabs`) for tolerance.
- * Chained (N-ary) forms conjoin pairwise with `&&`.
+ * Emit a JavaScript equality test. Compiled `Equal`/`NotEqual` on numeric
+ * operands is EXACT (`===`/`!==`), the IEEE 754 comparison: `0.1 + 0.2 = 0.3`
+ * compiles to `false`, two infinities of the same sign are equal, and `NaN`
+ * equals nothing. This differs from the interpreter, which compares numbers
+ * within `engine.tolerance`; the compiled lanes serve plot kernels, where a
+ * tolerance test on every comparison (a subtraction, an absolute value and a
+ * compare per sample) is not acceptable and where the exact answer is the
+ * one the reference graphing calculators give (user ruling of 2026-09-09,
+ * `docs/COMPILATION-MODEL.md`).
  *
- * Two details keep the emission faithful where the difference of the operands
- * is `NaN` — that is, when an operand is `NaN`, and when both operands are
- * infinities of the SAME sign. Every comparison against `NaN` is false, so the
- * bare tolerance test answers `false` for BOTH of those pairs:
+ * `NotEqual` is the NEGATION of the `Equal` test (`!==`), which is `true` on
+ * a `NaN` operand as the interpreter answers (`NotEqual(NaN, 3)` is `True`).
+ * Complex operands compare component-wise. Chained (N-ary) forms conjoin
+ * pairwise with `&&`.
  *
- *  - the EXACT pre-test (`exact`) rescues the matching infinities, which the
- *    interpreter answers `Equal(oo, oo)` → `True`;
- *  - `NotEqual` is the NEGATION of the whole `Equal` test, not `|a − b| > tol`.
- *    The `>` form answered `false` on a `NaN` operand — the compiled function
- *    reported that `NaN` EQUALS 3 — while `!(NaN-test)` answers `true`, which
- *    is both the IEEE 754 convention and what the interpreter answers
- *    (`NotEqual(NaN, 3)` is `True`).
+ * One guard survives: an absent operand reads `undefined`, and two absent
+ * operands are `===` to each other, where the interpreter answers `Missing`
+ * (never `True`) for `Equal(Missing, Missing)`. When BOTH operands may read
+ * `undefined` (`mayReadUndefinedJS`), the left operand is tested with
+ * `typeof … === 'number'` first, so the pair answers `false` for `Equal`
+ * and `true` for `NotEqual`. A pair with a literal or an arithmetic result
+ * on either side needs no guard: `undefined === 5` is already `false`.
  */
 function compileJSEquality(
   kind: 'Equal' | 'NotEqual',
@@ -808,13 +856,12 @@ function compileJSEquality(
   // reimplementing the n-ary dispatch in `_SYS`, not conjoining `_SYS.eq`
   // calls — and a conjunction of them is demonstrably a different value. No
   // faithful runtime dispatch, so no relaxation.
-  const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const collectionish = (a: Expression): boolean =>
     a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a);
   if (args.some(collectionish)) {
     if (args.length === 2) {
       const helper = kind === 'Equal' ? 'eq' : 'neq';
-      return `_SYS.${helper}((${compile(args[0])}), (${compile(args[1])}), ${tol})`;
+      return `_SYS.${helper}((${compile(args[0])}), (${compile(args[1])}))`;
     }
     throw new Error(
       `${kind}: cannot compile — chained (n-ary) comparison over an operand ` +
@@ -823,18 +870,20 @@ function compileJSEquality(
         `Fail closed (D6).`
     );
   }
-  // Which adjacent pairs take the EXACT `===`/`!==` form rather than the
-  // tolerance form? The tolerance form splices both of its operands twice (the
-  // exact pre-test and the difference), the exact form only once, so the
-  // impure-operand rule below needs the answer per pair.
-  const exactPair = (i: number, j: number): boolean =>
-    exactIntegerComparison([args[i], args[j]], tol);
+  // Each operand is compiled exactly once, here: the direct emission is what
+  // the absence predicate reads, and what the pair splices or binds below.
+  const direct = args.map((a) => compile(a));
+  // Does the pair (i, j) carry the absence guard? Only when both operands may
+  // read `undefined` — see `mayReadUndefinedJS`.
+  const guardedPair = (i: number, j: number): boolean =>
+    mayReadUndefinedJS(args[i], direct[i], target) &&
+    mayReadUndefinedJS(args[j], direct[j], target);
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
   // interpreter evaluates each operand once. Three positions splice an operand
-  // MORE than once: an operand of a TOLERANCE-form pair appears both in the
-  // exact pre-test and in the difference, a COMPLEX operand is spliced twice
-  // more by `part()` (once for `.re`, once for `.im`), and a MIDDLE operand of
-  // a chained (n-ary) form appears in the two comparisons that straddle it. So
+  // MORE than once: the LEFT operand of a guarded pair appears in the `typeof`
+  // test and in the comparison, a COMPLEX operand is spliced twice by
+  // `part()` (once for `.re`, once for `.im`), and a MIDDLE operand of a
+  // chained (n-ary) form appears in the two comparisons that straddle it. So
   // `Equal(Random()·i, …)` and `Equal(0.1, Random(), 0.9)` each consumed TWO
   // draws. When any operand is spliced more than once, bind EVERY impure
   // operand — in argument order, so the draw order matches the interpreter's —
@@ -843,17 +892,27 @@ function compileJSEquality(
   const multiSpliced = (i: number): boolean =>
     (i >= 1 && i <= args.length - 2) ||
     BaseCompiler.isComplexValued(args[i]) ||
-    (i > 0 && !exactPair(i - 1, i)) ||
-    (i < args.length - 1 && !exactPair(i, i + 1));
-  const bind = args.some((a, i) => a.isPure === false && multiSpliced(i));
+    (i < args.length - 1 && guardedPair(i, i + 1));
+  // An operand can also be spliced where it is CONDITIONALLY evaluated, which
+  // costs a draw just as surely as splicing it twice. The absence guard of a
+  // pair tests the left operand with `typeof` and joins it with `&&`, so the
+  // RIGHT operand of a guarded pair is never evaluated when the left one
+  // reads `undefined`. The interpreter evaluates both operands whatever they
+  // hold, so a skipped draw of the Random family would move every later draw
+  // of a seeded sequence.
+  const conditionallySpliced = (i: number): boolean =>
+    i >= 1 && guardedPair(i - 1, i);
+  const bind = args.some(
+    (a, i) => a.isPure === false && (multiSpliced(i) || conditionallySpliced(i))
+  );
   const bindings: string[] = [];
-  const codes = args.map((a, _i) => {
+  const codes = args.map((a, i) => {
     if (!bind || a.isPure !== false) return undefined;
     const t = BaseCompiler.tempVar(target);
-    bindings.push(`${t} = ${compile(a)}`);
+    bindings.push(`${t} = ${direct[i]}`);
     return t;
   });
-  const code = (i: number): string => codes[i] ?? compile(args[i]);
+  const code = (i: number): string => codes[i] ?? direct[i];
   const anyComplex = (i: number, j: number): boolean =>
     BaseCompiler.isComplexValued(args[i]) ||
     BaseCompiler.isComplexValued(args[j]);
@@ -863,38 +922,18 @@ function compileJSEquality(
     BaseCompiler.isComplexValued(e)
       ? { re: `(${c}).re`, im: `(${c}).im` }
       : { re: `(${c})`, im: '0' };
-  const distance = (i: number, j: number): string => {
-    if (!anyComplex(i, j)) return `Math.abs((${code(i)}) - (${code(j)}))`;
-    // The modulus of the difference of the two `{ re, im }` promotions.
-    const pa = part(args[i], code(i));
-    const pb = part(args[j], code(j));
-    return `_SYS.cabs({ re: ${pa.re} - ${pb.re}, im: ${pa.im} - ${pb.im} })`;
-  };
-  // Bit-exact equality, tested BEFORE the tolerance test. The difference of two
-  // infinities of the same sign is `NaN`, and every comparison against `NaN` is
-  // false, so the tolerance test alone reports a matching pair of infinities
-  // UNEQUAL where the interpreter answers `Equal(oo, oo)` → `True`. The exact
-  // test rescues that pair and changes nothing else: two values it accepts have
-  // a difference of exactly 0, which the tolerance test accepts as well. It is
-  // the shape the Python `_ce_eqcoll` collection helper already used. `NaN`
-  // fails both tests, which is again the interpreter's answer.
-  // The real arm also checks that the left operand IS a number: a caller
-  // variable that is absent reads `undefined`, and two absent operands are
-  // `===` to each other, which would report two unknown values EQUAL where
-  // the numeric difference (`NaN`) reports them not equal. One check on the
-  // left suffices — an absent right operand never equals a number.
-  const exact = (i: number, j: number): string => {
-    if (!anyComplex(i, j))
-      return `(typeof (${code(i)}) === 'number' && (${code(i)}) === (${code(j)}))`;
-    const pa = part(args[i], code(i));
-    const pb = part(args[j], code(j));
-    return `(${pa.re} === ${pb.re} && ${pa.im} === ${pb.im})`;
-  };
   const pair = (i: number, j: number): string => {
-    if (exactPair(i, j))
-      return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;
-    const equal = `${exact(i, j)} || ${distance(i, j)} <= ${tol}`;
-    return kind === 'Equal' ? `(${equal})` : `(!(${equal}))`;
+    if (anyComplex(i, j)) {
+      const pa = part(args[i], code(i));
+      const pb = part(args[j], code(j));
+      const equal = `(${pa.re} === ${pb.re} && ${pa.im} === ${pb.im})`;
+      return kind === 'Equal' ? equal : `(!${equal})`;
+    }
+    if (guardedPair(i, j)) {
+      const equal = `(typeof (${code(i)}) === 'number' && (${code(i)}) === (${code(j)}))`;
+      return kind === 'Equal' ? equal : `(!${equal})`;
+    }
+    return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;
   };
   let body: string;
   if (args.length === 2) body = pair(0, 1);
@@ -1608,7 +1647,18 @@ function compilePointComponent(
   // `PointX(v) + 1` over a two-point list answered `[2, 3, 4]` where the
   // interpreter answers `[2, 5]`, and a `PointList` body threw at run time
   // (Tycho item 238).
-  if (mayBePointList(t)) return `_SYS.pointComponent(${compiled()}, ${idx})`;
+  if (mayBePointList(t)) {
+    // Both readings see the same `[]`, so an EMPTY value at run time is the one
+    // question the dispatch cannot answer from the value. The declared element
+    // type answers it — the same evidence the interpreter uses when there is no
+    // element to look at (`elementTypeBroadcastsWhenEmpty`) — so it is carried
+    // into the helper. The broadcast reading is the helper's default, and is
+    // left unspoken to keep the emitted call short.
+    const emptyReading = elementTypeBroadcastsWhenEmpty(eltType)
+      ? ''
+      : ', false';
+    return `_SYS.pointComponent(${compiled()}, ${idx}${emptyReading})`;
+  }
   const direct = pointConstructorComponent(arg, idx, compile, target, eltType);
   if (direct !== undefined) return direct;
   return `(${compiled()}[${idx}]${pointComponentAbsence(eltType)})`;
@@ -1634,25 +1684,50 @@ function staticPointArityOf(t: Type): number | undefined {
 }
 
 /**
+ * The element types that PROVE a collection is not a list of points, because
+ * no value of them is one: the scalars. A `string` element type belongs here
+ * for the same reason a `number` one does — `PointX(["a", "b"])` is `"a"` —
+ * and `character` is what a `string` OPERAND reports as its element type.
+ */
+const NON_POINT_ELEMENT_TYPE = 'boolean | character | number | string';
+
+/**
  * Could a value of type `t` be a LIST OF POINTS as well as a single point, so
- * that a coordinate accessor over it has to dispatch at run time? True for an
- * untyped operand and for any type that admits an indexed collection whose
- * element type could be a point — a union such as `collection<any> | tuple`, a
- * bare `list`, a `list<any>`. Every non-collection type answers false, and so
- * does a collection whose element type settles the reading on its own
- * (`elementTypeReadsAsPointList`): a `list<number>` is a single point spelled
- * flat (`PointX([3, 4])` is `3`), and a `list<string>` element-indexes
- * (`PointX(["a", "b"])` is `"a"`).
+ * that a coordinate accessor over it has to dispatch at run time? This is the
+ * NON-EMPTY question, and it fails OPEN: the interpreter's `pointComponentAt`
+ * decides it from the concrete elements, so the compiled code may only settle
+ * it statically when the type PROVES one reading. Every other type keeps the
+ * run-time dispatch.
  *
- * Both must stay out of the run-time dispatch, not only the numeric one: that
- * dispatch reads an empty array as a list of no points and answers `[]`, which
- * is the wrong value for an operand the type proves element-indexes — the
- * interpreter answers the absence marker there.
+ * A type answers false only when it admits no indexed collection at all, or
+ * when its element type is one of the scalars, which no point is
+ * (`NON_POINT_ELEMENT_TYPE`): a `list<number>` is a single point spelled flat
+ * (`PointX([3, 4])` is `3`) and a `list<string>` element-indexes. Everything
+ * else answers true — an untyped operand, a bare `list`, a `list<any>`, a
+ * union such as `collection<any> | tuple`, and any NESTED element type
+ * (`list<list<any>>`, `list<number | tuple<number, number>>`), whose values
+ * can be rows of coordinates.
+ *
+ * Failing closed here reads a list of points as one point: `PointX(L)` over
+ * `[[1, 2], [3, 4]]` answered the first ROW, `[1, 2]`, where the interpreter
+ * broadcasts and answers `[1, 3]`.
+ *
+ * This is a DIFFERENT question from the one an EMPTY operand asks — see
+ * `elementTypeBroadcastsWhenEmpty`, which the caller consults separately. An
+ * empty collection has no element for either route to look at, so its reading
+ * comes from the declared element type alone, and that rule is stricter: a
+ * `list<list<any>>` broadcasts when it holds numeric rows but element-indexes
+ * when it is empty.
  */
 function mayBePointList(t: Type): boolean {
   if (t === 'unknown' || t === 'any') return true;
   if (!couldMatch(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
-  return elementTypeReadsAsPointList(collectionElementType(t));
+  const elt = collectionElementType(t);
+  // The bottom element type `never` (what the literal `[]` and `Set()` carry)
+  // is a subtype of every scalar, but it proves the collection holds nothing
+  // at all rather than proving anything about points.
+  if (elt === undefined || elt === 'never') return true;
+  return !isSubtype(elt, NON_POINT_ELEMENT_TYPE);
 }
 
 /** The type of a tuple's `idx`-th element, or `undefined` when `t` is not a
@@ -1715,31 +1790,37 @@ function isPointListOperand(e: Expression): boolean {
  * BROADCAST reading. A coordinate accessor then broadcasts over zero points
  * and answers the empty list, for every accessor position.
  *
- * Mirrors the interpreter's `elementTypeBroadcastsWhenEmpty`
- * (`library/collections.ts`), which states the rule in full. In short: an
- * element type that is point-shaped, the bottom `never` (what the literal `[]`
- * and `Set()` carry), or unknown broadcasts; every other element type
- * element-INDEXES when non-empty and so indexes when empty, answering the
- * absence marker. Kept as a local predicate, rather than imported from
- * `collections.ts`, for the module-init reordering reason `isPointListOperand`
- * gives.
+ * The element-type rule is the local `elementTypeBroadcastsWhenEmpty` below,
+ * which mirrors the interpreter's function of the same name
+ * (`library/collections.ts`). In short: an element type that is point-shaped,
+ * the bottom `never` (what the literal `[]` and `Set()` carry), or unknown
+ * broadcasts; every other element type element-INDEXES when non-empty and so
+ * indexes when empty, answering the absence marker. Kept as a local predicate,
+ * rather than imported from `collections.ts`, for the module-init reordering
+ * reason `isPointListOperand` gives.
  *
- * An operand that indexes falls through to the direct `[idx]` access, whose
- * absence value is this target's projection of that marker — `NaN` for a
- * coordinate that could hold a number, and the bare access otherwise (see
- * `pointComponentAbsence`). A STRING is refused ahead of the element type, as
+ * An operand that indexes falls through to the routes below, which answer the
+ * marker for it: the direct `[idx]` access, whose absence value is this
+ * target's projection of the marker — `NaN` for a coordinate that could hold a
+ * number, and the bare access otherwise (see `pointComponentAbsence`) — or the
+ * run-time dispatch with the indexing reading stated, when the element type is
+ * one whose non-empty reading only the value settles (`mayBePointList`).
+ * A STRING is refused ahead of the element type, as
  * the interpreter refuses it: the accessors element-INDEX a string
  * (`PointX("abc")` is `"a"`).
  */
 function isEmptyCollectionOperand(e: Expression): boolean {
   if (e.isFiniteCollection !== true || e.count !== 0) return false;
   if (e.type.matches('string')) return false;
-  return elementTypeReadsAsPointList(collectionElementType(jsType(e)));
+  return elementTypeBroadcastsWhenEmpty(collectionElementType(jsType(e)));
 }
 
 /**
- * True when an ELEMENT type lets a collection read as a LIST OF POINTS, so a
- * coordinate accessor over it broadcasts. Mirrors the interpreter's
+ * Which reading a coordinate accessor takes over an EMPTY collection: true to
+ * BROADCAST over zero points, which answers the empty list; false to
+ * element-INDEX, which answers the absence marker. An empty collection has no
+ * element to look at, so the declared ELEMENT type is the only evidence, and
+ * this is the question it answers. Mirrors the interpreter's
  * `elementTypeBroadcastsWhenEmpty` (`library/collections.ts`), which states
  * the rule in full:
  *
@@ -1749,19 +1830,22 @@ function isEmptyCollectionOperand(e: Expression): boolean {
  *    broadcasts: it proves the collection is empty and says nothing about
  *    points;
  *  - an element type nothing is known about (`unknown`, `any`, or none at all)
- *    broadcasts, which on this target means the run-time dispatch decides;
+ *    broadcasts;
  *  - every other element type element-INDEXES. A numeric one because the
  *    collection is ONE point spelled flat (`PointX([3, 4])` is `3`); a string
  *    or boolean one because its elements are not points (`PointX(["a", "b"])`
- *    is `"a"`).
+ *    is `"a"`); a nested one because a row of non-numbers is not a point
+ *    either (`PointX([["a"], ["b"]])` is `["a"]`).
  *
- * The two predicates that read it — `isEmptyCollectionOperand` and
- * `mayBePointList` — must stay in lockstep, which is why they share it: an
- * operand routed to the run-time dispatch is read there by VALUE, and that
- * reading answers the empty list for an empty array, so an operand whose
- * element type element-indexes must not be routed there.
+ * This is STRICTER than the non-empty question `mayBePointList` asks, and the
+ * two must not be merged. `mayBePointList` fails open, because the non-empty
+ * reading is decided from the concrete elements; this one is decided from the
+ * type alone, so a `list<list<any>>` answers true there (its rows may be
+ * points) and false here. Where the two disagree, the compiled operand takes
+ * the run-time dispatch AND carries this answer into it — see the third
+ * argument of `_SYS.pointComponent`.
  */
-function elementTypeReadsAsPointList(elt: Type | undefined): boolean {
+function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
   if (elt === undefined) return true;
   if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
   if (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
@@ -2807,7 +2891,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `[${args.map((x) => spreadIfSequence(x, compile, target)).join(', ')}]`,
   // Element count of a compiled collection. Only an indexed collection lowers
   // to a JS array; a dictionary or string operand fails closed (D6).
-  Length: (args, compile) => {
+  Length: (args, compile, target) => {
     const arg = args[0];
     if (arg === null || arg === undefined)
       throw new Error('Length: no argument');
@@ -2834,7 +2918,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `has a string arm), and \`.length\` counts UTF-16 code units, not ` +
           `characters. Fail closed (D6) — the interpreter evaluates it.`
       );
-    return `(${compile(arg)}).length`;
+    // A `Range`-indexed gather is POSITION-PRESERVING — an out-of-band index
+    // contributes an absence marker in place rather than being dropped — so
+    // its length is the number of indices the range holds, and no slice has
+    // to be built to count them. The source is still read, and still tested
+    // for being an array: `Length` of a gather over a non-array answers the
+    // same NaN the gather itself would.
+    const loop = emitRangeGatherReduction(
+      arg,
+      target,
+      '0',
+      undefined,
+      (_acc, count) => count
+    );
+    return loop ?? `(${compile(arg)}).length`;
   },
   // Positional access. CE `At` is 1-based and supports negative indices from
   // the end. The index may be a scalar, a list of integers (gather), or a
@@ -3659,8 +3756,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // 1-based index of the first element equal to `value`, or 0 if not found.
   // The element test is EXACT, matching the interpreter's `.isSame()`, which
   // has no numeric tolerance (`IndexOf([0], 5e-11)` and
-  // `IndexOf([0.30000000000000004], 0.3)` both answer 0, probe-verified) —
-  // NOT the tolerance test `compileJSEquality` uses for `Equal`. It is not
+  // `IndexOf([0.30000000000000004], 0.3)` both answer 0, probe-verified),
+  // the same exact comparison `compileJSEquality` emits for `Equal`. It is not
   // `Array.indexOf` either, because of NaN (below). `findIndex` is 0-based and
   // returns -1 when absent, so `+ 1` maps both. The value is hoisted into an
   // IIFE parameter so it is evaluated once.
@@ -3739,7 +3836,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `NaN === NaN` is false, so a NaN needle would never be found, where the
     // interpreter's structural `.isSame()` answers 1 — hence the both-NaN
     // short-circuit. BOOLEAN-ness needs no guard: `true === 1` is false
-    // natively (it was the earlier `Math.abs(true - 1) <= tol` leaf that found
+    // natively (it was an earlier tolerance leaf, `Math.abs(true - 1) <= tol`, that found
     // a boolean needle in a numeric haystack, and a numeric needle in a
     // boolean one, where the interpreter answers 0).
     return `((_v) => (${coll}).findIndex((_x) => (_x !== _x && _v !== _v) || _SYS.eqt(_x, _v)) + 1)(${compile(
@@ -4288,23 +4385,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `(_SYS.cond(${c}) ? 1 : 0)`;
   },
   // δ: 1 when all arguments are equal — a single argument compares to 0 —
-  // else 0, using the same tolerance as compiled `Equal`. Arguments are
-  // hoisted into IIFE parameters so each is evaluated once.
+  // else 0. The comparison is EXACT (`===`), as compiled `Equal` is (see
+  // `compileJSEquality`): a `NaN` argument answers 0. Arguments are hoisted
+  // into IIFE parameters so each is evaluated once.
+  //
+  // The variadic form tests the first argument for absence before comparing.
+  // An absent value reads as `undefined` on the object axis of this target,
+  // and `undefined === undefined` is true, so two absent arguments would
+  // otherwise answer 1 — where the interpreter answers `Missing` and a
+  // compiled `Equal` of the same two operands answers false. Numeric absence
+  // is `NaN`, which already fails the comparison against itself and so needs
+  // no test of its own.
   KroneckerDelta: (args, compile) => {
     if (args.length === 0 || args[0] == null)
       throw new Error('KroneckerDelta: missing argument');
-    const tol = args[0].engine.tolerance ?? 1e-10;
-    // All-integer arguments compare exactly, for the reason given in
-    // `exactIntegerComparison`: integers are one apart or identical, so below
-    // a tolerance of 1 the two tests accept the same pairs, and they agree on
-    // `NaN` as well. The single-argument form compares against the integer 0.
-    const exact = exactIntegerComparison(args, tol);
-    if (args.length === 1)
-      return exact
-        ? `(${compile(args[0])} === 0 ? 1 : 0)`
-        : `(Math.abs(${compile(args[0])}) <= ${tol} ? 1 : 0)`;
-    const test = exact ? '_x === _v[0]' : `Math.abs(_x - _v[0]) <= ${tol}`;
-    return `((..._v) => _v.every((_x) => ${test}) ? 1 : 0)(${args.map((a) => compile(a)).join(', ')})`;
+    if (args.length === 1) return `(${compile(args[0])} === 0 ? 1 : 0)`;
+    // A complex operand is a `{ re, im }` object, which `===` compares by
+    // reference; compare it component-wise, as `compileJSEquality` does.
+    if (args.some((a) => BaseCompiler.isComplexValued(a))) {
+      const part = (e: Expression, c: string): string =>
+        BaseCompiler.isComplexValued(e) ? c : `({ re: ${c}, im: 0 })`;
+      return `((..._v) => _v[0] !== undefined && _v.every((_x) => _x.re === _v[0].re && _x.im === _v[0].im) ? 1 : 0)(${args.map((a) => part(a, compile(a))).join(', ')})`;
+    }
+    return `((..._v) => _v[0] !== undefined && _v.every((_x) => _x === _v[0]) ? 1 : 0)(${args.map((a) => compile(a)).join(', ')})`;
   },
   // Membership of a value in an indexed collection — `Contains` with the
   // operands flipped. Same primitive-element restriction; a domain (e.g.
@@ -4632,10 +4735,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `Math.min(Math.max(${compile(args[0])}, ${compile(args[1])}), ${compile(
       args[2]
     )})`,
-  Max: (args, compile) => compileExtremum('Max', args, compile),
-  Mean: (args, compile) => {
+  Max: (args, compile, target) => compileExtremum('Max', args, compile, target),
+  Mean: (args, compile, target) => {
     if (args.length === 0) return 'NaN';
-    if (args.length === 1) return `_SYS.mean(${compile(args[0])})`;
+    if (args.length === 1) {
+      // `_SYS.mean` is `sum / count` over the materialized elements; over a
+      // `Range`-indexed gather the counted loop computes the same two numbers
+      // in the same order without building the slice.
+      const loop = emitRangeGatherReduction(
+        args[0],
+        target,
+        '0',
+        (acc, element) => `${acc} += ${element};`,
+        (acc, count) => `${acc} / ${count}`
+      );
+      return loop ?? `_SYS.mean(${compile(args[0])})`;
+    }
     return `_SYS.mean([${args.map(compile).join(', ')}])`;
   },
   Median: (args, compile) => {
@@ -4722,7 +4837,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.correlation(${compile(args[0])}, ${compile(args[1])})`;
   },
-  Min: (args, compile) => compileExtremum('Min', args, compile),
+  Min: (args, compile, target) => compileExtremum('Min', args, compile, target),
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
@@ -7563,9 +7678,9 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  * such as `q(x)`) — the runtime side of `compileJSEquality`'s
  * possibly-collection lowering (Tycho item 41). Mirrors the interpreter's
  * dispatch, probe-verified shape by shape:
- * - scalar = scalar → tolerant boolean (`a === b || |a − b| <= tol`; a complex
- *   operand compares component-wise for exactness and on the modulus of the
- *   difference for tolerance)
+ * - scalar = scalar → an EXACT boolean (`a === b`, the IEEE 754 comparison
+ *   that `compileJSEquality` emits for scalars; a complex operand compares
+ *   component-wise)
  * - array = scalar (either order) → element-wise array of booleans
  *   (`[1,4,4] = 4` → `[false, true, true]`), recursing into nested arrays
  * - array = array → a single boolean: equal lengths and every element pair
@@ -7576,8 +7691,8 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  * The scalar leaf has a STRING branch (tier 2, 2026-08-08): when either side is
  * a string the comparison is content equality with no tolerance, the
  * interpreter's own string semantics (`compare.ts`). Without it the leaf fell
- * through to `Math.hypot(NaN, …) <= tol` → `false`, so two EQUAL string lists
- * answered `false`. It is the mirror of the Python target's `_ce_eqcoll` string
+ * through to the numeric leaf, which is `false` on strings, so two EQUAL
+ * string lists answered `false`. It is the mirror of the Python target's `_ce_eqcoll` string
  * leaf, and it is faithful for a MIXED leaf pair too (`Equal("a", 1)` is
  * `False` in the interpreter, and `eqText("a", 1)` is `false`) — though only the
  * all-string shapes are ADMITTED at compile time
@@ -7585,20 +7700,16 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  * not raw UTF-16, because the interpreter's strings are NFC and well-formed by
  * the time it compares them.
  */
-function eqTensor(
-  a: unknown,
-  b: unknown,
-  tol: number
-): boolean | (boolean | unknown[])[] {
+function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++)
-      if (eqTensor(a[i], b[i], tol) !== true) return false;
+      if (eqTensor(a[i], b[i]) !== true) return false;
     return true;
   }
-  // Array-vs-scalar with a NUMBER on the scalar side: one tolerance test per
+  // Array-vs-scalar with a NUMBER on the scalar side: one exact test per
   // element, with the `{re, im}` projection and the string branch reserved
   // for the elements that need them. The generic per-element recursion
   // allocated two projection objects per cell and re-probed the scalar's kind
@@ -7611,15 +7722,12 @@ function eqTensor(
     if (typeof scalar === 'number') {
       for (let i = 0; i < arr.length; i++) {
         const x = arr[i];
-        out[i] =
-          typeof x === 'number'
-            ? x === scalar || Math.abs(x - scalar) <= tol
-            : eqTensor(x, scalar, tol);
+        out[i] = typeof x === 'number' ? x === scalar : eqTensor(x, scalar);
       }
       return out;
     }
     for (let i = 0; i < arr.length; i++)
-      out[i] = aArr ? eqTensor(arr[i], b, tol) : eqTensor(a, arr[i], tol);
+      out[i] = aArr ? eqTensor(arr[i], b) : eqTensor(a, arr[i]);
     return out;
   }
   if (typeof a === 'string' || typeof b === 'string') return eqText(a, b);
@@ -7629,19 +7737,12 @@ function eqTensor(
       : { re: v as number, im: 0 };
   const pa = part(a);
   const pb = part(b);
-  // Bit-exact equality first, as `compileJSEquality`'s scalar form does and as
-  // the Python `_ce_eqcoll` helper does: the difference of two infinities of
-  // the same sign is `NaN`, so `Math.hypot(NaN, 0) <= tol` would report a
-  // matching pair of infinities UNEQUAL where the interpreter answers `True`.
-  // A pair the exact test accepts has a difference of exactly 0, which the
-  // tolerance test accepts too, so nothing else changes; `NaN` fails both,
-  // which is again the interpreter's answer.
+  // Bit-exact equality, as `compileJSEquality`'s scalar form emits it: two
+  // infinities of the same sign are equal, `NaN` equals nothing.
   // An absent operand reads `undefined` and is promoted to `{ re: undefined,
-  // im: 0 }`; two of them would be `===` on both parts, so the exact test
-  // also requires a real number on the left.
-  if (typeof pa.re === 'number' && pa.re === pb.re && pa.im === pb.im)
-    return true;
-  return Math.hypot(pa.re - pb.re, pa.im - pb.im) <= tol;
+  // im: 0 }`; two of them would be `===` on both parts, so the test also
+  // requires a real number on the left.
+  return typeof pa.re === 'number' && pa.re === pb.re && pa.im === pb.im;
 }
 
 /**
@@ -7649,19 +7750,13 @@ function eqTensor(
  * an array-vs-scalar pair, a single negated boolean for array-vs-array and
  * scalar-vs-scalar.
  */
-function neqTensor(
-  a: unknown,
-  b: unknown,
-  tol: number
-): boolean | (boolean | unknown[])[] {
+function neqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
-  if (aArr && bArr) return eqTensor(a, b, tol) !== true;
-  if (aArr)
-    return a.map((x) => neqTensor(x, b, tol)) as (boolean | unknown[])[];
-  if (bArr)
-    return b.map((y) => neqTensor(a, y, tol)) as (boolean | unknown[])[];
-  return eqTensor(a, b, tol) !== true;
+  if (aArr && bArr) return eqTensor(a, b) !== true;
+  if (aArr) return a.map((x) => neqTensor(x, b)) as (boolean | unknown[])[];
+  if (bArr) return b.map((y) => neqTensor(a, y)) as (boolean | unknown[])[];
+  return eqTensor(a, b) !== true;
 }
 
 /**
@@ -8833,24 +8928,24 @@ const SYS_HELPERS = {
    *    fewer than three components is the interpreter's `incompatible-
    *    dimensions` error, projected to a single `NaN` for the whole
    *    application — never a `NaN` per point;
-   *  - an EMPTY array is the empty list, and the coordinate broadcasts over
-   *    zero points: the empty list, for every coordinate — what the
-   *    interpreter answers for `PointX([])` (Desmos agrees: `[].x` is `[]`).
-   *    The competing reading of an empty collection, where the accessor
-   *    element-INDEXES and the coordinate is absent, cannot reach this helper:
-   *    it is chosen by an element type that settles the reading on its own — a
-   *    numeric one (`list<number>` is one point spelled flat) or a non-point
-   *    one (`list<string>` indexes) — and `mayBePointList` keeps such an
-   *    operand out, compiling it to a direct `[k]` access instead. The erasure
-   *    makes an empty TUPLE the same value; the list reading is taken for it
-   *    too, since a zero-component point is not a shape any compiled producer
-   *    builds;
+   *  - an EMPTY array is the one shape the VALUE cannot settle, since both
+   *    readings spell it `[]`. The caller settles it from the declared element
+   *    type — the same evidence the interpreter uses there — and states the
+   *    answer in `emptyBroadcasts`. When it broadcasts, the coordinate of zero
+   *    points is the empty list, for every coordinate: what the interpreter
+   *    answers for `PointX([])` (Desmos agrees: `[].x` is `[]`). When it
+   *    element-INDEXES instead (a `list<list<any>>`, whose rows are points
+   *    only when they hold numbers), the coordinate is absent and the answer
+   *    is `NaN`, this target's projection of the interpreter's marker. The
+   *    erasure makes an empty TUPLE the same value; it takes the broadcast
+   *    reading too, since a zero-component point is not a shape any compiled
+   *    producer builds;
    *  - an absent coordinate otherwise, and a non-array value (the
    *    interpreter's `incompatible-type` error) answer `NaN`.
    */
-  pointComponent: (v: unknown, k: number): unknown => {
+  pointComponent: (v: unknown, k: number, emptyBroadcasts = true): unknown => {
     if (!Array.isArray(v)) return NaN;
-    if (v.length === 0) return [];
+    if (v.length === 0) return emptyBroadcasts ? [] : NaN;
     const first = v[0];
     const rows =
       Array.isArray(first) &&
@@ -12233,7 +12328,8 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
 function compileExtremum(
   kind: 'Max' | 'Min',
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
 ): string {
   const fn = kind === 'Max' ? 'Math.max' : 'Math.min';
   const identity = kind === 'Max' ? '-Infinity' : 'Infinity';
@@ -12243,7 +12339,16 @@ function compileExtremum(
   const guardedReduce = (arrayCode: string): string =>
     `((_l) => _l.length === 0 ? NaN : _l.reduce((_a, _b) => ${fn}(_a, _b), ${identity}))(${arrayCode})`;
   if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
-    return guardedReduce(compile(args[0]));
+    // A `Range`-indexed gather walks its positions with a counted loop rather
+    // than building the slice. Its range holds at least one index, so the
+    // empty-input branch above has no counterpart there.
+    const loop = emitRangeGatherReduction(
+      args[0],
+      target,
+      identity,
+      (acc, element) => `${acc} = ${fn}(${acc}, ${element});`
+    );
+    return loop ?? guardedReduce(compile(args[0]));
   }
   // A single operand that is not PROVABLY scalar but not provably a collection
   // either — its type admits an indexed-collection arm (`number |
@@ -12401,6 +12506,178 @@ function compileGcdLcm(
 }
 
 /**
+ * The source and bounds of a `Range`-indexed positional gather — the
+ * `P[a...b]` spelling, `At(P, Range(a, b))` — when a reduction over it can be
+ * walked with a counted loop instead of being materialized. `undefined` for
+ * every other operand.
+ *
+ * Three conditions make the loop reproduce the gather EXACTLY:
+ *  - the range carries no explicit step, so its step is the auto-directed ±1
+ *    and its k-th index is `lo + k` (ascending) or `lo − k` (descending);
+ *  - both bounds are integer-typed, so every index the range yields is an
+ *    integer. That is what lets the loop read element by element: the
+ *    interpreter refuses a gather whose index list holds a NON-integer for
+ *    the whole read at once, which a per-element walk cannot reproduce;
+ *  - the source is a provably indexed collection whose elements are numbers,
+ *    which is what makes each read a numeric one. A string source is excluded
+ *    — it is indexed by grapheme cluster and has to be segmented first — and
+ *    so is a tuple, whose slots are positional rather than homogeneous cells.
+ */
+function rangeGatherSource(coll: Expression):
+  | {
+      base: Expression;
+      range: Expression;
+      lo: Expression;
+      hi: Expression;
+      elementType: Type;
+    }
+  | undefined {
+  if (!isFunction(coll, 'At') || coll.ops.length !== 2) return undefined;
+  const index = coll.ops[1];
+  if (!isFunction(index, 'Range') || index.ops.length !== 2) return undefined;
+  const [lo, hi] = index.ops;
+  if (!BaseCompiler.isIntegerValued(lo) || !BaseCompiler.isIntegerValued(hi))
+    return undefined;
+  const base = coll.ops[0];
+  if (
+    !isIndexedCollectionOperand(base) ||
+    isProvablyStringOperand(base) ||
+    couldBeStringOperand(base)
+  )
+    return undefined;
+  const elementType = collectionElementType(jsType(base));
+  if (elementType === undefined) return undefined;
+  if (
+    !isSubtype(
+      stripMissingFromType(resolveTypeForCompilation(elementType)),
+      'number'
+    )
+  )
+    return undefined;
+  const baseType = resolveTypeForCompilation(jsType(base));
+  if (typeof baseType !== 'string' && baseType.kind === 'tuple')
+    return undefined;
+  return { base, range: index, lo, hi, elementType };
+}
+
+/**
+ * A reduction over a `Range`-indexed gather (see {@link rangeGatherSource}) as
+ * a counted loop, or `undefined` when the operand is not that shape.
+ *
+ * Without it `total(P[a...b])` allocates the index list, then the gathered
+ * slice, then folds the slice through a callback — three passes and two arrays
+ * for a walk of `b − a + 1` cells. The loop reads each element straight from
+ * the source with the same `_SYS.atNumeric` call the INDEXED form of the same
+ * reduction emits (`Σ_{k=a}^{b} P[k]`), so nothing is allocated.
+ *
+ * It walks the range in ITS OWN direction — `P[4...2]` reads elements 4, 3, 2
+ * — because a floating-point fold depends on the order of its terms.
+ *
+ * `fold` accumulates one element; omit it for a reduction that reads only the
+ * element count. `result` turns the accumulator and the count into the
+ * answer; it defaults to the accumulator itself.
+ */
+function emitRangeGatherReduction(
+  coll: Expression,
+  target: CompileTarget<Expression>,
+  identity: string,
+  fold: ((acc: string, element: string) => string) | undefined,
+  result: (acc: string, count: string) => string = (acc) => acc
+): string | undefined {
+  // A source whose elements may be `{re, im}` objects is the complex fold's
+  // business: this loop accumulates with real JavaScript arithmetic.
+  if (!BaseCompiler.collectionFoldsReal(coll)) return undefined;
+  const source = rangeGatherSource(coll);
+  if (source === undefined) return undefined;
+
+  // The loop reads the source array element by element, so neither the `At`
+  // nor the `Range` application is ever emitted. A caller that re-maps either
+  // name — through the `functions`/`operators` options — supplies its own
+  // lowering, which is free to answer something a positional walk cannot
+  // reproduce (an `At` mapping that returns a fixed one-element list makes
+  // the gather one element long whatever the bounds say). Such an operand
+  // goes to the materializing lowering below, which builds the index list and
+  // the slice through both operator handlers.
+  const harvestOptions = target.cse?.harvestOptions;
+  if (
+    isCallerMapped(coll, harvestOptions) ||
+    isCallerMapped(source.range, harvestOptions)
+  )
+    return undefined;
+
+  const statements = javascriptStatements(target);
+  const expression = (
+    build: (exit: (value: string) => string) => string
+  ): string =>
+    statements?.expression(build) ??
+    `(() => { ${build((v) => `return ${v};`)} })()`;
+
+  const arr = BaseCompiler.tempVar(target);
+  const lo = BaseCompiler.tempVar(target);
+  const hi = BaseCompiler.tempVar(target);
+  const step = BaseCompiler.tempVar(target);
+  const count = BaseCompiler.tempVar(target);
+  // A reduction that reads only the count declares neither of these.
+  const acc = fold === undefined ? '' : BaseCompiler.tempVar(target);
+  const turn = fold === undefined ? '' : BaseCompiler.tempVar(target);
+
+  // The element read, exactly as the `At` handler emits it for a scalar
+  // index: `_SYS.at` applies the 1-based, negative-from-the-end convention and
+  // marks an out-of-band position with NaN, and the `atNumeric` wrapper adds
+  // the run-time check that a base coming from OUTSIDE the kernel really does
+  // hold numbers where its declared element type says so.
+  const at = (idx: string): string =>
+    source.base.unknowns.length > 0
+      ? `_SYS.atNumeric(${arr}, ${idx}, ${JSON.stringify(typeToString(source.elementType))})`
+      : `_SYS.at(${arr}, ${idx})`;
+
+  // The three run-time facts the loop rests on, tested once. A non-array
+  // source has no elements to read (`_SYS.at`'s own rule), and a bound that
+  // is not an integer at run time — which the declared type does not
+  // guarantee, since a caller's `vars` object is not type-checked — is a
+  // gather the interpreter refuses outright, so both answer NaN for the whole
+  // reduction rather than per element. The integer test also rejects `±∞` and
+  // NaN, so the counted loop below always terminates.
+  const guard = `!Array.isArray(${arr}) || !Number.isInteger(${lo}) || !Number.isInteger(${hi})`;
+
+  // Compile the three operands ONCE, before the statement sink is asked for a
+  // body: `JavaScriptStatements.expression` runs the body it is given more
+  // than once — once to register the source text, again whenever that text is
+  // re-emitted at a statement position — and `BaseCompiler.compile` is not a
+  // pure function of its argument. It mints temporaries and advances the
+  // common-subexpression bookkeeping, so a second call on the same operand
+  // would consume an occurrence for a body that is then discarded. The
+  // callback below closes over the finished text instead.
+  const baseCode = BaseCompiler.compile(source.base, target);
+  const loCode = BaseCompiler.compile(source.lo, target);
+  const hiCode = BaseCompiler.compile(source.hi, target);
+
+  return expression((exit) => {
+    const prologue =
+      `const ${arr} = ${baseCode}; ` +
+      `const ${lo} = ${loCode}; ` +
+      `const ${hi} = ${hiCode}; ` +
+      `if (${guard}) ${exit('NaN')} ` +
+      `const ${step} = ${hi} >= ${lo} ? 1 : -1; ` +
+      // Integer bounds and a ±1 step: the element count is `|hi − lo| + 1`,
+      // always at least one, so no clamp and no floor are needed.
+      `const ${count} = (${hi} - ${lo}) * ${step} + 1; `;
+    if (fold === undefined) return `${prologue}${exit(result('', count))}`;
+    // NaN absorbs every fold this loop serves (`+`, `*`, `Math.max`,
+    // `Math.min`), so once the accumulator is NaN no later element can change
+    // the answer. The elements are reads of an array bound before the loop,
+    // which have no observable effect, so stopping early is unobservable.
+    return (
+      `${prologue}let ${acc} = ${identity}; ` +
+      `for (let ${turn} = 0; ${turn} < ${count}; ${turn}++) { ` +
+      `${fold(acc, at(`${lo} + ${step} * ${turn}`))} ` +
+      `if (${acc} !== ${acc}) ${exit('NaN')} } ` +
+      `${exit(result(acc, count))}`
+    );
+  });
+}
+
+/**
  * Compile the collection form of `Sum`/`Product` — a reduce over the elements
  * of an indexed collection (e.g. `[3,4,5].total` → `Sum([3,4,5])`). The
  * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
@@ -12413,6 +12690,17 @@ function emitCollectionReduce(
   target: CompileTarget<Expression>,
   guarded: boolean
 ): string {
+  if (!guarded) {
+    // `total(P[a...b])` and its `Product` twin walk the gathered positions
+    // with a counted loop instead of building the index list and the slice.
+    const loop = emitRangeGatherReduction(
+      coll,
+      target,
+      kind === 'Sum' ? '0' : '1',
+      (acc, element) => `${acc} ${kind === 'Sum' ? '+' : '*'}= ${element};`
+    );
+    if (loop !== undefined) return loop;
+  }
   const code = BaseCompiler.compile(coll, target);
   // A statically indexed collection has provably scalar elements (a
   // `list<number>`/`vector<n>`) and is always an array — no runtime guard.
@@ -12432,7 +12720,40 @@ function emitCollectionReduce(
     // lift, always yields a `{re, im}` (the parent reads it as complex).
     if (BaseCompiler.collectionFoldsReal(coll)) {
       const op = kind === 'Sum' ? '+' : '*';
-      return `(${code}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
+      const reduce = (read: string): string =>
+        `(${read}).reduce((_a, _b) => _a ${op} _b, ${identity})`;
+      // A NARROW collection whose width the type states is folded term by
+      // term: the `reduce` closure and its per-element calls buy nothing when
+      // the terms can be written out. The identity is kept as the first term,
+      // so the grouping is the left fold's, down to the sign of a `-0` term.
+      // The width bound is `MIN_UNROLLED_WIDTH`, the boundary the whole
+      // fixed-width machinery uses: from five terms up the `reduce` fold is
+      // both the shorter and the faster spelling.
+      const width = BaseCompiler.staticCollectionWidth(coll);
+      if (width !== undefined && width >= 1 && width < MIN_UNROLLED_WIDTH) {
+        const terms = (read: string): string => {
+          const parts = [identity];
+          for (let k = 0; k < width; k++) parts.push(`${read}[${k}]`);
+          return `(${parts.join(` ${op} `)})`;
+        };
+        // A `List` node compiles to an array literal holding exactly its own
+        // operands, so reading it by index is decided by construction.
+        if (isFunction(coll, 'List') && coll.ops.length === width)
+          return BaseCompiler.withRepeatableSource(code, target, terms);
+        // Every other source takes the width from its DECLARED type, which
+        // constrains what the ENGINE may assign, not what a caller may put in
+        // the kernel's `vars` object: a `list<real^3>` input can arrive
+        // absent, shorter, longer, or as a plain number. Test the shape once
+        // and hand every other shape to the `reduce` fold, which answers it
+        // the way the same reduction over a width-less `list<real>` does.
+        const source = BaseCompiler.tempVar(target);
+        return (
+          `((${source}) => Array.isArray(${source}) && ` +
+          `${source}.length === ${width} ? ${terms(source)} : ` +
+          `${reduce(source)})(${code})`
+        );
+      }
+      return reduce(code);
     }
     const combiner = kind === 'Sum' ? '_SYS.sadd' : '_SYS.smul';
     return `_SYS.cplx((${code}).reduce(${combiner}, ${identity}))`;

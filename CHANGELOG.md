@@ -1,5 +1,79 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Compiled `Equal` and `NotEqual` are exact.** A compiled comparison of
+  two numbers is the IEEE 754 test (`===` on the `javascript` target, `==` on
+  `python`; the shader targets were already exact), with no tolerance branch.
+  The interpreter still compares within `engine.tolerance`, so
+  `0.1 + 0.2 = 0.3` evaluates to `True` and compiles to `false`. The compiled
+  lanes serve plot kernels, where every comparison runs per sample and the
+  tolerance test cost a subtraction, an absolute value and a compare each
+  time (124 sites in the Tycho corpus, 63 in one Voronoi kernel), and where
+  the exact answer is the one the reference graphing calculators give. The
+  same rule covers `KroneckerDelta`, the collection helpers (`_SYS.eq`,
+  `_SYS.neq`, `_ce_eqcoll`, which drop their tolerance argument) and the
+  earlier integer-only exact form, which is now the rule for every pair.
+  `NotEqual` stays the negation of `Equal`, so it answers `true` on `NaN`;
+  matching infinities stay equal; two absent operands stay unequal — the
+  `typeof` (JavaScript) or `is not None` (Python) guard is now emitted only
+  where both sides may be absent, so a comparison against a literal or an
+  arithmetic result is a bare `===`. A consumer that needs tolerant
+  equality evaluates through the interpreter. See
+  `docs/COMPILATION-MODEL.md` § Fail closed.
+
+### Performance
+
+- **Compiled kernels no longer evaluate a shared subexpression more than
+  once in a large body.** Common-subexpression elimination now counts the
+  occurrences a candidate serves in nested scopes when it decides that a
+  candidate is redundant because a larger one contains it, so the nested
+  chains a big body produces no longer crowd out its small, frequently
+  repeated terms (a Voronoi cell distance went from 64 shared temporaries —
+  its per-region limit, with three terms still recomputed three times each —
+  to 25, with nothing recomputed). It also applies its benefit test before
+  that redundancy test, so a subexpression can no longer be dropped in favour
+  of a container that is itself discarded: `(sin(u)+1)^2 + 1/(sin(u)+1)`
+  called `Math.sin` twice and now calls it once. Loop-invariant hoisting
+  shares subexpressions between the values it lifts out of a loop instead of
+  repeating them in each: a heat-map shader computed `fract(x)` six times and
+  each of its four hash values twice ahead of its loop, and now computes each
+  once.
+- **Element-wise arithmetic over a list whose width is known at compile time
+  is written out component by component on the `javascript` target**
+  (`list<number^4>`, a literal list, a user function returning one) instead
+  of going through the run-time broadcast helper `_SYS.bcast` — a closure, a
+  shape test and an allocation per evaluation. A narrow `Sum`/`Product` over
+  such a list is folded term by term instead of through `reduce`, and a
+  reduction over a real vector no longer takes the complex lane: the row
+  `1-(\sum(f(x+1,y+3)+f(x-1,y+3)))^2` with `f(x,y):=[-y,x]/(x^2+y^2)` emitted
+  `_SYS.cneg(_SYS.cplx(…reduce(_SYS.sadd…)))` and now emits
+  `-_SYS.pow2(…) + 1`.
+- **A reduction over a range-indexed slice compiles to a counted loop.**
+  `total(P[a...b])` — and `Product`, `Mean`, `Max`, `Min` and `Length` over
+  the same gather — built the index list and the gathered slice and folded
+  them with a callback; the `javascript` target now walks the source with a
+  counted loop, in the range's own direction, reading each element with the
+  same call the indexed spelling `P[k]` uses. A source that is not an array
+  at run time, or a bound that is not an integer, answers `NaN` where the
+  old fold raised a `TypeError`. A reduction over a list whose element type
+  is `number` stays on the real lane, as every other consumer of such a list
+  already did; and the counted-range prologue of a comprehension over
+  integer-typed bounds drops its dead floor and clamp (the array-length
+  guard stays: a non-finite bound supplied through `vars` must throw, not
+  hang).
+- **`interval-js`: the compiled kernel no longer allocates per evaluation
+  what it can allocate once.** Every constant interval is bound in a table
+  the runner builds when it is created, instead of being rebuilt on each
+  call (the top-level expression and the folded constants of an unrolled
+  `Sum` included); a leading negation folds into the division it feeds (the
+  new `negDiv` kernel, or the sign on a constant divisor), and a negation of
+  a negation cancels; a conditional lowers to a ternary chain over the
+  tri-state condition instead of `piecewise` with two closures. The runner
+  returns a fresh copy of its answer so a caller cannot write into the shared
+  table. On the audit corpus a plotted `cases` expression is 25–40% faster
+  per sample and a lattice snap (`-⌊nx⌋/n`) about 17%.
+
 ### Resolved Issues
 
 - **A point-coordinate accessor over an EMPTY list of points answers the empty
@@ -43,11 +117,17 @@
   the interpreter's marker for a numeric coordinate — and a `list<string>`
   answers `undefined`, its projection for a coordinate the type proves
   non-numeric; a `list<tuple<number, number>>` and an untyped operand answer
-  `[]`. An operand the type proves element-indexes no longer reaches the
-  run-time point dispatch (`_SYS.pointComponent`), which decides on the value
-  and would read an empty array as a list of no points. That also repairs
-  `PointX(s)` for an operand declared `string`, which compiled to `NaN` and now
-  answers its first character, as the interpreter does.
+  `[]`. An operand whose element type PROVES element indexing — a scalar one,
+  which no point can have — no longer reaches the run-time point dispatch
+  (`_SYS.pointComponent`), which decides on the value and would read an empty
+  array as a list of no points. That also repairs `PointX(s)` for an operand
+  declared `string`, which compiled to `NaN` and now answers its first
+  character, as the interpreter does. The NON-EMPTY reading stays value-decided
+  for every element type the static type cannot settle — a nested one such as
+  `list<list<any>>`, or a union of a number with a tuple — because the
+  interpreter reads it off the concrete elements: such an operand keeps the
+  dispatch, and the empty-case answer its element type calls for is carried
+  into it.
 
 ## 0.128.0 _2026-09-09_
 

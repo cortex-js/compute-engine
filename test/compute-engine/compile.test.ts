@@ -1110,30 +1110,26 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
   });
 });
 
-// CO-P1-4: compiled `Equal`/`NotEqual` used exact `===`, disagreeing with the
-// interpreter, which compares numbers within `engine.tolerance` (default
-// 1e-10). Compiled equality must bake the tolerance and match the interpreter.
-describe('COMPILE Equal/NotEqual tolerance (CO-P1-4)', () => {
-  it('compiled Equal(0.1+0.2, 0.3) is true, matching the interpreter', () => {
+// Compiled `Equal`/`NotEqual` is the exact `===` (compiled-equality ruling of
+// 2026-09-09, `docs/COMPILATION-MODEL.md`). The interpreter compares numbers
+// within `engine.tolerance` (default 1e-10), so the two routes DIVERGE on a
+// pair that is equal within tolerance but not bit-equal; the divergence is
+// ruled and pinned here.
+describe('COMPILE Equal/NotEqual is exact', () => {
+  it('compiled Equal(0.1+0.2, 0.3) is false where the interpreter answers True', () => {
     const expr = ce.box(['Equal', ['Add', 0.1, 0.2], 0.3]);
-    // The operands are constant, so folding would emit a `true` literal instead
-    // of the tolerance comparison this test is pinning.
+    // The operands are constant, so folding would emit a literal instead of
+    // the comparison this test is pinning.
     const r = compile(expr, { constantFold: false })!;
-    expect(r.code).toContain('Math.abs');
-    // The emission carries an exact `===` test as well, but only as a
-    // pre-test: it rescues a pair whose DIFFERENCE is `NaN`, such as two
-    // infinities of the same sign. It never decides a pair the tolerance test
-    // would decide differently, which is what the run below witnesses —
-    // `0.1 + 0.2 === 0.3` is `false` in JavaScript, and the answer is `true`.
-    expect(r.run!({})).toBe(true);
-    // Interpreter agrees.
+    expect(r.code).toBe('((0.1 + 0.2) === (0.3))');
+    expect(r.run!({})).toBe(false);
     expect(expr.evaluate().symbol).toBe('True');
   });
 
-  it('compiled NotEqual(0.1+0.2, 0.3) is false, matching the interpreter', () => {
+  it('compiled NotEqual(0.1+0.2, 0.3) is true where the interpreter answers False', () => {
     const expr = ce.box(['NotEqual', ['Add', 0.1, 0.2], 0.3]);
-    const r = compile(expr)!;
-    expect(r.run!({})).toBe(false);
+    const r = compile(expr, { constantFold: false })!;
+    expect(r.run!({})).toBe(true);
     expect(expr.evaluate().symbol).toBe('False');
   });
 

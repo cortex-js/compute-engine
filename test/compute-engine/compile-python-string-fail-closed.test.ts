@@ -272,7 +272,7 @@ describe('Python: EQUALITY fails closed on an unfaithful aggregate', () => {
 
   test('a BINARY tuple-vs-tuple Equal keeps the _ce_eqcoll lowering', () => {
     expect(code(ce.box(['Equal', ['Tuple', 1, 2], ['Tuple', 1, 2]]))).toContain(
-      '_ce_eqcoll((1, 2), (1, 2), 1e-10)'
+      '_ce_eqcoll((1, 2), (1, 2))'
     );
   });
 
@@ -308,7 +308,7 @@ describe('Python: EQUALITY fails closed on an unfaithful aggregate', () => {
         'pl1',
         'pl2',
       ])
-    ).toContain('_ce_eqcoll(pl1, pl2, 1e-10)');
+    ).toContain('_ce_eqcoll(pl1, pl2)');
   });
 });
 
@@ -440,12 +440,12 @@ describe('Python: ORDERINGS decline only the MIXED string case', () => {
 });
 
 describe('Python: unknown-typed comparisons compile unchanged', () => {
-  test('Equal(u, 1) keeps the scalar tolerance form', () => {
+  test('Equal(u, 1) keeps the scalar exact form', () => {
     ce.declare('u', 'unknown');
     expect(python.compileFunction(ce.box(['Equal', 'u', 1]), 'f', ['u']))
       .toMatchInlineSnapshot(`
       "def f(u):
-          return ((u) is not None and ((u) == (1) or abs((u) - (1)) <= 1e-10))
+          return ((u) == (1))
       "
     `);
   });

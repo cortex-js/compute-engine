@@ -2118,47 +2118,18 @@ class Harvester {
       return true;
     });
 
-    // Subsumption — drop A when every occurrence of A sits strictly inside an
-    // occurrence of B with the same per-region count. Different counts: keep
-    // both. The scan only ever pairs candidates of the SAME region, so group
-    // first: the cost is then quadratic per region rather than in the global
-    // candidate count.
-    const byRegionForSubsumption = new Map<MutableRegion, Provisional[]>();
-    for (const c of afterMutation) {
-      const list = byRegionForSubsumption.get(c.region);
-      if (list === undefined) byRegionForSubsumption.set(c.region, [c]);
-      else list.push(c);
-    }
-    // A candidate that serves descendant occurrences takes no part in
-    // subsumption, in either role: its served occurrences sit outside the
-    // region's own occurrences, so "every occurrence of A is inside an
-    // occurrence of B" cannot be decided from the region-local lists. Keeping
-    // both candidates costs at most one extra temporary.
-    const subsumed = new Set<Provisional>();
-    for (const group of byRegionForSubsumption.values()) {
-      for (const a of group) {
-        if (a.served.length > 0) continue;
-        for (const b of group) {
-          if (a === b || subsumed.has(b) || b.served.length > 0) continue;
-          if (b.occurrences.length !== a.occurrences.length) continue;
-          if (b.size <= a.size) continue;
-          const allInside = a.occurrences.every((oa) =>
-            b.occurrences.some((ob) => ob.enter < oa.enter && oa.exit < ob.exit)
-          );
-          if (allInside) {
-            subsumed.add(a);
-            this.droppedBySubsumption += 1;
-            break;
-          }
-        }
-      }
-    }
-    const afterSubsumption = afterMutation.filter((c) => !subsumed.has(c));
-
     // Re-check per-region counts (no single-use temps), then G4. An admitted
     // user-function application is exempt from the size/score heuristics
     // (see `isAdmittedUserFnApp`).
-    const surviving = afterSubsumption.filter((c) => {
+    //
+    // Applied BEFORE subsumption, so a candidate can only ever be subsumed by
+    // one that is itself going to be bound. The other order lost the sharing
+    // outright wherever the container failed the benefit test and the
+    // contained candidate would have passed it on an exemption:
+    // `(sin(u) + 1)^2 + 1/(sin(u) + 1)` bound nothing and called `Math.sin`
+    // twice, because `sin(u) + 1` (score 4, under `CSE_MIN_SCORE`) subsumed
+    // the `sin(u)` the transcendental-call exemption admits.
+    const surviving = afterMutation.filter((c) => {
       const count = c.occurrences.length + c.served.length;
       if (count < 2) return false;
       if (
@@ -2177,9 +2148,96 @@ class Harvester {
       return true;
     });
 
+    // Subsumption — drop A when every occurrence of A sits strictly inside an
+    // occurrence of B and the two have the same occurrence count. Different
+    // counts: keep both. The scan only ever pairs candidates of the SAME
+    // region, so group first: the cost is then quadratic per region rather
+    // than in the global candidate count.
+    const byRegionForSubsumption = new Map<MutableRegion, Provisional[]>();
+    for (const c of surviving) {
+      const list = byRegionForSubsumption.get(c.region);
+      if (list === undefined) byRegionForSubsumption.set(c.region, [c]);
+      else list.push(c);
+    }
+    // A candidate's occurrence set for this test is its own occurrences PLUS
+    // the descendant occurrences it serves. A served occurrence reads the
+    // region's temporary instead of re-evaluating the term, so it is elided
+    // exactly like an own occurrence, and counting it makes the containment
+    // test decidable for a serving candidate instead of excluding that
+    // candidate from the test in both roles. The exclusion was expensive: a
+    // body that inlines nine user functions over `(x, y)` (a Voronoi cell
+    // distance) left 199 candidates in one region, nearly all of them nested
+    // prefixes of one another that each serve one descendant occurrence, and
+    // the per-region binding cap then spent its whole budget on those chains
+    // instead of on the small, frequently repeated terms. The shape is
+    // pinned in `test/compute-engine/item-280-cse-shared-subterms.test.ts`.
+    const fullOccurrences = new Map<Provisional, MutableOccurrence[]>();
+    const occurrencesOf = (c: Provisional): MutableOccurrence[] => {
+      let all = fullOccurrences.get(c);
+      if (all === undefined) {
+        all =
+          c.served.length === 0
+            ? c.occurrences
+            : [...c.occurrences, ...c.served].sort((p, q) => p.enter - q.enter);
+        fullOccurrences.set(c, all);
+      }
+      return all;
+    };
+    // Two occurrences of one structural class have the same size, so neither
+    // can strictly contain the other: the list is a set of pairwise disjoint
+    // intervals, sorted by `enter`. The one interval that can contain `oa` is
+    // therefore the last one that starts before it, found by binary search.
+    const strictlyInsideOne = (
+      oa: MutableOccurrence,
+      sorted: MutableOccurrence[]
+    ): boolean => {
+      let lo = 0;
+      let hi = sorted.length - 1;
+      let last = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (sorted[mid].enter < oa.enter) {
+          last = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return last >= 0 && oa.exit < sorted[last].exit;
+    };
+    const subsumed = new Set<Provisional>();
+    for (const group of byRegionForSubsumption.values()) {
+      for (const a of group) {
+        const aOccurrences = occurrencesOf(a);
+        for (const b of group) {
+          if (a === b || subsumed.has(b)) continue;
+          if (b.size <= a.size) continue;
+          // The binding cap ranks an admitted user-function application above
+          // every ordinary candidate, whatever its score, because a repeated
+          // call that stays unbound can expand exponentially. A container
+          // that ranks BELOW the call would undo that priority if the cap
+          // then dropped the container, so it may not subsume it.
+          if (
+            this.isAdmittedUserFnApp(a.representative) &&
+            !this.isAdmittedUserFnApp(b.representative)
+          )
+            continue;
+          const bOccurrences = occurrencesOf(b);
+          if (bOccurrences.length !== aOccurrences.length) continue;
+          const allInside = aOccurrences.every((oa) =>
+            strictlyInsideOne(oa, bOccurrences)
+          );
+          if (allInside) {
+            subsumed.add(a);
+            this.droppedBySubsumption += 1;
+            break;
+          }
+        }
+      }
+    }
+    const afterSubsumption = surviving.filter((c) => !subsumed.has(c));
+
     // Materialize, then apply the per-region binding cap.
     const byRegion = new Map<MutableRegion, CseCandidate[]>();
-    for (const c of surviving) {
+    for (const c of afterSubsumption) {
       const candidate: CseCandidate = {
         id: this.nextCandidateId++,
         representative: c.representative,

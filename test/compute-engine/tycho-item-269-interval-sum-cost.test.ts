@@ -111,7 +111,8 @@ describe('Tycho item 269: sound constant folding on the interval target', () => 
     // `_IA.ln(_IA.point(2))` is gone; its enclosure is inlined as a literal
     // of the same `{ kind: 'interval', value }` shape the routine returns.
     expect(r.code).not.toContain('_IA.ln(');
-    expect(r.code).toMatch(
+    // The literal itself is bound in the constant table the preamble carries.
+    expect(r.preamble ?? '').toMatch(
       /\{ kind: 'interval', value: \{ lo: [0-9.e-]+, hi: [0-9.e-]+ \} \}/
     );
     const structural = compileStructural('\\ln(2) x');
@@ -186,7 +187,8 @@ describe('Tycho item 269: sound constant folding on the interval target', () => 
 
   test('`constantFold: false` keeps the structural lowering of every constant', () => {
     const r = compileInterval('\\ln(2) x', { constantFold: false });
-    expect(r.code).toContain('_IA.ln(_IA.point(2))');
+    expect(r.preamble).toContain('const _k1 = _IA.point(2);');
+    expect(r.code).toContain('_IA.ln(_k1)');
     expect(r.code).not.toContain("kind: 'interval'");
   });
 

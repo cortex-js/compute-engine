@@ -288,16 +288,19 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     });
   });
 
-  describe('JavaScript — unchanged `_SYS.bcast`', () => {
+  describe('JavaScript — the element-wise lanes, never `.map`', () => {
     // `constantFold: false`: the operand is a literal list, so compile-time
     // folding would answer the whole expression from the interpreter and emit
-    // a literal array instead of the `_SYS.bcast` closure under test.
-    it('broadcasts a unary head through the runtime helper', () => {
+    // a literal array instead of the element-wise lowering under test.
+    it('emits one expression per component when the width is known', () => {
       const r = compile(ce.box(['Sin', ['List', 1, 2, 3, 4]]), {
         constantFold: false,
       });
       expect(r.success).toBe(true);
-      expect(r.code).toBe('_SYS.bcast((_tv1) => Math.sin(_tv1), [1, 2, 3, 4])');
+      expect(r.code).toBe(
+        '((_tv2) => [Math.sin(_tv2[0]), Math.sin(_tv2[1]), ' +
+          'Math.sin(_tv2[2]), Math.sin(_tv2[3])])([1, 2, 3, 4])'
+      );
       expect(r.code).not.toContain('.map(');
     });
 
@@ -336,14 +339,17 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
 
   // `constantFold: false` on the concrete-list probes below: their operands
   // are all literal, so compile-time folding would emit the evaluated array
-  // and never exercise the `_SYS.bcast` wrapping of the scalar CALL, which is
+  // and never exercise the element-wise wrapping of the scalar CALL, which is
   // the defect these tests pin.
   it('Sign broadcasts over a concrete list', () => {
     const r = compile(ce.box(['Sign', ['List', 3, -4, 0]]), {
       constantFold: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_SYS.bcast((_tv1) => Math.sign(_tv1), [3, -4, 0])');
+    expect(r.code).toBe(
+      '((_tv2) => [Math.sign(_tv2[0]), Math.sign(_tv2[1]), ' +
+        'Math.sign(_tv2[2])])([3, -4, 0])'
+    );
     expect(r.run!({})).toEqual([1, -1, 0]);
   });
 
@@ -359,7 +365,8 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
     });
     expect(r.success).toBe(true);
     expect(r.code).toBe(
-      '_SYS.bcast((_tv1, _tv2) => Math.atan2(_tv1, _tv2), [1, 2, 3], 1)'
+      '((_tv3) => [Math.atan2(_tv3[0], 1), Math.atan2(_tv3[1], 1), ' +
+        'Math.atan2(_tv3[2], 1)])([1, 2, 3])'
     );
     const out = r.run!({}) as unknown as number[];
     expect(out).toHaveLength(3);

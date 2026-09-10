@@ -864,57 +864,56 @@ describe('PYTHON TARGET', () => {
     });
   });
 
-  // CO-P1-4: compiled Equal used exact `==`; the interpreter compares within
-  // engine.tolerance (default 1e-10).
-  describe('CO-P1-4 tolerance-aware equality', () => {
-    it('Equal bakes the engine tolerance', () => {
+  // Compiled Equal is the exact `==` (compiled-equality ruling of 2026-09-09,
+  // `docs/COMPILATION-MODEL.md`); the interpreter compares within
+  // engine.tolerance (default 1e-10). The engine tolerance is not baked.
+  describe('exact equality', () => {
+    it('Equal is the exact `==`, whatever the engine tolerance', () => {
       // `constantFold: false`: `0.1 + 0.2` has no free variable, so
       // compile-time constant folding would emit `0.3` in its place and the
       // pinned emission would no longer show the operand it compares.
       const code = python.compile(ce.box(['Equal', ['Add', 0.1, 0.2], 0.3]), {
         constantFold: false,
       }).code;
-      expect(code).toBe(
-        '((0.1 + 0.2) is not None and ((0.1 + 0.2) == (0.3) or abs((0.1 + 0.2) - (0.3)) <= 1e-10))'
-      );
+      expect(code).toBe('((0.1 + 0.2) == (0.3))');
     });
 
     it('NotEqual negates the whole Equal test', () => {
       const code = python.compile(ce.box(['NotEqual', 'x', 0.3])).code;
-      expect(code).toBe('(not ((x) is not None and ((x) == (0.3) or abs((x) - (0.3)) <= 1e-10)))');
+      expect(code).toBe('((x) != (0.3))');
     });
 
     // The scalar/scalar emission is the hot path — pinned byte-identical so the
-    // collection branch below cannot perturb it.
+    // collection branch below cannot perturb it. Two free symbols may both be
+    // absent (`None`), so the left one carries the `is not None` guard.
     it('the scalar/scalar emission is unchanged by the collection branch', () => {
       expect(python.compile(ce.box(['Equal', 'x', 'y'])).code).toBe(
-        '((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10))'
+        '((x) is not None and (x) == (y))'
       );
       expect(python.compile(ce.box(['NotEqual', 'x', 'y'])).code).toBe(
-        '(not ((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10)))'
+        '(not ((x) is not None and (x) == (y)))'
       );
       // N-ary scalar chain: adjacent pairs conjoined with the scalar `and`.
       expect(python.compile(ce.box(['Equal', 'x', 'y', 'z'])).code).toBe(
-        '(((x) is not None and (y) is not None and ((x) == (y) or abs((x) - (y)) <= 1e-10)) and ' +
-          '((y) is not None and (z) is not None and ((y) == (z) or abs((y) - (z)) <= 1e-10)))'
+        '(((x) is not None and (x) == (y)) and ' +
+          '((y) is not None and (y) == (z)))'
       );
     });
 
     // Two-or-more collection operands: the interpreter returns a SCALAR
-    // boolean (whole-collection equality within tolerance, length mismatch →
-    // False), so the lowering routes to the `_ce_eqcoll` runtime helper rather
-    // than the scalar `abs(a - b)` form (which raises on a plain Python list).
+    // boolean (whole-collection equality, length mismatch → False), so the
+    // lowering routes to the `_ce_eqcoll` runtime helper rather than the
+    // scalar `==` (which compares two Python lists as sequences, with none of
+    // the shape rules below).
     describe('collection equality (2+ collection operands)', () => {
       it('a pair of collections lowers to the whole-collection helper', () => {
         const code = python.compile(
           ce.box(['Equal', ['List', 1, 2], ['List', 3, 4]] as any)
         ).code;
         expect(code).toContain('def _ce_eqcoll(');
-        expect(code.split('\n').at(-1)).toBe(
-          '_ce_eqcoll([1, 2], [3, 4], 1e-10)'
-        );
-        // The scalar element-wise form must NOT appear.
-        expect(code).not.toContain('abs(([1, 2])');
+        expect(code.split('\n').at(-1)).toBe('_ce_eqcoll([1, 2], [3, 4])');
+        // The scalar form must NOT appear.
+        expect(code).not.toContain('([1, 2]) == ([3, 4])');
       });
 
       it('NotEqual negates the helper', () => {
@@ -922,7 +921,7 @@ describe('PYTHON TARGET', () => {
           ce.box(['NotEqual', ['List', 1, 2, 3], ['List', 1, 2]] as any)
         ).code;
         expect(code.split('\n').at(-1)).toBe(
-          '(not _ce_eqcoll([1, 2, 3], [1, 2], 1e-10))'
+          '(not _ce_eqcoll([1, 2, 3], [1, 2]))'
         );
       });
 
@@ -936,8 +935,7 @@ describe('PYTHON TARGET', () => {
           ] as any)
         ).code;
         expect(code.split('\n').at(-1)).toBe(
-          '(_ce_eqcoll([1, 2], [1, 2], 1e-10) and ' +
-            '_ce_eqcoll([1, 2], [1, 2], 1e-10))'
+          '(_ce_eqcoll([1, 2], [1, 2]) and _ce_eqcoll([1, 2], [1, 2]))'
         );
       });
 
@@ -950,22 +948,21 @@ describe('PYTHON TARGET', () => {
           ce.box(['Equal', ['List', 1, 2], ['List', 1, 2], 5] as any)
         ).code;
         expect(code.split('\n').at(-1)).toBe(
-          '(_ce_eqcoll([1, 2], [1, 2], 1e-10) and _ce_eqcoll([1, 2], 5, 1e-10))'
+          '(_ce_eqcoll([1, 2], [1, 2]) and _ce_eqcoll([1, 2], 5))'
         );
       });
 
-      it('bakes a non-default engine tolerance', () => {
+      it('a non-default engine tolerance does not reach the helper', () => {
         const scoped = new ComputeEngine();
         scoped.tolerance = 1e-4;
         const code = python.compile(
           scoped.box(['Equal', ['List', 1, 2], ['List', 1, 2]] as any)
         ).code;
-        expect(code.split('\n').at(-1)).toBe(
-          '_ce_eqcoll([1, 2], [1, 2], 0.0001)'
-        );
+        expect(code.split('\n').at(-1)).toBe('_ce_eqcoll([1, 2], [1, 2])');
+        expect(code).not.toContain('0.0001');
       });
 
-      // The tolerance path must be selected from the UNCOERCED dtypes.
+      // The vectorized path must be selected from the UNCOERCED dtypes.
       // `np.asarray(..., dtype=float)` parses numeric-looking STRINGS, so
       // `Equal(["1"], ["1.0"])` answered True while the interpreter compares
       // the strings and answers False.
@@ -984,14 +981,14 @@ describe('PYTHON TARGET', () => {
           "if _x.dtype.kind in 'iuf' and _y.dtype.kind in 'iuf':"
         );
         expect(code.split('\n').at(-1)).toBe(
-          '_ce_eqcoll(["1"], ["1.0"], 1e-10)'
+          '_ce_eqcoll(["1"], ["1.0"])'
         );
       });
 
-      // `abs(inf - inf)` is NaN, so the tolerance test alone reported matching
-      // infinities UNEQUAL. Exact `==` is tried first; NaN still fails both
-      // tests, which is the interpreter's answer (`Equal([NaN],[NaN])` → False).
-      it('the helper compares exactly before applying the tolerance', () => {
+      // The helper compares with the exact `==`: matching infinities are
+      // equal and NaN fails, which is the interpreter's answer
+      // (`Equal([NaN],[NaN])` → False).
+      it('the helper compares exactly', () => {
         const code = python.compile(
           ce.box([
             'Equal',
@@ -999,14 +996,11 @@ describe('PYTHON TARGET', () => {
             ['List', { num: '+Infinity' }],
           ] as any)
         ).code;
-        expect(code).toContain(
-          'return bool(np.all((_x == _y) | (np.abs(_x - _y) <= _tol)))'
-        );
+        expect(code).toContain('return bool(np.all(_x == _y))');
         // …and on the scalar (recursive) path too.
-        expect(code).toContain('return bool(_a == _b or abs(_a - _b) <= _tol)');
-        expect(code.split('\n').at(-1)).toBe(
-          '_ce_eqcoll([np.inf], [np.inf], 1e-10)'
-        );
+        expect(code).toContain('return bool(_a == _b)');
+        expect(code).not.toContain('_tol');
+        expect(code.split('\n').at(-1)).toBe('_ce_eqcoll([np.inf], [np.inf])');
       });
     });
 

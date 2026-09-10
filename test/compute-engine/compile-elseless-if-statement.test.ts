@@ -408,8 +408,8 @@ describe('the admission is plain-JavaScript only', () => {
 
   test('…and the interval else-FUL lowering, which is correct, is untouched', () => {
     // The contrast that makes the decline above the right call: with an else,
-    // interval-js emits `_IA.piecewise(_IA.less(…), …)` and answers correctly
-    // for a point interval.
+    // interval-js emits its closure-free conditional over `_IA.less(…)` and
+    // answers correctly for a point interval.
     ce.declare('x', 'number');
     const expr = ce.box([
       'Block',
@@ -419,7 +419,8 @@ describe('the admission is plain-JavaScript only', () => {
     ]);
     const r = compile(expr, { to: 'interval-js', fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatch(/_IA\.piecewise/);
+    expect(r.code).toMatch(/=== 'true' \?/);
+    expect(r.code).toContain('_IA.hull(');
     expect((r.run as any)({ x: 3 })).toEqual({ lo: -1, hi: -1 });
     expect((r.run as any)({ x: -3 })).toEqual({ lo: 7, hi: 7 });
   });

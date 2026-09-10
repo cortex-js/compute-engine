@@ -174,7 +174,9 @@ function assertPyNoCharacterOperand(
  * coercion rules:
  *
  *  - a `dictionary`/`record` has no positional lowering at all, so the scalar
- *    equality form (`abs(a - b) <= tol`) is a `TypeError` and the infix `<` of
+ *    equality form compares two distinct mappings (`==` on dicts is
+ *    content equality in Python, which is not the interpreter's whole-value
+ *    comparison of a record with nested collections) and the infix `<` of
  *    an ordering compares Python dicts (a `TypeError` too, or worse a
  *    lexicographic answer for another mapping type);
  *  - a `tuple` lowers to a Python tuple, which `np.less` maps over ELEMENT-WISE
@@ -196,8 +198,8 @@ function assertPyComparableAggregate(
     throw new Error(
       `${kind}: cannot compile — a ${aggregate} participant. The interpreter ` +
         `compares it as ONE value, whereas the emitted Python looks inside it: ` +
-        `a dictionary or record has no positional lowering (the tolerance test ` +
-        `\`abs(a - b)\` raises), and a tuple is mapped over element-wise by ` +
+        `a dictionary or record has no positional lowering, and a tuple is ` +
+        `mapped over element-wise by ` +
         `\`np.less\` (\`Equal(Tuple(1, 2), List(1, 2))\` answered \`True\`) ` +
         `where a point binds atomically. Fail closed (D6) — the interpreter ` +
         `evaluates it.`
@@ -273,10 +275,13 @@ function assertPyNoNestedTupleOrdering(
 /**
  * Fail closed when numeric equality has a provably string-valued participant.
  *
- * The scalar lowering is numeric — `abs((a) - (b)) <= tol` — which for strings
- * raises `TypeError` at run time (pure Python, no NumPy coercion), so
- * `Equal("a", "a")` never answered the interpreter's `True`. Evidence is tested
- * per PARTICIPANT, not per operand, exactly as on the JavaScript target.
+ * The scalar lowering is numeric — a raw `==` — which on Python `str` is a
+ * content comparison without the conditioning (NFC, well-formed surrogates)
+ * the interpreter applies before it compares text, and the earlier tolerance
+ * lowering (`abs((a) - (b)) <= tol`) raised `TypeError` on strings, so
+ * `Equal("a", "a")` never answered the interpreter's `True` by design.
+ * Evidence is tested per PARTICIPANT, not per operand, exactly as on the
+ * JavaScript target.
  *
  * Orderings are governed by the narrower `assertPyNoMixedStringOrdering`:
  * all-string orderings agree with interpretation and keep compiling.
@@ -288,8 +293,8 @@ function assertPyNoStringOperand(
   if (args.some(isProvablyStringComparisonParticipant))
     throw new Error(
       `${kind}: cannot compile — string-valued operands are not supported by ` +
-        `this target (the lowering is numeric: a tolerance test on the ` +
-        `difference, which raises \`TypeError\` for strings). ` +
+        `this target (the lowering is numeric: a raw \`==\` that skips the ` +
+        `interpreter's text conditioning). ` +
         `Fail closed (D6) — the interpreter evaluates it.`
     );
 }
@@ -301,8 +306,8 @@ function assertPyNoStringOperand(
  * Python's `==` on `str` is exact structural comparison, which is the
  * interpreter's string semantics (`compare.ts`: `a.string === b.string`, no
  * tolerance) — including the numeric-string trap (`"1" == 1.0` is `False` in
- * Python, matching the interpreter, where the numeric `abs(a - b)` form raised
- * `TypeError`). Cross-sort equality is total in the interpreter (`Equal("a", 1)`
+ * Python, matching the interpreter). Cross-sort equality is total in the
+ * interpreter (`Equal("a", 1)`
  * → `False`) and Python's `==` agrees, so a participant of unknown type opposite
  * a provable string is admitted; a provably numeric one is not, nor is anything
  * that may be a collection or an unfaithful aggregate.
@@ -371,14 +376,65 @@ function assertPyNoMixedStringOrdering(
 }
 
 /**
- * Emit a Python equality test with the engine's numeric tolerance baked in at
- * compile time. The interpreter compares numbers within `engine.tolerance`
- * (default 1e-10) — so `0.1 + 0.2 == 0.3` is *true* — while a raw `==` on
- * floats is exact and would disagree. `kind` selects Equal
- * (`a == b or abs(a - b) <= tol`) vs NotEqual (the NEGATION of that same test
- * — see the `pair` helper for why `abs(a - b) > tol` is wrong on `nan`, and why
- * the exact `==` comes first). Chained (N-ary) forms are conjoined pairwise
- * with `and`.
+ * Operator heads whose Python lowering always produces a NUMBER (a `nan`
+ * included) and never the absent value `None`: arithmetic on `None` raises
+ * in Python, so the lowering of these heads never returns it — the mirror
+ * of `JS_ALWAYS_NUMBER_HEADS` on the JavaScript target. `compilePythonEquality`
+ * uses it to decide whether an exact `==` needs the `is not None` guard.
+ */
+const PY_ALWAYS_NUMBER_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+  'Abs',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Sign',
+  'Mod',
+  'Min',
+  'Max',
+  'Sum',
+  'Product',
+  'Length',
+  'Exp',
+  'Ln',
+  'Log',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Arctan',
+  'Arctan2',
+  'Arcsin',
+  'Arccos',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Dot',
+  'Norm',
+  'Hypot',
+  'Gamma',
+  'Factorial',
+  'Random',
+  'RandomInteger',
+]);
+
+/**
+ * Emit a Python equality test. Compiled `Equal`/`NotEqual` on numeric
+ * operands is EXACT (`==`/`!=`), the IEEE 754 comparison, as on the
+ * JavaScript target (`compileJSEquality`): `0.1 + 0.2 == 0.3` compiles to
+ * `False`, matching infinities are equal, `nan` equals nothing. The
+ * interpreter compares within `engine.tolerance`; the compiled lanes do not
+ * (user ruling of 2026-09-09, `docs/COMPILATION-MODEL.md`). `NotEqual` is the
+ * NEGATION of the `Equal` test, which is `True` on a `nan` operand as the
+ * interpreter answers. Chained (N-ary) forms are conjoined pairwise with
+ * `and`.
  *
  * Collection operands follow the interpreter's gate (see the `Equal`/`NotEqual`
  * evaluate handlers in `library/relational-operator.ts`), which switches on how
@@ -386,9 +442,9 @@ function assertPyNoMixedStringOrdering(
  *
  * - two or more collection operands: whole-collection equality, a scalar
  *   boolean (`Equal([1,2],[3,4],[5,6])` → `False`). Lowered to the
- *   `_ce_eqcoll` runtime helper, which compares within tolerance element-wise
- *   but folds to one `bool` — a length/shape mismatch is `False`, not an
- *   error. The scalar tolerance form cannot represent this shape.
+ *   `_ce_eqcoll` runtime helper, which compares exactly element-wise but
+ *   folds to one `bool` — a length/shape mismatch is `False`, not an error.
+ *   The scalar form cannot represent this shape.
  * - exactly one collection operand: the interpreter broadcasts, returning a
  *   *list* of booleans (`Equal([1,2],5)` → `["False","False"]`), a different
  *   different result kind and therefore declines rather than guessing.
@@ -403,7 +459,6 @@ function compilePythonEquality(
 ): string {
   if (args.length < 2)
     throw new Error(`${kind}: expected at least two arguments`);
-  const tol = args[0]?.engine?.tolerance ?? 1e-10;
   const collCount = args.filter(isPyCollectionOperand).length;
   // Ahead of every lowering below (the scalar `abs` form, `_ce_eqcoll`, and
   // both chain forms) — see `assertPyComparableAggregate` /
@@ -453,7 +508,7 @@ function compilePythonEquality(
   if (!stringScalarEquality && !stringCollectionEquality)
     assertPyNoStringOperand(kind, args);
   if (stringScalarEquality) {
-    // Structural, NOT the tolerance test — see `isPyStringScalarEquality`.
+    // Structural content equality — see `isPyStringScalarEquality`.
     const op = kind === 'Equal' ? '==' : '!=';
     return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
   }
@@ -467,7 +522,7 @@ function compilePythonEquality(
     // Whole-collection equality per adjacent pair, folded with the scalar
     // `and` — every pair is a Python `bool` here, so the chain is well-formed.
     const collPair = (a: Expression, b: Expression): string => {
-      const eq = `_ce_eqcoll(${compile(a)}, ${compile(b)}, ${tol})`;
+      const eq = `_ce_eqcoll(${compile(a)}, ${compile(b)})`;
       return kind === 'Equal' ? eq : `(not ${eq})`;
     };
     if (args.length === 2) return collPair(args[0], args[1]);
@@ -479,41 +534,35 @@ function compilePythonEquality(
       collParts.push(collPair(args[i], args[i + 1]));
     return `(${collParts.join(' and ')})`;
   }
-  // Two details keep this emission faithful where the difference of the
-  // operands is `nan` — that is, when an operand is `nan`, and when both
-  // operands are infinities of the SAME sign. Every comparison against `nan` is
-  // false, so the bare tolerance test answers `False` for BOTH of those pairs:
+  // An absent operand is the Python object `None`: `None == None` is `True`,
+  // where the interpreter answers `Missing` (never `True`) for
+  // `Equal(Missing, Missing)`. So when BOTH operands may be absent — neither
+  // is a numeric literal nor an arithmetic result, which is a number (`nan`
+  // at worst) — the left one is tested for `None` in front of the comparison,
+  // and an absent pair makes `Equal` false and `NotEqual` true, as the
+  // JavaScript target answers for `undefined`. A pair with a literal or an
+  // arithmetic result on either side needs no guard: `None == 5` is `False`.
   //
-  //  - an EXACT `==` is tried BEFORE the tolerance test, the same order the
-  //    `_ce_eqcoll` collection helper uses. That rescues the matching
-  //    infinities (`inf == inf` is `True`, while `abs(inf - inf)` is `nan`),
-  //    which the interpreter answers `Equal(oo, oo)` → `True`. A pair the exact
-  //    test accepts has a difference of exactly 0, which the tolerance test
-  //    accepts too, so nothing else changes.
-  //  - `NotEqual` is the NEGATION of the whole `Equal` test, not
-  //    `abs(a - b) > tol`. The `>` form answered `False` on a `nan` operand —
-  //    the compiled function reported that `nan` EQUALS 3 — while the negation
-  //    answers `True`, which is both the IEEE 754 convention and what the
-  //    interpreter answers (`NotEqual(NaN, 3)` is `True`).
-  //
-  // Each operand is spliced TWICE, once in the exact test and once in the
-  // difference. That is only safe while this target has no impure lowering
-  // (`Random` and friends decline today) — bind each operand to a temporary if
-  // that changes, so that it is evaluated once as the interpreter evaluates it
+  // A guarded left operand is spliced TWICE (the `None` test and the
+  // comparison). That is only safe while this target has no impure lowering
+  // (`Random` and friends decline today) — bind it to a temporary if that
+  // changes, so that it is evaluated once as the interpreter evaluates it
   // once. The JavaScript target already does that (`multiSpliced`).
+  const mayBeNone = (e: Expression): boolean =>
+    !isNumber(e) &&
+    !(
+      isFunction(e) &&
+      typeof e.operator === 'string' &&
+      PY_ALWAYS_NUMBER_HEADS.has(e.operator)
+    );
   const pair = (a: Expression, b: Expression): string => {
     const ca = compile(a);
     const cb = compile(b);
-    // An absent operand is the Python object `None`: `None == None` is true,
-    // and `abs(None - 3)` raises instead of answering. So an operand that
-    // is not a numeric literal is tested for `None` in front of the WHOLE
-    // comparison, and an absent operand makes `Equal` false and `NotEqual`
-    // true, as the JavaScript target answers for `undefined`.
-    const guard = [a, b]
-      .filter((op) => !isNumber(op))
-      .map((op) => `(${compile(op)}) is not None and `)
-      .join('');
-    const equal = `(${guard}((${ca}) == (${cb}) or abs((${ca}) - (${cb})) <= ${tol}))`;
+    const guard =
+      mayBeNone(a) && mayBeNone(b) ? `(${ca}) is not None and ` : '';
+    if (guard === '')
+      return `((${ca}) ${kind === 'Equal' ? '==' : '!='} (${cb}))`;
+    const equal = `(${guard}(${ca}) == (${cb}))`;
     return kind === 'Equal' ? equal : `(not ${equal})`;
   };
   if (args.length === 2) return pair(args[0], args[1]);
@@ -965,9 +1014,9 @@ const PYTHON_OPERATORS: CompiledOperators = {
   // rare edge — so it is left as a documented divergence. The JS target aligns
   // it via `_SYS.pow`. See finding CO-P2-24.
   Power: ['**', 15],
-  // Equal / NotEqual are NOT operators: a raw `==` on floats is exact, but the
-  // interpreter compares within `engine.tolerance`. They are handled as
-  // function forms (see `compilePythonEquality`) so the tolerance is honored.
+  // Equal / NotEqual are NOT operators: they need the string, aggregate and
+  // collection gates and the `None` guard of `compilePythonEquality`, which
+  // emits the exact `==`/`!=` for the scalar pairs that pass them.
   LessEqual: ['<=', 9],
   GreaterEqual: ['>=', 9],
   Less: ['<', 9],
@@ -1175,7 +1224,7 @@ const PYTHON_RREF_HELPER = `def _ce_rref(_m):
 `;
 
 /**
- * Whole-collection equality within tolerance — the runtime side of the
+ * Whole-collection equality, exact per element — the runtime side of the
  * `Equal`/`NotEqual` lowering when two or more operands are collections. The
  * interpreter returns a SCALAR boolean there (see `compilePythonEquality`), so
  * this folds to one Python `bool`.
@@ -1203,21 +1252,20 @@ const PYTHON_RREF_HELPER = `def _ce_rref(_m):
  * Anything else — strings, mixed or `object` dtype (ragged input), complex —
  * falls through to the recursive element-wise comparison.
  *
- * On both the vectorized and the scalar path, exact `==` is tried BEFORE the
- * tolerance test: `abs(inf - inf)` is `NaN`, so the tolerance test alone would
- * report matching infinities unequal. `NaN` fails both tests, which is the
- * interpreter's answer.
+ * On both the vectorized and the scalar path the comparison is the exact
+ * `==`, as the scalar `Equal` lowering emits: matching infinities are equal,
+ * `nan` equals nothing.
  */
-const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b, _tol):
+const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b):
     _al = isinstance(_a, (list, tuple, np.ndarray))
     _bl = isinstance(_b, (list, tuple, np.ndarray))
     if _al != _bl:
         return False
     if not _al:
         try:
-            return bool(_a == _b or abs(_a - _b) <= _tol)
-        except TypeError:
             return bool(_a == _b)
+        except TypeError:
+            return False
     try:
         _x = np.asarray(_a)
         _y = np.asarray(_b)
@@ -1225,12 +1273,12 @@ const PYTHON_EQCOLL_HELPER = `def _ce_eqcoll(_a, _b, _tol):
             if _x.shape != _y.shape:
                 return False
             with np.errstate(invalid='ignore'):
-                return bool(np.all((_x == _y) | (np.abs(_x - _y) <= _tol)))
+                return bool(np.all(_x == _y))
     except (ValueError, TypeError):
         pass
     if len(_a) != len(_b):
         return False
-    return all(_ce_eqcoll(_x, _y, _tol) for _x, _y in zip(_a, _b))
+    return all(_ce_eqcoll(_x, _y) for _x, _y in zip(_a, _b))
 `;
 
 /**
@@ -3389,13 +3437,21 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `(1 if ${compile(args[0])} else 0)`;
   },
+  // δ: 1 when all arguments are equal — a single argument compares to 0 —
+  // else 0. The comparison is EXACT (`==`), as compiled `Equal` is (see
+  // `compilePythonEquality`): a `nan` argument answers 0.
+  //
+  // The variadic form tests the first argument for absence before comparing.
+  // An absent value reads as `None` on the object axis of this target, and
+  // `None == None` is true, so two absent arguments would otherwise answer 1
+  // — where the interpreter answers `Missing` and a compiled `Equal` of the
+  // same two operands answers false. Numeric absence is `nan`, which already
+  // fails the comparison against itself and so needs no test of its own.
   KroneckerDelta: (args, compile) => {
     if (args.length === 0 || args[0] == null)
       throw new Error('KroneckerDelta: missing argument');
-    const tol = args[0].engine.tolerance ?? 1e-10;
-    if (args.length === 1)
-      return `(1 if abs(${compile(args[0])}) <= ${tol} else 0)`;
-    return `(lambda *_v: 1 if all(abs(_x - _v[0]) <= ${tol} for _x in _v) else 0)(${args.map((a) => compile(a)).join(', ')})`;
+    if (args.length === 1) return `(1 if ${compile(args[0])} == 0 else 0)`;
+    return `(lambda *_v: 1 if _v[0] is not None and all(_x == _v[0] for _x in _v) else 0)(${args.map((a) => compile(a)).join(', ')})`;
   },
   Element: (args, compile) => {
     if (args[0] == null || args[1] == null)

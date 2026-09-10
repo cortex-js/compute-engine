@@ -41,11 +41,8 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
   it.each([
     ['Sum', 'PositiveInfinity', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'PositiveInfinity']]],
     ['Sum', 'NegativeInfinity', 'lower', ['Sum', 'i', ['Limits', 'i', 'NegativeInfinity', 10]]],
-    ['Sum', 'NaN', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
-    ['Sum', 'NaN', 'lower', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
     ['Product', 'PositiveInfinity', 'upper', ['Product', 'i', ['Limits', 'i', 1, 'PositiveInfinity']]],
     ['Product', 'NegativeInfinity', 'lower', ['Product', 'i', ['Limits', 'i', 'NegativeInfinity', 5]]],
-    ['Product', 'NaN', 'upper', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
   ] as const)('%s with a %s %s bound throws on the direct target', (kind, _bound, which, json) => {
     expect(() =>
       new JavaScriptTarget().compile(ce.box(json as any), {
@@ -54,6 +51,24 @@ describe('Sum/Product with a non-finite bound fails closed (D6)', () => {
     ).toThrow(
       new RegExp(`${kind}: the ${which} bound .* is not a finite number`)
     );
+  });
+
+  // A bound WRITTEN as `NaN` is rejected one step earlier, at boxing: the
+  // bound slot types `number` and `NaN` is an absence marker, so the operand
+  // boxes as an `incompatible-type` error (`checkBound`, `library/utils.ts`)
+  // and the whole expression is invalid before any target sees it. The
+  // fail-closed outcome is the same — no loop is emitted — with the
+  // invalid-expression diagnostic in place of the loop-bound one.
+  it.each([
+    ['Sum', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
+    ['Sum', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
+    ['Product', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
+  ] as const)('%s with a NaN bound is invalid at boxing and throws on the direct target', (_kind, json) => {
+    const expr = ce.box(json as any);
+    expect(expr.isValid).toBe(false);
+    expect(() =>
+      new JavaScriptTarget().compile(expr, { constantFold: false })
+    ).toThrow(/Cannot compile invalid expression/);
   });
 
   it('declines rather than trying to UNROLL an infinite range', () => {
@@ -127,8 +142,6 @@ describe('the GPU targets decline a non-finite bound too', () => {
   it.each([
     ['Sum', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'PositiveInfinity']]],
     ['Sum', 'lower', ['Sum', 'i', ['Limits', 'i', 'NegativeInfinity', 10]]],
-    ['Sum', 'upper', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
-    ['Sum', 'lower', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
     [
       'Product',
       'upper',
@@ -139,7 +152,6 @@ describe('the GPU targets decline a non-finite bound too', () => {
       'lower',
       ['Product', 'i', ['Limits', 'i', 'NegativeInfinity', 5]],
     ],
-    ['Product', 'upper', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
   ] as const)('%s with a non-finite %s bound', (kind, which, json) => {
     for (const to of ['glsl', 'wgsl'] as const) {
       const result = compile(ce.box(json as any), {
@@ -151,6 +163,20 @@ describe('the GPU targets decline a non-finite bound too', () => {
         new RegExp(`${kind}: the ${which} bound .* is not a finite number`)
       );
       expect(result.error).toMatch(/Fail closed \(D6\)\./);
+    }
+  });
+
+  // A `NaN` written as a bound is invalid at boxing (see the direct-target
+  // block above); the shader targets decline it with the same diagnostic.
+  it.each([
+    ['Sum', ['Sum', 'i', ['Limits', 'i', 1, 'NaN']]],
+    ['Sum', ['Sum', 'i', ['Limits', 'i', 'NaN', 5]]],
+    ['Product', ['Product', 'i', ['Limits', 'i', 1, 'NaN']]],
+  ] as const)('%s with a NaN bound declines as an invalid expression', (_kind, json) => {
+    for (const to of ['glsl', 'wgsl'] as const) {
+      const result = compile(ce.box(json as any), { to, constantFold: false });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Cannot compile invalid expression/);
     }
   });
 

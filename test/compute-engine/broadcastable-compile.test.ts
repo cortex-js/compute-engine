@@ -46,14 +46,21 @@ describe('broadcastable<T> — JavaScript compile target', () => {
   test('3b. fixed-shape broadcast chain compiles end-to-end (Tycho item 31)', () => {
     // `2·sin(3·[x,y])`: the inner product types `vector<2>`, so every scalar
     // -function hop must type `list<number>` (not collapse to scalar) for the
-    // compile pipeline to lower the whole chain through `_SYS.bcast`. Before
-    // the fixed-shape wrapper trigger, `Sin(3·[x,y])` typed scalar `number`
-    // and the compiled chain returned a silent wrong result behind
-    // `success: true`.
+    // compile pipeline to lower the whole chain element-wise. Before the
+    // fixed-shape wrapper trigger, `Sin(3·[x,y])` typed scalar `number` and
+    // the compiled chain returned a silent wrong result behind
+    // `success: true`. Every hop states the width 2, so each one emits its two
+    // components rather than a `_SYS.bcast` dispatch.
     const r = jsCompile((ce) =>
       ce.box(['Multiply', 2, ['Sin', ['Multiply', 3, ['List', 'x', 'y']]]])
     );
-    expect(r.code).toContain('_SYS.bcast');
+    // A hop whose operand is not provably an array of that width tests it
+    // first, so the `_SYS.bcast` dispatch survives as the ELSE branch of that
+    // test — never on the path a correctly shaped operand takes.
+    expect(r.code.split('_SYS.bcast(').length).toBe(
+      r.code.split(' : _SYS.bcast(').length
+    );
+    expect(r.code).toContain('[0]');
     const out = r.run!({ x: 0.5, y: 1.0 }) as number[];
     expect(out).toHaveLength(2);
     expect(out[0]).toBeCloseTo(2 * Math.sin(1.5), 12);

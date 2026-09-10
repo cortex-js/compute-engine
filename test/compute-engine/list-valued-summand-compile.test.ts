@@ -739,9 +739,12 @@ describe('a contradicted scalar declaration declines in every scalar position (2
   });
 
   // CONTROL: the honest `(unknown) -> unknown` spelling of the SAME body keeps
-  // its current behavior on JS — every shape compiles element-wise through
-  // `_SYS.bcast`/`_SYS.eq`/`_SYS.select`. `matches('number')` is false for it,
-  // so the gate is structurally unable to fire.
+  // its current behavior on JS — every shape compiles element-wise.
+  // `matches('number')` is false for it, so the gate is structurally unable to
+  // fire. Two element-wise spellings appear: the run-time
+  // `_SYS.bcast`/`_SYS.eq`/`_SYS.select` dispatch, and — where the assignment
+  // refines the call's type to `vector<2>`, so the compiler can count the
+  // components — one expression per component, which reads them as `[0]`/`[1]`.
   test.each(ADJACENCIES)(
     'the `-> unknown` control still compiles `%s` on JS',
     (_name, mathjson) => {
@@ -749,7 +752,7 @@ describe('a contradicted scalar declaration declines in every scalar position (2
       const expr = ce.box(mathjson);
       const r = compile(expr, { fallback: true });
       expect(r?.success).toBe(true);
-      expect((r as any).code).toMatch(/_SYS\.(bcast|eq|select)/);
+      expect((r as any).code).toMatch(/_SYS\.(bcast|eq|select)|\[0\]/);
       const v = (r as any).run({ u: 0.3 });
       expect(Array.isArray(v)).toBe(true);
       expect(v).toHaveLength(2);
@@ -1508,7 +1511,10 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
 
   // CONTROL: the HONEST `-> unknown` spelling of the SAME list body — not a
   // scalar declaration, so the gate is structurally unable to fire and the
-  // item-171 element-wise route survives.
+  // item-171 element-wise route survives. The route is the COMPONENT one: the
+  // assignment refines the call's type to `vector<2>`, and a width the
+  // compiler can count is emitted as one expression per component instead of
+  // a `_SYS.bcast` dispatch.
   test('the `-> unknown` control keeps the element-wise route on JS', () => {
     const ce = withBody(
       ['List', ['Cos', 't'], ['Sin', 't']],
@@ -1516,6 +1522,10 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
     );
     const r = compile(ce.box(['Add', ['b', 'u'], 1]), { fallback: true });
     expect(r?.success).toBe(true);
-    expect((r as any).code).toContain('_SYS.bcast');
+    expect((r as any).code).toMatch(/\[0\] \+ 1/);
+    const v = (r as any).run({ u: 0.3 });
+    expect(v).toHaveLength(2);
+    expect(v[0]).toBeCloseTo(Math.cos(0.3) + 1, 10);
+    expect(v[1]).toBeCloseTo(Math.sin(0.3) + 1, 10);
   });
 });

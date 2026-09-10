@@ -383,17 +383,79 @@ their expected effect on the corpus.
   `Chunk`. Every generic operator with a checkable value parameter is in the
   same position. Instantiating the plan per call site would close it; a
   design change, low urgency.
-- **Peephole left after the IEEE equality change (Tycho final re-measure,
-  2026-09-09):** where a comparison operand already sits behind the
-  decidedness guard `(v === v) ? … : NaN`, the exact pre-test the equality
-  now emits (`typeof v === 'number' && v === k`) makes that outer guard
-  redundant on the equality path — 100 sites / 90 codes, about 7 KB of
-  JavaScript in the corpus. A hash temporary compared with a loop counter
-  (`_tv1` vs `k`) keeps the tolerance branch on purpose: the temporary is a
-  real, not an integer, so the exact-integer `===` path does not apply.
+- **The piecewise decidedness guard is NOT redundant after the exact
+  equality (checked 2026-09-09, closing a note that said the opposite):** a
+  comparison operand behind the guard `(v === v) ? … : NaN` still needs it.
+  `Which(Equal(NaN, 5), 1, True, 0)` evaluates to `Missing` in the
+  interpreter, so the compiled piecewise must answer `NaN` when the compared
+  value is `NaN`; without the guard `NaN === 5` is `false` and the else arm
+  would answer instead. The exact test answers `false` on `NaN`, which is the
+  right answer for the COMPARISON, not for the piecewise that contains it.
+  Tycho's item 276 asks for the guard to be dropped; it stays, and the test
+  `compile-equality-exact.test.ts` pins the interpreter's `Missing`.
 - **Not CE's:** the inline `At` lambda (Tycho's own override), the "Unknown
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
+
+### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
+
+- **A repeated range-gather reduction is emitted twice.** `total(P[a...b])`
+  now lowers to a counted loop written straight into expression position, so
+  it is not a common-subexpression candidate: `total(P[a...b]) · total(P[a...b])`
+  emits the prologue and the loop twice and walks the array twice, and the
+  same reduction inside an unrolled `Sum` body is emitted once per term
+  (three copies for `\sum_{k=1}^{3}`). Routing the loop through the
+  statement-binding channel (`statements.consume`, or the loop-invariant
+  hoist) would bind it once; that is a change to how a statement-shaped
+  lowering takes part in CSE, larger than the round, and it needs the same
+  purity and scope rules the hoist applies. Measured, not merely suspected:
+  the shape is reachable from `\operatorname{total}(P[(m+n)...(m+n+4)])`
+  written twice in one row.
+- **An ABSENT scalar operand of a compiled equality answers `false`, not
+  `Missing`.** `Equal(L, t)` with `t` absent from `vars` compiles (fused and
+  unfused alike) to `[false, false, false]`, and a `Which` on it selects the
+  else arm, where the interpreter answers `Equal([1,2], Missing)` →
+  `[Missing, Missing]` and the piecewise would answer `Missing`. The scalar
+  pair already documents the convention (an absent operand makes `Equal`
+  false and `NotEqual` true, `compileJSEquality`); the `NaN`-condition rule
+  that makes a piecewise answer `NaN` only sees a numeric `NaN`, not the
+  `undefined` an absent object-axis read produces. Whether the compiled lanes
+  should project an absent operand of a comparison to a `NaN` answer (the
+  numeric absence) is a ruling on the absence contract
+  (`docs/ERROR-MODEL.md` §3.F), not a codegen fix.
+- **`Dot` over a tuple with `broadcastable` components types `value`, and
+  the user-function chain behind Tycho's heat-map colour row never settles
+  (reported by the Tycho session 2026-09-09 as evidence for item 275; not
+  part of the round, reproduced from source).** With `t_0(x,y) := x + y`,
+  `p(x,y) := (cos t_0(x,y), sin t_0(x,y))` and `S(x,y) := (x, y)` declared
+  `(unknown, unknown) -> unknown` (the importer's spelling), `p(x,y)` types
+  `tuple<number, number>` and `S(x,y) + PointList(0,0)` types
+  `tuple<unknown, unknown>`, so `Dot(p(x,y), S(x,y) + PointList(0,0))` types
+  `value`; with `a, b: tuple<broadcastable<number>, broadcastable<number>>`,
+  `Dot(a, b)` also types `value` where `Dot` of two `tuple<real, real>`
+  types `number`. The `Dot` type handler keeps `value` on purpose for a
+  tuple whose components could refine to a point list (its comment cites the
+  `Multiply` lesson of item 158), so the ask is a typing change with a
+  design question: a tuple whose components are each `number` or
+  `broadcastable<number>` (no collection component) could answer
+  `broadcastable<number>` — a number, or a list of numbers when a component
+  is a list — which is the value the evaluator produces once the components
+  settle. Downstream, `c_2 → broadcastable<unknown>`, `f_Bm →
+  broadcastable<number>`, `R_ec → broadcastable<broadcastable<number>>` and
+  the colour row → `broadcastable<color>` → `_SYS.bcastColor` + 71
+  `_SYS.bcast` sites (Tycho `hyvhlz4chj`). Second half of the same chain: a
+  user-function result under `unknown` parameters called with SCALAR
+  arguments should settle scalar through the chain (the item-86 look-through
+  stops at the first `value`). Probe on the Tycho side:
+  `scripts/repros/2026-09-09-hyvhlz4chj-carrier-oracle-probe.mts`.
+- **The interval-js runner copies its answer on the way out.** The constant
+  table now lives for the artifact's lifetime, so `freshIntervalValue` copies
+  the top-level result (and, for a collection-valued root, every element) so
+  a caller that writes into a returned enclosure cannot corrupt the table.
+  One or two small allocations per call; for a collection-valued root the
+  copy is linear in its length. The alternative is to document the returned
+  enclosure as read-only and drop the copy. Today no in-repo consumer writes
+  to a returned enclosure. The copy stays until ruled otherwise.
 
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 

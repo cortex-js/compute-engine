@@ -18,6 +18,7 @@ const ce = new ComputeEngine();
 type IntervalRun = {
   success: boolean;
   code: string;
+  preamble?: string;
   run: (arg: unknown) => unknown;
 };
 
@@ -87,7 +88,9 @@ describe('INTERVAL JS - SUBTRACTION EMITS _IA.sub', () => {
   test('a constant subtrahend that canonicalizes to a negative literal still adds', () => {
     // `x - 2` canonicalizes to `Add(x, -2)`: the operand is a number
     // literal, not a `Negate` node, so there is no negation to remove.
-    expect(compileInterval('x - 2').code).toBe('_IA.add(_.x, _IA.point(-2))');
+    const r = compileInterval('x - 2');
+    expect(r.code).toBe('_IA.add(_.x, _k1)');
+    expect(r.preamble).toBe('const _k1 = _IA.point(-2);');
   });
 
   test('the chain-step fold still sees the subtraction step', () => {
@@ -95,8 +98,10 @@ describe('INTERVAL JS - SUBTRACTION EMITS _IA.sub', () => {
     // and no call survives.
     const r = compileInterval('\\pi - e');
     expect(count(r.code, '_IA.')).toBe(0);
-    expect(r.code).toBe(
-      "{ kind: 'interval', value: { lo: 0.42331082513074714, hi: 0.4233108251307489 } }"
+    expect(r.code).toBe('_k1');
+    expect(r.preamble).toBe(
+      "const _k1 = { kind: 'interval', value: { lo: 0.42331082513074714, " +
+        'hi: 0.4233108251307489 } };'
     );
   });
 

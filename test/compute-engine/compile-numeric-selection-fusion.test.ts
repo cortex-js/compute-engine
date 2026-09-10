@@ -171,16 +171,19 @@ describe('numeric selection fusion', () => {
       expect(fused.run!(vars)).toEqual(original.run!(vars));
   });
 
-  test('equality uses the engine tolerance', () => {
+  test('equality is exact, whatever the engine tolerance', () => {
+    // Compiled equality is the exact `===` on every lane (compiled-equality
+    // ruling, `docs/COMPILATION-MODEL.md`); the fused loop and the unfused
+    // `_SYS.eq` leaf agree, and neither reads `engine.tolerance`.
     const ce = new ComputeEngine();
     ce.tolerance = 0.01;
     ce.declare('S', 'list<number>');
     const expr = ce.expr(['Which', ['Equal', 'S', 2], 7, 'True', 9]);
     const fused = new JavaScriptTarget().compile(expr);
     const original = new UnfusedTarget().compile(expr);
-    expect(fused.run!({ S: [2.001, 2.02] })).toEqual(
-      original.run!({ S: [2.001, 2.02] })
-    );
+    const S = [2, 2.001, 2.02, NaN];
+    expect(fused.run!({ S })).toEqual([7, 9, 9, 9]);
+    expect(fused.run!({ S })).toEqual(original.run!({ S }));
   });
 
   test('array-array equality retains whole-value semantics', () => {
@@ -303,5 +306,52 @@ describe('numeric selection fusion — carrier declarations', () => {
     const { fused, original } = pair(life, { S: 'indexed_collection<number>' });
     // The runtime guard, not the declaration, selects the fused loop.
     expect(fused.run!({ S: [] })).toEqual(original.run!({ S: [] }));
+  });
+});
+
+describe('numeric selection fusion — no absent cell reaches the fused loop', () => {
+  // The fused comparison is a bare `===`, and `undefined === undefined` is
+  // true, so an absent cell reaching the loop would make two absent positions
+  // compare EQUAL where the unfused `eqTensor` leaf says not equal. None
+  // does: `_SYS.numericSelectionInputs` scans every cell of every array input
+  // and each scalar input carries its own `typeof … === "number"` test, so a
+  // hole, an `undefined` cell or an absent scalar takes the generic selection
+  // instead. A rotation cannot read out of band either — the shift is reduced
+  // modulo the common length before the loop.
+  test('a hole in the carrier takes the generic selection', () => {
+    const { fused, original } = pair(life);
+    const holed = [1, 1, 1, , 1, 0, 0, 1, 1, 0] as number[];
+    expect(fused.run!({ S: holed })).toEqual(original.run!({ S: holed }));
+    const undefinedCell = [1, 1, 1, undefined, 1, 0, 0, 1, 1, 0];
+    expect(fused.run!({ S: undefinedCell })).toEqual(
+      original.run!({ S: undefinedCell })
+    );
+  });
+
+  test('an absent scalar operand takes the generic selection', () => {
+    const json = [
+      'Which',
+      ['Equal', ['RotateLeft', 'S', 97], 't'],
+      1,
+      'True',
+      0,
+    ];
+    const { fused, original } = pair(json, {
+      S: 'list<number>',
+      t: 'number',
+    });
+    expect(fused.code).toContain('_SYS.numericSelectionInputs(');
+    // The shift is reduced modulo the length, so 97 over three cells reads
+    // positions 2, 3, 1 — never out of band.
+    expect(fused.run!({ S: [1, 2, 3], t: 2 })).toEqual(
+      original.run!({ S: [1, 2, 3], t: 2 })
+    );
+    expect(fused.run!({ S: [1, 2, 3] })).toEqual(
+      original.run!({ S: [1, 2, 3] })
+    );
+    const holed = [1, , 3] as number[];
+    expect(fused.run!({ S: holed, t: 2 })).toEqual(
+      original.run!({ S: holed, t: 2 })
+    );
   });
 });

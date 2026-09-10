@@ -4,8 +4,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // Arithmetic peepholes in the JavaScript emitter, from the Tycho
 // code-generation audit of 2026-09-08:
 //
-//   - equality between provably integer operands uses `===`, not the
-//     tolerance test on the difference;
+//   - equality uses `===` on every numeric pair (compiled equality is exact,
+//     with no tolerance test on the difference — the integer-operand
+//     peephole of the audit became the rule on 2026-09-09);
 //   - the floored-modulo template binds a divisor it would otherwise compute
 //     three times;
 //   - a reciprocal square is a division by one multiplication, not
@@ -63,22 +64,19 @@ describe('J8: equality between integer-valued operands is exact', () => {
     );
   });
 
-  test('a real operand keeps the tolerance test', () => {
-    expect(codeOf(ce, 'x = 3')).toBe(
-      '((typeof (_.x) === \'number\' && (_.x) === (3)) || Math.abs((_.x) - (3)) <= 1e-10)'
-    );
-    expect(codeOf(ce, 'x = 0.5')).toBe(
-      '((typeof (_.x) === \'number\' && (_.x) === (0.5)) || Math.abs((_.x) - (0.5)) <= 1e-10)'
-    );
+  test('a real operand compares exactly too', () => {
+    expect(codeOf(ce, 'x = 3')).toBe('((_.x) === (3))');
+    expect(codeOf(ce, 'x = 0.5')).toBe('((_.x) === (0.5))');
   });
 
-  test('a tolerance of 1 or more keeps the tolerance test', () => {
-    // At a tolerance of 1 the interpreter calls 3 and 4 equal, and `===` does
-    // not, so the exact form would disagree with it.
+  test('the engine tolerance does not reach compiled equality', () => {
+    // At a tolerance of 1 the interpreter calls 3 and 4 equal; the compiled
+    // comparison is exact whatever the engine tolerance (compiled-equality
+    // ruling, `docs/COMPILATION-MODEL.md`).
     const coarse = new ComputeEngine();
     coarse.tolerance = 1;
     coarse.declare('m', 'integer');
-    expect(codeOf(coarse, 'm = 3')).toContain('Math.abs');
+    expect(codeOf(coarse, 'm = 3')).toBe('((_.m) === (3))');
   });
 
   test('the compiled value matches the interpreter', () => {
@@ -102,10 +100,9 @@ describe('J8: equality between integer-valued operands is exact', () => {
     }
   });
 
-  test('NaN compares false both ways, as the tolerance test does', () => {
-    // `NaN === NaN` is false, and `Math.abs(NaN - NaN) <= tol` is false as
-    // well, so the exact form does not change the answer for a `NaN` that an
-    // `integer`-typed lowering produced at run time.
+  test('NaN compares false both ways', () => {
+    // `NaN === NaN` is false, which is the interpreter's `Equal(NaN, NaN)`
+    // for a `NaN` that an `integer`-typed lowering produced at run time.
     const r = compile(ce.parse('\\lfloor a \\rfloor = \\lceil b \\rceil'), {
       fallback: false,
     });
@@ -125,11 +122,12 @@ describe('J8: equality between integer-valued operands is exact', () => {
     expect(d1.run!({ n: 0 })).toBe(1);
     expect(d1.run!({ n: 2 })).toBe(0);
 
-    // A real operand keeps the tolerance test.
+    // A real operand compares exactly as well.
     const real = compile(ce.box(['KroneckerDelta', 'x', 3]), {
       fallback: false,
     });
-    expect(real.code).toContain('Math.abs');
+    expect(real.code).toContain('_x === _v[0]');
+    expect(real.run!({ x: 3 + 1e-12 })).toBe(0);
   });
 });
 
@@ -302,13 +300,34 @@ describe('J5: a complex value built as a + i·b stays on the real lane', () => {
     expect(r.run!({ P: [1, -2, 3, -4, 5], a: 2, b: 4 })).toBe(3);
   });
 
-  test('a wide element type keeps the shape-agnostic fold', () => {
+  test('a wide element type folds on the real lane too', () => {
+    // A WIDE element type (`list<number>`) is real outside the complex
+    // discipline, the rule every other wide binding follows: a scalar
+    // `x: number` compiles `x + 1` to `_.x + 1`, `Max` over the same list
+    // reduces with `Math.max`, and the indexed spelling of this very sum —
+    // `Σ_{k=a}^{b} Q[k]` — accumulates with `+`. The collection form of
+    // `Sum` used to be the sole consumer that read the same type as
+    // possibly-complex and took the shape-agnostic combiner.
     const wide = newEngine({
       Q: 'list<number>',
       a: 'integer',
       b: 'integer',
     });
-    expect(codeOf(wide, '\\mathrm{Sum}(Q_{a..b})')).toContain('_SYS.sadd');
+    const code = codeOf(wide, '\\mathrm{Sum}(Q_{a..b})');
+    expect(code).not.toContain('_SYS.sadd');
+    expect(code).not.toContain('_SYS.cplx');
+    expect(code).toContain('+=');
+  });
+
+  test('an element type that is NOT real keeps the shape-agnostic fold', () => {
+    const complexList = newEngine({
+      Q: 'list<complex>',
+      a: 'integer',
+      b: 'integer',
+    });
+    expect(codeOf(complexList, '\\mathrm{Sum}(Q_{a..b})')).toContain(
+      '_SYS.sadd'
+    );
   });
 });
 

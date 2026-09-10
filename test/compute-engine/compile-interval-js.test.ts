@@ -7,12 +7,21 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 
+/** The whole emitted artifact: the constant table and the definitions the
+ *  preamble carries, then the expression that reads them. Every constant
+ *  interval is bound in that table (`hoistIntervalConstants`), so a test that
+ *  looks for a constant's spelling has to look at both halves. */
+function emitted(fn: { preamble?: string; code: string }): string {
+  return `${fn.preamble ?? ''}\n${fn.code}`;
+}
+
 describe('INTERVAL JS COMPILATION - BASIC', () => {
   test('compiles constant', () => {
     const expr = ce.parse('5');
     const fn = compile(expr, { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toContain('_IA.point(5)');
+    expect(fn.preamble).toBe('const _k1 = _IA.point(5);');
+    expect(fn.code).toBe('_k1');
   });
 
   test('compiles variable', () => {
@@ -27,7 +36,10 @@ describe('INTERVAL JS COMPILATION - BASIC', () => {
     // An irrational constant is emitted as the two-ulp ENCLOSURE of its
     // value, not as a point at the nearest double: no double is π, so a
     // point would exclude the constant it claims to bound.
-    expect(fn.code).toBe('{ lo: 3.1415926535897927, hi: 3.1415926535897936 }');
+    expect(fn.preamble).toBe(
+      'const _k1 = { lo: 3.1415926535897927, hi: 3.1415926535897936 };'
+    );
+    expect(fn.code).toBe('_k1');
   });
 });
 
@@ -122,10 +134,14 @@ describe('INTERVAL JS COMPILATION - FUNCTIONS', () => {
     expect(fn.code).toContain('_IA.abs');
   });
 
-  test('compiles if to piecewise', () => {
+  test('compiles if to a closure-free conditional', () => {
     const expr = ce.expr(['If', ['Greater', 'x', 0], 'x', ['Negate', 'x']]);
     const fn = compile(expr, { to: 'interval-js' });
-    expect(fn.code).toContain('_IA.piecewise');
+    // The condition is bound to a temporary and read back before either arm
+    // is evaluated; no arm is wrapped in a function.
+    expect(fn.code).toContain("=== 'true' ?");
+    expect(fn.code).toContain('_IA.hull(');
+    expect(fn.code).not.toContain('() =>');
   });
 
   test('compiles Gamma', () => {
@@ -1074,8 +1090,9 @@ describe('INTERVAL JS - element-wise selection declines cleanly', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toContain('_IA.piecewise');
-    expect(fn.code).toContain('_IA.less(_.x, _IA.point(3))');
+    expect(fn.code).toContain("=== 'true' ?");
+    expect(emitted(fn)).toContain('_IA.less(_.x, _k1)');
+    expect(fn.preamble).toContain('const _k1 = _IA.point(3);');
   });
 
   test('a wide-declared (unprovable) condition still compiles', () => {
@@ -1088,7 +1105,8 @@ describe('INTERVAL JS - element-wise selection declines cleanly', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toContain('_IA.piecewise');
+    expect(fn.code).toContain("=== 'true' ?");
+    expect(fn.code).toContain('_IA.hull(');
   });
 });
 
@@ -1161,7 +1179,8 @@ describe('INTERVAL JS - collection access', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.point(20)');
+    expect(emitted(fn)).toContain('_IA.point(20)');
+    expect(fn.code).toBe('_k1');
     expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
   });
 
@@ -1178,7 +1197,8 @@ describe('INTERVAL JS - collection access', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toContain('[_IA.point(10), _IA.point(20), _IA.point(30)]');
+    expect(fn.code).toContain('[_k1, _k2, _k3]');
+    expect(fn.preamble).toContain('const _k1 = _IA.point(10);');
     expect(fn.run!({ k: 3 })).toEqual({
       kind: 'interval',
       value: { lo: 30, hi: 30 },
@@ -1200,7 +1220,8 @@ describe('INTERVAL JS - collection access', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.point(3)');
+    expect(emitted(fn)).toContain('_IA.point(3)');
+    expect(fn.code).toBe('_k1');
   });
 
   test('PointX/PointY of a declared tuple', () => {
@@ -1228,7 +1249,8 @@ describe('INTERVAL JS - collection access', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.point(3)');
+    expect(emitted(fn)).toContain('_IA.point(3)');
+    expect(fn.code).toBe('_k1');
   });
 
   test('an absence marker composes through interval arithmetic', () => {
@@ -1335,8 +1357,9 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
       { to: 'interval-js' }
     );
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe(
-      '[_IA.scale(_IA.point(2), _.a), _IA.add(_.b, _IA.point(1))]'
+    expect(fn.code).toBe('[_IA.scale(_k1, _.a), _IA.add(_.b, _k2)]');
+    expect(fn.preamble).toBe(
+      'const _k1 = _IA.point(2);\nconst _k2 = _IA.point(1);'
     );
     expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
       { kind: 'interval', value: { lo: 2, hi: 4 } },
@@ -1402,16 +1425,15 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
   test('At over an assigned list folds to the element', () => {
     const fn = compile(ceA.box(['At', 'La', 2]), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.point(20)');
+    expect(emitted(fn)).toContain('_IA.point(20)');
+    expect(fn.code).toBe('_k1');
     expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
   });
 
   test('At over an assigned list with a run-time index emits the array', () => {
     const fn = compile(ceA.box(['At', 'La', 'n']), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe(
-      '_IA.at([_IA.point(10), _IA.point(20), _IA.point(30)], _.n)'
-    );
+    expect(fn.code).toBe('_IA.at([_k1, _k2, _k3], _.n)');
     const r = fn.run!({ n: { lo: 2, hi: 3 } }) as {
       kind: string;
       value: { lo: number; hi: number };
@@ -1423,13 +1445,15 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
   test('Length of an assigned list folds to the count', () => {
     const fn = compile(ceA.box(['Length', 'La']), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.point(3)');
+    expect(emitted(fn)).toContain('_IA.point(3)');
+    expect(fn.code).toBe('_k1');
   });
 
   test('PointY of an assigned point folds to the coordinate', () => {
     const fn = compile(ceA.box(['PointY', 'Pa']), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.point(2)');
+    expect(emitted(fn)).toContain('_IA.point(2)');
+    expect(fn.code).toBe('_k1');
   });
 
   test('a symbol pinned by `vars` is a run-time input, never looked through', () => {
@@ -1438,7 +1462,8 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
       vars: { La: '_.La' },
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.at(_.La, _IA.point(2))');
+    expect(fn.code).toBe('_IA.at(_.La, _k1)');
+    expect(fn.preamble).toBe('const _k1 = _IA.point(2);');
     expect(fn.run!({ La: [7, 8, 9] })).toEqual({
       kind: 'interval',
       value: { lo: 8, hi: 8 },
