@@ -10,7 +10,9 @@ import {
   hasFunctionSignature,
   signatureArms,
   signatureEffects,
+  stripMissingFromType,
   stripNumericRanges,
+  typeContainsMissing,
 } from '../../common/type/utils.js';
 import {
   isSubtype,
@@ -379,6 +381,25 @@ export function adoptTopPlaceholderSlots(value: Type, expected: Type): Type {
   return refined;
 }
 
+/**
+ * True when AT LEAST ONE arm of `t` is callable — a plain signature, the bare
+ * `function` wildcard, or one member of a union or intersection.
+ *
+ * {@link hasFunctionSignature} answers a stronger question: it is true only
+ * when EVERY member of a union is a signature, so a mixed declaration such as
+ * `number | (number) -> number` is not callable-only and escapes it. The
+ * missing-strip carve-out below needs the weaker question, because a value
+ * whose stripped type is the bottom type is a subtype of every arm, callable
+ * arms included.
+ */
+function hasAnyFunctionSignatureArm(t: Readonly<Type>): boolean {
+  if (hasFunctionSignature(t)) return true;
+  if (typeof t === 'string') return false;
+  if (t.kind === 'union' || t.kind === 'intersection')
+    return t.types.some((arm) => hasFunctionSignature(arm));
+  return false;
+}
+
 export function matchesDeclaredTypeAxes(
   ce: ComputeEngine,
   value: BoxedType,
@@ -408,6 +429,35 @@ export function matchesDeclaredTypeAxes(
   // proved. Those declarations keep refusing an `unknown` value, as they did
   // before this rule existed.
   if (value.isUnknown && !hasFunctionSignature(declared.type)) return true;
+
+  // ABSENCE IS A STATE EVERY TYPE CAN TAKE (ruled 2026-09-09), so the value's
+  // `missing` member is removed before its type is compared with the declared
+  // one. A gated value — `P := (1, 2) {a > 0}`, whose type is
+  // `missing | tuple<integer, integer>` while `a` is unbound — binds to a
+  // symbol declared `tuple<number, number>`, and the marker itself binds to
+  // any declared type with no callable arm (see the carve-out below). This
+  // mirrors `NaN`, which inhabits `number` and needs no `| nan` arm in a
+  // declaration. Only the ADMISSION changes: subtyping is
+  // untouched (`missing <: number` stays false), the DECLARED type stays
+  // exactly as written, and a symbol with no declaration still infers the
+  // `T | missing` arm. The declared type describes the SUCCESSES; the
+  // dereferenced value answers the marker when the gate is false
+  // (`docs/ERROR-MODEL.md` §4, Contract B).
+  //
+  // A value that strips to the BOTTOM type — a bare `missing`, and nothing
+  // else — is excluded when the declaration has a callable arm, for the same
+  // reason the `unknown` rule above excludes a signature: the bottom type is a
+  // subtype of every signature, so admitting it would install a CALLABLE
+  // definition under a contract nothing proved. The exclusion is limited to
+  // that case on purpose. A declaration such as `number | (number) -> number`
+  // has a NON-callable arm too, and a gated scalar (`3 {a > 0}`, stripping to
+  // `integer`) is admitted by that arm on its own merits; only a value that
+  // could match through the callable arm ALONE is refused.
+  if (typeContainsMissing(value.type)) {
+    const stripped = stripMissingFromType(value.type);
+    if (stripped !== 'never' || !hasAnyFunctionSignatureArm(declared.type))
+      value = ce.type(stripped);
+  }
 
   // A declared `unknown` slot is a placeholder the value refines, never a
   // constraint (see `refineDeclaredPlaceholders` above). Skipped for a

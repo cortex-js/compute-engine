@@ -882,10 +882,15 @@ export function resolveTypeAlias(t: Readonly<Type>): Type {
 
 /**
  * True if `t` carries a `missing` arm at any nesting level (a scalar `missing`,
- * a `T | missing` union, or a `missing` cell nested inside a list/collection/
- * tuple/record). Used to gate the missing-value strip (§3.B of
- * `docs/TYPE-SYSTEM.md`) so that a
+ * a `T | missing` union, or a `missing` cell nested inside a list/set/
+ * collection/tuple/record/dictionary). Used to gate the missing-value strip
+ * (§3.B of `docs/TYPE-SYSTEM.md`) so that a
  * Missing-free program is never touched by the lift.
+ *
+ * The kinds this recurses into must stay the same as the kinds
+ * {@link stripMissingFromType} rebuilds: a kind detected here but not stripped
+ * there arms the strip and then leaves the arm in place, so the caller both
+ * pays for the transform and still sees the absence arm.
  */
 export function typeContainsMissing(t: Readonly<Type>): boolean {
   if (t === 'missing') return true;
@@ -895,6 +900,7 @@ export function typeContainsMissing(t: Readonly<Type>): boolean {
     case 'intersection':
       return t.types.some(typeContainsMissing);
     case 'list':
+    case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
@@ -1157,6 +1163,10 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
  * against a parameter `P` iff `strip(T | missing) = T <: P`, so a scalar
  * `Missing` is admissible without widening `P` (I4 — inference still unifies an
  * unconstrained symbol against the bare `P`).
+ *
+ * Every kind {@link typeContainsMissing} recurses into is rebuilt here, so the
+ * two stay symmetric: a `record{x: integer | missing}` or a
+ * `dictionary<number | missing>` that arms the strip is also stripped by it.
  */
 export function stripMissingFromType(t: Readonly<Type>): Type {
   if (t === 'missing') return 'never';
@@ -1175,6 +1185,7 @@ export function stripMissingFromType(t: Readonly<Type>): Type {
       return { kind: 'intersection', types: arms };
     }
     case 'list':
+    case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
@@ -1187,6 +1198,19 @@ export function stripMissingFromType(t: Readonly<Type>): Type {
           type: stripMissingFromType(e.type),
         })),
       };
+    case 'dictionary':
+      return { ...t, values: stripMissingFromType(t.values) };
+    case 'record':
+    case 'object': {
+      // `elements` is a prototype-free map from field name to field type, and
+      // it is rebuilt the same way, because a record key can be `__proto__`
+      // or `toString` — an ordinary object literal would drop the first and
+      // inherit a bogus type for the second.
+      const elements: Record<string, Type> = Object.create(null);
+      for (const key of Object.keys(t.elements))
+        elements[key] = stripMissingFromType(t.elements[key]);
+      return { ...t, elements };
+    }
     default:
       return t;
   }

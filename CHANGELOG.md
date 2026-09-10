@@ -78,6 +78,47 @@
 
 ### Resolved Issues
 
+- **A gated value can be assigned to a declared symbol again.** Since 0.128.0
+  the type of a restriction carries the absent case, and the assignment
+  compatibility check required the value's type to be a subtype of the declared
+  type, so binding a masked value to a declared symbol threw:
+
+  ```js
+  ce.declare('P', 'tuple<number, number>');
+  ce.assign('P', ce.parse('(1,2)\\left\\{a>0\\right\\}'));
+  // TypeCompatibilityError: The value "(1, 2) {0 < a}" of type
+  // "missing | tuple<integer, integer>" is not compatible with the type
+  // "tuple<number, number>"
+
+  ce.declare('n', 'number');
+  ce.assign('n', ce.parse('3\\left\\{a>0\\right\\}'));
+  // TypeCompatibilityError: "integer | missing" is not compatible with "number"
+  ```
+
+  Both bound on 0.127.0 and both bind again. Absence is a state every type can
+  take — the way `NaN` is a member of `number` — so the value's `missing`
+  member is now removed before the subtype test, and the marker on its own
+  binds to any declared type. This covers every route that checks a value
+  against a declared type: `ce.assign`, `ce.declare(name, { type, value })`,
+  the `Assign` operator, `:=`, and each leaf of a destructuring declaration
+  (`Declare((x, y), type, value)`, the `let (x, y) = t` form). A declaration
+  with a CALLABLE arm still refuses the bare marker, because `missing` strips
+  to the bottom type — a subtype of every signature — and admitting it would
+  install a callable definition under a contract nothing proved.
+
+  The declared type stays exactly as written — `P.type` is
+  `tuple<number, number>` — and dereferencing the symbol answers the gated
+  value or the marker: with `a := 1`, `P` evaluates to `(1, 2)`; with
+  `a := -1`, to `Missing`, and `IsMissing(P)` answers `True`. Subtyping is
+  unchanged: `missing <: number` is still false and `matches()` answers as it
+  did.
+
+  This amends the 0.128.0 consumer guidance below. "A consumer that gates on
+  `type.matches("number")` must strip the `missing` member first" stays true
+  for an INFERRED type and for the type of an expression — an undeclared
+  `ce.assign("q", …)` of a gated value still types `integer | missing` — but it
+  is no longer needed to bind a value to a DECLARED symbol.
+
 - **A point-coordinate accessor over an EMPTY list of points answers the empty
   list.** `PointX([])` — and `PointY`, `PointZ`, and every empty collection, an
   empty `Set()` or a `Filter` that kept nothing included — evaluated to the
@@ -120,16 +161,24 @@
   answers `undefined`, its projection for a coordinate the type proves
   non-numeric; a `list<tuple<number, number>>` and an untyped operand answer
   `[]`. An operand whose element type PROVES element indexing — a scalar one,
-  which no point can have — no longer reaches the run-time point dispatch
-  (`_SYS.pointComponent`), which decides on the value and would read an empty
-  array as a list of no points. That also repairs `PointX(s)` for an operand
-  declared `string`, which compiled to `NaN` and now answers its first
-  character, as the interpreter does. The NON-EMPTY reading stays value-decided
-  for every element type the static type cannot settle — a nested one such as
-  `list<list<any>>`, or a union of a number with a tuple — because the
-  interpreter reads it off the concrete elements: such an operand keeps the
-  dispatch, and the empty-case answer its element type calls for is carried
-  into it.
+  which no point can have, or a row type whose cells the type proves
+  non-numeric, such as `list<list<string>>` — no longer reaches the run-time
+  point dispatch (`_SYS.pointComponent`), which decides on the value and would
+  read an empty array as a list of no points. That also repairs `PointX(s)` for
+  an operand declared `string`, which compiled to `NaN` and now answers its
+  first character, as the interpreter does. The NON-EMPTY reading stays
+  value-decided for every element type the static type cannot settle — a nested
+  one whose rows can hold numbers, such as `list<list<any>>`, or a union of a
+  number with a tuple — because the interpreter reads it off the concrete
+  elements: such an operand keeps the dispatch, and the empty-case answer its
+  element type calls for is carried into it.
+
+- **A compiled point accessor reads a row of MIXED cells as no point.** The
+  run-time dispatch classified the first row of a list by its FIRST cell only,
+  so `PointX(L)` over `[[1, "a"], [3, "b"]]` answered the coordinate list
+  `[1, 3]` where the interpreter, which admits a row as a point only when every
+  cell is a number, element-indexes and answers the first row `[1, "a"]`. The
+  dispatch now tests every cell of the row.
 
 ## 0.128.0 _2026-09-09_
 

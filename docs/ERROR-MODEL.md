@@ -502,6 +502,34 @@ is mandatory:
    as a declared predicate, or as a check inside the handler routed to
    the matching channel.
 
+**Assignment admits `missing` into a declared type — RULED 2026-09-09.**
+The same reading applies to a DECLARED SYMBOL: its type describes the
+values the symbol takes when it has one, so absence is not a second type
+the declaration must also spell. When a value is checked against a
+declared type, the value's `missing` member is removed before the subtype
+test. A restriction carries the absent case in its type — `3 {a > 0}`
+types `integer | missing` while `a` is unbound, and `(1, 2) {a > 0}` types
+`missing | tuple<integer, integer>` — so `ce.declare("n", "number")`
+followed by `ce.assign("n", 3 {a > 0})` binds, and so does a gated tuple
+into `tuple<number, number>`. The marker on its own binds too: absence is
+a state every type can take, the way `NaN` inhabits `number`. Three things
+do NOT change. The DECLARED type stays exactly as written (`n.type` is
+`number`, not `number | missing`). Subtyping is untouched:
+`missing <: number` is still false, so `matches()` answers as it always
+did. And where NOTHING is declared, the INFERRED type still keeps its
+`T | missing` arm, so a consumer that gates on `type.matches("number")`
+must still strip the absence arm when it reads an inferred or an
+expression type. Dereferencing the symbol answers the gated value or the
+marker, and the per-parameter `missingBehavior` policy — not this rule —
+still governs what an absent ARGUMENT does at a parameter slot. One value
+is excluded: the bare marker does not bind to a declaration with a
+CALLABLE arm — a plain signature, the `function` wildcard, or a union such
+as `number | (number) -> number`. `missing` strips to the bottom type,
+which is a subtype of every signature, and admitting it would install a
+callable definition under a contract nothing proved. Only that value is
+refused: a gated scalar assigned to `number | (number) -> number` strips
+to `integer` and binds through the scalar arm.
+
 The three worked declarations:
 
 ```

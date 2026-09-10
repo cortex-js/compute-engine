@@ -1692,6 +1692,16 @@ function staticPointArityOf(t: Type): number | undefined {
 const NON_POINT_ELEMENT_TYPE = 'boolean | character | number | string';
 
 /**
+ * The types that PROVE a coordinate ROW is not a point: the scalars that are
+ * not numbers. A row is a point only when every one of its cells holds a
+ * number — the interpreter's `isPointLike` admits a row whose element type is
+ * a subtype of `number` — so a row whose cells are proved non-numeric is no
+ * point. These are the members of `NON_POINT_ELEMENT_TYPE` except `number`,
+ * which is a coordinate one level down and a non-point one level up.
+ */
+const NON_COORDINATE_TYPE = 'boolean | character | string';
+
+/**
  * Could a value of type `t` be a LIST OF POINTS as well as a single point, so
  * that a coordinate accessor over it has to dispatch at run time? This is the
  * NON-EMPTY question, and it fails OPEN: the interpreter's `pointComponentAt`
@@ -1699,14 +1709,17 @@ const NON_POINT_ELEMENT_TYPE = 'boolean | character | number | string';
  * it statically when the type PROVES one reading. Every other type keeps the
  * run-time dispatch.
  *
- * A type answers false only when it admits no indexed collection at all, or
- * when its element type is one of the scalars, which no point is
- * (`NON_POINT_ELEMENT_TYPE`): a `list<number>` is a single point spelled flat
- * (`PointX([3, 4])` is `3`) and a `list<string>` element-indexes. Everything
- * else answers true — an untyped operand, a bare `list`, a `list<any>`, a
- * union such as `collection<any> | tuple`, and any NESTED element type
- * (`list<list<any>>`, `list<number | tuple<number, number>>`), whose values
- * can be rows of coordinates.
+ * A type answers false only when it admits no indexed collection at all, when
+ * its element type is one of the scalars, which no point is
+ * (`NON_POINT_ELEMENT_TYPE`), or when its element type is a ROW whose cells
+ * are proved non-numeric (`NON_COORDINATE_TYPE`), which no point is either: a
+ * `list<number>` is a single point spelled flat (`PointX([3, 4])` is `3`), a
+ * `list<string>` element-indexes, and so does a `list<list<string>>`, whose
+ * rows hold no coordinates. Everything else answers true — an untyped
+ * operand, a bare `list`, a `list<any>`, a union such as
+ * `collection<any> | tuple`, and a nested element type whose rows can hold
+ * numbers (`list<list<any>>`, `list<list<number>>`,
+ * `list<number | tuple<number, number>>`).
  *
  * Failing closed here reads a list of points as one point: `PointX(L)` over
  * `[[1, 2], [3, 4]]` answered the first ROW, `[1, 2]`, where the interpreter
@@ -1727,7 +1740,33 @@ function mayBePointList(t: Type): boolean {
   // is a subtype of every scalar, but it proves the collection holds nothing
   // at all rather than proving anything about points.
   if (elt === undefined || elt === 'never') return true;
-  return !isSubtype(elt, NON_POINT_ELEMENT_TYPE);
+  if (isSubtype(elt, NON_POINT_ELEMENT_TYPE)) return false;
+  // A nested element type is a row of cells. The row is a point only when its
+  // cells hold numbers, so an inner type proved non-numeric proves the whole
+  // collection element-indexes, exactly as a scalar element type does one
+  // level up. Without this arm a `list<list<string>>` kept the run-time
+  // dispatch, whose EMPTY answer is a flat `NaN`, where the direct route
+  // answers the `undefined` its non-numeric coordinate calls for — the marker
+  // the interpreter and the flat `list<string>` case already agree on.
+  // A TUPLE element type is a point whatever its components hold — the
+  // interpreter's `isPointLike` admits every tuple — and a tuple is a subtype
+  // of the indexed-collection shape, so it must be let through ahead of the
+  // row test below, which would read `list<tuple<string, string>>` as a list
+  // of non-numeric rows.
+  const isTupleType =
+    elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
+  if (!isTupleType && isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    const inner = collectionElementType(elt);
+    // `never` is a subtype of every scalar, but an empty ROW says nothing
+    // about points, for the reason the element-type test above gives.
+    if (
+      inner !== undefined &&
+      inner !== 'never' &&
+      isSubtype(inner, NON_COORDINATE_TYPE)
+    )
+      return false;
+  }
+  return true;
 }
 
 /** The type of a tuple's `idx`-th element, or `undefined` when `t` is not a
@@ -8921,13 +8960,15 @@ const SYS_HELPERS = {
    * (`library/collections.ts`) under the JavaScript erasure, where a tuple
    * and a list are both arrays:
    *
-   *  - a list whose first element is a NUMERIC coordinate row (an array that
-   *    is empty or starts with a number or a `{ re, im }`) is a list of
-   *    points and yields the list of coordinates. A row of strings is not a
-   *    point in the interpreter (`isPointLike` admits numeric rows and
-   *    tuples), so such a list is indexed like `First`/`Second`/`Third`
-   *    instead; the tuple-of-strings spelling is erased to the same array and
-   *    takes the same reading;
+   *  - a list whose first element is a NUMERIC coordinate row (an array whose
+   *    cells are ALL numbers, the empty array included) is a list of points
+   *    and yields the list of coordinates. A row that holds anything else is
+   *    not a point in the interpreter (`isPointLike` admits a row only when
+   *    its element type is a subtype of `number`, and admits tuples), so such
+   *    a list is indexed like `First`/`Second`/`Third` instead; the
+   *    tuple-of-strings spelling is erased to the same array and takes the
+   *    same reading. Every cell must be tested, not just the first: a MIXED
+   *    row such as `[1, "a"]` starts with a number and is not a point;
    *  - the third coordinate of a point (or of a list whose first point) has
    *    fewer than three components is the interpreter's `incompatible-
    *    dimensions` error, projected to a single `NaN` for the whole
@@ -8951,13 +8992,19 @@ const SYS_HELPERS = {
     if (!Array.isArray(v)) return NaN;
     if (v.length === 0) return emptyBroadcasts ? [] : NaN;
     const first = v[0];
-    const rows =
-      Array.isArray(first) &&
-      (first.length === 0 ||
-        typeof first[0] === 'number' ||
-        (typeof first[0] === 'object' &&
-          first[0] !== null &&
-          're' in first[0]));
+    // A cell holds a coordinate when it is a JavaScript number — the absence
+    // marker `NaN` and the infinities included — or the `{ re, im }` object a
+    // complex value is erased to, `complex` being a subtype of `number`.
+    const isCoordinate = (c: unknown): boolean =>
+      typeof c === 'number' ||
+      (typeof c === 'object' && c !== null && 're' in c);
+    // EVERY cell must be a coordinate, as the interpreter's `isPointLike`
+    // requires of a row's element type. Testing the first cell alone read
+    // `[[1, "a"], [3, "b"]]` as a list of points and answered `[1, 3]`, where
+    // the interpreter reads a row of mixed cells as no point at all and
+    // element-indexes, answering the first row. An empty row passes, as it
+    // does in the interpreter, where its element type is the bottom `never`.
+    const rows = Array.isArray(first) && first.every(isCoordinate);
     if (k === 2 && (rows ? first.length : v.length) < 3) return NaN;
     if (rows) return v.map((p) => (Array.isArray(p) ? (p[k] ?? NaN) : NaN));
     return v[k] ?? NaN;

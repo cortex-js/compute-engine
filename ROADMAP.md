@@ -1317,6 +1317,39 @@ What remains:
   broadcast, so `provablyScalarArg` refuses to inline over it. This is a
   soundness guard, not a defect.
 
+### A gated value is still refused by an assumption in force and by a range-bracketed declaration (OPEN, ruling — found 2026-09-09 while admitting `missing` at assignment)
+
+The 2026-09-09 ruling made the assignment compatibility check admit `missing`
+into any declared value type, so `n: number := 3\left\{a>0\right\}` binds
+although the value types `integer | missing` while `a` is unbound. Two related
+refusals remain, and stripping `missing` does not settle either:
+
+- **An assumption in force.** `ce.assume(v > 3); ce.assign('v', 5\{a>0\})`
+  throws "refused by the assumptions in force, which require the type
+  `real<3<..>`", while `ce.assign('v', 5)` under the same assumption is
+  accepted. This is a second check in `assertAssignableValueDef`
+  (`engine-declarations.ts`, the `provenTypeNode` block), a bare
+  `value.type.matches(provenType)` that does not go through the funnel the
+  ruling changed. The fact-level check that follows it (`refutingFact`) already
+  accepts the gated value, because substituting gives `True{0<a}`, so the type
+  pre-gate is stricter than the check it guards.
+- **A range-bracketed declaration.** `ce.declare('e', 'integer<3<..>');
+  ce.assign('e', 5\{a>0\})` throws "`integer | missing` is not compatible
+  with `integer<4..>`", while the same value binds to a plain `integer`.
+
+The shared cause is that forming the union erases the literal value type:
+`ce.box(5).type` is the literal `5`, but `5\{a>0\}` types `integer | missing`,
+which strips to `integer`, and `integer` satisfies no range. Two decisions
+settle both: (a) whether an assumption constrains a value that may be absent
+at all — the fact-level check says no, so the type pre-gate could defer to it
+for a value whose type carries `missing`; (b) whether a restriction should
+preserve the literal value type through the gate (`5 | missing` rather than
+`integer | missing`), a change to restriction typing with its own blast radius
+(every pin that reads the type of a gated literal). No test pins the current
+refusals; nothing consumer-facing depends on them today.
+
+If nothing is decided, both refusals stand.
+
 ### A broadcast over a lone EMPTY operand answers `Nothing` on the compiled route and in the unary heads, but `[]` in `Add`/`Multiply` (OPEN, ruling — found 2026-09-09 while fixing `PointX([])`)
 
 Three sides disagree. `docs/BROADCAST-MODEL.md` states that a lone empty
