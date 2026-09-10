@@ -407,3 +407,148 @@ describe('the counted loop compiles each of its operands once', () => {
     );
   });
 });
+
+describe('a Join- or List-indexed gather walks its segments in order', () => {
+  // The pixel-art spelling of "this cell and the sixty after it" is
+  // `P[Join([m+n], (m+n+15)...(m+n+60))]`: a singleton list joined to a
+  // range. Each piece of the index is a segment of the walk — a listed index
+  // is read once, a range is a counted loop — and the accumulator runs
+  // through them in order, so the answer is the interpreter's gather
+  // (`Sum`, `Product`, `Max`, `Min`, `Mean`, `Length`) with nothing
+  // materialized.
+  const JOIN = '\\sum P[\\operatorname{Join}([a], (a+2)...b)]';
+
+  test('the singleton-and-range shape is a loop with no index list', () => {
+    const c = code(engine(), JOIN);
+    expect(c).not.toContain('Array.from');
+    expect(c).not.toContain('.reduce');
+    expect(c).not.toContain('_SYS.cplx');
+    expect(c).not.toContain('...(');
+    // The listed index is read once, ahead of the loop over the range.
+    expect(c).toMatch(
+      /let (_tv\d+) = 0; \1 \+= _SYS\.atNumeric\(_tv1, _tv\d+, "number"\); if \(\1 !== \1\) return NaN; for \(let/
+    );
+  });
+
+  test.each([
+    [1, 4],
+    [2, 5],
+    [3, 3],
+    [1, 9],
+    [0, 3],
+    [-2, 4],
+  ])('equals the interpreter at a = %d, b = %d', (a, b) => {
+    for (const tex of [
+      JOIN,
+      '\\max(P[\\operatorname{Join}([a], (a+2)...b)])',
+      '\\operatorname{length}(P[\\operatorname{Join}([a], (a+2)...b)])',
+      '\\operatorname{total}(P[[a, b]])',
+      '\\operatorname{mean}(P[\\operatorname{Join}([a], [b], a...b)])',
+    ]) {
+      const got = kernel(engine(), tex)({ P: CELLS, a, b });
+      const want = interpreted(tex, a, b);
+      if (Number.isNaN(want)) expect([tex, got]).toEqual([tex, NaN]);
+      else expect([tex, got]).toEqual([tex, want]);
+    }
+  });
+
+  test('a run-time shape the declared types do not promise answers NaN', () => {
+    const f = kernel(engine(), JOIN);
+    // An absent source, a fractional listed index, a fractional bound.
+    expect(f({ a: 1, b: 4 })).toBeNaN();
+    expect(f({ P: CELLS, a: 1.5, b: 4 })).toBeNaN();
+    expect(f({ P: CELLS, a: 1, b: 4.5 })).toBeNaN();
+  });
+
+  test('an empty gather keeps the materializing lowering and its NaN extrema', () => {
+    const ce = engine();
+    for (const tex of [
+      '\\max(P[[]])',
+      '\\max(P[\\operatorname{Join}([], [])])',
+    ]) {
+      const c = code(ce, tex);
+      expect(c).not.toMatch(/for \(let/);
+      expect(kernel(ce, tex)({ P: CELLS })).toBeNaN();
+    }
+    // An empty piece beside a non-empty one contributes nothing.
+    expect(
+      kernel(
+        ce,
+        '\\sum P[\\operatorname{Join}([], a...b)]'
+      )({
+        P: CELLS,
+        a: 2,
+        b: 3,
+      })
+    ).toBe(50);
+  });
+
+  test('a caller-mapped empty `List` piece keeps the materializing lowering', () => {
+    const ce = engine();
+    const r = compile(
+      ce.box(['Sum', ['At', 'P', ['Join', ['List'], ['Range', 1, 2]]]]),
+      {
+        to: 'javascript',
+        fallback: false,
+        functions: { List: '_SYS.mylist' },
+      } as any
+    );
+    expect(r?.success).toBe(true);
+    expect(r!.code).toContain('_SYS.mylist');
+    expect(r!.code).not.toMatch(/for \(let/);
+  });
+
+  test('a listed index past the width limit keeps the materializing lowering', () => {
+    const ce = engine();
+    const wide = [
+      'Sum',
+      ['At', 'P', ['List', ...Array.from({ length: 33 }, (_, i) => i + 1)]],
+    ];
+    const narrow = [
+      'Sum',
+      ['At', 'P', ['List', ...Array.from({ length: 32 }, (_, i) => i + 1)]],
+    ];
+    const w = compile(ce.box(wide as any), { to: 'javascript' } as any);
+    const n = compile(ce.box(narrow as any), { to: 'javascript' } as any);
+    expect(w!.code).toContain('.reduce');
+    expect(n!.code).not.toContain('.reduce');
+  });
+
+  test('a repeated bound is tested once and an empty piece adds no count', () => {
+    const ce = engine();
+    const c = code(
+      ce,
+      '\\operatorname{mean}(P[\\operatorname{Join}([], a...b, b...a)])'
+    );
+    expect(c.match(/Number\.isInteger/g)).toHaveLength(2);
+    expect(c).not.toMatch(/\(0 \+/);
+    expect(
+      kernel(
+        ce,
+        '\\operatorname{mean}(P[\\operatorname{Join}([], a...b, b...a)])'
+      )({ P: CELLS, a: 2, b: 3 })
+    ).toBe(25);
+  });
+
+  test('an index piece that is not integer-typed keeps the materializing lowering', () => {
+    const ce = engine();
+    ce.declare('x', 'real');
+    const c = code(ce, '\\sum P[\\operatorname{Join}([x], 2...b)]');
+    expect(c).toContain('.reduce');
+  });
+
+  test('a caller-mapped `Join` keeps the materializing lowering', () => {
+    const ce = engine();
+    const r = compile(
+      ce.box(['Sum', ['At', 'P', ['Join', ['List', 'a'], ['Range', 2, 'b']]]]),
+      {
+        to: 'javascript',
+        fallback: false,
+        functions: { Join: '_SYS.myjoin' },
+      } as any
+    );
+    expect(r?.success).toBe(true);
+    expect(r!.code).toContain('_SYS.myjoin');
+    expect(r!.code).not.toMatch(/for \(let/);
+  });
+});

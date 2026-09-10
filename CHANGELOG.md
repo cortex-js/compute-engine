@@ -54,7 +54,9 @@
   the same gather — built the index list and the gathered slice and folded
   them with a callback; the `javascript` target now walks the source with a
   counted loop, in the range's own direction, reading each element with the
-  same call the indexed spelling `P[k]` uses. A source that is not an array
+  same call the indexed spelling `P[k]` uses; a `Join` of listed indices and
+  ranges (`P[Join([m+n], (m+n+15)...(m+n+60))]`) walks its pieces in order
+  the same way. A source that is not an array
   at run time, or a bound that is not an integer, answers `NaN` where the
   old fold raised a `TypeError`. A reduction over a list whose element type
   is `number` stays on the real lane, as every other consumer of such a list

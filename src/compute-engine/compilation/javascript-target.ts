@@ -2918,10 +2918,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `has a string arm), and \`.length\` counts UTF-16 code units, not ` +
           `characters. Fail closed (D6) — the interpreter evaluates it.`
       );
-    // A `Range`-indexed gather is POSITION-PRESERVING — an out-of-band index
-    // contributes an absence marker in place rather than being dropped — so
-    // its length is the number of indices the range holds, and no slice has
-    // to be built to count them. The source is still read, and still tested
+    // A positional gather (a range, a literal list of indices, or a `Join`
+    // of those) is POSITION-PRESERVING — an out-of-band index contributes an
+    // absence marker in place rather than being dropped — so its length is
+    // the number of indices the pieces hold, and no slice has to be built to
+    // count them. The source is still read, and still tested
     // for being an array: `Length` of a gather over a non-array answers the
     // same NaN the gather itself would.
     const loop = emitRangeGatherReduction(
@@ -2938,8 +2939,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // boolean mask — `_SYS.at` dispatches on its runtime shape, since an index
   // expression (e.g. `p[X-1]`) is not always statically provably a collection.
   // A scalar out-of-range or zero index yields NaN (matching the interpreter's
-  // `Nothing`, projected to NaN on a real target); a gather drops out-of-range
-  // entries; a non-integer entry in a collection index makes the interpreter
+  // `Nothing`, projected to NaN on a real target); a gather is
+  // position-preserving, so an out-of-range or zero index contributes NaN in
+  // place and the gathered length is the number of indices, not the number
+  // of hits; a non-integer entry in a collection index makes the interpreter
   // decline, projected as a scalar NaN for the whole result. Only the
   // single-index form over an indexed collection compiles; nested/multi-index
   // access and non-collection operands fail closed (D6).
@@ -4740,8 +4743,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 0) return 'NaN';
     if (args.length === 1) {
       // `_SYS.mean` is `sum / count` over the materialized elements; over a
-      // `Range`-indexed gather the counted loop computes the same two numbers
-      // in the same order without building the slice.
+      // positional gather (a range, a literal list of indices, or a `Join` of
+      // those) the counted loop computes the same two numbers in the same
+      // order without building the slice.
       const loop = emitRangeGatherReduction(
         args[0],
         target,
@@ -12339,9 +12343,11 @@ function compileExtremum(
   const guardedReduce = (arrayCode: string): string =>
     `((_l) => _l.length === 0 ? NaN : _l.reduce((_a, _b) => ${fn}(_a, _b), ${identity}))(${arrayCode})`;
   if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
-    // A `Range`-indexed gather walks its positions with a counted loop rather
-    // than building the slice. Its range holds at least one index, so the
-    // empty-input branch above has no counterpart there.
+    // A positional gather walks its positions with a counted loop rather
+    // than building the slice. A gather the loop takes always holds at least
+    // one position, because `rangeGatherSource` declines a gather with no
+    // position at all, so the empty-input branch above has no counterpart
+    // there.
     const loop = emitRangeGatherReduction(
       args[0],
       target,
@@ -12506,18 +12512,37 @@ function compileGcdLcm(
 }
 
 /**
- * The source and bounds of a `Range`-indexed positional gather — the
- * `P[a...b]` spelling, `At(P, Range(a, b))` — when a reduction over it can be
- * walked with a counted loop instead of being materialized. `undefined` for
- * every other operand.
+ * The most listed indices a positional gather may carry and still take the
+ * counted-loop lowering (see `rangeGatherSource`); in the same order as the
+ * common-subexpression binding cap, since both bound the size of the emitted
+ * artifact.
+ */
+const GATHER_LISTED_INDEX_LIMIT = 32;
+
+/**
+ * One piece of a positional gather's index list: a `Range(lo, hi)` walked
+ * with a counted loop, or the scalar indices of a literal `List`, read one by
+ * one. `Join` concatenates pieces (`P[Join([m+n], (m+n+15)...(m+n+60))]`, the
+ * pixel-art spelling of "this cell and the sixty after it").
+ */
+type GatherSegment =
+  | { kind: 'range'; range: Expression; lo: Expression; hi: Expression }
+  | { kind: 'points'; list: Expression; indices: ReadonlyArray<Expression> };
+
+/**
+ * The source and index segments of a positional gather — `P[a...b]`
+ * (`At(P, Range(a, b))`), `P[[i, j]]` (`At(P, List(i, j))`), and a `Join` of
+ * such pieces — when a reduction over it can be walked with a counted loop
+ * instead of being materialized. `undefined` for every other operand.
  *
  * Three conditions make the loop reproduce the gather EXACTLY:
- *  - the range carries no explicit step, so its step is the auto-directed ±1
+ *  - a range carries no explicit step, so its step is the auto-directed ±1
  *    and its k-th index is `lo + k` (ascending) or `lo − k` (descending);
- *  - both bounds are integer-typed, so every index the range yields is an
- *    integer. That is what lets the loop read element by element: the
- *    interpreter refuses a gather whose index list holds a NON-integer for
- *    the whole read at once, which a per-element walk cannot reproduce;
+ *  - every bound and every listed index is integer-typed, so every index the
+ *    gather yields is an integer. That is what lets the loop read element by
+ *    element: the interpreter refuses a gather whose index list holds a
+ *    NON-integer for the whole read at once, which a per-element walk cannot
+ *    reproduce;
  *  - the source is a provably indexed collection whose elements are numbers,
  *    which is what makes each read a numeric one. A string source is excluded
  *    — it is indexed by grapheme cluster and has to be segmented first — and
@@ -12526,17 +12551,32 @@ function compileGcdLcm(
 function rangeGatherSource(coll: Expression):
   | {
       base: Expression;
-      range: Expression;
-      lo: Expression;
-      hi: Expression;
+      index: Expression;
+      segments: ReadonlyArray<GatherSegment>;
       elementType: Type;
     }
   | undefined {
   if (!isFunction(coll, 'At') || coll.ops.length !== 2) return undefined;
   const index = coll.ops[1];
-  if (!isFunction(index, 'Range') || index.ops.length !== 2) return undefined;
-  const [lo, hi] = index.ops;
-  if (!BaseCompiler.isIntegerValued(lo) || !BaseCompiler.isIntegerValued(hi))
+  const segments = gatherSegments(index);
+  if (segments === undefined) return undefined;
+  // A listed index is unrolled — one temporary, one integer test and one
+  // read each — so the emitted code grows with the list where the range
+  // path does not. Past this many listed indices the materializing lowering
+  // is the smaller artifact; the limit is about emitted-code size, not
+  // correctness.
+  if (
+    segments.reduce(
+      (n, seg) => n + (seg.kind === 'points' ? seg.indices.length : 0),
+      0
+    ) > GATHER_LISTED_INDEX_LIMIT
+  )
+    return undefined;
+  // A gather with no position at all (`P[[]]`, or a `Join` of empty lists)
+  // is left to the materializing lowering, whose extrema answer NaN for an
+  // empty collection where the counted fold would answer its seed
+  // (`-Infinity` for `Max`).
+  if (!segments.some((seg) => seg.kind === 'range' || seg.indices.length > 0))
     return undefined;
   const base = coll.ops[0];
   if (
@@ -12557,12 +12597,49 @@ function rangeGatherSource(coll: Expression):
   const baseType = resolveTypeForCompilation(jsType(base));
   if (typeof baseType !== 'string' && baseType.kind === 'tuple')
     return undefined;
-  return { base, range: index, lo, hi, elementType };
+  return { base, index, segments, elementType };
 }
 
 /**
- * A reduction over a `Range`-indexed gather (see {@link rangeGatherSource}) as
- * a counted loop, or `undefined` when the operand is not that shape.
+ * The segments of a gather index (see {@link GatherSegment}), or `undefined`
+ * when the index is not a `Range` without a step, a literal `List` of
+ * integer-typed scalars, or a `Join` of those. An empty `List` is a
+ * zero-length segment; a `Join` with no admissible operand is not a gather.
+ */
+function gatherSegments(
+  index: Expression
+): ReadonlyArray<GatherSegment> | undefined {
+  if (isFunction(index, 'Range') && index.ops.length === 2) {
+    const [lo, hi] = index.ops;
+    if (!BaseCompiler.isIntegerValued(lo) || !BaseCompiler.isIntegerValued(hi))
+      return undefined;
+    return [{ kind: 'range', range: index, lo, hi }];
+  }
+  if (isFunction(index, 'List')) {
+    if (!index.ops.every((i) => BaseCompiler.isIntegerValued(i)))
+      return undefined;
+    // An empty list is kept as a zero-length segment rather than dropped:
+    // the caller-mapping check of the emitter has to see every index
+    // application, and a mapped `List` lowering may answer indices of its
+    // own.
+    return [{ kind: 'points', list: index, indices: index.ops }];
+  }
+  if (isFunction(index, 'Join') && index.ops.length > 0) {
+    const out: GatherSegment[] = [];
+    for (const op of index.ops) {
+      const piece = gatherSegments(op);
+      if (piece === undefined) return undefined;
+      out.push(...piece);
+    }
+    return out;
+  }
+  return undefined;
+}
+
+/**
+ * A reduction over a positional gather (see {@link rangeGatherSource}) — a
+ * range, a literal list of indices, or a `Join` of those — as a counted walk,
+ * or `undefined` when the operand is not that shape.
  *
  * Without it `total(P[a...b])` allocates the index list, then the gathered
  * slice, then folds the slice through a callback — three passes and two arrays
@@ -12570,8 +12647,9 @@ function rangeGatherSource(coll: Expression):
  * the source with the same `_SYS.atNumeric` call the INDEXED form of the same
  * reduction emits (`Σ_{k=a}^{b} P[k]`), so nothing is allocated.
  *
- * It walks the range in ITS OWN direction — `P[4...2]` reads elements 4, 3, 2
- * — because a floating-point fold depends on the order of its terms.
+ * The pieces are walked in the order the index lists them, and a range in ITS
+ * OWN direction — `P[4...2]` reads elements 4, 3, 2 — because a
+ * floating-point fold depends on the order of its terms.
  *
  * `fold` accumulates one element; omit it for a reduction that reads only the
  * element count. `result` turns the accumulator and the count into the
@@ -12591,17 +12669,26 @@ function emitRangeGatherReduction(
   if (source === undefined) return undefined;
 
   // The loop reads the source array element by element, so neither the `At`
-  // nor the `Range` application is ever emitted. A caller that re-maps either
-  // name — through the `functions`/`operators` options — supplies its own
-  // lowering, which is free to answer something a positional walk cannot
-  // reproduce (an `At` mapping that returns a fixed one-element list makes
-  // the gather one element long whatever the bounds say). Such an operand
-  // goes to the materializing lowering below, which builds the index list and
-  // the slice through both operator handlers.
+  // nor the index application (`Range`, `List`, `Join`) is ever emitted. A
+  // caller that re-maps any of those names — through the `functions`/
+  // `operators` options — supplies its own lowering, which is free to answer
+  // something a positional walk cannot reproduce (an `At` mapping that
+  // returns a fixed one-element list makes the gather one element long
+  // whatever the bounds say). Such an operand goes to the materializing
+  // lowering below, which builds the index list and the slice through every
+  // operator handler.
+  // The top-level index is checked as well as each piece: a `Join` node is
+  // not itself a segment.
   const harvestOptions = target.cse?.harvestOptions;
   if (
     isCallerMapped(coll, harvestOptions) ||
-    isCallerMapped(source.range, harvestOptions)
+    isCallerMapped(source.index, harvestOptions) ||
+    source.segments.some((seg) =>
+      isCallerMapped(
+        seg.kind === 'range' ? seg.range : seg.list,
+        harvestOptions
+      )
+    )
   )
     return undefined;
 
@@ -12613,10 +12700,6 @@ function emitRangeGatherReduction(
     `(() => { ${build((v) => `return ${v};`)} })()`;
 
   const arr = BaseCompiler.tempVar(target);
-  const lo = BaseCompiler.tempVar(target);
-  const hi = BaseCompiler.tempVar(target);
-  const step = BaseCompiler.tempVar(target);
-  const count = BaseCompiler.tempVar(target);
   // A reduction that reads only the count declares neither of these.
   const acc = fold === undefined ? '' : BaseCompiler.tempVar(target);
   const turn = fold === undefined ? '' : BaseCompiler.tempVar(target);
@@ -12631,49 +12714,98 @@ function emitRangeGatherReduction(
       ? `_SYS.atNumeric(${arr}, ${idx}, ${JSON.stringify(typeToString(source.elementType))})`
       : `_SYS.at(${arr}, ${idx})`;
 
-  // The three run-time facts the loop rests on, tested once. A non-array
-  // source has no elements to read (`_SYS.at`'s own rule), and a bound that
-  // is not an integer at run time — which the declared type does not
-  // guarantee, since a caller's `vars` object is not type-checked — is a
-  // gather the interpreter refuses outright, so both answer NaN for the whole
-  // reduction rather than per element. The integer test also rejects `±∞` and
-  // NaN, so the counted loop below always terminates.
-  const guard = `!Array.isArray(${arr}) || !Number.isInteger(${lo}) || !Number.isInteger(${hi})`;
-
-  // Compile the three operands ONCE, before the statement sink is asked for a
+  // Compile every operand ONCE, before the statement sink is asked for a
   // body: `JavaScriptStatements.expression` runs the body it is given more
   // than once — once to register the source text, again whenever that text is
   // re-emitted at a statement position — and `BaseCompiler.compile` is not a
   // pure function of its argument. It mints temporaries and advances the
   // common-subexpression bookkeeping, so a second call on the same operand
   // would consume an occurrence for a body that is then discarded. The
-  // callback below closes over the finished text instead.
+  // callback below closes over the finished text instead. Every bound and
+  // every listed index gets a temporary of its own, bound in the prologue.
   const baseCode = BaseCompiler.compile(source.base, target);
-  const loCode = BaseCompiler.compile(source.lo, target);
-  const hiCode = BaseCompiler.compile(source.hi, target);
+  type Bound = { name: string; code: string };
+  const bound = (e: Expression): Bound => ({
+    name: BaseCompiler.tempVar(target),
+    code: BaseCompiler.compile(e, target),
+  });
+  const pieces = source.segments.map((seg) =>
+    seg.kind === 'range'
+      ? {
+          kind: 'range' as const,
+          lo: bound(seg.lo),
+          hi: bound(seg.hi),
+          step: BaseCompiler.tempVar(target),
+          count: BaseCompiler.tempVar(target),
+        }
+      : { kind: 'points' as const, indices: seg.indices.map(bound) }
+  );
+  const bounds: Bound[] = pieces.flatMap((piece) =>
+    piece.kind === 'range' ? [piece.lo, piece.hi] : piece.indices
+  );
+
+  // The run-time facts the loop rests on, tested once. A non-array source
+  // has no elements to read (`_SYS.at`'s own rule), and a bound or a listed
+  // index that is not an integer at run time — which the declared type does
+  // not guarantee, since a caller's `vars` object is not type-checked — is a
+  // gather the interpreter refuses outright, so both answer NaN for the whole
+  // reduction rather than per element. The integer test also rejects `±∞` and
+  // NaN, so every counted loop below terminates.
+  // Two occurrences of one bound expression get a temporary each (a bound
+  // is compiled once per occurrence, which is what the common-subexpression
+  // accounting expects), but the integer test is a pure re-test of the same
+  // value, so it runs once per distinct expression text.
+  const seen = new Set<string>();
+  const guard = [
+    `!Array.isArray(${arr})`,
+    ...bounds
+      .filter((b) => !seen.has(b.code) && seen.add(b.code))
+      .map((b) => `!Number.isInteger(${b.name})`),
+  ].join(' || ');
+  // The element count of the whole gather: each range contributes
+  // `|hi − lo| + 1` (integer bounds and a ±1 step, so no clamp and no floor),
+  // each listed index one. An empty list piece stays in `pieces` for the
+  // caller-mapping check but adds nothing here. `rangeGatherSource` declines
+  // a gather with no position, so at least one count remains. Parenthesized
+  // when it is a sum, because `result` splices it into an expression of its
+  // own (`acc / count` for `Mean`).
+  const counts = pieces.flatMap((piece) =>
+    piece.kind === 'range'
+      ? [piece.count]
+      : piece.indices.length === 0
+        ? []
+        : [String(piece.indices.length)]
+  );
+  const total = counts.length === 1 ? counts[0] : `(${counts.join(' + ')})`;
 
   return expression((exit) => {
-    const prologue =
+    let prologue =
       `const ${arr} = ${baseCode}; ` +
-      `const ${lo} = ${loCode}; ` +
-      `const ${hi} = ${hiCode}; ` +
-      `if (${guard}) ${exit('NaN')} ` +
-      `const ${step} = ${hi} >= ${lo} ? 1 : -1; ` +
-      // Integer bounds and a ±1 step: the element count is `|hi − lo| + 1`,
-      // always at least one, so no clamp and no floor are needed.
-      `const ${count} = (${hi} - ${lo}) * ${step} + 1; `;
-    if (fold === undefined) return `${prologue}${exit(result('', count))}`;
+      bounds.map((b) => `const ${b.name} = ${b.code}; `).join('') +
+      `if (${guard}) ${exit('NaN')} `;
+    for (const piece of pieces)
+      if (piece.kind === 'range')
+        prologue +=
+          `const ${piece.step} = ${piece.hi.name} >= ${piece.lo.name} ? 1 : -1; ` +
+          `const ${piece.count} = (${piece.hi.name} - ${piece.lo.name}) * ${piece.step} + 1; `;
+    if (fold === undefined) return `${prologue}${exit(result('', total))}`;
     // NaN absorbs every fold this loop serves (`+`, `*`, `Math.max`,
     // `Math.min`), so once the accumulator is NaN no later element can change
     // the answer. The elements are reads of an array bound before the loop,
     // which have no observable effect, so stopping early is unobservable.
-    return (
-      `${prologue}let ${acc} = ${identity}; ` +
-      `for (let ${turn} = 0; ${turn} < ${count}; ${turn}++) { ` +
-      `${fold(acc, at(`${lo} + ${step} * ${turn}`))} ` +
-      `if (${acc} !== ${acc}) ${exit('NaN')} } ` +
-      `${exit(result(acc, count))}`
-    );
+    const exitOnNaN = `if (${acc} !== ${acc}) ${exit('NaN')} `;
+    let body = `${prologue}let ${acc} = ${identity}; `;
+    for (const piece of pieces) {
+      if (piece.kind === 'range')
+        body +=
+          `for (let ${turn} = 0; ${turn} < ${piece.count}; ${turn}++) { ` +
+          `${fold(acc, at(`${piece.lo.name} + ${piece.step} * ${turn}`))} ` +
+          `${exitOnNaN}} `;
+      else
+        for (const idx of piece.indices)
+          body += `${fold(acc, at(idx.name))} ${exitOnNaN}`;
+    }
+    return `${body}${exit(result(acc, total))}`;
   });
 }
 
@@ -12691,8 +12823,9 @@ function emitCollectionReduce(
   guarded: boolean
 ): string {
   if (!guarded) {
-    // `total(P[a...b])` and its `Product` twin walk the gathered positions
-    // with a counted loop instead of building the index list and the slice.
+    // `total(P[a...b])`, `total(P[Join([i], a...b)])` and their `Product`
+    // twins walk the gathered positions with a counted loop instead of
+    // building the index list and the slice.
     const loop = emitRangeGatherReduction(
       coll,
       target,
