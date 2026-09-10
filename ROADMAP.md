@@ -383,6 +383,14 @@ their expected effect on the corpus.
   `Chunk`. Every generic operator with a checkable value parameter is in the
   same position. Instantiating the plan per call site would close it; a
   design change, low urgency.
+- **Peephole left after the IEEE equality change (Tycho final re-measure,
+  2026-09-09):** where a comparison operand already sits behind the
+  decidedness guard `(v === v) ? … : NaN`, the exact pre-test the equality
+  now emits (`typeof v === 'number' && v === k`) makes that outer guard
+  redundant on the equality path — 100 sites / 90 codes, about 7 KB of
+  JavaScript in the corpus. A hash temporary compared with a loop counter
+  (`_tv1` vs `k`) keeps the tolerance branch on purpose: the temporary is a
+  real, not an integer, so the exact-integer `===` path does not apply.
 - **Not CE's:** the inline `At` lambda (Tycho's own override), the "Unknown
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
