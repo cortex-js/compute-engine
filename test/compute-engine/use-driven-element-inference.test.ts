@@ -271,10 +271,22 @@ describe('the numeric short path refuses a non-numeric carrier behind an absence
     const ce = new ComputeEngine();
     ce.declare('uq', { type: 'unknown | missing' });
     ce.declare('lq', { type: 'list<number> | missing' });
-    ce.declare('tq', { type: 'tuple<number, number> | missing' });
     ce.declare('mq', { type: 'missing' });
-    for (const n of ['uq', 'lq', 'tq', 'mq'])
+    for (const n of ['uq', 'lq', 'mq'])
       expect(ce.box(['Add', n, 1]).isValid).toBe(true);
+  });
+
+  test('a POINT behind an absence arm is refused, like a bare point', () => {
+    // A scalar does not add to a tuple at any component, and reading the
+    // operand's type exactly let an absence arm hide that: the rejection now
+    // reads through `missing` and across a union of numeric tuple spellings,
+    // so `tuple<number, number> | missing` is refused exactly as
+    // `tuple<number, number>` is. A scalar MULTIPLE of such a point stays
+    // admitted, since it scales the vector.
+    const ce = new ComputeEngine();
+    ce.declare('tq', { type: 'tuple<number, number> | missing' });
+    expect(ce.box(['Add', 'tq', 1]).isValid).toBe(false);
+    expect(ce.box(['Multiply', 'tq', 2]).isValid).toBe(true);
   });
 });
 

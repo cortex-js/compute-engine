@@ -411,18 +411,39 @@ their expected effect on the corpus.
   purity and scope rules the hoist applies. Measured, not merely suspected:
   the shape is reachable from `\operatorname{total}(P[(m+n)...(m+n+4)])`
   written twice in one row.
-- **An ABSENT scalar operand of a compiled equality answers `false`, not
-  `Missing`.** `Equal(L, t)` with `t` absent from `vars` compiles (fused and
-  unfused alike) to `[false, false, false]`, and a `Which` on it selects the
-  else arm, where the interpreter answers `Equal([1,2], Missing)` →
-  `[Missing, Missing]` and the piecewise would answer `Missing`. The scalar
-  pair already documents the convention (an absent operand makes `Equal`
-  false and `NotEqual` true, `compileJSEquality`); the `NaN`-condition rule
-  that makes a piecewise answer `NaN` only sees a numeric `NaN`, not the
-  `undefined` an absent object-axis read produces. Whether the compiled lanes
-  should project an absent operand of a comparison to a `NaN` answer (the
-  numeric absence) is a ruling on the absence contract
-  (`docs/ERROR-MODEL.md` §3.F), not a codegen fix.
+- **A SCALAR compiled comparison answers a decided boolean where the
+  interpreter is undecided.** `Equal(a, b)` with either operand absent from the
+  object of variables compiles to `false` (and `NotEqual` to `true`), where the
+  interpreter answers `Missing` for `Equal(Missing, 5)` and for
+  `NotEqual(Missing, 5)` alike. The ELEMENT-WISE runtime was made three-valued
+  (an absent cell is marked `NaN`, which the selection runtime and the
+  element-wise connective guard both read); the scalar lowering deliberately was
+  not, and the reasons were measured rather than assumed. Its answer is relied
+  on to be a real boolean in four places: `BRANCH_RELATIONS` states so;
+  `kleeneRelationLeaf` negates the compiled comparison with a bare `not`, which
+  would turn a marker into a confident `true`; a value-position `And`/`Or` is a
+  plain `&&`, which returns its first falsy operand and so cannot let a decided
+  `false` absorb an undecided operand; and a chained comparison would need a
+  three-valued fold that still stops at the first false pair, because the
+  interpreter short-circuits a chain there (`evaluateChainOperands`). Two
+  further consequences were measured: the marker arm would have to fire when
+  EITHER operand may be absent (a literal on one side currently makes the pair
+  decided, so `Equal(a, 3)` and `Equal(a, b)` would disagree), and the emitted
+  arm splices both operands twice, which double-evaluates a pure but expensive
+  operand that only impure operands are currently bound against. Closing this
+  means doing all of that together, not changing the comparison alone.
+- **Whole-collection equality answers `false` when an element is absent.**
+  `Equal(a, b)` over two ARRAYS is collection equality, a single boolean, and
+  its recursion treats an element pair that is not decided equal as unequal. So
+  two arrays with matching absent cells compile to `false` where the
+  interpreter answers `True` (measured: `Equal([1, Missing], [1, Missing])` is
+  `True`), and an absent cell against a present one compiles to `false` where
+  the interpreter leaves the comparison unevaluated. The element-wise shape
+  (array against scalar) is unaffected: it marks exactly the absent positions.
+  Deciding this needs an answer to what an undecided WHOLE-collection
+  comparison should be — a single marker, or a decided `false` — which is a
+  question about the absence contract (`docs/ERROR-MODEL.md`), not a codegen
+  fix.
 - **`Re((x+ib)^2)` still builds one `{re, im}` object (noted by the
   complex-lane slice of 2026-09-09).** The statement lowering removed the
   closures; splitting a small-integer `Power` of a complex operand into its

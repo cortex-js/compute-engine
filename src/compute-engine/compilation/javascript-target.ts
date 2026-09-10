@@ -894,6 +894,16 @@ function mayReadUndefinedJS(
  * `typeof … === 'number'` first, so the pair answers `false` for `Equal`
  * and `true` for `NotEqual`. A pair with a literal or an arithmetic result
  * on either side needs no guard: `undefined === 5` is already `false`.
+ *
+ * The SCALAR answer is therefore always a genuine boolean, which the branch
+ * machinery depends on (`BRANCH_RELATIONS` in `base-compiler.ts`, and the
+ * negation inside `kleeneRelationLeaf`). Only the ELEMENT-WISE runtime is
+ * three-valued: `eqTensor` marks an absent CELL with `NaN`, which the
+ * selection runtime reads as an undecided position. Making the scalar answer
+ * undecided as well was measured and declined: it reaches the fused selection
+ * lane, the value-position connectives, the operand-binding rules and the
+ * chain's short-circuit order, which is a far wider change than the cell-level
+ * defect it would fix.
  */
 function compileJSEquality(
   kind: 'Equal' | 'NotEqual',
@@ -8102,7 +8112,10 @@ function mulTensor(...args: BcastValue[]): BcastValue {
  * not raw UTF-16, because the interpreter's strings are NFC and well-formed by
  * the time it compares them.
  */
-function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
+function eqTensor(
+  a: unknown,
+  b: unknown
+): boolean | number | (boolean | number | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
@@ -8120,7 +8133,7 @@ function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
   if (aArr !== bArr) {
     const arr = (aArr ? a : b) as unknown[];
     const scalar = aArr ? b : a;
-    const out: (boolean | unknown[])[] = new Array(arr.length);
+    const out: (boolean | number | unknown[])[] = new Array(arr.length);
     if (typeof scalar === 'number') {
       for (let i = 0; i < arr.length; i++) {
         const x = arr[i];
@@ -8132,6 +8145,20 @@ function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
       out[i] = aArr ? eqTensor(arr[i], b) : eqTensor(a, arr[i]);
     return out;
   }
+  // An ABSENT operand reads `undefined`, and a comparison with it is
+  // UNDECIDED: the interpreter answers `Equal([1, 2, 3], Missing)` with
+  // `[Missing, Missing, Missing]` and `Equal([1, Missing], 1)` with
+  // `[True, Missing]`, so the cell carries an absence marker, not a decided
+  // `false`. The marker is `NaN`, which is how a real target renders `Missing`
+  // in a cell: the selection runtime reads such a cell as undecided and
+  // consumes the position (see `select`), and the element-wise connective
+  // guard tests absence as `x !== x` (`guardConnectiveAbsence`), so a marked
+  // cell combines correctly with `And`/`Or` — a decided `false` still wins.
+  // An `undefined` cell would satisfy neither test.
+  //
+  // A `NaN` OPERAND is not absent: it is a number that equals nothing, and it
+  // keeps answering `false` below. Only a genuinely missing read is marked.
+  if (a === undefined || b === undefined) return Number.NaN;
   if (typeof a === 'string' || typeof b === 'string') return eqText(a, b);
   const part = (v: unknown): { re: number; im: number } =>
     typeof v === 'object' && v !== null && 're' in v
@@ -8140,10 +8167,10 @@ function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
   const pa = part(a);
   const pb = part(b);
   // Bit-exact equality, as `compileJSEquality`'s scalar form emits it: two
-  // infinities of the same sign are equal, `NaN` equals nothing.
-  // An absent operand reads `undefined` and is promoted to `{ re: undefined,
-  // im: 0 }`; two of them would be `===` on both parts, so the test also
-  // requires a real number on the left.
+  // infinities of the same sign are equal, `NaN` equals nothing. The test
+  // requires a real number on the left so that a leaf which is neither a
+  // number nor a complex part — a boolean, `null` — stays `false` rather than
+  // comparing by JavaScript identity.
   return typeof pa.re === 'number' && pa.re === pb.re && pa.im === pb.im;
 }
 
@@ -8152,13 +8179,23 @@ function eqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
  * an array-vs-scalar pair, a single negated boolean for array-vs-array and
  * scalar-vs-scalar.
  */
-function neqTensor(a: unknown, b: unknown): boolean | (boolean | unknown[])[] {
+function neqTensor(
+  a: unknown,
+  b: unknown
+): boolean | number | (boolean | number | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) return eqTensor(a, b) !== true;
-  if (aArr) return a.map((x) => neqTensor(x, b)) as (boolean | unknown[])[];
-  if (bArr) return b.map((y) => neqTensor(a, y)) as (boolean | unknown[])[];
-  return eqTensor(a, b) !== true;
+  if (aArr)
+    return a.map((x) => neqTensor(x, b)) as (boolean | number | unknown[])[];
+  if (bArr)
+    return b.map((y) => neqTensor(a, y)) as (boolean | number | unknown[])[];
+  // An UNDECIDED comparison stays undecided under negation: the interpreter
+  // answers `NotEqual([1, 2, 3], Missing)` with `[Missing, Missing, Missing]`,
+  // never `[True, True, True]`. Only a decided answer is negated, so the
+  // marker is relayed rather than negated into a confident `true`.
+  const equal = eqTensor(a, b);
+  return typeof equal === 'number' ? equal : equal !== true;
 }
 
 /**

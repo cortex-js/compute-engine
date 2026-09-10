@@ -236,6 +236,105 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
   });
 });
 
+/**
+ * An ABSENT CELL makes an element-wise comparison UNDECIDED, and the compiled
+ * runtime marks exactly that position instead of answering a decided `false`.
+ *
+ * The interpreter is the reference at every shape below, measured rather than
+ * recalled: `Equal([1, 2, 3], Missing)` and `NotEqual([1, 2, 3], Missing)` are
+ * `[Missing, Missing, Missing]`, and `Equal([1, Missing], 1)` is
+ * `[True, Missing]`.
+ *
+ * The marker is `NaN`, which is how a real target renders `Missing` in a cell.
+ * Two consumers already read it: the selection runtime consumes a position
+ * whose condition cell is absent instead of offering it to a later clause, and
+ * the element-wise connective guard tests absence as `x !== x`, so a marked
+ * cell combines correctly with `And`/`Or` and a decided `false` still wins.
+ *
+ * A `NaN` OPERAND is not an absence — it is a number that equals nothing — so
+ * it keeps answering a decided `false`/`true`.
+ *
+ * The SCALAR lowering is deliberately NOT three-valued: its answer stays a
+ * genuine boolean, which the branch machinery depends on. Making it undecided
+ * as well was measured and declined; the reasoning is in `ROADMAP.md`.
+ */
+describe('an absent cell makes an element-wise comparison undecided', () => {
+  const ce = new ComputeEngine();
+  ce.declare('L', 'list<number>');
+  ce.declare('t', 'number');
+
+  test('an absent scalar operand marks every position', () => {
+    // This answered `[false, false, false]`, so a piecewise over it selected
+    // its else arm where the interpreter has nothing to select.
+    expect(js(ce, ['Equal', 'L', 't']).run({ L: [1, 2, 3] })).toEqual([
+      NaN,
+      NaN,
+      NaN,
+    ]);
+    expect(js(ce, ['NotEqual', 'L', 't']).run({ L: [1, 2, 3] })).toEqual([
+      NaN,
+      NaN,
+      NaN,
+    ]);
+  });
+
+  test('a hole in the list marks only its own position', () => {
+    expect(
+      js(ce, ['Equal', 'L', 't']).run({ L: [1, undefined, 3], t: 1 })
+    ).toEqual([true, NaN, false]);
+    expect(
+      js(ce, ['NotEqual', 'L', 't']).run({ L: [1, undefined, 3], t: 1 })
+    ).toEqual([false, NaN, true]);
+  });
+
+  test('a fully bound pair and a NaN cell are unchanged', () => {
+    expect(js(ce, ['Equal', 'L', 't']).run({ L: [1, 2, 3], t: 2 })).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    // `NaN` is a number that equals nothing: decided, not absent.
+    expect(js(ce, ['Equal', 'L', 't']).run({ L: [1, NaN, 3], t: NaN })).toEqual(
+      [false, false, false]
+    );
+    expect(
+      js(ce, ['NotEqual', 'L', 't']).run({ L: [1, NaN, 3], t: NaN })
+    ).toEqual([true, true, true]);
+  });
+
+  test('an element-wise piecewise answers absent, not its else arm', () => {
+    const r = compile(ce.box(['Which', ['Equal', 'L', 't'], 1, 'True', 0]), {
+      to: 'javascript',
+      fallback: false,
+    });
+    if (!r.success) throw new Error(r.error?.message);
+    // Answered `[0, 0, 0]` while the comparison answered a decided `false`.
+    expect(r.run({ L: [1, 2, 3] })).toEqual([NaN, NaN, NaN]);
+    expect(r.run({ L: [1, 2, 3], t: 2 })).toEqual([0, 1, 0]);
+  });
+
+  test('a marked cell combines three-valued with a connective', () => {
+    // `And(Missing, True)` is `Missing` and `And(Missing, False)` is `False`:
+    // a decided `false` absorbs an undecided cell. The element-wise connective
+    // guard reads the marker because it tests absence as `x !== x`.
+    const r = js(ce, ['And', ['Equal', 'L', 't'], ['Greater', 'L', 0]]);
+    expect(r.run({ L: [1, 2, 3] })).toEqual([NaN, NaN, NaN]);
+    expect(r.run({ L: [-1, -2, -3] })).toEqual([false, false, false]);
+    expect(r.run({ L: [1, 2, 3], t: 2 })).toEqual([false, true, false]);
+  });
+
+  test('the scalar lowering still answers a genuine boolean', () => {
+    const c = new ComputeEngine();
+    c.declare('u', 'real');
+    c.declare('v', 'real');
+    // Not the marker: the scalar answer feeds the branch machinery, which is
+    // written against a real boolean. A scalar piecewise answers `NaN` for an
+    // absent operand through its own condition guard, ahead of this value.
+    expect(js(c, ['Equal', 'u', 'v']).run({})).toBe(false);
+    expect(js(c, ['NotEqual', 'u', 'v']).run({})).toBe(true);
+  });
+});
+
 describe('compiled Equal/NotEqual is exact (Python)', () => {
   const ce = engine();
   const py = new PythonTarget();

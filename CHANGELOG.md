@@ -20,23 +20,20 @@
   are two points, not two coordinates. Only the point constructors are read that
   way now; every other tuple-typed operand contributes its TYPE's components.
 
-- **A comparison with an absent operand is undecided instead of `false`.** A
-  compiled `Equal` or `NotEqual` whose operand is missing from the object of
-  variables passed to the kernel answered a decided boolean — `false` for
-  `Equal`, `true` for `NotEqual` — where the interpreter answers `Missing` for
-  both. Element-wise, `Equal(L, t)` with `t` absent compiled to
-  `[false, false, false]`, so a piecewise over it selected its else arm and a
-  plot drew a curve where the interpreter has nothing to draw. The comparison
-  now answers the absence marker of the lane, `undefined` on JavaScript and
-  `None` on Python, and the element-wise form marks exactly the absent
-  positions: `Equal([1, Missing], 1)` compiles to `[true, undefined]` as the
-  interpreter answers `[True, Missing]`. A piecewise over such a condition
-  answers absent at that position rather than taking a branch. A chained
-  comparison folds its pairs three-valued, because a decided `false` absorbs an
-  undecided pair from either side, which is what the interpreter answers for
-  `Equal(Missing, 1, 2)`. `NaN` is unchanged and still equals nothing: it is a
-  number, not an absence. `KroneckerDelta` is unchanged too, since its codomain
-  is numeric and it answers `0`.
+- **An element-wise comparison marks an absent cell instead of answering
+  `false`.** `Equal(L, t)` with `t` missing from the object of variables passed
+  to the compiled kernel answered `[false, false, false]`, so a piecewise over
+  it selected its else arm and a plot drew a curve where the interpreter has
+  nothing to draw. The interpreter answers `[Missing, Missing, Missing]`. Each
+  undecided position now carries the absence marker `NaN`, and exactly the
+  absent positions are marked: `Equal([1, Missing], 1)` compiles to
+  `[true, NaN]`, matching the interpreter's `[True, Missing]`. A piecewise over
+  such a condition answers absent at that position rather than taking a branch,
+  and a marked cell combines three-valued with `And`/`Or`, where a decided
+  `false` still absorbs it. `NaN` as an OPERAND is unchanged and still equals
+  nothing: it is a number, not an absence. The scalar comparison is unchanged
+  and still answers a boolean; `KroneckerDelta` is unchanged and still answers
+  `0`.
 
 ### Improvements
 
@@ -111,7 +108,12 @@
   `Add(Missing, (1, 1, 1))` and `Multiply(Missing, (1, 1, 1))` are `Missing`
   rather than symbolic residue or a tuple of markers. All-numeric absences are
   unchanged: `2 \cdot Missing`, `-Missing` and `\sin(Missing)` are still
-  `NaN`.
+  `NaN`. "Typed a number" is decided from the declaration, so a piecewise
+  function whose parameter is NOT declared changes its reading: with
+  `g(t) := \begin{cases} t & t > 5\end{cases}`, the sum `g(3) + 1` is now
+  `Missing` where it was `NaN`, because nothing declares the result of `g` a
+  number. Declare the parameter — `g: (number) -> number` — to keep the
+  numeric reading.
 
 ## 0.128.1 _2026-09-10_
 

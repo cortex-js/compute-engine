@@ -67,10 +67,34 @@ element-wise and whole-collection equality helpers (`_SYS.eq`, `_ce_eqcoll`),
 and the `IndexOf` element test, which was already exact. `NotEqual` is the
 negation of the `Equal` test, so it answers `true` on a `NaN` operand, as the
 interpreter does. Two absent operands (`undefined` on JavaScript, `None` on
-Python) are not equal: the interpreter answers `Missing` for
-`Equal(Missing, Missing)`, and the emitted test guards the left operand when
-both sides may be absent. A consumer that needs tolerant equality evaluates
-through the interpreter, or asks for a compile option; none exists today.
+Python) are not equal in the SCALAR lowering: the interpreter answers `Missing`
+for `Equal(Missing, Missing)`, and the emitted test guards the left operand when
+both sides may be absent. That scalar answer stays a genuine boolean on purpose,
+because the branch machinery is written against one.
+
+The ELEMENT-WISE runtime is three-valued, and that is where an absence shows.
+An absent CELL makes its comparison undecided, so the runtime marks exactly that
+position with `NaN` — how a real target renders `Missing` in a cell — instead of
+answering a decided `false`: `Equal([1, 2, 3], Missing)` compiles to three marks
+as the interpreter answers `[Missing, Missing, Missing]`, and
+`Equal([1, Missing], 1)` compiles to `[true, NaN]` as the interpreter answers
+`[True, Missing]`. A `NaN` OPERAND is not an absence — it is a number that
+equals nothing — and still answers a decided `false`. Two consumers already read
+the mark: the selection runtime consumes a position whose condition cell is
+absent instead of offering it to a later clause, so an element-wise piecewise
+answers absent there rather than taking a branch; and the element-wise
+connective guard tests absence as `x !== x`, so a marked cell combines
+three-valued with `And`/`Or` and a decided `false` still absorbs it.
+`KroneckerDelta` is unaffected, since its codomain is numeric and it answers `0`.
+
+Making the SCALAR comparison undecided as well was measured and declined: it
+reaches the fused selection lane, the value-position connectives, the
+operand-binding rules and the short-circuit order of a chained comparison, which
+is a far wider change than the cell-level defect it would fix. The remaining
+divergences are recorded in `ROADMAP.md`.
+
+A consumer that needs tolerant equality evaluates through the interpreter, or
+asks for a compile option; none exists today.
 
 ## Target boundaries
 
