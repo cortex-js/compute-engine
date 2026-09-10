@@ -1,3 +1,54 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A point-coordinate accessor over an EMPTY list of points answers the empty
+  list.** `PointX([])` — and `PointY`, `PointZ`, and every empty collection, an
+  empty `Set()` or a `Filter` that kept nothing included — evaluated to the
+  absence marker `Missing`, because an empty collection has no first element to
+  peek and the broadcast-vs-index decision fell to the element-index arm. With
+  the 0.128.0 absence rule, where `Add` and `Multiply` absorb an evaluated
+  `Missing` into `NaN`, `2 · PointX([])` then evaluated to the scalar `NaN`
+  typed `broadcastable<number>`; on 0.127.0 the same product stayed symbolic.
+  Both answers were wrong: the accessors broadcast over a list of POINTS, so
+  over a list of none the coordinate list is empty. `PointX([])` is now `[]`,
+  typed `list<never>` — what the empty list literal itself types as — and
+  `2 · PointX([])` is `[]`. This is Desmos parity: `[].x` is `[]`.
+
+  Which empty collections those are is decided by the declared ELEMENT type,
+  since there is no element to look at, and the rule keeps the empty case
+  reading the way the non-empty case with the same element type reads — so a
+  collection does not change meaning as its last element is removed:
+
+  - a POINT-shaped element type broadcasts, in both point spellings: a tuple
+    element (`list<tuple<number, number>>`) and the coordinate-row spelling a
+    data import produces (`[[0, 0], [3, 4]]`). So does the bottom element type
+    `never`, which the literal `[]` and `Set()` carry and which says nothing
+    about points, and so does an element type nothing is known about — a bare
+    `list`, a `list<any>`, an operand declared `unknown`, whose reading the
+    compiled route settles at run time. These answer `[]`, typed `list<never>`;
+  - a NUMERIC element type does not: such a collection is ONE point spelled
+    flat, whose coordinates are its elements, so `PointX([3, 4])` is `3`,
+    element one. An empty one is that point with the coordinate absent. A symbol
+    declared `list<number>` and assigned `[]` therefore still answers the
+    marker, typed `number`, exactly as before;
+  - any OTHER element type element-indexes when non-empty — `PointX(["a", "b"])`
+    is `"a"`, the `First`/`Second`/`Third` fallback — so it indexes when empty
+    and answers the marker. A `list<string>` assigned `[]` answers `Missing`,
+    which is what its type `missing | string` says. A string operand is the same
+    reading: `PointX("")` keeps the marker, as `First("")` does.
+
+  The compiled JavaScript route answers the same values. With `v` declared
+  `list<number>`, `PointX(v)` run on `[]` is `NaN` — this target's projection of
+  the interpreter's marker for a numeric coordinate — and a `list<string>`
+  answers `undefined`, its projection for a coordinate the type proves
+  non-numeric; a `list<tuple<number, number>>` and an untyped operand answer
+  `[]`. An operand the type proves element-indexes no longer reaches the
+  run-time point dispatch (`_SYS.pointComponent`), which decides on the value
+  and would read an empty array as a list of no points. That also repairs
+  `PointX(s)` for an operand declared `string`, which compiled to `NaN` and now
+  answers its first character, as the interpreter does.
+
 ## 0.128.0 _2026-09-09_
 
 ### Breaking Changes

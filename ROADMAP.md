@@ -1255,6 +1255,35 @@ What remains:
   broadcast, so `provablyScalarArg` refuses to inline over it. This is a
   soundness guard, not a defect.
 
+### A broadcast over a lone EMPTY operand answers `Nothing` on the compiled route and in the unary heads, but `[]` in `Add`/`Multiply` (OPEN, ruling — found 2026-09-09 while fixing `PointX([])`)
+
+Three sides disagree. `docs/BROADCAST-MODEL.md` states that a lone empty
+operand broadcasts to `Nothing` (`Not([])`), and the compiled JavaScript helper
+`_SYS.bcast` implements that: with `N: list<number>`, `compile(2·N)` emits
+`_SYS.bcast((a, b) => a * b, 2, _.N)` and `run({N: []})` answers `NaN`. The
+interpreter follows the document for the unary and elementwise heads —
+`Sin([])`, `Negate([])`, `Not([])`, `Abs([])` and `[] < 3` are all `Nothing` —
+but `Add` and `Multiply` answer `[]`: `2 · []` evaluates to `[]`. Desmos answers
+the empty list for every one of these, and the 2026-09-09 fix that makes
+`PointX([])` answer `[]` (an accessor broadcast over zero points) makes
+`2 · PointX([])` a witness on both routes: the interpreter answers `[]`, the
+compiled artifact `NaN`. That is a fail-closed violation of
+`COMPILATION-MODEL.md` on its face, and it needs one ruling that settles the
+three sides together:
+
+- adopt `[]` everywhere — the runtime `bcastWith` already carries an
+  `emptyIsList` flag for user-function application, so the helper change is
+  one line, but it flips the documented rule, its comment pin, and an unmeasured
+  number of tests that record `Nothing`/`NaN`;
+- keep `Nothing` for the unary family and accept `Add`/`Multiply` as a
+  deliberate exception, then teach the compiled lane the per-head split
+  (`bcastWith` is head-blind today);
+- make `Add`/`Multiply` answer `Nothing` too, which contradicts the `[]`
+  shipped for `2 · PointX([])`.
+
+If nothing is decided, the compiled route stays `NaN` where the interpreter
+answers `[]` for a product or sum over an empty list.
+
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
 The evaluator broadcasts `Which` elementwise over collection-valued operands

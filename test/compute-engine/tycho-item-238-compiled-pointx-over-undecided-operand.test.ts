@@ -109,10 +109,17 @@ describe('the run-time reading mirrors the interpreter', () => {
     expect(compile(ce.parse('\\mathrm{PointZ}(T)'), { to: 'javascript' }).run!()).toBeNaN();
   });
 
-  test('an empty list and a non-collection are NaN', () => {
+  test('an empty list is the empty list; a non-collection is NaN', () => {
     const ce = engine();
     const r = compile(ce.parse('\\mathrm{PointX}(v)'), { to: 'javascript' });
-    expect(r.run!({ v: [] })).toBeNaN();
+    // An empty array is an empty list of points, and the coordinate
+    // broadcasts over zero of them: the empty list, which is what the
+    // interpreter answers for `PointX([])`. (Through 0.128.0 both routes
+    // answered the absence marker here.)
+    expect(r.run!({ v: [] })).toEqual([]);
+    expect(String(ce.parse('\\mathrm{PointX}([])').evaluate())).toBe('[]');
+    // A non-collection is the interpreter's `incompatible-type` error,
+    // projected to `NaN` on this target.
     expect(r.run!({ v: 5 })).toBeNaN();
   });
 });

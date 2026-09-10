@@ -2159,6 +2159,19 @@ function hasPointElementTypeD(d: OperandDescriptor): boolean {
 }
 
 /**
+ * Descriptor twin of the empty-collection reading: true when a coordinate
+ * accessor broadcasts over the operand once it is empty. See
+ * {@link elementTypeBroadcastsWhenEmpty} for the rule.
+ *
+ * Only the declared type is read, never the `elttype` fact. The fact reports
+ * what the elements ARE, and an empty collection has none to report — the
+ * question here is which reading the DECLARATION asks for.
+ */
+function emptyCollectionBroadcastsD(d: OperandDescriptor): boolean {
+  return elementTypeBroadcastsWhenEmpty(collectionElementType(d.type));
+}
+
+/**
  * Descriptor twin of {@link collectionBroadcastsPoints}.
  *
  * The expression shape peeked the FIRST element through `each()`. A
@@ -2185,6 +2198,34 @@ function collectionBroadcastsPointsD(
   return false;
 }
 
+/**
+ * True when the operand proves it is a collection with no elements: a literal
+ * `[]` (whose type is `list<never>`), an empty `Set()` (`set<never>`), or any
+ * collection whose element type is the bottom `never`, which no value
+ * inhabits.
+ *
+ * A STRING is excluded for the reason `pointComponentAt` gives: the accessors
+ * element-index a string rather than broadcast over it, so an empty one is an
+ * absent element, not an empty broadcast.
+ *
+ * Emptiness alone does NOT settle how a coordinate accessor reads the operand:
+ * the caller must also ask `emptyCollectionBroadcastsD` whether the declared
+ * element type calls for a broadcast at all.
+ */
+function isProvablyEmptyCollectionD(xs: OperandDescriptor): boolean {
+  if (xs.facts.collection === false) return false;
+  if (isSubtype(xs.type, 'string')) return false;
+  // Either channel proving the bottom element type proves the collection has
+  // no elements. They are read separately, not with the usual per-instance
+  // preference: the TYPE of the literal `[]` is `list<never>` while its
+  // `elttype` handler answers the wide `unknown`, since an empty list has no
+  // element to report.
+  if (collectionElementType(xs.type) === 'never') return true;
+  if (xs.facts.elementType === 'never') return true;
+  const s = xs.structureOf?.();
+  return s?.kind === 'list-literal' && s.elements.length === 0;
+}
+
 /** Descriptor twin of {@link pointComponentType}. */
 function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   const t = xs.type;
@@ -2203,6 +2244,20 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
     }
     return withMarker(ct);
   }
+  // A coordinate of an empty collection, decided by the DECLARED element type
+  // before the emptiness test, exactly as `pointComponentAt` decides the value.
+  //
+  // Only an element type that BROADCASTS when empty answers the empty list,
+  // typed as the empty list literal itself is: `list<never>`, which is also the
+  // type of the value `pointComponentAt` answers. An element type that
+  // element-indexes instead — a numeric one, which makes the collection one
+  // point spelled flat, or a string one, whose elements are not points — keeps
+  // the arms below, which answer the coordinate type with its absence marker.
+  //
+  // A `tuple` took the arm above: however few components it has, it is one
+  // point, not a collection of them.
+  if (emptyCollectionBroadcastsD(xs) && isProvablyEmptyCollectionD(xs))
+    return { kind: 'list', elements: 'never' };
   if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) {
     if (collectionBroadcastsPointsD(xs) === false)
       return componentResultTypeD(xs, position);
@@ -3095,15 +3150,65 @@ function isPointLike(e: Expression): boolean {
 }
 
 // True when the operand's declared type says its elements are points (tuples).
-// Used to decide how an *empty* collection broadcasts: a declared `list<tuple>`
-// with no elements is still a (empty) list of points, so a coordinate accessor
-// yields an empty list — matching the JS compiler's `[].map(...)` → `[]`.
+// Used for a collection whose elements cannot be peeked because its finiteness
+// is undecidable (a point view over an unbound `Range`): the declared element
+// type is then the only evidence that the coordinate projection is defined
+// element-wise. A finite collection is decided from its elements instead, and
+// an EMPTY one — which has no element either — from
+// `elementTypeBroadcastsWhenEmpty`, which asks the wider question of which
+// reading the declared element type calls for.
 function hasPointElementType(xs: Expression): boolean {
   const elt = collectionElementType(xs.type.type);
   if (elt === undefined) return false;
   // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
   // arity, as much a point element as a structural `tuple<…>`.
   return elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
+}
+
+// Which reading a coordinate accessor takes over an EMPTY collection, decided
+// from the declared ELEMENT type — the only evidence left when there is no
+// element to look at. True to BROADCAST over zero points, which answers the
+// empty list; false to ELEMENT-INDEX, which answers the position-preserving
+// absence marker.
+//
+// The rule is that the empty case reads the way the NON-EMPTY case with the
+// same declared element type reads, so that a collection does not change
+// meaning as its last element is removed, and so that the value stays in step
+// with the type the `type` handler reports:
+//
+//  - a POINT element type broadcasts, so an empty one broadcasts to `[]`. Both
+//    point spellings count, as they do in `isPointLike`: a tuple element
+//    (`list<tuple<number, number>>`), and the coordinate-ROW spelling a data
+//    import produces, whose elements are numeric indexed collections
+//    (`[[0, 0], [3, 4]]`);
+//  - the bottom element type `never` broadcasts. It proves the collection
+//    holds nothing at all — the literal `[]` and `Set()` carry it — and says
+//    nothing about points, so `PointX([])` is `[]`, which is Desmos parity;
+//  - an element type nothing is known about broadcasts too: `unknown`, `any`,
+//    or no element type at all (an operand declared `unknown`). The compiled
+//    route hands such an operand to a run-time dispatch that reads an empty
+//    array as the empty list, and the interpreter answers the same value;
+//  - every OTHER element type element-INDEXES when non-empty, so it indexes
+//    when empty. A numeric one because the collection is then ONE point
+//    spelled flat, whose coordinates are its elements (`PointX([3, 4])` is
+//    `3`, element one), and an empty one is that point with the coordinate
+//    absent. A string or boolean one because its elements are not points at
+//    all (`PointX(["a", "b"])` is `"a"`, the First/Second/Third fallback).
+function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
+  if (elt === undefined) return true;
+  if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
+  // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
+  // arity, as much a point element as a structural `tuple<…>`.
+  if (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
+    return true;
+  // The coordinate-ROW spelling. A row of strings is not a point (`isPointLike`
+  // admits numeric rows only), and a `string` element type lands here with the
+  // element type `character`, which is not a number: both element-index.
+  if (isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    const inner = collectionElementType(elt);
+    return inner !== undefined && isSubtype(inner, 'number');
+  }
+  return false;
 }
 
 // The point arity a TYPE proves, or `undefined` when it proves nothing. A
@@ -3285,16 +3390,41 @@ function pointComponentOf(
   return ce.function(POINT_ACCESSOR_BY_POSITION[position - 1], [e]);
 }
 
+// The operand of a point-coordinate accessor as its `type` handler sees it:
+// canonical and bound, but not evaluated. `undefined` when the evaluation
+// driver supplied no node, or when the node does not hold exactly the one
+// operand the accessor takes — the provenance rule
+// `EvaluateHandlerOptions.expression` states, which is that an operand of the
+// node stands for an evaluated operand only when the two counts agree.
+function rawAccessorOperand(expression?: Expression): Expression | undefined {
+  if (expression === undefined || !isFunction(expression)) return undefined;
+  if (expression.nops !== 1) return undefined;
+  return expression.op1;
+}
+
 // Evaluate a point-component accessor, broadcasting the coordinate over a list
 // of points. We inspect the actual elements (not the declared element type,
 // which is unreliable for a literal list of points) to decide whether to
 // broadcast; a collection whose elements are not points falls back to the
 // `First`/`Second`/`Third` element-indexing behavior.
+//
+// `raw` is the operand BEFORE evaluation — the very expression the `type`
+// handler was given. It is needed only for an EMPTY collection, which has no
+// element to inspect: evaluating a symbol replaces it by its value, and an
+// empty value carries the type `list<never>` whatever the symbol was declared,
+// so `v: list<number> := []`, `S: list<string> := []` and
+// `W: list<tuple<…>> := []` all arrive here as the same expression. The
+// declared element type is the only thing that still tells the readings apart,
+// and reading it here is what keeps the value the accessor answers in step
+// with the type `pointComponentTypeD` reports. Omitting `raw` is safe: the
+// evaluated operand is then used alone, which reads `list<never>` and
+// broadcasts.
 function pointComponentAt(
   xs: Expression,
   position: number,
   ce: ComputeEngine,
-  numericApproximation = false
+  numericApproximation = false,
+  raw?: Expression
 ): Expression | undefined {
   // A single point (tuple): the coordinate.
   const t = xs.type.type;
@@ -3360,10 +3490,33 @@ function pointComponentAt(
       // Elements are not points → element indexing, like First/Second/Third.
       return componentAt(xs, position, ce);
     }
-    // Empty collection: if the declared element type is a point, broadcast to
-    // an empty list (matching the JS compiler's `[].map(...)` → `[]`);
-    // otherwise index (→ Nothing), like First/Second/Third on an empty list.
-    if (hasPointElementType(xs)) return ce.function('List', []);
+    // Empty collection: there is no element to peek, so the declared ELEMENT
+    // type picks the reading — see `elementTypeBroadcastsWhenEmpty` for the
+    // three-way rule and why each arm reads the way the non-empty case with
+    // the same element type reads.
+    //
+    // A point element type, the bottom `never` (the literal `[]`, an empty
+    // `Set()`) and an unknown element type all broadcast over zero points, and
+    // the coordinate list of no points is the empty list, for every accessor
+    // position. This matches the JS compiler's `[].map(...)` → `[]`, and
+    // Desmos, where `[].x` is `[]`. Reading such a collection as an element
+    // ACCESS instead answered the absence marker, and the 0.128 absence rule
+    // then absorbed it: `2 · PointX([])` was the scalar `NaN` where the empty
+    // list is wanted.
+    //
+    // The declared type is read from `raw`, the operand BEFORE evaluation,
+    // because evaluation erases it: `v: list<number> := []` and
+    // `W: list<tuple<…>> := []` both evaluate to a value typed `list<never>`.
+    //
+    // A STRING is checked on its own, ahead of the element type. Its elements
+    // are characters, never points, so the accessors element-INDEX it
+    // (`PointX("abc")` is `"a"`) and an empty string keeps the marker, exactly
+    // as `First("")` does.
+    if (
+      !xs.type.matches('string') &&
+      elementTypeBroadcastsWhenEmpty(collectionElementType((raw ?? xs).type.type))
+    )
+      return ce.function('List', []);
     return componentAt(xs, position, ce);
   }
 
@@ -8454,8 +8607,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         pointComponentTypeD(xs, 1),
         context.engine._typeResolver
       ),
-    evaluate: ([xs], { engine: ce, numericApproximation }) =>
-      pointComponentAt(xs, 1, ce, numericApproximation ?? false),
+    evaluate: ([xs], { engine: ce, numericApproximation, expression }) =>
+      pointComponentAt(
+        xs,
+        1,
+        ce,
+        numericApproximation ?? false,
+        rawAccessorOperand(expression)
+      ),
   },
 
   PointY: {
@@ -8469,8 +8628,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         pointComponentTypeD(xs, 2),
         context.engine._typeResolver
       ),
-    evaluate: ([xs], { engine: ce, numericApproximation }) =>
-      pointComponentAt(xs, 2, ce, numericApproximation ?? false),
+    evaluate: ([xs], { engine: ce, numericApproximation, expression }) =>
+      pointComponentAt(
+        xs,
+        2,
+        ce,
+        numericApproximation ?? false,
+        rawAccessorOperand(expression)
+      ),
   },
 
   PointZ: {
@@ -8498,14 +8663,20 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         pointComponentTypeD(xs, 3),
         context.engine._typeResolver
       ),
-    evaluate: ([xs], { engine: ce, numericApproximation }) => {
+    evaluate: ([xs], { engine: ce, numericApproximation, expression }) => {
       // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
       // but the concrete value is 2-D: the WHOLE application errors — a
       // per-point marker inside a broadcast list is not wanted.
       const arity = runtimePointArity(xs);
       if (arity !== undefined && arity < 3)
         return pointArityError(ce, 3, arity);
-      return pointComponentAt(xs, 3, ce, numericApproximation ?? false);
+      return pointComponentAt(
+        xs,
+        3,
+        ce,
+        numericApproximation ?? false,
+        rawAccessorOperand(expression)
+      );
     },
   },
 

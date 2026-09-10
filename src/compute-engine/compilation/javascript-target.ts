@@ -1578,7 +1578,11 @@ function compilePointComponent(
   // type). Any other collection is element-indexing, like First/Second/Third,
   // which is the same `[idx]` access as the single-point case.
   const eltType = collectionElementType(t);
-  if (isPointListOperand(arg) || isCoordinateRowListOperand(arg)) {
+  if (
+    isPointListOperand(arg) ||
+    isCoordinateRowListOperand(arg) ||
+    isEmptyCollectionOperand(arg)
+  ) {
     // `PointZ` over points whose arity the type does not state: the
     // interpreter measures the first point and errors on the WHOLE
     // application when it is 2-D (`runtimePointArity`), so the run-time
@@ -1633,16 +1637,22 @@ function staticPointArityOf(t: Type): number | undefined {
  * Could a value of type `t` be a LIST OF POINTS as well as a single point, so
  * that a coordinate accessor over it has to dispatch at run time? True for an
  * untyped operand and for any type that admits an indexed collection whose
- * element type is not provably a scalar number — a union such as
- * `collection<any> | tuple`, a bare `list`, a `list<any>`. A `list<number>`
- * is a single point spelled flat (`PointX([3, 4])` is `3`) and answers false,
- * as does every non-collection type.
+ * element type could be a point — a union such as `collection<any> | tuple`, a
+ * bare `list`, a `list<any>`. Every non-collection type answers false, and so
+ * does a collection whose element type settles the reading on its own
+ * (`elementTypeReadsAsPointList`): a `list<number>` is a single point spelled
+ * flat (`PointX([3, 4])` is `3`), and a `list<string>` element-indexes
+ * (`PointX(["a", "b"])` is `"a"`).
+ *
+ * Both must stay out of the run-time dispatch, not only the numeric one: that
+ * dispatch reads an empty array as a list of no points and answers `[]`, which
+ * is the wrong value for an operand the type proves element-indexes — the
+ * interpreter answers the absence marker there.
  */
 function mayBePointList(t: Type): boolean {
   if (t === 'unknown' || t === 'any') return true;
   if (!couldMatch(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
-  const elt = collectionElementType(t);
-  return elt === undefined || !isSubtype(elt, 'number');
+  return elementTypeReadsAsPointList(collectionElementType(t));
 }
 
 /** The type of a tuple's `idx`-th element, or `undefined` when `t` is not a
@@ -1695,6 +1705,70 @@ function isPointListOperand(e: Expression): boolean {
       (typeof ft !== 'string' && ft.kind === 'tuple') ||
       first.operator === 'Tuple'
     );
+  }
+  return false;
+}
+
+/**
+ * True when `e` is a collection the compiler can prove holds NO elements (the
+ * literal `[]`, an empty `Set()`) AND its declared element type calls for the
+ * BROADCAST reading. A coordinate accessor then broadcasts over zero points
+ * and answers the empty list, for every accessor position.
+ *
+ * Mirrors the interpreter's `elementTypeBroadcastsWhenEmpty`
+ * (`library/collections.ts`), which states the rule in full. In short: an
+ * element type that is point-shaped, the bottom `never` (what the literal `[]`
+ * and `Set()` carry), or unknown broadcasts; every other element type
+ * element-INDEXES when non-empty and so indexes when empty, answering the
+ * absence marker. Kept as a local predicate, rather than imported from
+ * `collections.ts`, for the module-init reordering reason `isPointListOperand`
+ * gives.
+ *
+ * An operand that indexes falls through to the direct `[idx]` access, whose
+ * absence value is this target's projection of that marker — `NaN` for a
+ * coordinate that could hold a number, and the bare access otherwise (see
+ * `pointComponentAbsence`). A STRING is refused ahead of the element type, as
+ * the interpreter refuses it: the accessors element-INDEX a string
+ * (`PointX("abc")` is `"a"`).
+ */
+function isEmptyCollectionOperand(e: Expression): boolean {
+  if (e.isFiniteCollection !== true || e.count !== 0) return false;
+  if (e.type.matches('string')) return false;
+  return elementTypeReadsAsPointList(collectionElementType(jsType(e)));
+}
+
+/**
+ * True when an ELEMENT type lets a collection read as a LIST OF POINTS, so a
+ * coordinate accessor over it broadcasts. Mirrors the interpreter's
+ * `elementTypeBroadcastsWhenEmpty` (`library/collections.ts`), which states
+ * the rule in full:
+ *
+ *  - a point-shaped element broadcasts, in both spellings — a tuple element,
+ *    and the coordinate-ROW spelling whose rows are numeric;
+ *  - the bottom element type `never` (what the literal `[]` and `Set()` carry)
+ *    broadcasts: it proves the collection is empty and says nothing about
+ *    points;
+ *  - an element type nothing is known about (`unknown`, `any`, or none at all)
+ *    broadcasts, which on this target means the run-time dispatch decides;
+ *  - every other element type element-INDEXES. A numeric one because the
+ *    collection is ONE point spelled flat (`PointX([3, 4])` is `3`); a string
+ *    or boolean one because its elements are not points (`PointX(["a", "b"])`
+ *    is `"a"`).
+ *
+ * The two predicates that read it — `isEmptyCollectionOperand` and
+ * `mayBePointList` — must stay in lockstep, which is why they share it: an
+ * operand routed to the run-time dispatch is read there by VALUE, and that
+ * reading answers the empty list for an empty array, so an operand whose
+ * element type element-indexes must not be routed there.
+ */
+function elementTypeReadsAsPointList(elt: Type | undefined): boolean {
+  if (elt === undefined) return true;
+  if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
+  if (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
+    return true;
+  if (isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
+    const inner = collectionElementType(elt);
+    return inner !== undefined && isSubtype(inner, 'number');
   }
   return false;
 }
@@ -8759,11 +8833,24 @@ const SYS_HELPERS = {
    *    fewer than three components is the interpreter's `incompatible-
    *    dimensions` error, projected to a single `NaN` for the whole
    *    application — never a `NaN` per point;
-   *  - an absent coordinate otherwise, an empty list, and a non-array value
-   *    (the interpreter's `incompatible-type` error) answer `NaN`.
+   *  - an EMPTY array is the empty list, and the coordinate broadcasts over
+   *    zero points: the empty list, for every coordinate — what the
+   *    interpreter answers for `PointX([])` (Desmos agrees: `[].x` is `[]`).
+   *    The competing reading of an empty collection, where the accessor
+   *    element-INDEXES and the coordinate is absent, cannot reach this helper:
+   *    it is chosen by an element type that settles the reading on its own — a
+   *    numeric one (`list<number>` is one point spelled flat) or a non-point
+   *    one (`list<string>` indexes) — and `mayBePointList` keeps such an
+   *    operand out, compiling it to a direct `[k]` access instead. The erasure
+   *    makes an empty TUPLE the same value; the list reading is taken for it
+   *    too, since a zero-component point is not a shape any compiled producer
+   *    builds;
+   *  - an absent coordinate otherwise, and a non-array value (the
+   *    interpreter's `incompatible-type` error) answer `NaN`.
    */
   pointComponent: (v: unknown, k: number): unknown => {
     if (!Array.isArray(v)) return NaN;
+    if (v.length === 0) return [];
     const first = v[0];
     const rows =
       Array.isArray(first) &&

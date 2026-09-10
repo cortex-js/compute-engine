@@ -458,14 +458,18 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     ).toEqual([2, 4]);
   });
 
-  it('KNOWN PARITY EDGE: projecting an EMPTY point list — compiled `[]`, interpreter absence', () => {
+  it('projecting an EMPTY point list answers `[]` on both routes', () => {
     // The compiled construction is `[]` and `[].map(…)` is `[]`. The
     // interpreter's evaluated empty transpose is an UNTYPED empty `List`
     // (`list<never>` — an empty literal carries no element type), so
-    // `pointComponentAt` cannot see that it was a point list and falls through
-    // to First/Second/Third-style element indexing, which answers the absence
-    // marker. Pinned as a divergence, not a fix: typing the empty transpose
-    // `list<tuple>` is a type-handler change.
+    // `pointComponentAt` cannot see that it was a point list — but an empty
+    // collection has no coordinate to index either, and the coordinate
+    // broadcast over zero points is the empty list whatever the element type
+    // says. Both routes therefore answer `[]`.
+    //
+    // Through 0.128.0 the interpreter fell through to First/Second/Third-style
+    // element indexing here and answered the absence marker instead, which
+    // this test pinned as a known divergence from the compiled route.
     const ce = zipEngine();
     const expr = ['PointY', ['PointList', -6, 'n']];
     const r = js.compile(ce.box(expr as any));
@@ -474,8 +478,8 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     const ce2 = new ComputeEngine();
     ce2.assign('n', ce2.box(['List']) as any);
     const interp = ce2.box(expr as any).evaluate();
-    expect(interp.type.matches('collection')).toBe(false);
-    expect(interp.toString()).toBe('"Missing"');
+    expect(interp.type.matches('collection')).toBe(true);
+    expect(interp.toString()).toBe('[]');
   });
 
   it('Length and At consume a compiled construction', () => {
