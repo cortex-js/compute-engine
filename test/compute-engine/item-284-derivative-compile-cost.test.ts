@@ -535,7 +535,7 @@ describe('applied derivative: the value shape of the emitted code', () => {
     ).toBeLessThan(1e-12);
   });
 
-  test('a derivative that introduces a complex power compiles complex', () => {
+  test('an odd-root derivative stays real at negative real inputs', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.parse('f(x):=\\sqrt[3]{x}').evaluate();
@@ -548,23 +548,12 @@ describe('applied derivative: the value shape of the emitted code', () => {
     expect(
       relative(asComplex(r.run({ x: 2 })), { re: want.re, im: want.im })
     ).toBeLessThan(1e-9);
-    // Off it, the closed form `−2/(9·x^(5/3))` lowers through the complex
-    // `_SYS.cpow` while the body `∛x` is real-lane. Answering from the body
-    // added 1 to a `{re, im}` object and produced the STRING
-    // `"[object Object]1"`. The reference is the same closed form compiled on
-    // its own, which is the code the emitter produces here — the interpreter
-    // takes the real cube root of a negative base rather than the principal
-    // branch, a convention difference this lowering already had.
-    const closed = compile(ce.parse('-\\frac{2}{9}x^{-5/3}+1'), {
-      to: 'javascript',
-      fallback: false,
-    } as never) as {
-      run: (v: Record<string, number>) => number | { re: number; im: number };
-    };
+    // An odd root and its derivatives remain real at negative real inputs.
+    const wantNegative = expr.subs({ x: ce.number(-1.2) }).N();
     const got = r.run({ x: -1.2 });
     expect(typeof got).not.toBe('string');
     expect(
-      relative(asComplex(got), asComplex(closed.run({ x: -1.2 })))
+      relative(asComplex(got), { re: wantNegative.re, im: wantNegative.im })
     ).toBeLessThan(1e-12);
   });
 

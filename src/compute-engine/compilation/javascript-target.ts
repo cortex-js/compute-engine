@@ -5193,6 +5193,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       return String(r);
     }
+    const realPower = BaseCompiler.realPowerExponent(args);
+    if (realPower !== undefined) {
+      const optimized = realRadicalPower(
+        base,
+        realPower.value,
+        compile,
+        target
+      );
+      if (optimized !== undefined) return optimized;
+      const value = BaseCompiler.tempVar(target);
+      const magnitude = `Math.pow(Math.abs(${value}), ${realPower.value})`;
+      return boundJSResult(
+        target,
+        jsBinding(target, value, compile(base)),
+        realPower.oddNumerator
+          ? `(${value} < 0 ? -${magnitude} : ${magnitude})`
+          : magnitude
+      );
+    }
     // The operands are real-emitted but the RESULT is typed complex (a
     // negative base on the even-denominator branch, e.g. `a^{0.3}` with
     // `a ⩴ -2`). The enclosing expression reads `{re, im}` off this node, so

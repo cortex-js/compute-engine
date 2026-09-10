@@ -3218,6 +3218,42 @@ export class BaseCompiler {
     return undefined;
   }
 
+  /** An exact noninteger exponent whose reduced denominator permits a real root. */
+  static realPowerExponent(
+    args: ReadonlyArray<Expression>
+  ): { value: number; oddNumerator: boolean } | undefined {
+    // Broadcast callbacks replace a literal exponent with a parameter. Keep
+    // the original fraction's branch decision when compiling that callback.
+    for (
+      let i = BaseCompiler._broadcastRadicalVerdict.length - 1;
+      i >= 0;
+      i--
+    ) {
+      const frame = BaseCompiler._broadcastRadicalVerdict[i];
+      if (
+        frame.head === 'Power' &&
+        args.length === 2 &&
+        args.every((a) => isSymbol(a) && frame.params.has(a.symbol))
+      )
+        return frame.realPower;
+    }
+    const exponent = args[1];
+    if (
+      !isNumber(exponent) ||
+      !exponent.isExact ||
+      exponent.im !== 0 ||
+      !Number.isFinite(exponent.re) ||
+      Number.isInteger(exponent.re)
+    )
+      return undefined;
+    const rational = asRational(exponent);
+    if (rational === undefined) return undefined;
+    const p = BigInt(rational[0]);
+    const q = BigInt(rational[1]);
+    if (q <= 1n || q % 2n === 0n) return undefined;
+    return { value: exponent.re, oddNumerator: p % 2n !== 0n };
+  }
+
   /**
    * Whether applying `head` to `args` takes the COMPLEX lane purely because
    * the caller opted in to complex promotion (`complexPromotion`).
@@ -3277,12 +3313,13 @@ export class BaseCompiler {
         return frame.promotes;
     }
     if (head === 'Power') {
-      // `Power` of an unknown-sign base with a PROVABLY non-integer exponent
-      // (`x^{0.3}`, `x^{2/3}`; `(−8)^{1/3}` is the interpreter's principal
-      // complex value): the real `Math.pow` is `NaN` there. An integer or
-      // unknown exponent keeps the real lowering — a variable exponent may be
-      // an integer at run time, and promoting it would move every `x^y` off
-      // the real kernel.
+      // Exact powers with an odd denominator have a real value at negative
+      // real bases. Explicitly complex operands still use complex arithmetic.
+      if (
+        BaseCompiler.realPowerExponent(args) !== undefined &&
+        !args.some((a) => BaseCompiler.isComplexValued(a))
+      )
+        return false;
       const [base, exp] = args;
       if (base === undefined || exp === undefined) return false;
       if (!isNumber(exp) || Number.isInteger(exp.re) || exp.im !== 0)
@@ -6315,7 +6352,12 @@ export class BaseCompiler {
     // Handle operators
     const op = target.operators?.(h);
 
-    if (op !== undefined) {
+    const realPythonPower =
+      target.language === 'python' &&
+      h === 'Power' &&
+      op?.[0] === '**' &&
+      BaseCompiler.realPowerExponent(args) !== undefined;
+    if (op !== undefined && !realPythonPower) {
       // Skip infix operators for complex operands — fall through to function
       // dispatch. An operand the D2 runtime rule has bound to a real
       // projection (`_codeOverrides`) is real here.
@@ -9598,7 +9640,12 @@ export class BaseCompiler {
     // stay in that frame's memo layer.
     BaseCompiler._pushLocalComplex(complexFrame);
     let radicalFrame:
-      | { head: string; params: Set<string>; promotes: boolean }
+      | {
+          head: string;
+          params: Set<string>;
+          promotes: boolean;
+          realPower?: { value: number; oddNumerator: boolean };
+        }
       | undefined;
     try {
       radicalFrame =
@@ -9609,6 +9656,10 @@ export class BaseCompiler {
               head: h,
               params: new Set(params),
               promotes: BaseCompiler.promotesRadicalToComplex(h, args),
+              realPower:
+                h === 'Power'
+                  ? BaseCompiler.realPowerExponent(args)
+                  : undefined,
             }
           : undefined;
     } finally {
@@ -13393,6 +13444,7 @@ export class BaseCompiler {
     head: string;
     params: Set<string>;
     promotes: boolean;
+    realPower?: { value: number; oddNumerator: boolean };
   }> = [];
 
   /**
@@ -14166,6 +14218,12 @@ export class BaseCompiler {
       );
       if (viaBody !== undefined) return viaBody;
     }
+    if (
+      expr.operator === 'Power' &&
+      BaseCompiler.realPowerExponent(expr.ops) !== undefined &&
+      !expr.ops.some((a) => BaseCompiler.isComplexValued(a))
+    )
+      return false;
     // Check the function's return type from its operator definition.
     //
     // The infinite and NaN branches are dropped first: a head whose value can

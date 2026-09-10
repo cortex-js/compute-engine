@@ -5749,6 +5749,28 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       return formatFloat(r, target.language);
     }
+    const realPower = BaseCompiler.realPowerExponent(args);
+    if (realPower !== undefined) {
+      const code = gpuOperandOnce('Power', base, compile, target);
+      const width = gpuBinaryVectorWidth(base, exp);
+      const shape = (n: number): string =>
+        width === undefined
+          ? formatFloat(n, target.language)
+          : `${gpuFVec(width, target)}(${formatFloat(n, target.language)})`;
+      const magnitude = `pow(abs(${code}), ${shape(realPower.value)})`;
+      if (!realPower.oddNumerator) return magnitude;
+      const negative =
+        target.language === 'wgsl' || width === undefined
+          ? `${code} < ${shape(0)}`
+          : `lessThan(${code}, ${shape(0)})`;
+      const sign =
+        target.language === 'wgsl'
+          ? `select(${shape(1)}, ${shape(-1)}, ${negative})`
+          : width === undefined
+            ? `(${negative} ? -1.0 : 1.0)`
+            : `mix(${shape(1)}, ${shape(-1)}, ${negative})`;
+      return `(${sign} * ${magnitude})`;
+    }
     // Real-emitted operands but a complex RESULT type (a negative base on the
     // even-denominator branch, e.g. `a^{0.3}` with `a ⩴ -2`). The enclosing
     // emission is `vec2(re, im)`; a scalar `pow` here would scalar-broadcast

@@ -2400,13 +2400,22 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Exp2: 'np.exp2',
 
   // Power and roots
-  Power: (args, compile) => {
+  Power: (args, compile, target) => {
     if (args.length !== 2) return 'np.power';
     if (
       BaseCompiler.isComplexValued(args[0]) ||
       BaseCompiler.isComplexValued(args[1])
     )
       return `(${compile(args[0])} ** ${compile(args[1])})`;
+    const realPower = BaseCompiler.realPowerExponent(args);
+    if (realPower !== undefined) {
+      const value = BaseCompiler.tempVar(target);
+      const magnitude = `np.power(np.abs(${value}), ${realPower.value})`;
+      const result = realPower.oddNumerator
+        ? `(np.where(${value} < 0, -1.0, 1.0) * ${magnitude})`
+        : magnitude;
+      return `(lambda ${value}: ${result})(${compile(args[0])})`;
+    }
     // PROMOTION (the `auto`/`complex` disciplines): an unknown-sign base with
     // a provably non-integer exponent — `np.emath.power` returns the complex
     // principal value for a negative base (the same helper family the

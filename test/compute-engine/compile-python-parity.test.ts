@@ -58,6 +58,12 @@ type Case = {
 
 const CASES: Case[] = [
   {
+    name: 'exact_odd_denominator_power',
+    expr: ['Power', 'x', ['Rational', -5, 3]],
+    params: ['x'],
+    inputs: [{ x: -8 }, { x: -1.2 }, { x: 0.3 }, { x: 2 }],
+  },
+  {
     name: 'if_branch',
     expr: ['If', ['Greater', 'x', 0], ['Multiply', 2, 'x'], ['Negate', 'x']],
     params: ['x'],

@@ -461,33 +461,12 @@ their expected effect on the corpus.
   `factor()` handle nested quotients in near-linear time, and should the
   differentiation rules then keep their results factored — which changes
   the shape of many `evaluate()` results and needs a snapshot-churn ruling.
-- **Interval application of small closed-form derivatives is implemented.**
-  `Apply(Derivative(f, n), x)` resolves the closed form before checking the
-  function's arity. Degree-mode rewriting and target support checks still
-  apply. Calls selected for the JavaScript jet path remain declined on the
-  interval target, avoiding costly symbolic expansion and unproved interval
-  recurrences.
-
 - **`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with `F := [f, f', f'', f''']`
   does not parse as the application of a list element** — `F(\epsilon)`
   parses as a juxtaposition — so the corpus row of Tycho item 284 never
   reaches the compiler in the shape the record implies. The explicit
   four-term sum compiles in 65 ms and matches `.N()`; the record's exact
   spelling should be recovered and re-tested on the Tycho side.
-- **Closed-form derivatives accept complex arguments (implemented).** The
-  derivative literal's parameter is compiled with the argument's complex
-  representation. Result analysis uses the same parameter context, so enclosing
-  arithmetic also handles the result correctly. A derivative independent of
-  its parameter can still return a real number.
-
-- **A cube root of a negative number takes the principal branch when
-  compiled and the real branch when interpreted.** `f(x) = ∛x`, `f''(-1.2)`:
-  the interpreter answers the real `1.164…`, the compiled closed form goes
-  through `_SYS.cpow` and answers `0.918 - 0.142i`. Pre-existing on the
-  symbolic route; the jet route takes the real root for an odd degree (fixed
-  in the same review). The compiled `Root` emitter of an odd degree over a
-  negative operand should take the real branch as `Math.cbrt` does for the
-  plain `∛x`.
 - **`_gpu_powi` vector variants answer NaN for a zero component under a
   negative odd exponent** (`sign(x) · pow(0, n)` is `0 · ∞`), where the
   scalar helper answers `+∞`. Both sit in hardware-undefined territory (a
