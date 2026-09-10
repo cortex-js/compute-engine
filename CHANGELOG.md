@@ -59,6 +59,38 @@
   in OKLCh; the space is proved at compile time there instead. See "Color
   values" in `docs/COMPILATION-MODEL.md`.
 
+- **`ColorFromColorspace` answers a COLOR, on every route.** The operator
+  builds a color from channel values in a named space, and its signature is
+  now `(color | tuple, string) -> color` instead of `-> tuple`. The
+  interpreter answers the color head of the space it names —
+  `ColorFromColorspace((0.5, 0.1, 20), "oklch")` is `Oklch(0.5, 0.1, 20)`,
+  and `"rgb"`, `"hsv"`, `"hsl"`, `"oklab"` answer `Rgb`, `Hsv`, `Hsl` and
+  `Oklab` heads with the given channels. It used to convert the channels to
+  0-1 sRGB and answer a components tuple —
+  `(0.58, 0.29, 0.29)` for the example above — while the compiled routes
+  answered a color value, so `At(ColorFromColorspace(...), 1)` read a channel
+  in the interpreter and `undefined` when compiled.
+
+  MIGRATION: a caller that read the components off the result now reads them
+  with `ColorToColorspace(color, "rgb")`, which answers exactly the tuple
+  `ColorFromColorspace` used to answer. A caller that passed the result to
+  another color operator needs no change — that is what now works on every
+  route, `ColorMix(ColorFromColorspace(c, s), other, 0.5)` included. A caller
+  that INDEXED the result (`At(result, 1)`) gets an `incompatible-type` error,
+  the same one `At(Rgb(1, 0, 0), 1)` has always answered, because a color is
+  not an indexed collection.
+
+  The compiled value follows the same rule: on the JavaScript target the color
+  carries the channels it was given and is tagged with the space it was built
+  in (`{ space: 'rgb', c0, c1, c2, alpha }`), not converted to OKLCh, so a
+  caller reading `space` or a channel sees the same color the interpreter
+  answers. On the GLSL and WGSL targets, where a color is a bare `vec3` with
+  no run-time tag, the value is the channels and `colorSpaceOf` carries the
+  space; the conversion back to OKLCh is emitted where the color is CONSUMED,
+  exactly as it is for an `AsRgb` or `AsHsv` operand. A shader that used
+  `ColorFromColorspace` as its whole expression and expected OKLCh must wrap
+  it in `AsOklch`.
+
 ### New Features
 
 - **`Arg` compiles on the `interval-js` target.** The phase of a complex
@@ -107,6 +139,31 @@
   `PointList` through the `functions` option keeps their implementation.
 
 ### Resolved Issues
+
+- **A tuple that is not visible at compile time is no longer read as a color
+  by the compiled routes.** A color operand that is a tuple-typed VARIABLE, or
+  a head that answers components such as `ColorToColorspace`, was passed
+  through as though it were a color value. On the JavaScript target a tuple's
+  compiled value is a bare array, which every color helper reads as a list and
+  refuses, so `ColorMix(v, Rgb(0, 0, 1), 0.5)` with `v` declared
+  `tuple<number, number, number>` compiled with `success: true` over code that
+  threw `Not a color` at every run; on the shader targets the same vector was
+  read as canonical OKLCh, which answers a color the interpreter — which
+  refuses the operand — never agrees with. Both targets now decline such an
+  operand at compile time (fail closed) at every head that CONSUMES a color —
+  `ColorMix`, `ColorDelta`, `ColorContrast`, `ContrastingColor`,
+  `ColorToString` — so the expression falls back to the interpreter, and the
+  diagnostic says that the operator takes a color, that a tuple is components,
+  and that `AsRgb((r, g, b))` builds a color from 0-1 sRGB components.
+
+  The heads that TAKE components — the five `As*` conversions and
+  `ColorToColorspace` — read such an operand instead, as 0-1 sRGB components
+  at run time, which is what the interpreter reads it as: `AsRgb(v)` and
+  `ColorToColorspace(v, "hsv")` with `v` a tuple-typed variable compile and
+  answer the interpreter's color, and so does `AsRgb(ColorToColorspace(c,
+  "rgb"))`. A shader carries no alpha, so a 4-wide components tuple is
+  declined there. A tuple written LITERALLY at the call site is unchanged: it
+  is 0-1 sRGB at every color operator, on every route, as the signatures say.
 
 - **Interval `sign` and `heaviside` no longer report a value they never
   take.** `sign([0, 0.5])` answered the enclosure `[-1, 1]`, although the

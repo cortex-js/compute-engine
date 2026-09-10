@@ -1141,13 +1141,13 @@
       "name": "ColorFromColorspace",
       "category": "Colors",
       "arity": "2",
-      "signature": "(color | tuple, string) -> tuple",
+      "signature": "(color | tuple, string) -> color",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Convert color space components to a color, answered in the canonical form of the route: an sRGB tuple when evaluated, the target's canonical color value when compiled. To get the same numbers on every route, call ColorToColorspace(result, \"rgb\")"
+      "description": "Build a color from channel values in a named color space. The result is a color on every route — the color head of the named space when evaluated, the target's color value when compiled. To read the channels back out, call ColorToColorspace(color, space)"
     },
     {
       "name": "Colormap",
@@ -7586,7 +7586,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Conditional/restriction value. `When(e, cond)` evaluates to:\n  - `e` when `cond` evaluates to `True`\n  - `Undefined` when `cond` evaluates to `False` (the \"masking rule\"; consumers like 2D plotters skip masked points)\n  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\nStacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\nCompiles to ternary `(cond) ? (e) : NaN` in JS and GLSL."
+      "description": "Conditional/restriction value. `When(e, cond)` evaluates to:\n  - `e` when `cond` evaluates to `True`\n  - `Missing` when `cond` evaluates to `False` (the \"masking rule\": the position-preserving absent datum, the same answer a selection with no selected branch gives; consumers like 2D plotters skip masked points)\n  - `When(e, cond_simplified)` when `cond` is indeterminate (holds)\nStacked restrictions canonicalize: `When(When(e, c1), c2)` → `When(e, And(c1, c2))`.\nCompiles to ternary `(cond) ? (e) : NaN` in JS and GLSL."
     },
     {
       "name": "Which",

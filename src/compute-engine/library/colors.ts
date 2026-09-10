@@ -415,6 +415,48 @@ function componentsTuple(ce: any, components: number[], alpha?: number): any {
   return ce.tuple(...args);
 }
 
+/**
+ * The color head whose components are the channels of the named color space.
+ * `lab` is the alternate spelling of `oklab` the color-space operators also
+ * accept. An unknown name has no head.
+ *
+ * A `Map` rather than an object, because the name comes from the expression:
+ * a plain object answers an INHERITED value for a name such as `constructor`
+ * or `__proto__`, which would pass an `undefined` check and reach
+ * `ce.function()` with something that is not an operator name. Every name
+ * that is not one of the six below is an unknown space.
+ */
+const SPACE_COLOR_HEAD: ReadonlyMap<string, string> = new Map([
+  ['rgb', 'Rgb'],
+  ['hsl', 'Hsl'],
+  ['hsv', 'Hsv'],
+  ['oklab', 'Oklab'],
+  ['lab', 'Oklab'],
+  ['oklch', 'Oklch'],
+]);
+
+/**
+ * Build the color head of the named space from its channels, appending alpha
+ * when it is not the opaque default.
+ *
+ * This is the same shape the constructor of that space builds, so
+ * `ColorFromColorspace((r, g, b), "rgb")` and `Rgb(r, g, b)` are the same
+ * expression. Alpha is normalized as every other emit site normalizes it — an
+ * absent, non-finite or effectively-1 alpha is dropped — so an opaque color
+ * has three operands whichever way it was written.
+ */
+function colorHeadFromSpace(
+  ce: any,
+  head: string,
+  components: number[],
+  alpha?: number
+): any {
+  const args = components.map((v) => ce.number(v));
+  const a = normalizeAlpha(alpha);
+  if (a !== undefined) args.push(ce.number(a));
+  return ce.function(head, args);
+}
+
 /** Convert an RgbColor (0-255) to a hex string (#rrggbb or #rrggbbaa). */
 function rgbToHex(rgb: RgbColor): string {
   const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
@@ -629,19 +671,23 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
 
   ColorFromColorspace: {
     description:
-      'Convert color space components to a color, answered in the canonical ' +
-      "form of the route: an sRGB tuple when evaluated, the target's " +
-      'canonical color value when compiled. To get the same numbers on every ' +
-      'route, call ColorToColorspace(result, "rgb")',
+      'Build a color from channel values in a named color space. The result ' +
+      'is a color on every route — the color head of the named space when ' +
+      "evaluated, the target's color value when compiled. To read the " +
+      'channels back out, call ColorToColorspace(color, space)',
     complexity: 8000,
-    signature: '(color | tuple, string) -> tuple',
+    signature: '(color | tuple, string) -> color',
     evaluate: (ops, { engine: ce }) => {
       const space = isString(ops[1]) ? ops[1].string?.toLowerCase() : undefined;
       if (!space) return ce.error('incompatible-type');
+      const head = SPACE_COLOR_HEAD.get(space);
+      if (head === undefined) return ce.error('expected-value');
 
       // Accept typed color heads (Rgb/Hsv/Hsl/Oklab/Oklch) directly: their
       // component layout matches the named colorspace, so unwrap and use them
-      // as if they were a Tuple of the same components.
+      // as if they were a Tuple of the same components. The head's OWN space
+      // is ignored at this position — `ColorFromColorspace(Rgb(0.5, 0.1, 20),
+      // "oklch")` reads (0.5, 0.1, 20) as L, C and H.
       let c0: number, c1: number, c2: number;
       let alpha: number | undefined;
       const arg = ops[0];
@@ -660,54 +706,21 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         c1 = arg.ops[1].re;
         c2 = arg.ops[2].re;
         alpha = arg.ops.length >= 4 ? arg.ops[3].re : undefined;
+        // A channel that is not a finite number is refused here exactly as a
+        // typed head with the same channel is refused (`readColorExpr`): the
+        // result of this operator is a color, and a color head with a
+        // non-finite channel is `incompatible-type` everywhere else.
+        if (
+          !Number.isFinite(c0) ||
+          !Number.isFinite(c1) ||
+          !Number.isFinite(c2)
+        )
+          return ce.error('incompatible-type');
       } else {
         return ce.error('incompatible-type');
       }
 
-      let rgb: RgbColor;
-
-      switch (space) {
-        case 'rgb':
-          return componentsTuple(ce, [c0, c1, c2], alpha);
-
-        case 'hsl': {
-          const result = hslToRgb(c0, c1, c2);
-          return componentsTuple(
-            ce,
-            [result.r / 255, result.g / 255, result.b / 255],
-            alpha
-          );
-        }
-
-        case 'hsv': {
-          const result = hsvToRgb(c0, c1, c2);
-          return componentsTuple(
-            ce,
-            [result.r / 255, result.g / 255, result.b / 255],
-            alpha
-          );
-        }
-
-        case 'oklch':
-          rgb = oklchToRgb({ L: c0, C: c1, H: c2 });
-          return componentsTuple(
-            ce,
-            [rgb.r / 255, rgb.g / 255, rgb.b / 255],
-            alpha
-          );
-
-        case 'oklab':
-        case 'lab':
-          rgb = oklabToRgb({ L: c0, a: c1, b: c2 });
-          return componentsTuple(
-            ce,
-            [rgb.r / 255, rgb.g / 255, rgb.b / 255],
-            alpha
-          );
-
-        default:
-          return ce.error('expected-value');
-      }
+      return colorHeadFromSpace(ce, head, [c0, c1, c2], alpha);
     },
   },
 

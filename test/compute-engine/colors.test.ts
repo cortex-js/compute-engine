@@ -161,6 +161,15 @@ describe('ColorToColorspace', () => {
 });
 
 describe('ColorFromColorspace', () => {
+  // The operator BUILDS a color from channels in the named space, so it
+  // answers the color head of that space, with those channels. The sRGB
+  // components it used to answer are read back with `ColorToColorspace`.
+  const srgbOf = (color: any) =>
+    ce
+      .expr(['ColorToColorspace', color.json, "'rgb'"])
+      .evaluate()
+      .ops!.map((op) => op.re);
+
   test('from oklch', () => {
     const expr = ce.expr([
       'ColorFromColorspace',
@@ -168,20 +177,22 @@ describe('ColorFromColorspace', () => {
       "'oklch'",
     ]);
     const result = expr.evaluate();
-    expect(result.operator).toBe('Tuple');
-    expect(result.ops!.length).toBe(3);
+    expect(result.operator).toBe('Oklch');
+    expect(result.ops!.map((op) => op.re)).toEqual([0.6, 0.26, 29]);
     // Should be reddish
-    expect(result.ops![0].re).toBeGreaterThan(0.5);
+    expect(srgbOf(result)[0]).toBeGreaterThan(0.5);
   });
 
   test('from hsl', () => {
     const expr = ce.expr(['ColorFromColorspace', ['Tuple', 0, 1, 0.5], "'hsl'"]);
     const result = expr.evaluate();
-    expect(result.operator).toBe('Tuple');
+    expect(result.operator).toBe('Hsl');
+    expect(result.ops!.map((op) => op.re)).toEqual([0, 1, 0.5]);
     // Pure red
-    expect(result.ops![0].re).toBeCloseTo(1, 1);
-    expect(result.ops![1].re).toBeCloseTo(0, 1);
-    expect(result.ops![2].re).toBeCloseTo(0, 1);
+    const rgb = srgbOf(result);
+    expect(rgb[0]).toBeCloseTo(1, 1);
+    expect(rgb[1]).toBeCloseTo(0, 1);
+    expect(rgb[2]).toBeCloseTo(0, 1);
   });
 
   test('roundtrip oklch', () => {
@@ -191,15 +202,16 @@ describe('ColorFromColorspace', () => {
     const back = ce
       .expr(['ColorFromColorspace', toOklch.json, "'oklch'"])
       .evaluate();
-    expect(back.operator).toBe('Tuple');
+    expect(back.operator).toBe('Oklch');
 
     // Convert Color() result (Oklch) to 0-1 sRGB for comparison.
     const originalAsRgb = ce
       .expr(['AsRgb', ce.expr(['Color', "'#3366cc'"]).evaluate().json])
       .evaluate();
-    expect(back.ops![0].re).toBeCloseTo(originalAsRgb.ops![0].re, 2);
-    expect(back.ops![1].re).toBeCloseTo(originalAsRgb.ops![1].re, 2);
-    expect(back.ops![2].re).toBeCloseTo(originalAsRgb.ops![2].re, 2);
+    const rgb = srgbOf(back);
+    expect(rgb[0]).toBeCloseTo(originalAsRgb.ops![0].re, 2);
+    expect(rgb[1]).toBeCloseTo(originalAsRgb.ops![1].re, 2);
+    expect(rgb[2]).toBeCloseTo(originalAsRgb.ops![2].re, 2);
   });
 });
 
@@ -235,16 +247,23 @@ describe('Edge cases', () => {
     const toHsl = ce
       .expr(['ColorToColorspace', "'#3366cc'", "'hsl'"])
       .evaluate();
+    // The round trip answers an `Hsl` COLOR, so the sRGB components are read
+    // back out with `ColorToColorspace`.
     const back = ce
       .expr(['ColorFromColorspace', toHsl.json, "'hsl'"])
       .evaluate();
+    expect(back.operator).toBe('Hsl');
+    const rgb = ce
+      .expr(['ColorToColorspace', back.json, "'rgb'"])
+      .evaluate()
+      .ops!.map((op) => op.re);
     // Convert Color() result (Oklch) to 0-1 sRGB for comparison.
     const originalAsRgb = ce
       .expr(['AsRgb', ce.expr(['Color', "'#3366cc'"]).evaluate().json])
       .evaluate();
-    expect(back.ops![0].re).toBeCloseTo(originalAsRgb.ops![0].re, 2);
-    expect(back.ops![1].re).toBeCloseTo(originalAsRgb.ops![1].re, 2);
-    expect(back.ops![2].re).toBeCloseTo(originalAsRgb.ops![2].re, 2);
+    expect(rgb[0]).toBeCloseTo(originalAsRgb.ops![0].re, 2);
+    expect(rgb[1]).toBeCloseTo(originalAsRgb.ops![1].re, 2);
+    expect(rgb[2]).toBeCloseTo(originalAsRgb.ops![2].re, 2);
   });
 });
 
@@ -889,31 +908,49 @@ describe('GPU color compilation', () => {
     expect(compiled.code).toBe('_gpu_srgb_roundtrip(vec3(0.7, 0.1, 0.3))');
   });
 
-  test('compile ColorFromColorspace to WGSL', () => {
-    // Components in oklab → canonical OKLCh via _gpu_oklab_to_oklch.
+  test('compile ColorFromColorspace to WGSL keeps the named space', () => {
+    // The value is the channels themselves, in the space they were given in
+    // — the shader counterpart of the `Oklab(...)` head the interpreter
+    // answers. A CONSUMER converts them back to OKLCh, which is what the
+    // second half of this test pins.
     const expr = ce.expr([
       'ColorFromColorspace',
       ['Tuple', 0.6, 0.2, 0.1],
       "'oklab'",
     ]);
     // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3f, hiding the conversion helper this test pins.
+    // literal vec3f, hiding the lowering this test pins.
     const compiled = compile(expr, { to: 'wgsl', constantFold: false });
     expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_oklab_to_oklch');
+    expect(compiled.code).toBe('vec3f(0.6, 0.2, 0.1)');
+
+    const consumed = compile(
+      ce.expr(['AsOklch', expr.json]),
+      { to: 'wgsl', constantFold: false }
+    );
+    expect(consumed.success).toBe(true);
+    expect(consumed.code).toContain('_gpu_oklab_to_oklch');
   });
 
-  test('compile ColorFromColorspace to GLSL routes rgb to OKLCh', () => {
+  test('compile ColorFromColorspace to GLSL routes rgb to OKLCh at its consumer', () => {
     const expr = ce.expr([
       'ColorFromColorspace',
       ['Tuple', 1, 0, 0],
       "'rgb'",
     ]);
     // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3, hiding the conversion helper this test pins.
+    // literal vec3, hiding the lowering this test pins.
     const compiled = compile(expr, { to: 'glsl', constantFold: false });
     expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
+    expect(compiled.code).toBe('vec3(1.0, 0.0, 0.0)');
+
+    // The sRGB→OKLCh conversion is emitted where the color is CONSUMED.
+    const mixed = compile(
+      ce.expr(['ColorMix', expr.json, ['Rgb', 0, 0, 1], 0.5]),
+      { to: 'glsl', constantFold: false }
+    );
+    expect(mixed.success).toBe(true);
+    expect(mixed.code).toContain('_gpu_srgb_to_oklch(vec3(1.0, 0.0, 0.0))');
   });
 
   test('compile ContrastingColor to GLSL', () => {
@@ -941,7 +978,9 @@ describe('GPU compile: HSL space', () => {
     expect(compiled.preamble).toContain('vec3 _gpu_rgb_to_hsl');
   });
 
-  test('ColorFromColorspace hsl emits HSL→sRGB→OKLCh chain', () => {
+  test('a consumed ColorFromColorspace hsl emits the HSL→sRGB→OKLCh chain', () => {
+    // The operator itself answers the HSL channels; the chain back to OKLCh
+    // is emitted at the consumer, exactly as it is for an `AsHsl` operand.
     const expr = ce.expr([
       'ColorFromColorspace',
       ['Tuple', 0, 1, 0.5],
@@ -949,7 +988,10 @@ describe('GPU compile: HSL space', () => {
     ]);
     // `constantFold: false`: constant operands would otherwise fold to a
     // literal vec3f, hiding the HSL→sRGB→OKLCh chain this test pins.
-    const compiled = compile(expr, { to: 'wgsl', constantFold: false });
+    const compiled = compile(ce.expr(['AsOklch', expr.json]), {
+      to: 'wgsl',
+      constantFold: false,
+    });
     expect(compiled.success).toBe(true);
     expect(compiled.code).toContain('_gpu_hsl_to_rgb');
     expect(compiled.code).toContain('_gpu_srgb_to_oklch');
@@ -1684,22 +1726,26 @@ describe('Regression: ColorFromColorspace accepts typed heads', () => {
     const result = ce
       .expr(['ColorFromColorspace', ['Oklch', 0.628, 0.258, 29.23], "'oklch'"])
       .evaluate();
-    expect(result.operator).toBe('Tuple');
+    expect(result.operator).toBe('Oklch');
     expect(result.ops!.length).toBe(3);
     // Round-trip should land near pure red in 0-1 sRGB.
-    expect(result.ops![0].re).toBeCloseTo(1, 1);
-    expect(result.ops![1].re).toBeCloseTo(0, 1);
-    expect(result.ops![2].re).toBeCloseTo(0, 1);
+    const rgb = ce
+      .expr(['ColorToColorspace', result.json, "'rgb'"])
+      .evaluate()
+      .ops!.map((op) => op.re);
+    expect(rgb[0]).toBeCloseTo(1, 1);
+    expect(rgb[1]).toBeCloseTo(0, 1);
+    expect(rgb[2]).toBeCloseTo(0, 1);
   });
 
   test('ColorFromColorspace accepts an Rgb head with rgb space', () => {
-    // Components from an Rgb head are 0-255; the operator interprets them
-    // per the named space ('rgb' = 0-1 sRGB), so this is intentionally a
-    // pass-through that produces Tuple of the raw components.
+    // A typed head at this position is read as RAW components in the named
+    // space, whatever its own space is. Here the two agree, so the result is
+    // the same color the head names.
     const result = ce
       .expr(['ColorFromColorspace', ['Rgb', 0.5, 0.25, 0.75], "'rgb'"])
       .evaluate();
-    expect(result.operator).toBe('Tuple');
+    expect(result.operator).toBe('Rgb');
     expect(result.ops![0].re).toBeCloseTo(0.5, 6);
     expect(result.ops![1].re).toBeCloseTo(0.25, 6);
     expect(result.ops![2].re).toBeCloseTo(0.75, 6);
@@ -1709,7 +1755,7 @@ describe('Regression: ColorFromColorspace accepts typed heads', () => {
     const result = ce
       .expr(['ColorFromColorspace', ['Tuple', 0.5, 0.25, 0.75], "'rgb'"])
       .evaluate();
-    expect(result.operator).toBe('Tuple');
+    expect(result.operator).toBe('Rgb');
     expect(result.ops![0].re).toBeCloseTo(0.5, 6);
   });
 });

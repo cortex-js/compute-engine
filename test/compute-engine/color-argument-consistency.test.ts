@@ -308,20 +308,21 @@ describe('a bare tuple is 0-1 sRGB on every route', () => {
     expect(shader.z).toBeCloseTo(expected[2], 4);
   });
 
-  test('a tuple that arrives through a VARIABLE keeps the canonical reading', () => {
-    // Documented behaviour, not an oversight: a variable has no shape at
-    // compile time, so the compiled targets cannot tell a tuple of sRGB
-    // components from the color value they already hold as three numbers.
-    // The value a variable carries at run time IS the canonical color, so it
-    // is passed through unconverted.
+  test('a tuple that arrives through a VARIABLE is DECLINED', () => {
+    // A tuple is COMPONENTS, and `ColorMix` takes a color. The compiled
+    // targets used to read such an operand as the color value they already
+    // hold as three numbers: on JavaScript that emitted code whose color
+    // helper threw `Not a color` at every run — a compile-time-provable
+    // failure reported as a success — and on a shader it answered a color
+    // the interpreter, which refuses the operand, never agrees with. Both
+    // decline now, so the expression falls back to the interpreter.
     const cev = new ComputeEngine();
     cev.declare('v', 'tuple<number, number, number>');
     const expr = cev.expr(['ColorMix', 'v', ['Rgb', 0, 0, 1], 0.5]);
-    expect((compile(expr, NO_FOLD as any) as any).code).toBe(
-      '_SYS.colorMix(_.v, _SYS.rgb(0, 0, 1), 0.5)'
-    );
-    expect(new GLSLTarget().compile(expr, NO_FOLD as any).code).toBe(
-      '_gpu_color_mix(v, _gpu_srgb_to_oklch(vec3(0.0, 0.0, 1.0)), 0.5)'
+    expect(expr.evaluate().operator).toBe('Error');
+    expect((compile(expr, NO_FOLD as any) as any).code).toBe('');
+    expect(() => new GLSLTarget().compile(expr, NO_FOLD as any)).toThrow(
+      /a tuple is color COMPONENTS/
     );
   });
 });
@@ -476,18 +477,19 @@ describe('the HSV color space is available on every route', () => {
   });
 
   test('ColorFromColorspace', () => {
-    const t = interp(['ColorFromColorspace', ['Tuple', 0, 1, 1], "'hsv'"]);
-    expect(t.ops!.map((op) => Math.round(op.re * 1000) / 1000)).toEqual([
-      1, 0, 0,
-    ]);
-    // The compiled routes answer the same color in their own OKLCh form.
+    // The operator BUILDS a color from channels in the named space, so it
+    // answers the `Hsv` head with those channels — pure red, written in HSV.
+    const expr = ['ColorFromColorspace', ['Tuple', 0, 1, 1], "'hsv'"];
+    const t = interp(expr);
+    expect(t.operator).toBe('Hsv');
+    expect(t.ops!.map((op) => op.re)).toEqual([0, 1, 1]);
+    // Which is the same color as `Rgb(1, 0, 0)`.
     const red = interpOklch(['Rgb', 1, 0, 0]);
-    const js = runJSChannels([
-      'ColorFromColorspace',
-      ['Tuple', 0, 1, 1],
-      "'hsv'",
-    ]);
-    for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(red[i], 9);
+    const asOklch = interpOklch(expr);
+    for (let i = 0; i < 3; i++) expect(asOklch[i]).toBeCloseTo(red[i], 9);
+    // The compiled value carries the channels and the space it was built in.
+    expect(runJSSpace(expr)).toBe('hsv');
+    expect(runJSChannels(expr)).toEqual([0, 1, 1]);
   });
 });
 
@@ -569,18 +571,21 @@ describe('ColorFromColorspace does not convert a typed color head twice', () => 
   // space. Its own lowering already converts to OKLCh, so the compiled routes
   // converted a second time and answered a color that was not red.
   test('Rgb components in the rgb space stay red', () => {
-    const t = interp(['ColorFromColorspace', ['Rgb', 1, 0, 0], "'rgb'"]);
+    const expr = ['ColorFromColorspace', ['Rgb', 1, 0, 0], "'rgb'"];
+    const t = interp(expr);
+    expect(t.operator).toBe('Rgb');
     expect(t.ops!.map((op) => op.re)).toEqual([1, 0, 0]);
 
-    const red = interpOklch(['Rgb', 1, 0, 0]);
-    const js = runJSChannels([
-      'ColorFromColorspace',
-      ['Rgb', 1, 0, 0],
-      "'rgb'",
-    ]);
-    for (let i = 0; i < 3; i++) expect(js[i]).toBeCloseTo(red[i], 9);
+    // The compiled value keeps those channels, tagged `rgb`.
+    expect(runJSSpace(expr)).toBe('rgb');
+    expect(runJSChannels(expr)).toEqual([1, 0, 0]);
 
-    const shader = evalGLSL(['ColorFromColorspace', ['Rgb', 1, 0, 0], "'rgb'"]);
+    // On a shader a color is a bare `vec3` with no tag, so the value is the
+    // channels and `colorSpaceOf` carries the space. Wrapping the expression
+    // in `AsOklch` is how a caller asks for the canonical space, and the
+    // answer is red — not red converted twice.
+    const red = interpOklch(['Rgb', 1, 0, 0]);
+    const shader = evalGLSL(['AsOklch', expr]);
     expect(shader.x).toBeCloseTo(red[0], 6);
     expect(shader.y).toBeCloseTo(red[1], 6);
     expect(shader.z).toBeCloseTo(red[2], 6);

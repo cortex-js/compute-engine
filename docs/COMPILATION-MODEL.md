@@ -358,17 +358,31 @@ degrees and two 0-1 components; `oklab` holds `L`, `a` and `b`.
 
 OKLCh is the preferred internal space. Every color constructor (`Rgb`, `Hsv`,
 `Hsl`, `Oklab`, `Oklch`) and every operator that produces a color (`Color`,
-`Colormap`, `ColorMix`, `ContrastingColor`, `ColorFromColorspace`) answers a
-color in it. `ContrastingColor` normalizes the candidate it chooses, so its
-value is canonical whatever space the candidate was written in. An EXPLICIT
-conversion answers a color tagged with the space it names: `AsRgb` answers
-`rgb`, `AsHsv` answers `hsv`, `AsOklab` answers `oklab`.
+`Colormap`, `ColorMix`, `ContrastingColor`) answers a color in it.
+`ContrastingColor` normalizes the candidate it chooses, so its value is
+canonical whatever space the candidate was written in. An EXPLICIT conversion
+answers a color tagged with the space it names: `AsRgb` answers `rgb`,
+`AsHsv` answers `hsv`, `AsOklab` answers `oklab`.
 
-`ColorToColorspace` is NOT one of these. It answers COMPONENTS — it is
-declared `-> tuple`, the interpreter evaluates it to a `Tuple`, and consumers
-index the result (`At(ColorToColorspace(c, "rgb"), 1)`) — so its compiled value
-is the plain array of three channels, four with an alpha. To get a color from
-components, pass them to `ColorFromColorspace`.
+`ColorFromColorspace(components, space)` is the other head that answers a
+named space. It BUILDS a color from channel values in the space it names, and
+it keeps them there: the value carries those channels and is tagged with that
+space, so `ColorFromColorspace((0.5, 0.1, 20), "rgb")` is
+`{space: 'rgb', c0: 0.5, c1: 0.1, c2: 20, alpha: undefined}`. That is the
+color the interpreter answers — the color HEAD of the named space,
+`Rgb(0.5, 0.1, 20)` here — so a caller that reads `space`, or a channel, sees
+the same color on both routes. Converting to OKLCh at the operator would have
+shown different numbers from the interpreter for the same expression. The
+operator is declared `-> color`, so its value has the color representation by
+TYPE, like every other color-valued head.
+
+`ColorToColorspace` is the opposite direction and is NOT one of these. It
+answers COMPONENTS — it is declared `-> tuple`, the interpreter evaluates it
+to a `Tuple`, and consumers index the result
+(`At(ColorToColorspace(c, "rgb"), 1)`) — so its compiled value is the plain
+array of three channels, four with an alpha. The two are inverses:
+`ColorToColorspace(ColorFromColorspace(t, s), "rgb")` answers the 0-1 sRGB
+components, which is how a caller reads channel values back out of a color.
 
 A color value whose `space` is not one of the five spellings is not a color:
 the readers switch on the space, so an object tagged `srgb` reaching a helper
@@ -387,11 +401,48 @@ A color STRING stays a JavaScript string until a helper parses it, and a LIST
 of colors is a JavaScript array of color objects or color strings. So a bare
 numeric array is NEVER a color on this target: it is a list. A color helper
 handed one throws a `TypeError` naming the expected shape. The static gates
-refuse a literal list at a color position, so that throw is a run-time backstop
-for the shapes they cannot see: a `vars` input, a caller still passing the
-pre-2026-09 array representation, and a COMPONENTS tuple whose width is not
-visible at compile time — a tuple-typed variable, or `ColorToColorspace` —
-which is passed through unconverted and reaches the helper as a bare array.
+refuse a literal list at a color position, so that throw is a run-time
+backstop for the shapes they cannot see: a `vars` input, and a caller still
+passing the pre-2026-09 array representation.
+
+A TUPLE at a color position is COMPONENTS, and how it is read depends on
+whether the compiler can see it. A tuple written LITERALLY at the call site
+denotes 0-1 sRGB on every route — the color operators are declared
+`(color | string | tuple, …)` and the interpreter reads such a tuple — so it
+is converted here with the same conversion `Rgb(r, g, b)` takes. A tuple that
+arrives any OTHER way — a tuple-typed variable, or a head that answers
+components such as `ColorToColorspace` — is read at a head that TAKES
+components and DECLINED at a head that consumes a color.
+
+The heads that take components are the five `As*` conversions and
+`ColorToColorspace`; they are how a caller turns components into a color, so a
+tuple at their operand is legitimate input whichever way it arrives, and it is
+read as 0-1 sRGB components at run time. On JavaScript the reader is
+`_SYS.colorFromSrgbComponents`, which builds the color of a 3- or 4-element
+numeric array — the 4th component is alpha — and throws the color-shape
+`TypeError` for any other shape. On a shader the operand's compiled value is
+the `vec3` of its channels and `_gpu_srgb_to_oklch` makes the canonical color
+of it; a tuple whose type says it is 4 wide is declined there, because a
+shader color carries no alpha. On both targets a width the type states as
+anything but 3 (or 4 on JavaScript) is declined at compile time. sRGB is the
+reading even where `colorSpaceOf` names another space for the channels,
+because the interpreter reads every tuple at a color position as 0-1 sRGB:
+`AsRgb(ColorToColorspace(c, "hsv"))` answers the hue, saturation and value
+read as red, green and blue on every route. A caller who means the channels in
+the space they were computed in writes `ColorFromColorspace(components,
+space)`, whose own first operand is components and is unaffected by any of
+this.
+
+Every OTHER color head — `ColorMix`, `ColorDelta`, `ColorContrast`,
+`ContrastingColor`, `ColorToString` — consumes a color and declines such an
+operand. Its value is a bare array, which this target reads as a list and
+never as a color, so passing it through emitted code that threw the
+color-shape `TypeError` on every run — a compile-time-provable failure behind
+`success: true`. On the shader targets the same vector was read as canonical
+OKLCh, which answers a color the interpreter, which refuses such an operand,
+never agrees with. Declining hands the expression back to the interpreter; the
+diagnostic names `AsRgb((r, g, b))` and `ColorFromColorspace(components,
+space)`, the two spellings that build a color from components.
 
 A color whose channels are not all finite is the same object with `NaN`
 channels, in the space the answering helper names. It is the numeric projection
@@ -401,14 +452,11 @@ channel.
 A color-VALUED expression is NOT constant-folded on this target. The
 interpreter's value for a color is a typed head, whose literal emission is a
 bare numeric array — a list on this target, never a color — so the color
-lowering runs instead and builds the object. The test is the expression's TYPE,
-so every color-valued expression is covered whatever head built it, and an
-expression that answers components rather than a color folds like any other
+lowering runs instead and builds the object. The test is the expression's TYPE
+alone, so every color-valued expression is covered whatever head built it, and
+an expression that answers components rather than a color folds like any other
 tuple: `ColorToColorspace(c, s)` with `s` a symbol bound to a string folds to
 the interpreter's tuple, which is the same 3-array its lowering emits.
-`ColorFromColorspace` is the one head the type cannot speak for — it is
-declared `-> tuple` while its lowering answers a color value — and it is
-excluded by name.
 
 The interpreter FALLBACK answers the same object, and CONSUMES one. A declining
 color expression run under `fallback: true` comes back as
@@ -419,15 +467,23 @@ compiled runner produced is boxed back to the head that names its space when it
 is passed in as a `vars` value, recursively inside arrays, so a color can cross
 from a compiled runner into a declining expression.
 
-On the SHADER targets (GLSL, WGSL) a color is a bare `vec3` in OKLCh, end to
-end, with no run-time tag and no alpha. The space is a COMPILE-TIME fact
-instead (`colorSpaceOf`, `compilation/color-space-fact.ts`): the constructors
-and the color-producing operators answer `oklch`, each `As*` answers the space
-it names, and `ColorToColorspace(c, "<literal>")` answers that literal space. A
-color operand whose fact is a named space other than `oklch` is converted back
-to OKLCh statically, with the `_gpu_srgb_to_oklch`, `_gpu_oklab_to_oklch`,
-`_gpu_hsl_to_rgb` and `_gpu_hsv_to_rgb` helpers the preamble already carries,
-so no nesting has to be declined for want of a reverse conversion.
+On the SHADER targets (GLSL, WGSL) a color is a bare `vec3` with no run-time
+tag and no alpha, read as OKLCh unless the compiler knows otherwise. The space
+is a COMPILE-TIME fact instead (`colorSpaceOf`,
+`compilation/color-space-fact.ts`): the constructors and the color-producing
+operators answer `oklch`, each `As*` answers the space it names, and
+`ColorToColorspace(c, "<literal>")` and `ColorFromColorspace(comps,
+"<literal>")` answer that literal space. A color operand whose fact is a named
+space other than `oklch` is converted back to OKLCh statically, with the
+`_gpu_srgb_to_oklch`, `_gpu_oklab_to_oklch`, `_gpu_hsl_to_rgb` and
+`_gpu_hsv_to_rgb` helpers the preamble already carries, so no nesting has to be
+declined for want of a reverse conversion.
+
+`ColorFromColorspace` therefore emits the channels themselves, and the
+conversion to OKLCh appears at its CONSUMER, the same place an `AsHsv`
+operand's conversion appears. A shader whose whole expression is a
+`ColorFromColorspace` gets that named space as its result; `AsOklch(...)` is
+how a caller asks for the canonical one.
 
 The fact follows a value through the shapes that FORWARD one: a block's last
 statement, a return-type ascription (`Typed`, the normalized spelling of a

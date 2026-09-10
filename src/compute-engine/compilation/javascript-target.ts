@@ -2159,13 +2159,16 @@ const JS_COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
  * color value and answered a different color than the interpreter for the
  * same expression.
  *
- * Only a tuple written LITERALLY at the call site can be recognized. A tuple
- * that reaches this position any other way — a tuple-typed variable, or
- * `ColorToColorspace`, whose value is components in the space it names — has
- * no shape at compile time and is passed through unconverted. Its value is a
- * bare array at run time, which this target reads as a LIST, so the color
- * helper it reaches throws the color-shape `TypeError` rather than answering
- * a color it cannot vouch for.
+ * A tuple that reaches this position any OTHER way — a tuple-typed variable,
+ * or `ColorToColorspace`, whose value is components in the space it names —
+ * is DECLINED. Its compiled value is a bare array, which this target reads as
+ * a list and never as a color, so passing it through emitted code that threw
+ * the color-shape `TypeError` at every run: a compile-time-provable failure
+ * reported as `success: true`. Declining hands the expression to the
+ * interpreter instead, which is where its answer — an `incompatible-type`
+ * error for a valueless variable, a color for a components tuple it can read
+ * — comes from. Write `AsRgb(components)` to build a color from 0-1 sRGB
+ * components, or `ColorFromColorspace(components, space)` for another space.
  *
  * A `List` written at a color position is refused; only an operand of unknown
  * shape keeps the canonical reading. The interpreter's signatures say `tuple`
@@ -2184,7 +2187,10 @@ function compileColorOperand(
   compile: (expr: Expression) => string
 ): string {
   if (isFunction(color, 'List')) refuseColorList();
-  if (!isFunction(color, 'Tuple')) return compile(color);
+  if (!isFunction(color, 'Tuple')) {
+    if (isProvablyTupleParticipant(color)) refuseColorComponents(head);
+    return compile(color);
+  }
   const ops = color.ops;
   if (ops.length < 3 || ops.length > 4) refuseColorTupleWidth(ops.length);
   // A component that is provably not a scalar is not a color channel. The
@@ -2201,6 +2207,40 @@ function compileColorOperand(
 }
 
 /**
+ * Compile the operand of an ENTRY function — one of the five `As*`
+ * conversions, or `ColorToColorspace` — which takes components as well as a
+ * color.
+ *
+ * These heads are the way a caller turns components into a color, so a tuple
+ * at their operand is legitimate input whichever way it arrives. A tuple
+ * written literally is read as 0-1 sRGB by `compileColorOperand`. A tuple
+ * that arrives through a variable, or from a head that answers components
+ * such as `ColorToColorspace`, has no shape at compile time, so the reading
+ * is done at run time by `_SYS.colorFromSrgbComponents`: it answers the color
+ * of a 3- or 4-element numeric array read as 0-1 sRGB, and refuses any other
+ * shape, which is the interpreter's `incompatible-type` for such an operand.
+ *
+ * Every other color head CONSUMES a color and declines the same operand
+ * (`refuseColorComponents`).
+ */
+function compileColorEntryOperand(
+  head: string,
+  color: Expression,
+  compile: (expr: Expression) => string
+): string {
+  if (!isFunction(color, 'Tuple') && isProvablyTupleParticipant(color)) {
+    // A width the TYPE states is checked here rather than left to the run-time
+    // throw, for the same reason a literal tuple's width is: a tuple of two
+    // components can never be a color, so the failure is proved now.
+    const width = BaseCompiler.aggregateComponentCount(color);
+    if (width !== undefined && width !== 3 && width !== 4)
+      refuseColorTupleWidth(width);
+    return `_SYS.colorFromSrgbComponents(${compile(color)})`;
+  }
+  return compileColorOperand(head, color, compile);
+}
+
+/**
  * The color-space conversions (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`,
  * `AsOklch`) are `broadcastable`, so a LIST of colors at their operand is one
  * conversion per element. Emit that map when the operand may be a list at run
@@ -2211,12 +2251,16 @@ function compileColorOperand(
  * any depth, as the interpreter's broadcast does, and it answers the
  * non-finite color at an absent position — see that helper.
  *
- * Three operand shapes keep the one-color reading and answer `undefined`. A
+ * Four operand shapes keep the one-color reading and answer `undefined`. A
  * literal `Tuple` is one color in 0-1 sRGB, which is the shape the
  * definitions exempt from broadcasting (`broadcastExemptions: ['tuples']`). A
- * provably STRING operand is one CSS color, not a list of its grapheme
- * clusters. And an operand that is not collection-shaped at all is one color
- * by its type.
+ * provably TUPLE-TYPED operand is the same shape reaching the position
+ * through a variable or from a head that answers components, and the
+ * exemption is about the tuple, not about where it was written: it is one set
+ * of components, which the caller lowers through
+ * `compileColorEntryOperand`. A provably STRING operand is one CSS color, not
+ * a list of its grapheme clusters. And an operand that is not
+ * collection-shaped at all is one color by its type.
  *
  * An operand that MAY be a list at run time must prove that every leaf it
  * holds is a color, and the proof is the type matching
@@ -2249,6 +2293,7 @@ function tryCompileColorBroadcast(
   target: CompileTarget<Expression>
 ): string | undefined {
   if (isFunction(color, 'Tuple')) return undefined;
+  if (isProvablyTupleParticipant(color)) return undefined;
   if (color.type.matches('string')) return undefined;
   const mayBeList =
     color.isCollection ||
@@ -2274,6 +2319,32 @@ function refuseColorList(): never {
   throw new Error(
     'A list is not a color — a color operand must be a color, a color ' +
       'string or a tuple of 3 or 4 components. Fail closed (D6).'
+  );
+}
+
+/**
+ * Decline a tuple-TYPED operand at a color position — a tuple-typed variable,
+ * or a head that answers components such as `ColorToColorspace`.
+ *
+ * A tuple is COMPONENTS. Its compiled value on this target is a bare array,
+ * which every color helper reads as a list and refuses, so the emitted code
+ * threw at run time on every input. The message names the two spellings that
+ * build a color from components.
+ *
+ * Only a head that CONSUMES a color reaches here — `ColorMix`, `ColorDelta`,
+ * `ColorContrast`, `ContrastingColor`, `ColorToString`. The heads that take
+ * components in their own signature (the five `As*` conversions and
+ * `ColorToColorspace`) read such an operand as 0-1 sRGB components instead,
+ * through `compileColorEntryOperand`, so the message can tell the caller to
+ * write one of them.
+ */
+function refuseColorComponents(head: string): never {
+  throw new Error(
+    `${head}: this operator takes a COLOR, and a tuple is color COMPONENTS, ` +
+      'not a color. Build a color from the components first — ' +
+      '`AsRgb((r, g, b))` reads them as 0-1 sRGB, and ' +
+      '`ColorFromColorspace(components, space)` reads them in any named ' +
+      'space. Fail closed (D6).'
   );
 }
 
@@ -5556,7 +5627,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   ColorToColorspace: ([color, space], compile) => {
     if (color === null || space === null)
       throw new Error('ColorToColorspace: need color and space');
-    return `_SYS.colorToColorspace(${compileColorOperand(
+    return `_SYS.colorToColorspace(${compileColorEntryOperand(
       'ColorToColorspace',
       color,
       compile
@@ -5635,7 +5706,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       compile,
       target
     );
-    return list ?? `_SYS.asRgb(${compileColorOperand('AsRgb', c, compile)})`;
+    return (
+      list ?? `_SYS.asRgb(${compileColorEntryOperand('AsRgb', c, compile)})`
+    );
   },
   AsHsv: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsv: no argument');
@@ -5646,7 +5719,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       compile,
       target
     );
-    return list ?? `_SYS.asHsv(${compileColorOperand('AsHsv', c, compile)})`;
+    return (
+      list ?? `_SYS.asHsv(${compileColorEntryOperand('AsHsv', c, compile)})`
+    );
   },
   AsHsl: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsl: no argument');
@@ -5657,7 +5732,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       compile,
       target
     );
-    return list ?? `_SYS.asHsl(${compileColorOperand('AsHsl', c, compile)})`;
+    return (
+      list ?? `_SYS.asHsl(${compileColorEntryOperand('AsHsl', c, compile)})`
+    );
   },
   AsOklab: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklab: no argument');
@@ -5668,7 +5745,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       compile,
       target
     );
-    return list ?? `_SYS.asOklab(${compileColorOperand('AsOklab', c, compile)})`;
+    return (
+      list ?? `_SYS.asOklab(${compileColorEntryOperand('AsOklab', c, compile)})`
+    );
   },
   AsOklch: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklch: no argument');
@@ -5698,7 +5777,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // hand on as though they were a color. A literal tuple is sRGB components
     // and is converted by `compileColorOperand`, whose `_SYS.rgb(…)` value is
     // canonical.
-    const operand = compileColorOperand('AsOklch', c, compile);
+    const operand = compileColorEntryOperand('AsOklch', c, compile);
     const canonical =
       isFunction(c, 'Tuple') ||
       (colorSpaceOf(c) === 'oklch' && isColorValued(c));
@@ -6601,32 +6680,20 @@ const colorHelpers = {
       c2 = c.c2;
       alpha = c.alpha;
     }
-    let oklch: { L: number; C: number; H: number };
-    switch (space.toLowerCase()) {
-      case 'rgb':
-        oklch = rgbToOklch({ r: c0 * 255, g: c1 * 255, b: c2 * 255 });
-        break;
-      case 'hsl': {
-        const rgb = hslToRgb(c0, c1, c2);
-        oklch = rgbToOklch(rgb);
-        break;
-      }
-      case 'hsv': {
-        const rgb = hsvToRgb(c0, c1, c2);
-        oklch = rgbToOklch(rgb);
-        break;
-      }
-      case 'oklch':
-        oklch = { L: c0, C: c1, H: c2 };
-        break;
-      case 'oklab':
-      case 'lab':
-        oklch = oklabToOklch({ L: c0, a: c1, b: c2 });
-        break;
-      default:
-        throw new Error(`Unknown color space: ${space}`);
-    }
-    return mkColor('oklch', oklch.L, oklch.C, oklch.H, normalizeAlpha(alpha));
+    // The channels are KEPT in the space they were given in, and the value is
+    // tagged with it. The interpreter answers the color head of that space
+    // (`ColorFromColorspace((0.5, 0.1, 20), "oklch")` is `Oklch(0.5, 0.1,
+    // 20)`), so tagging rather than converting is what makes a caller that
+    // reads `space`, or a channel, see the same color on both routes. Every
+    // helper that consumes a color reads the tag (`toOklch`), so the
+    // conversion happens where the color is used.
+    const name = space.toLowerCase();
+    const tag = name === 'lab' ? 'oklab' : name;
+    if (!COMPILED_COLOR_SPACES.has(tag))
+      throw new Error(`Unknown color space: ${space}`);
+    if (!finiteChannels(c0, c1, c2))
+      return nonFiniteColor(alpha, tag as CompiledColorSpace);
+    return mkColor(tag as CompiledColorSpace, c0, c1, c2, normalizeAlpha(alpha));
   },
 
   // -----------------------------------------------------------------------
@@ -6669,6 +6736,36 @@ const colorHelpers = {
   oklch(L: number, C: number, H: number, alpha?: number): CompiledColor {
     if (!finiteChannels(L, C, H)) return nonFiniteColor(alpha);
     return mkColor('oklch', L, C, H, normalizeAlpha(alpha));
+  },
+
+  /**
+   * Read color COMPONENTS as a color, in 0-1 sRGB, with a 4th component read
+   * as alpha.
+   *
+   * A tuple's compiled value on this target is a bare array, and a tuple at
+   * the operand of an ENTRY function — one of the five `As*` conversions, or
+   * `ColorToColorspace` — is 0-1 sRGB components, exactly as a tuple written
+   * literally there is. The array is only visible at run time when it reaches
+   * the position through a variable or from a head that answers components,
+   * so the width and the channels are checked here and the conversion is the
+   * one `_SYS.rgb` performs (`compileColorEntryOperand`).
+   *
+   * Any other shape throws the color-shape `TypeError`: the interpreter
+   * answers `incompatible-type` for an operand it cannot read three channels
+   * off, and a plausible color built from a wrong shape would be worse than a
+   * throw.
+   */
+  colorFromSrgbComponents(input: unknown): CompiledColor {
+    if (
+      Array.isArray(input) &&
+      (input.length === 3 || input.length === 4) &&
+      input.every((v) => typeof v === 'number')
+    )
+      return colorHelpers.rgb(input[0], input[1], input[2], input[3]);
+    throw new TypeError(
+      'Not a color: color components are 3 numbers, or 4 with the fourth ' +
+        `read as alpha. Expected ${COLOR_SHAPE}`
+    );
   },
 
   // -----------------------------------------------------------------------

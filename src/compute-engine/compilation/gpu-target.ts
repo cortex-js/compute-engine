@@ -48,6 +48,7 @@ import {
   BaseCompiler,
   isProvablyCharacterOperand,
   isProvablyStringOperand,
+  isProvablyTupleParticipant,
   pointHasBroadcastComponent,
   statementBodyHead,
 } from './base-compiler.js';
@@ -615,6 +616,21 @@ function gpuRgbBoundary(
 const GPU_COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
 
 /**
+ * The color-space names a shader can read channels in. Each one has a helper
+ * in the preamble that converts it back to OKLCh (`gpuToOklch`), so a color
+ * built in one of these spaces can be consumed anywhere. `lab` is the
+ * alternate spelling of `oklab` the interpreter also accepts.
+ */
+const GPU_COLOR_SPACES: ReadonlySet<string> = new Set([
+  'oklch',
+  'oklab',
+  'lab',
+  'rgb',
+  'hsl',
+  'hsv',
+]);
+
+/**
  * Compile an operand that sits at a COLOR position.
  *
  * A bare tuple written at a color position denotes 0-1 sRGB components on
@@ -625,9 +641,19 @@ const GPU_COLOR_HEADS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
  * triple and computed a different color than the interpreter for the same
  * expression.
  *
- * Only a tuple written LITERALLY at the call site can be recognized. A tuple
- * that reaches this position through a variable has no shape at compile time,
- * so it keeps the canonical reading: it is taken to be a color value already.
+ * A tuple that reaches this position any OTHER way — a tuple-typed variable,
+ * or a head that answers components such as `ColorToColorspace` — is
+ * DECLINED. A tuple is COMPONENTS, and the interpreter refuses one whose
+ * channels it cannot read, so reading the same vector as a canonical OKLCh
+ * color would answer a color no other route agrees with. Write
+ * `AsRgb(components)` to read them as 0-1 sRGB, or
+ * `ColorFromColorspace(components, space)` for another space.
+ *
+ * Only a head that CONSUMES a color reaches that decline. The heads that take
+ * components in their own signature — the five `As*` conversions and
+ * `ColorToColorspace` — read such an operand as 0-1 sRGB components instead,
+ * through `gpuColorEntryOperand`, which is why the message can tell the
+ * caller to write one of them.
  *
  * A `List` written at a color position is refused; only an operand of unknown
  * shape keeps the canonical reading. The interpreter's signatures say `tuple`
@@ -662,6 +688,14 @@ function gpuColorOperand(
         `color string or a tuple of 3 or 4 components. Fail closed (D6).`
     );
   if (!isFunction(color) || color.operator !== 'Tuple') {
+    if (isProvablyTupleParticipant(color))
+      throw new Error(
+        `${head}: this operator takes a COLOR, and a tuple is color ` +
+          `COMPONENTS, not a color. Build a color from the components ` +
+          `first — \`AsRgb((r, g, b))\` reads them as 0-1 sRGB, and ` +
+          `\`ColorFromColorspace(components, space)\` reads them in any ` +
+          `named space. Fail closed (D6).`
+      );
     if (colorSpaceIsUnsettled(color))
       throw new Error(
         `${head}: cannot settle the color space of the operand at compile ` +
@@ -689,6 +723,58 @@ function gpuColorOperand(
     .slice(0, 3)
     .map((op) => compile(op))
     .join(', ')}))`;
+}
+
+/**
+ * Compile the operand of an ENTRY function — one of the five `As*`
+ * conversions, or `ColorToColorspace` — which takes components as well as a
+ * color.
+ *
+ * These heads are the way a caller turns components into a color, so a tuple
+ * at their operand is legitimate input whichever way it arrives. A tuple
+ * written literally is read as 0-1 sRGB by `gpuColorOperand`, and a tuple
+ * that arrives through a variable, or from a head that answers components
+ * such as `ColorToColorspace`, is read the same way here: its compiled value
+ * is a `vec3` of the three channels, and `_gpu_srgb_to_oklch` makes the
+ * canonical color of them.
+ *
+ * sRGB is the reading even when `colorSpaceOf` names another space for those
+ * channels. The interpreter reads EVERY tuple at a color position as 0-1 sRGB
+ * components — `AsRgb(ColorToColorspace(c, "hsv"))` answers the hue,
+ * saturation and value read as red, green and blue — so any other reading
+ * would answer a color no other route agrees with. A caller who means the
+ * channels in the space they were computed in writes
+ * `ColorFromColorspace(components, space)`, which builds a color in that
+ * space.
+ *
+ * A 4th channel is alpha, which a shader color cannot carry, so a tuple whose
+ * width is known to be 4 is declined with the same message a 4-operand color
+ * constructor gets. A width the type does not state is read as the `vec3` it
+ * must be: the shader compiler refuses the call outright if the value turns
+ * out to be another vector, so no wrong color can come of it.
+ *
+ * Every other color head CONSUMES a color and declines the same operand
+ * (`gpuColorOperand`).
+ */
+function gpuColorEntryOperand(
+  head: string,
+  color: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const literalTuple = isFunction(color) && color.operator === 'Tuple';
+  if (!literalTuple && isProvablyTupleParticipant(color)) {
+    const width = BaseCompiler.aggregateComponentCount(color);
+    if (width === 4) refuseGPUAlpha(head);
+    if (width !== undefined && width !== 3)
+      throw new Error(
+        `${head}: a tuple of ${width} components is not a color — color ` +
+          `components are 3 channels, or 4 with the fourth read as alpha. ` +
+          `Fail closed (D6).`
+      );
+    return `_gpu_srgb_to_oklch(${compile(color)})`;
+  }
+  return gpuColorOperand(head, color, compile, target);
 }
 
 /**
@@ -730,6 +816,13 @@ function gpuToOklch(
  */
 function assertNoGPUAlpha(head: string, args: ReadonlyArray<Expression>): void {
   if (args.length <= 3) return;
+  refuseGPUAlpha(head);
+}
+
+/** The decline of an alpha channel a shader color cannot carry, shared by the
+ *  color constructors and by a 4-wide components tuple
+ *  (`gpuColorEntryOperand`). */
+function refuseGPUAlpha(head: string): never {
   throw new Error(
     `${head}: an alpha (4th) operand is not representable on the GPU target — ` +
       `color values are \`vec3\` (OKLCh) end to end, with no alpha channel. ` +
@@ -6447,7 +6540,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const spaceName = readStringLiteral(space);
     if (spaceName === null)
       throw new Error('ColorToColorspace: space must be a string literal');
-    const c = gpuColorOperand('ColorToColorspace', color, compile, target);
+    const c = gpuColorEntryOperand('ColorToColorspace', color, compile, target);
     switch (spaceName) {
       case 'oklch':
         return c;
@@ -6469,7 +6562,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   ColorFromColorspace: ([components, space], compile, target) => {
     if (components === null || space === null)
       throw new Error('ColorFromColorspace: need components and space');
-    // Components are in the named space; build a canonical OKLCh value.
+    // Components are in the named space, and the color this builds keeps them
+    // there. The space operand must be a string literal so that the space is
+    // a compile-time fact (`colorSpaceOf`): a shader color is a bare vector
+    // with no run-time tag, and shader code carries no runtime branching.
     const spaceName = readStringLiteral(space);
     if (spaceName === null)
       throw new Error('ColorFromColorspace: space must be a string literal');
@@ -6510,23 +6606,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           .map((op) => compile(op))
           .join(', ')})`
       : compile(components);
-    switch (spaceName) {
-      case 'oklch':
-        return c;
-      case 'oklab':
-      case 'lab':
-        return `_gpu_oklab_to_oklch(${c})`;
-      case 'rgb':
-        return `_gpu_srgb_to_oklch(${c})`;
-      case 'hsl':
-        return `_gpu_srgb_to_oklch(_gpu_hsl_to_rgb(${c}))`;
-      case 'hsv':
-        return `_gpu_srgb_to_oklch(_gpu_hsv_to_rgb(${c}))`;
-      default:
-        throw new Error(
-          `ColorFromColorspace: unsupported space "${spaceName}" on GPU target`
-        );
-    }
+    // The value is the channels themselves, in the space they were given in.
+    // That is the color this operator builds — the interpreter answers the
+    // color head of the named space — and `colorSpaceOf` reports the space,
+    // so a consumer converts the channels back to OKLCh where it reads them
+    // (`gpuColorOperand`), exactly as it does for an `As*` conversion. The
+    // space name is still checked here, so a space no shader helper covers
+    // fails closed at the operator rather than at its consumer.
+    if (!GPU_COLOR_SPACES.has(spaceName))
+      throw new Error(
+        `ColorFromColorspace: unsupported space "${spaceName}" on GPU target`
+      );
+    return c;
   },
 
   // ---------------------------------------------------------------------------
@@ -6619,14 +6710,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // converted.
     return gpuParenthesizeIdentity(
       c,
-      gpuColorOperand('AsOklch', c, compile, target),
+      gpuColorEntryOperand('AsOklch', c, compile, target),
       target
     );
   },
 
   AsOklab: ([c], compile, target) => {
     if (c === null) throw new Error('AsOklab: no argument');
-    return `_gpu_oklch_to_oklab(${gpuColorOperand(
+    return `_gpu_oklch_to_oklab(${gpuColorEntryOperand(
       'AsOklab',
       c,
       compile,
@@ -6638,14 +6729,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (c === null) throw new Error('AsRgb: no argument');
     return gpuRgbBoundary(
       c,
-      gpuColorOperand('AsRgb', c, compile, target),
+      gpuColorEntryOperand('AsRgb', c, compile, target),
       target
     );
   },
 
   AsHsv: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsv: no argument');
-    return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${gpuColorOperand(
+    return `_gpu_rgb_to_hsv(_gpu_oklch_to_srgb(${gpuColorEntryOperand(
       'AsHsv',
       c,
       compile,
@@ -6655,7 +6746,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   AsHsl: ([c], compile, target) => {
     if (c === null) throw new Error('AsHsl: no argument');
-    return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${gpuColorOperand(
+    return `_gpu_rgb_to_hsl(_gpu_oklch_to_srgb(${gpuColorEntryOperand(
       'AsHsl',
       c,
       compile,

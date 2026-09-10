@@ -19,19 +19,23 @@ import type { CompiledColorSpace } from './types.js';
  * The rules, in one place:
  *
  * - Every color CONSTRUCTOR (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`) and every
- *   operator that PRODUCES a color (`Color`, `Colormap`, `ColorFromColorspace`,
- *   `ColorMix`, `ContrastingColor`) answers `oklch`: they take components in
- *   their own space but the value they build is canonical.
+ *   operator that PRODUCES a color in the canonical space (`Color`,
+ *   `Colormap`, `ColorMix`, `ContrastingColor`) answers `oklch`: they take
+ *   components in their own space but the value they build is canonical.
  * - `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab` and `AsOklch` answer the space they
  *   name.
- * - `ColorToColorspace(c, "<literal>")` answers the literal space (`lab` is
- *   the `oklab` spelling the interpreter also accepts). With a non-literal
- *   space operand the fact is unknown. This head answers COMPONENTS, not a
- *   color value: on the JavaScript target its compiled value is a bare array
- *   of channels, and only a shader, where a color IS a bare vector of
- *   channels, can read that value at a color position. So a JavaScript caller
- *   that needs "is this a color value?" must ask the TYPE
- *   (`isColorValued`), not this fact.
+ * - `ColorToColorspace(c, "<literal>")` and `ColorFromColorspace(comps,
+ *   "<literal>")` answer the literal space (`lab` is the `oklab` spelling the
+ *   interpreter also accepts). With a non-literal space operand the fact is
+ *   unknown. `ColorFromColorspace` BUILDS a color from channels in the space
+ *   it names and keeps them in that space, exactly as the interpreter's color
+ *   head does; a consumer converts them back to OKLCh where it needs to, the
+ *   same way it does for an `As*` operand.
+ * - `ColorToColorspace` answers COMPONENTS, not a color value: on the
+ *   JavaScript target its compiled value is a bare array of channels, and
+ *   only a shader, where a color IS a bare vector of channels, can read that
+ *   value at a color position. So a JavaScript caller that needs "is this a
+ *   color value?" must ask the TYPE (`isColorValued`), not this fact.
  * - `Which` and `If` answer the space their value ARMS agree on, and
  *   `undefined` when the arms disagree or any arm is unknown. Without this a
  *   selection between two converted colors read as OKLCh on a shader.
@@ -58,9 +62,9 @@ export function colorSpaceOf(
   if (!isFunction(expr)) return undefined;
   const head = expr.operator;
   if (OKLCH_VALUED_HEADS.has(head)) return 'oklch';
-  const named = CONVERSION_SPACE[head];
+  const named = CONVERSION_SPACE.get(head);
   if (named !== undefined) return named;
-  if (head === 'ColorToColorspace') {
+  if (head === 'ColorToColorspace' || head === 'ColorFromColorspace') {
     const space = expr.ops[1];
     if (space === undefined || !isString(space)) return undefined;
     const name = space.string?.toLowerCase();
@@ -170,14 +174,8 @@ function colorValuePositions(expr: Expression): ReadonlyArray<Expression> {
  * shallower one. The sibling constant `NESTED_COLOR_BROADCAST_TYPE`
  * (`javascript-target.ts`) has the same shape for the same reason — it gates
  * the OPERAND of a conversion, this gates the VALUE of an expression.
- *
- * `ColorFromColorspace` is the one head the type cannot speak for. It is
- * declared `-> tuple` and evaluates to an sRGB components tuple, while its
- * lowering on this target answers a color value — the route divergence its
- * own description states (`library/colors.ts`).
  */
 export function isColorValued(expr: Expression): boolean {
-  if (isFunction(expr, 'ColorFromColorspace')) return true;
   return expr.type.matches(
     'broadcastable<broadcastable<broadcastable<broadcastable<color>>>>'
   );
@@ -192,19 +190,25 @@ const OKLCH_VALUED_HEADS: ReadonlySet<string> = new Set([
   'Oklch',
   'Color',
   'Colormap',
-  'ColorFromColorspace',
   'ColorMix',
   'ContrastingColor',
 ]);
 
-/** The heads whose compiled value is channels in the space they name. */
-const CONVERSION_SPACE: Readonly<Record<string, CompiledColorSpace>> = {
-  AsRgb: 'rgb',
-  AsHsv: 'hsv',
-  AsHsl: 'hsl',
-  AsOklab: 'oklab',
-  AsOklch: 'oklch',
-};
+/**
+ * The heads whose compiled value is channels in the space they name.
+ *
+ * A `Map` rather than an object, because the key is the operator name of an
+ * arbitrary expression: a plain object answers an INHERITED value for a head
+ * named `constructor` or `__proto__`, which would pass the `undefined` check
+ * below and report a function object as the color space.
+ */
+const CONVERSION_SPACE = new Map<string, CompiledColorSpace>([
+  ['AsRgb', 'rgb'],
+  ['AsHsv', 'hsv'],
+  ['AsHsl', 'hsl'],
+  ['AsOklab', 'oklab'],
+  ['AsOklch', 'oklch'],
+]);
 
 const COLOR_SPACE_NAMES: ReadonlySet<string> = new Set([
   'oklch',

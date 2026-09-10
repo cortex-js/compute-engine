@@ -136,10 +136,6 @@ describe('the shape of a compiled color value', () => {
     ['Color', ['Color', { str: '#ff0000' }]],
     ['ColorMix', ['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], 0.5]],
     ['ContrastingColor', ['ContrastingColor', ['Rgb', 1, 1, 1]]],
-    [
-      'ColorFromColorspace',
-      ['ColorFromColorspace', ['Tuple', 1, 0, 0], { str: 'rgb' }],
-    ],
     ['Colormap at a position', ['Colormap', { str: 'viridis' }, 0.5]],
   ])('%s answers an OKLCh color value', (_name, expr) => {
     const ce = new ComputeEngine();
@@ -163,6 +159,27 @@ describe('the shape of a compiled color value', () => {
     expect(c.space).toBe(space);
     expect(Object.keys(c)).toEqual(['space', 'c0', 'c1', 'c2', 'alpha']);
   });
+
+  test.each(['rgb', 'hsv', 'hsl', 'oklab', 'oklch'])(
+    'ColorFromColorspace answers a color tagged with the space it names (%s)',
+    (space) => {
+      // The operator builds a color from channels in the space it names and
+      // KEEPS them in it, so the value carries those channels and that tag —
+      // the same color the interpreter answers as `Rgb(...)`, `Hsv(...)` and
+      // so on. Converting to OKLCh here would answer different numbers from
+      // the interpreter for the same expression.
+      const ce = new ComputeEngine();
+      const c = runColor(ce, [
+        'ColorFromColorspace',
+        ['Tuple', 0.5, 0.1, 20],
+        { str: space },
+      ]);
+      expect(c.space).toBe(space);
+      expect(Object.keys(c)).toEqual(['space', 'c0', 'c1', 'c2', 'alpha']);
+      expect([c.c0, c.c1, c.c2]).toEqual([0.5, 0.1, 20]);
+      expect(c.alpha).toBeUndefined();
+    }
+  );
 
   test('ColorToColorspace answers COMPONENTS, not a color value', () => {
     // The head is declared `-> tuple` and consumers index its result

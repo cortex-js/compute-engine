@@ -349,7 +349,7 @@ To search the library by concept rather than by name, use
 | `color` | `Color` | `(string) -> color` | Parse a CSS-style color string to an Oklch color |
 | `colorContrast` | `ColorContrast` | `(color \| string \| tuple, color \| string \| tuple) -> number` | APCA contrast ratio between two colors |
 | `colorDelta` | `ColorDelta` | `(color \| string \| tuple, color \| string \| tuple) -> number` | Perceptual color difference (ΔE_OK) between two colors |
-| `colorFromColorspace` | `ColorFromColorspace` | `(color \| tuple, string) -> tuple` | Convert color space components to a color, answered in the canonical form of the route: an sRGB tuple when evaluated, the target's canonical color value when compiled. |
+| `colorFromColorspace` | `ColorFromColorspace` | `(color \| tuple, string) -> color` | Build a color from channel values in a named color space. |
 | `colorMix` | `ColorMix` | `(color \| string \| tuple, color \| string \| tuple, number?) -> color` | Mix two colors in OKLCh space |
 | `colorToColorspace` | `ColorToColorspace` | `(color \| string \| tuple, string) -> tuple` | Convert a color to components in a target color space |
 | `colorToString` | `ColorToString` | `(color \| string \| tuple, string?) -> string` | Convert a color to a string in the specified format |
