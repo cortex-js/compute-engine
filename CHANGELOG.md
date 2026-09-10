@@ -1,14 +1,16 @@
+## [Unreleased]
+
 ## 0.128.3 _2026-09-10_
 
 ### Resolved Issues
 
-- **Scalar calls retain their types through user-function chains and locals.**
-  A function accepting points or lists can now compile a scalar point call to
+- **Scalar calls retain their types through user-function chains and locals.** A
+  function accepting points or lists can now compile a scalar point call to
   shared JavaScript, GLSL, and WGSL helpers without dropping its list inputs.
   Result inference follows actual argument types through local assignments,
   returns, and indexed sums/products. Shader point constructors also use the
-  scalar facts established for local bindings. This addresses Tycho requests
-  289 and 275; see `docs/CALL-SHAPE-SPECIALIZATION.md` for the contract and
+  scalar facts established for local bindings. This addresses Tycho requests 289
+  and 275; see `docs/CALL-SHAPE-SPECIALIZATION.md` for the contract and
   source-level consumer verification.
 
 - **A point built from a symbol that holds a number compiled to code that
@@ -105,8 +107,8 @@
   non-absent case is rejected exactly as a plain `tuple<number, number>` is. A
   scalar MULTIPLE of such a point is still admitted, since it scales the vector.
 - **An absent point stays absent instead of collapsing to `NaN`.** With `P`
-  declared `list<tuple<number, number, number>>`, the out-of-range access
-  `P[0]` is `Missing`; scaling or negating it (`2 \cdot P[0]`, `-P[0]`,
+  declared `list<tuple<number, number, number>>`, the out-of-range access `P[0]`
+  is `Missing`; scaling or negating it (`2 \cdot P[0]`, `-P[0]`,
   `\frac{P[0]}{2}`) answered the scalar `NaN` in 0.128.0, and adding a point to
   that `NaN` then failed with an `incompatible-type` error
   (`2 \cdot P[0] + (1, 1, 1)`). An operator that propagates an absent operand
@@ -116,13 +118,13 @@
   factor beside a point makes the whole point absent, so
   `Add(Missing, (1, 1, 1))` and `Multiply(Missing, (1, 1, 1))` are `Missing`
   rather than symbolic residue or a tuple of markers. All-numeric absences are
-  unchanged: `2 \cdot Missing`, `-Missing` and `\sin(Missing)` are still
-  `NaN`. "Typed a number" is decided from the declaration, so a piecewise
-  function whose parameter is NOT declared changes its reading: with
+  unchanged: `2 \cdot Missing`, `-Missing` and `\sin(Missing)` are still `NaN`.
+  "Typed a number" is decided from the declaration, so a piecewise function
+  whose parameter is NOT declared changes its reading: with
   `g(t) := \begin{cases} t & t > 5\end{cases}`, the sum `g(3) + 1` is now
   `Missing` where it was `NaN`, because nothing declares the result of `g` a
-  number. Declare the parameter — `g: (number) -> number` — to keep the
-  numeric reading.
+  number. Declare the parameter — `g: (number) -> number` — to keep the numeric
+  reading.
 
 ## 0.128.1 _2026-09-10_
 
