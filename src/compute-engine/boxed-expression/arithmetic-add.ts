@@ -26,7 +26,7 @@ import {
 } from './type-guards.js';
 import {
   isBroadcastCollectionType,
-  isNumericTuple,
+  isNumericTupleCarrier,
   isTuple,
   numericTupleArity,
   hasAccessibleComponents,
@@ -139,8 +139,17 @@ export function canonicalAdd(
   // tuple). Unknown/`any`-typed operands — and operands whose numeric type was
   // merely INFERRED, or that a broadcastable operator computed from one —
   // stay symbolic (inference is retractable evidence; `isProvablyScalarNumber`).
+  //
+  // An operand whose type carries an ABSENCE arm (`missing | tuple<…>`, what a
+  // `When`-gated point has) or a UNION of numeric tuple spellings is rejected
+  // the same way, because every non-absent value it can take is a tuple —
+  // hence `isNumericTupleCarrier` rather than the exact `isNumericTuple`.
+  // Before this, `q + 2` with `q: missing | tuple<number, number>` was
+  // admitted and typed `number | tuple<number, number>`, and the JavaScript
+  // compiler trusted that type and emitted scalar code over the tuple, which
+  // returned the string "21,2".
   if (
-    ops.some((x) => isNumericTuple(x)) &&
+    ops.some((x) => isNumericTupleCarrier(x)) &&
     ops.some((x) => isProvablyScalarNumber(x))
   )
     return ce.error(['incompatible-type', 'tuple', 'number']);

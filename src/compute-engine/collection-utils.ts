@@ -5,6 +5,8 @@ import {
   collectionElementType,
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
+  stripMissingFromType,
+  isPointElementType,
   stripNumericRanges,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
@@ -765,6 +767,55 @@ export function isNumericTuple(expr: Expression): boolean {
   if (typeof t === 'string') return false;
   if (t.kind !== 'tuple') return false;
   return t.elements.every((el) => isSubtype(el.type, 'number'));
+}
+
+/** Is `t` — already alias-resolved — a parameterized tuple whose every
+ *  component type is a subtype of `number`? */
+function isNumericTupleType(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  if (t.kind !== 'tuple') return false;
+  return t.elements.every((el) => isSubtype(el.type, 'number'));
+}
+
+/**
+ * `isNumericTuple`, read through an absence arm and across a union of tuple
+ * spellings: true when every value the operand can take, other than the
+ * absent one, is a numeric tuple. `q: missing | tuple<number, number>` (a
+ * gated point) and `w: tuple<integer, number> | tuple<number, integer>` are
+ * both numeric tuples in every non-absent case, so `q + 2` and `w + 2` are
+ * the same `scalar + tuple` mistake `p + 2` is for `p: tuple<number, number>`.
+ * Used by the `canonicalAdd` rejection only; `isNumericTuple` itself keeps
+ * its exact reading for the callers that build tuple arithmetic from
+ * `t.elements`.
+ */
+export function isNumericTupleCarrier(expr: Expression): boolean {
+  // The two early exits of `isNumericTuple`, for the reasons given there: a
+  // number literal is never a tuple, and neither is a scalar-lift application
+  // over operands that cannot be tuples.
+  if (isNumber(expr)) return false;
+  if (
+    isScalarLiftApplication(expr) &&
+    operandTypeCannotBeTuple(expr, SCALAR_LIFT_DESCENT)
+  )
+    return false;
+  // The alias is unfolded BEFORE the absence arm is stripped:
+  // `stripMissingFromType` leaves a reference node as it is, so an alias of
+  // `missing | tuple<number, number>` would keep its `missing` arm and fail
+  // the tuple test below, admitting the very `scalar + tuple` case this
+  // predicate exists to reject.
+  const t = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(expr.type.type))
+  );
+  // An operand typed `missing` alone has no non-absent value to be a tuple.
+  if (t === 'never') return false;
+  if (typeof t === 'string') return false;
+  if (t.kind === 'tuple') return isNumericTupleType(t);
+  if (t.kind === 'union')
+    return (
+      t.types.length > 0 &&
+      t.types.every((branch) => isNumericTupleType(resolveTypeAlias(branch)))
+    );
+  return false;
 }
 
 /**
@@ -1979,14 +2030,12 @@ export function isTuple(expr: Expression): boolean {
 export function isPointListValue(expr: Expression): boolean {
   // A nominal `type`/`type alias` for a point list is a point list.
   const elt = collectionElementType(resolveType(expr.type.type));
-  // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
-  // `{ kind: 'tuple' }` node, and it is what a `list<tuple>` declaration
-  // reports — both spellings must read as a point.
-  if (
-    elt !== undefined &&
-    (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
-  )
-    return true;
+  // The bare `tuple` (what a `list<tuple>` declaration reports), a
+  // parameterized tuple, and a union of tuple spellings (what a list literal
+  // of two differently typed points infers) all read as a point element —
+  // the same test the point accessors use (`isPointElementType`), so `Abs`
+  // over a point list and `PointX` over it agree on what a point list is.
+  if (isPointElementType(elt)) return true;
   // A literal collection is often mis-typed (a list of 2-tuples types as a
   // matrix), so fall back to the runtime evidence of its first element.
   if (expr.isFiniteCollection === true && expr.isIndexedCollection === true) {

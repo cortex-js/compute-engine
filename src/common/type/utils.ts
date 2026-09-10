@@ -501,6 +501,41 @@ export function functionResult(
   return widen(...arms.map(armResult));
 }
 
+/**
+ * Is `t` the type of a POINT: the bare `tuple`, a parameterized tuple, or a
+ * union whose every arm is one of those? A collection whose element type is
+ * such a union — `list<tuple<integer, number> | tuple<number, integer>>`,
+ * which is what a list literal of two tuple spellings infers — holds points
+ * in every element, exactly as `list<tuple<number, number>>` does, so the
+ * point accessors must read both the same way. Transparent aliases are
+ * unfolded; a nominal reference stays opaque and is not a point.
+ *
+ * The union walk recurses into the arms, so an alias is unfolded through
+ * {@link unfoldAliasOnDescent}: a self-referential alias such as
+ * `type alias cyc = cyc | tuple<number, number>` reaches itself through an
+ * arm, and unfolding it afresh at every level would never end. An arm whose
+ * allowance on the current path is spent contributes no members, so it
+ * answers `false` — the conservative reading for a union arm.
+ */
+export function isPointElementType(
+  t: Readonly<Type> | undefined,
+  seen: AliasDescent = undefined
+): boolean {
+  if (t === undefined) return false;
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return false;
+  const resolved = unfolded.type;
+  if (resolved === 'tuple') return true;
+  if (typeof resolved === 'string') return false;
+  if (resolved.kind === 'tuple') return true;
+  if (resolved.kind === 'union')
+    return (
+      resolved.types.length > 0 &&
+      resolved.types.every((arm) => isPointElementType(arm, unfolded.seen))
+    );
+  return false;
+}
+
 // An UNPARAMETERIZED collection type states nothing about its elements, so
 // its element type is the PLACEHOLDER `unknown`, not the contract `any`.
 //

@@ -326,7 +326,23 @@ information loss stated in §1.
 Missing`) and is never erased. In a *numeric* slot, `Missing` is
 normalized to `NaN` at the boundary (numeric domains absorb absence, per
 §1), so numeric operators never need a `missing` arm; a `| missing` arm
-survives only on data/object-domain results. One boxing-time exception,
+survives only on data/object-domain results.
+
+The normalization is to the marker of the CODOMAIN, exactly as rule 4 of §2
+states. The codomain is read off the type of the application itself, with
+its `missing` arm stripped, not off the operator's declared result: the
+answer is `NaN` when that type is a subtype of `number`, and `Missing` when
+it is a point, a collection, or any type that is not provably numeric. An
+absent addend or an absent factor beside a tuple makes the whole point
+absent, because a tuple is atomic — there is no cell for the absence to
+land in, and a tuple of absent coordinates is not a value any consumer
+reads. For example, with `P` declared `list<tuple<number, number, number>>`
+and holding two points, the out-of-range access `P[0]` is `Missing`, so
+`2 · P[0]` is `Missing` — an absent point scaled is an absent point — and
+`2 · P[0] + (1, 1, 1)` is `Missing` in turn. It was the scalar `NaN`
+before, which then failed against the point operand with an
+`incompatible-type` error. An all-numeric absence is unaffected:
+`2 · Missing` is still `NaN`. One boxing-time exception,
 ruled 2026-09-09: a big-operator bound WRITTEN as the literal `NaN` or the
 symbol `Missing` (`Sum(x, (x, NaN, 3))`) is a program defect and is
 rejected at boxing with a type error, like a string bound; a bound that only

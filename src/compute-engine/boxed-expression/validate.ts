@@ -787,6 +787,42 @@ export function hasAbsentScalarOperand(
   );
 }
 
+/**
+ * The value an operator with missing behavior `propagate` answers when
+ * {@link hasAbsentScalarOperand} is true for its operands. The marker speaks
+ * the codomain's vocabulary (`docs/ERROR-MODEL.md` §2 rule 4): `NaN` when the
+ * application's own type, with its `missing` arm stripped, is a subtype of
+ * `number`; the position-preserving `Missing` otherwise.
+ *
+ * The APPLICATION's type is read, not the operator's declared result:
+ * `Negate` is declared `-> number`, yet `Negate(P[0])` for
+ * `P: list<tuple<number, number, number>>` is typed
+ * `tuple<number, number, number>` through the tuple broadcast exemption, and
+ * its absent operand is an absent POINT, which `NaN` — a number — cannot
+ * stand for (`2 · P[0] + (1, 1, 1)` then failed as `NaN + tuple`).
+ *
+ * A type that is not provably numeric (`unknown`, `broadcastable<number>`)
+ * also keeps `Missing`: absorbing into `NaN` is an information loss that is
+ * only licensed inside a numeric domain. When no application node is
+ * available the answer is `NaN`, the behavior before this rule.
+ *
+ * An application whose type strips to `never` answers `NaN`. That type is
+ * what a numeric operator over a symbol ASSIGNED `Missing` reports (`w :=
+ * Missing`, then `sin(w)` and `2w` are typed `never`): the value is absent in
+ * every case, and the operator's own domain is numeric, so the numeric marker
+ * of the 2026-07-24 absence ruling (`Sin(Missing)` is `NaN`) is the answer.
+ * `never` is a subtype of `number`, so no separate arm is needed for it; this
+ * sentence records that the fall-through is intended.
+ */
+export function absentScalarMarker(
+  ce: ComputeEngine,
+  expression: Expression | undefined
+): Expression {
+  if (expression === undefined) return ce.NaN;
+  const t = stripMissingFromType(expression.type.type);
+  return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
+}
+
 // ————————————————————————————————————————————————————————————————————————
 // Generic runtime conformance (R1/R8 — §4.4 of
 // `docs/plans/2026-08-22-type-handlers-on-types.md`)

@@ -1,3 +1,47 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A point accessor reads a list whose element type is a UNION of tuple
+  spellings as a list of points.** A list literal of two points whose components
+  have different tiers infers a union element type — `[(a, 1), (2, b)]` with `a`
+  and `b` declared `number` is a
+  `list<tuple<integer, number> | tuple<number, integer>>` — and every element of
+  such a list is a point. `PointX`/`PointY`/`PointZ` tested for exactly one
+  tuple type, so the union was not point-shaped for the type handler while the
+  value route, which looks at the elements, broadcast over it. `PointY(Q) + 1`
+  typed `number | tuple<number, number>` where the value was `[2, 8]`, and the
+  JavaScript compiler trusted that type and emitted scalar code over a
+  broadcast, which returned the string `"1,71"`. The two routes now agree: the
+  accessor types as `list<number>`, an empty list with such a declared element
+  type broadcasts to `[]` as a single-tuple element type already did, and a
+  SINGLE point declared with such a union answers the widening of the component
+  each arm states (`number`) instead of `unknown`.
+- **A scalar cannot be added to a point that carries an absence arm.** The
+  `scalar + tuple` rejection read the operand's type exactly, so
+  `q: missing | tuple<number, number>` — what a restriction-gated point has,
+  e.g. `h(t) := (t, t+1)\{t > 0\}` — slipped past it: `q + 2` was admitted and
+  typed `number | tuple<number, number>`, and the compiled route emitted the
+  scalar `2 + h(1)`, which returned the string `"21,2"` where the interpreter
+  errored. The rejection now reads through the absence arm and across a union of
+  numeric tuple spellings: an operand that is a numeric tuple in every
+  non-absent case is rejected exactly as a plain `tuple<number, number>` is. A
+  scalar MULTIPLE of such a point is still admitted, since it scales the vector.
+- **An absent point stays absent instead of collapsing to `NaN`.** With `P`
+  declared `list<tuple<number, number, number>>`, the out-of-range access
+  `P[0]` is `Missing`; scaling or negating it (`2 \cdot P[0]`, `-P[0]`,
+  `\frac{P[0]}{2}`) answered the scalar `NaN` in 0.128.0, and adding a point to
+  that `NaN` then failed with an `incompatible-type` error
+  (`2 \cdot P[0] + (1, 1, 1)`). An operator that propagates an absent operand
+  now answers the quiet marker of its own codomain: `NaN` when the application
+  is typed a number, and the position-preserving `Missing` when it is typed a
+  point, a collection, or anything not provably numeric. An absent addend or
+  factor beside a point makes the whole point absent, so
+  `Add(Missing, (1, 1, 1))` and `Multiply(Missing, (1, 1, 1))` are `Missing`
+  rather than symbolic residue or a tuple of markers. All-numeric absences are
+  unchanged: `2 \cdot Missing`, `-Missing` and `\sin(Missing)` are still
+  `NaN`.
+
 ## 0.128.1 _2026-09-10_
 
 ### Breaking Changes

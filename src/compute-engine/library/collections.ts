@@ -89,6 +89,7 @@ import {
   functionResult,
   functionArity,
   isAtomicValueType,
+  isPointElementType,
   narrowingPreservesEffects,
   resolveTypeAlias,
   staticCollectionDims,
@@ -2138,12 +2139,7 @@ function isPossiblyCollectionTypedD(d: OperandDescriptor): boolean {
  * ELEMENT of a collection. */
 function isPointLikeD(d: OperandDescriptor): boolean {
   const t = d.type;
-  if (
-    t === 'tuple' ||
-    (typeof t !== 'string' && t.kind === 'tuple') ||
-    d.structureOf?.()?.kind === 'tuple'
-  )
-    return true;
+  if (isPointElementType(t) || d.structureOf?.()?.kind === 'tuple') return true;
   if (d.facts.finiteCollection === true && d.facts.indexed === true) {
     const elt = collectionElementType(t);
     if (elt !== undefined && isSubtype(elt, 'number')) return true;
@@ -2154,8 +2150,7 @@ function isPointLikeD(d: OperandDescriptor): boolean {
 /** Descriptor twin of {@link hasPointElementType}. */
 function hasPointElementTypeD(d: OperandDescriptor): boolean {
   const elt = d.facts.elementType ?? collectionElementType(d.type);
-  if (elt === undefined) return false;
-  return elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
+  return isPointElementType(elt);
 }
 
 /**
@@ -2243,6 +2238,25 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
       return 'number';
     }
     return withMarker(ct);
+  }
+  // A SINGLE point whose type is a union of tuple spellings — `w: tuple<
+  // integer, number> | tuple<number, integer>`. Every arm is a point, so the
+  // coordinate is defined in every case, and its type is the widening of the
+  // component each arm gives at this position. An arm that is the bare `tuple`
+  // (no components stated) or that has no component at this position states
+  // nothing about the coordinate, so the whole union falls through to the
+  // collection arms below rather than guessing one.
+  if (typeof t !== 'string' && t.kind === 'union' && isPointElementType(t)) {
+    const componentTypes: Type[] = [];
+    for (const branch of t.types) {
+      const arm = resolveTypeAlias(branch);
+      if (typeof arm === 'string' || arm.kind !== 'tuple') break;
+      const ct = arm.elements[position - 1]?.type;
+      if (ct === undefined) break;
+      componentTypes.push(ct);
+    }
+    if (componentTypes.length === t.types.length && componentTypes.length > 0)
+      return withMarker(widen(...componentTypes));
   }
   // A coordinate of an empty collection, decided by the DECLARED element type
   // before the emptiness test, exactly as `pointComponentAt` decides the value.
@@ -3130,12 +3144,7 @@ function componentAt(
 // of points they diverge (`First` returns the first point, not the x-list).
 function isPointLike(e: Expression): boolean {
   const t = e.type.type;
-  if (
-    t === 'tuple' ||
-    (typeof t !== 'string' && t.kind === 'tuple') ||
-    e.operator === 'Tuple'
-  )
-    return true;
+  if (isPointElementType(t) || e.operator === 'Tuple') return true;
   // The list-of-lists spelling of a point list: a row of coordinates. A data
   // import produces `[[0,0],[3,4]]` rather than a list of tuples, and the
   // point accessors have no competing meaning for it — without this, `PointX`
@@ -3159,10 +3168,11 @@ function isPointLike(e: Expression): boolean {
 // reading the declared element type calls for.
 function hasPointElementType(xs: Expression): boolean {
   const elt = collectionElementType(xs.type.type);
-  if (elt === undefined) return false;
   // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
-  // arity, as much a point element as a structural `tuple<…>`.
-  return elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
+  // arity, as much a point element as a structural `tuple<…>`. A union of
+  // tuple spellings — what a list literal of two differently-typed points
+  // infers — holds a point in every element too; see `isPointElementType`.
+  return isPointElementType(elt);
 }
 
 // Which reading a coordinate accessor takes over an EMPTY collection, decided
@@ -3198,9 +3208,10 @@ function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
   if (elt === undefined) return true;
   if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
   // The bare `tuple` (a callback declared `-> tuple`) is a point of unknown
-  // arity, as much a point element as a structural `tuple<…>`.
-  if (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
-    return true;
+  // arity, as much a point element as a structural `tuple<…>`. A union of
+  // tuple spellings — what a list literal of two differently-typed points
+  // infers — holds a point in every element too; see `isPointElementType`.
+  if (isPointElementType(elt)) return true;
   // The coordinate-ROW spelling. A row of strings is not a point (`isPointLike`
   // admits numeric rows only), and a `string` element type lands here with the
   // element type `character`, which is not a number: both element-index.

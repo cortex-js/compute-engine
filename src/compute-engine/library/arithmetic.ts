@@ -10,6 +10,7 @@ import {
   checkType,
   checkTypes,
   checkNumericArgs,
+  absentScalarMarker,
   hasAbsentScalarOperand,
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
@@ -607,6 +608,21 @@ function divisorKeepsNumeratorShape(den: OperandDescriptor): boolean {
   )
     return false;
   return !factsOf(dt).matrix;
+}
+
+/**
+ * True when an evaluated `Add`/`Multiply` operand is a collection that is NOT
+ * a tuple: a list, a set, a range, or a symbol declared with such a type and
+ * not yet valued. Such an operand makes the application a broadcast over its
+ * cells, which the collection kernels (`addTensors`, `mulTensors`, the
+ * packing demotion) own; the whole-point absence arm in the `Add` and
+ * `Multiply` handlers stands aside for it. A tuple is atomic under both
+ * operators, so it is excluded here. Read as the type, not only as the
+ * `isCollection` capability, for the reason `hasAbsentScalarOperand` gives.
+ */
+function isNonTupleCollectionOperand(x: Expression): boolean {
+  if (isTuple(x)) return false;
+  return x.isCollection || x.type.matches('collection<any>');
 }
 
 /**
@@ -1631,7 +1647,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       // @fastpath: canonicalization is done in the function
       // makeNumericFunction().
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         // Ellipsis fold barrier: an `Add` with a direct `ContinuationPlaceholder`
         // operand is a notational object; leave it unchanged rather than summing
         // across the elided terms.
@@ -1644,17 +1660,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The driver's missing-value gate saw the operands UNEVALUATED
         // (`Add` is lazy), so an absence produced by the evaluation above —
         // a piecewise with no default arm, `g(3)` — has not been absorbed
-        // yet. Apply the same normalization here: in a numeric slot
-        // `Missing` becomes `NaN` (`docs/ERROR-MODEL.md` §3). It runs
+        // yet. Apply the same normalization here: the absence becomes the
+        // quiet marker of the codomain (`docs/ERROR-MODEL.md` §3), which is
+        // `NaN` in a numeric slot and `Missing` in any other. It runs
         // AFTER the non-numeric check, and only when every evaluated operand
         // is valid, because an error or a non-numeric operand outranks an
         // absence: `Error` is the absorbing element of evaluation, and a
         // type error names the offending operand where `NaN` would hide it.
-        if (
-          evaluated.every((x) => x.isValid) &&
-          hasAbsentScalarOperand(evaluated)
-        )
-          return engine!.NaN;
+        if (evaluated.every((x) => x.isValid)) {
+          // An absent addend beside a POINT makes the point absent: the tuple
+          // is atomic, so there is no cell for the absence to land in, and a
+          // tuple of absent components is not a value any consumer reads.
+          // This arm has to run before `addTuples` below, which would
+          // otherwise leave the sum as symbolic residue. It stands aside when
+          // a LIST (any non-tuple collection) is also an operand: that sum is
+          // a broadcast over the list, and the absent point lands in each
+          // cell through the collection kernel instead.
+          if (
+            evaluated.some((x) => isSymbol(x, 'Missing')) &&
+            evaluated.some((x) => isTuple(x)) &&
+            !evaluated.some((x) => isNonTupleCollectionOperand(x))
+          )
+            return engine!.Missing;
+          if (hasAbsentScalarOperand(evaluated))
+            return absentScalarMarker(engine!, expression);
+        }
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
           if (
@@ -4107,7 +4137,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return 'not-zero';
         return undefined;
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         // Ellipsis fold barrier: a `Multiply` with a direct
         // `ContinuationPlaceholder` operand is a notational object; leave it
         // unchanged rather than multiplying across the elided terms.
@@ -4119,13 +4149,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (nonNumeric !== undefined) return nonNumeric;
         // See the matching note in `Add`: `Multiply` is lazy, so the driver's
         // missing-value gate never saw the EVALUATED operands, and the
-        // absence normalization to `NaN` has to run here, after the
+        // absence normalization to the codomain's quiet marker — `NaN` in a
+        // numeric slot, `Missing` in any other — has to run here, after the
         // non-numeric check and only over valid operands.
-        if (
-          evaluated.every((x) => x.isValid) &&
-          hasAbsentScalarOperand(evaluated)
-        )
-          return engine!.NaN;
+        if (evaluated.every((x) => x.isValid)) {
+          // An absent factor beside a POINT makes the point absent: the tuple
+          // is atomic, so there is no cell for the absence to land in, and a
+          // tuple of absent components is not a value any consumer reads.
+          // This arm has to run before `mulTuples` below, which would
+          // otherwise scale each coordinate into its own `Missing`. It
+          // stands aside in two cases. When a LIST (any non-tuple collection)
+          // is also a factor, the product is a broadcast over the list and
+          // the absent point lands in each cell through the collection
+          // kernel. When TWO points are factors, there is no product between
+          // points, and that error outranks the absence: `mulTuples` reports
+          // it, as it did before this arm existed.
+          if (
+            evaluated.some((x) => isSymbol(x, 'Missing')) &&
+            evaluated.filter((x) => isTuple(x)).length === 1 &&
+            !evaluated.some((x) => isNonTupleCollectionOperand(x))
+          )
+            return engine!.Missing;
+          if (hasAbsentScalarOperand(evaluated))
+            return absentScalarMarker(engine!, expression);
+        }
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
           if (

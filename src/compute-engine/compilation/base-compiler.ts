@@ -52,6 +52,7 @@ import {
   collectionElementType,
   finitePartOfType,
   isNonRealNumber,
+  isPointElementType,
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
@@ -8844,7 +8845,9 @@ export class BaseCompiler {
 
     // A LIST OF POINTS by its static type: a rank-1 list whose element type
     // is a tuple (a declared `list<tuple<number, number>>` parameter, a
-    // literal point list, a `PointList` application). The interpreter gives
+    // literal point list, a `PointList` application) or a union of tuple
+    // spellings, which is what a list literal of two differently typed points
+    // infers (see `isPointElementType`). The interpreter gives
     // a point list the arithmetic of its elements — a point plus a scalar or
     // a product of two points is an error at every element — so the shapes
     // that decline for a single point must decline for a list of them too.
@@ -8859,11 +8862,7 @@ export class BaseCompiler {
         (t.dimensions?.length ?? 0) > 1
       )
         return false;
-      const elt = collectionElementType(t);
-      return (
-        elt !== undefined &&
-        (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
-      );
+      return isPointElementType(collectionElementType(t));
     };
 
     // A `broadcastable<T>`-typed operand is scalar OR an indexed collection at

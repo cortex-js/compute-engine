@@ -198,7 +198,11 @@ import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
-import { hasAbsentScalarOperand, runtimeConformanceError } from './validate.js';
+import {
+  absentScalarMarker,
+  hasAbsentScalarOperand,
+  runtimeConformanceError,
+} from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
@@ -4616,14 +4620,18 @@ export class BoxedFunction
       //
       // 4a/ Missing-value behavior gate (§3.E of the missing-value typing
       // design). A `propagate` operator with an absent SCALAR operand
-      // (`Missing`, or a `NaN`) yields `NaN` in the numeric result cell (I6
-      // absorption) — but only when NO operand is a collection: a
-      // scalar-vs-collection application (`Add(Missing, matrix)`) broadcasts
-      // the absence per cell through the operator's own kernel (packing
-      // demotion, tensor-view). Under an element-wise broadcast (step 2 above)
-      // the gate re-enters per element (`Sin([1,Missing,3])` →
-      // `[Sin(1), NaN, Sin(3)]`). A `reject` operator errors at an absent
-      // operand in BOTH strict modes (the behavior gate, not validation).
+      // (`Missing`, or a `NaN`) answers the quiet marker of its own codomain
+      // (`absentScalarMarker`, `validate.ts`): `NaN` in a numeric result cell
+      // (I6 absorption), and the position-preserving `Missing` when the
+      // application is typed anything else — a point, a collection, or a type
+      // that is not provably numeric. The gate applies only when NO operand
+      // is a collection: a scalar-vs-collection application
+      // (`Add(Missing, matrix)`) broadcasts the absence per cell through the
+      // operator's own kernel (packing demotion, tensor-view). Under an
+      // element-wise broadcast (step 2 above) the gate re-enters per element
+      // (`Sin([1,Missing,3])` → `[Sin(1), NaN, Sin(3)]`). A `reject` operator
+      // errors at an absent operand in BOTH strict modes (the behavior gate,
+      // not validation).
       //
       if (def instanceof _BoxedOperatorDefinition) {
         const behavior = def.resolvedMissingBehavior;
@@ -4641,7 +4649,7 @@ export class BoxedFunction
               'unexpected-argument',
               this.engine.Missing.toString(),
             ]);
-          return this.engine.NaN;
+          return absentScalarMarker(this.engine, this);
         }
       }
 
@@ -5399,7 +5407,9 @@ export class BoxedFunction
       //
       // 3a/ Missing-value behavior gate (§3.E) — parity with the sync path's
       // step 4a. A `propagate` operator with an absent `Missing` scalar operand
-      // (no collection operand) yields `NaN`; a `reject` operator errors.
+      // (no collection operand) yields the quiet marker of its own codomain
+      // (`absentScalarMarker`): `NaN` into a numeric application type,
+      // `Missing` otherwise. A `reject` operator errors.
       // "No collection operand" is collection-SHAPED, not the `isCollection`
       // capability — see the sync gate (step 4a) for why the two must gain
       // this disjunct together.
@@ -5415,7 +5425,7 @@ export class BoxedFunction
               'unexpected-argument',
               this.engine.Missing.toString(),
             ]);
-          return this.engine.NaN;
+          return absentScalarMarker(this.engine, this);
         }
       }
 

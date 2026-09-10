@@ -42,6 +42,7 @@ import {
   containsBroadcastableType,
   finitePartOfType,
   isNonRealNumber,
+  isPointElementType,
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
@@ -1893,9 +1894,9 @@ function mayBePointList(t: Type): boolean {
   // interpreter's `isPointLike` admits every tuple — and a tuple is a subtype
   // of the indexed-collection shape, so it must be let through ahead of the
   // row test below, which would read `list<tuple<string, string>>` as a list
-  // of non-numeric rows.
-  const isTupleType =
-    elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple');
+  // of non-numeric rows. A union of tuple spellings is a point element too
+  // (see `isPointElementType`).
+  const isTupleType = isPointElementType(elt);
   if (!isTupleType && isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
     const inner = collectionElementType(elt);
     // `never` is a subtype of every scalar, but an empty ROW says nothing
@@ -1946,12 +1947,11 @@ function isPointListOperand(e: Expression): boolean {
   // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
   // `{ kind: 'tuple' }` node — and it is what a `list<tuple>` DECLARATION
   // reports (the `PointList` type handler itself answers the parameterized
-  // `list<tuple<…>>`), so both spellings must read as a point.
-  if (
-    elt !== undefined &&
-    (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
-  )
-    return true;
+  // `list<tuple<…>>`), so both spellings must read as a point. A union whose
+  // arms are all tuple spellings — what a list literal of two differently
+  // typed points infers — is a point element as well; see
+  // `isPointElementType`.
+  if (isPointElementType(elt)) return true;
   if (e.isFiniteCollection) {
     const first = e.at(1);
     if (first === undefined) return false;
@@ -2028,8 +2028,9 @@ function isEmptyCollectionOperand(e: Expression): boolean {
 function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
   if (elt === undefined) return true;
   if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
-  if (elt === 'tuple' || (typeof elt !== 'string' && elt.kind === 'tuple'))
-    return true;
+  // Both tuple spellings, and a union of them, are point elements; see
+  // `isPointElementType`.
+  if (isPointElementType(elt)) return true;
   if (isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE)) {
     const inner = collectionElementType(elt);
     return inner !== undefined && isSubtype(inner, 'number');
