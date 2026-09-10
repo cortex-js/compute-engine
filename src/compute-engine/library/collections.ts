@@ -3514,7 +3514,9 @@ function pointComponentAt(
     // as `First("")` does.
     if (
       !xs.type.matches('string') &&
-      elementTypeBroadcastsWhenEmpty(collectionElementType((raw ?? xs).type.type))
+      elementTypeBroadcastsWhenEmpty(
+        collectionElementType((raw ?? xs).type.type)
+      )
     )
       return ce.function('List', []);
     return componentAt(xs, position, ce);
