@@ -56,11 +56,16 @@ describe('broadcastable<T> — JavaScript compile target', () => {
     );
     // A hop whose operand is not provably an array of that width tests it
     // first, so the `_SYS.bcast` dispatch survives as the ELSE branch of that
-    // test — never on the path a correctly shaped operand takes.
+    // test — never on the path a correctly shaped operand takes. Here every
+    // hop's operand IS provable — the innermost one is a literal list — so
+    // each component is written out from the literal's own text and no
+    // dispatch, index read or temporary is emitted at all.
     expect(r.code.split('_SYS.bcast(').length).toBe(
       r.code.split(' : _SYS.bcast(').length
     );
-    expect(r.code).toContain('[0]');
+    expect(r.code).toBe(
+      '[(2 * Math.sin((3 * _.x))), (2 * Math.sin((3 * _.y)))]'
+    );
     const out = r.run!({ x: 0.5, y: 1.0 }) as number[];
     expect(out).toHaveLength(2);
     expect(out[0]).toBeCloseTo(2 * Math.sin(1.5), 12);

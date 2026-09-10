@@ -39,6 +39,7 @@ import {
   Sign,
   TypeHandlerContext,
 } from '../global-types.js';
+import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { operandLiteralValue } from './type-handlers.js';
 import {
   isCharacter,
@@ -399,12 +400,31 @@ const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
 };
 
 /**
+ * The heads, other than `Tuple`, whose OPERANDS are the coordinates of the
+ * point they build. Any other application that types as a tuple — a sum of
+ * points, a scaled point, a user-function call — holds its coordinates
+ * inside its value, not in its operand list.
+ */
+// `Tuple` is absent because a `Tuple` operand arrives as the `tuple`
+// STRUCTURE kind, which the caller reads before it consults this set. This is
+// deliberately NOT the same set as `POINT_CONSTRUCTOR_HEADS`
+// (`compilation/provable-kind.ts`), which answers a different question about
+// emitted code and therefore lists `Tuple` as well.
+const POINT_SPELLING_HEADS = new Set(['Pair', 'Triple', 'Single', 'PointList']);
+
+/**
  * The components of a rank-1 `Dot` operand — a point (`Tuple`/`PointList`/…)
  * or a literal `List` vector — or `undefined` when there are none to read.
  *
  * A symbol declared `tuple<number, number>` or `vector<3>`, and a lazy
- * collection such as a `Range`, have a TYPE but no operands, which is the case
- * `innerProductType` declines on.
+ * collection such as a `Range`, have a TYPE but no operands to read. So does an
+ * application whose head is not a point constructor: the operands of
+ * `P + (0, 0)` are two points and the operands of `2 · P` are a scalar and a
+ * point, neither of which is a coordinate. Reading them as coordinates typed
+ * `Dot(P + (0, 0), Q)` as `tuple<real, real>` and `Dot(2P, Q)` as a union
+ * with a tuple, where both values are scalars; a consumer that trusted that
+ * type then emitted two-component array code over a scalar. For those the
+ * caller falls back to the tuple TYPE's elements (`tupleTypeComponents`).
  */
 function rank1Components(
   d: OperandDescriptor
@@ -414,9 +434,10 @@ function rank1Components(
   let ops: ReadonlyArray<OperandDescriptor>;
   if (structure.kind === 'tuple' || structure.kind === 'list-literal')
     ops = structure.elements;
-  else if (structure.kind === 'application') {
-    // A point spelled with another head (`Pair`, `Point`, …) is a point by
-    // TYPE, which is how the operand gate above admitted it.
+  else if (
+    structure.kind === 'application' &&
+    POINT_SPELLING_HEADS.has(structure.head)
+  ) {
     const t = resolveTypeAlias(d.type);
     if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
     ops = structure.children;
@@ -425,8 +446,28 @@ function rank1Components(
 }
 
 /**
+ * One descriptor per element of a tuple-TYPED operand, built from the type
+ * alone — the components of an operand that has none to read
+ * (`rank1Components`): a declared point symbol, a sum of points, a call.
+ */
+function tupleTypeComponents(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string' || t.kind !== 'tuple' || t.elements.length === 0)
+    return undefined;
+  return t.elements.map((el) => describeType(el.type));
+}
+
+/**
  * The type of the inner product `Dot(a, b)`, or `undefined` when it cannot be
  * sharpened past the caller's `number`.
+ *
+ * The components are read from the operand's own structure when it has one
+ * and from its tuple TYPE otherwise (`tupleTypeComponents`), so a DECLARED
+ * point sharpens exactly as a written one does: `Dot(c, d)` for two
+ * `tuple<real, real>` symbols is `real`, where it used to stay at the
+ * operator's declared `number`.
  *
  * An inner product IS the sum of the component-wise products, so it is typed
  * by asking the arithmetic handlers for the type of that sum rather than by
@@ -464,8 +505,8 @@ function innerProductType(
   b: OperandDescriptor,
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
-  const as = rank1Components(a);
-  const bs = rank1Components(b);
+  const as = rank1Components(a) ?? tupleTypeComponents(a);
+  const bs = rank1Components(b) ?? tupleTypeComponents(b);
   // Unequal lengths are `incompatible-dimensions`, reported by the evaluate
   // handler; there is no inner product here to type.
   if (as === undefined || bs === undefined || as.length !== bs.length)
@@ -500,6 +541,154 @@ function isNumericTupleOperand(d: OperandDescriptor): boolean {
   const t = resolveTypeAlias(d.type);
   if (typeof t === 'string' || t.kind !== 'tuple') return false;
   return t.elements.every((el) => isSubtype(el.type, 'number'));
+}
+
+/**
+ * `broadcastable<number>`: a number, or an indexed collection of numbers
+ * applied element-wise. Frozen and shared, so a gate that asks the question
+ * repeatedly does not re-parse the spelling on every read.
+ */
+const BROADCASTABLE_NUMBER_TYPE: Type = Object.freeze({
+  kind: 'broadcastable',
+  elements: 'number',
+}) as Type;
+
+/**
+ * Is this operand a tuple whose every component is a number or a list-nesting
+ * of numbers — a point, or a point list written as a tuple of coordinate
+ * lists?
+ *
+ * This is the looser companion of {@link isNumericTupleOperand}: it admits
+ * `broadcastable<number>`, `list<number>` and `vector<n>` components besides
+ * plain numbers. It still refuses a component the engine cannot prove numeric
+ * — an undeclared symbol (`unknown`), a string, a nested tuple, a
+ * `list<tuple<…>>` — because the inner product of such a tuple has no value
+ * this operator computes, and its type must stay the wide `value`.
+ */
+function isBroadcastableTupleOperand(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string' || t.kind !== 'tuple') return false;
+  return t.elements.every((el) =>
+    isSubtype(el.type, BROADCASTABLE_NUMBER_TYPE)
+  );
+}
+
+/**
+ * The components of a tuple operand admitted by
+ * {@link isBroadcastableTupleOperand}: the structural components when the
+ * operand carries them, and otherwise one synthetic descriptor per element of
+ * the tuple TYPE.
+ *
+ * The type fallback is what lets a symbol declared
+ * `tuple<broadcastable<number>, broadcastable<number>>` — a user function's
+ * result, which has a type and no operands — be typed at all.
+ */
+function broadcastableTupleComponents(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  return rank1Components(d) ?? tupleTypeComponents(d);
+}
+
+/**
+ * The type of the inner product of two tuples whose components may each be a
+ * number OR a collection of numbers, or `undefined` when the two operands do
+ * not line up (different component counts, or components that cannot be read).
+ *
+ * The derivation is the same one {@link innerProductType} performs — ask
+ * `Multiply` for each component product, then `Add` for their sum — but the
+ * answer is CLAMPED to `broadcastable<number>`. The clamp states what the
+ * inner product of such a tuple always is: a number when every component is a
+ * number, and a list of numbers when some component is a list, which is
+ * exactly the meaning of `broadcastable<number>`. Anything the arithmetic
+ * handlers report that is wider than that — or their refusal to answer at all
+ * — is therefore replaced by the clamp rather than passed through, so this
+ * function never widens the operator's claim beyond what the broadcast
+ * semantics guarantee.
+ */
+function broadcastableInnerProductType(
+  a: OperandDescriptor,
+  b: OperandDescriptor,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const as = broadcastableTupleComponents(a);
+  const bs = broadcastableTupleComponents(b);
+  // Unequal lengths are `incompatible-dimensions`, reported by the evaluate
+  // handler; there is no inner product here to type.
+  if (as === undefined || bs === undefined || as.length !== bs.length)
+    return undefined;
+  const products: Type[] = [];
+  for (let i = 0; i < as.length; i++) {
+    const t = derive('Multiply', [as[i], bs[i]]);
+    if (t === undefined) return BROADCASTABLE_NUMBER_TYPE;
+    products.push(t);
+  }
+  const sum = derive(
+    'Add',
+    products.map((t) => describeType(t))
+  );
+  if (sum === undefined || !isSubtype(sum, BROADCASTABLE_NUMBER_TYPE))
+    return BROADCASTABLE_NUMBER_TYPE;
+  return sum;
+}
+
+/**
+ * The components of a POINT operand of `Dot` at EVALUATION time — the
+ * components of a `Tuple`, `Pair`, `Triple` or `Single`. `undefined` for
+ * everything else.
+ *
+ * A POINT and nothing else, so that the point-list route below reads exactly
+ * the operand shapes the `type` handler answers `broadcastable<number>` for:
+ * two TUPLES whose every component is a number or a collection of numbers
+ * (`isBroadcastableTupleOperand`). A `List` operand admitted here would make
+ * the evaluate route the wider of the two — `Dot((1, L), [2, 3])` would
+ * answer a LIST under the wide static type `value` — and the type handler
+ * cannot follow it, because a list of numbers has the same type whether it is
+ * a vector or a row of a matrix: `Dot([[1, 2], [3, 4]], [[5, 6], [7, 8]])`
+ * must keep answering the matrix product `[[19, 22], [43, 50]]`, not the sum
+ * of the row-wise products.
+ */
+function pointComponents(
+  op: Expression
+): ReadonlyArray<Expression> | undefined {
+  if (!isFunction(op) || !hasAccessibleComponents(op)) return undefined;
+  return op.ops;
+}
+
+/**
+ * The component pairs of a POINT-LIST inner product `Dot(a, b)` — the pairs
+ * whose products the operator sums — or `undefined` when this is not that
+ * product.
+ *
+ * It is that product when both operands are points, the counts agree, every
+ * component is either a number literal or a collection of numbers, and at
+ * least ONE component is such a collection. The last condition is what leaves
+ * an all-number point on the unchanged `MatrixMultiply` route, where a vector
+ * operand and a matrix operand stay as well.
+ *
+ * A component the engine cannot read as a number or as a collection of
+ * numbers (a free symbol, a string, a nested list) makes the whole operator
+ * stay symbolic, as it already did, rather than build a sum that cannot
+ * reduce.
+ */
+function pointListInnerProductPairs(
+  ops: ReadonlyArray<Expression>
+): Array<[Expression, Expression]> | undefined {
+  if (ops.length !== 2) return undefined;
+  const as = pointComponents(ops[0]);
+  const bs = pointComponents(ops[1]);
+  if (as === undefined || bs === undefined || as.length !== bs.length)
+    return undefined;
+  let collectionCount = 0;
+  for (const c of [...as, ...bs]) {
+    if (isNumber(c)) continue;
+    if (c.isCollection && isSubtype(c.type.type, BROADCASTABLE_NUMBER_TYPE)) {
+      collectionCount += 1;
+      continue;
+    }
+    return undefined;
+  }
+  if (collectionCount === 0) return undefined;
+  return as.map((a, i): [Expression, Expression] => [a, bs[i]]);
 }
 
 /**
@@ -1539,50 +1728,91 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // type language has no variadic tuple, so the bare `tuple` param does
       // the admission (the `Norm` pattern) and the handlers narrow.
       signature: '(matrix|vector|tuple, matrix|vector|tuple) -> value',
-      // The result is a collection only for matrix-ish operands, and the
-      // static type stays the wide `value` there — which the facet's type
-      // fallthrough misread as a definite `false` while `Dot(m1, m2)`
-      // evaluates to a matrix. Two-tier answer: a SHARPENED scalar result
-      // (two provable rank-1 numeric operands — see the `type` handler) has
-      // nothing to walk, definite `false`; otherwise answer from the
-      // operands like the other tensor products (never `true`).
+      // The result is a collection only for matrix-ish and point-list
+      // operands, and the static type stays the wide `value` for a matrix
+      // product — which the facet's type fallthrough misread as a definite
+      // `false` while `Dot(m1, m2)` evaluates to a matrix. Three-tier answer:
+      //
+      // - a SHARPENED scalar result (two provable rank-1 numeric operands —
+      //   see the `type` handler) has nothing to walk, definite `false`;
+      // - a `broadcastable<number>` result — the point-list case, where the
+      //   value is a number for a point and a list for a point list — cannot
+      //   be decided from the type, so it declines to answer. Reading the
+      //   operands instead would be wrong here: the operands are tuples,
+      //   which are not enumerable collections, while the result is one.
+      // - otherwise answer from the operands like the other tensor products
+      //   (never `true`).
       canEnumerate: (expr) => {
         if (!isFunction(expr)) return undefined;
-        if (isSubtype(expr.type.type, 'number')) return false;
+        const t = expr.type.type;
+        if (isSubtype(t, 'number')) return false;
+        if (isSubtype(t, BROADCASTABLE_NUMBER_TYPE)) return undefined;
         return canEnumerateTensorOperands(expr);
       },
-      // Two provable rank-1 numeric operands reduce to the inner product, a
-      // number. A `tuple` operand only counts when every element is provably
-      // numeric (`isNumericTuple`, strict): a point-list-shaped tuple (a
-      // collection component, or `broadcastable` elements that could refine
-      // to one) keeps the wide `value` — claiming `number` on retractable
-      // evidence is how item 158 happened to `Multiply`. A vector operand
-      // needs the explicit matrix exclusion: `matrix<T^(mxn)>` carries its
-      // shape in the DIMENSIONS, not the element type, so it subtypes
-      // `vector` (= `list<number>`) too.
+      // The claim is made at one of three strengths, from the operand types
+      // alone.
       //
-      // With the components in hand the claim sharpens from `number` to the
-      // type of the inner product written out (`innerProductType`).
+      // 1. Two provable rank-1 NUMERIC operands reduce to the inner product,
+      //    a number. A `tuple` operand counts here only when every element is
+      //    provably a number (`isNumericTupleOperand`, strict). A vector
+      //    operand needs the explicit matrix exclusion: `matrix<T^(mxn)>`
+      //    carries its shape in the DIMENSIONS, not the element type, so it
+      //    subtypes `vector` (= `list<number>`) too. With the components in
+      //    hand the claim sharpens from `number` to the type of the inner
+      //    product written out (`innerProductType`).
+      //
+      // 2. Two tuples of the same length whose every component is a number OR
+      //    a collection of numbers — a point list written as a tuple of
+      //    coordinate lists, such as `(1, L)` with `L` a list. The inner
+      //    product of those broadcasts component-wise, so the result is a
+      //    number when every component is a number and a list of numbers when
+      //    some component is a list. That is exactly `broadcastable<number>`,
+      //    and `broadcastableInnerProductType` derives the claim under that
+      //    clamp.
+      //
+      // 3. Everything else keeps the wide `value`: a matrix product, a vector
+      //    paired with a broadcastable tuple, two tuples of different
+      //    lengths, and above all a tuple with a component the engine cannot
+      //    prove numeric. An undeclared symbol could be a string or a nested
+      //    tuple, and claiming a number on such retractable evidence is how
+      //    `Multiply` once mistyped a point list (Tycho item 158).
       type: ([a, b], { derive, engine }) => {
+        if (!a || !b) return BoxedType.forResult('value', engine._typeResolver);
         if (
-          !a ||
-          !b ||
-          ![a, b].every(
+          [a, b].every(
             (x) =>
               isNumericTupleOperand(x) ||
               (isSubtype(x.type, 'vector') && !isSubtype(x.type, 'matrix'))
           )
         )
-          return BoxedType.forResult('value', engine._typeResolver);
-        return BoxedType.forResult(
-          innerProductType(a, b, derive) ?? 'number',
-          engine._typeResolver
-        );
+          return BoxedType.forResult(
+            innerProductType(a, b, derive) ?? 'number',
+            engine._typeResolver
+          );
+        if (isBroadcastableTupleOperand(a) && isBroadcastableTupleOperand(b)) {
+          const t = broadcastableInnerProductType(a, b, derive);
+          if (t !== undefined)
+            return BoxedType.forResult(t, engine._typeResolver);
+        }
+        return BoxedType.forResult('value', engine._typeResolver);
       },
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
       // vectors and to the matrix product otherwise — exactly what
       // `MatrixMultiply` already computes.
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // A point list written as a tuple of coordinate lists — `(1, L)` with
+        // `L` a list — has no tensor form `MatrixMultiply` accepts, so the
+        // inner product is written out instead and left to the broadcast in
+        // `Multiply` and `Add`. One inner product is produced per point.
+        const pairs = pointListInnerProductPairs(ops);
+        if (pairs !== undefined)
+          return ce
+            .function(
+              'Add',
+              pairs.map(([x, y]) => ce.function('Multiply', [x, y]))
+            )
+            .evaluate({ numericApproximation });
+
         // Lower each fixed numeric tuple operand to its component vector;
         // `MatrixMultiply` does not accept tuples (and supplies the
         // `incompatible-dimensions` check on unequal lengths). A tuple

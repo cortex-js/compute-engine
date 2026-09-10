@@ -75,9 +75,10 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     // The distinction the fix rests on: a list is a set of legs, a point is
     // one leg. This case must keep the ELEMENT-WISE lowering — here the
     // component one, since the list states its width.
+    // The list is written as a literal, so each component reads its own
+    // element straight from that text and no index read is emitted.
     const { code, value } = compiled(['Hypot', ['List', 3, 4], 1]);
-    expect(code).toContain('Math.hypot');
-    expect(code).toContain('[0]');
+    expect(code).toBe('[Math.hypot(3, 1), Math.hypot(4, 1)]');
     expect(value).toEqual([Math.hypot(3, 1), Math.hypot(4, 1)]);
   });
 

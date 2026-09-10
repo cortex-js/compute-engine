@@ -181,15 +181,22 @@ describe('controls: emissions that were already correct are unchanged', () => {
     expect(g(expr)).toBe('-((t + 1.0) * vec2(x, 0.0))');
   });
 
-  test('the javascript target broadcasts instead of splicing an infix `*`', () => {
-    const result = compile(
-      ce.box(['Multiply', ['Add', 't', 1], ['Tuple', 'x', 0]] as any),
-      { to: 'javascript', constantFold: false } as any
-    );
+  test('the javascript target scales each component, never splicing an infix `*` around the whole point', () => {
+    // The hazard this control guards is a `*` spliced against the point as
+    // ONE operand, which JavaScript would evaluate on an array. The width of
+    // the point is known, so each component is written out instead, and the
+    // scalar factor is bound once so it is evaluated once.
+    const expr = ce.box(['Multiply', ['Add', 't', 1], ['Tuple', 'x', 0]] as any);
+    const result = compile(expr, {
+      to: 'javascript',
+      constantFold: false,
+    } as any);
     expect(result.success).toBe(true);
     expect(result.code).toBe(
-      '_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _.t + 1, [_.x, 0])'
+      '((_tv3) => [(_tv3 * _.x), (_tv3 * 0)])(_.t + 1)'
     );
+    expect(result.run!({ t: 2, x: 5 })).toEqual([15, 0]);
+    expect(expr.subs({ t: 2, x: 5 }).N().toString()).toBe('(15, 0)');
   });
 
   test('the python target fails closed on arithmetic over a point', () => {

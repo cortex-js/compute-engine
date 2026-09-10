@@ -17,6 +17,7 @@ import {
   recordScalarParams,
   recordIntegerRange,
   recordScopeParent,
+  provenPointWidth,
 } from './javascript-value-facts.js';
 import {
   javascriptStatements,
@@ -6111,7 +6112,12 @@ export class BaseCompiler {
               // garbage at run time) where the interpreter answers an
               // `incompatible-type` error.
               a.type.matches('collection<any>') ||
-              isBoundPossiblyCollectionTyped(a))
+              // Read WITH the target, as `tryCompileBroadcast` reads it:
+              // this guard is reached after that lowering declined, and an
+              // operand it proved a constructed scalar (a call of a user
+              // function whose body is a scalar over its point argument)
+              // must not be refused here on the conservative reading.
+              isBoundPossiblyCollectionTyped(a, target))
         )
       ) {
         const opMap = target.operators?.(h);
@@ -8519,11 +8525,36 @@ export class BaseCompiler {
    * that is refused here is only tested at run time, never mis-read.
    */
   private static arrayLiteralWidth(code: string): number | undefined {
+    return BaseCompiler.arrayLiteralElements(code)?.length;
+  }
+
+  /**
+   * The element source texts of an emitted array LITERAL — `[a, b + 1]`
+   * gives `['a', '(b + 1)']` — or `undefined` when the text is anything else,
+   * or when `width` is given and the count differs from it. The rules are
+   * those of {@link arrayLiteralWidth}, which is this function's length.
+   *
+   * Every text answered is ATOMIC: an element of an array literal is compiled
+   * at precedence zero, so `a + b` arrives unparenthesized, and the callers
+   * splice a text straight into an operator position — a factor of a product,
+   * an operand of the scalar codegen — without parenthesizing it. A text that
+   * is not atomic on its own ({@link isAtomicSource}) is therefore wrapped
+   * here. Without the wrap, `Dot((a+b,c),(d,e))` emitted
+   * `(_.a + _.b * _.d + _.c * _.e)` and ran to 24 where the interpreter
+   * answers 27.
+   */
+  private static arrayLiteralElements(
+    code: string,
+    width?: number
+  ): string[] | undefined {
     if (!code.startsWith('[') || !code.endsWith(']')) return undefined;
     if (/['"`]/.test(code)) return undefined;
-    if (code.slice(1, -1).trim() === '') return 0;
+    const inner = code.slice(1, -1);
+    if (inner.trim() === '')
+      return width === undefined || width === 0 ? [] : undefined;
     let depth = 0;
-    let n = 1;
+    let start = 0;
+    const parts: string[] = [];
     for (let i = 0; i < code.length; i++) {
       const c = code[i];
       if (c === '[' || c === '(' || c === '{') depth += 1;
@@ -8533,9 +8564,160 @@ export class BaseCompiler {
         // is not one literal but an expression that starts with one
         // (`[1, 2].concat(x)`).
         if (depth === 0 && i !== code.length - 1) return undefined;
-      } else if (c === ',' && depth === 1) n += 1;
+      } else if (c === ',' && depth === 1) {
+        parts.push(code.slice(start + 1, i).trim());
+        start = i;
+      }
     }
-    return depth === 0 ? n : undefined;
+    if (depth !== 0) return undefined;
+    parts.push(code.slice(start + 1, code.length - 1).trim());
+    if (width !== undefined && parts.length !== width) return undefined;
+    return parts.map((p) => (BaseCompiler.isAtomicSource(p) ? p : `(${p})`));
+  }
+
+  /**
+   * Whether a source text may be spliced into an operator position — a factor
+   * of a product, an operand of the head's scalar codegen — without being
+   * parenthesized first.
+   *
+   * True when the text holds nothing at nesting depth ZERO but the characters
+   * of a name, a number, a property read and the brackets of a call or an
+   * index: `Math.floor(_.x)`, `_tv1[0]`, `2.41` and an already-parenthesized
+   * `(a + b)` all qualify, while `a + b` and `a ? b : c` do not. Such a text
+   * is a primary expression, possibly followed by member reads and calls, so
+   * it binds tighter than any binary operator.
+   *
+   * The test is deliberately conservative: a text it refuses is only wrapped
+   * in parentheses, which is always sound, while a text it wrongly admits
+   * would change the meaning of the code that splices it. A NEGATIVE number
+   * literal is refused for that reason, and not as an oversight: exponentiation
+   * binds tighter than unary minus in Python, so an unparenthesized `-4` as
+   * the base of `**` reads as `-(4 ** k)`. The only caller,
+   * {@link arrayLiteralElements}, refuses any text that holds a quote, so no
+   * string literal reaches this scan and a bracket found here always nests.
+   */
+  private static isAtomicSource(code: string): boolean {
+    let depth = 0;
+    for (const c of code) {
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if (c === ')' || c === ']' || c === '}') {
+        depth -= 1;
+        if (depth < 0) return false;
+      } else if (depth === 0 && !/[A-Za-z0-9_$.]/.test(c)) return false;
+    }
+    return depth === 0;
+  }
+
+  /**
+   * The inner product of two points or vectors whose one width the compiler
+   * can count, written out as the sum of the component products — `(a, b) ·
+   * (c, d)` is `a * c + b * d` — or `undefined` when it cannot be.
+   *
+   * `_SYS.matmul` tests the rank of both operands and loops over the
+   * components; for the two- and three-component points of a plotting
+   * kernel that is a call, two shape tests and a loop for two
+   * multiplications, on every sample. The shader targets already emit
+   * `dot(vec2, vec2)` for the same expression.
+   *
+   * The admission is that of the component fan-out in
+   * {@link tryCompileBroadcast}: both operands pure and of one static width
+   * below {@link MIN_UNROLLED_WIDTH} ({@link staticCollectionWidth} — a numeric
+   * tuple type or a dimensioned numeric list type), no operand of unprovable
+   * run-time shape, and no complex component, since the scalar `*` and `+`
+   * written here are the real lowering. As in the fan-out, a source that is
+   * not an array literal of the right width is bound once and tested at run
+   * time, because a declared width constrains what the ENGINE assigns and not
+   * what a caller puts in `vars`; the failing shapes go to `_SYS.matmul`,
+   * which answers them the way the interpreter does. Without a test, a
+   * literal is read component by component from its text.
+   */
+  static compileStaticInnerProduct(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if (args.length !== 2) return undefined;
+    const widths = args.map((a) => BaseCompiler.staticCollectionWidth(a));
+    const n = widths[0];
+    if (n === undefined || widths[1] !== n) return undefined;
+    if (n < 1 || n >= MIN_UNROLLED_WIDTH) return undefined;
+    for (const a of args) {
+      if (a.isPure !== true) return undefined;
+      if (isBoundPossiblyCollectionTyped(a, target)) return undefined;
+      if (
+        BaseCompiler.isComplexValued(a) ||
+        BaseCompiler.hasAnyComplexElement(a)
+      )
+        return undefined;
+      const t = compilationType(a);
+      if (typeof t === 'string') return undefined;
+      if (t.kind === 'tuple') {
+        if (t.elements.some((el) => isNonRealNumber(el.type))) return undefined;
+      } else {
+        const elt = collectionElementType(t);
+        if (elt === undefined || isNonRealNumber(elt)) return undefined;
+      }
+    }
+    const codes = args.map((a) => BaseCompiler.compile(a, target));
+    const needsGuard = codes.map(
+      (code, i) =>
+        BaseCompiler.arrayLiteralWidth(code) !== n &&
+        provenPointWidth(args[i], target) !== n
+    );
+    const anyGuard = needsGuard.some((g) => g);
+    const bindings: string[] = [];
+    const bound: string[] = [];
+    const guarded: string[] = [];
+    const parts: (string | string[])[] = codes.map((code, i) => {
+      if (!anyGuard) {
+        const elements = BaseCompiler.arrayLiteralElements(code, n);
+        if (elements !== undefined) return elements;
+      }
+      if (!needsGuard[i] && BaseCompiler.REPEATABLE_SOURCE.test(code))
+        return code;
+      const v = BaseCompiler.tempVar(target);
+      bindings.push(v);
+      bound.push(code);
+      if (needsGuard[i]) guarded.push(v);
+      return v;
+    });
+    const read = (i: number, k: number): string => {
+      const part = parts[i];
+      return Array.isArray(part) ? part[k] : `${part}[${k}]`;
+    };
+    const terms: string[] = [];
+    for (let k = 0; k < n; k++) terms.push(`${read(0, k)} * ${read(1, k)}`);
+    const sum = `(${terms.join(' + ')})`;
+    if (guarded.length > 0) {
+      // The test claims RANK 1 as well as the length, because the sum below
+      // multiplies the components as scalars. A declared type constrains what
+      // the ENGINE assigns, never what a caller puts in the kernel's `vars`
+      // object: a `tuple<number, number>` input may arrive as the matrix
+      // `[[1, 2], [3, 4]]`, which has length two and passes a length test
+      // alone, and the scalar sum then answers NaN where `_SYS.matmul` — and
+      // the interpreter — answer `[5, 11]`. The first element decides the
+      // rank, which is the test `_SYS.matmul` itself applies
+      // (`Array.isArray(a?.[0])`, `javascript-target.ts`), so a shape this
+      // refuses is one the fallback still answers the way the interpreter
+      // does.
+      const test = guarded
+        .map(
+          (v) =>
+            `Array.isArray(${v}) && ${v}.length === ${n} && ` +
+            `!Array.isArray(${v}[0])`
+        )
+        .join(' && ');
+      // Every part is one source text here: a part is the element ARRAY of a
+      // literal only when no operand needs the run-time test, and this branch
+      // runs only when one does.
+      const whole = parts as string[];
+      return (
+        `((${bindings.join(', ')}) => ${test} ? ${sum} : ` +
+        `_SYS.matmul(${whole[0]}, ${whole[1]}))(${bound.join(', ')})`
+      );
+    }
+    return bindings.length === 0
+      ? sum
+      : `((${bindings.join(', ')}) => ${sum})(${bound.join(', ')})`;
   }
 
   /**
@@ -8546,13 +8728,25 @@ export class BaseCompiler {
    *
    * The element test keeps a point list, a nested list, a string and a
    * dictionary out: component k of one of those is not a scalar the head's
-   * scalar codegen can consume. A tuple is out as well, because a tuple type
-   * carries no `dimensions`, which leaves every point-shaped operand to the
-   * dedicated point lanes of {@link tryCompileBroadcast}.
+   * scalar codegen can consume.
+   *
+   * A POINT states its width too: a tuple type lists its components, so a
+   * `tuple<number, number>` operand — a literal point, a symbol declared
+   * so, or a user-function application whose reconciled result is a numeric
+   * tuple — has two. The same element test applies: a component that is a
+   * list (a point list), a nested tuple or an `unknown` is not a scalar.
+   * The head-specific point rules (a point does not add to a scalar) are
+   * applied by the caller, {@link staticBroadcastWidth}.
    */
   static staticCollectionWidth(a: Expression): number | undefined {
     const t = compilationType(a);
-    if (typeof t === 'string' || t.kind !== 'list') return undefined;
+    if (typeof t === 'string') return undefined;
+    if (t.kind === 'tuple') {
+      return t.elements.every((el) => isSubtype(el.type, 'number'))
+        ? t.elements.length
+        : undefined;
+    }
+    if (t.kind !== 'list') return undefined;
     const dims = t.dimensions;
     if (dims === undefined || dims.length !== 1) return undefined;
     const elt = collectionElementType(t);
@@ -8582,7 +8776,20 @@ export class BaseCompiler {
    *   component exactly as the broadcast repeats a scalar;
    * - no operand's run-time shape is unprovable. A `broadcastable<T>` node or
    *   a top-typed application may be a scalar or an array of any length, and
-   *   only the run-time dispatch answers for both.
+   *   only the run-time dispatch answers for both;
+   * - a POINT operand (a numeric tuple) takes part only in the shapes the
+   *   interpreter computes component-wise. A point summed with a scalar is
+   *   an `incompatible-type` error there, a product of two points is the
+   *   `no-product-between-points` error and a scalar divided by a point is
+   *   `no-division-by-point`, so under `Add` every operand must be a point
+   *   of the one width, under `Multiply` exactly one operand may be a point
+   *   and under `Divide` only the dividend may be. A point beside a LIST is
+   *   not a component-wise shape either (the interpreter broadcasts the list
+   *   and keeps the point whole — the point lanes of
+   *   {@link tryCompileBroadcast}), so the two never mix here. Every other
+   *   head broadcasts over a point exactly as over a list — the interpreter
+   *   answers `2^(1,2)` as `(2, 4)` and `sin((1,2))` as `(sin 1, sin 2)`,
+   *   which is what the component code emitted here computes (measured).
    *
    * The width must be below {@link MIN_UNROLLED_WIDTH}, the same boundary
    * `unrollFixedWidthCollections` uses, read from the other side. That pass
@@ -8596,24 +8803,40 @@ export class BaseCompiler {
    * expressions is neither.
    */
   private static staticBroadcastWidth(
+    h: string,
     args: ReadonlyArray<Expression>,
     isArrayOperand: (a: Expression) => boolean
   ): number | undefined {
     let width: number | undefined;
-    for (const a of args) {
+    let points = 0;
+    let lists = 0;
+    let scalars = 0;
+    let firstIsPoint = false;
+    for (const [i, a] of args.entries()) {
       if (a.isPure !== true) return undefined;
       if (isBoundPossiblyCollectionTyped(a)) return undefined;
       if (!isArrayOperand(a)) {
         if (!a.type.matches('number')) return undefined;
+        scalars += 1;
         continue;
       }
       const n = BaseCompiler.staticCollectionWidth(a);
       if (n === undefined) return undefined;
+      if (isTupleShapedType(compilationType(a))) {
+        points += 1;
+        if (i === 0) firstIsPoint = true;
+      } else lists += 1;
       if (width === undefined) width = n;
       else if (width !== n) return undefined;
     }
     if (width === undefined || width < 1 || width >= MIN_UNROLLED_WIDTH)
       return undefined;
+    if (points > 0) {
+      if (lists > 0) return undefined;
+      if (h === 'Add' && scalars > 0) return undefined;
+      if (h === 'Multiply' && points !== 1) return undefined;
+      if (h === 'Divide' && !(points === 1 && firstIsPoint)) return undefined;
+    }
     return width;
   }
 
@@ -9213,6 +9436,24 @@ export class BaseCompiler {
       }
     }
 
+    // A point SUMMED with a scalar is a per-element `incompatible-type` error
+    // in the interpreter: `(1, 2) + 3`, and `(x, y) + 3` whatever `x` and `y`
+    // hold, since a tuple never adds to a number. The generic closure below
+    // answered the plausible `[4, 5]` behind `success: true` (measured:
+    // `(x, y) + 3` ran to `[3.3, 3.7]` at `x = 0.3, y = 0.7`), so the shape
+    // declines and the D6 guard fails closed. Decided on PROVABLE evidence
+    // only — a tuple-shaped operand type beside a provably numeric operand.
+    // An operand whose type is open (an undeclared `z`) may hold a point at
+    // run time, and the closure then sums component-wise as the interpreter
+    // does.
+    if (
+      h === 'Add' &&
+      atomicTuple === undefined &&
+      args.some((a) => isTupleShapedType(compilationType(a))) &&
+      args.some((a) => a.type.matches('number'))
+    )
+      return null;
+
     // What the closure's element parameter for each operand holds at run time:
     // `true` for a `{re, im}` object, `false` for a plain number, `'mixed'`
     // when the elements do not all share one shape or the shape cannot be
@@ -9270,7 +9511,7 @@ export class BaseCompiler {
     // by one expression per component, further down.
     const componentWidth =
       atomicTuple === undefined
-        ? BaseCompiler.staticBroadcastWidth(args, isArrayOperand)
+        ? BaseCompiler.staticBroadcastWidth(h, args, isArrayOperand)
         : undefined;
 
     // Bind one element parameter per operand and build the scalar body by
@@ -9401,7 +9642,12 @@ export class BaseCompiler {
     // Every operand's width is known: emit one expression per component and
     // drop the run-time dispatch altogether. An operand whose compiled source
     // cannot be repeated for free is bound once to a temporary, so each one is
-    // still evaluated exactly once, in operand order.
+    // still evaluated exactly once. The ORDER is not the operand order: an
+    // operand read from its literal text is not bound to a temporary, so its
+    // elements are evaluated inside the component expressions, after every
+    // bound sibling was evaluated as an argument of the wrapping arrow
+    // function. That is sound because `staticBroadcastWidth` admits PURE
+    // operands only, so no operand can observe another's evaluation.
     if (componentWidth !== undefined) {
       const bindings: string[] = [];
       const bound: string[] = [];
@@ -9416,32 +9662,67 @@ export class BaseCompiler {
       // interpreter does (a missing operand gives NaN, a shorter list gives
       // the shorter result, a scalar gives a scalar).
       const guarded: string[] = [];
-      const sources = compiledArgs.map((code, i) => {
-        const needsGuard =
+      // An operand whose emitted code is an array of the width BY
+      // CONSTRUCTION — a constructor the common-subexpression pass has
+      // named, a sum of points, a point-valued call — needs no test either
+      // (`provenPointWidth`); a declared input read from `vars` keeps it.
+      const needsGuard = compiledArgs.map(
+        (code, i) =>
           isArrayOperand(args[i]) &&
-          BaseCompiler.arrayLiteralWidth(code) !== componentWidth;
-        if (!needsGuard && BaseCompiler.REPEATABLE_SOURCE.test(code))
+          BaseCompiler.arrayLiteralWidth(code) !== componentWidth &&
+          provenPointWidth(args[i], target) !== componentWidth
+      );
+      // When no source needs the run-time test, a source that is one array
+      // literal of the right width is read component by component from its
+      // TEXT: a `Tuple`/`List` node compiles to exactly that, so `(a, b) +
+      // (c, d)` is written `[a + c, b + d]` rather than binding `[a, b]` to a
+      // temporary only to index it. Under a test the literal is bound as
+      // before: the fallback closure must receive it whole, and repeating a
+      // component's text in both branches would double the emitted code.
+      const anyGuard = needsGuard.some((g) => g);
+      const literalParts = compiledArgs.map((code, i) =>
+        !anyGuard && isArrayOperand(args[i])
+          ? BaseCompiler.arrayLiteralElements(code, componentWidth)
+          : undefined
+      );
+      const sources = compiledArgs.map((code, i) => {
+        if (literalParts[i] !== undefined) return code;
+        if (!needsGuard[i] && BaseCompiler.REPEATABLE_SOURCE.test(code))
           return code;
         const v = BaseCompiler.tempVar(target);
         bindings.push(v);
         bound.push(code);
-        if (needsGuard) guarded.push(v);
+        if (needsGuard[i]) guarded.push(v);
         return v;
       });
       const components: string[] = [];
       for (let k = 0; k < componentWidth; k++) {
-        const cell = args.map((a, i) =>
-          isArrayOperand(a) ? `${sources[i]}[${k}]` : sources[i]
-        );
+        const cell = args.map((a, i) => {
+          const parts = literalParts[i];
+          if (parts !== undefined) return parts[k];
+          return isArrayOperand(a) ? `${sources[i]}[${k}]` : sources[i];
+        });
         components.push(
           BaseCompiler.guardConnectiveAbsence(h, cell, buildScalarBody(cell))
         );
       }
       const literal = `[${components.join(', ')}]`;
       if (guarded.length > 0) {
+        // The test claims RANK 1 as well as the length, because a component
+        // read is spliced into the head's SCALAR codegen. A declared width
+        // constrains what the engine assigns, not what a caller supplies, so
+        // a `tuple<number, number>` input may arrive as the matrix
+        // `[[1, 2], [3, 4]]`, which has length two: `P + (1, 2)` then read
+        // each ROW as a scalar and ran to the JavaScript string concatenation
+        // `['1,21', '3,42']`, where `_SYS.bcast` maps over the nested arrays
+        // and answers `[[2, 3], [5, 6]]`. The first element decides the rank,
+        // the same test `_SYS.matmul` applies (`javascript-target.ts`), so a
+        // shape this refuses falls to the helper that answered it before.
         const test = guarded
           .map(
-            (v) => `Array.isArray(${v}) && ${v}.length === ${componentWidth}`
+            (v) =>
+              `Array.isArray(${v}) && ${v}.length === ${componentWidth} && ` +
+              `!Array.isArray(${v}[0])`
           )
           .join(' && ');
         const fallback = `_SYS.bcast(${closure}, ${sources.join(', ')})`;

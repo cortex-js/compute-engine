@@ -1,3 +1,74 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A point built from a symbol that holds a number compiled to code that
+  threw.** `(⌊x⌋, ⌊y⌋, s)` with `s` assigned `2.41` emitted `[…, ...2.41]`, and
+  every call of the compiled function raised "2.41 is not iterable". The spread
+  belongs to a name bound to a REST sequence; a name the target inlined as a
+  literal has no accessor, and comparing two absent readings answered "equal"
+  and spread the literal. Compiled kernels that hash a lattice cell — the
+  Perlin-style noise of a plot document — could not run at all.
+- **A point summed with a scalar compiled instead of failing closed.**
+  `(x, y) + 3` emitted a run-time broadcast and answered `[3.3, 3.7]` at
+  `x = 0.3, y = 0.7`, where the interpreter reports `incompatible-type`: a tuple
+  does not add to a number at any component. The shape now declines, so the
+  interpreter answers it.
+- **`Dot` read the operands of any tuple-typed application as coordinates.**
+  `Dot(P + (0, 0), Q)` typed `tuple<real, real>` and `Dot(2P, Q)` typed a union
+  with a tuple, although both values are single numbers — the operands of a sum
+  are two points, not two coordinates. Only the point constructors are read that
+  way now; every other tuple-typed operand contributes its TYPE's components.
+
+- **A comparison with an absent operand is undecided instead of `false`.** A
+  compiled `Equal` or `NotEqual` whose operand is missing from the object of
+  variables passed to the kernel answered a decided boolean — `false` for
+  `Equal`, `true` for `NotEqual` — where the interpreter answers `Missing` for
+  both. Element-wise, `Equal(L, t)` with `t` absent compiled to
+  `[false, false, false]`, so a piecewise over it selected its else arm and a
+  plot drew a curve where the interpreter has nothing to draw. The comparison
+  now answers the absence marker of the lane, `undefined` on JavaScript and
+  `None` on Python, and the element-wise form marks exactly the absent
+  positions: `Equal([1, Missing], 1)` compiles to `[true, undefined]` as the
+  interpreter answers `[True, Missing]`. A piecewise over such a condition
+  answers absent at that position rather than taking a branch. A chained
+  comparison folds its pairs three-valued, because a decided `false` absorbs an
+  undecided pair from either side, which is what the interpreter answers for
+  `Equal(Missing, 1, 2)`. `NaN` is unchanged and still equals nothing: it is a
+  number, not an absence. `KroneckerDelta` is unchanged too, since its codomain
+  is numeric and it answers `0`.
+
+### Improvements
+
+- **`Dot` of a point whose coordinates may be lists answers the broadcast inner
+  product.** A tuple whose every component is a number, a list of numbers or a
+  `broadcastable<number>` types `broadcastable<number>` instead of the top type
+  `value`, and evaluates: with `L := [1, 2]`, `Dot((1, L), (3, 4))` is `[7, 11]`
+  where it used to stay symbolic. A declared point sharpens too — `Dot(c, d)`
+  for two `tuple<real, real>` symbols is `real`, where it stayed at the
+  operator's `number`, so it now fits a `real`-declared slot.
+- **Point arithmetic and inner products emit component code on the `javascript`
+  target.** A point states its width in its type, so a sum, scaling, division or
+  power over points of that width is written out one component at a time instead
+  of allocating a closure and dispatching on shape per evaluation, and `Dot` of
+  two static-width points becomes the sum of the component products rather than
+  a call to the rank-dispatching helper. A literal operand is read from its own
+  text, so `2 · (1, 2)` compiles to `[(2 * 1), (2 * 2)]` with no temporary at
+  all.
+- **A user-function application is proved scalar through POINT arguments and
+  through a bounded `Sum`.** The compile-side analysis that decides whether a
+  call may answer an array at run time now reads a body that consumes a point
+  whole (an inner product, a coordinate, a norm) or reduces over an index, and
+  it no longer demands a scalar in every argument position of a user-defined
+  callee. A parameter's scalar standing also survives a binder inside its own
+  body, which it lost at every `Sum`.
+
+  Measured on the Perlin-noise kernel of the Desmos state `hyvhlz4chj`, whose
+  helpers are all declared with the open `(unknown, unknown) -> unknown` arrow:
+  15.5 to 2.5 microseconds a sample, with the emitted definitions going from 64
+  run-time broadcast sites to 9 and the compiled values unchanged to the last
+  bit.
+
 ## 0.128.2 _2026-09-10_
 
 ### Resolved Issues

@@ -53,13 +53,15 @@ describe('a static width is emitted component by component', () => {
   test('`W + 1` over a `list<number^4>` fans out behind a shape test', () => {
     // A declared type constrains what the ENGINE may assign, not what a caller
     // may put in the `vars` object, so the components are read only after a
-    // run-time test that the operand really is a four-element array. The
-    // `_SYS.bcast` call is the else branch, and nothing on the fast path
-    // allocates it.
+    // run-time test that the operand really is a four-element array of
+    // SCALARS: a caller may supply a four-row matrix, whose rows the
+    // component code would read as numbers. The `_SYS.bcast` call is the else
+    // branch, and nothing on the fast path allocates it.
     const ce = newEngine({ W: 'list<number^4>' });
     const { code, run } = compiled(ce, 'W+1');
     expect(code).toBe(
-      '((_tv3) => Array.isArray(_tv3) && _tv3.length === 4 ? ' +
+      '((_tv3) => Array.isArray(_tv3) && _tv3.length === 4 && ' +
+        '!Array.isArray(_tv3[0]) ? ' +
         '[(_tv3[0] + 1), (_tv3[1] + 1), (_tv3[2] + 1), (_tv3[3] + 1)] : ' +
         '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _tv3, 1))(_.W)'
     );

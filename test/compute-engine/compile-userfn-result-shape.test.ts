@@ -149,10 +149,12 @@ describe('a user-function result is a scalar by construction', () => {
 });
 
 describe('a body that builds a collection keeps its element-wise lowering', () => {
-  // The list body states its width, so the element-wise lowering is the
-  // component one — two expressions reading `[0]` and `[1]` — rather than the
-  // run-time `_SYS.bcast` dispatch. The point body below keeps the dispatch:
-  // a point is atomic under broadcast and takes the dedicated point lane.
+  // Both bodies state their width, so the element-wise lowering is the
+  // component one — one expression per component — rather than the run-time
+  // `_SYS.bcast` dispatch. The two differ in what the compiler can prove
+  // about the CALL's result: a list-returning call is tested for its shape
+  // first, while a point-returning call is proved a two-component array by
+  // the point analysis and needs no test.
   test('a list-returning body still broadcasts, and agrees with the interpreter', () => {
     const ce = new ComputeEngine();
     ce.declare('t', 'number');
@@ -177,12 +179,19 @@ describe('a body that builds a collection keeps its element-wise lowering', () =
     ).toBe('[6,12]');
   });
 
-  test('a point-returning body still broadcasts', () => {
+  test('a point-returning body is scaled component by component, never read as one number', () => {
+    // The hazard is a point read as a scalar: `2 · p(t)` must not compile to
+    // `2 * _fn_p(t)`, which multiplies an array. The body proves the call
+    // yields a point of two components, so the two products are written out
+    // and the call is evaluated once.
     const ce = new ComputeEngine();
     ce.declare('t', 'number');
     ce.assign('p', ce.box(['Function', ['Tuple', 't', ['Square', 't']], 't']));
     const r = build(ce, ['Multiply', 2, ['p', 't']]);
-    expect(r.code).toContain('_SYS.bcast');
+    expect(r.code).toBe(
+      '((_tv3) => [(2 * _tv3[0]), (2 * _tv3[1])])(_fn_p(_.t))'
+    );
+    expect(r.code.split('_fn_p(').length - 1).toBe(1);
     expect(r.run({ t: 3 })).toEqual([6, 18]);
     expect(
       ce

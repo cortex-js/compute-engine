@@ -423,31 +423,6 @@ their expected effect on the corpus.
   should project an absent operand of a comparison to a `NaN` answer (the
   numeric absence) is a ruling on the absence contract
   (`docs/ERROR-MODEL.md` §3.F), not a codegen fix.
-- **`Dot` over a tuple with `broadcastable` components types `value`, and
-  the user-function chain behind Tycho's heat-map colour row never settles
-  (reported by the Tycho session 2026-09-09 as evidence for item 275; not
-  part of the round, reproduced from source).** With `t_0(x,y) := x + y`,
-  `p(x,y) := (cos t_0(x,y), sin t_0(x,y))` and `S(x,y) := (x, y)` declared
-  `(unknown, unknown) -> unknown` (the importer's spelling), `p(x,y)` types
-  `tuple<number, number>` and `S(x,y) + PointList(0,0)` types
-  `tuple<unknown, unknown>`, so `Dot(p(x,y), S(x,y) + PointList(0,0))` types
-  `value`; with `a, b: tuple<broadcastable<number>, broadcastable<number>>`,
-  `Dot(a, b)` also types `value` where `Dot` of two `tuple<real, real>`
-  types `number`. The `Dot` type handler keeps `value` on purpose for a
-  tuple whose components could refine to a point list (its comment cites the
-  `Multiply` lesson of item 158), so the ask is a typing change with a
-  design question: a tuple whose components are each `number` or
-  `broadcastable<number>` (no collection component) could answer
-  `broadcastable<number>` — a number, or a list of numbers when a component
-  is a list — which is the value the evaluator produces once the components
-  settle. Downstream, `c_2 → broadcastable<unknown>`, `f_Bm →
-  broadcastable<number>`, `R_ec → broadcastable<broadcastable<number>>` and
-  the colour row → `broadcastable<color>` → `_SYS.bcastColor` + 71
-  `_SYS.bcast` sites (Tycho `hyvhlz4chj`). Second half of the same chain: a
-  user-function result under `unknown` parameters called with SCALAR
-  arguments should settle scalar through the chain (the item-86 look-through
-  stops at the first `value`). Probe on the Tycho side:
-  `scripts/repros/2026-09-09-hyvhlz4chj-carrier-oracle-probe.mts`.
 - **`Re((x+ib)^2)` still builds one `{re, im}` object (noted by the
   complex-lane slice of 2026-09-09).** The statement lowering removed the
   closures; splitting a small-integer `Power` of a complex operand into its
@@ -516,6 +491,66 @@ their expected effect on the corpus.
   copy is linear in its length. The alternative is to document the returned
   enclosure as read-only and drop the copy. Today no in-repo consumer writes
   to a returned enclosure. The copy stays until ruled otherwise.
+
+### Residue of the point-shape compile round (OPEN, compile performance — found 2026-09-10 while settling the Tycho heat-map colour chain)
+
+The round proved a user-function application scalar or point-shaped under
+point arguments, taught `Dot` and point arithmetic to emit component code at
+a static width, and made a parameter's scalar standing survive a binder
+inside its own body. The Tycho noise kernel `hyvhlz4chj` went from 15.5 to
+2.5 microseconds a sample and its emitted definitions from 64 runtime
+broadcast sites to 9. What those 9 are:
+
+- **A parameter that binds a POINT whole keeps the runtime dispatch inside
+  its own definition** (3 sites, `p_rand(p) := mod(sin(p · (12.9898, 78.233,
+  45.164)) · 43758.5453, 1)`). Every CALL of that function is proved to pass
+  a three-component point, so the call site emits scalar code; the emitted
+  DEFINITION is shared by every call site in the compilation, and no
+  whole-program fact says they all pass a point of one width. The body
+  therefore reads `p` as a value of unknown rank: `Dot(p, …)` lowers to
+  `_SYS.matmul`, whose result is a scalar for a rank-1 operand and a vector
+  for a matrix, and the `Sin`, `Multiply` and `Mod` above it broadcast.
+  Emitting a per-shape specialization of the definition — one body per
+  argument shape the compilation actually calls it with — would compile the
+  point case as straight-line code. That is a new emission strategy, not a
+  gap in an analysis, and it is the same specialization the point-at-an-
+  untyped-parameter inlining was scoped against.
+- **A product of two calls whose declared result is `broadcastable<number>`
+  keeps `_SYS.mul`** (6 sites, the domain warp `f_Bm(x, y) · |f_Bm(x, y)|`
+  inside `R_ec`). The same shape written against a plainly typed helper
+  compiles to scalar arithmetic, so the analysis has the rule; what it does
+  not have is a verdict for this particular callee at that call site. Not
+  diagnosed further — the remaining cost is two multiplications a sample.
+
+A residue of the `Dot` typing half is that `PointList(1, L)` with `L` a list
+types `list<tuple<…>>`, so `Dot(PointList(1, L), PointList(3, 4))` reports
+`incompatible-type` where the tuple spelling `(1, L)` now answers the
+broadcast inner product. The two spellings should agree; deciding which one
+moves is a typing ruling on what `PointList` of a collection component means.
+
+**A point DECLARED with `broadcastable` coordinates compiles to a wrong value
+when a coordinate holds a list at run time (OPEN, correctness — needs a
+decision).** With `a, b: tuple<broadcastable<number>, broadcastable<number>>`
+— the shape the Tycho importer gives a point-valued helper — `Dot(a, b)`
+compiles to `_SYS.matmul(_.a, _.b)`. Measured:
+
+| `vars` | compiled | interpreted |
+| --- | --- | --- |
+| `a = [1, 2]`, `b = [3, 4]` | `11` | `11` |
+| `a = [1, [1, 2]]`, `b = [3, 4]` | `NaN` | `[7, 11]` |
+
+The round closed the same divergence for a WRITTEN point with a provably
+collection-valued component, by declining in the `Dot` codegen so the
+interpreter answers. That decline cannot be extended to this shape:
+`broadcastable<number>` is a union of a number and a collection, so the
+operand is a plain point at run time in every kernel that supplies scalars,
+and refusing it would stop a reachable, currently correct case from compiling
+at all. The fix is a lowering, not a gate — the sum of the component products
+emitted through `_SYS.bcast`, with the width read from the tuple type and a
+`_SYS.matmul` fallback behind the usual shape test, which is
+`compileStaticInnerProduct`'s machinery with a broadcasting body. Not built:
+it is a new emission, and the wrong value predates this round (the operand
+typed the top type `value` before and took the same `_SYS.matmul` path).
 
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 

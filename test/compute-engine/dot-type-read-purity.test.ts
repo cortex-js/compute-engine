@@ -139,12 +139,11 @@ describe('the inner-product type table', () => {
   });
 
   test('undeclared component symbols', () => {
-    // `value`, not a numeric tier: an `unknown` component may hold anything,
-    // including a collection, in which case the product broadcasts instead of
-    // staying scalar. The answer comes from `Dot`'s own operand gate
-    // (`isNumericTuple`, or a non-matrix `vector` type), which declines before
-    // any component is read; the same gate covers a boolean, a string, a
-    // nested tuple and a collection-typed component.
+    // `value`, not a numeric tier: an `unknown` component may hold anything
+    // — a string, a nested tuple — so neither the scalar inner product nor
+    // the broadcast one can be claimed. The answer comes from `Dot`'s own
+    // operand gate, which declines before any component is read; the same
+    // gate covers a boolean, a string and a nested tuple component.
     const dot = new ComputeEngine().box([
       'Dot',
       ['Tuple', 'uu', 'vv'],
@@ -155,15 +154,27 @@ describe('the inner-product type table', () => {
 
   test('non-numeric components of every other shape', () => {
     const ce = new ComputeEngine();
-    ce.declare('LL', 'list<integer>');
     const shapes: unknown[] = [
       ['Dot', ['Tuple', 'True', 2], ['Tuple', 3, 4]],
       ['Dot', ['Tuple', "'a'", 2], ['Tuple', 3, 4]],
       ['Dot', ['Tuple', ['Tuple', 1, 2], 3], ['Tuple', ['Tuple', 4, 5], 6]],
-      ['Dot', ['Tuple', 'LL', 2], ['Tuple', 3, 4]],
     ];
     for (const json of shapes)
       expect(ce.box(json as never).type.toString()).toBe('value');
+  });
+
+  test('a collection component types the broadcast inner product', () => {
+    // A tuple of coordinate lists is a POINT LIST, and its inner product is
+    // one number per point. The components are all numbers or collections of
+    // numbers, so the derivation runs and the claim is the type of the sum
+    // written out — never wider than `broadcastable<number>`, which is what
+    // the broadcast semantics guarantee. See `dot-point-list.test.ts` for the
+    // matching evaluation.
+    const ce = new ComputeEngine();
+    ce.declare('LL', 'list<integer>');
+    const dot = ce.box(['Dot', ['Tuple', 'LL', 2], ['Tuple', 3, 4]]);
+    expect(dot.type.toString()).toBe('list<integer>');
+    expect(dot.type.matches('broadcastable<number>')).toBe(true);
   });
 
   test('a one-component inner product keeps the product tier', () => {

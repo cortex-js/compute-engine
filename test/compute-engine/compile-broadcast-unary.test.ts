@@ -293,13 +293,14 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     // folding would answer the whole expression from the interpreter and emit
     // a literal array instead of the element-wise lowering under test.
     it('emits one expression per component when the width is known', () => {
+      // A literal list is read component by component from its own text: no
+      // temporary is bound only to be indexed.
       const r = compile(ce.box(['Sin', ['List', 1, 2, 3, 4]]), {
         constantFold: false,
       });
       expect(r.success).toBe(true);
       expect(r.code).toBe(
-        '((_tv2) => [Math.sin(_tv2[0]), Math.sin(_tv2[1]), ' +
-          'Math.sin(_tv2[2]), Math.sin(_tv2[3])])([1, 2, 3, 4])'
+        '[Math.sin(1), Math.sin(2), Math.sin(3), Math.sin(4)]'
       );
       expect(r.code).not.toContain('.map(');
     });
@@ -346,10 +347,11 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
       constantFold: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe(
-      '((_tv2) => [Math.sign(_tv2[0]), Math.sign(_tv2[1]), ' +
-        'Math.sign(_tv2[2])])([3, -4, 0])'
-    );
+    // The element source `-4` is parenthesized before it is spliced into the
+    // head's scalar codegen: a negative literal is not a primary expression
+    // everywhere the same splice runs (in Python `**` binds tighter than
+    // unary minus), so the wrap is applied to every non-atomic element.
+    expect(r.code).toBe('[Math.sign(3), Math.sign((-4)), Math.sign(0)]');
     expect(r.run!({})).toEqual([1, -1, 0]);
   });
 
@@ -365,8 +367,7 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
     });
     expect(r.success).toBe(true);
     expect(r.code).toBe(
-      '((_tv3) => [Math.atan2(_tv3[0], 1), Math.atan2(_tv3[1], 1), ' +
-        'Math.atan2(_tv3[2], 1)])([1, 2, 3])'
+      '[Math.atan2(1, 1), Math.atan2(2, 1), Math.atan2(3, 1)]'
     );
     const out = r.run!({}) as unknown as number[];
     expect(out).toHaveLength(3);

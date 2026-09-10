@@ -130,9 +130,11 @@ describe('BROADCAST EXEMPTION — the shapes it does NOT cover', () => {
         .evaluate()
         .toString()
     ).toBe('(sin(1), sin(2))');
+    // A point states its width in its type, so the element-wise lowering is
+    // written out per component rather than dispatched at run time.
     const r = js(['Sin', ['Tuple', 1, 2]]);
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_SYS.bcast((_tv1) => Math.sin(_tv1), [1, 2])');
+    expect(r.code).toBe('[Math.sin(1), Math.sin(2)]');
     expect(g(['Sin', ['Tuple', 1, 2]])).toBe('sin(vec2(1.0, 2.0))');
   });
 
@@ -166,7 +168,7 @@ describe('BROADCAST EXEMPTION — the shapes it does NOT cover', () => {
     // compiled lanes reproduce it and must not stand aside.
     const r = js(['Multiply', 2, ['Tuple', 1, 2]]);
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), 2, [1, 2])');
+    expect(r.code).toBe('[(2 * 1), (2 * 2)]');
     expect(r.run({})).toEqual([2, 4]);
   });
 });

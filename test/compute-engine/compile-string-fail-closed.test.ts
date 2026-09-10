@@ -592,7 +592,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       const r = compile(expr, { fallback: false });
       expect(r.success).toBe(true);
       expect(r.code).toMatchInlineSnapshot(
-        `"((_tv3) => [((1) < (_tv3[0])), ((1) < (_tv3[1]))])([1, 2])"`
+        `"[((1) < (1)), ((1) < (2))]"`
       );
       expect(r.run!()).toEqual(interpretedBooleans(expr));
     });

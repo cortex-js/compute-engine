@@ -7,6 +7,7 @@ import {
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import type { CompileTarget } from './types.js';
 import { isCallerMapped } from './cse.js';
+import { POINT_CONSTRUCTOR_HEADS } from './provable-kind.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { resolveTypeForCompilation } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
@@ -150,6 +151,34 @@ export function recordScalarParams(
 ): void {
   if (!target.boundVars || names.size === 0) return;
   scalarParams.set(target.boundVars, names);
+}
+
+/**
+ * Is `name` a parameter of the emitted body this scope belongs to that holds
+ * a run-time scalar? The fact is recorded on the bound-variable set of the
+ * body's own frame, so a binder INSIDE that body — the `Sum` of
+ * `f(x, y) := Σ … x …` — must be crossed to read it: every binder spreads a
+ * fresh set, and reading the fact off that set alone answered "not a scalar"
+ * for the enclosing function's own parameters. The whole rotation of the
+ * Tycho noise kernel then broadcast inside its `Sum` while the same
+ * expression outside one compiled as scalar arithmetic.
+ *
+ * The walk stops at a frame that BINDS the name itself, which is a different
+ * variable of the same name — the same rule {@link isDecidedLoopIndex}
+ * applies for the same reason.
+ */
+function isScalarParam(
+  name: string,
+  boundVars: ReadonlySet<string> | undefined
+): boolean {
+  let scope = boundVars;
+  while (scope !== undefined) {
+    if (scalarParams.get(scope)?.has(name) === true) return true;
+    const link = scopeParents.get(scope);
+    if (link === undefined || link.added.includes(name)) return false;
+    scope = link.parent;
+  }
+  return false;
 }
 
 function builtin(expr: Expression, target: CompileTarget<Expression>): boolean {
@@ -307,27 +336,35 @@ export function isConstructedScalar(
     // exempts. A function with a collection parameter records nothing,
     // because such a body may receive a list whole. Recorded by the emission
     // (`BaseCompiler.recordScalarParams`).
-    if (
-      target.boundVars !== undefined &&
-      scalarParams.get(target.boundVars)?.has(expr.symbol) === true
-    )
-      return true;
+    if (isScalarParam(expr.symbol, target.boundVars)) return true;
     // A caller's explicit declaration is the input contract. A type inferred
     // from use in a scalar parameter is not such a promise. Local binders and
     // caller mappings have their own representations and do not inherit it.
+    // A symbol that HOLDS a value compiles to that value, so it is the
+    // value's shape that decides: a number (a library constant such as
+    // `Pi`, or `t_0 := 2.855`) is a scalar; any other held value — a
+    // collection, a symbolic expression — is not judged here.
+    const held = expr.engine._getSymbolValue(expr.symbol);
     return (
       !target.boundVars?.has(expr.symbol) &&
       !target.varsKeys?.has(expr.symbol) &&
       expr.valueDefinition?.inferredType === false &&
-      expr.engine._getSymbolValue(expr.symbol) === undefined &&
+      (held === undefined ? true : isNumber(held)) &&
       ['number', 'boolean', 'string'].some((t) =>
         isSubtype(expr.type.type, t as 'number' | 'boolean' | 'string')
       )
     );
   }
   if (!isFunction(expr) || !builtin(expr, target)) return false;
-  if (SCALAR_ARITHMETIC_HEADS.includes(expr.operator))
-    return expr.ops.every((arg) => isConstructedScalar(arg, target, depth + 1));
+  // A scalar read off a constructed POINT — the inner product of two points,
+  // a coordinate, a norm — is a constructed scalar too. Decided with an
+  // empty walk, so every leaf is held to this function's own input contract.
+  if (
+    scalarOverPoints(expr, target, freshWalk(), depth) ||
+    (SCALAR_ARITHMETIC_HEADS.includes(expr.operator) &&
+      expr.ops.every((arg) => isConstructedScalar(arg, target, depth + 1)))
+  )
+    return true;
   return isScalarUserFunctionCall(expr, target, depth);
 }
 
@@ -443,28 +480,45 @@ function scalarShapedValue(
 ): boolean {
   if (depth > 32) return false;
   if (isNumber(expr)) return true;
-  if (isSymbol(expr))
+  if (isSymbol(expr)) {
+    // A parameter hypothesised to hold a POINT is an array, never a scalar.
+    if (walk.points.has(expr.symbol)) return false;
     return (
       walk.shadowed.has(expr.symbol) ||
       isConstructedScalar(expr, target, depth + 1)
     );
+  }
   if (!isFunction(expr) || !builtin(expr, target)) return false;
   const scalarOperand = (a: Expression) =>
     scalarShapedValue(a, target, walk, depth + 1);
   const arms = valueArms(expr);
   if (arms !== undefined) return arms.every(scalarOperand);
+  // A scalar read off a point (`scalarOverPoints`), and a sum or product over
+  // an index whose body is a scalar: both answer one number whatever their
+  // static type says, and neither is a broadcast over its operands.
+  if (scalarOverPoints(expr, target, walk, depth)) return true;
+  if (
+    (expr.operator === 'Sum' || expr.operator === 'Product') &&
+    indexedReductionIsScalar(expr, target, walk, depth)
+  )
+    return true;
   const shape = headShape(expr, target, walk);
   // A local binding, a caller `vars` entry or a callee already open on this
   // walk: none of them is a value this module can read.
   if (shape === 'opaque') return false;
   if (shape === 'broadcast') {
-    if (!expr.ops.every(scalarOperand)) return false;
-    // A built-in broadcastable head over scalars is a scalar by definition.
-    // A user-defined callee still owes the body test.
-    return (
-      !isUserFunctionHead(expr) ||
-      scalarShapedCall(expr, target, scalarOperand, walk, depth)
-    );
+    // A USER-defined callee decides its own arguments: one of them may be a
+    // POINT, which the body consumes whole and reduces to a number — the
+    // lattice hash `p_rand((⌊x⌋, ⌊y⌋, s))` is one value, not three.
+    // Demanding a scalar in every argument position refused such a call here,
+    // before its body was ever read, and every arithmetic head above it then
+    // lowered to a run-time broadcast.
+    if (isUserFunctionHead(expr))
+      return scalarShapedCall(expr, target, scalarOperand, walk, depth);
+    // A BUILT-IN broadcastable head maps element-wise, so it answers an array
+    // whenever an operand holds one: every operand must be a scalar for the
+    // result to be one.
+    return expr.ops.every(scalarOperand);
   }
   if (isScalarResultType(expr.type.type)) return true;
   if (SCALAR_ARITHMETIC_HEADS.includes(expr.operator))
@@ -516,8 +570,308 @@ function headShape(
 }
 
 /** The state a body walk carries: the callees whose body is open on the stack
- * (the cycle guard) and the parameter names those bodies bind. */
-type BodyWalk = { visiting: Set<string>; shadowed: Set<string> };
+ * (the cycle guard), the parameter names those bodies bind as SCALARS, and
+ * the parameter names they bind as POINTS, each with the point's width. A
+ * name is in one of the two sets, never both. */
+type BodyWalk = {
+  visiting: Set<string>;
+  shadowed: Set<string>;
+  points: Map<string, number>;
+  /** Whether a DECLARED point input (`P: tuple<number, number>` read from
+   * the caller's `vars`) counts as a point of its declared width. The shape
+   * questions trust the declaration; the run-time guard question
+   * (`provenPointWidth`) does not, because a caller may put anything in
+   * `vars`. */
+  inputsProven: boolean;
+};
+
+/** A walk with nothing open: every leaf is judged by the input contract. */
+function freshWalk(inputsProven = true): BodyWalk {
+  return {
+    visiting: new Set(),
+    shadowed: new Set(),
+    points: new Map(),
+    inputsProven,
+  };
+}
+
+/**
+ * The width of `expr` when the code this compiler emits for it is an array
+ * of that many scalars BY CONSTRUCTION — a point or list constructor with
+ * that many operands, or a value the point analysis proves a point — and
+ * `undefined` otherwise. A declared point INPUT does not qualify: its width
+ * is a declaration the caller may violate through `vars`, so it keeps the
+ * run-time shape test. The component fan-out and the static inner product
+ * (`base-compiler.ts`) read a qualifying operand by index with no test.
+ */
+export function provenPointWidth(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): number | undefined {
+  if (
+    isFunction(expr) &&
+    builtin(expr, target) &&
+    ARRAY_LITERAL_HEADS.has(expr.operator) &&
+    expr.ops.length > 0 &&
+    !expr.ops.some((op) => emitsSequenceSpread(op, target))
+  )
+    return expr.ops.length;
+  return pointShapedValue(expr, target, freshWalk(false), 0);
+}
+
+/**
+ * The constructor heads whose emitted JavaScript is ONE array literal holding
+ * exactly one element per operand, so the operand count is the run-time width.
+ *
+ * `PointList` builds points but is deliberately absent:
+ * `PointList([1,2,3], [10,20])` is a LIST OF POINTS, and the array it emits
+ * holds one array per point — the shortest zip of its source components,
+ * whose length has nothing to do with the operand count. A `PointList` whose
+ * every component is a scalar IS a single point, and the slow path
+ * (`pointShapedValue`, which tests each component) proves that case.
+ */
+const ARRAY_LITERAL_HEADS = new Set(['List', 'Tuple', 'Pair', 'Triple']);
+
+/**
+ * Does the emitted code SPLICE `op` into the array literal that holds it, so
+ * that it contributes an unknown number of elements instead of one? The list
+ * and tuple emitters spread a name bound to a REST sequence
+ * (`spreadIfSequence`, `javascript-target.ts`), so `List(a, rest)` can emit
+ * `[a, ...t]`, whose run-time length is not 2.
+ *
+ * The condition mirrors that emitter exactly: the name must be one the target
+ * records as a sequence AND must still resolve to the recorded accessor. A
+ * nested binder that shadows the name resolves it elsewhere, and the value it
+ * then holds is not a sequence.
+ */
+function emitsSequenceSpread(
+  op: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSymbol(op)) return false;
+  const accessor = target.sequenceVars?.get(op.symbol);
+  return accessor !== undefined && accessor === target.var(op.symbol);
+}
+
+/** The heads that read one scalar off a single point: a coordinate, and the
+ * norm (`Abs` of a tuple IS its norm in the interpreter). */
+const POINT_TO_SCALAR_HEADS = new Set([
+  'PointX',
+  'PointY',
+  'PointZ',
+  'Norm',
+  'Abs',
+]);
+
+/**
+ * Is `expr` a scalar read off constructed POINTS — the inner product of two
+ * points of one width, or a coordinate or the norm of one point? A point is a
+ * JavaScript array at run time, so the scalar heads around it must not read
+ * it as a number; but these heads consume the whole point and answer one
+ * number, exactly as the interpreter does. Every other shape answers `false`
+ * and leaves the decision to the caller's remaining rules.
+ */
+function scalarOverPoints(
+  expr: Expression & FunctionInterface,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number
+): boolean {
+  const h = expr.operator;
+  const ops = expr.ops;
+  const point = (a: Expression) => pointShapedValue(a, target, walk, depth + 1);
+  if (h === 'Dot' && ops.length === 2) {
+    const width = point(ops[0]);
+    return width !== undefined && point(ops[1]) === width;
+  }
+  if (POINT_TO_SCALAR_HEADS.has(h) && ops.length === 1)
+    return point(ops[0]) !== undefined;
+  return false;
+}
+
+/**
+ * Bind `names` into the walk as the parameters (or indices) of the body about
+ * to be examined, and answer the function that puts the enclosing state back.
+ *
+ * A bound name is a DIFFERENT variable from anything an enclosing frame holds
+ * under that name, so it must shadow BOTH hypothesis sets: a name left in
+ * `walk.points` would answer the enclosing point's width for what is really a
+ * scalar, and `Norm(i)` or `Dot(i, i)` would then be admitted as a scalar read
+ * off a point.
+ *
+ * The enclosing state of each DISTINCT name is saved once, before any write.
+ * Saving it as each name is bound would let a repeated name (`f(x, x)`, which
+ * nothing here rejects) save the state its own first binding had just
+ * installed, and the restore would then leave a hypothesis behind.
+ */
+function bindWalkNames(
+  walk: BodyWalk,
+  names: ReadonlyArray<string>,
+  kindOf: (index: number) => 'scalar' | number
+): () => void {
+  const saved = new Map<
+    string,
+    { scalar: boolean; point: number | undefined }
+  >();
+  for (const n of names)
+    if (!saved.has(n))
+      saved.set(n, { scalar: walk.shadowed.has(n), point: walk.points.get(n) });
+  names.forEach((n, i) => {
+    const kind = kindOf(i);
+    if (kind === 'scalar') {
+      walk.points.delete(n);
+      walk.shadowed.add(n);
+    } else {
+      walk.shadowed.delete(n);
+      walk.points.set(n, kind);
+    }
+  });
+  return () => {
+    for (const [n, state] of saved) {
+      if (state.scalar) walk.shadowed.add(n);
+      else walk.shadowed.delete(n);
+      if (state.point !== undefined) walk.points.set(n, state.point);
+      else walk.points.delete(n);
+    }
+  };
+}
+
+/**
+ * Is `expr` a `Sum` or `Product` over one or more `Limits(index, lo, hi)`
+ * whose bounds are scalars and whose body is a scalar once each index is
+ * bound as one? Such a reduction answers one number. A `Sum` over a
+ * collection (no `Limits`), or a `Limits` with a non-symbol index, answers
+ * `false`.
+ */
+function indexedReductionIsScalar(
+  expr: Expression & FunctionInterface,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number
+): boolean {
+  const ops = expr.ops;
+  if (ops.length < 2) return false;
+  const indices: string[] = [];
+  for (const limits of ops.slice(1)) {
+    if (!isFunction(limits, 'Limits') || !isSymbol(limits.ops[0])) return false;
+    if (
+      !limits.ops
+        .slice(1)
+        .every((b) => scalarShapedValue(b, target, walk, depth + 1))
+    )
+      return false;
+    indices.push(limits.ops[0].symbol);
+  }
+  // Each index is a scalar for the body walk, and it shadows whatever an
+  // enclosing frame holds under that name (`bindWalkNames`).
+  const restore = bindWalkNames(walk, indices, () => 'scalar');
+  try {
+    return scalarShapedValue(ops[0], target, walk, depth + 1);
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * The width of `expr` when it is a POINT — a numeric tuple, a JavaScript array
+ * of that many scalars at run time — and `undefined` when that is not proved.
+ * The point twin of `scalarShapedValue`, under the same input contract:
+ *
+ *  - a parameter hypothesised to hold a point has that width;
+ *  - a declared point input (`P: tuple<number, number>`) has the width its
+ *    type lists, on the same terms as a declared scalar input
+ *    (`constructedPointWidth`);
+ *  - a point constructor over scalars has one coordinate per operand;
+ *  - a block or piecewise whose arms are all points of one width has it;
+ *  - the point arithmetic the interpreter computes coordinate by coordinate
+ *    keeps the width: a sum of points, a negated point, a point scaled by a
+ *    scalar, a point divided by or raised to a scalar. A point summed with a
+ *    scalar is an `incompatible-type` error there and is not a point here;
+ *  - a call of a user-defined function whose body is a point under the
+ *    arguments' kinds.
+ */
+function pointShapedValue(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number
+): number | undefined {
+  if (depth > 32) return undefined;
+  if (isSymbol(expr)) {
+    const hypothesis = walk.points.get(expr.symbol);
+    if (hypothesis !== undefined) return hypothesis;
+    if (walk.shadowed.has(expr.symbol) || !walk.inputsProven) return undefined;
+    return constructedPointWidth(expr, target);
+  }
+  if (!isFunction(expr) || !builtin(expr, target)) return undefined;
+  const h = expr.operator;
+  const ops = expr.ops;
+  const scalar = (a: Expression) =>
+    scalarShapedValue(a, target, walk, depth + 1);
+  const point = (a: Expression) => pointShapedValue(a, target, walk, depth + 1);
+  if (POINT_CONSTRUCTOR_HEADS.has(h))
+    return ops.length > 0 && ops.every(scalar) ? ops.length : undefined;
+  const arms = valueArms(expr);
+  if (arms !== undefined) return commonWidth(arms.map(point));
+  if (h === 'Add')
+    return ops.length > 0 ? commonWidth(ops.map(point)) : undefined;
+  if (h === 'Negate') return ops.length === 1 ? point(ops[0]) : undefined;
+  if (h === 'Multiply') {
+    let width: number | undefined;
+    for (const op of ops) {
+      if (scalar(op)) continue;
+      const w = point(op);
+      if (w === undefined || width !== undefined) return undefined;
+      width = w;
+    }
+    return width;
+  }
+  if ((h === 'Divide' || h === 'Power') && ops.length === 2)
+    return scalar(ops[1]) ? point(ops[0]) : undefined;
+  if (isUserFunctionHead(expr)) {
+    const kind = userCallKind(
+      expr,
+      target,
+      (a) => (scalar(a) ? 'scalar' : point(a)),
+      walk,
+      depth
+    );
+    return typeof kind === 'number' ? kind : undefined;
+  }
+  return undefined;
+}
+
+/** One width shared by every entry, or `undefined` when an entry is not a
+ * point or the widths differ. */
+function commonWidth(
+  widths: ReadonlyArray<number | undefined>
+): number | undefined {
+  if (widths.length === 0 || widths.some((w) => w === undefined))
+    return undefined;
+  return widths.every((w) => w === widths[0]) ? widths[0] : undefined;
+}
+
+/** The width of a declared POINT runtime input — a symbol whose explicitly
+ * declared type is a tuple of numbers — on the same terms as the declared
+ * scalar input of `isConstructedScalar`: the declaration is the caller's
+ * input contract, an inferred type is not. */
+function constructedPointWidth(
+  expr: Expression & { readonly symbol: string },
+  target: CompileTarget<Expression>
+): number | undefined {
+  if (
+    target.boundVars?.has(expr.symbol) ||
+    target.varsKeys?.has(expr.symbol) ||
+    expr.valueDefinition?.inferredType !== false ||
+    expr.engine._getSymbolValue(expr.symbol) !== undefined
+  )
+    return undefined;
+  const t = resolveTypeForCompilation(expr.type.type);
+  if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+  return t.elements.every((el) => isSubtype(el.type, 'number'))
+    ? t.elements.length
+    : undefined;
+}
 
 /** The operands of `expr` that can become its VALUE — the last statement of a
  * `Block`, the arms of an `If`, the odd-indexed arms of a `Which`. `undefined`
@@ -553,6 +907,41 @@ function scalarShapedCall(
   walk: BodyWalk,
   depth: number
 ): boolean {
+  return (
+    userCallKind(
+      expr,
+      target,
+      (a) =>
+        scalarArgument(a)
+          ? 'scalar'
+          : pointShapedValue(a, target, walk, depth + 1),
+      walk,
+      depth
+    ) === 'scalar'
+  );
+}
+
+/**
+ * The kind of value a call of user function `expr` yields — `'scalar'`, the
+ * width of a point, or `undefined` when neither is proved — given each
+ * argument's kind under `argumentKind` (`undefined` for an argument of no
+ * proved kind, which refuses the call: the emitted call broadcasts a list
+ * argument element-wise and answers a list, whatever the body returns for
+ * one element).
+ *
+ * A call whose arguments are all scalars is the memoized question
+ * `userFunctionResultIsScalar` answers; a call with a POINT argument binds
+ * that parameter as a point of the argument's width for the body walk and is
+ * decided afresh each time (the memo is keyed on the callee alone, so it
+ * cannot hold an answer that depends on the arguments' kinds).
+ */
+function userCallKind(
+  expr: Expression & FunctionInterface,
+  target: CompileTarget<Expression>,
+  argumentKind: (a: Expression) => 'scalar' | number | undefined,
+  walk: BodyWalk,
+  depth: number
+): 'scalar' | number | undefined {
   const h = expr.operator;
   if (
     target.boundVars?.has(h) ||
@@ -561,11 +950,40 @@ function scalarShapedCall(
     walk.shadowed.has(h) ||
     walk.visiting.has(h)
   )
-    return false;
+    return undefined;
   const literal = userFunctionLiteral(expr, h);
-  if (literal === undefined || literal.ops.length < 1) return false;
-  if (!expr.ops.every(scalarArgument)) return false;
-  return userFunctionResultIsScalar(h, literal, target, walk, depth);
+  if (literal === undefined || literal.ops.length < 1) return undefined;
+  const kinds = expr.ops.map(argumentKind);
+  if (kinds.some((k) => k === undefined)) return undefined;
+  if (
+    kinds.every((k) => k === 'scalar') &&
+    userFunctionResultIsScalar(h, literal, target, walk, depth)
+  )
+    return 'scalar';
+  // Not a scalar under these kinds: the body may still be a POINT, which the
+  // walk below decides with the parameters bound to the arguments' kinds.
+  const params = literal.ops.slice(1).map((p) => parameterName(p));
+  if (params.length !== kinds.length || params.some((n) => n === undefined))
+    return undefined;
+  const root = target.userFunctions?.root;
+  walk.visiting.add(h);
+  // Each parameter takes the kind of the argument at its position, and
+  // shadows whatever an enclosing frame holds under that name
+  // (`bindWalkNames`).
+  const restore = bindWalkNames(
+    walk,
+    params as ReadonlyArray<string>,
+    (i) => kinds[i]!
+  );
+  try {
+    const body = literal.ops[0];
+    const t = root ?? target;
+    if (scalarShapedValue(body, t, walk, depth + 1)) return 'scalar';
+    return pointShapedValue(body, t, walk, depth + 1);
+  } finally {
+    walk.visiting.delete(h);
+    restore();
+  }
 }
 
 /**
@@ -596,24 +1014,41 @@ function userFunctionResultIsScalar(
   if (cached !== undefined) return cached;
   const root = registry?.root;
   walk.visiting.add(h);
-  // The body binds these names; a call of one of them inside it denotes that
-  // binding, never the same-named engine definition.
+  // The body binds these names as SCALARS — that is the question this
+  // function asks — and a call of one of them inside the body denotes that
+  // binding, never the same-named engine definition. The binding shadows
+  // both hypothesis sets (`bindWalkNames`): a parameter whose name matches
+  // one the caller hypothesised as a POINT would otherwise keep the outer
+  // width for the whole body walk, and `Norm(p)` or `Dot(p, p)` over the
+  // callee's own scalar parameter would be admitted as a scalar read off a
+  // point.
   const bound = literal.ops
     .slice(1)
     .map((p) => parameterName(p))
-    .filter((n): n is string => n !== undefined && !walk.shadowed.has(n));
-  for (const n of bound) walk.shadowed.add(n);
+    .filter((n): n is string => n !== undefined);
+  const restore = bindWalkNames(walk, bound, () => 'scalar');
   let answer: boolean;
   try {
     answer = scalarShapedValue(literal.ops[0], root ?? target, walk, depth + 1);
   } finally {
     walk.visiting.delete(h);
-    for (const n of bound) walk.shadowed.delete(n);
+    restore();
   }
-  // Only a verdict reached with no callee left open on the stack is a
-  // property of `h` alone: an answer computed while a caller was being
-  // examined may have been cut short by the cycle guard.
-  if (registry !== undefined && root !== undefined && walk.visiting.size === 0)
+  // Only a verdict reached with NOTHING left over from the calling context is
+  // a property of `h` alone. A callee still open on the stack means the answer
+  // may have been cut short by the cycle guard. A name the caller hypothesised
+  // — as a scalar in `walk.shadowed`, or as a point in `walk.points` — can
+  // decide the answer just as well: a body that reads a document symbol of
+  // that same name is then judged against the hypothesis instead of against
+  // the symbol, and every later call site would reuse that verdict under
+  // names of its own.
+  if (
+    registry !== undefined &&
+    root !== undefined &&
+    walk.visiting.size === 0 &&
+    walk.shadowed.size === 0 &&
+    walk.points.size === 0
+  )
     (registry.scalarShaped ??= new Map()).set(h, answer);
   return answer;
 }
@@ -654,7 +1089,7 @@ function isScalarUserFunctionCall(
     expr,
     target,
     (a) => isConstructedScalar(a, target, depth + 1),
-    { visiting: new Set(), shadowed: new Set() },
+    freshWalk(),
     depth
   );
 }

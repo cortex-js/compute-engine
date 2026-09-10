@@ -29,6 +29,11 @@ import {
   functionLiteralBoundNames,
   functionLiteralParameterName,
 } from '../boxed-expression/function-literal.js';
+import {
+  provableApplicationKind,
+  provableTopLevelKind,
+  userFunctionLiteral,
+} from './provable-kind.js';
 import { Complex } from 'complex-esm';
 import {
   tryGetConstant,
@@ -1480,17 +1485,20 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
   // node.
   if (t === 'unknown' || t === 'any' || t === 'value') {
     if (!isFunction(e) || (!e.isCanonical && !e.isStructural)) return false;
-    // Item-86 look-through (Tycho): an application of a USER function whose
-    // body is provably scalar under scalar arguments is NOT
-    // possibly-collection, even when its declared return type is open
+    // Look through an application of a USER function: when the body analysis
+    // proves the result is ONE NUMBER under these arguments, the application
+    // is NOT possibly-collection, even though its declared return type is open
     // (`(unknown) -> unknown`, the shape consumers use so list-broadcasting
     // keeps working). `q(x) < y` with `q(t) = n·t+1` compiles; `q(L) < y`
     // with a collection-ish `L` still fails closed at the argument check.
-    return !isProvablyScalarApplication(
-      e,
-      new Set(),
-      (a) =>
-        !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a)
+    // A body the analysis proves to be a POINT keeps the fail-closed answer
+    // here: a point is a JavaScript array at run time, so it IS a collection
+    // for the paths this predicate guards.
+    // Provenance: Tycho item 86.
+    return (
+      provableApplicationKind(e, new Set(), (a) =>
+        provableTopLevelKind(a, topLevelArgIsScalar)
+      ) !== 'scalar'
     );
   }
   // A scalar-or-collection union (`integer | vector<integer^2>`) is a scalar
@@ -1534,19 +1542,18 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
       // DECLARED result, and under the open `(unknown) -> unknown` head the
       // consumers use, `T` is `unknown` no matter what the body returns —
       // `a(t) = [cos t, sin t]` applied to a SCALAR is still a list. So a
-      // user-function application takes the item-86 look-through instead,
-      // which reads the body and declines on a collection constructor
-      // (Tycho item 171: `Σ_i a(h(i))` reached the scalar accumulation arm
-      // and `+`-concatenated the arrays into a string, where the
-      // type-`unknown` spellings `Σ_i a(i)` / `Σ_i a(t+i)` took the
-      // element-wise `_SYS.bcast` fold).
+      // user-function application takes the body look-through instead, which
+      // reads the body and declines on a collection constructor, and answers
+      // "possibly collection" for a body that builds a POINT — a point is a
+      // JavaScript array at run time (Tycho item 171: `Σ_i a(h(i))` reached
+      // the scalar accumulation arm and `+`-concatenated the arrays into a
+      // string, where the type-`unknown` spellings `Σ_i a(i)` / `Σ_i a(t+i)`
+      // took the element-wise `_SYS.bcast` fold).
       if (userFunctionLiteral(e) !== undefined)
-        return !isProvablyScalarApplication(
-          e,
-          new Set(),
-          (a) =>
-            !a.type.matches('collection<any>') &&
-            !isPossiblyCollectionTypedJS(a)
+        return (
+          provableApplicationKind(e, new Set(), (a) =>
+            provableTopLevelKind(a, topLevelArgIsScalar)
+          ) !== 'scalar'
         );
       return (e.ops ?? []).some(
         (a) =>
@@ -1559,102 +1566,14 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
 }
 
 /**
- * The `Function`-literal value of `e`'s operator when `e` is an application of
- * a USER-defined function (a symbol whose value is a `Function` literal), and
- * `undefined` otherwise — builtin operators have their own compile handlers and
- * no body to look through.
+ * The scalar test the two `isPossiblyCollectionTypedJS` look-through gates
+ * hand to `provableTopLevelKind`: an ACTUAL ARGUMENT is one number at run time
+ * when its type is not collection-shaped and this predicate does not call it
+ * possibly-collection. A bare `unknown` symbol passes — at the top level it is
+ * a free plot variable, not a captured document symbol.
  */
-function userFunctionLiteral(
-  e: Expression
-): (Expression & FunctionInterface) | undefined {
-  if (!isFunction(e)) return undefined;
-  const op = e.operator;
-  if (typeof op !== 'string') return undefined;
-  const value = e.engine.box(op).value;
-  return isFunction(value, 'Function') ? value : undefined;
-}
-
-/**
- * Item-86 look-through: is `e` an application of a user function whose result
- * is provably scalar — every actual argument accepted by `argIsScalar`, and
- * the function's body mapping scalar parameters to a scalar result?
- *
- * The body analysis is a conservative WHITELIST: its only permitted failure
- * mode is *declining* (the caller then keeps the fail-closed path), never
- * unsound admission — the inverse discipline of the usual "static gates
- * over-fire" rule, because here admission is the dangerous direction.
- *
- * - the actual arguments are judged by the caller-supplied `argIsScalar` (at
- *   the top level: the gate's own convention, where a bare unknown symbol is
- *   a plot variable and scalar; inside a body: the enclosing analysis);
- * - a parameter is scalar by assumption;
- * - a captured (non-parameter) symbol must have a provably-scalar declared
- *   type (`number`/`boolean`/`string`) — unlike a plot variable, a captured
- *   document symbol is routinely assigned a list later, so `unknown` is not
- *   trusted here;
- * - an application must be of a `broadcastable` operator (whose base
- *   signature is scalar → scalar by definition of the lift) over
- *   scalar-if-scalar operands, or of another user function passing this same
- *   analysis — self/mutual recursion declines via `visited`;
- * - everything else declines: `List`/`Range`/collection constructors (not
- *   broadcastable), multi-statement `Block` bodies, arity mismatches,
- *   non-symbol parameters.
- */
-function isProvablyScalarApplication(
-  e: Expression,
-  visited: Set<string>,
-  argIsScalar: (a: Expression) => boolean
-): boolean {
-  if (!isFunction(e)) return false;
-  const op = e.operator;
-  if (visited.has(op)) return false;
-  // Only a USER function — a symbol whose value is a `Function` literal — is
-  // looked through; built-in operators have their own compile handlers.
-  const fnVal = userFunctionLiteral(e);
-  if (fnVal === undefined) return false;
-  const fnOps = fnVal.ops;
-  const params = fnOps
-    .slice(1)
-    .map((p: Expression) => functionLiteralParameterName(p));
-  const args = e.ops;
-  if (params.length !== args.length) return false;
-  if (params.some((p: string) => !p)) return false;
-  if (!args.every(argIsScalar)) return false;
-  const nextVisited = new Set(visited);
-  nextVisited.add(op);
-  // Canonical parse wraps a lambda body in `Block`; unwrap only the
-  // single-statement form (a multi-statement body declines below — `Block`
-  // is not a broadcastable operator).
-  let body: Expression | undefined = fnOps[0];
-  if (body === undefined) return false;
-  while (isFunction(body, 'Block') && body.nops === 1) body = body.ops[0];
-  return scalarIfScalarBody(body, new Set(params), nextVisited);
-}
-
-/** See `isProvablyScalarApplication` — the body half of the whitelist. */
-function scalarIfScalarBody(
-  x: Expression,
-  params: Set<string>,
-  visited: Set<string>
-): boolean {
-  if (isNumber(x) || isString(x)) return true;
-  if (isSymbol(x)) {
-    if (params.has(x.symbol)) return true;
-    const t = x.type;
-    return t.matches('number') || t.matches('boolean') || t.matches('string');
-  }
-  if (!isFunction(x)) return false;
-  const op = x.operator;
-  if (typeof op === 'string') {
-    const def = x.engine.lookupDefinition(op);
-    if (def && (def as any).operator?.broadcastable === true)
-      return (x.ops ?? []).every((o) => scalarIfScalarBody(o, params, visited));
-  }
-  // A nested user-function application: same look-through, with its
-  // arguments judged under THIS body's scalar assumptions.
-  return isProvablyScalarApplication(x, visited, (a) =>
-    scalarIfScalarBody(a, params, visited)
-  );
+function topLevelArgIsScalar(a: Expression): boolean {
+  return !a.type.matches('collection<any>') && !isPossiblyCollectionTypedJS(a);
 }
 
 /**
@@ -2334,12 +2253,17 @@ function spreadIfSequence(
   target: CompileTarget<Expression> | undefined
 ): string {
   const code = compile(x);
-  if (
-    isSymbol(x) &&
-    target !== undefined &&
-    target.sequenceVars?.get(x.symbol) === target.var(x.symbol)
-  )
-    return `...${code}`;
+  if (isSymbol(x) && target !== undefined) {
+    // Both readings must name the SAME accessor, and that accessor must
+    // exist. A symbol the target resolves to an inlined literal — a declared
+    // real symbol holding `2.41` — has no accessor at all, so both readings
+    // are `undefined` and an equality test alone would call them equal and
+    // spread the literal: `(⌊x⌋, ⌊y⌋, s)` was emitted as
+    // `[…, ...2.41]`, which throws "2.41 is not iterable" at run time.
+    const accessor = target.sequenceVars?.get(x.symbol);
+    if (accessor !== undefined && accessor === target.var(x.symbol))
+      return `...${code}`;
+  }
   return code;
 }
 
@@ -4729,9 +4653,35 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Dot` and `MatrixMultiply` share the interpreter's dimensionality
   // dispatch: vector·vector → scalar, matrix·vector / vector·matrix →
   // vector, matrix·matrix → matrix. Dimension mismatches yield NaN.
-  Dot: (args, compile) => {
+  Dot: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Dot: missing argument');
+    // A POINT with a collection component is a point LIST: `(1, L)` with
+    // `L = [1, 2]` is the two points `(1, 1)` and `(1, 2)`, so the
+    // interpreter zips the components and answers one inner product per
+    // point — `Dot((1, L), (3, 4))` is `[7, 11]`. No lowering here
+    // reproduces that: `_SYS.matmul` multiplies the nested array whole and
+    // answers a wrong value (measured: `null`), and the written-out inner
+    // product below refuses a collection-typed operand. Fail closed (D6), so
+    // the interpreter answers through the fallback route.
+    //
+    // The test covers the point spellings — `Tuple` and `PointList`. A `List`
+    // operand is excluded: a list whose components are collections is a
+    // MATRIX, and `_SYS.matmul` multiplies a matrix correctly.
+    for (const arg of [args[0], args[1]])
+      if (
+        isUnwrittenPointWithCollectionComponent(arg) ||
+        (!isFunction(arg, 'List') && pointHasBroadcastComponent(arg))
+      )
+        throw new Error(
+          'Dot: cannot compile a point operand with a collection ' +
+            'component. Fail closed (D6).'
+        );
+    // Two points or vectors of one static width are written out as the sum of
+    // their component products; every other shape takes the run-time
+    // dispatch (`compileStaticInnerProduct`).
+    const inner = BaseCompiler.compileStaticInnerProduct(args, target);
+    if (inner !== undefined) return inner;
     return `_SYS.matmul(${collArg('Dot', args[0], compile, 1)}, ${collArg('Dot', args[1], compile, 2)})`;
   },
   MatrixMultiply: (args, compile) => {
