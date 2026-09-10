@@ -2981,6 +2981,7 @@ type CompiledExpression = {
 ```ts
 type OperatorCompileContext = {
   language: string;
+  typeOf: (expr) => Type;
 };
 ```
 
