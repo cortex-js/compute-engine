@@ -1490,7 +1490,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // the missing parameters to `undefined`. A non-literal callee (a
     // valueless function symbol) has no parameter list to check against.
     // Fail closed (D6) on all of those.
-    const fn = args[0];
+    const fn = isFunction(args[0], 'Derivative')
+      ? BaseCompiler.intervalDerivativeLiteral(args)
+      : args[0];
     if (!isFunction(fn, 'Function'))
       throw new Error(
         `Apply: only a function-literal callee compiles on the interval ` +
@@ -1504,7 +1506,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `curries or throws there, which this target cannot express. ` +
           `Fail closed (D6).`
       );
-    return `(${compile(args[0])})(${args
+    return `(${compile(fn)})(${args
       .slice(1)
       .map((a) => compile(a))
       .join(', ')})`;

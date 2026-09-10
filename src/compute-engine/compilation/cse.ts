@@ -1066,6 +1066,17 @@ class Harvester {
    * Purity and caller mappings are checked by the same admission rules as
    * every other CSE candidate. */
   private isExpensiveBuiltin(node: Expression): boolean {
+    // A range gather reduction walks the source even when its syntax is
+    // below the ordinary size threshold. Existing purity and scope checks
+    // still decide whether two occurrences may share that walk.
+    if (
+      isFunction(node) &&
+      (node.operator === 'Sum' || node.operator === 'Product') &&
+      node.nops === 1 &&
+      isFunction(node.ops[0], 'At') &&
+      isFunction(node.ops[0].ops[1], 'Range')
+    )
+      return true;
     return (
       isFunction(node) &&
       [

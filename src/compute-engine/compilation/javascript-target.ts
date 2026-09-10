@@ -1,3 +1,4 @@
+import { derivativeClosedForm } from './derivative-closed-form.js';
 import type {
   Expression,
   FunctionInterface,
@@ -4654,6 +4655,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // stays compact, and for any head with no coefficient recurrence.
     const jet = tryCompileJetDerivative(args, compile, target);
     if (jet !== undefined) return jet;
+    if (isFunction(args[0], 'Derivative') && args.length === 2) {
+      const literal = derivativeClosedForm('Derivative', args[0].ops);
+      if (isFunction(literal, 'Function') && literal.nops === 2) {
+        const callee = BaseCompiler.withDerivativeArgument(
+          literal,
+          args[1],
+          () => compile(literal)
+        );
+        return `(${callee})(${compile(args[1])})`;
+      }
+    }
     return `(${compile(args[0])})(${args
       .slice(1)
       .map((a) => compile(a))
@@ -4666,18 +4678,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Dot: (args, compile, target) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Dot: missing argument');
-    // A POINT with a collection component is a point LIST: `(1, L)` with
-    // `L = [1, 2]` is the two points `(1, 1)` and `(1, 2)`, so the
-    // interpreter zips the components and answers one inner product per
-    // point — `Dot((1, L), (3, 4))` is `[7, 11]`. No lowering here
-    // reproduces that: `_SYS.matmul` multiplies the nested array whole and
-    // answers a wrong value (measured: `null`), and the written-out inner
-    // product below refuses a collection-typed operand. Fail closed (D6), so
-    // the interpreter answers through the fallback route.
-    //
-    // The test covers the point spellings — `Tuple` and `PointList`. A `List`
-    // operand is excluded: a list whose components are collections is a
-    // MATRIX, and `_SYS.matmul` multiplies a matrix correctly.
+    const broadcast = BaseCompiler.compileBroadcastInnerProduct(args, target);
+    if (broadcast !== undefined) return broadcast;
+    // Tuple coordinates with numeric list components use the broadcast path
+    // above. Other point-list spellings have no faithful component expansion;
+    // passing their nested arrays to matrix multiplication changes the result.
     for (const arg of [args[0], args[1]])
       if (
         isUnwrittenPointWithCollectionComponent(arg) ||
@@ -13613,7 +13618,7 @@ function emitSumProduct(
       // new. The nested clause hoists for itself, once per outer term.
       const asStatements = termCount >= UNROLL_STATEMENT_MIN_TERMS;
       const { bindings, result: terms } =
-        asStatements && rest.length === 0
+        termCount > 1 && rest.length === 0
           ? BaseCompiler.hoistLoopInvariants(body, [index], target, emitTerms)
           : { bindings: [], result: emitTerms() };
 
@@ -13622,7 +13627,12 @@ function emitSumProduct(
         .join('');
 
       if (!unrolledIsComplex) {
-        if (!asStatements) return `(${terms.join(` ${op} `)})`;
+        if (!asStatements) {
+          const sum = `(${terms.join(` ${op} `)})`;
+          return bindings.length === 0
+            ? sum
+            : expression((exit) => `${hoisted}${exit(sum)}`);
+        }
 
         // May the accumulation stop at the first NaN? Only if skipping the
         // remaining terms is unobservable — a term with an observable effect

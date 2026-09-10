@@ -120,7 +120,7 @@ import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
-import { derivative } from '../symbolic/derivative.js';
+import { derivativeClosedForm } from './derivative-closed-form.js';
 import {
   MIN_UNROLLED_WIDTH,
   unrollFixedWidthCollections,
@@ -8614,6 +8614,57 @@ export class BaseCompiler {
     return depth === 0;
   }
 
+  /** A tuple's list-valued coordinates represent several points, not a matrix. */
+  static compileBroadcastInnerProduct(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    if (args.length !== 2) return undefined;
+    const types = args.map(compilationType);
+    if (!types.every((t) => typeof t !== 'string' && t.kind === 'tuple'))
+      return undefined;
+    const [left, right] = types as [
+      Extract<Type, { kind: 'tuple' }>,
+      Extract<Type, { kind: 'tuple' }>,
+    ];
+    const n = left.elements.length;
+    if (n === 0 || right.elements.length !== n) return undefined;
+    const components = [...left.elements, ...right.elements];
+    if (
+      !components.every((c) => isSubtype(c.type, 'broadcastable<number>')) ||
+      components.every((c) => isSubtype(c.type, 'number'))
+    )
+      return undefined;
+    const realComponents = (t: Type): boolean => {
+      if (typeof t !== 'string' && t.kind === 'union')
+        return t.types.every(realComponents);
+      const element = collectionElementType(t);
+      return element !== undefined
+        ? realComponents(element)
+        : !isNonRealNumber(t);
+    };
+    if (
+      target.mode === 'complex' ||
+      !components.every((c) => realComponents(c.type))
+    )
+      throw new Error(
+        'Dot: broadcasting complex point coordinates is not supported by this target.'
+      );
+    const values = args.map(() => BaseCompiler.tempVar(target));
+    const params = components.map(() => BaseCompiler.tempVar(target));
+    const coords = values.flatMap((v) =>
+      Array.from({ length: n }, (_, k) => `${v}[${k}]`)
+    );
+    const sum = Array.from(
+      { length: n },
+      (_, k) => `${params[k]} * ${params[n + k]}`
+    ).join(' + ');
+    const guard = values
+      .map((v) => `Array.isArray(${v}) && ${v}.length === ${n}`)
+      .join(' && ');
+    return `((${values.join(', ')}) => ${guard} ? _SYS.bcast((${params.join(', ')}) => ${sum}, ${coords.join(', ')}) : _SYS.matmul(${values.join(', ')}))(${args.map((a) => BaseCompiler.compile(a, target)).join(', ')})`;
+  }
+
   /**
    * The inner product of two points or vectors whose one width the compiler
    * can count, written out as the sum of the component products — `(a, b) ·
@@ -14054,7 +14105,7 @@ export class BaseCompiler {
         head !== undefined && isSymbol(head) ? head.symbol : undefined;
       const recursing =
         guard !== undefined && BaseCompiler._userCallVisited.has(guard);
-      if (body !== undefined && !recursing) {
+      if (!recursing) {
         if (guard !== undefined) BaseCompiler._userCallVisited.add(guard);
         try {
           // The jet lowering is asked the same way the emitter asks it, so
@@ -14064,7 +14115,7 @@ export class BaseCompiler {
             (id) => BaseCompiler.userFunctionLiteral(expr.engine, id),
             BaseCompiler.mode === 'complex'
           );
-          if (jet !== undefined) {
+          if (jet !== undefined && body !== undefined) {
             // The jet family is picked from the body AND from the point the
             // derivative is taken at: the real family reads a coefficient
             // with `asReal`, so a `{re, im}` argument forces the complex
@@ -14082,24 +14133,15 @@ export class BaseCompiler {
           // compilation was not going to pay anyway: it is memoised per
           // (function literal, order) (`derivative`, symbolic/derivative.ts),
           // and the emission that follows reads the same entry.
-          const order =
-            callee.ops.length === 2 ? Math.floor(callee.ops[1].N().re) : 1;
-          let closedForm: Expression | undefined;
-          try {
-            if (Number.isFinite(order))
-              closedForm = derivative(literal!, order);
-          } catch {
-            // The differentiation raised (an evaluation deadline, a head
-            // whose rule throws). `compileDerivative` turns the same failure
-            // into its numeric fallback rather than failing the
-            // compilation, so this predicate must not raise either: fall
-            // back to the body below.
-            closedForm = undefined;
-          }
-          // No closed form (the differentiation declined, or the order is not
-          // a number yet): the emitter falls back to a numeric stencil over
-          // the compiled body, whose lane is the body's.
-          return BaseCompiler.isComplexValued(closedForm ?? body);
+          const closedForm = derivativeClosedForm('Derivative', callee.ops);
+          if (isFunction(closedForm, 'Function') && expr.ops.length === 2)
+            return BaseCompiler.withDerivativeArgument(
+              closedForm,
+              expr.ops[1],
+              () => BaseCompiler.isComplexValued(closedForm.ops[0])
+            );
+          if (closedForm !== undefined || body !== undefined)
+            return BaseCompiler.isComplexValued((closedForm ?? body)!);
         } finally {
           if (guard !== undefined) BaseCompiler._userCallVisited.delete(guard);
         }
@@ -20372,6 +20414,46 @@ export class BaseCompiler {
     return { op, accComplex, eltComplex, coerceSeed };
   }
 
+  /** Resolve only derivative calls whose closed form stays within the small-body path. */
+  static intervalDerivativeLiteral(
+    args: ReadonlyArray<Expression>
+  ): Expression | undefined {
+    if (args.length !== 2 || !isFunction(args[0], 'Derivative'))
+      return undefined;
+    if (
+      jetDerivativeTarget(
+        args,
+        (id) => BaseCompiler.userFunctionLiteral(args[0].engine, id),
+        false
+      ) !== undefined
+    )
+      return undefined;
+    return derivativeClosedForm('Derivative', args[0].ops);
+  }
+
+  static withDerivativeArgument<T>(
+    literal: Expression,
+    arg: Expression,
+    fn: () => T
+  ): T {
+    if (!isFunction(literal, 'Function') || literal.nops !== 2) return fn();
+    const name = functionLiteralParameterName(literal.ops[1]);
+    if (!name) return fn();
+    const type = BaseCompiler.declaredParamType(literal.ops[1]);
+    const complex =
+      BaseCompiler.isComplexValued(arg) ||
+      (type !== undefined && isNonRealNumber(type));
+    // Analyze and emit the closed form with the same argument representation.
+    // Owning the frame prevents the literal from masking this information.
+    return BaseCompiler.withLocalShapeFrame(
+      new Map([[name, complex]]),
+      new Map([[name, BaseCompiler.LOCAL_SCALAR]]),
+      fn,
+      false,
+      literal
+    );
+  }
+
   /**
    * Compile an INLINE combiner lambda under the lanes `combinerPlan` chose:
    * its accumulator and element parameters are entered in a local shape
@@ -22471,17 +22553,23 @@ export class BaseCompiler {
       // expressions (listing `Field` as unsupported on a compilable SET, or
       // descending into a getter where the compile path emits a setter).
       //
-      // A target whose `Apply` compiles only a function-LITERAL callee
-      // (`CompileTarget.appliesFunctionLiteralsOnly`) never compiles the
-      // callee of any other application, so the analysis must not walk into
-      // it: the walk probes the callee head's compile handler, and for an
-      // applied derivative that probe runs the whole symbolic
-      // differentiation on a compilation that has already declined.
+      // Resolve small derivative callees with the same limit as the interval
+      // emitter. Other nonliteral callees are not compiled, so do not probe
+      // their handlers: that could expand a derivative the target rejects.
       if (
         h === 'Apply' &&
         target.appliesFunctionLiteralsOnly === true &&
         !isFunction(ops[0], 'Function')
       ) {
+        const literal =
+          target.language === 'interval-javascript'
+            ? BaseCompiler.intervalDerivativeLiteral(ops)
+            : undefined;
+        if (isFunction(literal, 'Function') && literal.nops === ops.length) {
+          visitLiteralBody(literal, bound);
+          for (const op of ops.slice(1)) visit(op, bound);
+          return;
+        }
         unsupported.add('Apply');
         // A SYMBOL callee is still reported: naming it costs a symbol lookup
         // and it is what tells the caller which function it could not lower.

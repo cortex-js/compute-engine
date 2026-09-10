@@ -251,11 +251,7 @@ describe('Dot over a tuple with collection components', () => {
   });
 
   describe('the compiled route agrees with the interpreter', () => {
-    // A point with a collection component broadcasts in the interpreter and
-    // has no lowering in the JavaScript target — `_SYS.matmul` multiplies the
-    // nested array whole. The compile fails closed (D6) and the fallback
-    // answers through the interpreter, so no wrong value is ever returned
-    // behind `success: true`.
+    // A tuple's list-valued coordinates broadcast into individual points.
     function engine() {
       const ce = new ComputeEngine();
       ce.declare('L', 'list<number>');
@@ -266,7 +262,7 @@ describe('Dot over a tuple with collection components', () => {
       const r = compile(engine().parse('\\operatorname{Dot}((1,L),(3,4))'), {
         constantFold: false,
       });
-      expect(r.success).toBe(false);
+      expect(r.success).toBe(true);
       expect(r.run!({ L: [1, 2] })).toEqual([7, 11]);
     });
 

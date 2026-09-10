@@ -399,18 +399,13 @@ their expected effect on the corpus.
 
 ### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
 
-- **A repeated range-gather reduction is emitted twice.** `total(P[a...b])`
-  now lowers to a counted loop written straight into expression position, so
-  it is not a common-subexpression candidate: `total(P[a...b]) · total(P[a...b])`
-  emits the prologue and the loop twice and walks the array twice, and the
-  same reduction inside an unrolled `Sum` body is emitted once per term
-  (three copies for `\sum_{k=1}^{3}`). Routing the loop through the
-  statement-binding channel (`statements.consume`, or the loop-invariant
-  hoist) would bind it once; that is a change to how a statement-shaped
-  lowering takes part in CSE, larger than the round, and it needs the same
-  purity and scope rules the hoist applies. Measured, not merely suspected:
-  the shape is reachable from `\operatorname{total}(P[(m+n)...(m+n+4)])`
-  written twice in one row.
+- **Repeated range-gather reductions are shared (implemented).** `Sum` and
+  `Product` over `P[a...b]` qualify as expensive CSE candidates even when their
+  syntax is small. Existing purity, mutation and conditional-scope checks still
+  apply. Short unrolled sums also hoist invariant reductions, so a three-term
+  sum runs an index-independent gather once. Regression coverage:
+  `test/compute-engine/compile-audit-followups.test.ts`.
+
 - **A SCALAR compiled comparison answers a decided boolean where the
   interpreter is undecided.** `Equal(a, b)` with either operand absent from the
   object of variables compiles to `false` (and `NotEqual` to `true`), where the
@@ -466,31 +461,25 @@ their expected effect on the corpus.
   `factor()` handle nested quotients in near-linear time, and should the
   differentiation rules then keep their results factored — which changes
   the shape of many `evaluate()` results and needs a snapshot-churn ruling.
-- **`interval-js` declines an applied derivative it could compile.**
-  `Derivative(f, 1)` alone compiles on that target, and the closed form is
-  ordinary arithmetic with a sound enclosure; only the `Apply` handler's
-  callee check (a `Function` literal) refuses `Apply(Derivative(f, 1), x)`.
-  Resolving the callee to its cached closed-form literal before that check
-  would give interval enclosures for derivative plots; the jet lowering does
-  not port (each recurrence would need its own enclosure argument), so only
-  the orders the symbolic route computes within its node budget would be
-  served.
+- **Interval application of small closed-form derivatives is implemented.**
+  `Apply(Derivative(f, n), x)` resolves the closed form before checking the
+  function's arity. Degree-mode rewriting and target support checks still
+  apply. Calls selected for the JavaScript jet path remain declined on the
+  interval target, avoiding costly symbolic expansion and unproved interval
+  recurrences.
+
 - **`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with `F := [f, f', f'', f''']`
   does not parse as the application of a list element** — `F(\epsilon)`
   parses as a juxtaposition — so the corpus row of Tycho item 284 never
   reaches the compiler in the shape the record implies. The explicit
   four-term sum compiles in 65 ms and matches `.N()`; the record's exact
   spelling should be recovered and re-tested on the Tycho side.
-- **The closed-form derivative route applied at a COMPLEX point emits a
-  real-lane lambda around a complex argument (found 2026-09-09 by the
-  review of the jet lowering; pre-existing).** `(x - e) · f''(e)` with
-  `e: complex` and a SMALL body (`f(x) = x³`, below the jet threshold) emits
-  `((x) => 6 * x)(_.e)` and answers NaN where the interpreter answers
-  `6.96 - 1.8i`. The jet route handles the complex argument (it switches to
-  the complex jet family); the closed-form lambda emitted by
-  `compileDerivative` (`library/calculus.ts`) would have to bind its
-  parameter to the call site's lane the way `isComplexValuedUserCall` does
-  for an ordinary user function.
+- **Closed-form derivatives accept complex arguments (implemented).** The
+  derivative literal's parameter is compiled with the argument's complex
+  representation. Result analysis uses the same parameter context, so enclosing
+  arithmetic also handles the result correctly. A derivative independent of
+  its parameter can still return a real number.
+
 - **A cube root of a negative number takes the principal branch when
   compiled and the real branch when interpreted.** `f(x) = ∛x`, `f''(-1.2)`:
   the interpreter answers the real `1.164…`, the compiled closed form goes
@@ -541,29 +530,12 @@ types `list<tuple<…>>`, so `Dot(PointList(1, L), PointList(3, 4))` reports
 broadcast inner product. The two spellings should agree; deciding which one
 moves is a typing ruling on what `PointList` of a collection component means.
 
-**A point DECLARED with `broadcastable` coordinates compiles to a wrong value
-when a coordinate holds a list at run time (OPEN, correctness — needs a
-decision).** With `a, b: tuple<broadcastable<number>, broadcastable<number>>`
-— the shape the Tycho importer gives a point-valued helper — `Dot(a, b)`
-compiles to `_SYS.matmul(_.a, _.b)`. Measured:
-
-| `vars` | compiled | interpreted |
-| --- | --- | --- |
-| `a = [1, 2]`, `b = [3, 4]` | `11` | `11` |
-| `a = [1, [1, 2]]`, `b = [3, 4]` | `NaN` | `[7, 11]` |
-
-The round closed the same divergence for a WRITTEN point with a provably
-collection-valued component, by declining in the `Dot` codegen so the
-interpreter answers. That decline cannot be extended to this shape:
-`broadcastable<number>` is a union of a number and a collection, so the
-operand is a plain point at run time in every kernel that supplies scalars,
-and refusing it would stop a reachable, currently correct case from compiling
-at all. The fix is a lowering, not a gate — the sum of the component products
-emitted through `_SYS.bcast`, with the width read from the tuple type and a
-`_SYS.matmul` fallback behind the usual shape test, which is
-`compileStaticInnerProduct`'s machinery with a broadcasting body. Not built:
-it is a new emission, and the wrong value predates this round (the operand
-typed the top type `value` before and took the same `_SYS.matmul` path).
+**Dot with declared broadcastable coordinates is implemented.** Tuple
+coordinates are broadcast before their scalar inner products are computed.
+`Dot(a, b)` with `a = [1, [1, 2]]` and `b = [3, 4]` now returns `[7, 11]`,
+while scalar-coordinate inputs still return a scalar. Operands are bound once;
+inputs whose widths disagree with the declarations retain the runtime matrix
+fallback. Written tuples with numeric list components use the same path.
 
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 

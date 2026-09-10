@@ -7,8 +7,8 @@
  * below, the third derivative was 392 KB of emitted code and took tens of
  * seconds to build, and the compilation ran the differentiation TWICE (once
  * when the reference analysis probed whether the `Derivative` head lowers,
- * once when the code was emitted). The interval target, which declines the
- * application outright, paid the whole cost too and then threw it away.
+ * once when the code was emitted). The interval target also paid that cost
+ * for expensive derivative applications it could not compile.
  *
  * Three changes are pinned here:
  *
@@ -403,10 +403,10 @@ describe('applied derivative: where the jet lowering declines', () => {
   });
 });
 
-describe('applied derivative: the interval target declines before differentiating', () => {
+describe('applied derivative: interval compilation keeps expensive derivatives bounded', () => {
   test('the decline names Apply and does not walk into the callee', () => {
     const ce = radical;
-    for (const order of [1, 2, 3]) {
+    for (const order of [2, 3]) {
       const r = compiled(ce, order, 'interval-js');
       expect(r.success).toBe(false);
       // `Apply` itself is what this target cannot lower. Reporting the heads
@@ -418,9 +418,10 @@ describe('applied derivative: the interval target declines before differentiatin
     }
   });
 
-  test('the interpreter fallback still answers', () => {
+  test('a small first derivative compiles and answers', () => {
     const ce = radical;
     const r = compiled(ce, 1, 'interval-js');
+    expect(r.success).toBe(true);
     expect(r.run({ x: 1 })).toBeDefined();
   });
 });
@@ -662,10 +663,10 @@ const PERF = process.env.CE_PERF === '1';
     expect(performance.now() - t0).toBeLessThan(1000);
   });
 
-  test("the interval-js decline for f'(x) returns in under 50 ms", () => {
+  test("the interval-js decline for f'''(x) returns in under 50 ms", () => {
     const ce = engineWith(RADICAL);
     const t0 = performance.now();
-    compiled(ce, 1, 'interval-js');
+    compiled(ce, 3, 'interval-js');
     expect(performance.now() - t0).toBeLessThan(50);
   });
 });
