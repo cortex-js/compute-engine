@@ -669,7 +669,8 @@ function exactIntegerComparison(
   tolerance: number
 ): boolean {
   const integerOrNaN = (a: Expression): boolean =>
-    BaseCompiler.isIntegerValued(a) || a.type?.matches('integer | nan') === true;
+    BaseCompiler.isIntegerValued(a) ||
+    a.type?.matches('integer | nan') === true;
   return (
     tolerance < 1 &&
     operands.every((a) => integerOrNaN(a) && !BaseCompiler.isComplexValued(a))
@@ -6693,7 +6694,13 @@ const colorHelpers = {
       throw new Error(`Unknown color space: ${space}`);
     if (!finiteChannels(c0, c1, c2))
       return nonFiniteColor(alpha, tag as CompiledColorSpace);
-    return mkColor(tag as CompiledColorSpace, c0, c1, c2, normalizeAlpha(alpha));
+    return mkColor(
+      tag as CompiledColorSpace,
+      c0,
+      c1,
+      c2,
+      normalizeAlpha(alpha)
+    );
   },
 
   // -----------------------------------------------------------------------
@@ -9887,9 +9894,7 @@ function memoizeSharedDefinitions(
     if (inDefinitions + count(rootCode, pattern) < 2) continue;
     defs.set(
       name,
-      memoizedDefinition(name, entry, statements, [
-        ...varsReads.get(name)!,
-      ])
+      memoizedDefinition(name, entry, statements, [...varsReads.get(name)!])
     );
   }
 }

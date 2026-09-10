@@ -198,10 +198,7 @@ import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { apply, lookupApplicable } from '../function-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
-import {
-  hasAbsentScalarOperand,
-  runtimeConformanceError,
-} from './validate.js';
+import { hasAbsentScalarOperand, runtimeConformanceError } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
