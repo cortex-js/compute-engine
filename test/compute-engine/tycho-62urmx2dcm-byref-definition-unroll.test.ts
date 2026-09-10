@@ -697,11 +697,8 @@ describe('BY-REFERENCE DEFINITION UNROLL — the angular unit', () => {
     expect(ce.box(['fdeg', 30] as any).N().re).toBeCloseTo(0.5, 12);
   });
 
-  it('scales a trig call inside a substituted callee — inline route', () => {
-    // A point-typed parameter has no static GLSL type, so the definition
-    // cannot be emitted and the CALL is inlined instead
-    // (`tryInlineUserFunctionCall`, Tycho item 216). That route substitutes
-    // the same body and needs the same rewrite.
+  it('scales a trig call inside a specialized point helper', () => {
+    // The helper knows the point width and must preserve the angular unit.
     const withUnit = (unit: 'deg' | 'rad') => {
       const ce = new ComputeEngine();
       ce.angularUnit = unit;
@@ -716,20 +713,26 @@ describe('BY-REFERENCE DEFINITION UNROLL — the angular unit', () => {
       const written: any = compile(direct.parse(String.raw`\sin(x) + y`), {
         to: 'glsl',
       } as any);
-      return { viaCall: String(viaCall.code), written: String(written.code) };
+      expect(viaCall.success).toBe(true);
+      expect(viaCall.code).toMatch(/^_fn_f.*\(vec2\(x, y\)\)$/);
+      return {
+        helper: String(viaCall.preamble),
+        written: String(written.code),
+      };
     };
 
     const deg = withUnit('deg');
     // The shader spelling of `Math.fround(π/180)` is its shortest single-
     // precision decimal, `0.017453292`.
-    expect(deg.viaCall).toContain('0.017453292');
-    expect(deg.viaCall).toBe(deg.written);
+    expect(deg.helper).toContain('0.017453292');
+    expect(deg.written).toContain('0.017453292');
+    expect(deg.helper).toContain('sin(');
 
     // Radian mode is the no-op case: no factor, and nothing changed.
     const rad = withUnit('rad');
-    expect(rad.viaCall).not.toContain('0.017453292');
-    expect(rad.viaCall).toBe(rad.written);
-    expect(rad.viaCall).toBe('y + sin(x)');
+    expect(rad.helper).not.toContain('0.017453292');
+    expect(rad.helper).toContain('sin(P.x) + P.y');
+    expect(rad.written).toBe('y + sin(x)');
   });
 });
 

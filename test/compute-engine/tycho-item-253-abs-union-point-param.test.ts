@@ -170,7 +170,8 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       to: 'javascript',
     });
     expect(sum.success).toBe(true);
-    expect(String(sum.preamble ?? '') + String(sum.code)).toContain('absShape');
+    // A concrete point call specializes the helper and selects its norm.
+    expect(sum.preamble).toContain('_SYS.norm(');
     expect(sum.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
   });
 

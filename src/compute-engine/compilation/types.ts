@@ -1361,6 +1361,9 @@ export interface CompileTarget<Expr = unknown> {
      * repeated bare free symbol in value position doesn't re-hit
      * `lookupDefinition` on every occurrence. Populated lazily. */
     misses?: Set<string>;
+    /** Private literals compiled for a particular argument representation. */
+    specializations?: Map<string, Expr>;
+    specializing?: Set<string>;
     /**
      * User functions whose call is currently being compiled INLINED — the
      * body beta-reduced at the call site because the target could not emit
@@ -1400,6 +1403,7 @@ export interface CompileTarget<Expr = unknown> {
         body: Expr;
         /** The whole `["Function", body, …params]` literal. */
         literal: Expr;
+        parameterTypes?: readonly Type[];
         /** Target with the parameters shadowed and bound. */
         target: CompileTarget<Expr>;
       }) => string;

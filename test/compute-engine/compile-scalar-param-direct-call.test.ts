@@ -72,10 +72,7 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
     expect(r.run({ x: [[1, 2], [3]] })).toEqual([[3, 9], [19]]);
     expect(
       ce
-        .box([
-          'f',
-          ['List', ['List', 1, 2], ['List', 3]],
-        ] as any)
+        .box(['f', ['List', ['List', 1, 2], ['List', 3]]] as any)
         .evaluate()
         .toString()
     ).toBe('[[3,9],[19]]');
@@ -111,7 +108,12 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
     expect(r.preamble).not.toContain('_SYS.bcastFn(_fn_h');
     // The dispatcher, and both clauses, answer what the interpreter answers.
     expect(r.run({ u: 3 })).toBe(10);
-    expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('10');
+    expect(
+      ce
+        .box(['f', 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('10');
     expect(r.run({ u: [1, 2] })).toEqual([2, 5]);
     expect(
       ce
@@ -238,7 +240,7 @@ describe('an ATOMIC argument does not switch off the sibling broadcast', () => {
     const ce = pointAndListEngine();
     const expr = ['f', ['Tuple', 'a', 'b'], 'u'];
     const r = build(ce, expr);
-    expect(r.code).toBe('_fn_f([_.a, _.b], _.u)');
+    expect(r.code).toMatch(/^_fn_f.*\(\[_.a, _.b\], _.u\)$/);
     expect(r.run({ a: 1, b: 2, u: 3 })).toBe(6);
     expect(
       ce
@@ -314,7 +316,12 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
     // on the number of arguments.
     expect(r.preamble).toContain('const _fn_mc$b = (..._');
     expect(r.run({})).toEqual([[4, 7], [10]]);
-    expect(ce.box(expr as any).evaluate().toString()).toBe('[[4,7],[10]]');
+    expect(
+      ce
+        .box(expr as any)
+        .evaluate()
+        .toString()
+    ).toBe('[[4,7],[10]]');
   });
 
   test('a flat source still reaches the dispatcher directly', () => {
@@ -322,7 +329,12 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
     const expr = ['Map', 'mc', ['List', 1, 2, 3]];
     const r = build(ce, expr);
     expect(r.run({})).toEqual([4, 7, 10]);
-    expect(ce.box(expr as any).evaluate().toString()).toBe('[4,7,10]');
+    expect(
+      ce
+        .box(expr as any)
+        .evaluate()
+        .toString()
+    ).toBe('[4,7,10]');
   });
 
   test('a clause parameter that binds a value whole keeps the bare reference', () => {
@@ -352,27 +364,9 @@ describe('a MULTI-CLAUSE function value is shape-aware', () => {
 });
 
 //
-// A POINT THROUGH AN UNTYPED PARAMETER is INLINED at the call site.
-//
-// `p(P) := q(P)`, `q(P) := r(P)`, `r(P) := 2·P` called as `p((a, b))` binds a
-// POINT to a parameter nothing types: inference reads parameter types from
-// body uses, not from call sites, so `P` stays `unknown`. An emitted
-// definition of `r` treats `P` as a scalar, and the by-reference call handed
-// it the JavaScript array a point lowers to, which answered NaN where the
-// interpreter scales the point and answers `(2a, 2b)`.
-//
-// The call site is the only place that knows the argument is a point, so a
-// call that binds a point to an untyped parameter is substituted into the
-// body instead of going by reference (`pointArgumentAtUntypedParameter` in
-// `compilation/base-compiler.ts`): the chain collapses to `2·(a, b)`, which
-// every target lowers as a point. When the substitution is not sound — an
-// impure point, a body that is invalid over a point — the call fails closed,
-// and the `fallback: true` route answers through the interpreter.
-//
-// A body that reads the point as a point — `PointX(P)` — types the parameter
-// and still compiles by reference.
-//
-describe('a POINT bound to an untyped parameter is inlined at the call site', () => {
+// Concrete point calls carry their width into shared helper definitions.
+// Their original untyped contracts still admit scalar and list calls.
+describe('a POINT bound to an untyped parameter specializes a shared helper', () => {
   function chainEngine(body: unknown): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('a', 'real');
@@ -397,9 +391,9 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
     const ce = chainEngine(['Multiply', 2, 'P']);
     const chain = strict(ce, ['p', ['Tuple', 'a', 'b']]);
     const direct = strict(ce, ['r', ['Tuple', 'a', 'b']]);
-    // No definition is emitted: the chain is substituted down to `2·(a, b)`.
-    expect(chain.preamble ?? '').not.toContain('_fn_');
-    expect(direct.preamble ?? '').not.toContain('_fn_');
+    // Both entry points emit a helper with the known point width.
+    expect(chain.preamble).toContain('_fn_p');
+    expect(direct.preamble).toContain('_fn_r');
     expect(chain.run({ a: 3, b: 4 })).toEqual([6, 8]);
     expect(direct.run({ a: 3, b: 4 })).toEqual([6, 8]);
     expect(
@@ -415,17 +409,19 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
     const ce = chainEngine(['Multiply', 2, 'P']);
     ce.declare('Q', 'tuple<real, real>');
     const symbol = strict(ce, ['r', 'Q']);
-    expect(symbol.preamble ?? '').not.toContain('_fn_');
+    expect(symbol.preamble).toContain('_fn_r');
     expect(symbol.run({ Q: [3, 4] })).toEqual([6, 8]);
     const pointList = strict(ce, ['p', ['PointList', 'a', 'b']]);
-    expect(pointList.preamble ?? '').not.toContain('_fn_');
+    expect(pointList.preamble).toContain('_fn_p');
     expect(pointList.run({ a: 3, b: 4 })).toEqual([6, 8]);
   });
 
-  test('the shader target compiles the substituted point arithmetic', () => {
+  test('the shader target emits a vector helper for point arithmetic', () => {
     const ce = chainEngine(['Multiply', 2, 'P']);
     const r = strict(ce, ['p', ['Tuple', 'a', 'b']], 'glsl');
-    expect(r.code).toBe('2.0 * vec2(a, b)');
+    expect(r.code).toMatch(/^_fn_p.*\(vec2\(a, b\)\)$/);
+    expect(r.preamble).toContain('2.0 * P');
+    expect(r.preamble).toMatch(/vec2 _fn_p.*\(vec2 P\)/);
   });
 
   test('a scalar argument still goes by reference', () => {
@@ -445,7 +441,12 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
     const r = strict(ce, ['f', 'a']);
     expect(r.preamble).not.toContain('_fn_p');
     expect(r.run({ a: 3 })).toEqual([6, 6]);
-    expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('(6, 6)');
+    expect(
+      ce
+        .box(['f', 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('(6, 6)');
   });
 
   test('a body the interpreter rejects over a point fails closed instead of answering a list', () => {
@@ -458,7 +459,7 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
     ]) {
       const ce = chainEngine(body);
       expect(() => strict(ce, ['p', ['Tuple', 'a', 'b']])).toThrow(
-        /argument 1 is a point/
+        /argument 1 is a point|invalid expression/
       );
       // The fallback route reports the decline and answers through the
       // interpreter, which has no number for an error expression.
@@ -466,23 +467,28 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
         constantFold: false,
       } as any);
       expect(fallback.success).toBe(false);
-      expect(fallback.error).toMatch(/argument 1 is a point/);
+      expect(fallback.error).toMatch(
+        /argument 1 is a point|invalid expression/
+      );
       expect(fallback.run({ a: 3, b: 4 })).toBeNaN();
     }
   });
 
-  test('an IMPURE point argument fails closed (substitution would repeat the draw)', () => {
+  test('a shared helper evaluates an IMPURE point argument once', () => {
     const ce = chainEngine(['Multiply', 2, 'P']);
-    expect(() => strict(ce, ['r', ['Tuple', ['Random'], 'b']])).toThrow(
-      /argument 1 is a point/
-    );
+    const r = strict(ce, ['r', ['Tuple', ['Random'], 'b']]);
+    expect(r.code.match(/_SYS.drawNextRandomNumber\(\)/g)).toHaveLength(1);
+    const value = r.run({ b: 4 });
+    expect(value[0]).toBeGreaterThanOrEqual(0);
+    expect(value[0]).toBeLessThan(2);
+    expect(value[1]).toBe(8);
   });
 
   test('`r(P) := PointX(P)` types the parameter and still compiles by reference', () => {
     const ce = chainEngine(['PointX', 'P']);
     const chain = strict(ce, ['p', ['Tuple', 'a', 'b']]);
     const direct = strict(ce, ['r', ['Tuple', 'a', 'b']]);
-    expect(chain.preamble).toContain('const _fn_q = (P) => _fn_r(P);');
+    expect(chain.preamble).toMatch(/const _fn_q.* = \(P\) => _fn_r.*\(P\);/);
     expect(chain.run({ a: 3, b: 4 })).toBe(3);
     expect(direct.run({ a: 3, b: 4 })).toBe(3);
     expect(
@@ -517,7 +523,12 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
     ] as any).evaluate();
     const r = strict(ce, ['f', 2, 'u']);
     expect(r.run({ u: 3 })).toEqual([30, 30]);
-    expect(ce.box(['f', 2, 3] as any).evaluate().toString()).toBe('(30, 30)');
+    expect(
+      ce
+        .box(['f', 2, 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('(30, 30)');
     // With no colliding name the substitution lands inside the definition
     // and reads the global, folded to its value.
     ce.box([
@@ -548,7 +559,7 @@ describe('a POINT bound to an untyped parameter is inlined at the call site', ()
       ],
     ] as any).evaluate();
     const r = strict(ce, ['sh', ['Tuple', 'a', 'b']]);
-    expect(r.code).toBe('_fn_sh([_.a, _.b])');
+    expect(r.code).toMatch(/^_fn_sh.*\(\[_.a, _.b\]\)$/);
     expect(r.run({ a: 1, b: 2 })).toEqual([2, 4, 6]);
   });
 

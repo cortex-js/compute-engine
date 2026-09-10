@@ -50,17 +50,17 @@ const code = (
   return String(r.code);
 };
 
-describe('Tycho item 216: a call with a literal point argument inlines where the definition cannot be emitted', () => {
+describe('Tycho item 216: point calls use shared helpers where supported', () => {
   test('point-typed parameter, glsl', () => {
     const ce = engine();
-    expect(code(ce, String.raw`f((x,y))`, 'glsl')).toBe(
-      'a * (x * x) + b * (y * y)'
+    expect(code(ce, String.raw`f((x,y))`, 'glsl')).toEqual(
+      expect.stringMatching(/^_fn_f_.*\(vec2\(x, y\)\)$/)
     );
-    expect(code(ce, String.raw`d((x,y))`, 'glsl')).toBe(
-      'sqrt((x * x) + (y * y))'
+    expect(code(ce, String.raw`d((x,y))`, 'glsl')).toEqual(
+      expect.stringMatching(/^_fn_d_.*\(vec2\(x, y\)\)$/)
     );
-    expect(code(ce, String.raw`f((x,y))=1`, 'glsl')).toBe(
-      'a * (x * x) + b * (y * y) == 1.0'
+    expect(code(ce, String.raw`f((x,y))=1`, 'glsl')).toEqual(
+      expect.stringMatching(/^_fn_f_.* == 1\.0$/)
     );
   });
 
@@ -76,15 +76,15 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
 
   test('two point parameters, one of them a numeric literal point', () => {
     const ce = engine();
-    expect(code(ce, String.raw`Q((x,y),(1,2))`, 'glsl')).toBe(
-      'a * x + 2.0 * b * y'
+    expect(code(ce, String.raw`Q((x,y),(1,2))`, 'glsl')).toEqual(
+      expect.stringMatching(/^_fn_Q_.*\(vec2\(x, y\), vec2\(1\.0, 2\.0\)\)$/)
     );
   });
 
   test('a chained definition inlines through its callee', () => {
     const ce = engine();
-    expect(code(ce, String.raw`e_2((x,y))`, 'glsl')).toBe(
-      'sqrt((x * x) + (y * y)) + 1.0'
+    expect(code(ce, String.raw`e_2((x,y))`, 'glsl')).toEqual(
+      expect.stringMatching(/^_fn_e_2_.*\(vec2\(x, y\)\)$/)
     );
     expect(code(ce, String.raw`e_2((x,y))`, 'interval-js')).toBe(
       '_IA.add(_IA.sqrt(_IA.add(_IA.square(_.x), _IA.square(_.y))), _k1)'
@@ -112,8 +112,8 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
 
   test('the javascript target still compiles the call BY REFERENCE', () => {
     const ce = engine();
-    expect(code(ce, String.raw`f((x,y))`, 'javascript')).toBe(
-      '_fn_f([_.x, _.y])'
+    expect(code(ce, String.raw`f((x,y))`, 'javascript')).toEqual(
+      expect.stringMatching(/^_fn_f_.*\(\[_\.x, _\.y\]\)$/)
     );
     // A scalar-parameter chain never needed inlining on any target.
     expect(code(ce, String.raw`F(x)`, 'glsl')).toBe('_fn_F(x)');
@@ -122,8 +122,8 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
   test('a point-typed SYMBOL argument inlines like a literal point', () => {
     const ce = engine();
     ce.declare('P', 'tuple<number, number>');
-    expect(code(ce, String.raw`f(P)`, 'glsl')).toBe(
-      'a * _gpu_pow2(P.x) + b * _gpu_pow2(P.y)'
+    expect(code(ce, String.raw`f(P)`, 'glsl')).toEqual(
+      expect.stringMatching(/^_fn_f_.*\(P\)$/)
     );
     expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe(
       '_IA.add(_IA.mul(_.a, _IA.square(_IA.component(_.P, 0))), ' +
@@ -136,11 +136,10 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
     expect(out.value.hi).toBeCloseTo(14, 9);
   });
 
-  test('declines that must stand: an impure body, a list argument, a recursive callee', () => {
+  test('unsupported interval bodies, list arguments and recursive shaders still decline', () => {
     const ce = engine();
     ce.declare('L', 'list<number>');
     for (const [latex, to] of [
-      [String.raw`h((x,y))`, 'glsl'],
       [String.raw`h((x,y))`, 'interval-js'],
       [String.raw`f(L)`, 'glsl'],
       [String.raw`\operatorname{rec}(3)`, 'glsl'],
@@ -152,11 +151,11 @@ describe('Tycho item 216: a call with a literal point argument inlines where the
 
   test('the substituted body is not evaluated: an impure body never bakes a draw', () => {
     const ce = engine();
-    // By reference on javascript, declined on the shader target — in neither
-    // case does `Random()` get folded into the emitted source.
+    // Each target calls a shared helper; the draw stays in its body.
     const js = code(ce, String.raw`h((x,y))`, 'javascript');
-    expect(js).toBe('_fn_h([_.x, _.y])');
+    expect(js).toEqual(expect.stringMatching(/^_fn_h_.*\(\[_\.x, _\.y\]\)$/));
     const glsl = code(ce, String.raw`h((x,y))`, 'glsl');
-    expect(typeof glsl).toBe('object');
+    expect(glsl).toEqual(expect.stringMatching(/^_fn_h_/));
+    expect(compile(ce.parse('h((x,y))'), {to: 'glsl'}).preamble).toContain('_gpu_rnd_draw(');
   });
 });

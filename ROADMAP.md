@@ -522,20 +522,12 @@ inside its own body. The Tycho noise kernel `hyvhlz4chj` went from 15.5 to
 2.5 microseconds a sample and its emitted definitions from 64 runtime
 broadcast sites to 9. What those 9 are:
 
-- **A parameter that binds a POINT whole keeps the runtime dispatch inside
-  its own definition** (3 sites, `p_rand(p) := mod(sin(p · (12.9898, 78.233,
-  45.164)) · 43758.5453, 1)`). Every CALL of that function is proved to pass
-  a three-component point, so the call site emits scalar code; the emitted
-  DEFINITION is shared by every call site in the compilation, and no
-  whole-program fact says they all pass a point of one width. The body
-  therefore reads `p` as a value of unknown rank: `Dot(p, …)` lowers to
-  `_SYS.matmul`, whose result is a scalar for a rank-1 operand and a vector
-  for a matrix, and the `Sin`, `Multiply` and `Mod` above it broadcast.
-  Emitting a per-shape specialization of the definition — one body per
-  argument shape the compilation actually calls it with — would compile the
-  point case as straight-line code. That is a new emission strategy, not a
-  gap in an analysis, and it is the same specialization the point-at-an-
-  untyped-parameter inlining was scoped against.
+- **Point-parameter helper specialization is implemented.** Proven point
+  calls now share a helper compiled at their argument widths, while the
+  function's original declaration continues to admit lists. The `p_rand`
+  helper's trigonometric arithmetic no longer uses runtime broadcast dispatch.
+  See `docs/CALL-SHAPE-SPECIALIZATION.md` for the call-typing contract and the
+  CORE source comparison.
 - **A product of two calls whose declared result is `broadcastable<number>`
   keeps `_SYS.mul`** (6 sites, the domain warp `f_Bm(x, y) · |f_Bm(x, y)|`
   inside `R_ec`). The same shape written against a plainly typed helper

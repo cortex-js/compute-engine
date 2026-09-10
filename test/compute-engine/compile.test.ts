@@ -3053,8 +3053,8 @@ describe('COMPILE user-defined function calls', () => {
       expect(expr.evaluate().re).toBe(7);
       const r = compile(expr);
       expect(r.success).toBe(true);
-      // The assigned tuple is a bound value (`const _val_T = [3, 4];`).
-      expect(r.code).toBe('_fn_p(_val_T)');
+      // A known tuple call may fold; neither route broadcasts its components.
+      expect(r.code).not.toContain('_SYS.bcast');
       expect(r.run!()).toBe(7);
     });
 

@@ -1,3 +1,5 @@
+import { describeType } from '../boxed-expression/operand-descriptor.js';
+import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
 import type {
   Expression,
   FunctionInterface,
@@ -101,6 +103,7 @@ import {
   functionLiteralParameters,
   functionLiteralParameterType,
   functionLiteralReturnMarker,
+  functionLiteralReturnType,
   isDestructuringParameter,
   isRestParameter,
 } from '../boxed-expression/function-literal.js';
@@ -5886,7 +5889,10 @@ export class BaseCompiler {
             target.declaredVarTypes
           ) ?? args,
           (expr) => BaseCompiler.compileValueOperand(expr, target),
-          { language: target.language ?? 'javascript' }
+          {
+            language: target.language ?? 'javascript',
+            typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
+          }
         );
         if (custom !== undefined && custom !== null && custom !== '')
           return custom;
@@ -18058,6 +18064,12 @@ export class BaseCompiler {
           );
       }
     }
+    const specialized =
+      literal === undefined
+        ? undefined
+        : BaseCompiler.trySpecializedUserCall(engine, h, literal, args, target);
+    if (specialized !== undefined) return specialized;
+
     // A POINT bound to an UNTYPED parameter never goes by reference: the
     // emitted body treats that parameter as a scalar and answers NaN over the
     // array a point lowers to (`pointArgumentAtUntypedParameter` says why).
@@ -19821,6 +19833,213 @@ export class BaseCompiler {
     };
   }
 
+  /** A shader's framed scalar locals have a concrete representation even
+   * when their stored expression types still admit a collection. Derive
+   * enclosing applications from those local facts for operator handlers. */
+  private static operandTypeInContext(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    depth = 0
+  ): Type {
+    if (
+      depth > 32 ||
+      (target.language !== 'glsl' && target.language !== 'wgsl')
+    )
+      return expr.type.type;
+    if (isSymbol(expr)) {
+      const frame = BaseCompiler.localShapeFrameOf(expr.symbol)?.get(
+        expr.symbol
+      );
+      if (frame === BaseCompiler.LOCAL_SCALAR) return 'number';
+      if (frame === BaseCompiler.LOCAL_BOOLEAN) return 'boolean';
+      if (frame !== undefined && frame > 0)
+        return {
+          kind: 'tuple',
+          elements: Array.from({ length: frame }, () => ({ type: 'number' })),
+        };
+      return expr.type.type === 'unknown' ? 'number' : expr.type.type;
+    }
+    if (!isFunction(expr) || expr.operatorDefinition?.scoped)
+      return expr.type.type;
+    const types = expr.ops.map((x) =>
+      BaseCompiler.operandTypeInContext(x, target, depth + 1)
+    );
+    if (types.every((t, i) => t === expr.ops[i].type.type))
+      return expr.type.type;
+    const operands = types.map((t) => describeType(t));
+    const inferred = deriveApplicationType(
+      expr.engine,
+      expr.operator,
+      operands
+    );
+    return inferred !== undefined &&
+      inferred !== 'never' &&
+      isSubtype(inferred, expr.type.type)
+      ? inferred
+      : expr.type.type;
+  }
+
+  /** Compile one shared helper for each proven argument representation.
+   * The private literal carries narrower parameters; the engine definition
+   * remains available for list calls and function-value uses. */
+  private static trySpecializedUserCall(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    args: readonly Expression[],
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const registry = target.userFunctions;
+    if (
+      !registry ||
+      (target.language !== 'javascript' &&
+        target.language !== 'glsl' &&
+        target.language !== 'wgsl')
+    )
+      return undefined;
+    if (
+      registry.specializing?.has(h) ||
+      BaseCompiler.userFunctionIsGeneric(engine, h, literal)
+    )
+      return undefined;
+    const params = literal.ops.slice(1);
+    if (
+      params.length !== args.length ||
+      params.some((p) => isRestParameter(p) || isDestructuringParameter(p))
+    )
+      return undefined;
+    // A private Typed parameter also enforces assignments to that binding.
+    // Preserve the original mutation semantics instead of adding a promise
+    // based only on the value passed at entry.
+    const parameterNames = new Set(params.map(functionLiteralParameterName));
+    const writesParameter = (expr: Expression): boolean =>
+      isFunction(expr) &&
+      ((expr.operator === 'Assign' &&
+        expr.op1.symbols.some((name) => parameterNames.has(name))) ||
+        expr.ops.some(writesParameter));
+    if (writesParameter(literal.op1)) return undefined;
+    const types: Type[] = [];
+    let narrower = false;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      const declared =
+        BaseCompiler.userFunctionParamType(engine, h, i) ?? params[i].type.type;
+      let t = a.type.type;
+      if (BaseCompiler.isSinglePointArg(a)) {
+        const width = BaseCompiler.aggregateComponentCount(a);
+        if (width === undefined) return undefined;
+        t = {
+          kind: 'tuple',
+          elements: Array.from({ length: width }, () => ({
+            type: 'number' as Type,
+          })),
+        };
+      } else if (
+        target.language === 'javascript'
+          ? isConstructedScalar(a, target)
+          : isSubtype(BaseCompiler.operandTypeInContext(a, target), 'number') ||
+            isSubtype(a.type.type, 'boolean')
+      ) {
+        if (BaseCompiler.isComplexValued(a)) return undefined;
+        t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
+      } else return undefined;
+      if (
+        declared !== 'unknown' &&
+        declared !== 'any' &&
+        declared !== 'value' &&
+        !isSubtype(t, declared)
+      ) {
+        if (isSubtype(a.type.type, declared)) t = declared;
+        else return undefined;
+      }
+      if (
+        declared === 'unknown' ||
+        declared === 'any' ||
+        declared === 'value' ||
+        !isSubtype(declared, t)
+      )
+        narrower = true;
+      types.push(t);
+    }
+    if (!narrower) return undefined;
+    if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))
+      return undefined;
+    const scalarDefinition =
+      BaseCompiler.userFunctionParamsAreScalar(engine, h) &&
+      types.every((t) => isSubtype(t, 'number'));
+    const key = `${h}#${types.map((t) => typeToString(t)).join(';')}`;
+    const cache = (registry.specializations ??= new Map());
+    let specialized = cache.get(key);
+    if (specialized === undefined) {
+      // Rebuild under the definition's lexical parent, never under a caller's
+      // local scope. Parameter bindings are fresh and cannot narrow the source.
+      engine.pushScope({
+        parent: literal.op1.localScope?.parent ?? null,
+        bindings: new Map(),
+      });
+      try {
+        const body = literal.op1;
+        const marker = functionLiteralReturnMarker(literal);
+        const resultType = functionLiteralReturnType(literal);
+        // A broad result ascription hides the representation derived from
+        // the narrower parameters. Scalar promises remain authoritative.
+        const scalarResult =
+          resultType !== undefined &&
+          (isSubtype(resultType, 'number') ||
+            isSubtype(resultType, 'boolean') ||
+            isSubtype(resultType, 'string'));
+        const bodyJson =
+          marker && !scalarResult && isFunction(body, 'Block')
+            ? ([
+                'Block',
+                ...body.ops.slice(0, -1).map((x) => x.json),
+                marker.op1.json,
+              ] as MathJsonExpression)
+            : body.json;
+        specialized = engine.box([
+          'Function',
+          bodyJson,
+          ...params.map(
+            (p, i) =>
+              [
+                'Typed',
+                functionLiteralParameterName(p)!,
+                `'${typeToString(types[i])}'`,
+              ] as MathJsonExpression
+          ),
+        ]);
+      } finally {
+        engine.popScope();
+      }
+      if (!isFunction(specialized, 'Function') || !specialized.isValid)
+        return undefined;
+      cache.set(key, specialized);
+    }
+    if (!isFunction(specialized, 'Function')) return undefined;
+    const active = (registry.specializing ??= new Set());
+    active.add(h);
+    let name: string | undefined;
+    try {
+      name = BaseCompiler.emitFunctionLiteralDefinition(
+        h,
+        specialized,
+        target,
+        registry,
+        { key: scalarDefinition ? h : key, types }
+      );
+    } finally {
+      active.delete(h);
+    }
+    if (name === undefined) return undefined;
+    target.symbolDeps?.add(h);
+    // Scalar definitions already have a broadcast-aware call boundary and a
+    // memoization policy. Reuse it after preparing the typed body.
+    if (scalarDefinition) return undefined;
+    if (registry.lowering)
+      return registry.lowering.call({ id: h, name, args, target });
+    return `${name}(${args.map((a) => BaseCompiler.compileValueOperand(a, target)).join(', ')})`;
+  }
+
   static ensureUserFunctionEmitted(
     engine: ComputeEngine,
     h: string,
@@ -20585,9 +20804,13 @@ export class BaseCompiler {
     h: string,
     literal: Expression & FunctionInterface,
     target: CompileTarget<Expression>,
-    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    specialization?: { key: string; types: readonly Type[] }
   ): string | undefined {
-    const name = BaseCompiler.userFunctionName(registry, h);
+    const name = BaseCompiler.userFunctionName(
+      registry,
+      specialization?.key ?? h
+    );
 
     if (!registry.defs.has(name)) {
       // Re-entrant reference: `h`'s definition is on the in-flight compile
@@ -20651,6 +20874,7 @@ export class BaseCompiler {
                   params,
                   body: bodyExpr,
                   literal,
+                  parameterTypes: specialization?.types,
                   target: bodyTarget,
                 })
             )
@@ -22403,7 +22627,10 @@ export class BaseCompiler {
                 declaredTypes
               ) ?? ops,
               (e) => BaseCompiler.compileValueOperand(e, target),
-              { language: target.language ?? 'javascript' }
+              {
+                language: target.language ?? 'javascript',
+                typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
+              }
             );
             hasCustomCompile =
               probe !== undefined && probe !== null && probe !== '';

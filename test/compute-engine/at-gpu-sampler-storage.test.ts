@@ -590,9 +590,9 @@ describe('`storage` option — validated everywhere, ignored off the shader targ
     const call = ce2.box(['f', 'k']);
     const r = glsl.compile(call, { ...NO_FOLD, ...SAMPLER });
     expect(r.success).toBe(true);
-    // The single-use body is inlined at the call site, so the read lands in
-    // `code`; the helper it needs lands in the preamble either way.
-    expect(r.code).toBe('_gpu_texat1600(S, k)');
+    // The specialized helper retains the free sampler read.
+    expect(r.code).toBe('_fn_f(k)');
+    expect(r.preamble).toContain('_gpu_texat1600(S, x)');
     expect(r.preamble).toContain('float _gpu_texat1600(sampler2D v, float i)');
     // Ignored, but accepted, on the JavaScript target.
     expect(js.compile(call, { ...NO_FOLD, ...SAMPLER }).success).toBe(true);

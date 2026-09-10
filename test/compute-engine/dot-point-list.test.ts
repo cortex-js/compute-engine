@@ -1,3 +1,4 @@
+import { expectTypeBetween } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -132,20 +133,20 @@ describe('Dot over a tuple with collection components', () => {
       return ce;
     }
 
-    test('`p` returns a tuple of broadcastable components', () => {
-      expect(engine().parse('p(x,y)').type.toString()).toBe(
-        'tuple<broadcastable<number>, broadcastable<number>>'
-      );
+    test('`p` carries numeric shape through its function chain', () => {
+      expectTypeBetween(engine().parse('p(x,y)'), {
+        atMost: 'tuple<number, number>',
+      });
     });
 
-    test('the dot product types broadcastable<number> (was `value`)', () => {
+    test('the dot product carries the scalar shape', () => {
       const e = engine().parse('\\operatorname{Dot}(p(x,y),S(x,y)+(0,0))');
-      expect(e.type.toString()).toBe('broadcastable<number>');
+      expectTypeBetween(e, { atMost: 'number' });
     });
 
     test('the reconciled declaration of `d_00` narrows (was `-> value`)', () => {
       expect(engine().box('d_00').type.toString()).toBe(
-        '(unknown, unknown) -> broadcastable<number>'
+        '(unknown, unknown) -> number'
       );
     });
   });

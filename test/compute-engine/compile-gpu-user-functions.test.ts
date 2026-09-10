@@ -390,18 +390,14 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     );
   });
 
-  it('a point bound to an UNTYPED parameter is inlined and compiles componentwise', () => {
-    // With no declared signature the parameter `x` has no type, so the
-    // emitted definition would treat it as a `float`. The call site knows
-    // the argument is a point and substitutes the body instead
-    // (`pointArgumentAtUntypedParameter`, `compilation/base-compiler.ts`),
-    // which is the componentwise arithmetic the interpreter answers:
-    // `(1 + sin 1, 4 + sin 2)`.
+  it('a point bound to an untyped parameter uses a shared componentwise helper', () => {
     const ce = engineWithF();
     const r = glsl.compile(ce.expr(['f', ['Tuple', 1, 2]]), {
       constantFold: false,
     });
-    expect(r.code).toBe('sin(vec2(1.0, 2.0)) + _gpu_pow2_v2(vec2(1.0, 2.0))');
+    expect(r.code).toMatch(/^_fn_f_.*\(vec2\(1\.0, 2\.0\)\)$/);
+    expect(r.preamble).toMatch(/vec2 _fn_f_/);
+    expect(r.preamble).toContain('(x * x) + sin(x)');
     expect(
       ce
         .box(['f', ['Tuple', 1, 2]] as any)

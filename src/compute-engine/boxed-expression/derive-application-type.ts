@@ -1,3 +1,4 @@
+import { callResultType } from './call-result-type.js';
 import type {
   BoxedOperatorDefinition,
   IComputeEngine as ComputeEngine,
@@ -98,6 +99,14 @@ export function deriveApplicationType(
   if (!('operator' in binding)) {
     const ft = binding.value.type.type;
     if (typeof ft !== 'object' || ft.kind !== 'signature') return undefined;
+    const inferred = callResultType(
+      engine,
+      operator,
+      operands,
+      functionResult(ft) ?? 'unknown',
+      (h, a) => deriveApplicationType(engine, h, a)
+    );
+    if (inferred !== undefined) return inferred;
     return (
       instantiatedResultTypeOverActuals(ft, operands.map(actualOfDescriptor), {
         threadable: true,
@@ -134,6 +143,14 @@ export function deriveApplicationType(
   }
 
   const sig = def.signature.type;
+  const inferred = callResultType(
+    engine,
+    operator,
+    operands,
+    functionResult(sig) ?? 'unknown',
+    (h, a) => deriveApplicationType(engine, h, a)
+  );
+  if (inferred !== undefined) return absorb(inferred);
   const actuals: SolveActual[] = operands.map(actualOfDescriptor);
   return absorb(
     lift(

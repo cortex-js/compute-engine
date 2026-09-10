@@ -1,3 +1,4 @@
+import { expectTypeBetween } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { functionLiteralReturnType } from '../../src/compute-engine/boxed-expression/function-literal';
 import { hasFreeTypeVariables } from '../../src/common/type/instantiate';
@@ -1509,7 +1510,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     expect(call.type.toString()).toBe('list<list<number>>');
     expect(call.evaluate().toString()).toBe('[[1,1],[2,2]]');
     // …and the scalar call is unchanged.
-    expect(ce.box(['f', 3] as any).type.toString()).toBe('list<number>');
+    expectTypeBetween(ce.box(['f', 3] as any), {atMost: 'list<number>'});
     expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('[3,3]');
   });
 

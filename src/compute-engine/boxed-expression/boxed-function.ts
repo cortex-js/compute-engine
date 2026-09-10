@@ -1,3 +1,4 @@
+import { callResultType } from './call-result-type.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type {
   SimplifyOptions,
@@ -31,6 +32,7 @@ import {
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
 import {
+  deriveApplicationType,
   installBroadcastLiftHooks,
   typeHandlerContext,
 } from './derive-application-type.js';
@@ -6654,6 +6656,16 @@ function type(expr: BoxedFunction): Type | BoxedType {
       if (lifted !== undefined) return applyContractB(lifted);
     }
 
+    if (!typeHandlerAnswered) {
+      const inferred = callResultType(
+        expr.engine,
+        expr.operator,
+        expr.ops.map((x) => describeOperand(x)),
+        sigResult,
+        (h, a) => deriveApplicationType(expr.engine, h, a)
+      );
+      if (inferred !== undefined) return maybeAbsorb(inferred);
+    }
     return maybeAbsorb(sigResult);
   }
 
@@ -6719,7 +6731,15 @@ function type(expr: BoxedFunction): Type | BoxedType {
       );
       if (lifted !== undefined) return lifted;
     }
-    return sigResult;
+    return (
+      callResultType(
+        expr.engine,
+        expr.operator,
+        expr.ops.map((x) => describeOperand(x)),
+        sigResult,
+        (h, a) => deriveApplicationType(expr.engine, h, a)
+      ) ?? sigResult
+    );
   }
 
   // We want to return the result of evaluating the function, so since

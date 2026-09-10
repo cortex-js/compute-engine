@@ -10757,7 +10757,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // `float` declaration around a `vecN` return (wave 3).
         staticReturnType: true,
 
-        define: ({ id, name, params, body, literal, target }) => {
+        define: ({
+          id,
+          name,
+          params,
+          body,
+          literal,
+          target,
+          parameterTypes,
+        }) => {
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
           gpuCheckIdentifier(name, language);
@@ -10779,7 +10787,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           const complexFrame = new Map<string, boolean>();
           const vectorFrame = new Map<string, number>();
           const paramTypes = params.map((p, i) => {
-            const declared = BaseCompiler.userFunctionParamType(engine, id, i);
+            const declared =
+              parameterTypes?.[i] ??
+              BaseCompiler.userFunctionParamType(engine, id, i);
             const own = paramSymbols[i]?.type?.type;
             const t =
               declared === undefined || declared === 'unknown' ? own : declared;

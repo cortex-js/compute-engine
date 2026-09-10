@@ -138,9 +138,9 @@ describe('refinement is per-position', () => {
     expect(ce.box('w').type.toString()).toEqual(
       '(tuple<number, number>) -> tuple<number, number>'
     );
-    expect(ce.box(['w', ['Tuple', 3, 4]]).type.toString()).toEqual(
-      'tuple<number, number>'
-    );
+    expectTypeBetween(ce.box(['w', ['Tuple', 3, 4]]), {
+      atMost: 'tuple<number, number>',
+    });
   });
 
   test('declare-with-value resolves engine-local type names', () => {

@@ -566,6 +566,9 @@ export type OperatorCompileContext = {
   /** The target language, e.g. `"javascript"`, `"glsl"`, `"wgsl"`, `"python"`.
    * Branch on this to emit target-specific source. */
   readonly language: string;
+  /** The operand type including facts established by this compilation's local
+   * bindings. The expression's type remains the target-independent contract. */
+  readonly typeOf?: (expr: Expression) => Type;
 };
 
 /**

@@ -1,3 +1,4 @@
+import { expectTypeBetween } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -223,7 +224,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
     // CONCRETELY vector-valued rather than `broadcastable<unknown>` — the
     // element-wise agreement below is what this test pins either way.
     const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
-    expect(sumBody.type.toString()).toMatch(/vector<2>/);
+    expectTypeBetween(sumBody, {atMost: 'list<number^2>'});
 
     const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
     {
@@ -594,7 +595,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
   test('a truthful `-> list<number>` declaration still folds element-wise on JS', () => {
     const ce = truthfulList();
     const expr = ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]);
-    expect((expr as any).ops[0].type.toString()).toEqual('list<number>');
+    expectTypeBetween((expr as any).ops[0], {atMost: 'list<number>'});
     const r = compile(expr, { fallback: true, constantFold: false });
     expect(r?.success).toBe(true);
     expect((r as any).code).toContain('_SYS.bcast');

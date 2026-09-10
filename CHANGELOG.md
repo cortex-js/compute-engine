@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **Scalar calls retain their types through user-function chains and locals.**
+  A function accepting points or lists can now compile a scalar point call to
+  shared JavaScript, GLSL, and WGSL helpers without dropping its list inputs.
+  Result inference follows actual argument types through local assignments,
+  returns, and indexed sums/products. Shader point constructors also use the
+  scalar facts established for local bindings. This addresses Tycho requests
+  289 and 275; see `docs/CALL-SHAPE-SPECIALIZATION.md` for the contract and
+  source-level consumer verification.
+
 - **A point built from a symbol that holds a number compiled to code that
   threw.** `(⌊x⌋, ⌊y⌋, s)` with `s` assigned `2.41` emitted `[…, ...2.41]`, and
   every call of the compiled function raised "2.41 is not iterable". The spread

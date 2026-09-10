@@ -4165,7 +4165,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // No `eq` handler: a definitive structural comparison would make
     // `PointList(1,2)` unequal to the `Tuple(1,2)` it evaluates to; the
     // generic compare path evaluates both sides instead.
-    compile: (args, compile, { language }) => {
+    compile: (args, compile, { language, typeOf }) => {
       // Fail closed only for a *provably non-scalar* component — one whose
       // type (or any member of a union) is a subtype of `collection` (a list,
       // set, tuple, map, …). Everything else — `unknown`, `value`, and every
@@ -4188,7 +4188,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (t === 'string') return false;
         return isSubtype(t, COLLECTION_SHAPE_TYPE);
       };
-      const nonScalar = args.findIndex((a) => isProvablyNonScalar(a.type.type));
+      const nonScalar = args.findIndex((a) =>
+        isProvablyNonScalar(typeOf?.(a) ?? a.type.type)
+      );
       // A `broadcastable<T>` component is a scalar OR a list of `T`, decided
       // by its value — `2·PointX(v)` inside a function literal whose
       // parameter may be a point or a list of points. On `javascript` the
@@ -4203,7 +4205,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // union arm or an alias cannot be routed by one and missed by the
       // other.
       const undecided = args.findIndex((a) =>
-        containsBroadcastableType(a.type.type)
+        containsBroadcastableType(typeOf?.(a) ?? a.type.type)
       );
       if (nonScalar < 0 && undecided >= 0) {
         if (language === 'javascript') return undefined;
