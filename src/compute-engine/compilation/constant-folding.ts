@@ -15,6 +15,8 @@ import {
 import { BaseCompiler } from './base-compiler.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
+import { chop, factorial, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
+import { gamma } from '../numerics/special-functions.js';
 import { Complex } from 'complex-esm';
 
 /**
@@ -467,6 +469,16 @@ interface EmittedFoldDialect {
   /** The literal spelling of a folded value, parenthesized when the caller
    * asks. */
   readonly literal: (value: number, parenthesize: boolean) => string;
+  /** Names that may be called on ONE complex argument, each with the complex
+   * value it computes. Present only on a target whose complex values have a
+   * literal spelling this fold can write back (`complexLiteral`); a shader
+   * target carries a complex value in a `vec2`, which the reader has no value
+   * for, so it lists none. */
+  readonly complexCalls?: Readonly<
+    Record<string, (re: number, im: number) => { re: number; im: number }>
+  >;
+  /** The literal spelling of a folded complex value. */
+  readonly complexLiteral?: (re: number, im: number) => string;
   /** Memo by code string: the same constant subtree recurs across the unrolled
    * terms of a sum, and the fold is called on every emitted function node.
    * `null` records a decline. Cleared wholesale at `EMITTED_FOLD_MEMO_LIMIT`
@@ -685,6 +697,73 @@ class EmittedCodeReader {
       this.applied = true;
     }
   }
+
+  /** One named component of an emitted complex literal: `re: <expression>`.
+   * The key is matched exactly — an object with any other key is not the
+   * complex value this reader knows. */
+  private component(key: 're' | 'im'): number | undefined {
+    const start = this.pos;
+    const applied = this.applied;
+    this.skipWhitespace();
+    EMITTED_NAME.lastIndex = this.pos;
+    const match = EMITTED_NAME.exec(this.code);
+    if (match === null || match[0] !== key)
+      return this.backtrack(start, applied);
+    this.pos += key.length;
+    this.skipWhitespace();
+    if (this.code[this.pos] !== ':') return this.backtrack(start, applied);
+    this.pos += 1;
+    const value = this.additive();
+    if (value === undefined) return this.backtrack(start, applied);
+    return value;
+  }
+
+  /**
+   * The value of an emitted COMPLEX operand.
+   *
+   * The JavaScript target writes a complex value as `({ re: <re>, im: <im> })`,
+   * always with the two keys in that order and always in that shape
+   * (`complexOperandCode`), so the reader accepts exactly it — with the
+   * enclosing parentheses optional, since a caller may hand over a group whose
+   * parentheses it has already stripped. A REAL expression stands for the same
+   * value with a zero imaginary part, which is how a real operand reaches a
+   * complex routine.
+   */
+  complexOperand(): { re: number; im: number } | undefined {
+    this.skipWhitespace();
+    const start = this.pos;
+    const applied = this.applied;
+    const parenthesized = this.code[this.pos] === '(';
+    if (parenthesized) {
+      this.pos += 1;
+      this.skipWhitespace();
+    }
+    if (this.code[this.pos] !== '{') {
+      // Not an object literal: read the whole operand as a real expression,
+      // from the position the parenthesis test started at.
+      this.backtrack(start, applied);
+      const real = this.additive();
+      if (real === undefined) return this.backtrack(start, applied);
+      return { re: real, im: 0 };
+    }
+    this.pos += 1;
+    const re = this.component('re');
+    if (re === undefined) return this.backtrack(start, applied);
+    this.skipWhitespace();
+    if (this.code[this.pos] !== ',') return this.backtrack(start, applied);
+    this.pos += 1;
+    const im = this.component('im');
+    if (im === undefined) return this.backtrack(start, applied);
+    this.skipWhitespace();
+    if (this.code[this.pos] !== '}') return this.backtrack(start, applied);
+    this.pos += 1;
+    if (parenthesized) {
+      this.skipWhitespace();
+      if (this.code[this.pos] !== ')') return this.backtrack(start, applied);
+      this.pos += 1;
+    }
+    return { re, im };
+  }
 }
 
 /**
@@ -765,10 +844,50 @@ function evaluateEmittedCode(
       return emitFolded(head, consumed, rest, dialect);
   }
 
+  const complex = foldComplexCall(code, dialect);
+  if (complex !== undefined) return complex;
+
   const body = parenthesizedBody(code);
   if (body === undefined) return undefined;
   const foldedBody = evaluateEmittedCode(body, dialect);
   return foldedBody === undefined ? undefined : `(${foldedBody})`;
+}
+
+/**
+ * Fold a call of ONE of the dialect's complex routines on a literal complex
+ * argument — `_SYS.csqrt(({ re: (-2), im: 0 }))` becomes the complex literal
+ * `({ re: 0, im: 1.4142135623730951 })`.
+ *
+ * Such a call is created by the emission and is out of reach of the tree-level
+ * folds for the same reason the numeric ones are: an unrolled `Sum` substitutes
+ * its index into the emitted code, so `√(k−3)` at `k = 1` is a complex square
+ * root of a constant that the tree never held.
+ *
+ * The whole code must be the call and nothing else — a fold of a PREFIX has no
+ * meaning here, because a complex literal is not an operand of any arithmetic
+ * this reader evaluates.
+ */
+function foldComplexCall(
+  code: string,
+  dialect: EmittedFoldDialect
+): string | undefined {
+  const { complexCalls, complexLiteral } = dialect;
+  if (complexCalls === undefined || complexLiteral === undefined)
+    return undefined;
+  const text = code.trim();
+  const open = text.indexOf('(');
+  if (open < 0 || !text.endsWith(')')) return undefined;
+  const name = text.slice(0, open);
+  if (!Object.hasOwn(complexCalls, name)) return undefined;
+  const reader = new EmittedCodeReader(text.slice(open + 1, -1), dialect);
+  const arg = reader.complexOperand();
+  if (arg === undefined || !reader.atEnd()) return undefined;
+  const value = complexCalls[name](arg.re, arg.im);
+  // A component the literal cannot spell (a NaN or an infinity) leaves the
+  // call to run time, exactly as a non-finite real result does.
+  if (!Number.isFinite(value.re) || !Number.isFinite(value.im))
+    return undefined;
+  return complexLiteral(value.re, value.im);
 }
 
 /**
@@ -858,6 +977,78 @@ function variadicFold(
 }
 
 /**
+ * The `_SYS` complex routines whose body is one `complex-esm` method followed
+ * by the kernel-roundoff chop (`toRI` in `javascript-target.ts`), listed as
+ * `<runtime name>: <method>`.
+ *
+ * Every entry here is evaluated by calling that same method and applying that
+ * same chop, so a folded literal is what the run-time call returns, digit for
+ * digit. The routines with a hand-written body — `csign`, `clog10`, `clog2`,
+ * `cinvhav`, the ring operations `cneg` and `cconj` — are deliberately absent:
+ * each would need its own transcription, and a transcription that drifts from
+ * the runtime is a compiled value that contradicts the interpreter.
+ */
+const JAVASCRIPT_COMPLEX_METHODS: Readonly<Record<string, ComplexUnaryMethod>> =
+  {
+    '_SYS.csin': 'sin',
+    '_SYS.ccos': 'cos',
+    '_SYS.ctan': 'tan',
+    '_SYS.casin': 'asin',
+    '_SYS.cacos': 'acos',
+    '_SYS.catan': 'atan',
+    '_SYS.csinh': 'sinh',
+    '_SYS.ccosh': 'cosh',
+    '_SYS.ctanh': 'tanh',
+    '_SYS.csqrt': 'sqrt',
+    '_SYS.cexp': 'exp',
+    '_SYS.cln': 'log',
+    '_SYS.ccot': 'cot',
+    '_SYS.csec': 'sec',
+    '_SYS.ccsc': 'csc',
+    '_SYS.ccoth': 'coth',
+    '_SYS.csech': 'sech',
+    '_SYS.ccsch': 'csch',
+    '_SYS.cacot': 'acot',
+    '_SYS.casec': 'asec',
+    '_SYS.cacsc': 'acsc',
+    '_SYS.cacoth': 'acoth',
+    '_SYS.casech': 'asech',
+    '_SYS.cacsch': 'acsch',
+    '_SYS.cacosh': 'acosh',
+    '_SYS.catanh': 'atanh',
+  };
+
+/** A `complex-esm` method that takes no argument and answers a `Complex`. */
+type ComplexUnaryMethod = {
+  [K in keyof Complex]: Complex[K] extends () => Complex ? K : never;
+}[keyof Complex];
+
+const JAVASCRIPT_COMPLEX_CALLS: Readonly<
+  Record<string, (re: number, im: number) => { re: number; im: number }>
+> = Object.fromEntries(
+  Object.entries(JAVASCRIPT_COMPLEX_METHODS).map(([name, method]) => [
+    name,
+    (re: number, im: number) => {
+      const r = new Complex(re, im)[method]();
+      return {
+        re: chop(r.re, ROUNDOFF_TOLERANCE),
+        im: chop(r.im, ROUNDOFF_TOLERANCE),
+      };
+    },
+  ])
+);
+
+/** The JavaScript spelling of a complex value: the same `({ re: …, im: … })`
+ * object the target's own emission writes, so a folded literal stands exactly
+ * where the call it replaces stood. */
+function javascriptComplexLiteral(re: number, im: number): string {
+  return (
+    `({ re: ${javascriptNumberLiteral(re, false)}, ` +
+    `im: ${javascriptNumberLiteral(im, false)} })`
+  );
+}
+
+/**
  * The JavaScript emitted-code dialect.
  *
  * The constants and routines are the ones this target's own lowerings emit
@@ -915,28 +1106,140 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
     'Math.max': variadicFold(Math.max),
     '_SYS.pow2': unaryFold((x) => x * x),
     '_SYS.pow3': unaryFold((x) => x * x * x),
+    '_SYS.pow4': unaryFold((x) => {
+      const s = x * x;
+      return s * s;
+    }),
+    '_SYS.pow5': unaryFold((x) => {
+      const s = x * x;
+      return s * s * x;
+    }),
+    // `_SYS.pow` is `Math.pow` with the interpreter's `0^0 = NaN` convention.
+    // It is the lowering of every power whose EXPONENT is not a literal in the
+    // tree, which is exactly what a `Sum` or `Product` index is: the unroll
+    // substitutes the index value into the emitted code afterwards, so
+    // `(-1)^k` reaches this fold as `_SYS.pow(-1, 1)`. A `0^0` gives NaN,
+    // which the non-finite guard refuses, so that call is left to run time
+    // and still answers the NaN the interpreter answers.
+    '_SYS.pow': binaryFold((base, exp) =>
+      base === 0 && exp === 0 ? NaN : Math.pow(base, exp)
+    ),
+    // `x! = Γ(x+1)` and Γ itself, spelling a POLE as `Infinity` — the float
+    // projection of the interpreter's `~oo` — exactly as the two runtime
+    // routines do. Both call the same shared helpers the runtime calls, so the
+    // folded literal cannot drift from the value the call would return, and a
+    // pole is non-finite and therefore declines.
+    '_SYS.factorial': unaryFold((x) =>
+      Number.isInteger(x) ? (x < 0 ? Infinity : factorial(x)) : gamma(x + 1)
+    ),
+    '_SYS.gamma': unaryFold((z) =>
+      Number.isInteger(z) && z <= 0 ? Infinity : gamma(z)
+    ),
   },
   round: (x) => x,
   remainder: true,
   decimalPointRequired: false,
   literal: javascriptNumberLiteral,
+  complexCalls: JAVASCRIPT_COMPLEX_CALLS,
+  complexLiteral: javascriptComplexLiteral,
   memo: new Map<string, string | null>(),
 };
+
+/**
+ * The largest absolute INTEGER exponent a shader `pow` call folds at.
+ *
+ * It is the same bound the GPU target puts on inlining an integer power as
+ * repeated multiplication (`GPU_POWI_INLINE_LIMIT` in `gpu-target.ts`, also 8),
+ * and for the same reason: inside that range the target's own lowering of an
+ * integer power over a LITERAL base — which is the only base this fold ever
+ * sees — is a chain of multiplications written left to right, so folding that
+ * way reproduces the code the target would have written. Past it the
+ * target routes through the `_gpu_powi` preamble helper, whose arm for a large
+ * exponent is the hardware `pow` — a value this compiler cannot predict. The
+ * constant is repeated here rather than imported because `gpu-target.ts`
+ * imports this module, and the reverse import would close a cycle.
+ */
+const GPU_POW_FOLD_LIMIT = 8;
+
+/**
+ * `base^exponent` in shader arithmetic for an INTEGER exponent: repeated
+ * single-precision multiplication, left to right, which is what the GPU target
+ * emits for a literal integer power. `undefined` for anything else.
+ */
+function gpuIntegerPow(base: number, exponent: number): number | undefined {
+  if (!Number.isInteger(exponent)) return undefined;
+  const n = Math.abs(exponent);
+  if (n > GPU_POW_FOLD_LIMIT) return undefined;
+  // `0^0` is the one case the GPU target deliberately leaves to the hardware
+  // (it has no NaN literal to spell the interpreter's indeterminate `0^0`
+  // with), so the fold does not decide it either.
+  if (base === 0 && exponent === 0) return undefined;
+  let value = 1;
+  for (let i = 0; i < n; i++) value = Math.fround(value * base);
+  return exponent < 0 ? Math.fround(1 / value) : value;
+}
+
+/**
+ * `_gpu_powi(x, n)` as the preamble helper computes it, for the exponents whose
+ * value the helper makes predictable. `undefined` for every other exponent.
+ *
+ * The helper unrolls only `n` of 0, 2, 3 and 4 into single-precision products.
+ * Every other exponent — `|n| ≥ 5` and ALL negative ones — reaches the hardware
+ * `pow(abs(x), n)` with the sign restored afterwards, and a shader `pow` is not
+ * correctly rounded: its value is the driver's, not one this compiler may
+ * predict, so those decline. The single exception is `n = 1`: raising the
+ * magnitude to the first power leaves it unchanged and the odd-exponent branch
+ * then restores the sign, so the helper answers `x` itself.
+ *
+ * This is deliberately NOT `gpuIntegerPow`, the fold for a plain `pow` call:
+ * that one reproduces the left-to-right chain of products the GPU target emits
+ * for a LITERAL integer exponent, which is a different lowering from the
+ * helper's — the helper computes `n = 4` as `(x·x)·(x·x)` and has no product
+ * chain at all past `n = 4`.
+ */
+function gpuPowiHelper(base: number, exponent: number): number | undefined {
+  if (!Number.isInteger(exponent)) return undefined;
+  if (exponent === 0) return 1;
+  if (exponent === 1) return base;
+  if (exponent === 2) return Math.fround(base * base);
+  if (exponent === 3) return Math.fround(Math.fround(base * base) * base);
+  if (exponent === 4) {
+    const s = Math.fround(base * base);
+    return Math.fround(s * s);
+  }
+  return undefined;
+}
 
 /**
  * The GLSL / WGSL emitted-code dialect.
  *
  * Every step rounds to single (`Math.fround`), so a folded literal is
- * bit-identical to what the shader computes. Only `sqrt` and the fixed-power
- * helpers are admitted: `+`, `-`, `*`, `/` and `sqrt` are correctly rounded in
- * IEEE single, so a double computation rounded once reproduces them exactly,
- * while a shader `sin`, `cos`, `exp` or `pow` is NOT correctly rounded and its
- * value is the driver's, not one this compiler may predict. There are no
- * constants: neither shader language has a named numeric constant, so a bare
- * name in shader code is always a variable, a uniform or a helper.
+ * bit-identical to what the shader computes. Only `sqrt`, `pow` at an integer
+ * exponent and the fixed-power helpers are admitted: `+`, `-`, `*`, `/` and
+ * `sqrt` are correctly rounded in IEEE single, so a double computation rounded
+ * once reproduces them exactly, while a shader `sin`, `cos`, `exp` or a
+ * fractional `pow` is NOT correctly rounded and its value is the driver's, not
+ * one this compiler may predict. There are no constants: neither shader
+ * language has a named numeric constant, so a bare name in shader code is
+ * always a variable, a uniform or a helper.
+ *
+ * `pow` at an INTEGER exponent is admitted for a different reason than the
+ * correctly-rounded operations, and it fixes a wrong VALUE rather than a cost.
+ * Both shader languages define `pow(x, y)` as `exp2(y·log2(x))`, which is
+ * undefined for a negative `x` — `pow(-1.0, 1.0)` answers NaN on most drivers,
+ * so a kernel alternating signs with `(-1)^k` computes the wrong thing. The GPU
+ * target already refuses to write `pow` for a literal integer exponent for
+ * exactly that reason (it emits repeated multiplication or `_gpu_powi`); such a
+ * call only reaches the emitted code when the exponent became a literal AFTER
+ * the tree was compiled, which is what a `Sum` unroll does when it substitutes
+ * its index. Folding by repeated multiplication is therefore the value the
+ * target's own lowering would have produced, not the driver's.
  *
  * `_gpu_pow2` and `_gpu_pow3` fold as the products the preamble helpers
- * compute (`x * x`, `x * x * x`), each product rounded like the shader's. The
+ * compute (`x * x`, `x * x * x`), each product rounded like the shader's, and
+ * `_gpu_powi` folds at the exponents its own helper body turns into such
+ * products (`gpuPowiHelper`), declining the ones that reach a hardware `pow`
+ * inside the helper. The
  * per-width vector overloads (`_gpu_pow2_v2`) are absent on purpose: their
  * argument is a vector, which this reader has no value for. `abs` is exact in
  * every IEEE format (it only clears the sign bit), so it folds too; without
@@ -947,6 +1250,17 @@ const GPU_EMITTED_FOLD: EmittedFoldDialect = {
   calls: {
     sqrt: unaryFold((x) => Math.fround(Math.sqrt(x))),
     abs: unaryFold((x) => Math.abs(x)),
+    pow: (args) =>
+      args.length === 2 ? gpuIntegerPow(args[0], args[1]) : undefined,
+    // The sign-preserving integer power the target emits for a run-time
+    // exponent of integer TYPE; after a `Sum` unroll substitutes its index the
+    // exponent is a literal. Only the exponents the helper computes as
+    // single-precision products fold — see `gpuPowiHelper`, which mirrors the
+    // helper body rather than the plain `pow` lowering. A non-integer literal
+    // exponent cannot arrive here (the emitter gates the helper on the
+    // exponent's type) and declines anyway.
+    _gpu_powi: (args) =>
+      args.length === 2 ? gpuPowiHelper(args[0], args[1]) : undefined,
     _gpu_pow2: unaryFold((x) => Math.fround(x * x)),
     _gpu_pow3: unaryFold((x) => Math.fround(Math.fround(x * x) * x)),
   },

@@ -408,6 +408,95 @@ function isUserFunction(sym: Expression): boolean {
 }
 
 /**
+ * The per-function cache behind {@link derivative}: for one function literal
+ * and one differentiation variable, the chain of RAW iterates
+ * (`iterates[k]` is `differentiate` applied `k` times, `iterates[0]` the body
+ * the chain starts from) and the FINISHED result of each order (the iterate
+ * with the closing `simplify()` of order >= 2 applied).
+ *
+ * The two halves are guarded on DIFFERENT engine counters, because they read
+ * different state:
+ *
+ * - `semanticVersion` is the engine's `_semanticVersion` at the time the
+ *   entry was filled, and guards the raw iterates. Differentiating a body
+ *   expands the definitions of the other user functions it calls, so a cached
+ *   derivative is stale as soon as ANY definition changes; the whole entry is
+ *   dropped when the version moves. A reassignment of the function itself is
+ *   caught twice over — it bumps that version AND installs a fresh literal,
+ *   which is the map's key.
+ * - each finished result additionally carries the `generation` it was
+ *   simplified under (`ce._cacheGeneration()`: the `any` invalidation axis
+ *   plus the fact-suppression bit). The closing `simplify()` reads declared
+ *   types and assumptions, and a declaration or a type write advances the
+ *   `any` axis WITHOUT advancing the semantic one — writing `integer` onto a
+ *   free symbol of the body turns `6x·sin(πb)` into `0`, and the entry filled
+ *   before that write must not answer after it. Only the simplify is redone:
+ *   the raw iterates are what the differentiation cost buys.
+ */
+type DerivativeChainCache = {
+  semanticVersion: number;
+  iterates: Map<string, (Expression | undefined)[]>;
+  results: Map<
+    string,
+    Map<number, { generation: number; value: Expression | undefined }>
+  >;
+};
+
+/**
+ * Cached derivative chains, keyed by the FUNCTION LITERAL the derivative is
+ * taken of. The literal is the right lifetime: assigning a new body to `f`
+ * replaces the definition's `_lambdaLiteral` object, so the previous chain
+ * becomes unreachable and is collected with it.
+ *
+ * The cache is what makes an n-th derivative cost one differentiation step
+ * rather than n: `Derivative(f, 3)` continues the chain `Derivative(f, 2)`
+ * left behind. It also serves the compile path, which asks for the same
+ * closed form twice — once when the reference analysis probes whether the
+ * `Derivative` head lowers (`BaseCompiler.analyzeReferences`), once when the
+ * code is emitted.
+ */
+const derivativeChains = new WeakMap<Expression, DerivativeChainCache>();
+
+/**
+ * The cache key for differentiating `fn`: the function literal it resolves
+ * to, or `undefined` when there is none to key on (a builtin operator symbol
+ * such as `Sin`, whose derivative is a table lookup and costs nothing to
+ * redo).
+ */
+function derivativeChainKey(fn: Expression): Expression | undefined {
+  if (isFunction(fn, 'Function')) return fn;
+  if (isSymbol(fn)) {
+    const literal = fn.operatorDefinition?._lambdaLiteral;
+    if (isFunction(literal, 'Function')) return literal;
+  }
+  return undefined;
+}
+
+/**
+ * The cache entry for `key`, emptied when the engine's semantic state moved.
+ * The version is read BEFORE the differentiation runs, so a declaration the
+ * differentiation itself makes — an evaluation inside a throwaway compile
+ * scope can devolve a bare builtin symbol into a variable — moves the version
+ * past the entry and the next read starts over.
+ */
+function derivativeChainCache(
+  ce: Expression['engine'],
+  key: Expression
+): DerivativeChainCache {
+  const version = ce._semanticVersion;
+  let entry = derivativeChains.get(key);
+  if (entry === undefined || entry.semanticVersion !== version) {
+    entry = {
+      semanticVersion: version,
+      iterates: new Map(),
+      results: new Map(),
+    };
+    derivativeChains.set(key, entry);
+  }
+  return entry;
+}
+
+/**
  *
  * @param fn The function to differentiate, a function literal.
  *
@@ -420,10 +509,18 @@ export function derivative(
 ): Expression | undefined {
   if (order === 0) return fn;
   const ce = fn.engine;
+  // Read the cache key from the ORIGINAL operand: the normalization below
+  // rewrites a function symbol into an application of it, which is a fresh
+  // expression on every call and so has no identity to key on.
+  const cacheKey = derivativeChainKey(fn);
   let v = '_';
+  // Whether the chain starts from an APPLICATION of the function to the hole
+  // rather than from a body. See the sub-key below.
+  let appliedForm = false;
   if (isSymbol(fn) && fn.operatorDefinition) {
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
+    appliedForm = true;
   } else if (isSymbol(fn)) {
     return ce._fn('Derivative', [fn, ce.number(order)]);
   }
@@ -438,8 +535,36 @@ export function derivative(
     fn = fn.ops[0];
   }
   const originalOrder = order;
-  let result: Expression | undefined = fn;
-  while (order-- > 0 && result) result = differentiate(result, v);
+  const cache =
+    cacheKey === undefined ? undefined : derivativeChainCache(ce, cacheKey);
+  // The variable is part of the sub-key: the same literal can be
+  // differentiated with respect to its own parameter name (when the literal
+  // itself is the operand) or with respect to the hole `_` (when a function
+  // SYMBOL is, and the normalization above rewrote it to `f(_)`). The FORM
+  // the chain starts from is part of it too, and the two are not redundant: a
+  // literal whose parameter is spelled `_` differentiates its BODY with
+  // respect to `_`, which is a different chain from the application `f(_)`
+  // the symbol route builds, under the same variable name.
+  const subKey = appliedForm ? `apply:${v}` : `body:${v}`;
+  const finished = cache?.results.get(subKey)?.get(originalOrder);
+  // A finished result also has to have been simplified under the engine state
+  // in force now — see the cache type's comment.
+  if (finished !== undefined && finished.generation === ce._cacheGeneration())
+    return finished.value;
+
+  // The chain of raw iterates, extended in place: an order already computed
+  // for this literal is the starting point, so `f'''` costs one
+  // differentiation step once `f''` has been asked for.
+  const chain = cache?.iterates.get(subKey) ?? [fn];
+  let result: Expression | undefined =
+    order < chain.length ? chain[order] : chain[chain.length - 1];
+  let step = order < chain.length ? order : chain.length - 1;
+  while (step < order && result) {
+    result = differentiate(result, v);
+    step += 1;
+    chain[step] = result;
+  }
+  cache?.iterates.set(subKey, chain);
 
   // The iterated product/quotient rule squares the denominator at each step,
   // so an r-th derivative can carry x^(2^r)-scale exponents (e.g. the 75th
@@ -451,6 +576,20 @@ export function derivative(
   // structure, it does not change values. Only needed for order >= 2 (a single
   // derivative cannot blow up), which also leaves the common case untouched.
   if (result && originalOrder >= 2) result = result.simplify();
+  if (cache !== undefined) {
+    let byOrder = cache.results.get(subKey);
+    if (byOrder === undefined) {
+      byOrder = new Map();
+      cache.results.set(subKey, byOrder);
+    }
+    // The generation is read AFTER the simplify: that is the state the result
+    // describes, and the simplify itself can advance the axis (it pushes and
+    // pops scopes).
+    byOrder.set(originalOrder, {
+      generation: ce._cacheGeneration(),
+      value: result,
+    });
+  }
   return result;
 }
 

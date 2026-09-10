@@ -429,6 +429,43 @@ const CLOSE_DELIMITER: Record<string, string> = {
   '\\llbracket': '\\rrbracket',
 };
 
+/**
+ * The vertical-bar delimiter commands. Unlike a parenthesis or a bracket,
+ * each of these spells its own closing delimiter, so a nested absolute value
+ * or norm puts two of them side by side (`\vert x-\vert y\vert\vert`).
+ * `parseEnclosure()` copes with that by re-parsing the body without its close
+ * boundary and matching the boundary afterwards, which only works if a bar
+ * that no enclosure claimed stops the expression parse instead of being
+ * consumed. A bare `|` stops it because it is not a command; these spellings
+ * must behave the same, so `parsePrimary()` does not gobble them as an
+ * unknown command.
+ */
+const BAR_DELIMITER_COMMANDS = new Set<string>([
+  '\\vert',
+  '\\lvert',
+  '\\rvert',
+  '\\Vert',
+  '\\lVert',
+  '\\rVert',
+  '\\|',
+]);
+
+/**
+ * True when every token of a close boundary is a vertical bar (either the
+ * bare `|` or one of the commands above).
+ *
+ * Such a boundary is ambiguous: the same token also opens an absolute value
+ * or a norm, so an occurrence of it inside a brace group or at the start of
+ * an enclosure body can be the opening of a nested enclosure rather than the
+ * close of the enclosure that owns the boundary. A boundary with a closing
+ * spelling of its own — `)`, `\end{cases}`, `\right\vert` — is never
+ * ambiguous that way, so it stays visible and a runaway parse still stops
+ * on it.
+ */
+function isBarBoundary(tokens: LatexToken[]): boolean {
+  return tokens.every((tok) => tok === '|' || BAR_DELIMITER_COMMANDS.has(tok));
+}
+
 function describeTypeCallbackResult(value: unknown): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
@@ -604,7 +641,30 @@ export class _Parser implements Parser {
   // boundary, the parsing of the `|` argument stops as soon as it encounters
   // the `\end{cases}` and can properly report an unexpected token on the `|`
   // only while correctly interpreting the `\begin{cases}...\end{cases}`
-  private _boundaries: { index: number; tokens: LatexToken[] }[] = [];
+  //
+  // A boundary with a `minIndex` is inert while the current token index is
+  // below it. `parseEnclosure` uses that to re-read an apparently empty body
+  // (`\vert\vert x\vert-1\vert`): the delimiter at the start of the body is
+  // held to be the opening of a nested enclosure, so the boundary must not
+  // match it, while every later occurrence still closes the body.
+  private _boundaries: {
+    index: number;
+    tokens: LatexToken[];
+    minIndex?: number;
+  }[] = [];
+
+  /**
+   * Index of the lowest entry of `_boundaries` that `atBoundary` matches
+   * without restriction. An entry below the barrier belongs to an enclosure
+   * started outside the brace group or body currently being parsed, and is
+   * hidden only when it is spelled with vertical bars (`isBarBoundary`): a
+   * bar met inside opens a nested absolute value instead of closing the outer
+   * one. An entry with a closing spelling of its own — `\end{cases}`, `)` —
+   * stays visible, so an unclosed group still stops on it instead of running
+   * to the end of the input. `parseGroup` and the re-read of an apparently
+   * empty enclosure body raise the barrier and restore it afterwards.
+   */
+  private _boundaryBarrier = 0;
 
   // Those two properties are used to detect infinite loops while parsing
   private _lastPeek = '';
@@ -1037,7 +1097,11 @@ export class _Parser implements Parser {
   get atBoundary(): boolean {
     if (this.atEnd) return true;
     const start = this.index;
-    for (const boundary of this._boundaries) {
+    for (let i = 0; i < this._boundaries.length; i++) {
+      const boundary = this._boundaries[i];
+      if (i < this._boundaryBarrier && isBarBoundary(boundary.tokens)) continue;
+      if (boundary.minIndex !== undefined && start < boundary.minIndex)
+        continue;
       if (this.matchBoundaryTokens(boundary.tokens)) {
         this.index = start;
         return true;
@@ -1067,8 +1131,8 @@ export class _Parser implements Parser {
     return false;
   }
 
-  addBoundary(boundary: LatexToken[]): void {
-    this._boundaries.push({ index: this.index, tokens: boundary });
+  addBoundary(boundary: LatexToken[], minIndex?: number): void {
+    this._boundaries.push({ index: this.index, tokens: boundary, minIndex });
   }
 
   removeBoundary(): void {
@@ -1077,6 +1141,11 @@ export class _Parser implements Parser {
 
   matchBoundary(): boolean {
     const currentBoundary = this._boundaries[this._boundaries.length - 1];
+    if (
+      currentBoundary?.minIndex !== undefined &&
+      this.index < currentBoundary.minIndex
+    )
+      return false;
     const match =
       currentBoundary && this.matchBoundaryTokens(currentBoundary.tokens);
     if (match) this._boundaries.pop();
@@ -1735,14 +1804,28 @@ export class _Parser implements Parser {
     this.skipSpaceTokens();
     if (this.match('<{>')) {
       this.addBoundary(['<}>']);
-      const expr = this.parseExpression();
-      this.skipSpace();
-      if (this.matchBoundary()) return expr ?? 'Nothing';
-      // Try to find the boundary (or the end)
-      while (!this.matchBoundary() && !this.atEnd) this.nextToken();
-      if (operator(expr) === 'Error') return expr;
-      const err = this.error('expected-closing-delimiter', start);
-      return expr !== null ? ['InvisibleOperator', expr, err] : err;
+      // A brace group is a hard bracket for a bar: a vertical bar met inside
+      // the group opens a nested absolute value, it never closes an enclosure
+      // started outside the group. Without the barrier the `|` opening the
+      // inner absolute value of `\vert\frac{\vert x\vert}{2}\vert` matches the
+      // outer bar boundary, so the group parses as empty and the fraction
+      // reports a missing numerator. Boundaries with a closing spelling of
+      // their own stay visible, so an unclosed group still stops on the
+      // enclosing `\end{cases}` instead of consuming it.
+      const savedBarrier = this._boundaryBarrier;
+      this._boundaryBarrier = this._boundaries.length - 1;
+      try {
+        const expr = this.parseExpression();
+        this.skipSpace();
+        if (this.matchBoundary()) return expr ?? 'Nothing';
+        // Try to find the boundary (or the end)
+        while (!this.matchBoundary() && !this.atEnd) this.nextToken();
+        if (operator(expr) === 'Error') return expr;
+        const err = this.error('expected-closing-delimiter', start);
+        return expr !== null ? ['InvisibleOperator', expr, err] : err;
+      } finally {
+        this._boundaryBarrier = savedBarrier;
+      }
     }
 
     this.index = start;
@@ -2332,6 +2415,12 @@ export class _Parser implements Parser {
       // 2. Collect the expression in between the delimiters
       const bodyStart = this.index;
       this.skipSpace();
+      // Visual spacing just inside the fences is decoration, not a body. It
+      // is written exactly to separate two adjacent bars, as in
+      // `|\,|x|\,|`, so it must not make the body look non-empty: an empty
+      // body is what triggers the re-parse that reads the inner bars as a
+      // nested absolute value.
+      this.skipVisualSpace();
       if (isReversedInterval) this._reversedIntervalDepth += 1;
       let body = this.parseExpression();
       if (isReversedInterval) this._reversedIntervalDepth -= 1;
@@ -2347,16 +2436,34 @@ export class _Parser implements Parser {
           def.openTrigger.length === def.closeTrigger.length &&
           def.openTrigger.every((tok, i) => tok === def.closeTrigger[i]));
       if (matchedBoundary && isEmptySequence(body) && sameTrigger && boundary) {
-        // If the open/close delimiter are identical and the body is empty,
-        // we may have consumed an inner delimiter (e.g. "||3-5|-4|").
-        // Retry parsing without the boundary and look for the closing delimiter.
+        // The open and close delimiters are the same and the body came out
+        // empty, so the delimiter that closed it is really the opening of a
+        // nested enclosure ("||3-5|-4|"). Read the body again with the
+        // boundary held inert on that one token: every later occurrence of
+        // the delimiter still closes the body, which is what lets an
+        // enclosure nest more than two deep.
         this.index = bodyStart;
         this.skipSpace();
+        this.skipVisualSpace();
+        this.addBoundary(boundary, this.index + 1);
+        // Hide the enclosing bar boundaries as well. They are spelled with
+        // the same delimiter one level up, so they would close the body at
+        // the very token this re-read holds to be a nested opening — which is
+        // what stopped an enclosure from nesting three deep. An enclosing
+        // boundary with a closing spelling of its own is not ambiguous and
+        // stays visible.
+        const savedBarrier = this._boundaryBarrier;
+        this._boundaryBarrier = this._boundaries.length - 1;
         if (isReversedInterval) this._reversedIntervalDepth += 1;
-        body = this.parseExpression();
+        try {
+          body = this.parseExpression();
+        } finally {
+          this._boundaryBarrier = savedBarrier;
+        }
         if (isReversedInterval) this._reversedIntervalDepth -= 1;
         this.skipSpace();
-        if (!this.matchAll(boundary)) {
+        if (!this.matchBoundary()) {
+          this.removeBoundary();
           this.index = start;
           if (!this.atEnd) continue;
           return null;
@@ -3609,7 +3716,11 @@ export class _Parser implements Parser {
 
     if (result === null) {
       result = this.options.parseUnexpectedToken?.(null, this) ?? null;
-      if (result === null && this.peek.startsWith('\\')) {
+      if (
+        result === null &&
+        this.peek.startsWith('\\') &&
+        !BAR_DELIMITER_COMMANDS.has(this.peek)
+      ) {
         // Tolerate a stray bare `\` at end of input (e.g. Desmos trailing `\`).
         // Some sources emit a trailing `\` that the tokenizer surfaces as a
         // literal `\` token when followed by EOF.

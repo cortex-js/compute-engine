@@ -1131,6 +1131,22 @@ export interface CompileTarget<Expr = unknown> {
   reservedEmittedNames?: ReadonlySet<string>;
 
   /**
+   * Set by a target whose `Apply` lowering compiles ONLY a function-LITERAL
+   * callee. The interval target is one: it validates a call's arity against
+   * the literal's parameter list, and a callee it cannot see has none — the
+   * interpreter curries an under-applied call and throws on an over-applied
+   * one, neither of which a plain call expresses, so it fails closed.
+   *
+   * The reference analysis reads this so that it reports `Apply` as
+   * unsupported instead of walking into a callee the target never compiles.
+   * That walk is not free: for `Apply(Derivative(f, n), x)` it probes the
+   * `Derivative` head's compile handler, which computes the symbolic n-th
+   * derivative — seconds of work, on a compilation that has already
+   * declined — and then discards it.
+   */
+  appliesFunctionLiteralsOnly?: boolean;
+
+  /**
    * Target-supplied absence capability. Because the interpreter normalizes
    * domains at construction, numeric absence
    * reaches the compile boundary already as `NaN` — no conversion shim is

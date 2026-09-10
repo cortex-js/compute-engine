@@ -109,8 +109,8 @@ describe('complex mode â€” one emission per user function, lift at use (design Â
     expect(bz.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
     const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
     expect(bs.code).toBe(
-      '((_tv1) => Array.isArray(_tv1) ? ' +
-        '_SYS.bcastFn(_fn_b, _tv1) : _fn_b(_tv1))' +
+      '((_tv3) => Array.isArray(_tv3) ? ' +
+        '_SYS.bcastFn(_fn_b, _tv3) : _fn_b(_tv3))' +
         '(_SYS.csqrt(_SYS.cplx(_.a)))'
     );
     expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });

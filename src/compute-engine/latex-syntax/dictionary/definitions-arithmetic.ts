@@ -64,6 +64,47 @@ function isExactlyTwo(expr: MathJsonExpression): boolean {
 }
 
 /**
+ * True when the serialized body of an absolute value carries a plain vertical
+ * bar of its own — a nested absolute value, written `\vert` or `|`.
+ *
+ * `\lvert`, `\rvert` and `\Vert` are not plain bars: each says which side of
+ * a pair it is on, so none of them can be taken for the close of the
+ * enclosing absolute value.
+ */
+function bodyContainsBar(latex: string): boolean {
+  // A LaTeX command name is a maximal run of letters, so the backslash has to
+  // sit right before `vert`: `\lvert` and `\rvert` do not contain `\vert`.
+  return latex.includes('\\vert') || latex.includes('|');
+}
+
+/**
+ * Serialize `Abs`.
+ *
+ * A body with no bar of its own keeps the plain `\vert x\vert` spelling, so
+ * the common case is unchanged. A body that does carry one is fenced with
+ * `\left\vert … \right\vert` instead: without `\left`/`\right` nothing says
+ * which bar of a run opens and which closes, so `\vert\vert x\vert-1\vert`
+ * has to be guessed at — both when the expression is read back and when a
+ * reader looks at it. The explicit fences also give the outer pair the right
+ * rendered height.
+ *
+ * The `groupStyle` option keeps its meaning: it can ask for scaled or big
+ * delimiters on any absolute value, nested or not.
+ */
+function serializeAbs(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string {
+  const style = serializer.groupStyle(expr, serializer.level + 1);
+  const inner = serializer.serialize(operand(expr, 1));
+  if (style === 'big')
+    return joinLatex(['\\Bigl\\vert', inner, '\\Bigr\\vert']);
+  if (style === 'scaled' || bodyContainsBar(inner))
+    return joinLatex(['\\left\\vert', inner, '\\right\\vert']);
+  return joinLatex(['\\vert', inner, '\\vert']);
+}
+
+/**
  * The subscript that carries the order of a norm: `‖v‖_1`, `‖v‖_\infty`,
  * `‖v‖_F`, `‖v‖_{3/2}`.
  *
@@ -1708,6 +1749,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeTrigger: '|',
     parse: (_parser: Parser, body: MathJsonExpression) =>
       isEmptySequence(body) ? null : (['Abs', body] as MathJsonExpression),
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      serializeAbs(serializer, expr),
   },
   {
     kind: 'matchfix',

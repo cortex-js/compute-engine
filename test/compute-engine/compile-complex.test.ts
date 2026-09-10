@@ -1586,7 +1586,7 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     );
     const call = engine.box(['Q2', ['Complex', 3, 4]]);
     const r2 = compile(call, { constantFold: false, fallback: false });
-    expect(r2.preamble).toContain('(z, w) => w + (z).re');
+    expect(r2.preamble).toContain('(z, w) => w + z.re');
     expect(r2.run!({})).toBe(6); // Re(1+2i) + 5
     expect(call.evaluate().toString()).toBe('6');
   });

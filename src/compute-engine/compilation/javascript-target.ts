@@ -211,6 +211,11 @@ import {
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
+  compileJetDerivative,
+  jetDerivativeTarget,
+  JET_HELPERS,
+} from './jet-derivative.js';
+import {
   MIN_UNROLLED_WIDTH,
   overriddenCompilationHeads,
   unrollFixedWidthCollections,
@@ -338,6 +343,142 @@ function boundJSResult(
       (exit) => `${bindings} ${exit(value)}`
     ) ?? `(() => { ${bindings} return ${value}; })()`
   );
+}
+
+/**
+ * One `const` binding of an operand that has already been compiled.
+ *
+ * When the operand is itself a value computed after local bindings
+ * (`boundJSResult`), the statement sink knows its statements and lays them out
+ * in the enclosing block; the operand then contributes no closure of its own.
+ * Anything else is bound with a plain `const`. A chain of such bindings is
+ * therefore one block of straight-line statements however deeply the
+ * expression nests.
+ *
+ * `name` must be a FRESH temporary (`BaseCompiler.tempVar`): the spliced form
+ * opens a nested block, so a spelling that two levels share would let the
+ * inner block's own `const` shadow the outer binding being assigned to, and
+ * the assignment would throw at run time.
+ */
+function jsBinding(
+  target: CompileTarget<Expression>,
+  name: string,
+  code: string
+): string {
+  return (
+    javascriptStatements(target)?.initialize(name, code) ??
+    `const ${name} = ${code};`
+  );
+}
+
+/**
+ * Prepare compiled operands for splicing into one emitted block.
+ *
+ * An operand that is a value computed after local bindings (`boundJSResult`)
+ * would otherwise be nested inside the block as an immediately invoked
+ * function. Here it is bound to a temporary whose statements come first, and
+ * the caller splices the NAME.
+ *
+ * Evaluation order is the order of `codes`: every operand up to the last one
+ * that needs lifting is bound, so none of them is left to be evaluated inside
+ * an expression that runs after the lifted statements. Operands after that one
+ * are passed through unchanged, which keeps the emission byte-identical when
+ * nothing needs lifting at all.
+ */
+function liftJSOperands(
+  target: CompileTarget<Expression>,
+  codes: ReadonlyArray<string>
+): { prelude: string; values: ReadonlyArray<string> } {
+  const statements = javascriptStatements(target);
+  let last = -1;
+  if (statements !== undefined)
+    codes.forEach((c, i) => {
+      if (statements.has(c)) last = i;
+    });
+  if (last < 0) return { prelude: '', values: codes };
+  const names = codes.map((c, i) =>
+    i <= last ? BaseCompiler.tempVar(target) : c
+  );
+  return {
+    prelude: codes
+      .slice(0, last + 1)
+      .map((c, i) => jsBinding(target, names[i], c))
+      .join(' '),
+    values: names,
+  };
+}
+
+/**
+ * Splice compiled operands into `build`, which uses each of them exactly once.
+ *
+ * The operands are lifted out of `build` (`liftJSOperands`) so a chain of
+ * complex operations stays one block of straight-line statements instead of
+ * gaining a closure at every level. A single operand needs no temporary at
+ * all: its statements end on a value expression, and `build` is applied to
+ * that expression directly.
+ *
+ * `build` must only assemble source: the statement sink renders a registered
+ * form once for its expression spelling and again at every statement position
+ * it reaches, so `build` is applied more than once. Compile any other operand
+ * BEFORE the call and splice the resulting string.
+ */
+function spliceJSValues(
+  target: CompileTarget<Expression>,
+  codes: ReadonlyArray<string>,
+  build: (values: ReadonlyArray<string>) => string
+): string {
+  const statements = javascriptStatements(target);
+  if (statements === undefined || !codes.some((c) => statements.has(c)))
+    return build(codes);
+  if (codes.length === 1)
+    return statements.expression((exit) =>
+      statements.emit(codes[0], (value) => exit(build([value])))
+    );
+  const { prelude, values } = liftJSOperands(target, codes);
+  return boundJSResult(target, prelude, build(values));
+}
+
+/**
+ * A `_SYS.c…` runtime helper applied to one complex operand.
+ *
+ * The operand goes through the statement sink (`spliceJSValues`), so an
+ * operand that is itself a chain of complex operations contributes its `const`
+ * temporaries to the enclosing block instead of nesting a closure inside the
+ * call argument. An operand that is an ordinary expression — a symbol, a
+ * literal, `({ re: x, im: 0 })` — is spliced unchanged.
+ */
+function complexUnary(
+  target: CompileTarget<Expression>,
+  helper: string,
+  code: string
+): string {
+  return spliceJSValues(target, [code], ([z]) => `${helper}(${z})`);
+}
+
+/**
+ * A piece of source safe to prefix a member read (`.re`) to: parenthesized
+ * unless it is already a single identifier.
+ */
+function jsAtom(code: string): string {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(code) ? code : `(${code})`;
+}
+
+/**
+ * The two components of a complex operand whose value is known at compile
+ * time — the imaginary unit, or a finite complex number literal — as numbers.
+ * `undefined` for anything else.
+ *
+ * A product with such a factor scales its other operand by two CONSTANTS, so
+ * the object holding those constants never has to be built and the two
+ * multiplications fold (see the `Multiply` complex arm).
+ */
+function complexLiteralParts(
+  x: Expression
+): { re: number; im: number } | undefined {
+  if (isSymbol(x, 'ImaginaryUnit')) return { re: 0, im: 1 };
+  if (isNumber(x) && Number.isFinite(x.re) && Number.isFinite(x.im))
+    return { re: x.re, im: x.im };
+  return undefined;
 }
 
 // Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
@@ -2483,6 +2624,42 @@ function compileColorEntryOperand(
 const NESTED_COLOR_BROADCAST_TYPE =
   'broadcastable<broadcastable<broadcastable<broadcastable<color>>>>';
 
+/**
+ * The forward-mode automatic-differentiation lowering of
+ * `Apply(Derivative(f, n), x)`, or `undefined` when this application keeps
+ * the symbolic closed form (`compileDerivative`, library/calculus.ts).
+ *
+ * Declines, in order: a shape that is not a single-order derivative applied
+ * to one argument; a callee that does not resolve to a pure univariate user
+ * function literal; the complex discipline, where the value shape is decided
+ * by the discipline rather than by the body this lowering reads it from; an
+ * order or a body small enough that the closed form is the better code; and
+ * finally a body containing a head with no coefficient recurrence
+ * (`jet-derivative.ts` reports that by returning `undefined`).
+ */
+function tryCompileJetDerivative(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  const engine = args[0]?.engine;
+  if (engine === undefined) return undefined;
+  const claim = jetDerivativeTarget(
+    args,
+    (id) => BaseCompiler.userFunctionLiteral(engine, id),
+    target.mode === 'complex'
+  );
+  if (claim === undefined) return undefined;
+  return compileJetDerivative(
+    claim.literal,
+    claim.order,
+    args[1],
+    compile,
+    () => BaseCompiler.tempVar(target),
+    BaseCompiler.isComplexValued
+  );
+}
+
 function tryCompileColorBroadcast(
   head: string,
   color: Expression,
@@ -2615,7 +2792,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // `tryGetJSComplexParts`.
       const parts = tryGetJSComplexParts(args[0], compile);
       if (parts !== undefined) return `Math.hypot(${parts.re}, ${parts.im})`;
-      return `_SYS.cabs(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.cabs', compile(args[0]));
     }
     if (BaseCompiler.isNonNegative(args[0]))
       return identityPassthrough(args[0], compile, target);
@@ -2645,104 +2822,157 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // byte-identical to the previous emission).
     const bindings: Array<[name: string, value: string]> = [];
     const parts = args.map((a) => {
+      // A complex operand whose value is known at compile time — the
+      // imaginary unit, or a complex literal — contributes its two components
+      // as constants, so the object holding them is never built and never
+      // read back (`x + i` is `{ re: x, im: 1 }`).
+      const literal = BaseCompiler.isComplexValued(a)
+        ? complexLiteralParts(a)
+        : undefined;
+      if (literal !== undefined)
+        return { re: String(literal.re), im: String(literal.im) };
       const code = compile(a);
       const isComplex = BaseCompiler.isComplexValued(a);
       if (isComplex && !isSymbol(a) && !isNumber(a)) {
         const name = BaseCompiler.tempVar(target);
         bindings.push([name, code]);
-        return { code: name, isComplex, bound: true };
+        return { re: `${name}.re`, im: `${name}.im` };
       }
-      return { code, isComplex, bound: false };
+      if (isComplex) return { re: `(${code}).re`, im: `(${code}).im` };
+      return { re: code, im: undefined };
     });
-    const reTerms = parts.map((p) =>
-      p.isComplex ? (p.bound ? `${p.code}.re` : `(${p.code}).re`) : p.code
-    );
-    const imTerms = parts
-      .filter((p) => p.isComplex)
-      .map((p) => (p.bound ? `${p.code}.im` : `(${p.code}).im`));
-    const body = `({ re: ${reTerms.join(' + ')}, im: ${imTerms.join(' + ')} })`;
+    // A component spelled as the constant `0` adds nothing to its sum and is
+    // dropped, the way the real arm above drops an operand whose value is
+    // zero. Only a component known at compile time is ever spelled that way,
+    // and it comes from a purely imaginary literal, whose real part is `0`.
+    //
+    // The one divergence this creates is the SIGN of a zero result: `x + i`
+    // emits `{ re: _.x, im: 1 }`, so a run-time `x` of `-0` keeps its negative
+    // zero, where the retained `_.x + 0` would answer `+0`. No literal can
+    // carry a negative zero into this arm — the engine normalizes it away when
+    // it boxes the number — so the divergence needs a value supplied at run
+    // time.
+    const sum = (terms: ReadonlyArray<string>): string => {
+      const nonZero = terms.filter((t) => t !== '0');
+      return nonZero.length === 0 ? '0' : nonZero.join(' + ');
+    };
+    const body = `({ re: ${sum(parts.map((p) => p.re))}, im: ${sum(
+      parts.flatMap((p) => (p.im === undefined ? [] : [p.im]))
+    )} })`;
     if (bindings.length === 0) return body;
-    return `(() => { const ${bindings
-      .map(([n, v]) => `${n} = ${v}`)
-      .join(', ')}; return ${body}; })()`;
+    return boundJSResult(
+      target,
+      bindings.map(([n, v]) => jsBinding(target, n, v)).join(' '),
+      body
+    );
   },
-  Arccos: (args, compile) => {
+  Arccos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.cacos(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.cacos', compile(args[0]));
     // Real operand, complex result (`Arccos(2)`, or `Arccos(x)` for a real
     // symbol of unknown magnitude): the node is typed `complex`, so the
     // parent emits `{re, im}` arithmetic and `Math.acos` — a `NaN` number —
     // must not be the lowering. See `resultIsComplexValued`.
     if (resultIsComplexValued('Arccos', args))
-      return `_SYS.cacos(${complexOperandCode(args[0], compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.cacos',
+        complexOperandCode(args[0], compile)
+      );
     return `Math.acos(${compile(args[0])})`;
   },
-  Arcosh: (args, compile) => {
+  Arcosh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.cacosh(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.cacosh', compile(args[0]));
     if (resultIsComplexValued('Arcosh', args))
-      return `_SYS.cacosh(${complexOperandCode(args[0], compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.cacosh',
+        complexOperandCode(args[0], compile)
+      );
     return `Math.acosh(${compile(args[0])})`;
   },
-  Arccot: ([x], compile) => {
+  Arccot: ([x], compile, target) => {
     if (x === null) throw new Error('Arccot: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacot(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.cacot', compile(x));
     // `Math.atan(1/x)` returns the wrong branch for x < 0 (range (-π/2, 0)
     // instead of the interpreter's (0, π)). `π/2 - atan(x)` is branch-free and
     // gives the full (0, π) range for all real x.
     return `(Math.PI / 2 - Math.atan(${compile(x)}))`;
   },
-  Arcoth: ([x], compile) => {
+  Arcoth: ([x], compile, target) => {
     if (x === null) throw new Error('Arcoth: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacoth(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.cacoth', compile(x));
     if (resultIsComplexValued('Arcoth', [x]))
-      return `_SYS.cacoth(${complexOperandCode(x, compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.cacoth',
+        complexOperandCode(x, compile)
+      );
     return `Math.atanh(1 / (${compile(x)}))`;
   },
-  Arccsc: ([x], compile) => {
+  Arccsc: ([x], compile, target) => {
     if (x === null) throw new Error('Arccsc: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacsc(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.cacsc', compile(x));
     if (resultIsComplexValued('Arccsc', [x]))
-      return `_SYS.cacsc(${complexOperandCode(x, compile)})`;
+      return complexUnary(target, '_SYS.cacsc', complexOperandCode(x, compile));
     return `Math.asin(1 / (${compile(x)}))`;
   },
-  Arcsch: ([x], compile) => {
+  Arcsch: ([x], compile, target) => {
     if (x === null) throw new Error('Arcsch: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.cacsch(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.cacsch', compile(x));
     return `Math.asinh(1 / (${compile(x)}))`;
   },
-  Arcsec: ([x], compile) => {
+  Arcsec: ([x], compile, target) => {
     if (x === null) throw new Error('Arcsec: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.casec(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.casec', compile(x));
     if (resultIsComplexValued('Arcsec', [x]))
-      return `_SYS.casec(${complexOperandCode(x, compile)})`;
+      return complexUnary(target, '_SYS.casec', complexOperandCode(x, compile));
     return `Math.acos(1 / (${compile(x)}))`;
   },
-  Arsech: ([x], compile) => {
+  Arsech: ([x], compile, target) => {
     if (x === null) throw new Error('Arsech: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.casech(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.casech', compile(x));
     if (resultIsComplexValued('Arsech', [x]))
-      return `_SYS.casech(${complexOperandCode(x, compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.casech',
+        complexOperandCode(x, compile)
+      );
     return `Math.acosh(1 / (${compile(x)}))`;
   },
-  Arcsin: (args, compile) => {
+  Arcsin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.casin(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.casin', compile(args[0]));
     if (resultIsComplexValued('Arcsin', args))
-      return `_SYS.casin(${complexOperandCode(args[0], compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.casin',
+        complexOperandCode(args[0], compile)
+      );
     return `Math.asin(${compile(args[0])})`;
   },
   Arsinh: 'Math.asinh',
-  Arctan: (args, compile) => {
+  Arctan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.catan(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.catan', compile(args[0]));
     return `Math.atan(${compile(args[0])})`;
   },
-  Artanh: (args, compile) => {
+  Artanh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.catanh(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.catanh', compile(args[0]));
     if (resultIsComplexValued('Artanh', args))
-      return `_SYS.catanh(${complexOperandCode(args[0], compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.catanh',
+        complexOperandCode(args[0], compile)
+      );
     return `Math.atanh(${compile(args[0])})`;
   },
   Ceil: (args, compile, target) => {
@@ -2756,19 +2986,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // non-default `ce.tolerance`.
   Chop: (args, compile) =>
     `_SYS.chop(${compile(args[0])}, ${args[0]?.engine?.tolerance ?? 1e-10})`,
-  Cos: (args, compile) => {
+  Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.ccos(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.ccos', compile(args[0]));
     return `Math.cos(${compile(args[0])})`;
   },
-  Cosh: (args, compile) => {
+  Cosh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.ccosh(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.ccosh', compile(args[0]));
     return `Math.cosh(${compile(args[0])})`;
   },
   Cot: ([x], compile, target) => {
     if (x === null) throw new Error('Cot: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccot(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.ccot', compile(x));
     return BaseCompiler.inlineExpression(
       target,
       'Math.cos(${x}) / Math.sin(${x})',
@@ -2777,26 +3008,29 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Coth: ([x], compile, target) => {
     if (x === null) throw new Error('Coth: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccoth(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.ccoth', compile(x));
     return BaseCompiler.inlineExpression(
       target,
       '(Math.cosh(${x}) / Math.sinh(${x}))',
       compile(x)
     );
   },
-  Csc: ([x], compile) => {
+  Csc: ([x], compile, target) => {
     if (x === null) throw new Error('Csc: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccsc(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.ccsc', compile(x));
     return `1 / Math.sin(${compile(x)})`;
   },
-  Csch: ([x], compile) => {
+  Csch: ([x], compile, target) => {
     if (x === null) throw new Error('Csch: no argument');
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.ccsch(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.ccsch', compile(x));
     return `1 / Math.sinh(${compile(x)})`;
   },
-  Exp: (args, compile) => {
+  Exp: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.cexp(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.cexp', compile(args[0]));
     return `Math.exp(${compile(args[0])})`;
   },
   // A STRING source is SEGMENTED first: `"s"[0]` selects a UTF-16 code unit,
@@ -2898,13 +3132,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       dir == null ? '' : `, ${compile(dir)}`
     })`;
   },
-  Ln: (args, compile) => {
+  Ln: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       // The operand may be complex only by WIDENESS (the complex discipline
       // lifted it): that is a promotion for the `promoted` report, and the
       // predicate below records it (its lowering is the same kernel).
       BaseCompiler.recordPromotion('Ln', args);
-      return `_SYS.cln(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.cln', compile(args[0]));
     }
     // Real-emitted operand with a complex result — a PROVABLY negative operand
     // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `complex`), or an
@@ -2914,7 +3148,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // keeps the real kernel (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out, which makes the parent agree).
     if (promotesToComplexLane('Ln', args))
-      return `_SYS.cln(${complexOperandCode(args[0], compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.cln',
+        complexOperandCode(args[0], compile)
+      );
     return `Math.log(${compile(args[0])})`;
   },
   // A name bound to a SEQUENCE (the `...rest` of a list pattern,
@@ -4468,8 +4706,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Apply a function literal to arguments. (`Apply` with a *symbol* head
   // canonicalizes to a direct call, so only the function-literal form
   // reaches this handler.)
-  Apply: (args, compile) => {
+  Apply: (args, compile, target) => {
     if (args[0] == null) throw new Error('Apply: missing function');
+    // `Apply(Derivative(f, n), x)` — the parse of `f''(x)` — would otherwise
+    // compile its callee through `compileDerivative`, which differentiates
+    // `f`'s body n times at compile time. That closed form multiplies out,
+    // so a nested composition costs tens of seconds and hundreds of
+    // kilobytes of emitted code. Evaluate the body in Taylor-jet arithmetic
+    // instead: one walk of the body, code that does not grow with `n`
+    // (`jet-derivative.ts`). The jet route declines — falling back to the
+    // closed form below — for order 1, for a small body whose closed form
+    // stays compact, and for any head with no coefficient recurrence.
+    const jet = tryCompileJetDerivative(args, compile, target);
+    if (jet !== undefined) return jet;
     return `(${compile(args[0])})(${args
       .slice(1)
       .map((a) => compile(a))
@@ -4750,17 +4999,33 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // by wideness (a no-op otherwise; the lowering below is the same).
       BaseCompiler.recordPromotion('Log', args);
       if (base !== undefined)
-        return `_SYS.clog${base}(${complexOperandCode(args[0], compile)})`;
-      const n = BaseCompiler.tempVar(target);
-      const num = `const ${n} = _SYS.cln(${complexOperandCode(args[0], compile)});`;
+        return complexUnary(
+          target,
+          `_SYS.clog${base}`,
+          complexOperandCode(args[0], compile)
+        );
       // `ln(x) / ln(b)`, as a complex quotient: the base may itself be complex,
       // or real-but-negative (whose own `ln` is complex).
+      const n = BaseCompiler.tempVar(target);
       const d = BaseCompiler.tempVar(target);
       const m = BaseCompiler.tempVar(target);
-      return (
-        `(() => { ${num} const ${d} = _SYS.cln(${complexOperandCode(args[1], compile)}); ` +
-        `const ${m} = ${d}.re * ${d}.re + ${d}.im * ${d}.im; ` +
-        `return { re: (${n}.re * ${d}.re + ${n}.im * ${d}.im) / ${m}, im: (${n}.im * ${d}.re - ${n}.re * ${d}.im) / ${m} }; })()`
+      // An operand that is itself a chain of complex operations joins this
+      // block instead of nesting a closure in the `_SYS.cln` argument.
+      const lifted = liftJSOperands(target, [
+        complexOperandCode(args[0], compile),
+        complexOperandCode(args[1], compile),
+      ]);
+      return boundJSResult(
+        target,
+        [
+          lifted.prelude,
+          `const ${n} = _SYS.cln(${lifted.values[0]});`,
+          `const ${d} = _SYS.cln(${lifted.values[1]});`,
+          `const ${m} = ${d}.re * ${d}.re + ${d}.im * ${d}.im;`,
+        ]
+          .filter((s) => s !== '')
+          .join(' '),
+        `{ re: (${n}.re * ${d}.re + ${n}.im * ${d}.im) / ${m}, im: (${n}.im * ${d}.re - ${n}.re * ${d}.im) / ${m} }`
       );
     }
     if (base !== undefined) return `Math.log${base}(${compile(args[0])})`;
@@ -4912,7 +5177,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         eInt <= 8
       ) {
         const t = BaseCompiler.tempVar(target);
-        const stmts: string[] = [`const ${t} = ${compile(base)};`];
+        // The base is bound through the statement sink, so a base that is
+        // itself a complex operation adds its `const` temporaries to this
+        // block rather than nesting a closure inside it (`jsBinding`).
+        const stmts: string[] = [jsBinding(target, t, compile(base))];
         let n = 0;
         const sq = (src: string): string => {
           const v = `${t}_${++n}`;
@@ -4931,9 +5199,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         const pow = (k: number): string =>
           k === 1 ? t : k % 2 === 0 ? sq(pow(k / 2)) : mulBase(pow(k - 1));
         const result = pow(eInt);
-        return `(() => { ${stmts.join(' ')} return ${result}; })()`;
+        return boundJSResult(target, stmts.join(' '), result);
       }
-      return `_SYS.cpow(${compile(base)}, ${compile(exp)})`;
+      return spliceJSValues(
+        target,
+        [compile(base), compile(exp)],
+        ([b, e]) => `_SYS.cpow(${b}, ${e})`
+      );
     }
     const bConst = tryGetConstant(base);
     const eConst = tryGetConstant(exp);
@@ -4968,7 +5240,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       resultIsComplexValued('Power', args) ||
       promotesToComplexLane('Power', args)
     )
-      return `_SYS.cpow(${complexOperandCode(base, compile)}, ${complexOperandCode(exp, compile)})`;
+      return spliceJSValues(
+        target,
+        [complexOperandCode(base, compile), complexOperandCode(exp, compile)],
+        ([b, e]) => `_SYS.cpow(${b}, ${e})`
+      );
     if (eConst === 0) return '1';
     if (eConst === 1) return compile(base);
     const radical = realRadicalPower(base, eConst, compile, target);
@@ -5150,8 +5426,26 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // Real-emitted operands but a complex RESULT type (an even degree over a
     // negative base, e.g. `\sqrt[4]{a}` with `a ⩴ -2`). The parent reads
     // `{re, im}` off this node. See `resultIsComplexValued`.
-    if (resultIsComplexValued('Root', [arg, exp]))
-      return `_SYS.cpow(${complexOperandCode(arg, compile)}, (1 / (${compile(exp)})))`;
+    //
+    // An even degree over an operand of merely UNKNOWN sign takes the same
+    // lowering under a promoting discipline: `Math.pow(x, 0.25)` is `NaN`
+    // for a negative `x` where the interpreter answers the principal complex
+    // root. `promotesRadicalToComplex` is what the enclosing expression's
+    // analysis asks, so this emission must ask the same question.
+    if (
+      resultIsComplexValued('Root', [arg, exp]) ||
+      BaseCompiler.promotesRadicalToComplex('Root', [arg, exp])
+    ) {
+      // Both operands are compiled ONCE, here: the callback below is applied
+      // again each time the statement sink renders this form.
+      const radicand = complexOperandCode(arg, compile);
+      const degree = compile(exp);
+      return spliceJSValues(
+        target,
+        [radicand],
+        ([z]) => `_SYS.cpow(${z}, (1 / (${degree})))`
+      );
+    }
     if (nConst === 2) return `Math.sqrt(${compile(arg)})`;
     if (nConst === 3) return `Math.cbrt(${compile(arg)})`;
     // Odd integer degree: `Math.pow` is NaN for a negative base, but the real
@@ -5280,16 +5574,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return `_SYS.pow2(${compile(arg)})`;
   },
-  Sec: (args, compile) => {
+  Sec: (args, compile, target) => {
     const arg = args[0];
     if (arg === null) throw new Error('Sec: no argument');
-    if (BaseCompiler.isComplexValued(arg)) return `_SYS.csec(${compile(arg)})`;
+    if (BaseCompiler.isComplexValued(arg))
+      return complexUnary(target, '_SYS.csec', compile(arg));
     return `1 / Math.cos(${compile(arg)})`;
   },
-  Sech: (args, compile) => {
+  Sech: (args, compile, target) => {
     const arg = args[0];
     if (arg === null) throw new Error('Sech: no argument');
-    if (BaseCompiler.isComplexValued(arg)) return `_SYS.csech(${compile(arg)})`;
+    if (BaseCompiler.isComplexValued(arg))
+      return complexUnary(target, '_SYS.csech', compile(arg));
     return `1 / Math.cosh(${compile(arg)})`;
   },
   /** A string source is segmented first — see `First`. */
@@ -5300,31 +5596,31 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Heaviside: '_SYS.heaviside',
   // A complex operand takes the complex sign `z/|z|` (`_SYS.csign`), the
   // interpreter's reading off the real line; a real one keeps `Math.sign`.
-  Sign: (args, compile) => {
+  Sign: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.csign(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.csign', compile(args[0]));
     return `Math.sign(${compile(args[0])})`;
   },
   Sinc: '_SYS.sinc',
   FresnelS: '_SYS.fresnelS',
   FresnelC: '_SYS.fresnelC',
-  Sin: (args, compile) => {
+  Sin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.csin(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.csin', compile(args[0]));
     return `Math.sin(${compile(args[0])})`;
   },
-  Sinh: (args, compile) => {
+  Sinh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.csinh(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.csinh', compile(args[0]));
     return `Math.sinh(${compile(args[0])})`;
   },
-  Sqrt: (args, compile) => {
+  Sqrt: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       // The operand may be complex only by WIDENESS (the complex discipline
       // lifted it): that is a promotion for the `promoted` report, and the
       // predicate below records it (its lowering is the same kernel).
       BaseCompiler.recordPromotion('Sqrt', args);
-      return `_SYS.csqrt(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.csqrt', compile(args[0]));
     }
     const c = tryGetConstant(args[0]);
     if (c !== undefined) {
@@ -5345,17 +5641,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `Math.sqrt` (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out so the parent agrees).
     if (promotesToComplexLane('Sqrt', args))
-      return `_SYS.csqrt(${complexOperandCode(args[0], compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.csqrt',
+        complexOperandCode(args[0], compile)
+      );
     return `Math.sqrt(${compile(args[0])})`;
   },
-  Tan: (args, compile) => {
+  Tan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.ctan(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.ctan', compile(args[0]));
     return `Math.tan(${compile(args[0])})`;
   },
-  Tanh: (args, compile) => {
+  Tanh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.ctanh(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.ctanh', compile(args[0]));
     return `Math.tanh(${compile(args[0])})`;
   },
   /** A string source is segmented first — see `First`. */
@@ -5475,7 +5775,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // No Subtract function handler — Subtract canonicalizes to Add+Negate.
   // The operator entry in JAVASCRIPT_OPERATORS handles any edge cases.
-  Divide: ([a, b], compile) => {
+  Divide: ([a, b], compile, target) => {
     if (a === null || b === null) throw new Error('Divide: missing argument');
     const ac = BaseCompiler.isComplexValued(a);
     const bc = BaseCompiler.isComplexValued(b);
@@ -5490,28 +5790,42 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `((${compile(a)}) / (${compile(b)}))`;
     }
 
+    // Each operand is bound through the statement sink, so an operand that is
+    // itself a complex operation adds its `const` temporaries to this block
+    // rather than nesting a closure inside it (`jsBinding`).
+    const ta = BaseCompiler.tempVar(target);
+    const tb = BaseCompiler.tempVar(target);
+    const bindings = `${jsBinding(target, ta, compile(a))} ${jsBinding(target, tb, compile(b))}`;
     if (ac && bc) {
-      return `(() => { const _a = ${compile(a)}, _b = ${compile(
-        b
-      )}, _d = _b.re * _b.re + _b.im * _b.im; return { re: (_a.re * _b.re + _a.im * _b.im) / _d, im: (_a.im * _b.re - _a.re * _b.im) / _d }; })()`;
+      const d = BaseCompiler.tempVar(target);
+      return boundJSResult(
+        target,
+        `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im;`,
+        `{ re: (${ta}.re * ${tb}.re + ${ta}.im * ${tb}.im) / ${d}, im: (${ta}.im * ${tb}.re - ${ta}.re * ${tb}.im) / ${d} }`
+      );
     }
     if (ac && !bc) {
-      return `(() => { const _a = ${compile(a)}, _r = ${compile(
-        b
-      )}; return { re: _a.re / _r, im: _a.im / _r }; })()`;
+      return boundJSResult(
+        target,
+        bindings,
+        `{ re: ${ta}.re / ${tb}, im: ${ta}.im / ${tb} }`
+      );
     }
-    return `(() => { const _r = ${compile(a)}, _b = ${compile(
-      b
-    )}, _d = _b.re * _b.re + _b.im * _b.im; return { re: _r * _b.re / _d, im: -_r * _b.im / _d }; })()`;
+    const d = BaseCompiler.tempVar(target);
+    return boundJSResult(
+      target,
+      `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im;`,
+      `{ re: ${ta} * ${tb}.re / ${d}, im: -${ta} * ${tb}.im / ${d} }`
+    );
   },
-  Negate: ([x], compile) => {
+  Negate: ([x], compile, target) => {
     if (x === null) throw new Error('Negate: no argument');
     if (!BaseCompiler.isComplexValued(x)) {
       const c = tryGetConstant(x);
       if (c !== undefined) return String(-c);
       return `(-(${compile(x)}))`;
     }
-    return `_SYS.cneg(${compile(x)})`;
+    return complexUnary(target, '_SYS.cneg', compile(x));
   },
   Multiply: (args, compile, target) => {
     if (args.length === 1) return compile(args[0]);
@@ -5530,8 +5844,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `(${nonOne.map((x) => compile(x)).join(' * ')})`;
     }
 
-    const boundResult = (bindings: string, value: string): string =>
-      boundJSResult(target, bindings, value);
+    // Each operand is bound through the statement sink, so an operand that is
+    // itself a complex operation contributes its own `const` temporaries to
+    // this block instead of a nested closure. Every name is a fresh temporary
+    // for the same reason (`jsBinding`).
+    const boundResult = (
+      bindings: ReadonlyArray<readonly [name: string, code: string]>,
+      value: string
+    ): string =>
+      boundJSResult(
+        target,
+        bindings.map(([n, c]) => jsBinding(target, n, c)).join(' '),
+        value
+      );
 
     if (args.length === 2) {
       const ac = BaseCompiler.isComplexValued(args[0]);
@@ -5539,38 +5864,96 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const ca = compile(args[0]);
       const cb = compile(args[1]);
 
+      // A complex factor whose value is known at compile time — the imaginary
+      // unit, or a complex literal — scales the real operand by two CONSTANTS.
+      // Multiplying by them at run time builds an object holding `0` and `1`
+      // only to read the two fields back, so the constants are applied here:
+      // `i · b` is `{ re: 0, im: b }`, not `{ re: 0 * b, im: 1 * b }`.
+      // The real operand is spliced when the fold leaves it with EXACTLY one
+      // use, and bound to a temporary otherwise — so it is evaluated once
+      // whatever the two constants are, and an operand with an effect (a draw
+      // of the `Random` family) is never dropped or repeated.
+      //
+      // At least one of the two constants is non-zero, so the fold never
+      // discards the real operand the way a `0` factor would: this arm is
+      // entered only when `BaseCompiler.isComplexValued` reports the factor
+      // complex, and that predicate on a number literal IS `im !== 0` (the
+      // imaginary unit answers with `im = 1`). A complex literal whose value
+      // is exactly zero cannot reach here at all — the engine boxes
+      // `Complex(0, 0)` as the real number `0`, which takes the real arm and
+      // keeps `0 · x` a multiplication, so `0 · NaN` stays `NaN`.
+      const literalScale = (
+        literal: { re: number; im: number },
+        real: Expression,
+        code: string
+      ): string => {
+        const scale = (k: number, v: string): string =>
+          k === 0 ? '0' : k === 1 ? v : `${k} * ${v}`;
+        const uses = (literal.re !== 0 ? 1 : 0) + (literal.im !== 0 ? 1 : 0);
+        if (uses === 1) {
+          const v = isSymbol(real) || isNumber(real) ? code : `(${code})`;
+          return `({ re: ${scale(literal.re, v)}, im: ${scale(literal.im, v)} })`;
+        }
+        const t = BaseCompiler.tempVar(target);
+        return boundResult(
+          [[t, code]],
+          `{ re: ${scale(literal.re, t)}, im: ${scale(literal.im, t)} }`
+        );
+      };
+      if (ac && !bc) {
+        const literal = complexLiteralParts(args[0]);
+        if (literal !== undefined) return literalScale(literal, args[1], cb);
+      } else if (!ac && bc) {
+        const literal = complexLiteralParts(args[1]);
+        if (literal !== undefined) return literalScale(literal, args[0], ca);
+      }
+
+      const ta = BaseCompiler.tempVar(target);
+      const tb = BaseCompiler.tempVar(target);
       if (ac && bc) {
         return boundResult(
-          `const _a = ${ca}, _b = ${cb};`,
-          '{ re: _a.re * _b.re - _a.im * _b.im, im: _a.re * _b.im + _a.im * _b.re }'
+          [
+            [ta, ca],
+            [tb, cb],
+          ],
+          `{ re: ${ta}.re * ${tb}.re - ${ta}.im * ${tb}.im, im: ${ta}.re * ${tb}.im + ${ta}.im * ${tb}.re }`
         );
       }
       if (ac && !bc) {
         return boundResult(
-          `const _a = ${ca}, _r = ${cb};`,
-          '{ re: _a.re * _r, im: _a.im * _r }'
+          [
+            [ta, ca],
+            [tb, cb],
+          ],
+          `{ re: ${ta}.re * ${tb}, im: ${ta}.im * ${tb} }`
         );
       }
       // !ac && bc
       return boundResult(
-        `const _r = ${ca}, _b = ${cb};`,
-        '{ re: _r * _b.re, im: _r * _b.im }'
+        [
+          [ta, ca],
+          [tb, cb],
+        ],
+        `{ re: ${ta} * ${tb}.re, im: ${ta} * ${tb}.im }`
       );
     }
 
-    // 3+ operands: single IIFE, sequential accumulation
+    // 3+ operands: one block, sequential accumulation
+    const bindings: Array<[name: string, code: string]> = [];
     const parts: string[] = [];
     const temps: string[] = [];
     for (let i = 0; i < args.length; i++) {
-      const t = `_v${i}`;
+      const t = BaseCompiler.tempVar(target);
       temps.push(t);
-      parts.push(`const ${t} = ${compile(args[i])}`);
+      bindings.push([t, compile(args[i])]);
     }
+    const re = BaseCompiler.tempVar(target);
+    const im = BaseCompiler.tempVar(target);
 
     // Accumulate with intermediate variables
     const firstIsComplex = BaseCompiler.isComplexValued(args[0]);
-    parts.push(`let _re = ${firstIsComplex ? `${temps[0]}.re` : temps[0]}`);
-    parts.push(`let _im = ${firstIsComplex ? `${temps[0]}.im` : '0'}`);
+    parts.push(`let ${re} = ${firstIsComplex ? `${temps[0]}.re` : temps[0]};`);
+    parts.push(`let ${im} = ${firstIsComplex ? `${temps[0]}.im` : '0'};`);
 
     for (let i = 1; i < args.length; i++) {
       const t = temps[i];
@@ -5589,17 +5972,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         // once would re-associate that arithmetic — for `z · a · b` with
         // `z = {re: 1e-200, im: 1e-200}` and `a = b = 1e200`, `a * b`
         // overflows to infinity while the stepwise product stays finite.
-        parts.push(`_re = _re * ${t}`);
-        parts.push(`_im = _im * ${t}`);
+        parts.push(`${re} = ${re} * ${t};`);
+        parts.push(`${im} = ${im} * ${t};`);
         continue;
       }
-      parts.push(`const _nre${i} = _re * ${t}.re - _im * ${t}.im`);
-      parts.push(`const _nim${i} = _re * ${t}.im + _im * ${t}.re`);
-      parts.push(`_re = _nre${i}`);
-      parts.push(`_im = _nim${i}`);
+      const nre = BaseCompiler.tempVar(target);
+      const nim = BaseCompiler.tempVar(target);
+      parts.push(`const ${nre} = ${re} * ${t}.re - ${im} * ${t}.im;`);
+      parts.push(`const ${nim} = ${re} * ${t}.im + ${im} * ${t}.re;`);
+      parts.push(`${re} = ${nre};`);
+      parts.push(`${im} = ${nim};`);
     }
 
-    return boundResult(`${parts.join('; ')};`, '{ re: _re, im: _im }');
+    return boundJSResult(
+      target,
+      `${bindings.map(([n, c]) => jsBinding(target, n, c)).join(' ')} ${parts.join(' ')}`,
+      `{ re: ${re}, im: ${im} }`
+    );
   },
 
   // Factorial and double factorial
@@ -5675,14 +6064,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       compile(x)
     );
   },
-  InverseHaversine: ([x], compile) => {
+  InverseHaversine: ([x], compile, target) => {
     if (x === null) throw new Error('InverseHaversine: no argument');
     // Same complex discipline as the Arcsin family: hav⁻¹ = 2·arcsin(√z) is
     // complex outside [0, 1], and the node's TYPE (which the enclosing
     // expression's codegen reads) claims complex for an unconstrained real.
-    if (BaseCompiler.isComplexValued(x)) return `_SYS.cinvhav(${compile(x)})`;
+    if (BaseCompiler.isComplexValued(x))
+      return complexUnary(target, '_SYS.cinvhav', compile(x));
     if (resultIsComplexValued('InverseHaversine', [x]))
-      return `_SYS.cinvhav(${complexOperandCode(x, compile)})`;
+      return complexUnary(
+        target,
+        '_SYS.cinvhav',
+        complexOperandCode(x, compile)
+      );
     return `(2 * Math.asin(Math.sqrt(${compile(x)})))`;
   },
 
@@ -5785,35 +6179,49 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // value. When the value is a sum of a real part and an imaginary part, that
   // scalar is one of the two parts (or `Math.atan2` of them), so the
   // `{ re, im }` object is never built. See `tryGetJSComplexParts`.
+  //
+  // Otherwise the value is read off the operand's own emission. That operand
+  // is often a chain of complex operations, which the statement sink lays out
+  // as `const` temporaries; `spliceJSValues` appends the read to those
+  // statements so the chain is not wrapped in a closure just to read one
+  // field of its result.
   Real: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       const parts = tryGetJSComplexParts(args[0], compile);
       if (parts !== undefined) return parts.re;
-      return `(${compile(args[0])}).re`;
+      return spliceJSValues(
+        target,
+        [compile(args[0])],
+        ([z]) => `${jsAtom(z)}.re`
+      );
     }
     return identityPassthrough(args[0], compile, target);
   },
-  Imaginary: (args, compile) => {
+  Imaginary: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       const parts = tryGetJSComplexParts(args[0], compile);
       if (parts !== undefined) return parts.im;
-      return `(${compile(args[0])}).im`;
+      return spliceJSValues(
+        target,
+        [compile(args[0])],
+        ([z]) => `${jsAtom(z)}.im`
+      );
     }
     return '0';
   },
-  Argument: (args, compile) => {
+  Argument: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0])) {
       // `_SYS.carg` is `Math.atan2(im, re)` — the argument order is
       // imaginary part first, as in every `atan2`.
       const parts = tryGetJSComplexParts(args[0], compile);
       if (parts !== undefined) return `Math.atan2(${parts.im}, ${parts.re})`;
-      return `_SYS.carg(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.carg', compile(args[0]));
     }
     return `(${compile(args[0])} >= 0 ? 0 : Math.PI)`;
   },
   Conjugate: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
-      return `_SYS.cconj(${compile(args[0])})`;
+      return complexUnary(target, '_SYS.cconj', compile(args[0]));
     return identityPassthrough(args[0], compile, target);
   },
 
@@ -8310,6 +8718,7 @@ function enterIntegral(): boolean {
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
 const SYS_HELPERS = {
+  ...JET_HELPERS,
   bcast,
   bcastFn,
   bcastColor,

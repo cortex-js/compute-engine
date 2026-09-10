@@ -2445,6 +2445,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       const c = compile(x);
       return `(np.sign(${c}) * np.power(np.abs(${c}), 1.0 / ${compile(n)}))`;
     }
+    // An EVEN degree over an operand of unknown sign, under a promoting
+    // discipline: `np.power` is `NaN` for a negative base where the
+    // interpreter answers the principal complex root. `np.emath.power`
+    // returns that root, and it is the same predicate the enclosing
+    // expression's analysis asks — see the `Sqrt` entry above, which
+    // promotes for the same reason.
+    if (BaseCompiler.promotesRadicalToComplex('Root', args))
+      return `np.emath.power(${compile(x)}, 1.0 / ${compile(n)})`;
     return `np.power(${compile(x)}, 1.0 / ${compile(n)})`;
   },
 

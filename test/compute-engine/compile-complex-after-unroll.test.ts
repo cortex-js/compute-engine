@@ -15,8 +15,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * NEGATIVE still takes the complex kernel.
  */
 
-const BODY =
-  '\\sum_{i=1}^{6} (1 - j(1-\\sqrt{1-0.025^2(i-0.5)^2}))\\cdot s';
+const BODY = '\\sum_{i=1}^{6} (1 - j(1-\\sqrt{1-0.025^2(i-0.5)^2}))\\cdot s';
 
 function compiledSource(ce: ComputeEngine, call: string): string {
   const r = compile(ce.parse(call), { to: 'javascript' });
@@ -40,7 +39,8 @@ describe('a radical over a constant radicand in an unrolled Sum', () => {
   test('emits no complex square root and no complex product chain', () => {
     const source = compiledSource(engine(), 'B(s, j)');
     expect(count(source, '_SYS.csqrt')).toBe(0);
-    expect(count(source, '_nre')).toBe(0);
+    // No four-product complex multiplication step anywhere in the emission.
+    expect(source).not.toContain('.re - ');
     expect(source).toContain('Math.sqrt');
   });
 
@@ -139,7 +139,14 @@ describe('a radical over a constant radicand in an unrolled Sum', () => {
     ce.declare('s', 'number');
     ce.parse('N(s) := \\sum_{i=1}^{6} \\sqrt{-1-(i-0.5)^2}\\cdot s').evaluate();
     const source = compiledSource(ce, 'N(s)');
-    expect(count(source, '_SYS.csqrt')).toBe(6);
+    // Every radicand folds to a NEGATIVE constant, so each radical takes the
+    // complex square root — a real `Math.sqrt` there would answer NaN where
+    // the interpreter answers a pure-imaginary value. The emitted-code fold
+    // then evaluates the six literal `_SYS.csqrt` calls and writes the values
+    // they compute, so what the six complex roots leave behind is six
+    // pure-imaginary literals.
+    expect(source).not.toContain('Math.sqrt');
+    expect(count(source, '({ re: 0, im:')).toBe(6);
     const r = compile(ce.parse('N(s)'), { to: 'javascript' });
     const value = r.run!({ s: 2 }) as { re: number; im: number };
     expect(value.re).toBeCloseTo(0, 12);
@@ -165,10 +172,18 @@ describe('a product with exactly one complex factor', () => {
     // Each REAL factor is two multiplications in place. The four-product
     // complex step, with its two extra temporaries, is left for the one factor
     // that is actually complex.
-    expect(code).toContain('_re = _re * _v1; _im = _im * _v1');
-    expect(code).toContain('_re = _re * _v2; _im = _im * _v2');
-    expect(count(code, '_nre')).toBe(2); // `_nre3`, declared then read
-    expect(count(code, '_nre3 = _re * _v3.re - _im * _v3.im')).toBe(1);
+    //
+    // Every temporary is a hygienic name the compilation allocates
+    // (`BaseCompiler.tempVar`), so the SHAPES are matched here rather than
+    // fixed spellings: the product may sit inside an enclosing block, where a
+    // fixed spelling would shadow a binding of the same name.
+    const scalings = code.match(/(_tv\d+) = \1 \* _tv\d+;/g) ?? [];
+    expect(scalings).toHaveLength(4); // two real factors × two components
+    const steps =
+      code.match(
+        /const _tv\d+ = _tv\d+ \* _tv\d+\.re - _tv\d+ \* _tv\d+\.im;/g
+      ) ?? [];
+    expect(steps).toHaveLength(1);
   });
 
   test('a leading complex factor leaves no complex step at all', () => {
@@ -181,8 +196,11 @@ describe('a product with exactly one complex factor', () => {
     const code = String(
       compile(ce.parse('p\\cdot w\\cdot y'), { to: 'javascript' }).code
     );
-    expect(count(code, '_nre')).toBe(0);
-    expect(code).toContain('let _re = _v0.re; let _im = _v0.im');
+    // No four-product complex step at all: the accumulator starts as the two
+    // components of the leading complex factor and every later factor is a
+    // real scaling.
+    expect(code).not.toContain('.re - ');
+    expect(code).toMatch(/let (_tv\d+) = (_tv\d+)\.re; let _tv\d+ = \2\.im;/);
   });
 
   test('the accumulation keeps the argument order, so a scaling cannot overflow first', () => {
@@ -210,11 +228,11 @@ describe('a product with exactly one complex factor', () => {
     );
     // Each operand is bound exactly once, and the bindings appear in operand
     // order — what keeps a factor with an effect evaluated where it was.
-    expect(code.match(/const _v\d = /g)).toEqual([
-      'const _v0 = ',
-      'const _v1 = ',
-      'const _v2 = ',
-      'const _v3 = ',
+    expect(code.match(/const _tv\d+ = _\.\w+;/g)).toEqual([
+      'const _tv1 = _.a;',
+      'const _tv2 = _.b;',
+      'const _tv3 = _.c;',
+      'const _tv4 = _.z;',
     ]);
     for (const v of ['_.a', '_.b', '_.c', '_.z'])
       expect(count(code, v)).toBe(1);
@@ -241,15 +259,16 @@ describe('a product with exactly one complex factor', () => {
     const ce = engine();
     const e = ce.parse('a\\cdot z\\cdot b\\cdot z');
     const code = String(compile(e, { to: 'javascript' }).code);
-    expect(count(code, '_nre')).toBeGreaterThan(0);
+    // One four-product complex step per complex factor.
+    expect(
+      code.match(/const _tv\d+ = _tv\d+ \* _tv\d+\.re - _tv\d+ \* _tv\d+\.im;/g)
+    ).toHaveLength(2);
     const r = compile(e, { to: 'javascript' });
     const value = r.run!({ a: 2, b: 3, z: { re: 1, im: -2 } }) as {
       re: number;
       im: number;
     };
-    const expected = e
-      .subs({ a: 2, b: 3, z: ce.box(['Complex', 1, -2]) })
-      .N();
+    const expected = e.subs({ a: 2, b: 3, z: ce.box(['Complex', 1, -2]) }).N();
     expect(value.re).toBeCloseTo(expected.re, 12);
     expect(value.im).toBeCloseTo(expected.im, 12);
   });

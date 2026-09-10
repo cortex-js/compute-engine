@@ -443,3 +443,35 @@ describe('interval-js: a conditional lowers without closures', () => {
     }
   });
 });
+
+describe('a Which arm that is an unevaluated literal sum compiles on interval-js', () => {
+  // Tycho item 282: `\{x<2: 1+0.05, 0\}` printed "Compilation fallback for
+  // Which (target: interval-js): Unexpected token ':'" while the `1.05`
+  // spelling compiled. The ternary lowering of conditionals fixed it as a
+  // side effect; this pin keeps the literal-sum arm compiling.
+  test('the literal-sum arm compiles with no fallback and the value of the folded spelling', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const sum = compile(
+      ce.parse('\\begin{cases}1+0.05&x<2\\\\0&\\top\\end{cases}'),
+      { to: 'interval-js', fallback: false } as any
+    );
+    const folded = compile(
+      ce.parse('\\begin{cases}1.05&x<2\\\\0&\\top\\end{cases}'),
+      { to: 'interval-js', fallback: false } as any
+    );
+    expect(sum?.success).toBe(true);
+    expect(folded?.success).toBe(true);
+    expect(sum!.code).toBe(folded!.code);
+    // The literal-sum arm is a constant `_IA.add(point(1), point(0.05))`
+    // in the table, rounded outward as every interval sum is, so its
+    // enclosure is a hair wider than `point(1.05)`; both enclose 1.05.
+    const box = { x: { lo: 0, hi: 1 } };
+    const wide = (sum!.run as any)(box).value;
+    const tight = (folded!.run as any)(box).value;
+    expect(tight).toEqual({ lo: 1.05, hi: 1.05 });
+    expect(wide.lo).toBeLessThanOrEqual(1.05);
+    expect(wide.hi).toBeGreaterThanOrEqual(1.05);
+    expect(wide.hi - wide.lo).toBeLessThan(1e-15);
+  });
+});

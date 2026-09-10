@@ -508,8 +508,7 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
 
   test('JS: pure operands keep the direct emission (byte-identical pins)', () => {
     expect(
-      compile(ce.box(['Mod', ['Add', 'x', 29], 900]), { fallback: false })
-        .code
+      compile(ce.box(['Mod', ['Add', 'x', 29], 900]), { fallback: false }).code
     ).toBe('((((_.x + 29) % (900)) + (900)) % (900))');
     expect(
       compile(ce.box(['Remainder', 'x', 2]), { fallback: false }).code
@@ -622,14 +621,15 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(jsCode(['Equal', 0.1, 'x', 0.9])).toBe(
       '(((0.1) === (_.x)) && ((_.x) === (0.9)))'
     );
+    // A PURE complex operand is spliced twice, once per component. `x·i` is
+    // a real operand scaled by the two constants of the imaginary unit, so
+    // what is spliced is an object literal rather than the arrow function
+    // that used to compute `{ re: 0 * x, im: 1 * x }` on each side.
     expect(
       jsCode(['Equal', ['Multiply', 'x', 'ImaginaryUnit'], ['Complex', 0, 0.5]])
     ).toBe(
-      '(((() => { const _a = ({ re: 0, im: 1 }), _r = _.x; return { re: ' +
-        '_a.re * _r, im: _a.im * _r }; })()).re === (({ re: 0, im: 0.5 ' +
-        '})).re && ((() => { const _a = ({ re: 0, im: 1 }), _r = _.x; return ' +
-        '{ re: _a.re * _r, im: _a.im * _r }; })()).im === (({ re: 0, im: 0.5 ' +
-        '})).im)'
+      '((({ re: 0, im: _.x })).re === (({ re: 0, im: 0.5 })).re && ' +
+        '(({ re: 0, im: _.x })).im === (({ re: 0, im: 0.5 })).im)'
     );
   });
 
@@ -793,9 +793,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
       '(((x - ((x + y) / 2.0)) * (x - ((x + y) / 2.0)) + ' +
         '(y - ((x + y) / 2.0)) * (y - ((x + y) / 2.0))) / 1.0)'
     );
-    expect(gpuCode(['Argument', ['Complex', 'x', 'y']])).toBe(
-      'atan(y, x)'
-    );
+    expect(gpuCode(['Argument', ['Complex', 'x', 'y']])).toBe('atan(y, x)');
     expect(gpuCode(['Conjugate', ['Complex', 'x', 'y']])).toBe(
       'vec2(vec2(x, y).x, -vec2(x, y).y)'
     );

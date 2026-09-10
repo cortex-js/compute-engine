@@ -5834,6 +5834,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // reciprocal of a vector power needs no widening either.
       return n < 0 ? `(1.0 / ${pos})` : pos;
     }
+    // A run-time exponent that is integer by TYPE (a `Sum` index, an
+    // integer-declared parameter) over a base that may be negative: `pow` is
+    // undefined for a negative base whatever the exponent's value, so
+    // `(-1)^n` and `x^k` answered NaN on most drivers where the interpreter
+    // answers `±x`. The sign-preserving helper computes `pow(abs(x), n)` and
+    // negates for an odd `n`, which is right ONLY because `n` is an integer:
+    // the gate is the exponent's type, never the sign of the base alone — a
+    // fractional exponent over a negative base is NaN over the reals and
+    // keeps the plain `pow` below. A provably non-negative base keeps `pow`
+    // too, since it has no sign to preserve. The exponent stays a scalar in
+    // the `vecN` overloads of the helper.
+    if (
+      BaseCompiler.isIntegerValued(exp) &&
+      !BaseCompiler.isNonNegative(base) &&
+      gpuOperandShape(exp) === 'scalar'
+    ) {
+      const shape = gpuOperandShape(base);
+      const width = typeof shape === 'number' ? shape : undefined;
+      if (shape === 'scalar' || width !== undefined)
+        return `_gpu_powi${width ?? ''}(${compile(base)}, ${compile(exp)})`;
+    }
     // DIVERGENCE (documented, CO-P2-24): a literal `0^0` folds to NaN at
     // canonicalization and then fails closed here (no GPU NaN literal); `x^0`
     // folds to 1. A *runtime* dynamic `0^0` reaches `pow(0.0, 0.0)`, which is
@@ -9665,9 +9686,14 @@ float _gpu_inf() {
  * Sign-preserving integer power (GLSL syntax). GLSL `pow(x, n)` is
  * `exp2(n·log2(x))`, undefined for a negative base — it returns `+8` for
  * `pow(-2.0, 3.0)` (wrong sign) and NaN for even powers of a negative. Compute
- * the magnitude from `abs(x)` and restore the sign for odd exponents. `n` is a
- * non-negative integer value; matches JS `Math.pow` for integer exponents
- * (including `0^0 = 1`).
+ * the magnitude from `abs(x)` and restore the sign for odd exponents. `n` is an
+ * integer value of EITHER sign (a run-time exponent declared `integer` can be
+ * negative); matches JS `Math.pow` for integer exponents (including
+ * `0^0 = 1`). The parity test is taken on `abs(n)` because the two languages
+ * disagree on the remainder of a negative operand: GLSL `mod` is floored
+ * (`mod(-3.0, 2.0)` is 1.0) while WGSL `%` is truncated (`-3.0 % 2.0` is
+ * -1.0), so a bare `n` would miss the odd branch on WGSL and answer `+0.125`
+ * for `_gpu_powi(-2.0, -3.0)` where -0.125 is right.
  */
 export const GPU_POWI_PREAMBLE_GLSL = `
 float _gpu_powi(float x, float n) {
@@ -9676,7 +9702,7 @@ float _gpu_powi(float x, float n) {
   if (n == 3.0) return x * x * x;
   if (n == 4.0) { float s = x * x; return s * s; }
   float r = pow(abs(x), n);
-  if (x < 0.0 && mod(n, 2.0) == 1.0) return -r;
+  if (x < 0.0 && mod(abs(n), 2.0) == 1.0) return -r;
   return r;
 }
 `;
@@ -9691,7 +9717,7 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
   if (n == 3.0) { return x * x * x; }
   if (n == 4.0) { let s = x * x; return s * s; }
   let r = pow(abs(x), n);
-  if (x < 0.0 && (n % 2.0) == 1.0) { return -r; }
+  if (x < 0.0 && (abs(n) % 2.0) == 1.0) { return -r; }
   return r;
 }
 `;
@@ -9725,8 +9751,11 @@ fn _gpu_round(x: f32) -> f32 {
  * vector base has no lowering through it and the operand-shape gate declines
  * the call. The widened bodies are the same computation over the genType:
  * `pow` and `abs` are componentwise in both languages, and the exponent stays
- * a SCALAR (it is a compile-time integer literal at every call site), so both
- * `if` conditions remain the scalar `bool` a shader requires.
+ * a SCALAR at every call site (the operand-shape gate declines a vector
+ * exponent), so both `if` conditions remain the scalar `bool` a shader
+ * requires. As in the scalar helper, `n` may be NEGATIVE and the parity test
+ * is taken on `abs(n)`: GLSL `mod` is floored and WGSL `%` is truncated, so a
+ * bare `n` would miss the odd branch on WGSL.
  *
  * The per-component sign is restored with `sign(x) * r` rather than the scalar
  * body's `-r`, because a vector has no single sign to branch on. The two
@@ -9747,7 +9776,7 @@ fn _gpu_powi${n}(x: ${v}, n: f32) -> ${v} {
   if (n == 3.0) { return x * x * x; }
   if (n == 4.0) { let s = x * x; return s * s; }
   let r = pow(abs(x), ${v}(n));
-  if ((n % 2.0) == 1.0) { return sign(x) * r; }
+  if ((abs(n) % 2.0) == 1.0) { return sign(x) * r; }
   return r;
 }
 `;
@@ -9758,7 +9787,7 @@ ${v} _gpu_powi${n}(${v} x, float n) {
   if (n == 3.0) return x * x * x;
   if (n == 4.0) { ${v} s = x * x; return s * s; }
   ${v} r = pow(abs(x), ${v}(n));
-  if (mod(n, 2.0) == 1.0) return sign(x) * r;
+  if (mod(abs(n), 2.0) == 1.0) return sign(x) * r;
   return r;
 }
 `;

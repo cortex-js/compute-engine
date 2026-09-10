@@ -3215,6 +3215,11 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // by the helpers it shares with the JavaScript target. See
       // `CompileTarget.reservedEmittedNames`.
       reservedEmittedNames: new Set(['_IA', '_SYS']),
+      // Only a function-LITERAL callee compiles here (see the `Apply` entry
+      // of the function table below, and `CompileTarget`): the reference
+      // analysis must stop at such an application rather than walk into a
+      // callee this target never compiles.
+      appliesFunctionLiteralsOnly: true,
       // Don't use operators - all arithmetic goes through functions
       // because interval arithmetic returns IntervalResult, not numbers
       operators: () => undefined,

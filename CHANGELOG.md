@@ -2,79 +2,133 @@
 
 ### Breaking Changes
 
-- **Compiled `Equal` and `NotEqual` are exact.** A compiled comparison of
-  two numbers is the IEEE 754 test (`===` on the `javascript` target, `==` on
+- **Compiled `Equal` and `NotEqual` are exact.** A compiled comparison of two
+  numbers is the IEEE 754 test (`===` on the `javascript` target, `==` on
   `python`; the shader targets were already exact), with no tolerance branch.
-  The interpreter still compares within `engine.tolerance`, so
-  `0.1 + 0.2 = 0.3` evaluates to `True` and compiles to `false`. The compiled
-  lanes serve plot kernels, where every comparison runs per sample and the
-  tolerance test cost a subtraction, an absolute value and a compare each
-  time (124 sites in the Tycho corpus, 63 in one Voronoi kernel), and where
-  the exact answer is the one the reference graphing calculators give. The
-  same rule covers `KroneckerDelta`, the collection helpers (`_SYS.eq`,
-  `_SYS.neq`, `_ce_eqcoll`, which drop their tolerance argument) and the
-  earlier integer-only exact form, which is now the rule for every pair.
-  `NotEqual` stays the negation of `Equal`, so it answers `true` on `NaN`;
-  matching infinities stay equal; two absent operands stay unequal — the
-  `typeof` (JavaScript) or `is not None` (Python) guard is now emitted only
-  where both sides may be absent, so a comparison against a literal or an
-  arithmetic result is a bare `===`. A consumer that needs tolerant
-  equality evaluates through the interpreter. See
-  `docs/COMPILATION-MODEL.md` § Fail closed.
+  The interpreter still compares within `engine.tolerance`, so `0.1 + 0.2 = 0.3`
+  evaluates to `True` and compiles to `false`. The compiled lanes serve plot
+  kernels, where every comparison runs per sample and the tolerance test cost a
+  subtraction, an absolute value and a compare each time (124 sites in the Tycho
+  corpus, 63 in one Voronoi kernel), and where the exact answer is the one the
+  reference graphing calculators give. The same rule covers `KroneckerDelta`,
+  the collection helpers (`_SYS.eq`, `_SYS.neq`, `_ce_eqcoll`, which drop their
+  tolerance argument) and the earlier integer-only exact form, which is now the
+  rule for every pair. `NotEqual` stays the negation of `Equal`, so it answers
+  `true` on `NaN`; matching infinities stay equal; two absent operands stay
+  unequal — the `typeof` (JavaScript) or `is not None` (Python) guard is now
+  emitted only where both sides may be absent, so a comparison against a literal
+  or an arithmetic result is a bare `===`. A consumer that needs tolerant
+  equality evaluates through the interpreter. See `docs/COMPILATION-MODEL.md` §
+  Fail closed.
+
+### Resolved Issues
+
+- **A nested absolute value round-trips through the serializer.** `Abs` of a
+  body that itself contains a vertical bar serialized as
+  `\vert\vert x\vert-0.5\vert`, which the parser read as one unknown command; a
+  function registered through serialize → parse then bound to an error. Such a
+  body now serializes with explicit `\left\vert … \right\vert` fences (an `Abs`
+  with no bar in its body is unchanged), and the parser accepts the bare
+  spelling anyway: `\vert\vert x\vert-0.5\vert`, `|x-|y||`, an absolute value
+  inside a fraction or an exponent inside another (`|\frac{|x|}{2}|`,
+  `|x^{|y|}|`), the spaced `|\,|x|\,|`, and nestings three deep and more all
+  parse. A brace group now hides the delimiters of enclosures opened outside it,
+  which is what made the fraction case fail.
+- **`\operatorname{real}`, `\operatorname{imag}`, `\operatorname{erf}` and
+  `\operatorname{erfc}` parse** as `Real`, `Imaginary`, `Erf` and `Erfc`.
+  Parse-only aliases; serialization is unchanged.
+- **A run-time integer exponent over a possibly negative base takes the
+  sign-preserving helper on the shader targets.** GLSL and WGSL leave
+  `pow(x, y)` undefined for a negative `x`, so `(-1)^n` with a run-time `n`, and
+  `x^k` with a real `x`, answered NaN on most drivers where the interpreter
+  answers the signed power. An exponent that is integer by type now routes
+  through `_gpu_powi`, which restores the sign for an odd exponent; a real
+  exponent keeps `pow`, since a negative base under a fractional power is NaN
+  over the reals as well.
 
 ### Performance
 
-- **Compiled kernels no longer evaluate a shared subexpression more than
-  once in a large body.** Common-subexpression elimination now counts the
-  occurrences a candidate serves in nested scopes when it decides that a
-  candidate is redundant because a larger one contains it, so the nested
-  chains a big body produces no longer crowd out its small, frequently
-  repeated terms (a Voronoi cell distance went from 64 shared temporaries —
-  its per-region limit, with three terms still recomputed three times each —
-  to 25, with nothing recomputed). It also applies its benefit test before
-  that redundancy test, so a subexpression can no longer be dropped in favour
-  of a container that is itself discarded: `(sin(u)+1)^2 + 1/(sin(u)+1)`
-  called `Math.sin` twice and now calls it once. Loop-invariant hoisting
-  shares subexpressions between the values it lifts out of a loop instead of
-  repeating them in each: a heat-map shader computed `fract(x)` six times and
-  each of its four hash values twice ahead of its loop, and now computes each
-  once.
-- **Element-wise arithmetic over a list whose width is known at compile time
-  is written out component by component on the `javascript` target**
-  (`list<number^4>`, a literal list, a user function returning one) instead
-  of going through the run-time broadcast helper `_SYS.bcast` — a closure, a
-  shape test and an allocation per evaluation. A narrow `Sum`/`Product` over
-  such a list is folded term by term instead of through `reduce`, and a
-  reduction over a real vector no longer takes the complex lane: the row
+- **Compiling a higher-order derivative of a user function (`f''(x)`, `f'''(x)`)
+  no longer differentiates the body symbolically at compile time on the
+  JavaScript target.** It is lowered by forward-mode automatic differentiation
+  (truncated Taylor jets, real or complex as the body promotes), which compiles
+  in milliseconds instead of tens of seconds and emits a few hundred bytes
+  instead of a few hundred kilobytes: the third derivative of a four-deep nested
+  radical went from 28.7 s and 392 KB to 1 ms and 174 B, and the corpus Taylor
+  row over a twenty-deep radical from 49 s to 23 ms. The symbolic closed form is
+  still used for a first derivative of an ordinary body (a large body takes the
+  jet at order one too: the first derivative of the twenty-deep radical was a
+  376 KB kernel), and is now cached per function definition and order (a higher
+  order continues the cached chain). A target that declines an applied
+  derivative (`interval-js`) declines before doing the symbolic work rather than
+  after, and the analysis walk no longer probes a derivative handler by running
+  it. Also fixed on the way: the complex-lane test for an applied derivative
+  read the declared `number` type instead of the differentiated body, so
+  `(x-e)·f'(e)` compiled to NaN when the body promotes to a complex value.
+- **The JavaScript compile target no longer allocates one closure per complex
+  operation.** A complex `Add`, `Multiply`, `Divide`, `Power`, `Log` or
+  component read lowers to statement-level temporaries in the enclosing block,
+  so a whole complex expression is one block of straight-line statements (an
+  iterated complex map of depth five went from twelve nested immediately-invoked
+  functions to none, and from about 90 to 60 ns per call). A complex factor
+  known at compile time — the imaginary unit, or a complex literal — scales its
+  real operand by two constants instead of building `{re, im}` and multiplying
+  by `0` and `1`: `i · b` compiles to `{ re: 0, im: b }`.
+- **The emitted-code constant fold reaches the JavaScript and shader targets'
+  own runtime routines**, so an unrolled `Sum` or `Product` no longer leaves
+  literal-only calls behind: `\sum_{k=1}^{3}(-1)^{k}x` compiles to
+  `(-x + x + -x)` instead of three `pow` calls, `k!` and the complex kernels of
+  a literal argument fold too, and a `-1` factor the fold exposes becomes a
+  negation. On GLSL and WGSL this also fixed a wrong value: a literal
+  `pow(-1.0, 1.0)` is undefined in both languages.
+- **Compiled kernels no longer evaluate a shared subexpression more than once in
+  a large body.** Common-subexpression elimination now counts the occurrences a
+  candidate serves in nested scopes when it decides that a candidate is
+  redundant because a larger one contains it, so the nested chains a big body
+  produces no longer crowd out its small, frequently repeated terms (a Voronoi
+  cell distance went from 64 shared temporaries — its per-region limit, with
+  three terms still recomputed three times each — to 25, with nothing
+  recomputed). It also applies its benefit test before that redundancy test, so
+  a subexpression can no longer be dropped in favour of a container that is
+  itself discarded: `(sin(u)+1)^2 + 1/(sin(u)+1)` called `Math.sin` twice and
+  now calls it once. Loop-invariant hoisting shares subexpressions between the
+  values it lifts out of a loop instead of repeating them in each: a heat-map
+  shader computed `fract(x)` six times and each of its four hash values twice
+  ahead of its loop, and now computes each once.
+- **Element-wise arithmetic over a list whose width is known at compile time is
+  written out component by component on the `javascript` target**
+  (`list<number^4>`, a literal list, a user function returning one) instead of
+  going through the run-time broadcast helper `_SYS.bcast` — a closure, a shape
+  test and an allocation per evaluation. A narrow `Sum`/`Product` over such a
+  list is folded term by term instead of through `reduce`, and a reduction over
+  a real vector no longer takes the complex lane: the row
   `1-(\sum(f(x+1,y+3)+f(x-1,y+3)))^2` with `f(x,y):=[-y,x]/(x^2+y^2)` emitted
-  `_SYS.cneg(_SYS.cplx(…reduce(_SYS.sadd…)))` and now emits
-  `-_SYS.pow2(…) + 1`.
+  `_SYS.cneg(_SYS.cplx(…reduce(_SYS.sadd…)))` and now emits `-_SYS.pow2(…) + 1`.
 - **A reduction over a range-indexed slice compiles to a counted loop.**
-  `total(P[a...b])` — and `Product`, `Mean`, `Max`, `Min` and `Length` over
-  the same gather — built the index list and the gathered slice and folded
-  them with a callback; the `javascript` target now walks the source with a
-  counted loop, in the range's own direction, reading each element with the
-  same call the indexed spelling `P[k]` uses; a `Join` of listed indices and
-  ranges (`P[Join([m+n], (m+n+15)...(m+n+60))]`) walks its pieces in order
-  the same way. A source that is not an array
-  at run time, or a bound that is not an integer, answers `NaN` where the
-  old fold raised a `TypeError`. A reduction over a list whose element type
-  is `number` stays on the real lane, as every other consumer of such a list
-  already did; and the counted-range prologue of a comprehension over
-  integer-typed bounds drops its dead floor and clamp (the array-length
-  guard stays: a non-finite bound supplied through `vars` must throw, not
-  hang).
-- **`interval-js`: the compiled kernel no longer allocates per evaluation
-  what it can allocate once.** Every constant interval is bound in a table
-  the runner builds when it is created, instead of being rebuilt on each
-  call (the top-level expression and the folded constants of an unrolled
-  `Sum` included); a leading negation folds into the division it feeds (the
-  new `negDiv` kernel, or the sign on a constant divisor), and a negation of
-  a negation cancels; a conditional lowers to a ternary chain over the
-  tri-state condition instead of `piecewise` with two closures. The runner
-  returns a fresh copy of its answer so a caller cannot write into the shared
-  table. On the audit corpus a plotted `cases` expression is 25–40% faster
-  per sample and a lattice snap (`-⌊nx⌋/n`) about 17%.
+  `total(P[a...b])` — and `Product`, `Mean`, `Max`, `Min` and `Length` over the
+  same gather — built the index list and the gathered slice and folded them with
+  a callback; the `javascript` target now walks the source with a counted loop,
+  in the range's own direction, reading each element with the same call the
+  indexed spelling `P[k]` uses; a `Join` of listed indices and ranges
+  (`P[Join([m+n], (m+n+15)...(m+n+60))]`) walks its pieces in order the same
+  way. A source that is not an array at run time, or a bound that is not an
+  integer, answers `NaN` where the old fold raised a `TypeError`. A reduction
+  over a list whose element type is `number` stays on the real lane, as every
+  other consumer of such a list already did; and the counted-range prologue of a
+  comprehension over integer-typed bounds drops its dead floor and clamp (the
+  array-length guard stays: a non-finite bound supplied through `vars` must
+  throw, not hang).
+- **`interval-js`: the compiled kernel no longer allocates per evaluation what
+  it can allocate once.** Every constant interval is bound in a table the runner
+  builds when it is created, instead of being rebuilt on each call (the
+  top-level expression and the folded constants of an unrolled `Sum` included);
+  a leading negation folds into the division it feeds (the new `negDiv` kernel,
+  or the sign on a constant divisor), and a negation of a negation cancels; a
+  conditional lowers to a ternary chain over the tri-state condition instead of
+  `piecewise` with two closures. The runner returns a fresh copy of its answer
+  so a caller cannot write into the shared table. On the audit corpus a plotted
+  `cases` expression is 25–40% faster per sample and a lattice snap (`-⌊nx⌋/n`)
+  about 17%.
 
 ### Resolved Issues
 
@@ -96,26 +150,25 @@
   ```
 
   Both bound on 0.127.0 and both bind again. Absence is a state every type can
-  take — the way `NaN` is a member of `number` — so the value's `missing`
-  member is now removed before the subtype test, and the marker on its own
-  binds to any declared type. This covers every route that checks a value
-  against a declared type: `ce.assign`, `ce.declare(name, { type, value })`,
-  the `Assign` operator, `:=`, and each leaf of a destructuring declaration
+  take — the way `NaN` is a member of `number` — so the value's `missing` member
+  is now removed before the subtype test, and the marker on its own binds to any
+  declared type. This covers every route that checks a value against a declared
+  type: `ce.assign`, `ce.declare(name, { type, value })`, the `Assign` operator,
+  `:=`, and each leaf of a destructuring declaration
   (`Declare((x, y), type, value)`, the `let (x, y) = t` form). A declaration
-  with a CALLABLE arm still refuses the bare marker, because `missing` strips
-  to the bottom type — a subtype of every signature — and admitting it would
+  with a CALLABLE arm still refuses the bare marker, because `missing` strips to
+  the bottom type — a subtype of every signature — and admitting it would
   install a callable definition under a contract nothing proved.
 
   The declared type stays exactly as written — `P.type` is
-  `tuple<number, number>` — and dereferencing the symbol answers the gated
-  value or the marker: with `a := 1`, `P` evaluates to `(1, 2)`; with
-  `a := -1`, to `Missing`, and `IsMissing(P)` answers `True`. Subtyping is
-  unchanged: `missing <: number` is still false and `matches()` answers as it
-  did.
+  `tuple<number, number>` — and dereferencing the symbol answers the gated value
+  or the marker: with `a := 1`, `P` evaluates to `(1, 2)`; with `a := -1`, to
+  `Missing`, and `IsMissing(P)` answers `True`. Subtyping is unchanged:
+  `missing <: number` is still false and `matches()` answers as it did.
 
   This amends the 0.128.0 consumer guidance below. "A consumer that gates on
-  `type.matches("number")` must strip the `missing` member first" stays true
-  for an INFERRED type and for the type of an expression — an undeclared
+  `type.matches("number")` must strip the `missing` member first" stays true for
+  an INFERRED type and for the type of an expression — an undeclared
   `ce.assign("q", …)` of a gated value still types `integer | missing` — but it
   is no longer needed to bind a value to a DECLARED symbol.
 
@@ -184,19 +237,19 @@
 
 ### Breaking Changes
 
-- **A false restriction answers `Missing`, not `Undefined`.** `When(e, c)`
-  — the `e \{c\}` restriction of a plot expression — evaluated to the
-  `Undefined` symbol when `c` was false. It now evaluates to `Missing`, the
+- **A false restriction answers `Missing`, not `Undefined`.** `When(e, c)` — the
+  `e \{c\}` restriction of a plot expression — evaluated to the `Undefined`
+  symbol when `c` was false. It now evaluates to `Missing`, the
   position-preserving absent datum, which is also what a `Which` with no
-  selected clause and an `If` with no else branch answer. The element-wise
-  form masks each cell the same way: `[10,20,30]\{[1,2,3] > 2\}` is
+  selected clause and an `If` with no else branch answer. The element-wise form
+  masks each cell the same way: `[10,20,30]\{[1,2,3] > 2\}` is
   `[Missing, Missing, 30]`. `Undefined` had no place in the error model (its
-  type is `unknown`) and nothing read it: the only engine reader was the
-  `Add` fold that turned it into `NaN`, and plots take the mask from
-  compiled code, where every target already emitted `NaN`. Compiled output is
-  unchanged. A consumer that tested `symbol === "Undefined"` on an evaluated
-  restriction must test `"Missing"` (or `IsMissing`, which now answers
-  `True` for a masked value).
+  type is `unknown`) and nothing read it: the only engine reader was the `Add`
+  fold that turned it into `NaN`, and plots take the mask from compiled code,
+  where every target already emitted `NaN`. Compiled output is unchanged. A
+  consumer that tested `symbol === "Undefined"` on an evaluated restriction must
+  test `"Missing"` (or `IsMissing`, which now answers `True` for a masked
+  value).
 
   The type of a restriction now carries the absent case: `When(5, x > 0)` is
   `integer | missing`, and a list holding a masked cell is
@@ -206,13 +259,12 @@
   member first, as it already must for a default-less `Which`.
 
 - **A compiled color value on the JavaScript target is an OBJECT, not a numeric
-  array.** `compile()` now answers a color as
-  `{ space, c0, c1, c2, alpha }` — `space` is one of `'oklch'`, `'rgb'`,
-  `'hsv'`, `'hsl'`, `'oklab'`, the three channels follow that space, and
-  `alpha` is `undefined` when the color carries none. Before this a color was
-  a flat `[L, C, H]` (or `[L, C, H, alpha]`) array in OKLCh, and a conversion
-  such as `AsRgb` answered a flat array of channels in the space it named,
-  with nothing at run time telling the two apart.
+  array.** `compile()` now answers a color as `{ space, c0, c1, c2, alpha }` —
+  `space` is one of `'oklch'`, `'rgb'`, `'hsv'`, `'hsl'`, `'oklab'`, the three
+  channels follow that space, and `alpha` is `undefined` when the color carries
+  none. Before this a color was a flat `[L, C, H]` (or `[L, C, H, alpha]`) array
+  in OKLCh, and a conversion such as `AsRgb` answered a flat array of channels
+  in the space it named, with nothing at run time telling the two apart.
 
   A consumer that reads `raw[0]`, `raw[1]`, `raw[2]` must now read `raw.space`
   and `raw.c0`, `raw.c1`, `raw.c2`, and decide what to do when `raw.space` is
@@ -221,14 +273,14 @@
   `TypeError` naming the expected shape rather than reading it as channels. An
   object whose `space` is not one of the five spellings throws the same way,
   naming the offending spelling — the helpers switch on the space, so a color
-  tagged `srgb` would have been read as OKLCh. A LIST of colors is a
-  JavaScript array of these objects; a color STRING is still a string.
+  tagged `srgb` would have been read as OKLCh. A LIST of colors is a JavaScript
+  array of these objects; a color STRING is still a string.
 
-  `ColorToColorspace` is NOT affected: it answers COMPONENTS, not a color. It
-  is declared `-> tuple`, the interpreter evaluates it to a `Tuple`, and
-  consumers index the result (`At(ColorToColorspace(c, "rgb"), 1)`), so its
-  compiled value stays the plain array of three channels — four with an alpha
-  — that it has always been.
+  `ColorToColorspace` is NOT affected: it answers COMPONENTS, not a color. It is
+  declared `-> tuple`, the interpreter evaluates it to a `Tuple`, and consumers
+  index the result (`At(ColorToColorspace(c, "rgb"), 1)`), so its compiled value
+  stays the plain array of three channels — four with an alpha — that it has
+  always been.
 
   The tag is what makes a nested conversion correct: `AsRgb(AsRgb(c))` now
   equals `AsRgb(c)` channel for channel, `AsHsv(AsRgb(c))` equals `AsHsv(c)`,
@@ -237,21 +289,21 @@
   longer runs to a scalar `NaN`; it also CONSUMES one, so a color a compiled
   runner produced can be passed straight back in as a `vars` value.
 
-  Nothing changes on the GLSL and WGSL targets, where a color stays a `vec3`
-  in OKLCh; the space is proved at compile time there instead. See "Color
-  values" in `docs/COMPILATION-MODEL.md`.
+  Nothing changes on the GLSL and WGSL targets, where a color stays a `vec3` in
+  OKLCh; the space is proved at compile time there instead. See "Color values"
+  in `docs/COMPILATION-MODEL.md`.
 
-- **`ColorFromColorspace` answers a COLOR, on every route.** The operator
-  builds a color from channel values in a named space, and its signature is
-  now `(color | tuple, string) -> color` instead of `-> tuple`. The
-  interpreter answers the color head of the space it names —
-  `ColorFromColorspace((0.5, 0.1, 20), "oklch")` is `Oklch(0.5, 0.1, 20)`,
-  and `"rgb"`, `"hsv"`, `"hsl"`, `"oklab"` answer `Rgb`, `Hsv`, `Hsl` and
-  `Oklab` heads with the given channels. It used to convert the channels to
-  0-1 sRGB and answer a components tuple —
-  `(0.58, 0.29, 0.29)` for the example above — while the compiled routes
-  answered a color value, so `At(ColorFromColorspace(...), 1)` read a channel
-  in the interpreter and `undefined` when compiled.
+- **`ColorFromColorspace` answers a COLOR, on every route.** The operator builds
+  a color from channel values in a named space, and its signature is now
+  `(color | tuple, string) -> color` instead of `-> tuple`. The interpreter
+  answers the color head of the space it names —
+  `ColorFromColorspace((0.5, 0.1, 20), "oklch")` is `Oklch(0.5, 0.1, 20)`, and
+  `"rgb"`, `"hsv"`, `"hsl"`, `"oklab"` answer `Rgb`, `Hsv`, `Hsl` and `Oklab`
+  heads with the given channels. It used to convert the channels to 0-1 sRGB and
+  answer a components tuple — `(0.58, 0.29, 0.29)` for the example above — while
+  the compiled routes answered a color value, so
+  `At(ColorFromColorspace(...), 1)` read a channel in the interpreter and
+  `undefined` when compiled.
 
   MIGRATION: a caller that read the components off the result now reads them
   with `ColorToColorspace(color, "rgb")`, which answers exactly the tuple
@@ -259,53 +311,51 @@
   another color operator needs no change — that is what now works on every
   route, `ColorMix(ColorFromColorspace(c, s), other, 0.5)` included. A caller
   that INDEXED the result (`At(result, 1)`) gets an `incompatible-type` error,
-  the same one `At(Rgb(1, 0, 0), 1)` has always answered, because a color is
-  not an indexed collection.
+  the same one `At(Rgb(1, 0, 0), 1)` has always answered, because a color is not
+  an indexed collection.
 
   The compiled value follows the same rule: on the JavaScript target the color
-  carries the channels it was given and is tagged with the space it was built
-  in (`{ space: 'rgb', c0, c1, c2, alpha }`), not converted to OKLCh, so a
-  caller reading `space` or a channel sees the same color the interpreter
-  answers. On the GLSL and WGSL targets, where a color is a bare `vec3` with
-  no run-time tag, the value is the channels and `colorSpaceOf` carries the
-  space; the conversion back to OKLCh is emitted where the color is CONSUMED,
-  exactly as it is for an `AsRgb` or `AsHsv` operand. A shader that used
-  `ColorFromColorspace` as its whole expression and expected OKLCh must wrap
-  it in `AsOklch`.
+  carries the channels it was given and is tagged with the space it was built in
+  (`{ space: 'rgb', c0, c1, c2, alpha }`), not converted to OKLCh, so a caller
+  reading `space` or a channel sees the same color the interpreter answers. On
+  the GLSL and WGSL targets, where a color is a bare `vec3` with no run-time
+  tag, the value is the channels and `colorSpaceOf` carries the space; the
+  conversion back to OKLCh is emitted where the color is CONSUMED, exactly as it
+  is for an `AsRgb` or `AsHsv` operand. A shader that used `ColorFromColorspace`
+  as its whole expression and expected OKLCh must wrap it in `AsOklch`.
 
 ### New Features
 
-- **`Arg` compiles on the `interval-js` target.** The phase of a complex
-  value has no interval spelling of its own, so `\arg((x - 0.3127) +
-  i(y - 0.329))` used to fail closed and fall back to the interpreter. When
-  the value is BUILT in the expression — the form `a + i·b` that
-  `Complex(a, b)` and an authored `x + iy` both canonicalize to — the phase is
-  `atan2(b, a)` over two REAL parts, which the interval domain does have, and
-  the target now emits that. The enclosure `_IA.atan2` answers is outward
-  rounded like every other kernel, and a box that straddles the branch cut on
-  the negative real axis reports the jump with the hull `[−π, π]`. An operand
-  that cannot be split — an opaque complex call such as `Sin(z)`, a
-  complex-typed symbol — still fails closed (D6).
+- **`Arg` compiles on the `interval-js` target.** The phase of a complex value
+  has no interval spelling of its own, so `\arg((x - 0.3127) + i(y - 0.329))`
+  used to fail closed and fall back to the interpreter. When the value is BUILT
+  in the expression — the form `a + i·b` that `Complex(a, b)` and an authored
+  `x + iy` both canonicalize to — the phase is `atan2(b, a)` over two REAL
+  parts, which the interval domain does have, and the target now emits that. The
+  enclosure `_IA.atan2` answers is outward rounded like every other kernel, and
+  a box that straddles the branch cut on the negative real axis reports the jump
+  with the hull `[−π, π]`. An operand that cannot be split — an opaque complex
+  call such as `Sin(z)`, a complex-typed symbol — still fails closed (D6).
 
 - **More fixed-width collection shapes compile to straight-line scalar code.**
-  The fixed-width unroll pass (`compilation/fixed-width-unroll.ts`) now
-  rewrites two shapes it left alone in 0.127.0. `Map(h, [e1, …, eN])` with a
-  BARE user-function head — not only a `Function` literal callback — becomes
-  the literal list of calls `[h(e1), …, h(eN)]` when `h` takes one plain
-  parameter and every element and every call is pure, so `Min(Map(h, list))`
-  compiles on `interval-js` as an n-ary minimum where it declined before. And
+  The fixed-width unroll pass (`compilation/fixed-width-unroll.ts`) now rewrites
+  two shapes it left alone in 0.127.0. `Map(h, [e1, …, eN])` with a BARE
+  user-function head — not only a `Function` literal callback — becomes the
+  literal list of calls `[h(e1), …, h(eN)]` when `h` takes one plain parameter
+  and every element and every call is pure, so `Min(Map(h, list))` compiles on
+  `interval-js` as an n-ary minimum where it declined before. And
   `Product([a, …])`, which canonicalization writes as
   `Reduce([a, …], Multiply, 1)`, is rewritten with `Reduce` over the bare
-  symbols `Add`, `Multiply`, `Min` and `Max` to the n-ary form, the seed
-  dropped when it is the literal identity of the head and kept as the first
-  operand otherwise; an impure seed is left alone. The JavaScript target emits
+  symbols `Add`, `Multiply`, `Min` and `Max` to the n-ary form, the seed dropped
+  when it is the literal identity of the head and kept as the first operand
+  otherwise; an impure seed is left alone. The JavaScript target emits
   `_.a * _.b * …` where it emitted a `reduce` over an array.
 
 - **A `Reduce`/`Scan` combiner lambda gets the loop-invariant hoist on the
   JavaScript target.** A subexpression of the combiner body that reads neither
   the accumulator nor the element — `Sin(u)·Cos(v)` in
-  `Reduce(list, (acc, x) ↦ acc + x·Sin(u)·Cos(v), 0)` — was recomputed once
-  per element. It is now bound once, on the first call, exactly as a `Map` or
+  `Reduce(list, (acc, x) ↦ acc + x·Sin(u)·Cos(v), 0)` — was recomputed once per
+  element. It is now bound once, on the first call, exactly as a `Map` or
   `Filter` callback's invariants have been since 0.127.0. A combiner with no
   invariant part emits byte-identical code.
 
@@ -314,200 +364,197 @@
   expression compile to the JavaScript array of their coordinate intervals
   (`[_.a, _.b]`) and `run()` returns that array, one `{lo, hi}` per coordinate.
   Both declined before ("no lowering for target 'interval-javascript'"). The
-  lowering is confined to the root: a point in an operand position of a
-  kernel (`2·(a, b)`, a point under `Which`) still declines, because every
-  kernel of this target takes one interval per operand. A point with a
-  broadcasting component declines, and a caller who overrode `Tuple` or
-  `PointList` through the `functions` option keeps their implementation.
+  lowering is confined to the root: a point in an operand position of a kernel
+  (`2·(a, b)`, a point under `Which`) still declines, because every kernel of
+  this target takes one interval per operand. A point with a broadcasting
+  component declines, and a caller who overrode `Tuple` or `PointList` through
+  the `functions` option keeps their implementation.
 
 ### Resolved Issues
 
-- **A tuple that is not visible at compile time is no longer read as a color
-  by the compiled routes.** A color operand that is a tuple-typed VARIABLE, or
-  a head that answers components such as `ColorToColorspace`, was passed
-  through as though it were a color value. On the JavaScript target a tuple's
-  compiled value is a bare array, which every color helper reads as a list and
-  refuses, so `ColorMix(v, Rgb(0, 0, 1), 0.5)` with `v` declared
+- **A tuple that is not visible at compile time is no longer read as a color by
+  the compiled routes.** A color operand that is a tuple-typed VARIABLE, or a
+  head that answers components such as `ColorToColorspace`, was passed through
+  as though it were a color value. On the JavaScript target a tuple's compiled
+  value is a bare array, which every color helper reads as a list and refuses,
+  so `ColorMix(v, Rgb(0, 0, 1), 0.5)` with `v` declared
   `tuple<number, number, number>` compiled with `success: true` over code that
   threw `Not a color` at every run; on the shader targets the same vector was
-  read as canonical OKLCh, which answers a color the interpreter — which
-  refuses the operand — never agrees with. Both targets now decline such an
-  operand at compile time (fail closed) at every head that CONSUMES a color —
-  `ColorMix`, `ColorDelta`, `ColorContrast`, `ContrastingColor`,
-  `ColorToString` — so the expression falls back to the interpreter, and the
-  diagnostic says that the operator takes a color, that a tuple is components,
-  and that `AsRgb((r, g, b))` builds a color from 0-1 sRGB components.
+  read as canonical OKLCh, which answers a color the interpreter — which refuses
+  the operand — never agrees with. Both targets now decline such an operand at
+  compile time (fail closed) at every head that CONSUMES a color — `ColorMix`,
+  `ColorDelta`, `ColorContrast`, `ContrastingColor`, `ColorToString` — so the
+  expression falls back to the interpreter, and the diagnostic says that the
+  operator takes a color, that a tuple is components, and that
+  `AsRgb((r, g, b))` builds a color from 0-1 sRGB components.
 
   The heads that TAKE components — the five `As*` conversions and
-  `ColorToColorspace` — read such an operand instead, as 0-1 sRGB components
-  at run time, which is what the interpreter reads it as: `AsRgb(v)` and
+  `ColorToColorspace` — read such an operand instead, as 0-1 sRGB components at
+  run time, which is what the interpreter reads it as: `AsRgb(v)` and
   `ColorToColorspace(v, "hsv")` with `v` a tuple-typed variable compile and
-  answer the interpreter's color, and so does `AsRgb(ColorToColorspace(c,
-  "rgb"))`. A shader carries no alpha, so a 4-wide components tuple is
-  declined there. A tuple written LITERALLY at the call site is unchanged: it
-  is 0-1 sRGB at every color operator, on every route, as the signatures say.
+  answer the interpreter's color, and so does
+  `AsRgb(ColorToColorspace(c, "rgb"))`. A shader carries no alpha, so a 4-wide
+  components tuple is declined there. A tuple written LITERALLY at the call site
+  is unchanged: it is 0-1 sRGB at every color operator, on every route, as the
+  signatures say.
 
-- **Interval `sign` and `heaviside` no longer report a value they never
-  take.** `sign([0, 0.5])` answered the enclosure `[-1, 1]`, although the
-  function takes only `0` and `1` on that input. An input that reaches zero
-  from one side only now answers `[0, 1]` or `[-1, 0]`, and only an input with
-  a negative part AND a positive part keeps `[-1, 1]`. `heaviside` is
-  tightened the same way, to the engine's convention that `H(0)` is `1/2`:
-  `[0.5, 1]` for an input with no negative part, `[0, 0.5]` for one with no
-  positive part, `[0, 1]` only for an input that spans zero. Both jumps are
-  reported as before — `singular` at `0` with no side, since the value at
-  `0` is neither the limit from above nor from below — and both point zeros
-  are unchanged and exact.
+- **Interval `sign` and `heaviside` no longer report a value they never take.**
+  `sign([0, 0.5])` answered the enclosure `[-1, 1]`, although the function takes
+  only `0` and `1` on that input. An input that reaches zero from one side only
+  now answers `[0, 1]` or `[-1, 0]`, and only an input with a negative part AND
+  a positive part keeps `[-1, 1]`. `heaviside` is tightened the same way, to the
+  engine's convention that `H(0)` is `1/2`: `[0.5, 1]` for an input with no
+  negative part, `[0, 0.5]` for one with no positive part, `[0, 1]` only for an
+  input that spans zero. Both jumps are reported as before — `singular` at `0`
+  with no side, since the value at `0` is neither the limit from above nor from
+  below — and both point zeros are unchanged and exact.
 
 - **Compiled `Equal` and `NotEqual` answer correctly on `NaN` and on two
   infinities of the same sign.** The scalar tolerance test is
-  `Math.abs(a - b) <= 1e-10` on the JavaScript target and
-  `abs(a - b) <= 1e-10` on the Python target. Every comparison against `NaN` is
-  false, and the difference of two infinities of the same sign IS `NaN`, so two
-  answers were wrong:
+  `Math.abs(a - b) <= 1e-10` on the JavaScript target and `abs(a - b) <= 1e-10`
+  on the Python target. Every comparison against `NaN` is false, and the
+  difference of two infinities of the same sign IS `NaN`, so two answers were
+  wrong:
 
   `NotEqual` was emitted as the `>` complement (`Math.abs(a - b) > 1e-10`),
-  which also answers `false` on a `NaN` operand — the compiled function
-  reported that `NaN` EQUALS the other operand. Reading an absent parameter is
-  enough to reach it: with `r` declared `real`, the compiled `r \ne 3` answered
-  `false` when `run({})` left `r` undefined. `NotEqual` is now the NEGATION of
-  the whole `Equal` test, which answers `true` there — the IEEE 754 convention,
-  and what the interpreter answers (`NotEqual(NaN, 3)` is `True`).
+  which also answers `false` on a `NaN` operand — the compiled function reported
+  that `NaN` EQUALS the other operand. Reading an absent parameter is enough to
+  reach it: with `r` declared `real`, the compiled `r \ne 3` answered `false`
+  when `run({})` left `r` undefined. `NotEqual` is now the NEGATION of the whole
+  `Equal` test, which answers `true` there — the IEEE 754 convention, and what
+  the interpreter answers (`NotEqual(NaN, 3)` is `True`).
 
   `Equal` reported two infinities of the same sign UNEQUAL, where the
   interpreter answers `Equal(oo, oo)` → `True`. An exact test now runs before
   the tolerance test on both targets (`a === b || Math.abs(a - b) <= 1e-10`;
-  `a == b or abs(a - b) <= 1e-10` in Python) — the order the Python
-  `_ce_eqcoll` collection helper already used — and the JavaScript runtime
-  dispatch behind `_SYS.eq`/`_SYS.neq` gained the same pre-test at its scalar
-  leaf. A pair the exact test accepts has a difference of exactly 0, which the
-  tolerance test accepts too, so no other pair changes answer.
+  `a == b or abs(a - b) <= 1e-10` in Python) — the order the Python `_ce_eqcoll`
+  collection helper already used — and the JavaScript runtime dispatch behind
+  `_SYS.eq`/`_SYS.neq` gained the same pre-test at its scalar leaf. A pair the
+  exact test accepts has a difference of exactly 0, which the tolerance test
+  accepts too, so no other pair changes answer.
 
   Compiled JavaScript for the scalar form now splices each operand twice, so an
   impure operand (the `Random` family) is bound to a temporary and evaluated
   once, as the interpreter evaluates it once. The exact `===`/`!==` form used
-  when both operands are provably integer is unchanged, and was already right
-  on `NaN`.
+  when both operands are provably integer is unchanged, and was already right on
+  `NaN`.
 
 - **Interval `atan2` reports the jump it makes along its `x` operand.**
-  `atan2([0, 0], [-1, 1])` — the angle over the segment of the real axis from
-  −1 to 1 — answered the bounded interval `[0, π]`, although the angle is `π`
-  on the left half of that segment and `0` on the right half and takes no
-  value in between: a consumer that reads a bounded `interval` as "continuous
-  on the cell" could read a crossing at any level between them. Such a box now
-  answers `singular` with the same enclosure, as every finite jump does. The
-  same verdict now covers a box that reaches `y = 0` from above while its `x`
-  range straddles zero, and the degenerate box on the line `x = 0` that
-  reaches the origin (`atan2([-1, 1], [0, 0])` takes only `−π/2`, `0` and
-  `π/2`). The branch-cut case that was already reported — some `x < 0` with a
-  `y` range that reaches 0 from below — is unchanged.
+  `atan2([0, 0], [-1, 1])` — the angle over the segment of the real axis from −1
+  to 1 — answered the bounded interval `[0, π]`, although the angle is `π` on
+  the left half of that segment and `0` on the right half and takes no value in
+  between: a consumer that reads a bounded `interval` as "continuous on the
+  cell" could read a crossing at any level between them. Such a box now answers
+  `singular` with the same enclosure, as every finite jump does. The same
+  verdict now covers a box that reaches `y = 0` from above while its `x` range
+  straddles zero, and the degenerate box on the line `x = 0` that reaches the
+  origin (`atan2([-1, 1], [0, 0])` takes only `−π/2`, `0` and `π/2`). The
+  branch-cut case that was already reported — some `x < 0` with a `y` range that
+  reaches 0 from below — is unchanged.
 
   A jump along the second operand needs a location in the second operand's
   coordinate, so a `singular` result gained an optional `atOperand` field: the
-  index of the operand whose coordinate `at` is a value in, absent for the
-  first operand, which is where every other kernel locates its jump. The field
-  travels with the jump as it propagates through the operations above it, and
-  a combination of jumps in different coordinates now reports no location at
-  all rather than a number belonging to one of them.
+  index of the operand whose coordinate `at` is a value in, absent for the first
+  operand, which is where every other kernel locates its jump. The field travels
+  with the jump as it propagates through the operations above it, and a
+  combination of jumps in different coordinates now reports no location at all
+  rather than a number belonging to one of them.
 
   An endpoint of `-0` is read as the real number zero throughout the kernel,
   which picks the principal angle: `atan2([0, 0], [-1, -1])` is `+π` (the
-  principal argument of a negative real) whichever zero the `y` operand
-  carries, and the origin as a point box is `0`.
+  principal argument of a negative real) whichever zero the `y` operand carries,
+  and the origin as a point box is `0`.
 
 - **`Partition` accepts a maybe-absent chunk size, like its siblings.**
-  `\mathrm{Partition}([1,2,3,4], k(0))`, where `k` is a default-less
-  piecewise and therefore types `integer | missing`, was refused at
-  canonicalization with an `incompatible-type` error, while `Take`, `Drop`,
-  `Chunk`, `SlidingWindow`, `Repeat` and `At` accepted the identical operand.
-  The difference was the spelling of the size parameter: a plain `integer`
-  parameter admits an operand whose type merely OVERLAPS it and defers the
-  verdict to the runtime check, while `Partition`'s parameter is the union
-  `integer | ((T) any -> boolean)` and a union carrying a callable arm was
-  exempt from that admission altogether. The exemption is there for the
-  arrow-slot rules, whose authority is over a callable operand, so it no
-  longer covers a non-callable one when every other arm of the union is
-  numeric. `Partition([1,2,3,4], k(0))` now answers `[[1,2],[3,4]]`, and a
-  size that turns out to be absent answers the same `incompatible-type`
-  error at evaluation that `Chunk` answers. A string size, and a `Missing`
-  written in the source, are still refused at canonicalization.
+  `\mathrm{Partition}([1,2,3,4], k(0))`, where `k` is a default-less piecewise
+  and therefore types `integer | missing`, was refused at canonicalization with
+  an `incompatible-type` error, while `Take`, `Drop`, `Chunk`, `SlidingWindow`,
+  `Repeat` and `At` accepted the identical operand. The difference was the
+  spelling of the size parameter: a plain `integer` parameter admits an operand
+  whose type merely OVERLAPS it and defers the verdict to the runtime check,
+  while `Partition`'s parameter is the union `integer | ((T) any -> boolean)`
+  and a union carrying a callable arm was exempt from that admission altogether.
+  The exemption is there for the arrow-slot rules, whose authority is over a
+  callable operand, so it no longer covers a non-callable one when every other
+  arm of the union is numeric. `Partition([1,2,3,4], k(0))` now answers
+  `[[1,2],[3,4]]`, and a size that turns out to be absent answers the same
+  `incompatible-type` error at evaluation that `Chunk` answers. A string size,
+  and a `Missing` written in the source, are still refused at canonicalization.
 
 - **A selection with no selected value answers absence by one rule on every
-  target.** A `Which` with no matching clause, an `If` with no else branch
-  and a false restriction `e\{c\}` now emit the same absent value on a given
-  target: `NaN` when the value is a number or its type is unknown, and the
-  target's object null — `undefined` in JavaScript, `None` in Python — only
-  when every arm is provably not a number, such as a string. Before this,
-  `Which` and `If` emitted `undefined` for an arm whose type was unknown (a
-  bare symbol arm in a `cases` environment) while a restriction emitted
-  `NaN`, and the Python target emitted `float('nan')` in every domain, so a
-  compiled `IsMissing` over a string selection disagreed with the
-  interpreter's `Missing`.
+  target.** A `Which` with no matching clause, an `If` with no else branch and a
+  false restriction `e\{c\}` now emit the same absent value on a given target:
+  `NaN` when the value is a number or its type is unknown, and the target's
+  object null — `undefined` in JavaScript, `None` in Python — only when every
+  arm is provably not a number, such as a string. Before this, `Which` and `If`
+  emitted `undefined` for an arm whose type was unknown (a bare symbol arm in a
+  `cases` environment) while a restriction emitted `NaN`, and the Python target
+  emitted `float('nan')` in every domain, so a compiled `IsMissing` over a
+  string selection disagreed with the interpreter's `Missing`.
 
 - **A big-operator bound written as the literal `NaN` is rejected at boxing,
   like a bound written as `Missing`.** `Sum(x, (x, NaN, 3))` used to box and
-  then stay symbolic, while `Sum(x, (x, Missing, 3))` was a type error; a
-  bound the author wrote as an absence is never usable, so both now report
-  `incompatible-type` where they are written. A bound that only evaluates to
-  an absence — a piecewise call with no matching arm — is a run-time value,
-  and the operator answers `NaN` as before.
+  then stay symbolic, while `Sum(x, (x, Missing, 3))` was a type error; a bound
+  the author wrote as an absence is never usable, so both now report
+  `incompatible-type` where they are written. A bound that only evaluates to an
+  absence — a piecewise call with no matching arm — is a run-time value, and the
+  operator answers `NaN` as before.
 
 - **A restriction, or a default-less selection, over a non-numeric value no
-  longer turns a juxtaposition into a `Tuple`.** `t P\{0 \le t \le 1\}`
-  over a point list `P`, `2x\{x>0\}` over an undeclared `x`, and
-  `2\,\mathrm{If}(c, x)` each parsed to a two-element `Tuple` instead of a
-  product, because the juxtaposition gates tested the raw `missing | T` type
-  and every test (`matches("number")`, `matches("list")`, `isUnknown`)
-  answers `false` for a union with a `missing` member. The gates now read
-  the operand's type with the absence marker stripped, so a `missing | T`
-  operand multiplies exactly as a `T` does; a type that fails the gate on its
-  own merits (`string | number`) still fails it.
+  longer turns a juxtaposition into a `Tuple`.** `t P\{0 \le t \le 1\}` over a
+  point list `P`, `2x\{x>0\}` over an undeclared `x`, and `2\,\mathrm{If}(c, x)`
+  each parsed to a two-element `Tuple` instead of a product, because the
+  juxtaposition gates tested the raw `missing | T` type and every test
+  (`matches("number")`, `matches("list")`, `isUnknown`) answers `false` for a
+  union with a `missing` member. The gates now read the operand's type with the
+  absence marker stripped, so a `missing | T` operand multiplies exactly as a
+  `T` does; a type that fails the gate on its own merits (`string | number`)
+  still fails it.
 
-- **The value-form else-less `If` compiles.** `\mathrm{If}(x > 0, x + 1)`
-  was refused by every compile target with "If: wrong number of arguments",
-  while the interpreter answered `Missing` when the condition was false. It
-  is now lowered as the one-clause `\mathrm{Which}(x > 0, x + 1)` on every
-  target — JavaScript, Python, GLSL, WGSL and interval arithmetic — and answers
-  the codomain's absence marker (`NaN` for a number) when the condition is
-  false. A two-operand `If` whose arm is a statement (an assignment, a block,
-  a loop, a jump) keeps its guard-statement reading: plain JavaScript compiles
-  it as an `if` statement, and the other targets still decline it.
+- **The value-form else-less `If` compiles.** `\mathrm{If}(x > 0, x + 1)` was
+  refused by every compile target with "If: wrong number of arguments", while
+  the interpreter answered `Missing` when the condition was false. It is now
+  lowered as the one-clause `\mathrm{Which}(x > 0, x + 1)` on every target —
+  JavaScript, Python, GLSL, WGSL and interval arithmetic — and answers the
+  codomain's absence marker (`NaN` for a number) when the condition is false. A
+  two-operand `If` whose arm is a statement (an assignment, a block, a loop, a
+  jump) keeps its guard-statement reading: plain JavaScript compiles it as an
+  `if` statement, and the other targets still decline it.
 
 - **An unrolled `Sum` or `Product` no longer promotes a radical whose radicand
-  is constant in every term to the complex lane.** `B(s, j) := \sum_{i=1}^{6}
-  (1 - j(1 - \sqrt{1 - 0.025^2(i - 0.5)^2}))\cdot s` compiled to six
-  `_SYS.csqrt` calls over `{re, im}` objects, and the whole sum was
-  accumulated as a complex pair, even though every term is plain real
-  arithmetic. A small constant range is unrolled by mapping the index NAME to
-  a literal in the emitted code, so the shape analysis still read a free index
-  and could not decide the sign of the radicand. The unrolled terms now hand
-  their index VALUES to the analysis: a radicand that folds to a non-negative
-  real takes `Math.sqrt`, and the terms and the accumulator stay real. A
-  radicand that folds negative still takes the complex kernel, a clause whose
-  terms disagree keeps the uniform lowering it had, and the enclosing
-  expression reads the same verdict the terms were emitted under.
+  is constant in every term to the complex lane.**
+  `B(s, j) := \sum_{i=1}^{6} (1 - j(1 - \sqrt{1 - 0.025^2(i - 0.5)^2}))\cdot s`
+  compiled to six `_SYS.csqrt` calls over `{re, im}` objects, and the whole sum
+  was accumulated as a complex pair, even though every term is plain real
+  arithmetic. A small constant range is unrolled by mapping the index NAME to a
+  literal in the emitted code, so the shape analysis still read a free index and
+  could not decide the sign of the radicand. The unrolled terms now hand their
+  index VALUES to the analysis: a radicand that folds to a non-negative real
+  takes `Math.sqrt`, and the terms and the accumulator stay real. A radicand
+  that folds negative still takes the complex kernel, a clause whose terms
+  disagree keeps the uniform lowering it had, and the enclosing expression reads
+  the same verdict the terms were emitted under.
 
 - **A product with exactly one complex factor scales the real factors once.**
   `a·b·z·c` with a complex `z` ran every real factor through a full complex
   multiplication step — four multiplications and two temporaries per factor,
   computing an imaginary half known to be zero. A real factor now scales the
   running real and imaginary parts with two multiplications, in the same
-  sequential, argument-ordered accumulation as before, so both the effect
-  order and the rounding order are unchanged: `z·a·b` with a tiny `z` and
-  two huge real factors stays finite where a product of the real factors
-  taken first would overflow. A product with two or more complex factors
-  keeps the full complex step for each of them.
+  sequential, argument-ordered accumulation as before, so both the effect order
+  and the rounding order are unchanged: `z·a·b` with a tiny `z` and two huge
+  real factors stays finite where a product of the real factors taken first
+  would overflow. A product with two or more complex factors keeps the full
+  complex step for each of them.
 
-- **A `Range` no longer reads its element type off its UPPER bound.** An
-  element of `Range(lower, upper, step)` is `lower + k·step`, so the upper
-  bound only says where the run stops. It was still required to be an integer
-  before the elements were called integers, which typed `Range(1, 2.5)` —
-  whose elements are 1 and 2 — `indexed_collection<real>`, and typed
-  `Range(1, n)` over an `n` declared `real` the same way. Both are
-  `indexed_collection<integer>` now. The compiled code benefits directly: an
-  equality against such an index (`[… for k = 1..(N^2)]` with `N` a slider)
-  now lowers to the exact `k === 9543` instead of the tolerance test
-  `Math.abs(9543 - k) <= 1e-10`.
+- **A `Range` no longer reads its element type off its UPPER bound.** An element
+  of `Range(lower, upper, step)` is `lower + k·step`, so the upper bound only
+  says where the run stops. It was still required to be an integer before the
+  elements were called integers, which typed `Range(1, 2.5)` — whose elements
+  are 1 and 2 — `indexed_collection<real>`, and typed `Range(1, n)` over an `n`
+  declared `real` the same way. Both are `indexed_collection<integer>` now. The
+  compiled code benefits directly: an equality against such an index
+  (`[… for k = 1..(N^2)]` with `N` a slider) now lowers to the exact
+  `k === 9543` instead of the tolerance test `Math.abs(9543 - k) <= 1e-10`.
 
 - **An equality over an operand typed `integer | nan` compiles to `===`/`!==`
   instead of the tolerance test.** That type is what an element read answers
@@ -516,68 +563,67 @@
   `NaN !== 3` reports it, where `Math.abs(NaN - 3) > 1e-10` answers `false`.
 
 - **A comparison against a compiled loop index no longer carries a run-time
-  decidedness test.** A name an emitted loop binds to the successive values of
-  a range with a finite literal start and step holds a value the loop computes
+  decidedness test.** A name an emitted loop binds to the successive values of a
+  range with a finite literal start and step holds a value the loop computes
   itself, so it can be neither `NaN` nor the `undefined` an absent caller
-  variable reads as. Such a comparison now emits
-  `(k === 9543 ? 1 : 0)` where it emitted `((k === k) ? (k === 9543 ? 1 : 0) :
-  NaN)`.
+  variable reads as. Such a comparison now emits `(k === 9543 ? 1 : 0)` where it
+  emitted `((k === k) ? (k === 9543 ? 1 : 0) : NaN)`.
 
 - **An unrolled `Sum`/`Product` over a body that cannot be `NaN` drops its
   per-term `NaN` test.** The test is an early exit, not a correctness device —
   `NaN` absorbs both `+` and `*`, so the accumulator ends at the same value
   either way — and it is emitted after every one of the unrolled terms. It is
-  now omitted when the body's type is a `real` subtype (finite, so no `NaN`)
-  and no emitted term mentions `NaN`.
+  now omitted when the body's type is a `real` subtype (finite, so no `NaN`) and
+  no emitted term mentions `NaN`.
 
-- **Shader float literals print the shortest decimal that reads back as the
-  same single-precision value.** A GLSL/WGSL literal is rounded to IEEE single
-  when the shader is compiled, so digits past that are noise. The folded `2π`
-  was emitted as `6.2831854820251465`; it is now `6.2831855`. Both shader
-  number formatters share the one spelling.
+- **Shader float literals print the shortest decimal that reads back as the same
+  single-precision value.** A GLSL/WGSL literal is rounded to IEEE single when
+  the shader is compiled, so digits past that are noise. The folded `2π` was
+  emitted as `6.2831854820251465`; it is now `6.2831855`. Both shader number
+  formatters share the one spelling.
 
 - **A `Sum`/`Product` over a COLLECTION declines with a message that names the
-  clause.** `Sum(2n, Element(n, [3, 5, 7]))` evaluates to 30 in the
-  interpreter, and the JavaScript emitter has no lowering for it: it builds a
-  counted loop and needs a `Limits` clause. It used to read the missing bounds
-  off the `Element` clause, which answered the `Nothing` erasure marker, and
-  fail several steps later with "Nothing: the erasure marker is not a value",
-  after two `console.assert` failures. The fallback to the interpreter is
-  unchanged; only the diagnostic is.
+  clause.** `Sum(2n, Element(n, [3, 5, 7]))` evaluates to 30 in the interpreter,
+  and the JavaScript emitter has no lowering for it: it builds a counted loop
+  and needs a `Limits` clause. It used to read the missing bounds off the
+  `Element` clause, which answered the `Nothing` erasure marker, and fail
+  several steps later with "Nothing: the erasure marker is not a value", after
+  two `console.assert` failures. The fallback to the interpreter is unchanged;
+  only the diagnostic is.
 
-- **The emitted-code constant fold now reaches a parenthesized group.** The
-  fold could reduce a leading run of literal factors (`2 * Math.PI * _.s` →
+- **The emitted-code constant fold now reaches a parenthesized group.** The fold
+  could reduce a leading run of literal factors (`2 * Math.PI * _.s` →
   `6.283185307179586 * _.s`) but not the same run inside the parentheses a
   quotient puts around its numerator, so `\frac{2\pi s}{P}` with `P` assigned
-  100 emitted `(2 * Math.PI * s) / 100` — at the root and inside a
-  user-function body alike. It now emits `(6.283185307179586 * s) / 100`.
+  100 emitted `(2 * Math.PI * s) / 100` — at the root and inside a user-function
+  body alike. It now emits `(6.283185307179586 * s) / 100`.
 
 - **A juxtaposition with a piecewise operand that has no default arm is a
   product again.** With `g(t) := \begin{cases} 0.5 & t < 1 \end{cases}`, the
   call `g(0)` types `missing | real` — the value can be absent. Juxtaposition
-  read that type as non-numeric and silently produced a `Tuple`, so `2g(0)`
-  was `(2, g(0))` instead of `2 \cdot g(0)`, and `\sin(0)g(0)` was a pair
-  instead of a product. The operand test now sets the `missing` member aside
-  and asks whether what remains is numeric. A genuinely non-numeric operand
-  still makes a `Tuple`: a string, a heterogeneous tuple, and a piecewise
-  over strings (`missing | string`) are unaffected.
+  read that type as non-numeric and silently produced a `Tuple`, so `2g(0)` was
+  `(2, g(0))` instead of `2 \cdot g(0)`, and `\sin(0)g(0)` was a pair instead of
+  a product. The operand test now sets the `missing` member aside and asks
+  whether what remains is numeric. A genuinely non-numeric operand still makes a
+  `Tuple`: a string, a heterogeneous tuple, and a piecewise over strings
+  (`missing | string`) are unaffected.
 
-- **`Add` and `Multiply` absorb an absence produced by evaluating an
-  operand.** In a numeric slot the `Missing` marker is normalized to `NaN`
+- **`Add` and `Multiply` absorb an absence produced by evaluating an operand.**
+  In a numeric slot the `Missing` marker is normalized to `NaN`
   (`docs/ERROR-MODEL.md` §3), and every other numeric head already did it —
   `\sin(g(3))` is `NaN`. But `Add` and `Multiply` hold their operands, so the
   engine's absence gate only ever saw a `Missing` written in the source:
   `g(3) + 1` stayed `Add(Missing, 1)` and `2 \cdot g(3)` stayed
-  `Multiply(2, Missing)`, where `Add(Missing, 1)` written literally gave
-  `NaN`. Both now answer `NaN`. A collection operand still broadcasts the
-  absence one cell at a time (`Add(Missing, [3, 4])` is `[NaN, NaN]`).
+  `Multiply(2, Missing)`, where `Add(Missing, 1)` written literally gave `NaN`.
+  Both now answer `NaN`. A collection operand still broadcasts the absence one
+  cell at a time (`Add(Missing, [3, 4])` is `[NaN, NaN]`).
 
-- **A summation or product bound that may be absent is no longer a type
-  error.** `\sum_{x=g(0)}^{3} x` reported `incompatible-type` for the bound
-  `g(0)` typed `missing | real`. Such a bound is not provably non-numeric —
-  its present values are numbers — so it is accepted, and an absence is
-  normalized at evaluation. A provably non-numeric bound (`Sum(x, (x, "lo",
-  10))`) is still refused.
+- **A summation or product bound that may be absent is no longer a type error.**
+  `\sum_{x=g(0)}^{3} x` reported `incompatible-type` for the bound `g(0)` typed
+  `missing | real`. Such a bound is not provably non-numeric — its present
+  values are numbers — so it is accepted, and an absence is normalized at
+  evaluation. A provably non-numeric bound (`Sum(x, (x, "lo", 10))`) is still
+  refused.
 
 - **Assigning a function whose result is a union with `missing` to a symbol
   declared with the bare type `function` no longer drops the result type to
@@ -589,164 +635,156 @@
   and the assign route ascribed that placeholder onto the body whenever the
   body's own result was not a subtype of `unknown`. Because `unknown` excludes
   the absence markers, a `missing | T` (or `nothing`) result failed that test
-  and was overwritten. A declared result of `unknown` is now never ascribed:
-  it is a placeholder the definition refines, not a contract. Consumers of the
-  call recover their types with it — `\sin(l(t))` reports `number` again
-  instead of `broadcastable<number>`, so a product around such a call
-  multiplies instead of broadcasting.
+  and was overwritten. A declared result of `unknown` is now never ascribed: it
+  is a placeholder the definition refines, not a contract. Consumers of the call
+  recover their types with it — `\sin(l(t))` reports `number` again instead of
+  `broadcastable<number>`, so a product around such a call multiplies instead of
+  broadcasting.
 
 - **A point bound to an UNTYPED user-function parameter no longer compiles to
   `NaN`.** With `r(P) := 2·P` and no declared type for `P`, the compiled
-  `r((a, b))` — and a chain `p(P) := q(P)`, `q(P) := r(P)` called as
-  `p((a, b))` — answered `NaN` on the JavaScript target where the interpreter
-  scales the point and answers `(2a, 2b)`. A parameter's type is inferred from
-  the uses in its own body, never from a call site, so the emitted definition
-  treated `P` as a scalar and its arithmetic ran over the JavaScript array a
-  point lowers to. The call site is the only place that knows the argument is
-  a point, so such a call is now substituted into the body instead of going by
-  reference, and every target lowers the point arithmetic it exposes:
-  `[6, 8]` on JavaScript, `2.0 * vec2(a, b)` on GLSL, componentwise `sin`
-  on a shader for `f((1, 2))` with `f(x) := sin x + x²`. A literal `Tuple`,
-  an all-scalar `PointList` and a symbol declared with a tuple type all count
-  as one point. When the substitution is not sound — an impure point argument,
-  a recursive or multi-clause callee, a callee whose free symbol the enclosing
-  definition binds, or a body the interpreter itself rejects over a point
-  (`P·P` is `no-product-between-points`, `2P + 1` is `incompatible-type`) —
-  the compile fails closed with the reason and the `fallback: true` route
-  answers through the interpreter, where it used to answer a wrong list
-  (`[9, 16]`, `[7, 9]`). A parameter the body never reads, or reads only under
-  an inner lambda of the same name, keeps the by-reference call. A parameter
-  whose type is declared or inferred as a tuple was already right and is
-  unchanged.
+  `r((a, b))` — and a chain `p(P) := q(P)`, `q(P) := r(P)` called as `p((a, b))`
+  — answered `NaN` on the JavaScript target where the interpreter scales the
+  point and answers `(2a, 2b)`. A parameter's type is inferred from the uses in
+  its own body, never from a call site, so the emitted definition treated `P` as
+  a scalar and its arithmetic ran over the JavaScript array a point lowers to.
+  The call site is the only place that knows the argument is a point, so such a
+  call is now substituted into the body instead of going by reference, and every
+  target lowers the point arithmetic it exposes: `[6, 8]` on JavaScript,
+  `2.0 * vec2(a, b)` on GLSL, componentwise `sin` on a shader for `f((1, 2))`
+  with `f(x) := sin x + x²`. A literal `Tuple`, an all-scalar `PointList` and a
+  symbol declared with a tuple type all count as one point. When the
+  substitution is not sound — an impure point argument, a recursive or
+  multi-clause callee, a callee whose free symbol the enclosing definition
+  binds, or a body the interpreter itself rejects over a point (`P·P` is
+  `no-product-between-points`, `2P + 1` is `incompatible-type`) — the compile
+  fails closed with the reason and the `fallback: true` route answers through
+  the interpreter, where it used to answer a wrong list (`[9, 16]`, `[7, 9]`). A
+  parameter the body never reads, or reads only under an inner lambda of the
+  same name, keeps the by-reference call. A parameter whose type is declared or
+  inferred as a tuple was already right and is unchanged.
 
 - **The call-site inliner no longer refuses a callee whose only use of a
-  colliding name is under its own lambda.** Substituting a user function's
-  body into a definition that binds one of the body's free symbols would
-  capture that symbol, so the substitution is declined; the test counted every
-  symbol of the body, including a name bound by an inner `Map(p ↦ …, list)`
-  lambda, and so declined a body whose `p` the enclosing definition's `p`
-  cannot reach. Only the free occurrences are checked now. A name bound by a
-  `Sum`, a `Block` or a comprehension still counts as free for this test, on
-  purpose: a comprehension clause reads the OUTER binding of a name a later
-  clause binds, so treating it as shadowed would hide a capture.
+  colliding name is under its own lambda.** Substituting a user function's body
+  into a definition that binds one of the body's free symbols would capture that
+  symbol, so the substitution is declined; the test counted every symbol of the
+  body, including a name bound by an inner `Map(p ↦ …, list)` lambda, and so
+  declined a body whose `p` the enclosing definition's `p` cannot reach. Only
+  the free occurrences are checked now. A name bound by a `Sum`, a `Block` or a
+  comprehension still counts as free for this test, on purpose: a comprehension
+  clause reads the OUTER binding of a name a later clause binds, so treating it
+  as shadowed would hide a capture.
 
-- **A color-space conversion of an operand that may be a list of colors
-  compiles again on the JavaScript target.** With `w` declared
-  `broadcastable<color>`, or `u` declared `broadcastable<number>`,
-  `AsRgb(w)` and `AsRgb(Hsv(u, 0.5, 0.5))` both declined in 0.127.0 with
-  "cannot compile scalar arithmetic over a list-valued operand", so
-  `compile()` fell back to the interpreter. The five conversions
-  (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch`) had gained a broadcast
-  exemption for a numeric tuple, and the compiler declines every generic
-  element-wise broadcast of a head that declares one. The lowering they had
-  before was not right either: it mapped the generic broadcast over the
-  operand, and a color VALUE on this target is itself an array of three or
-  four channels, so one color was converted channel by channel and came back
-  as a list of three colors. The conversions now carry a color-aware
-  broadcast (`_SYS.bcastColor`), which reads a nested array — an array holding
-  arrays or color strings — as a list of colors and anything else as one
-  color. A literal list of color-typed elements maps as well, and so does a
-  list of lists; a list of numbers, and any other collection whose type does
-  not prove a color at every element position, still fails closed. A literal
-  color string (`AsRgb("red")`) compiles again as well: the conversion reads
-  it as one CSS color, where the generic fan-out over a collection had
-  intercepted it as a list of grapheme clusters.
+- **A color-space conversion of an operand that may be a list of colors compiles
+  again on the JavaScript target.** With `w` declared `broadcastable<color>`, or
+  `u` declared `broadcastable<number>`, `AsRgb(w)` and `AsRgb(Hsv(u, 0.5, 0.5))`
+  both declined in 0.127.0 with "cannot compile scalar arithmetic over a
+  list-valued operand", so `compile()` fell back to the interpreter. The five
+  conversions (`AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch`) had gained a
+  broadcast exemption for a numeric tuple, and the compiler declines every
+  generic element-wise broadcast of a head that declares one. The lowering they
+  had before was not right either: it mapped the generic broadcast over the
+  operand, and a color VALUE on this target is itself an array of three or four
+  channels, so one color was converted channel by channel and came back as a
+  list of three colors. The conversions now carry a color-aware broadcast
+  (`_SYS.bcastColor`), which reads a nested array — an array holding arrays or
+  color strings — as a list of colors and anything else as one color. A literal
+  list of color-typed elements maps as well, and so does a list of lists; a list
+  of numbers, and any other collection whose type does not prove a color at
+  every element position, still fails closed. A literal color string
+  (`AsRgb("red")`) compiles again as well: the conversion reads it as one CSS
+  color, where the generic fan-out over a collection had intercepted it as a
+  list of grapheme clusters.
 
 - **A color operand that is itself a color conversion answers the interpreter's
-  color.** The compiled runtime used to have two spellings for a color: a
-  color VALUE was the canonical OKLCh triple, while a conversion answered bare
+  color.** The compiled runtime used to have two spellings for a color: a color
+  VALUE was the canonical OKLCh triple, while a conversion answered bare
   channels in the space it named. The consumer read those channels as
   `[L, C, H]`, so `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
-  `[0.7137, 0, 0.3686]` where the interpreter answers
-  `Rgb(0.5, 0.2513, 0.25)`. A compiled color value now carries its space (see
-  the breaking change above) and every helper that consumes a color converts
-  from that space, so the five conversions, `ColorDelta`, `ColorMix`,
-  `ColorContrast`, `ContrastingColor`, `ColorToString` and
-  `ColorToColorspace` all answer the interpreter's color for a nested
-  conversion. On the GLSL and WGSL targets, where a color is a `vec3` with no
-  run-time tag, the space is proved at compile time and the conversion back to
-  OKLCh is emitted. That proof follows a value through a return-type
-  ascription, a block, a user function's visible body, and the ARMS of a
-  `Which` or an `If`, which answer the space their arms agree on; a selection
-  whose arms name DIFFERENT spaces is declined on those targets rather than
-  read as OKLCh.
+  `[0.7137, 0, 0.3686]` where the interpreter answers `Rgb(0.5, 0.2513, 0.25)`.
+  A compiled color value now carries its space (see the breaking change above)
+  and every helper that consumes a color converts from that space, so the five
+  conversions, `ColorDelta`, `ColorMix`, `ColorContrast`, `ContrastingColor`,
+  `ColorToString` and `ColorToColorspace` all answer the interpreter's color for
+  a nested conversion. On the GLSL and WGSL targets, where a color is a `vec3`
+  with no run-time tag, the space is proved at compile time and the conversion
+  back to OKLCh is emitted. That proof follows a value through a return-type
+  ascription, a block, a user function's visible body, and the ARMS of a `Which`
+  or an `If`, which answer the space their arms agree on; a selection whose arms
+  name DIFFERENT spaces is declined on those targets rather than read as OKLCh.
 
 - **`ContrastingColor` answers a canonical color on the JavaScript target.** It
   used to answer the chosen candidate in the candidate's own color space while
   the compiler recorded the head as canonical, so
   `AsOklch(ContrastingColor(bg, AsRgb(a), AsRgb(b)))` skipped the conversion it
-  still needed and read the candidate's sRGB channels as `[L, C, H]`. The
-  chosen candidate is now converted to OKLCh before it is answered.
-- **`AsHsv` and `AsHsl` of a non-finite color answer the `NaN` triple.** The
-  hue is read off `max`/`min` comparisons, and every comparison with `NaN` is
-  false, so `AsHsv(Hsv(h, 0.5, 0.5))` with `h` non-finite answered
-  `[0, NaN, NaN]` — a hue of zero, which is red — where the three other
-  conversions answered the triple that the interpreter's `incompatible-type`
-  rejection projects to.
+  still needed and read the candidate's sRGB channels as `[L, C, H]`. The chosen
+  candidate is now converted to OKLCh before it is answered.
+- **`AsHsv` and `AsHsl` of a non-finite color answer the `NaN` triple.** The hue
+  is read off `max`/`min` comparisons, and every comparison with `NaN` is false,
+  so `AsHsv(Hsv(h, 0.5, 0.5))` with `h` non-finite answered `[0, NaN, NaN]` — a
+  hue of zero, which is red — where the three other conversions answered the
+  triple that the interpreter's `incompatible-type` rejection projects to.
 
 ### Performance
 
-- **Compiled code no longer repeats a `Min`/`Max` call, the modulo template,
-  an identity factor, a point it just built, or a root it could take
-  directly.** Five code-generation improvements, all measured on the
-  JavaScript target:
+- **Compiled code no longer repeats a `Min`/`Max` call, the modulo template, an
+  identity factor, a point it just built, or a root it could take directly.**
+  Five code-generation improvements, all measured on the JavaScript target:
 
   - Common-subexpression elimination now binds a repeated `Min`, `Max`,
-    `ElementMin` or `ElementMax` call. A two-operand call is three syntax
-    nodes, one below the size threshold, so it was re-emitted at every
-    occurrence while the `Math.cos` beside it was bound to a temporary.
-  - `Mod(a, 1)` emits `((a - Math.floor(a)) % 1)` instead of the
-    three-operation floored template `((a % 1) + 1) % 1`: one floor, one
-    subtraction and one remainder that is exact on `[0, 1)` and only maps a
-    result that rounded up to `1` back to `0`, so the answer stays inside
-    the floored modulo's codomain. A dividend that is not a plain symbol or
-    literal, or a symbol the caller re-mapped through `vars`, goes through
-    the `_SYS.fract` helper (the same arithmetic on its one argument), so it
-    is evaluated once without a closure per evaluation. On the shader targets
-    the emitted-code fold now takes `abs` of a literal, which is exact, so a
-    `sqrt(abs(<literal>))` folds to one literal.
-  - A factor the emitted-code fold reduced to the literal `1` is dropped from
-    a product (`x · 1` is `x` for every IEEE value). A `0` factor and a `0`
+    `ElementMin` or `ElementMax` call. A two-operand call is three syntax nodes,
+    one below the size threshold, so it was re-emitted at every occurrence while
+    the `Math.cos` beside it was bound to a temporary.
+  - `Mod(a, 1)` emits `((a - Math.floor(a)) % 1)` instead of the three-operation
+    floored template `((a % 1) + 1) % 1`: one floor, one subtraction and one
+    remainder that is exact on `[0, 1)` and only maps a result that rounded up
+    to `1` back to `0`, so the answer stays inside the floored modulo's
+    codomain. A dividend that is not a plain symbol or literal, or a symbol the
+    caller re-mapped through `vars`, goes through the `_SYS.fract` helper (the
+    same arithmetic on its one argument), so it is evaluated once without a
+    closure per evaluation. On the shader targets the emitted-code fold now
+    takes `abs` of a literal, which is exact, so a `sqrt(abs(<literal>))` folds
+    to one literal.
+  - A factor the emitted-code fold reduced to the literal `1` is dropped from a
+    product (`x · 1` is `x` for every IEEE value). A `0` factor and a `0`
     summand are deliberately kept: a `real` type describes the value, not the
     emitted code (an out-of-range indexed read answers NaN at run time), an
     operand with an effect must still run, and `-0 + 0` is `+0`.
-  - `PointX`/`PointY`/`PointZ` over a point the same expression builds emit
-    the component: `PointX(PointList(a, b))` is `a`, not an index into a
-    literal array. An impure component that would be dropped stands the
-    shortcut down, and an opaque component keeps its run-time guard.
-  - A power with a root in its exponent takes that root instead of
-    `Math.pow`: `√a³` and `a^(3/2)` emit `a * Math.sqrt(a)`, and `|x|^(2/3)`
-    emits the square of `Math.cbrt(x)`. Both are cheaper and closer to the
-    true value — `Math.pow(Math.abs(x), 2/3)` is 77 units in the last place
-    off at a base of 1e200.
+  - `PointX`/`PointY`/`PointZ` over a point the same expression builds emit the
+    component: `PointX(PointList(a, b))` is `a`, not an index into a literal
+    array. An impure component that would be dropped stands the shortcut down,
+    and an opaque component keeps its run-time guard.
+  - A power with a root in its exponent takes that root instead of `Math.pow`:
+    `√a³` and `a^(3/2)` emit `a * Math.sqrt(a)`, and `|x|^(2/3)` emits the
+    square of `Math.cbrt(x)`. Both are cheaper and closer to the true value —
+    `Math.pow(Math.abs(x), 2/3)` is 77 units in the last place off at a base of
+    1e200.
 
-- **A product or quotient by a constant point runs half the endpoint
-  arithmetic on the `interval-js` target.** `0.5 x` used to emit
-  `_IA.mul({ lo: 0.5, hi: 0.5 }, x)`, which computes all four endpoint
-  products of a general interval product and takes the extremes of them. Two
-  kernels answer exactly the same endpoints for a degenerate operand with two
-  multiplications (or two divisions) and no intermediate array, and the
-  emitter now uses them wherever a factor — or a divisor — is a constant
-  point: `_IA.scale(_IA.point(0.5), x)` and
-  `_IA.scaleDiv(x, _IA.point(49))`.
+- **A product or quotient by a constant point runs half the endpoint arithmetic
+  on the `interval-js` target.** `0.5 x` used to emit
+  `_IA.mul({ lo: 0.5, hi: 0.5 }, x)`, which computes all four endpoint products
+  of a general interval product and takes the extremes of them. Two kernels
+  answer exactly the same endpoints for a degenerate operand with two
+  multiplications (or two divisions) and no intermediate array, and the emitter
+  now uses them wherever a factor — or a divisor — is a constant point:
+  `_IA.scale(_IA.point(0.5), x)` and `_IA.scaleDiv(x, _IA.point(49))`.
 
 - **A constant factor absorbs an exact rational divisor on the `interval-js`
-  target.** `2πs/100` used to multiply by an enclosure of `π` and then divide
-  by 100 on every evaluation. The whole constant `π/50` is now computed once,
-  at compile time, through the run-time library itself, so the emitted code
-  multiplies by one enclosure and does not divide. The fold is taken only
-  when the other constant factors are already inexact: `2x/49` keeps its
-  division, because `x/49` is exact at every multiple of 49 and a folded
-  `2/49` — a value no double holds — would answer an interval there instead.
+  target.** `2πs/100` used to multiply by an enclosure of `π` and then divide by
+  100 on every evaluation. The whole constant `π/50` is now computed once, at
+  compile time, through the run-time library itself, so the emitted code
+  multiplies by one enclosure and does not divide. The fold is taken only when
+  the other constant factors are already inexact: `2x/49` keeps its division,
+  because `x/49` is exact at every multiple of 49 and a folded `2/49` — a value
+  no double holds — would answer an interval there instead.
 
-- **A constant interval inside a user-function body or a loop body is bound
-  once per call on the `interval-js` target.** Only a constant repeated in
-  the root expression used to be hoisted to a preamble local, so a body that
-  writes `_IA.point(2)` once allocated that object on every CALL of the
-  function — once per term of an unrolled forty-term sum — and a `\sum` past
-  the unroll limit allocated its `_IA.point(0.3)` once per iteration.
-  A constant written where the code runs repeatedly is now bound at its first
-  occurrence.
+- **A constant interval inside a user-function body or a loop body is bound once
+  per call on the `interval-js` target.** Only a constant repeated in the root
+  expression used to be hoisted to a preamble local, so a body that writes
+  `_IA.point(2)` once allocated that object on every CALL of the function — once
+  per term of an unrolled forty-term sum — and a `\sum` past the unroll limit
+  allocated its `_IA.point(0.3)` once per iteration. A constant written where
+  the code runs repeatedly is now bound at its first occurrence.
 
 ## 0.127.0 _2026-09-09_
 
@@ -816,8 +854,8 @@
 ### Resolved Issues
 
 - **A user function that cannot be emitted, referenced as a VALUE, refuses
-  instead of compiling to a broken artifact.** A function name in value
-  position — the callback of a `Map`, a `Filter`, a `CountIf` or a `Find`, a
+  instead of compiling to a broken artifact.** A function name in value position
+  — the callback of a `Map`, a `Filter`, a `CountIf` or a `Find`, a
   `Reduce`/`Scan` combiner, a `Tabulate` generator, an argument to a
   higher-order user function — fell through to the ordinary free-symbol read
   `_.<name>` when the target declined to emit its definition. With a nominal
@@ -828,23 +866,24 @@
   `success: true` and then threw `TypeError: _f is not a function` at run time,
   because nothing binds that key. Such a reference is now refused at compile
   time, naming the function and the property of the definition the target could
-  not express — here `no faithful JavaScript guard for a clause parameter typed
-  'meters'` — and the default `fallback: true` route answers the interpreter's
-  value. This is the same repair a bare BUILT-IN operator name in that position
-  already had (`Map(Sin, xs)` reading `_.Sin`). A symbol that is not a
-  user-defined function — a caller `vars` key, a declared value symbol, an
-  unknown name — keeps the free-symbol read it had.
-- **A MULTI-CLAUSE function referenced as a VALUE is shape-aware.** The
-  callback of a `Map`, a `Filter` or a `Reduce` receives whatever element the
-  source holds, and an element can be a collection — a row of a matrix. A
-  clause set has no single function literal, so it used to be handed out as the
-  bare dispatcher: with `h(x) := 3x`, `mc(x) := h(x) + 1` and
-  `mc(x, y) := h(x) + h(y)`, `Map(mc, [[1, 2], [3]])` answered
-  `["3,61", "91"]` — a row coerced to a string — where the interpreter answers
-  `[[4, 7], [10]]`. A clause set whose parameters are all scalar is now handed
-  out through the same broadcasting wrapper a single-clause function gets; one
-  whose clause binds a collection, a tuple or a nominal value whole keeps the
-  bare reference, because the interpreter does not broadcast it either.
+  not express — here
+  `no faithful JavaScript guard for a clause parameter typed 'meters'` — and the
+  default `fallback: true` route answers the interpreter's value. This is the
+  same repair a bare BUILT-IN operator name in that position already had
+  (`Map(Sin, xs)` reading `_.Sin`). A symbol that is not a user-defined function
+  — a caller `vars` key, a declared value symbol, an unknown name — keeps the
+  free-symbol read it had.
+- **A MULTI-CLAUSE function referenced as a VALUE is shape-aware.** The callback
+  of a `Map`, a `Filter` or a `Reduce` receives whatever element the source
+  holds, and an element can be a collection — a row of a matrix. A clause set
+  has no single function literal, so it used to be handed out as the bare
+  dispatcher: with `h(x) := 3x`, `mc(x) := h(x) + 1` and
+  `mc(x, y) := h(x) + h(y)`, `Map(mc, [[1, 2], [3]])` answered `["3,61", "91"]`
+  — a row coerced to a string — where the interpreter answers `[[4, 7], [10]]`.
+  A clause set whose parameters are all scalar is now handed out through the
+  same broadcasting wrapper a single-clause function gets; one whose clause
+  binds a collection, a tuple or a nominal value whole keeps the bare reference,
+  because the interpreter does not broadcast it either.
 - **A user function that takes its callee as a parameter compiled against the
   engine's function of the same name.** With `gsh(t) := sin t + t²` and
   `psh(gsh, t) := gsh(t) + 1`, the call-site inliner substituted the parameter
@@ -992,45 +1031,45 @@
   and `8^(-2/3)` is 0.25.
 - **The compile targets honour an operator's `broadcastExemptions: ['tuples']`
   declaration.** A `broadcastable` head maps over a collection operand, and a
-  tuple is an indexed collection, so a tuple written at the call site was
-  fanned out even by a head that owns that shape: `AsRgb((1, 0, 0))` failed
-  closed on the JavaScript target and needed a special case on the shaders.
-  The base compiler now reads the definition and hands such a tuple to the
-  head whole, as the interpreter does.
-- **A bare tuple at a colour argument is 0–1 sRGB on every route.** The
-  compiled JavaScript and shader targets read the same tuple as the
-  canonical OKLCh triple, so `ColorMix((1, 0, 0), (0, 0, 1), 0.5)` mixed red
-  with blue in the interpreter and two arbitrary OKLCh values when compiled,
-  and `ColorToString((1, 0, 0))` answered `#ff0000` in one and `#ffffff` in
-  the other. A tuple written at the call site is now converted with the same
-  conversion `Rgb(r, g, b)` takes; a tuple that arrives through a variable
-  has no shape at compile time and keeps the canonical reading. On the
-  shaders the `As*` conversions of a tuple were claimed by the element-wise
-  fan-out lane before the handler ran (`AsOklch((0.5, 0.2, 0.1))` emitted the
-  tuple untouched); the lane now converts it. A list of three numbers is not
-  a colour on any route.
+  tuple is an indexed collection, so a tuple written at the call site was fanned
+  out even by a head that owns that shape: `AsRgb((1, 0, 0))` failed closed on
+  the JavaScript target and needed a special case on the shaders. The base
+  compiler now reads the definition and hands such a tuple to the head whole, as
+  the interpreter does.
+- **A bare tuple at a colour argument is 0–1 sRGB on every route.** The compiled
+  JavaScript and shader targets read the same tuple as the canonical OKLCh
+  triple, so `ColorMix((1, 0, 0), (0, 0, 1), 0.5)` mixed red with blue in the
+  interpreter and two arbitrary OKLCh values when compiled, and
+  `ColorToString((1, 0, 0))` answered `#ff0000` in one and `#ffffff` in the
+  other. A tuple written at the call site is now converted with the same
+  conversion `Rgb(r, g, b)` takes; a tuple that arrives through a variable has
+  no shape at compile time and keeps the canonical reading. On the shaders the
+  `As*` conversions of a tuple were claimed by the element-wise fan-out lane
+  before the handler ran (`AsOklch((0.5, 0.2, 0.1))` emitted the tuple
+  untouched); the lane now converts it. A list of three numbers is not a colour
+  on any route.
 - **Colour strings and tuples are validated the same way on every route.** A
   four-digit hex colour (`#f00f`) is read as `#rrggbbaa` with each digit
-  doubled, as CSS reads it (the parser had no four-digit branch). A
-  malformed functional spelling — `rgb(255, 0, 0` or `rgba()` — is refused:
-  the complete form is checked, not only the opening name. The shader
-  `Color("…")` handler uses the shared predicate, so `#gg0000` is refused
-  instead of compiling to opaque black. A colour tuple has exactly three or
-  four components, they must be finite numbers, and a nested or complex
-  component fails closed on the compiled routes instead of emitting
-  invalid shader source or a NaN colour.
-- **A well-formed colour spelling that packs to zero is transparent black,
-  not an error.** `#00000000` and `rgba(0, 0, 0, 0)` were refused because
-  the parser packs them to the same 0 it uses for an unrecognized string. A
-  `#` form is checked for 3, 4, 6 or 8 hexadecimal digits before parsing, so
-  `#gg0000` is refused instead of reading as opaque black.
-- **`ContrastingColor` answers the chosen candidate in the colour space it
-  was given in.** It re-encoded the winner as an `Rgb` head, which pinched an
-  `Oklch` candidate through the sRGB gamut, and the compiled runtime
-  quantized it to 8 bits per channel; `ContrastingColor(Oklch(0.98, 0.02, 90),
-  Oklch(0.2, 0.1, 29), Oklch(0.95, 0.2, 264))` now answers `Oklch(0.2, 0.1, 29)`
-  on both routes. `ColorFromColorspace`'s description now states that its
-  result is the colour's components in the route's canonical form.
+  doubled, as CSS reads it (the parser had no four-digit branch). A malformed
+  functional spelling — `rgb(255, 0, 0` or `rgba()` — is refused: the complete
+  form is checked, not only the opening name. The shader `Color("…")` handler
+  uses the shared predicate, so `#gg0000` is refused instead of compiling to
+  opaque black. A colour tuple has exactly three or four components, they must
+  be finite numbers, and a nested or complex component fails closed on the
+  compiled routes instead of emitting invalid shader source or a NaN colour.
+- **A well-formed colour spelling that packs to zero is transparent black, not
+  an error.** `#00000000` and `rgba(0, 0, 0, 0)` were refused because the parser
+  packs them to the same 0 it uses for an unrecognized string. A `#` form is
+  checked for 3, 4, 6 or 8 hexadecimal digits before parsing, so `#gg0000` is
+  refused instead of reading as opaque black.
+- **`ContrastingColor` answers the chosen candidate in the colour space it was
+  given in.** It re-encoded the winner as an `Rgb` head, which pinched an
+  `Oklch` candidate through the sRGB gamut, and the compiled runtime quantized
+  it to 8 bits per channel;
+  `ContrastingColor(Oklch(0.98, 0.02, 90), Oklch(0.2, 0.1, 29), Oklch(0.95, 0.2, 264))`
+  now answers `Oklch(0.2, 0.1, 29)` on both routes. `ColorFromColorspace`'s
+  description now states that its result is the colour's components in the
+  route's canonical form.
 - **Colour operators handle their arguments consistently across the interpreter,
   the JavaScript target and the shader targets** (an audit of every operator
   that takes or produces a colour). A colour string that names no colour is
@@ -1165,32 +1204,31 @@
 
 ### Improvements
 
-- **A pure user function called from inside another user function is
-  wrapped in a last-call memo on the JavaScript target.** Common-subexpression
-  elimination never crosses a definition boundary, so a function emitted by
-  reference (`_fn_f`) ran its body again at every call. A definition whose body
-  has no observable effect, whose parameters are all scalar, and whose value
-  depends on its arguments alone now remembers the arguments and result of its
-  most recent call and answers a repeated call with the same arguments from
-  that record, when the compiled artifact calls it from inside another
-  definition and from two or more places in all and its emitted body is at
-  least 600 characters (below that size the JavaScript engine inlines the
-  definition and shares its subexpressions itself, and the memo's checks cost
-  more than they save). Arguments are compared by value, with `NaN` equal to
-  `NaN` and `0` distinct from `-0`; an argument that is not a number, a string
-  or a boolean, and a result that is an object or a function, bypass the
-  record; every vars-object binding the body reads, directly or through a
-  definition it calls — a Desmos slider reaches a compiled row this way — is
-  part of the key next to the arguments, so a slider moved between two calls
-  misses the record; a body that draws `Random()`, directly or through an
-  assigned symbol value, is never memoized; the record lives in the
-  definition's own closure, so two compiled
-  artifacts never share it. Measured on the nine-point Voronoi row of a Desmos
-  state defined as user functions over `(x, y)` — `m(x, y)` is called once
-  inside `m2` and once more by the row — the by-reference row went from 3.4 to
-  2.7 µs per sample (the fully inlined row is 1.2 µs on the same machine at
-  the same time); a definition called from one place, or from the root only,
-  is emitted exactly as before.
+- **A pure user function called from inside another user function is wrapped in
+  a last-call memo on the JavaScript target.** Common-subexpression elimination
+  never crosses a definition boundary, so a function emitted by reference
+  (`_fn_f`) ran its body again at every call. A definition whose body has no
+  observable effect, whose parameters are all scalar, and whose value depends on
+  its arguments alone now remembers the arguments and result of its most recent
+  call and answers a repeated call with the same arguments from that record,
+  when the compiled artifact calls it from inside another definition and from
+  two or more places in all and its emitted body is at least 600 characters
+  (below that size the JavaScript engine inlines the definition and shares its
+  subexpressions itself, and the memo's checks cost more than they save).
+  Arguments are compared by value, with `NaN` equal to `NaN` and `0` distinct
+  from `-0`; an argument that is not a number, a string or a boolean, and a
+  result that is an object or a function, bypass the record; every vars-object
+  binding the body reads, directly or through a definition it calls — a slider
+  reaches a compiled row this way — is part of the key next to the arguments, so
+  a slider moved between two calls misses the record; a body that draws
+  `Random()`, directly or through an assigned symbol value, is never memoized;
+  the record lives in the definition's own closure, so two compiled artifacts
+  never share it. Measured on the nine-point Voronoi row of a state defined as
+  user functions over `(x, y)` — `m(x, y)` is called once inside `m2` and once
+  more by the row — the by-reference row went from 3.4 to 2.7 µs per sample (the
+  fully inlined row is 1.2 µs on the same machine at the same time); a
+  definition called from one place, or from the root only, is emitted exactly as
+  before.
 - **The common-subexpression cap per region is 64 (was 32).** A body that
   inlines several user functions over `(x, y)` — a Voronoi cell distance in the
   Tycho corpus — produced 208 candidates that passed the sharing threshold in
@@ -1198,31 +1236,30 @@
   recomputed nine times. The cap still bounds the register pressure of a shader
   region.
 - **Inside a compiled user-function body, a call that passes on a parameter of
-  the enclosing definition is a direct call**, whatever that parameter's type
-  is — an author's annotation, an inferred scalar, or the `unknown` an
-  unannotated parameter keeps. Such a parameter holds a run-time scalar by
-  construction, as long as no parameter of the definition binds its argument
-  whole: every emitted call site of such a function either maps a list argument
-  element-wise or is the bare call an explicit caller declaration exempts, so
-  the body runs once per element. A definition with a COLLECTION parameter keeps
-  its run-time shape dispatch, so a body that receives a list whole —
-  `k(L) := Sum(L)` — is unaffected, and so is a tuple- or point-typed parameter.
-  This removes both broadcast dispatches from an untyped three-function chain
-  (`f(x) := g(x) + 1`, `g(x) := 2h(x)`, `h(x) := x²`), which is the shape of a
-  Desmos macro chain — no parameter there can be annotated. Each timing below
-  is the mean of 300 000 `run()` calls of that compiled chain after 5 000
-  warm-up calls, taken on one machine with the two builds in the same process
-  and each pair measured in both orders: 155 → 77 ns per sample with the
-  argument symbol declared `real`, and 174 → 106 ns with it undeclared, where
-  the root call keeps its own dispatch. The nine-point Voronoi row of the Tycho
-  corpus (the by-reference chain of the Desmos state `62urmx2dcm`, six named
-  functions of `(x, y)`) loses its last three dispatches per pixel the same
-  way, measured the same way at 2.25 → 2.11 µs per sample.
-  An ATOMIC argument — a tuple (a point) or a nominal value — is bound whole,
-  so a call that carries one alongside an argument that may be a collection
-  binds the atomic argument to a temporary, once, and broadcasts over the other
-  arguments with it closed over. Before the ruling such a call was emitted
-  direct for every argument, and the callee's own body dispatched.
+  the enclosing definition is a direct call**, whatever that parameter's type is
+  — an author's annotation, an inferred scalar, or the `unknown` an unannotated
+  parameter keeps. Such a parameter holds a run-time scalar by construction, as
+  long as no parameter of the definition binds its argument whole: every emitted
+  call site of such a function either maps a list argument element-wise or is
+  the bare call an explicit caller declaration exempts, so the body runs once
+  per element. A definition with a COLLECTION parameter keeps its run-time shape
+  dispatch, so a body that receives a list whole — `k(L) := Sum(L)` — is
+  unaffected, and so is a tuple- or point-typed parameter. This removes both
+  broadcast dispatches from an untyped three-function chain (`f(x) := g(x) + 1`,
+  `g(x) := 2h(x)`, `h(x) := x²`), which is the shape of a macro chain — no
+  parameter there can be annotated. Each timing below is the mean of 300 000
+  `run()` calls of that compiled chain after 5 000 warm-up calls, taken on one
+  machine with the two builds in the same process and each pair measured in both
+  orders: 155 → 77 ns per sample with the argument symbol declared `real`, and
+  174 → 106 ns with it undeclared, where the root call keeps its own dispatch.
+  The nine-point Voronoi row of the Tycho corpus (the by-reference chain of the
+  state `62urmx2dcm`, six named functions of `(x, y)`) loses its last three
+  dispatches per pixel the same way, measured the same way at 2.25 → 2.11 µs per
+  sample. An ATOMIC argument — a tuple (a point) or a nominal value — is bound
+  whole, so a call that carries one alongside an argument that may be a
+  collection binds the atomic argument to a temporary, once, and broadcasts over
+  the other arguments with it closed over. Before the ruling such a call was
+  emitted direct for every argument, and the callee's own body dispatched.
 - **The interval-js target emits `_IA.sub` for a subtraction.** `Subtract`
   canonicalizes to `Add(a, Negate(b))`, so the target emitted
   `_IA.add(a, _IA.negate(b))` — one extra call and one extra interval object per

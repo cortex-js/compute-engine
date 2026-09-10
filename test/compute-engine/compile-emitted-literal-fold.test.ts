@@ -156,8 +156,30 @@ describe('the emitted-code folder', () => {
 
     it('declines a transcendental, whose shader value is the driver’s', () => {
       expect(foldEmittedGPUCode('sin(2.0)')).toBeUndefined();
-      expect(foldEmittedGPUCode('pow(2.0, 3.0)')).toBeUndefined();
       expect(foldEmittedGPUCode('exp(1.0)')).toBeUndefined();
+      // A FRACTIONAL exponent is the driver's `exp2(y·log2(x))` too.
+      expect(foldEmittedGPUCode('pow(2.0, 0.5)')).toBeUndefined();
+      // Past the repeated-multiplication range the GPU target's own lowering
+      // reaches the hardware `pow` as well, so the fold stops there.
+      expect(foldEmittedGPUCode('pow(2.0, 9.0)')).toBeUndefined();
+      // `0^0` is left to the hardware by the GPU target (it has no NaN
+      // literal to spell the interpreter's indeterminate value with), so the
+      // fold does not decide it either.
+      expect(foldEmittedGPUCode('pow(0.0, 0.0)')).toBeUndefined();
+    });
+
+    it('folds an integer power, which the shader `pow` gets WRONG', () => {
+      // Both shader languages define `pow(x, y)` as `exp2(y·log2(x))`, which
+      // is undefined for a negative base: `pow(-1.0, 1.0)` answers NaN on most
+      // drivers. The GPU target never writes `pow` for a literal integer
+      // exponent for that reason; such a call only appears when a `Sum` unroll
+      // substitutes its index AFTER the tree was compiled. Folding to repeated
+      // multiplication is the value the target's own lowering would give.
+      expect(foldEmittedGPUCode('pow(-1.0, 1.0)')).toBe('(-1.0)');
+      expect(foldEmittedGPUCode('pow(-1.0, 2.0)')).toBe('1.0');
+      expect(foldEmittedGPUCode('pow(-2.0, 3.0)')).toBe('(-8.0)');
+      expect(foldEmittedGPUCode('pow(2.0, 3.0)')).toBe('8.0');
+      expect(foldEmittedGPUCode('pow(2.0, -2.0)')).toBe('0.25');
     });
 
     it('declines the vector overload of a fixed-power helper', () => {

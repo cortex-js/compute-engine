@@ -448,6 +448,66 @@ their expected effect on the corpus.
   arguments should settle scalar through the chain (the item-86 look-through
   stops at the first `value`). Probe on the Tycho side:
   `scripts/repros/2026-09-09-hyvhlz4chj-carrier-oracle-probe.mts`.
+- **`Re((x+ib)^2)` still builds one `{re, im}` object (noted by the
+  complex-lane slice of 2026-09-09).** The statement lowering removed the
+  closures; splitting a small-integer `Power` of a complex operand into its
+  two real parts at the reader (`tryGetJSComplexParts`) would emit
+  `x*x - b*b` with no object at all, at the cost of splicing each part twice
+  (a cheapness gate is needed) and of inheriting the reader's `re = 0`
+  convention for a non-finite imaginary factor. A new optimization, not a
+  defect; the expression-position `code` keeps one enclosing function by
+  contract either way.
+- **Symbolic differentiation grows super-exponentially with the order
+  because the chain rule is built with `.mul()`, which distributes over
+  sums (measured 2026-09-09 on `f(x) := √(x+√(x+√(x+√(x+x))))`: `d1` 49 ms
+  and 0.9 KB, `d2` 614 ms and 7.5 KB, `d3` 14 s and 172 KB, then 4.5 s of
+  `simplify`).** The compiled JavaScript route no longer pays it (jets), but
+  the interpreter's `Derivative(f, 3).evaluate()` and `.N()` still do.
+  Building the chain rule with `mulFactored` gives a three times smaller
+  first derivative and is 35 times SLOWER at order two, because normalizing
+  the nested quotients sends `Product.asRationalExpression` → `factor()`
+  into a near-exponential walk (17 s of a 20 s run). Two open questions: can
+  `factor()` handle nested quotients in near-linear time, and should the
+  differentiation rules then keep their results factored — which changes
+  the shape of many `evaluate()` results and needs a snapshot-churn ruling.
+- **`interval-js` declines an applied derivative it could compile.**
+  `Derivative(f, 1)` alone compiles on that target, and the closed form is
+  ordinary arithmetic with a sound enclosure; only the `Apply` handler's
+  callee check (a `Function` literal) refuses `Apply(Derivative(f, 1), x)`.
+  Resolving the callee to its cached closed-form literal before that check
+  would give interval enclosures for derivative plots; the jet lowering does
+  not port (each recurrence would need its own enclosure argument), so only
+  the orders the symbolic route computes within its node budget would be
+  served.
+- **`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with `F := [f, f', f'', f''']`
+  does not parse as the application of a list element** — `F(\epsilon)`
+  parses as a juxtaposition — so the corpus row of Tycho item 284 never
+  reaches the compiler in the shape the record implies. The explicit
+  four-term sum compiles in 65 ms and matches `.N()`; the record's exact
+  spelling should be recovered and re-tested on the Tycho side.
+- **The closed-form derivative route applied at a COMPLEX point emits a
+  real-lane lambda around a complex argument (found 2026-09-09 by the
+  review of the jet lowering; pre-existing).** `(x - e) · f''(e)` with
+  `e: complex` and a SMALL body (`f(x) = x³`, below the jet threshold) emits
+  `((x) => 6 * x)(_.e)` and answers NaN where the interpreter answers
+  `6.96 - 1.8i`. The jet route handles the complex argument (it switches to
+  the complex jet family); the closed-form lambda emitted by
+  `compileDerivative` (`library/calculus.ts`) would have to bind its
+  parameter to the call site's lane the way `isComplexValuedUserCall` does
+  for an ordinary user function.
+- **A cube root of a negative number takes the principal branch when
+  compiled and the real branch when interpreted.** `f(x) = ∛x`, `f''(-1.2)`:
+  the interpreter answers the real `1.164…`, the compiled closed form goes
+  through `_SYS.cpow` and answers `0.918 - 0.142i`. Pre-existing on the
+  symbolic route; the jet route takes the real root for an odd degree (fixed
+  in the same review). The compiled `Root` emitter of an odd degree over a
+  negative operand should take the real branch as `Math.cbrt` does for the
+  plain `∛x`.
+- **`_gpu_powi` vector variants answer NaN for a zero component under a
+  negative odd exponent** (`sign(x) · pow(0, n)` is `0 · ∞`), where the
+  scalar helper answers `+∞`. Both sit in hardware-undefined territory (a
+  pole); a per-component `select` would make the two agree. Reachable now
+  that a negative run-time exponent over a `vecN` base routes to the helper.
 - **The interval-js runner copies its answer on the way out.** The constant
   table now lives for the artifact's lifetime, so `freshIntervalValue` copies
   the top-level result (and, for a collection-valued root, every element) so

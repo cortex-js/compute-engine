@@ -279,11 +279,13 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     // an array to NaN. It wraps the coercing shim, so a scalar element still
     // reaches the body coerced.
     expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$s)');
+    // The shim temporaries are numbered after the two the complex product in
+    // `Q`'s own body takes (`2x` binds each factor to a hygienic temporary).
     expect(r?.preamble).toContain(
-      'const _fn_Q$v = (_tv1) => _fn_Q(_SYS.cplx(_tv1));'
+      'const _fn_Q$v = (_tv3) => _fn_Q(_SYS.cplx(_tv3));'
     );
     expect(r?.preamble).toContain(
-      'const _fn_Q$s = (_tv2) => Array.isArray(_tv2) ? NaN : _fn_Q$v(_tv2);'
+      'const _fn_Q$s = (_tv4) => Array.isArray(_tv4) ? NaN : _fn_Q$v(_tv4);'
     );
     expect(r?.run?.({})).toEqual([2, 4, 6]);
     expect(

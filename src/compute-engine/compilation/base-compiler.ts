@@ -114,6 +114,8 @@ import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
+import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
+import { derivative } from '../symbolic/derivative.js';
 import {
   MIN_UNROLLED_WIDTH,
   unrollFixedWidthCollections,
@@ -3282,6 +3284,29 @@ export class BaseCompiler {
         return false;
       if (BaseCompiler.assumedRealNonNegative(base)) return false;
       if (base.isNegative !== true && !isNonRealNumber(base.type.type))
+        BaseCompiler.notePromoted();
+      return true;
+    }
+    if (head === 'Root') {
+      // `Root(u, k)` of an unknown-sign operand with an EVEN integer degree
+      // is the same case as `Sqrt`, which is `Root(u, 2)`: the real
+      // `Math.pow(u, 1/k)` is `NaN` for a negative `u`, while the
+      // interpreter answers the principal complex root (`Root(−8, 4)` is
+      // `1.1892… + 1.1892…i`).
+      //
+      // An ODD degree keeps the real lowering: there the interpreter answers
+      // the REAL root (`Root(−8, 3)` is `−2`, not the principal complex
+      // value), which the emitters spell with `Math.cbrt` or a
+      // sign-corrected power. A degree that is not an even integer literal
+      // keeps it too — a variable degree may be odd at run time, and
+      // promoting it would move every `\sqrt[n]{x}` off the real kernel.
+      const [radicand, degree] = args;
+      if (radicand === undefined || degree === undefined) return false;
+      if (!isNumber(degree) || degree.im !== 0) return false;
+      if (!Number.isInteger(degree.re) || degree.re === 0) return false;
+      if (degree.re % 2 !== 0) return false;
+      if (BaseCompiler.assumedRealNonNegative(radicand)) return false;
+      if (radicand.isNegative !== true && !isNonRealNumber(radicand.type.type))
         BaseCompiler.notePromoted();
       return true;
     }
@@ -6633,6 +6658,18 @@ export class BaseCompiler {
                * with the interpreter, which evaluates `Cos(0)` to the exact
                * `1` and then drops the unit factor at canonicalization.
                *
+               * A factor spelled as the exact `-1` is dropped the same way and
+               * the caller negates the product instead (the return value says
+               * so; an EVEN number of such factors cancels and asks for no
+               * negation). It arrives by the same route — the unrolled
+               * `\sum_k (-1)^k x` emits `_.x * _SYS.pow(-1, 1)` and the fold
+               * turns the call into the literal — and the rewrite is exact for
+               * every IEEE value: negation only flips the sign bit, and
+               * round-to-nearest is sign-symmetric, so `-(a * b)` and
+               * `(-a) * b` are the same float. Unlike a `0` factor, a `-1`
+               * factor also discards nothing: `NaN * -1`, `∞ * -1` and
+               * `0 * -1` all keep the value the negation gives.
+               *
                * `x * 1` returns `x` for every IEEE value — a negative zero and
                * a NaN included — so this drop is exact. The two neighbouring
                * folds are deliberately NOT made:
@@ -6654,19 +6691,33 @@ export class BaseCompiler {
                * one could leave an operand of the wrong type for the position
                * it sits in.
                *
-               * `codes` is rewritten in place.
+               * `codes` is rewritten in place. Returns whether the product it
+               * leaves behind must be NEGATED to keep its value.
                */
-              const foldEmittedIdentityOperands = (codes: string[]): void => {
+              const foldEmittedIdentityOperands = (
+                codes: string[]
+              ): boolean => {
                 if (
                   target.language !== 'javascript' ||
                   target.constantFold === false
                 )
-                  return;
-                if (h !== 'Multiply' || op[0] !== '*') return;
+                  return false;
+                if (h !== 'Multiply' || op[0] !== '*') return false;
                 const identity = target.number(1);
-                const kept = codes.filter((c) => c !== identity);
-                if (kept.length > 0 && kept.length < codes.length)
-                  codes.splice(0, codes.length, ...kept);
+                // The emitted-code fold parenthesizes a negative literal it
+                // splices where the code did not already start with a minus
+                // sign, so both spellings of `-1` reach this point.
+                const minusOne = target.number(-1);
+                const isMinusOne = (c: string) =>
+                  c === minusOne || c === `(${minusOne})`;
+                const kept = codes.filter(
+                  (c) => c !== identity && !isMinusOne(c)
+                );
+                if (kept.length === 0 || kept.length === codes.length)
+                  return false;
+                const negations = codes.filter(isMinusOne).length;
+                codes.splice(0, codes.length, ...kept);
+                return negations % 2 === 1;
               };
               // Fold only a leading run of emitted numeric literals. It has
               // the same left-to-right rounding as the original product and
@@ -6726,9 +6777,35 @@ export class BaseCompiler {
                     );
               const rat =
                 ratIndex < 0 ? undefined : exactRationalDivisor(args[ratIndex]);
+              // A unary negation the whole result takes, asked for either by a
+              // `-1` numerator or by the `-1` factors the emitted-code fold
+              // left behind. The two are combined into ONE negation: emitting
+              // both would glue two minus signs into a JavaScript decrement.
+              const negateResult = (): void => {
+                const negOp = target.operators?.('Negate');
+                if (negOp !== undefined) {
+                  // A bare name or member path (`_.x`, `_cse1`) takes the
+                  // minus sign without parentheses: member access binds
+                  // tighter than a unary operator in every target language, so
+                  // nothing can re-associate. Anything else keeps them.
+                  const atomic =
+                    /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(resultStr);
+                  const operand =
+                    atomic || resultPrec >= negOp[1]
+                      ? resultStr
+                      : `(${resultStr})`;
+                  resultStr = `${negOp[0]}${operand}`;
+                  resultPrec = negOp[1];
+                } else {
+                  // No unary negation on this target: fall back to an
+                  // explicit `-1` factor.
+                  resultStr = `${target.number(-1)} ${op[0]} ${resultStr}`;
+                  resultPrec = op[1];
+                }
+              };
               if (rat !== undefined && divOp !== undefined) {
                 const factors = operandCodes.filter((_, i) => i !== ratIndex);
-                foldEmittedIdentityOperands(factors);
+                const negateFactors = foldEmittedIdentityOperands(factors);
                 foldLeadingNumericRun(factors);
                 // A leading factor of exactly one is the multiplicative
                 // identity for every IEEE value, so it is dropped. It appears
@@ -6752,24 +6829,12 @@ export class BaseCompiler {
                   resultStr = `${quotient} ${op[0]} ${target.number(rat.p)}`;
                   resultPrec = op[1];
                 }
-                if (rat.p === -1) {
-                  const negOp = target.operators?.('Negate');
-                  if (negOp !== undefined) {
-                    const quotient =
-                      resultPrec < negOp[1] ? `(${resultStr})` : resultStr;
-                    resultStr = `${negOp[0]}${quotient}`;
-                    resultPrec = negOp[1];
-                  } else {
-                    // No unary negation on this target: fall back to an
-                    // explicit `-1` factor.
-                    resultStr = `${target.number(-1)} ${op[0]} ${resultStr}`;
-                    resultPrec = op[1];
-                  }
-                }
+                if ((rat.p === -1) !== negateFactors) negateResult();
               } else {
-                foldEmittedIdentityOperands(operandCodes);
+                const negateFactors = foldEmittedIdentityOperands(operandCodes);
                 foldLeadingNumericRun(operandCodes);
                 resultStr = operandCodes.join(` ${op[0]} `);
+                if (negateFactors) negateResult();
               }
             }
             // Same shape gate as the function-codegen and string-helper paths
@@ -9240,7 +9305,9 @@ export class BaseCompiler {
       | undefined;
     try {
       radicalFrame =
-        h === 'Power' || BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
+        h === 'Power' ||
+        h === 'Root' ||
+        BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
           ? {
               head: h,
               params: new Set(params),
@@ -13665,6 +13732,94 @@ export class BaseCompiler {
       if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
         return true;
     }
+    // `Apply(Derivative(f, n), …)` — the compiled `f''(x)` — takes the value
+    // shape of the EXPRESSION THE EMITTER WILL PRODUCE, not the one this
+    // node's type reports: `Derivative`'s type handler reports `number` for a
+    // function with no declared codomain, so reading the type here put a
+    // real-lane multiplication around the `{re, im}` object the emitted code
+    // returns, and `(x − ε)·f′(ε)` answered NaN at every point.
+    //
+    // Which expression that is depends on the lowering, and the two do not
+    // agree. The forward-mode lowering (`jet-derivative.ts`) walks the body
+    // and picks its jet family from the body's own lane, so for it the body
+    // is the right answer. The symbolic closed form (`compileDerivative`,
+    // library/calculus.ts) is the DIFFERENTIATED body, which the body does
+    // not describe in either direction: differentiation can drop what made
+    // the body complex (`f(x) = x² + i` has the real derivative `2x`) and it
+    // can introduce a complex node the body has none of (`f(x) = ∛x` has the
+    // second derivative `−2/(9·x^(5/3))`, whose fractional power of an
+    // unknown-sign base lowers through the complex `_SYS.cpow`).
+    if (expr.operator === 'Apply' && isFunction(expr.ops[0], 'Derivative')) {
+      const callee = expr.ops[0];
+      const head = callee.ops[0];
+      const literal = isFunction(head, 'Function')
+        ? head
+        : isSymbol(head)
+          ? BaseCompiler.userFunctionLiteral(expr.engine, head.symbol)
+          : undefined;
+      const body =
+        literal !== undefined && isFunction(literal)
+          ? literal.ops[0]
+          : undefined;
+      // A body that reaches back to a derivative of the same function would
+      // recurse without end; the shared visited set of the user-call
+      // look-through below stops it, keyed on the differentiated head.
+      const guard =
+        head !== undefined && isSymbol(head) ? head.symbol : undefined;
+      const recursing =
+        guard !== undefined && BaseCompiler._userCallVisited.has(guard);
+      if (body !== undefined && !recursing) {
+        if (guard !== undefined) BaseCompiler._userCallVisited.add(guard);
+        try {
+          // The jet lowering is asked the same way the emitter asks it, so
+          // the two cannot disagree about which one claims the node.
+          const jet = jetDerivativeTarget(
+            expr.ops,
+            (id) => BaseCompiler.userFunctionLiteral(expr.engine, id),
+            BaseCompiler.mode === 'complex'
+          );
+          if (jet !== undefined) {
+            // The jet family is picked from the body AND from the point the
+            // derivative is taken at: the real family reads a coefficient
+            // with `asReal`, so a `{re, im}` argument forces the complex
+            // one. The two predicates must gain that disjunct together, or
+            // the enclosing expression puts real arithmetic around the
+            // `{re, im}` object `_SYS.jcread` hands back
+            // (`compileJetDerivative`, jet-derivative.ts).
+            const arg = expr.ops[1];
+            return (
+              BaseCompiler.isComplexValued(body) ||
+              (arg !== undefined && BaseCompiler.isComplexValued(arg))
+            );
+          }
+          // The closed form. Asking for it here costs nothing the
+          // compilation was not going to pay anyway: it is memoised per
+          // (function literal, order) (`derivative`, symbolic/derivative.ts),
+          // and the emission that follows reads the same entry.
+          const order =
+            callee.ops.length === 2 ? Math.floor(callee.ops[1].N().re) : 1;
+          let closedForm: Expression | undefined;
+          try {
+            if (Number.isFinite(order))
+              closedForm = derivative(literal!, order);
+          } catch {
+            // The differentiation raised (an evaluation deadline, a head
+            // whose rule throws). `compileDerivative` turns the same failure
+            // into its numeric fallback rather than failing the
+            // compilation, so this predicate must not raise either: fall
+            // back to the body below.
+            closedForm = undefined;
+          }
+          // No closed form (the differentiation declined, or the order is not
+          // a number yet): the emitter falls back to a numeric stencil over
+          // the compiled body, whose lane is the body's.
+          return BaseCompiler.isComplexValued(closedForm ?? body);
+        } finally {
+          if (guard !== undefined) BaseCompiler._userCallVisited.delete(guard);
+        }
+      }
+    }
+
     // A call to a user function follows its BODY, analyzed with the
     // parameters bound to the call site's complex lanes. Under the opt-in
     // this is where the promotion above actually happens (item 190's witness
@@ -21812,6 +21967,55 @@ export class BaseCompiler {
       // expressions (listing `Field` as unsupported on a compilable SET, or
       // descending into a getter where the compile path emits a setter).
       //
+      // A target whose `Apply` compiles only a function-LITERAL callee
+      // (`CompileTarget.appliesFunctionLiteralsOnly`) never compiles the
+      // callee of any other application, so the analysis must not walk into
+      // it: the walk probes the callee head's compile handler, and for an
+      // applied derivative that probe runs the whole symbolic
+      // differentiation on a compilation that has already declined.
+      if (
+        h === 'Apply' &&
+        target.appliesFunctionLiteralsOnly === true &&
+        !isFunction(ops[0], 'Function')
+      ) {
+        unsupported.add('Apply');
+        // A SYMBOL callee is still reported: naming it costs a symbol lookup
+        // and it is what tells the caller which function it could not lower.
+        // Anything else — a `Derivative` node above all — is left alone.
+        if (isSymbol(ops[0])) visit(ops[0], bound);
+        for (const op of ops.slice(1)) visit(op, bound);
+        return;
+      }
+
+      // Applied derivative: `Apply(Derivative(f, n), x)`. On the JavaScript
+      // target this lowers through forward-mode automatic differentiation
+      // (`tryCompileJetDerivative`, javascript-target.ts) and the callee is
+      // never compiled, so the `Derivative` head's compile handler must not
+      // be probed here either. That probe is not free: it computes the
+      // symbolic n-th derivative — the very work the jet lowering exists to
+      // avoid — and then discards it.
+      if (
+        h === 'Apply' &&
+        ops.length === 2 &&
+        isFunction(ops[0], 'Derivative') &&
+        (target.language ?? 'javascript') === 'javascript'
+      ) {
+        const lowering = BaseCompiler.jetDerivativeLowering(
+          engine,
+          ops,
+          (e) => BaseCompiler.compileValueOperand(e, target),
+          target.mode === 'complex'
+        );
+        if (lowering !== undefined) {
+          // The body's own free symbols still have to be reported: the jet
+          // emitter compiles each parameter-free subexpression in a
+          // throwaway context, which records nothing here.
+          visitLiteralBody(lowering, bound);
+          visit(ops[1], bound);
+          return;
+        }
+      }
+
       // Qualified call: `Apply(Field(Protocol, "member"), args…)`. The
       // compile path declines whole-unit when the tier declines, so the
       // member is reported unsupported in that case.
@@ -22523,6 +22727,41 @@ export class BaseCompiler {
       name = `_tv${++naming.counter}`;
     } while (naming.usedNames.has(name));
     return name;
+  }
+
+  /**
+   * The function literal an `Apply(Derivative(f, n), x)` would be lowered
+   * from through forward-mode automatic differentiation, or `undefined` when
+   * that lowering does not claim this application.
+   *
+   * The reference analysis needs the same answer the emitter reaches, and
+   * reaches it the same way: the jet emitter is run (it costs one walk of the
+   * body) and its decline is this function's decline. `compile` is the
+   * analysis walk's own throwaway operand compiler.
+   */
+  static jetDerivativeLowering(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    compile: (expr: Expression) => string,
+    complexMode: boolean
+  ): (Expression & FunctionInterface) | undefined {
+    const claim = jetDerivativeTarget(
+      args,
+      (id) => BaseCompiler.userFunctionLiteral(engine, id),
+      complexMode
+    );
+    if (claim === undefined) return undefined;
+    let counter = 0;
+    const code = compileJetDerivative(
+      claim.literal,
+      claim.order,
+      args[1],
+      compile,
+      () => `_tvProbe${++counter}`,
+      BaseCompiler.isComplexValued
+    );
+    if (code === undefined) return undefined;
+    return isFunction(claim.literal, 'Function') ? claim.literal : undefined;
   }
 
   // ---------------------------------------------------------------------------

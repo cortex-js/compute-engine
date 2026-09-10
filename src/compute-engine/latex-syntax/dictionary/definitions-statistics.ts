@@ -79,4 +79,17 @@ export const DEFINITIONS_STATISTICS: LatexDictionary = [
     kind: 'function',
     parse: 'Correlation',
   },
+  // Function-style aliases for the error functions, the lowercase spellings
+  // Desmos writes. Parse-only: `Erf` and `Erfc` keep serializing as
+  // `\mathrm{Erf}` and `\mathrm{Erfc}`.
+  {
+    symbolTrigger: 'erf',
+    kind: 'function',
+    parse: 'Erf',
+  },
+  {
+    symbolTrigger: 'erfc',
+    kind: 'function',
+    parse: 'Erfc',
+  },
 ];
