@@ -46,92 +46,6 @@
   exponent keeps `pow`, since a negative base under a fractional power is NaN
   over the reals as well.
 
-### Performance
-
-- **Compiling a higher-order derivative of a user function (`f''(x)`, `f'''(x)`)
-  no longer differentiates the body symbolically at compile time on the
-  JavaScript target.** It is lowered by forward-mode automatic differentiation
-  (truncated Taylor jets, real or complex as the body promotes), which compiles
-  in milliseconds instead of tens of seconds and emits a few hundred bytes
-  instead of a few hundred kilobytes: the third derivative of a four-deep nested
-  radical went from 28.7 s and 392 KB to 1 ms and 174 B, and the corpus Taylor
-  row over a twenty-deep radical from 49 s to 23 ms. The symbolic closed form is
-  still used for a first derivative of an ordinary body (a large body takes the
-  jet at order one too: the first derivative of the twenty-deep radical was a
-  376 KB kernel), and is now cached per function definition and order (a higher
-  order continues the cached chain). A target that declines an applied
-  derivative (`interval-js`) declines before doing the symbolic work rather than
-  after, and the analysis walk no longer probes a derivative handler by running
-  it. Also fixed on the way: the complex-lane test for an applied derivative
-  read the declared `number` type instead of the differentiated body, so
-  `(x-e)·f'(e)` compiled to NaN when the body promotes to a complex value.
-- **The JavaScript compile target no longer allocates one closure per complex
-  operation.** A complex `Add`, `Multiply`, `Divide`, `Power`, `Log` or
-  component read lowers to statement-level temporaries in the enclosing block,
-  so a whole complex expression is one block of straight-line statements (an
-  iterated complex map of depth five went from twelve nested immediately-invoked
-  functions to none, and from about 90 to 60 ns per call). A complex factor
-  known at compile time — the imaginary unit, or a complex literal — scales its
-  real operand by two constants instead of building `{re, im}` and multiplying
-  by `0` and `1`: `i · b` compiles to `{ re: 0, im: b }`.
-- **The emitted-code constant fold reaches the JavaScript and shader targets'
-  own runtime routines**, so an unrolled `Sum` or `Product` no longer leaves
-  literal-only calls behind: `\sum_{k=1}^{3}(-1)^{k}x` compiles to
-  `(-x + x + -x)` instead of three `pow` calls, `k!` and the complex kernels of
-  a literal argument fold too, and a `-1` factor the fold exposes becomes a
-  negation. On GLSL and WGSL this also fixed a wrong value: a literal
-  `pow(-1.0, 1.0)` is undefined in both languages.
-- **Compiled kernels no longer evaluate a shared subexpression more than once in
-  a large body.** Common-subexpression elimination now counts the occurrences a
-  candidate serves in nested scopes when it decides that a candidate is
-  redundant because a larger one contains it, so the nested chains a big body
-  produces no longer crowd out its small, frequently repeated terms (a Voronoi
-  cell distance went from 64 shared temporaries — its per-region limit, with
-  three terms still recomputed three times each — to 25, with nothing
-  recomputed). It also applies its benefit test before that redundancy test, so
-  a subexpression can no longer be dropped in favour of a container that is
-  itself discarded: `(sin(u)+1)^2 + 1/(sin(u)+1)` called `Math.sin` twice and
-  now calls it once. Loop-invariant hoisting shares subexpressions between the
-  values it lifts out of a loop instead of repeating them in each: a heat-map
-  shader computed `fract(x)` six times and each of its four hash values twice
-  ahead of its loop, and now computes each once.
-- **Element-wise arithmetic over a list whose width is known at compile time is
-  written out component by component on the `javascript` target**
-  (`list<number^4>`, a literal list, a user function returning one) instead of
-  going through the run-time broadcast helper `_SYS.bcast` — a closure, a shape
-  test and an allocation per evaluation. A narrow `Sum`/`Product` over such a
-  list is folded term by term instead of through `reduce`, and a reduction over
-  a real vector no longer takes the complex lane: the row
-  `1-(\sum(f(x+1,y+3)+f(x-1,y+3)))^2` with `f(x,y):=[-y,x]/(x^2+y^2)` emitted
-  `_SYS.cneg(_SYS.cplx(…reduce(_SYS.sadd…)))` and now emits `-_SYS.pow2(…) + 1`.
-- **A reduction over a range-indexed slice compiles to a counted loop.**
-  `total(P[a...b])` — and `Product`, `Mean`, `Max`, `Min` and `Length` over the
-  same gather — built the index list and the gathered slice and folded them with
-  a callback; the `javascript` target now walks the source with a counted loop,
-  in the range's own direction, reading each element with the same call the
-  indexed spelling `P[k]` uses; a `Join` of listed indices and ranges
-  (`P[Join([m+n], (m+n+15)...(m+n+60))]`) walks its pieces in order the same
-  way. A source that is not an array at run time, or a bound that is not an
-  integer, answers `NaN` where the old fold raised a `TypeError`. A reduction
-  over a list whose element type is `number` stays on the real lane, as every
-  other consumer of such a list already did; and the counted-range prologue of a
-  comprehension over integer-typed bounds drops its dead floor and clamp (the
-  array-length guard stays: a non-finite bound supplied through `vars` must
-  throw, not hang).
-- **`interval-js`: the compiled kernel no longer allocates per evaluation what
-  it can allocate once.** Every constant interval is bound in a table the runner
-  builds when it is created, instead of being rebuilt on each call (the
-  top-level expression and the folded constants of an unrolled `Sum` included);
-  a leading negation folds into the division it feeds (the new `negDiv` kernel,
-  or the sign on a constant divisor), and a negation of a negation cancels; a
-  conditional lowers to a ternary chain over the tri-state condition instead of
-  `piecewise` with two closures. The runner returns a fresh copy of its answer
-  so a caller cannot write into the shared table. On the audit corpus a plotted
-  `cases` expression is 25–40% faster per sample and a lattice snap (`-⌊nx⌋/n`)
-  about 17%.
-
-### Resolved Issues
-
 - **A gated value can be assigned to a declared symbol again.** Since 0.128.0
   the type of a restriction carries the absent case, and the assignment
   compatibility check required the value's type to be a subtype of the declared
@@ -232,6 +146,90 @@
   `[1, 3]` where the interpreter, which admits a row as a point only when every
   cell is a number, element-indexes and answers the first row `[1, "a"]`. The
   dispatch now tests every cell of the row.
+
+### Performance
+
+- **Compiling a higher-order derivative of a user function (`f''(x)`, `f'''(x)`)
+  no longer differentiates the body symbolically at compile time on the
+  JavaScript target.** It is lowered by forward-mode automatic differentiation
+  (truncated Taylor jets, real or complex as the body promotes), which compiles
+  in milliseconds instead of tens of seconds and emits a few hundred bytes
+  instead of a few hundred kilobytes: the third derivative of a four-deep nested
+  radical went from 28.7 s and 392 KB to 1 ms and 174 B, and the corpus Taylor
+  row over a twenty-deep radical from 49 s to 23 ms. The symbolic closed form is
+  still used for a first derivative of an ordinary body (a large body takes the
+  jet at order one too: the first derivative of the twenty-deep radical was a
+  376 KB kernel), and is now cached per function definition and order (a higher
+  order continues the cached chain). A target that declines an applied
+  derivative (`interval-js`) declines before doing the symbolic work rather than
+  after, and the analysis walk no longer probes a derivative handler by running
+  it. Also fixed on the way: the complex-lane test for an applied derivative
+  read the declared `number` type instead of the differentiated body, so
+  `(x-e)·f'(e)` compiled to NaN when the body promotes to a complex value.
+- **The JavaScript compile target no longer allocates one closure per complex
+  operation.** A complex `Add`, `Multiply`, `Divide`, `Power`, `Log` or
+  component read lowers to statement-level temporaries in the enclosing block,
+  so a whole complex expression is one block of straight-line statements (an
+  iterated complex map of depth five went from twelve nested immediately-invoked
+  functions to none, and from about 90 to 60 ns per call). A complex factor
+  known at compile time — the imaginary unit, or a complex literal — scales its
+  real operand by two constants instead of building `{re, im}` and multiplying
+  by `0` and `1`: `i · b` compiles to `{ re: 0, im: b }`.
+- **The emitted-code constant fold reaches the JavaScript and shader targets'
+  own runtime routines**, so an unrolled `Sum` or `Product` no longer leaves
+  literal-only calls behind: `\sum_{k=1}^{3}(-1)^{k}x` compiles to
+  `(-x + x + -x)` instead of three `pow` calls, `k!` and the complex kernels of
+  a literal argument fold too, and a `-1` factor the fold exposes becomes a
+  negation. On GLSL and WGSL this also fixed a wrong value: a literal
+  `pow(-1.0, 1.0)` is undefined in both languages.
+- **Compiled kernels no longer evaluate a shared subexpression more than once in
+  a large body.** Common-subexpression elimination now counts the occurrences a
+  candidate serves in nested scopes when it decides that a candidate is
+  redundant because a larger one contains it, so the nested chains a big body
+  produces no longer crowd out its small, frequently repeated terms (a Voronoi
+  cell distance went from 64 shared temporaries — its per-region limit, with
+  three terms still recomputed three times each — to 25, with nothing
+  recomputed). It also applies its benefit test before that redundancy test, so
+  a subexpression can no longer be dropped in favour of a container that is
+  itself discarded: `(sin(u)+1)^2 + 1/(sin(u)+1)` called `Math.sin` twice and
+  now calls it once. Loop-invariant hoisting shares subexpressions between the
+  values it lifts out of a loop instead of repeating them in each: a heat-map
+  shader computed `fract(x)` six times and each of its four hash values twice
+  ahead of its loop, and now computes each once.
+- **Element-wise arithmetic over a list whose width is known at compile time is
+  written out component by component on the `javascript` target**
+  (`list<number^4>`, a literal list, a user function returning one) instead of
+  going through the run-time broadcast helper `_SYS.bcast` — a closure, a shape
+  test and an allocation per evaluation. A narrow `Sum`/`Product` over such a
+  list is folded term by term instead of through `reduce`, and a reduction over
+  a real vector no longer takes the complex lane: the row
+  `1-(\sum(f(x+1,y+3)+f(x-1,y+3)))^2` with `f(x,y):=[-y,x]/(x^2+y^2)` emitted
+  `_SYS.cneg(_SYS.cplx(…reduce(_SYS.sadd…)))` and now emits `-_SYS.pow2(…) + 1`.
+- **A reduction over a range-indexed slice compiles to a counted loop.**
+  `total(P[a...b])` — and `Product`, `Mean`, `Max`, `Min` and `Length` over the
+  same gather — built the index list and the gathered slice and folded them with
+  a callback; the `javascript` target now walks the source with a counted loop,
+  in the range's own direction, reading each element with the same call the
+  indexed spelling `P[k]` uses; a `Join` of listed indices and ranges
+  (`P[Join([m+n], (m+n+15)...(m+n+60))]`) walks its pieces in order the same
+  way. A source that is not an array at run time, or a bound that is not an
+  integer, answers `NaN` where the old fold raised a `TypeError`. A reduction
+  over a list whose element type is `number` stays on the real lane, as every
+  other consumer of such a list already did; and the counted-range prologue of a
+  comprehension over integer-typed bounds drops its dead floor and clamp (the
+  array-length guard stays: a non-finite bound supplied through `vars` must
+  throw, not hang).
+- **`interval-js`: the compiled kernel no longer allocates per evaluation what
+  it can allocate once.** Every constant interval is bound in a table the runner
+  builds when it is created, instead of being rebuilt on each call (the
+  top-level expression and the folded constants of an unrolled `Sum` included);
+  a leading negation folds into the division it feeds (the new `negDiv` kernel,
+  or the sign on a constant divisor), and a negation of a negation cancels; a
+  conditional lowers to a ternary chain over the tri-state condition instead of
+  `piecewise` with two closures. The runner returns a fresh copy of its answer
+  so a caller cannot write into the shared table. On the audit corpus a plotted
+  `cases` expression is 25–40% faster per sample and a lattice snap (`-⌊nx⌋/n`)
+  about 17%.
 
 ## 0.128.0 _2026-09-09_
 
