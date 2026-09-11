@@ -14,6 +14,7 @@ import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
   canIndexArrayDirectly,
   isConstructedScalar,
+  isScalarValue,
   isDecidedLoopIndex,
   numericArrayCells,
   recordIntegerRange,
@@ -14000,7 +14001,14 @@ function emitSumProduct(
       [index, ...rest.map((c) => extractLimits(c).index)],
       target
     );
-    const fold = `${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
+    // Retained helper bodies can still have a collection-capable static
+    // type after their actual return values are proven scalar. Keep this
+    // branch's first-term seed (including signed zero), order and NaN policy,
+    // while omitting array dispatch for an innermost scalar term.
+    const scalarTerm = rest.length === 0 && isScalarValue(body, innerTarget);
+    const fold = scalarTerm
+      ? `${acc} = ${acc} === null ? ${val} : ${acc} ${op} ${val};`
+      : `${acc} = ${acc} === null ? (Array.isArray(${val}) ? ${val}.slice() : ${val}) : _SYS.bcast((_a, _b) => _a ${op} _b, ${acc}, ${val});`;
     if (elementwiseExit)
       return expression(
         (exit) =>

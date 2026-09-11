@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Improvements
+
+- **Scalar block results avoid broadcast dispatch in indexed reductions.**
+  JavaScript sums and products now use direct arithmetic when local assignments
+  and helper results prove their terms scalar, even if the block's declared
+  result still permits collections. First-term seeding, signed zero, iteration
+  order, and NaN handling are preserved; collection terms keep broadcasting.
+
 ## 0.128.5 _2026-09-10_
 
 ### Improvements

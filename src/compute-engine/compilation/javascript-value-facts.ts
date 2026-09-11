@@ -334,6 +334,14 @@ export function isConstructedScalar(
     // because such a body may receive a list whole. Recorded by the emission
     // (`BaseCompiler.recordScalarParams`).
     if (isScalarParam(expr.symbol, target.boundVars)) return true;
+    // These names emit Boolean literals only when no local or caller mapping
+    // replaces them. Their held symbolic value is not a numeric literal.
+    if (
+      (expr.symbol === 'True' || expr.symbol === 'False') &&
+      !target.boundVars?.has(expr.symbol) &&
+      !target.varsKeys?.has(expr.symbol)
+    )
+      return true;
     // A caller's explicit declaration is the input contract. A type inferred
     // from use in a scalar parameter is not such a promise. Local binders and
     // caller mappings have their own representations and do not inherit it.
@@ -370,6 +378,15 @@ export function isConstructedScalar(
   )
     return true;
   return isScalarUserFunctionCall(expr, target, depth);
+}
+
+/** Whether a value is scalar under the bindings established for its emitted
+ * body, including assignments to straight-line block locals. */
+export function isScalarValue(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  return scalarShapedValue(expr, target, freshWalk(), 0);
 }
 
 /** The scalar heads whose application to constructed scalars is itself a
@@ -499,8 +516,11 @@ function scalarShapedValue(
     scalarShapedValue(a, target, walk, depth + 1);
   if (expr.operator === 'Block')
     return blockValueKind(expr.ops, target, walk, depth) === 'scalar';
-  const arms = valueArms(expr);
-  if (arms !== undefined) return arms.every(scalarOperand);
+  const arms = conditionalArms(expr);
+  if (arms !== undefined)
+    return (
+      arms.conditions.every(scalarOperand) && arms.values.every(scalarOperand)
+    );
   // A scalar read off a point (`scalarOverPoints`), and a sum or product over
   // an index whose body is a scalar: both answer one number whatever their
   // static type says, and neither is a broadcast over its operands.
@@ -844,8 +864,11 @@ function pointShapedValue(
     const kind = blockValueKind(ops, target, walk, depth);
     return typeof kind === 'number' ? kind : undefined;
   }
-  const arms = valueArms(expr);
-  if (arms !== undefined) return commonWidth(arms.map(point));
+  const arms = conditionalArms(expr);
+  if (arms !== undefined)
+    return arms.conditions.every(scalar)
+      ? commonWidth(arms.values.map(point))
+      : undefined;
   if (h === 'Add')
     return ops.length > 0 ? commonWidth(ops.map(point)) : undefined;
   if (h === 'Negate') return ops.length === 1 ? point(ops[0]) : undefined;
@@ -1017,14 +1040,25 @@ export function recordBlockScalarLocals(
   );
 }
 
-/** The value arms of an `If` or `Which`. Blocks need statement-order
- * analysis through `blockValueKind` instead. */
-function valueArms(
+/** An array-valued condition broadcasts even when every value arm is scalar
+ * or a point. Both shape walks must therefore prove the conditions too.
+ * Blocks need statement-order analysis through `blockValueKind` instead. */
+function conditionalArms(
   expr: Expression & FunctionInterface
-): ReadonlyArray<Expression> | undefined {
+):
+  | {
+      conditions: ReadonlyArray<Expression>;
+      values: ReadonlyArray<Expression>;
+    }
+  | undefined {
   const ops = expr.ops;
-  if (expr.operator === 'If') return ops.slice(1);
-  if (expr.operator === 'Which') return ops.filter((_op, i) => i % 2 === 1);
+  if (expr.operator === 'If')
+    return { conditions: ops.slice(0, 1), values: ops.slice(1) };
+  if (expr.operator === 'Which')
+    return {
+      conditions: ops.filter((_op, i) => i % 2 === 0),
+      values: ops.filter((_op, i) => i % 2 === 1),
+    };
   return undefined;
 }
 
