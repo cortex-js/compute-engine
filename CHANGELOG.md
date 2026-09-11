@@ -1,11 +1,11 @@
 ## [Unreleased]
 
-### Bug Fixes
+### Resolved Issues
 
 - **Bound repeated shape analysis of shared JavaScript helpers.** Compilation
   reuses call-shape results within the same analysis context, including unknown
-  results reached at the recursion limit. This avoids the compile-time blowup
-  in nested shared scalar functions while preserving helper references, local
+  results reached at the recursion limit. This avoids the compile-time blowup in
+  nested shared scalar functions while preserving helper references, local
   bindings, broadcasting and recursion guards.
 
 ### Improvements

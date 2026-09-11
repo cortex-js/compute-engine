@@ -1080,9 +1080,7 @@ export function recordBlockScalarLocals(
 /** An array-valued condition broadcasts even when every value arm is scalar
  * or a point. Both shape walks must therefore prove the conditions too.
  * Blocks need statement-order analysis through `blockValueKind` instead. */
-function conditionalArms(
-  expr: Expression & FunctionInterface
-):
+function conditionalArms(expr: Expression & FunctionInterface):
   | {
       conditions: ReadonlyArray<Expression>;
       values: ReadonlyArray<Expression>;
