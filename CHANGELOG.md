@@ -10,6 +10,12 @@
 
 ### Improvements
 
+- **Constructed vectors retain their width through JavaScript arithmetic and
+  reductions.** Scalar lists returned by helpers or held in stable block locals
+  avoid redundant shape checks, broadcast fallbacks, and small `.reduce` calls.
+  Runtime inputs, list-valued function arguments, and potentially mutated arrays
+  retain their guards; reductions preserve identity seeds and evaluation order.
+
 - **Constructed points keep their shape inside specialized JavaScript helpers.**
   Private helper variants retain proven scalar component counts from their call
   sites, removing redundant `Dot` shape checks and matrix fallbacks. Calls from

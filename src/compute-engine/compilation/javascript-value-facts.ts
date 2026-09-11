@@ -7,7 +7,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import type { CompileTarget } from './types.js';
-import { isCallerMapped } from './cse.js';
+import { isCallerMapped, isCseAdmissible } from './cse.js';
 import { POINT_CONSTRUCTOR_HEADS } from './provable-kind.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { resolveTypeForCompilation } from '../../common/type/utils.js';
@@ -184,6 +184,13 @@ const constructedPointParams = new WeakMap<
   ReadonlyMap<string, number>
 >();
 
+// Array widths for block locals, kept separate from whole-point parameters:
+// passing a list local to a scalar helper still broadcasts the call.
+const constructedArrayLocals = new WeakMap<
+  ReadonlySet<string>,
+  ReadonlyMap<string, number>
+>();
+
 /** Record point parameters only when every call to this emitted helper
  * supplies the proven width and the body never writes those parameters. */
 export function recordConstructedPointParams(
@@ -194,13 +201,14 @@ export function recordConstructedPointParams(
     constructedPointParams.set(target.boundVars, widths);
 }
 
-function constructedPointParamWidth(
+function constructedWidthInScope(
+  facts: WeakMap<ReadonlySet<string>, ReadonlyMap<string, number>>,
   name: string,
   boundVars: ReadonlySet<string> | undefined
 ): number | undefined {
   let scope = boundVars;
   while (scope !== undefined) {
-    const width = constructedPointParams.get(scope)?.get(name);
+    const width = facts.get(scope)?.get(name);
     if (width !== undefined) return width;
     const link = scopeParents.get(scope);
     if (link === undefined || link.added.includes(name)) return undefined;
@@ -658,10 +666,13 @@ type BodyWalk = {
    * (`provenPointWidth`) does not, because a caller may put anything in
    * `vars`. */
   inputsProven: boolean;
+  /** Include constructed lists when proving an emitted array's width.
+   * Lists remain distinct from atomic tuple arguments at call boundaries. */
+  listsProven: boolean;
 };
 
 /** A walk with nothing open: every leaf is judged by the input contract. */
-function freshWalk(inputsProven = true): BodyWalk {
+function freshWalk(inputsProven = true, listsProven = false): BodyWalk {
   return {
     calls: new WeakMap(),
     callDependencies: [],
@@ -670,6 +681,7 @@ function freshWalk(inputsProven = true): BodyWalk {
     shadowed: new Set(),
     points: new Map(),
     inputsProven,
+    listsProven,
   };
 }
 
@@ -726,7 +738,7 @@ export function provenPointWidth(
     !expr.ops.some((op) => emitsSequenceSpread(op, target))
   )
     return expr.ops.length;
-  return pointShapedValue(expr, target, freshWalk(false), 0);
+  return pointShapedValue(expr, target, freshWalk(false, true), 0);
 }
 
 /**
@@ -928,7 +940,19 @@ function pointShapedValue(
     const hypothesis = walk.points.get(expr.symbol);
     if (hypothesis !== undefined) return hypothesis;
     if (walk.shadowed.has(expr.symbol)) return undefined;
-    const width = constructedPointParamWidth(expr.symbol, target.boundVars);
+    const width =
+      constructedWidthInScope(
+        constructedPointParams,
+        expr.symbol,
+        target.boundVars
+      ) ??
+      (walk.listsProven
+        ? constructedWidthInScope(
+            constructedArrayLocals,
+            expr.symbol,
+            target.boundVars
+          )
+        : undefined);
     if (width !== undefined) return width;
     if (!walk.inputsProven) return undefined;
     return constructedPointWidth(expr, target);
@@ -939,8 +963,12 @@ function pointShapedValue(
   const scalar = (a: Expression) =>
     scalarShapedValue(a, target, walk, depth + 1);
   const point = (a: Expression) => pointShapedValue(a, target, walk, depth + 1);
-  if (POINT_CONSTRUCTOR_HEADS.has(h))
-    return ops.length > 0 && ops.every(scalar) ? ops.length : undefined;
+  if (POINT_CONSTRUCTOR_HEADS.has(h) || (walk.listsProven && h === 'List'))
+    return ops.length > 0 &&
+      !ops.some((op) => emitsSequenceSpread(op, target)) &&
+      ops.every(scalar)
+      ? ops.length
+      : undefined;
   if (h === 'Block') {
     const kind = blockValueKind(ops, target, walk, depth);
     return typeof kind === 'number' ? kind : undefined;
@@ -950,6 +978,19 @@ function pointShapedValue(
     return arms.conditions.every(scalar)
       ? commonWidth(arms.values.map(point))
       : undefined;
+  // List arithmetic broadcasts scalars and zips arrays component-wise.
+  // Equal proven widths preserve the result length; unknown or unequal
+  // widths retain the runtime broadcast path.
+  const type = resolveTypeForCompilation(expr.type.type);
+  if (
+    walk.listsProven &&
+    typeof type !== 'string' &&
+    type.kind === 'list' &&
+    ['Add', 'Multiply', 'Divide', 'Power'].includes(h)
+  ) {
+    const arrays = ops.filter((op) => !scalar(op));
+    return arrays.length > 0 ? commonWidth(arrays.map(point)) : undefined;
+  }
   if (h === 'Add')
     return ops.length > 0 ? commonWidth(ops.map(point)) : undefined;
   if (h === 'Negate') return ops.length === 1 ? point(ops[0]) : undefined;
@@ -1065,6 +1106,27 @@ function blockValueKind(
     }
     return value.ops.every((op) => safe(op, locals));
   };
+  const safeValue = (value: Expression): boolean => {
+    if (!safe(value)) return false;
+    if (!outer.listsProven) return true;
+    // Array aliases can be mutated by a callee without rebinding the local.
+    // Scalar facts need no such restriction because scalars are immutable.
+    const options = target.cse?.harvestOptions;
+    return (
+      options !== undefined &&
+      isCseAdmissible(value, {
+        ...options,
+        skippabilityQuery: true,
+        shadowedNames: new Set([
+          ...(options.shadowedNames ?? []),
+          ...(target.boundVars ?? []),
+          ...walk.shadowed,
+          ...walk.points.keys(),
+          ...walk.locals.keys(),
+        ]),
+      })
+    );
+  };
   for (let i = 0; i < stmts.length; i++) {
     const stmt = stmts[i];
     if (isFunction(stmt, 'Declare') || isFunction(stmt, 'Assign')) {
@@ -1085,7 +1147,7 @@ function blockValueKind(
         value = rest[1] ?? attrsValue;
       }
       if (value === undefined) continue;
-      if (!safe(value)) return undefined;
+      if (!safeValue(value)) return undefined;
       const name = stmt.ops[0].symbol;
       const kind = kindOf(value);
       walk.locals.set(name, kind);
@@ -1096,7 +1158,7 @@ function blockValueKind(
       // A final declaration/assignment is not a value expression.
       if (i === stmts.length - 1) return undefined;
     } else {
-      if (i !== stmts.length - 1 || !safe(stmt)) return undefined;
+      if (i !== stmts.length - 1 || !safeValue(stmt)) return undefined;
       const result = kindOf(stmt);
       if (stable) for (const [name, kind] of facts) stable.set(name, kind);
       return result;
@@ -1105,8 +1167,8 @@ function blockValueKind(
   return undefined;
 }
 
-/** Publish only scalar local facts that hold throughout this block. A fresh
- * bound-variable scope keeps them from escaping or surviving a rebinding. */
+/** Publish scalar and constructed-array local facts valid throughout the
+ * block. A fresh scope keeps them from escaping or surviving a rebinding. */
 export function recordBlockScalarLocals(
   statements: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
@@ -1117,6 +1179,29 @@ export function recordBlockScalarLocals(
     target,
     new Set(
       [...stable].filter(([, kind]) => kind === 'scalar').map(([name]) => name)
+    )
+  );
+  // Scalar-only blocks do not need another body walk. Definite array
+  // assignments are the producers whose widths can reach local consumers.
+  const hasArrayBinding = statements.some(
+    (stmt) =>
+      (isFunction(stmt, 'Declare') || isFunction(stmt, 'Assign')) &&
+      stmt.ops.some((op) => {
+        const t = resolveTypeForCompilation(op.type.type);
+        return (
+          typeof t !== 'string' && (t.kind === 'list' || t.kind === 'tuple')
+        );
+      })
+  );
+  if (!hasArrayBinding || !target.boundVars) return;
+  const arrays = new Map<string, ValueKind>();
+  blockValueKind(statements, target, freshWalk(false, true), 0, arrays);
+  constructedArrayLocals.set(
+    target.boundVars,
+    new Map(
+      [...arrays].filter(
+        (entry): entry is [string, number] => typeof entry[1] === 'number'
+      )
     )
   );
 }
@@ -1208,7 +1293,23 @@ function userCallKind(
     return undefined;
   const literal = userFunctionLiteral(expr, h);
   if (literal === undefined || literal.ops.length < 1) return undefined;
-  const kinds = expr.ops.map(argumentKind);
+  const kinds = expr.ops.map((arg) => {
+    const kind = argumentKind(arg);
+    if (walk.listsProven && typeof kind === 'number') {
+      // A constructed list is an array result, but passing it to a scalar
+      // helper broadcasts the call. Only atomic points bind a width whole.
+      const t = resolveTypeForCompilation(arg.type.type);
+      const atomic =
+        (typeof t !== 'string' && t.kind === 'tuple') ||
+        isFunction(arg, 'Tuple') ||
+        (isFunction(arg, 'PointList') &&
+          arg.ops.length > 0 &&
+          arg.ops.every((op) => op.type.matches('number'))) ||
+        (isSymbol(arg) && walk.points.has(arg.symbol));
+      if (!atomic) return undefined;
+    }
+    return kind;
+  });
   if (kinds.some((k) => k === undefined)) return undefined;
   // A shared helper can be reached repeatedly by both scalar and point
   // analysis. Argument kinds, input assumptions, and remaining depth must
@@ -1221,7 +1322,13 @@ function userCallKind(
     walk.calls.set(target, (literals = new WeakMap()));
   let answers = literals.get(literal);
   if (answers === undefined) literals.set(literal, (answers = new Map()));
-  const key = JSON.stringify([h, kinds, depth, walk.inputsProven]);
+  const key = JSON.stringify([
+    h,
+    kinds,
+    depth,
+    walk.inputsProven,
+    walk.listsProven,
+  ]);
   const visiting = JSON.stringify([...walk.visiting].sort());
   const entries = answers.get(key) ?? [];
   const cached = entries.find((entry) =>

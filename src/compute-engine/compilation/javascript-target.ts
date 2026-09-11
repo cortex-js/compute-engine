@@ -12,6 +12,7 @@ import { isCallerMapped } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
+  provenPointWidth,
   canIndexArrayDirectly,
   isConstructedScalar,
   isScalarValue,
@@ -13403,9 +13404,9 @@ function emitCollectionReduce(
           for (let k = 0; k < width; k++) parts.push(`${read}[${k}]`);
           return `(${parts.join(` ${op} `)})`;
         };
-        // A `List` node compiles to an array literal holding exactly its own
-        // operands, so reading it by index is decided by construction.
-        if (isFunction(coll, 'List') && coll.ops.length === width)
+        // Constructors, helper bodies, and arithmetic can prove the emitted
+        // width. Declared runtime inputs still need the fallback below.
+        if (provenPointWidth(coll, target) === width)
           return BaseCompiler.withRepeatableSource(code, target, terms);
         // Every other source takes the width from its DECLARED type, which
         // constrains what the ENGINE may assign, not what a caller may put in
