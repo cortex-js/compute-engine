@@ -17,6 +17,7 @@ import {
   isDecidedLoopIndex,
   recordDecidedLoopIndex,
   recordScalarParams,
+  recordConstructedPointParams,
   recordBlockScalarLocals,
   recordIntegerRange,
   recordScopeParent,
@@ -20088,6 +20089,8 @@ export class BaseCompiler {
         expr.ops.some(writesParameter));
     if (writesParameter(literal.op1)) return undefined;
     const types: Type[] = [];
+    const pointWidths: (number | undefined)[] = [];
+    let preservesPoints: boolean | undefined;
     let narrower = false;
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
@@ -20129,14 +20132,39 @@ export class BaseCompiler {
       )
         narrower = true;
       types.push(t);
+      let pointWidth: number | undefined;
+      if (
+        target.language === 'javascript' &&
+        typeof t !== 'string' &&
+        t.kind === 'tuple' &&
+        provenScalarPointWidth(a, target) === t.elements.length
+      ) {
+        // An opaque call can mutate an array without assigning its binding.
+        // Check effects only for calls with a constructed point argument.
+        preservesPoints ??= BaseCompiler.isEmissionSkippable(
+          [literal.op1],
+          [...parameterNames].filter(
+            (name): name is string => name !== undefined
+          ),
+          registry.root ?? target
+        );
+        if (preservesPoints) pointWidth = t.elements.length;
+      }
+      pointWidths.push(pointWidth);
     }
-    if (!narrower) return undefined;
+    const hasPointProof = pointWidths.some((w) => w !== undefined);
+    if (!narrower && !hasPointProof) return undefined;
     if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))
       return undefined;
     const scalarDefinition =
       BaseCompiler.userFunctionParamsAreScalar(engine, h) &&
       types.every((t) => isSubtype(t, 'number'));
-    const key = `${h}#${types.map((t) => typeToString(t)).join(';')}`;
+    // A declared tuple and a constructed point can have the same type.
+    // Only the constructed variant may omit runtime shape checks.
+    const proofKey = hasPointProof
+      ? `#points:${pointWidths.map((w) => w ?? '').join(',')}`
+      : '';
+    const key = `${h}#${types.map((t) => typeToString(t)).join(';')}${proofKey}`;
     const cache = (registry.specializations ??= new Map());
     let specialized = cache.get(key);
     if (specialized === undefined) {
@@ -20194,7 +20222,7 @@ export class BaseCompiler {
         specialized,
         target,
         registry,
-        { key: scalarDefinition ? h : key, types }
+        { key: scalarDefinition ? h : key, types, pointWidths }
       );
     } finally {
       active.delete(h);
@@ -21014,7 +21042,11 @@ export class BaseCompiler {
     literal: Expression & FunctionInterface,
     target: CompileTarget<Expression>,
     registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
-    specialization?: { key: string; types: readonly Type[] }
+    specialization?: {
+      key: string;
+      types: readonly Type[];
+      pointWidths?: readonly (number | undefined)[];
+    }
   ): string | undefined {
     const name = BaseCompiler.userFunctionName(
       registry,
@@ -21051,6 +21083,16 @@ export class BaseCompiler {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(literal, target, registry, h);
         BaseCompiler.recordScalarParams(h, literal, bodyTarget);
+        if (specialization?.pointWidths) {
+          const widths = new Map<string, number>();
+          literal.ops.slice(1).forEach((p, i) => {
+            const width = specialization.pointWidths?.[i];
+            const name = functionLiteralParameterName(p);
+            if (width !== undefined && name !== undefined)
+              widths.set(name, width);
+          });
+          recordConstructedPointParams(bodyTarget, widths);
+        }
         // A target with its own definition lowering (the shader targets)
         // synthesizes the signature and compiles the body itself — a shader
         // function body is a STATEMENT position and its declaration needs

@@ -178,6 +178,37 @@ function isScalarParam(
   return false;
 }
 
+// Fixed-width scalar points supplied by proven calls to private helpers.
+const constructedPointParams = new WeakMap<
+  ReadonlySet<string>,
+  ReadonlyMap<string, number>
+>();
+
+/** Record point parameters only when every call to this emitted helper
+ * supplies the proven width and the body never writes those parameters. */
+export function recordConstructedPointParams(
+  target: CompileTarget<Expression>,
+  widths: ReadonlyMap<string, number>
+): void {
+  if (target.boundVars && widths.size > 0)
+    constructedPointParams.set(target.boundVars, widths);
+}
+
+function constructedPointParamWidth(
+  name: string,
+  boundVars: ReadonlySet<string> | undefined
+): number | undefined {
+  let scope = boundVars;
+  while (scope !== undefined) {
+    const width = constructedPointParams.get(scope)?.get(name);
+    if (width !== undefined) return width;
+    const link = scopeParents.get(scope);
+    if (link === undefined || link.added.includes(name)) return undefined;
+    scope = link.parent;
+  }
+  return undefined;
+}
+
 function builtin(expr: Expression, target: CompileTarget<Expression>): boolean {
   const options = target.cse?.harvestOptions;
   return (
@@ -896,7 +927,10 @@ function pointShapedValue(
     }
     const hypothesis = walk.points.get(expr.symbol);
     if (hypothesis !== undefined) return hypothesis;
-    if (walk.shadowed.has(expr.symbol) || !walk.inputsProven) return undefined;
+    if (walk.shadowed.has(expr.symbol)) return undefined;
+    const width = constructedPointParamWidth(expr.symbol, target.boundVars);
+    if (width !== undefined) return width;
+    if (!walk.inputsProven) return undefined;
     return constructedPointWidth(expr, target);
   }
   if (!isFunction(expr) || !builtin(expr, target)) return undefined;

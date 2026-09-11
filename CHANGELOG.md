@@ -10,6 +10,12 @@
 
 ### Improvements
 
+- **Constructed points keep their shape inside specialized JavaScript helpers.**
+  Private helper variants retain proven scalar component counts from their call
+  sites, removing redundant `Dot` shape checks and matrix fallbacks. Calls from
+  declared runtime inputs use separate guarded variants; public signatures and
+  parameter mutation behavior are preserved.
+
 - **Scalar point helpers use direct JavaScript dot products.** `Dot` can use
   helper bodies and block-local assignments to prove scalar coordinates even
   when retained tuple types still permit lists. Proven operands are evaluated

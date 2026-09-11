@@ -166,7 +166,7 @@ describe('what the ruling does NOT change', () => {
     );
     ce.assign('p', ce.box(['Function', ['q', 'P'], ['Typed', 'P', T]] as any));
     const r = build(ce, ['p', ['Tuple', 3, 4]]);
-    expect(r.preamble).toContain('const _fn_p = (P) => _fn_q(P);');
+    expect(r.preamble).toMatch(/const _fn_p\w* = \(P\) => _fn_q\w*\(P\);/);
     expect(r.run({})).toBe(7);
   });
 
@@ -563,7 +563,7 @@ describe('a POINT bound to an untyped parameter specializes a shared helper', ()
     expect(r.run({ a: 1, b: 2 })).toEqual([2, 4, 6]);
   });
 
-  test('a DECLARED tuple parameter is unaffected: the body is emitted for a point', () => {
+  test('a DECLARED tuple parameter still receives the whole point', () => {
     const ce = new ComputeEngine();
     ce.declare('a', 'real');
     ce.declare('b', 'real');
@@ -573,7 +573,7 @@ describe('a POINT bound to an untyped parameter specializes a shared helper', ()
       ['Function', ['Multiply', 2, 'P'], ['Typed', 'P', 'tuple<real, real>']],
     ] as any).evaluate();
     const r = strict(ce, ['t', ['Tuple', 'a', 'b']]);
-    expect(r.preamble).toContain('const _fn_t = (P) =>');
+    expect(r.preamble).toMatch(/const _fn_t\w* = \(P\) =>/);
     expect(r.run({ a: 3, b: 4 })).toEqual([6, 8]);
   });
 });
