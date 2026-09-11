@@ -395,8 +395,8 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
-    // The mapping itself is emitted ONCE.
-    expect(occurrences(result.code, '.map(')).toBe(1);
+    // The fused map/reduction is emitted once.
+    expect(occurrences(result.code, '.reduce(')).toBe(1);
 
     const value = (result.run as (v: Record<string, number>) => number)({});
     expect(value).toBe(
@@ -434,7 +434,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
-    expect(occurrences(result.code, '.map(')).toBe(1);
+    expect(occurrences(result.code, '.reduce(')).toBe(1);
 
     const value = (result.run as (v: Record<string, number>) => number)({});
     expect(value).toBe(
@@ -453,7 +453,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
-    expect(occurrences(result.code, '.map(')).toBe(1);
+    expect(occurrences(result.code, '.reduce(')).toBe(1);
 
     const value = (result.run as (v: Record<string, number>) => number)({});
     expect(value).toBe(
@@ -470,7 +470,7 @@ describe('COMPILE CSE — emission purity (G1b)', () => {
     const result = compile(expr, { fallback: false, constantFold: false });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
-    expect(occurrences(result.code, '.map(')).toBe(1);
+    expect(occurrences(result.code, '.reduce(')).toBe(1);
     expect((result.run as (v: Record<string, number>) => number)({})).toBe(
       expr.evaluate().N().re!
     );
@@ -1783,7 +1783,7 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     });
 
     expect(occurrences(result.code, 'const _cse')).toBe(1);
-    expect(occurrences(result.code, '.map(')).toBe(1);
+    expect(occurrences(result.code, '.reduce(')).toBe(1);
   });
 });
 

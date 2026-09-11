@@ -17,6 +17,7 @@ import {
   isDecidedLoopIndex,
   recordDecidedLoopIndex,
   recordScalarParams,
+  recordBlockScalarLocals,
   recordIntegerRange,
   recordScopeParent,
   provenPointWidth,
@@ -208,8 +209,8 @@ const GENERATED_NAME_RE = /(?<![\p{L}\p{N}_])_(?:tv|cse)[\p{L}\p{N}_]*/gu;
  * target here would close a cycle, which the module graph forbids.
  *
  * The hook answers `false` only when the index-masked analysis calls the body
- * complex while every unrolled term is real under its own index value, and
- * `undefined` otherwise — so it can only ever move a verdict from complex to
+ * complex while every unrolled term is real under its own index value, or a
+ * loop's lower bound proves the body real. It answers `undefined` otherwise — so it can only ever move a verdict from complex to
  * real. Until it is installed, and for every target that installs none, the
  * ordinary masked analysis stands.
  */
@@ -1499,13 +1500,15 @@ type ElementLane = boolean | 'mixed' | undefined;
 
 /**
  * One entry of `BaseCompiler._unrolledIndexValues`: the integer value each
- * index of an unrolled `Sum`/`Product` term holds, the names an inner binder
+ * index of an unrolled `Sum`/`Product` term holds (or its loop lower bound),
+ * the names an inner binder
  * has REBOUND (whose enclosing values must therefore not be read), the names
  * whose own binder has not been entered yet, and the fold memo the frame owns.
  * See the field's own documentation.
  */
 type UnrolledIndexFrame = {
   values: ReadonlyMap<string, number>;
+  lowerBounds?: ReadonlyMap<string, number>;
   masked: ReadonlySet<string>;
   /**
    * The frame's own names, less the ones whose binder has already been
@@ -3170,6 +3173,15 @@ export class BaseCompiler {
     // a closed constant in the term being emitted. Consult the term's index
     // values before the syntactic rules below, which cannot see them.
     if (BaseCompiler.unrolledIndexValuesProveNonNegative(expr)) return true;
+    if (isSymbol(expr)) {
+      for (let i = BaseCompiler._unrolledIndexValues.length - 1; i >= 0; i--) {
+        const frame = BaseCompiler._unrolledIndexValues[i];
+        if (frame.masked.has(expr.symbol)) break;
+        const lower = frame.lowerBounds?.get(expr.symbol);
+        if (lower !== undefined) return lower >= 0;
+        if (frame.values.has(expr.symbol)) break;
+      }
+    }
     if (!isFunction(expr)) return false;
     const t = expr.type?.type;
     if (t !== undefined && isNonRealNumber(t)) return false;
@@ -11629,6 +11641,9 @@ export class BaseCompiler {
         lexicalFunctions,
       };
 
+      if (target.language === 'javascript')
+        recordBlockScalarLocals(args, localTarget);
+
       // The statement LIST is one INERT region — no binding is placed at the
       // statement-list level, so early-exit reachability and inter-statement
       // ordering never interact with CSE. Each statement's own value
@@ -13209,8 +13224,8 @@ export class BaseCompiler {
 
   /**
    * The integer value each index of the unrolled `Sum`/`Product` terms
-   * currently being emitted holds, innermost frame last, together with a
-   * per-frame memo of `unrolledIndexValueFold` (`null` records "does not
+   * currently being emitted holds, or a runtime loop's known lower bound,
+   * innermost frame last, together with a per-frame memo of `unrolledIndexValueFold` (`null` records "does not
    * fold", which a `WeakMap` miss cannot express).
    *
    * An unrolled term substitutes its index at the emitted-CODE level — the
@@ -13269,6 +13284,33 @@ export class BaseCompiler {
   }
 
   /**
+   * Analyze or emit a loop body with its index's lower bound. The same scope
+   * tracking as constant indices hides this fact from a nested binder that
+   * reuses the name. Callers must first establish that the body cannot write
+   * the index and that its result representation agrees with its consumers.
+   */
+  static withLoopIndexLowerBound<T>(
+    index: string,
+    lower: number,
+    f: () => T
+  ): T {
+    BaseCompiler._unrolledIndexValues.push({
+      values: new Map(),
+      lowerBounds: new Map([[index, lower]]),
+      masked: NO_NAMES,
+      pending: new Set([index]),
+      memo: new WeakMap(),
+    });
+    BaseCompiler._pushComplexMemoLayer();
+    try {
+      return f();
+    } finally {
+      BaseCompiler._popComplexMemoLayer();
+      BaseCompiler._unrolledIndexValues.pop();
+    }
+  }
+
+  /**
    * Enter a scope that binds `names`, so the unrolled-index frames stop
    * answering for a name this scope REBINDS.
    *
@@ -13305,7 +13347,7 @@ export class BaseCompiler {
       let holder: UnrolledIndexFrame | undefined;
       for (let i = frames.length - 1; i >= 0; i--) {
         if (frames[i].masked.has(name)) break;
-        if (frames[i].values.has(name)) {
+        if (frames[i].values.has(name) || frames[i].lowerBounds?.has(name)) {
           holder = frames[i];
           break;
         }
@@ -13371,6 +13413,7 @@ export class BaseCompiler {
     // term's value for the same name.
     for (const frame of frames) {
       for (const name of frame.masked) delete values[name];
+      for (const name of frame.lowerBounds?.keys() ?? []) delete values[name];
       for (const [name, value] of frame.values) values[name] = value;
     }
     const names = new Set(Object.keys(values));
@@ -14218,6 +14261,21 @@ export class BaseCompiler {
       );
       if (viaBody !== undefined) return viaBody;
     }
+    // A loop-bound proof can settle a radical whose declared result remains
+    // number (including poles and NaN). The real emitter then returns a plain
+    // number even in complex mode, so its parent must use that representation.
+    if (
+      BaseCompiler._unrolledIndexValues.some(
+        (frame) => frame.lowerBounds?.size
+      ) &&
+      ['Sqrt', 'Ln', 'Log'].includes(expr.operator) &&
+      expr.ops.every(
+        (op) =>
+          !BaseCompiler.isComplexValued(op) &&
+          BaseCompiler.assumedRealNonNegative(op)
+      )
+    )
+      return false;
     if (
       expr.operator === 'Power' &&
       BaseCompiler.realPowerExponent(expr.ops) !== undefined &&
@@ -24513,6 +24571,24 @@ export class BaseCompiler {
     if (isSymbol(expr)) return names.has(expr.symbol);
     if (!isFunction(expr)) return false;
     return expr.ops.some((op) => BaseCompiler.mentionsAnySymbol(op, names));
+  }
+
+  /** Preserve an existing or planned shared value when fusing its consumer. */
+  static hasSharedExpression(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (BaseCompiler._codeOverrides.has(expr)) return true;
+    const session = target.cse;
+    if (!session?.enabled) return false;
+    if (BaseCompiler.availableCseBinding(session, expr) !== undefined)
+      return true;
+    return session.instances
+      .slice(session.availabilityFloor ?? 0)
+      .some(
+        (instance) =>
+          candidateAt(BaseCompiler.cseRegionOf(instance), expr) !== undefined
+      );
   }
 
   /**

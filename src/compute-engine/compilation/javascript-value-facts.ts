@@ -1,10 +1,11 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
 import {
   isFunction,
+  isDictionary,
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import type { CompileTarget } from './types.js';
 import { isCallerMapped } from './cse.js';
 import { POINT_CONSTRUCTOR_HEADS } from './provable-kind.js';
@@ -131,19 +132,15 @@ export function isDecidedLoopIndex(
   return false;
 }
 
-// The parameters of an emitted user-function body that hold a run-time
-// scalar: every parameter of a function none of whose parameters binds a
-// collection, a tuple or a point whole. Keyed on the bound-variable set the
-// body compiles under, the same way `loopRanges` above is: a nested binder
-// installs a new set, so a name it shadows loses the fact instead of
-// inheriting it.
+// Scalar bindings established by emission: scalar function parameters,
+// numeric counters and block locals whose assignments remain scalar. A new
+// bound-variable set masks enclosing facts for every name it rebinds.
 const scalarParams = new WeakMap<ReadonlySet<string>, ReadonlySet<string>>();
 
 /**
- * Record that, inside the body compiling under `target`, every name in
- * `names` holds a runtime scalar because the function it is a parameter of
- * binds no argument whole. See `isConstructedScalar` for what the fact is
- * used for.
+ * Record bindings that hold a runtime scalar throughout this scope. Callers
+ * prove that through the function's argument contract or its local writes.
+ * See `isConstructedScalar` for how emission uses the fact.
  */
 export function recordScalarParams(
   target: CompileTarget<Expression>,
@@ -345,13 +342,20 @@ export function isConstructedScalar(
     // `Pi`, or `t_0 := 2.855`) is a scalar; any other held value — a
     // collection, a symbolic expression — is not judged here.
     const held = expr.engine._getSymbolValue(expr.symbol);
+    // Retained helper bodies may predate the caller's input declarations.
+    // A free symbol emits the current runtime input accessor, so use that
+    // input's current explicit contract rather than its old inferred type.
+    const current = expr.engine.lookupDefinition(expr.symbol);
+    const definition = isValueDef(current)
+      ? current.value
+      : expr.valueDefinition;
     return (
       !target.boundVars?.has(expr.symbol) &&
       !target.varsKeys?.has(expr.symbol) &&
-      expr.valueDefinition?.inferredType === false &&
+      definition?.inferredType === false &&
       (held === undefined ? true : isNumber(held)) &&
       ['number', 'boolean', 'string'].some((t) =>
-        isSubtype(expr.type.type, t as 'number' | 'boolean' | 'string')
+        isSubtype(definition.type.type, t as 'number' | 'boolean' | 'string')
       )
     );
   }
@@ -481,6 +485,8 @@ function scalarShapedValue(
   if (depth > 32) return false;
   if (isNumber(expr)) return true;
   if (isSymbol(expr)) {
+    if (walk.locals.has(expr.symbol))
+      return walk.locals.get(expr.symbol) === 'scalar';
     // A parameter hypothesised to hold a POINT is an array, never a scalar.
     if (walk.points.has(expr.symbol)) return false;
     return (
@@ -491,6 +497,8 @@ function scalarShapedValue(
   if (!isFunction(expr) || !builtin(expr, target)) return false;
   const scalarOperand = (a: Expression) =>
     scalarShapedValue(a, target, walk, depth + 1);
+  if (expr.operator === 'Block')
+    return blockValueKind(expr.ops, target, walk, depth) === 'scalar';
   const arms = valueArms(expr);
   if (arms !== undefined) return arms.every(scalarOperand);
   // A scalar read off a point (`scalarOverPoints`), and a sum or product over
@@ -558,6 +566,7 @@ function headShape(
     target.boundVars?.has(h) ||
     target.varsKeys?.has(h) ||
     target.localFunctions?.has(h) ||
+    walk.locals.has(h) ||
     walk.shadowed.has(h) ||
     walk.visiting.has(h)
   )
@@ -569,11 +578,13 @@ function headShape(
     : 'reduction';
 }
 
-/** The state a body walk carries: the callees whose body is open on the stack
- * (the cycle guard), the parameter names those bodies bind as SCALARS, and
- * the parameter names they bind as POINTS, each with the point's width. A
- * name is in one of the two sets, never both. */
+/** A body walk tracks open callees to stop recursion, parameter hypotheses,
+ * and the values assigned to block locals. An unknown local still masks an
+ * enclosing parameter or runtime input of the same name. */
+type ValueKind = 'scalar' | number | undefined;
+
 type BodyWalk = {
+  locals: Map<string, ValueKind>;
   visiting: Set<string>;
   shadowed: Set<string>;
   points: Map<string, number>;
@@ -588,6 +599,7 @@ type BodyWalk = {
 /** A walk with nothing open: every leaf is judged by the input contract. */
 function freshWalk(inputsProven = true): BodyWalk {
   return {
+    locals: new Map(),
     visiting: new Set(),
     shadowed: new Set(),
     points: new Map(),
@@ -711,12 +723,23 @@ function bindWalkNames(
 ): () => void {
   const saved = new Map<
     string,
-    { scalar: boolean; point: number | undefined }
+    {
+      scalar: boolean;
+      point: number | undefined;
+      local: boolean;
+      kind: ValueKind;
+    }
   >();
   for (const n of names)
     if (!saved.has(n))
-      saved.set(n, { scalar: walk.shadowed.has(n), point: walk.points.get(n) });
+      saved.set(n, {
+        scalar: walk.shadowed.has(n),
+        point: walk.points.get(n),
+        local: walk.locals.has(n),
+        kind: walk.locals.get(n),
+      });
   names.forEach((n, i) => {
+    walk.locals.delete(n);
     const kind = kindOf(i);
     if (kind === 'scalar') {
       walk.points.delete(n);
@@ -728,6 +751,8 @@ function bindWalkNames(
   });
   return () => {
     for (const [n, state] of saved) {
+      if (state.local) walk.locals.set(n, state.kind);
+      else walk.locals.delete(n);
       if (state.scalar) walk.shadowed.add(n);
       else walk.shadowed.delete(n);
       if (state.point !== undefined) walk.points.set(n, state.point);
@@ -798,6 +823,10 @@ function pointShapedValue(
 ): number | undefined {
   if (depth > 32) return undefined;
   if (isSymbol(expr)) {
+    if (walk.locals.has(expr.symbol)) {
+      const kind = walk.locals.get(expr.symbol);
+      return typeof kind === 'number' ? kind : undefined;
+    }
     const hypothesis = walk.points.get(expr.symbol);
     if (hypothesis !== undefined) return hypothesis;
     if (walk.shadowed.has(expr.symbol) || !walk.inputsProven) return undefined;
@@ -811,6 +840,10 @@ function pointShapedValue(
   const point = (a: Expression) => pointShapedValue(a, target, walk, depth + 1);
   if (POINT_CONSTRUCTOR_HEADS.has(h))
     return ops.length > 0 && ops.every(scalar) ? ops.length : undefined;
+  if (h === 'Block') {
+    const kind = blockValueKind(ops, target, walk, depth);
+    return typeof kind === 'number' ? kind : undefined;
+  }
   const arms = valueArms(expr);
   if (arms !== undefined) return commonWidth(arms.map(point));
   if (h === 'Add')
@@ -873,15 +906,123 @@ function constructedPointWidth(
     : undefined;
 }
 
-/** The operands of `expr` that can become its VALUE — the last statement of a
- * `Block`, the arms of an `If`, the odd-indexed arms of a `Which`. `undefined`
- * for every other head, which has no such structure. */
+/** Read a straight-line block in statement order. Only assignments to its
+ * own declared locals are admitted; control flow and escaping writes decline.
+ * `stable` retains facts valid at every assignment, for whole-body emission. */
+function blockValueKind(
+  statements: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>,
+  outer: BodyWalk,
+  depth: number,
+  stable?: Map<string, ValueKind>
+): ValueKind {
+  if (depth > 32) return undefined;
+  const stmts = statements.filter((x) => !isSymbol(x, 'Nothing'));
+  const names = new Set<string>();
+  for (const stmt of stmts) {
+    if (!isFunction(stmt, 'Declare')) continue;
+    if (!isSymbol(stmt.ops[0])) return undefined;
+    names.add(stmt.ops[0].symbol);
+  }
+  const walk = { ...outer, locals: new Map(outer.locals) };
+  for (const name of names) walk.locals.set(name, undefined);
+  const facts = new Map<string, ValueKind>();
+  const kindOf = (value: Expression): ValueKind =>
+    scalarShapedValue(value, target, walk, depth + 1)
+      ? 'scalar'
+      : pointShapedValue(value, target, walk, depth + 1);
+  // Nested blocks may write their own locals, but may not mutate a fact
+  // carried by this block. Function literals and control transfers need a
+  // separate flow analysis and deliberately keep the generic emission.
+  const safe = (value: Expression, locals = new Set<string>()): boolean => {
+    if (isSymbol(value))
+      return (
+        !target.varsKeys?.has(value.symbol) &&
+        !target.cse?.harvestOptions?.isStringVar?.(value.symbol)
+      );
+    if (!isFunction(value)) return true;
+    // Caller-supplied code can mutate a local even from a condition whose
+    // value does not contribute to the block's result.
+    if (!builtin(value, target)) return false;
+    const h = value.operator;
+    if (['Function', 'Loop', 'Return', 'Break', 'Continue'].includes(h))
+      return false;
+    if (target.localFunctions?.has(h) || walk.locals.has(h)) return false;
+    if (h === 'Block') {
+      const own = new Set(locals);
+      for (const stmt of value.ops)
+        if (isFunction(stmt, 'Declare') && isSymbol(stmt.ops[0]))
+          own.add(stmt.ops[0].symbol);
+      return value.ops.every((op) => safe(op, own));
+    }
+    if (h === 'Assign' || h === 'Declare') {
+      if (!isSymbol(value.ops[0]) || !locals.has(value.ops[0].symbol))
+        return false;
+    }
+    return value.ops.every((op) => safe(op, locals));
+  };
+  for (let i = 0; i < stmts.length; i++) {
+    const stmt = stmts[i];
+    if (isFunction(stmt, 'Declare') || isFunction(stmt, 'Assign')) {
+      if (!isSymbol(stmt.ops[0]) || !names.has(stmt.ops[0].symbol))
+        return undefined;
+      let value: Expression | undefined;
+      if (stmt.operator === 'Assign') {
+        if (stmt.ops.length !== 2) return undefined;
+        value = stmt.ops[1];
+      } else {
+        let rest = stmt.ops.slice(1);
+        const last = rest[rest.length - 1];
+        let attrsValue: Expression | undefined;
+        if (last !== undefined && isDictionary(last)) {
+          attrsValue = last.get('value');
+          rest = rest.slice(0, -1);
+        }
+        value = rest[1] ?? attrsValue;
+      }
+      if (value === undefined) continue;
+      if (!safe(value)) return undefined;
+      const name = stmt.ops[0].symbol;
+      const kind = kindOf(value);
+      walk.locals.set(name, kind);
+      facts.set(
+        name,
+        !facts.has(name) || facts.get(name) === kind ? kind : undefined
+      );
+      // A final declaration/assignment is not a value expression.
+      if (i === stmts.length - 1) return undefined;
+    } else {
+      if (i !== stmts.length - 1 || !safe(stmt)) return undefined;
+      const result = kindOf(stmt);
+      if (stable) for (const [name, kind] of facts) stable.set(name, kind);
+      return result;
+    }
+  }
+  return undefined;
+}
+
+/** Publish only scalar local facts that hold throughout this block. A fresh
+ * bound-variable scope keeps them from escaping or surviving a rebinding. */
+export function recordBlockScalarLocals(
+  statements: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): void {
+  const stable = new Map<string, ValueKind>();
+  blockValueKind(statements, target, freshWalk(), 0, stable);
+  recordScalarParams(
+    target,
+    new Set(
+      [...stable].filter(([, kind]) => kind === 'scalar').map(([name]) => name)
+    )
+  );
+}
+
+/** The value arms of an `If` or `Which`. Blocks need statement-order
+ * analysis through `blockValueKind` instead. */
 function valueArms(
   expr: Expression & FunctionInterface
 ): ReadonlyArray<Expression> | undefined {
   const ops = expr.ops;
-  if (expr.operator === 'Block')
-    return ops.length === 0 ? undefined : [ops[ops.length - 1]];
   if (expr.operator === 'If') return ops.slice(1);
   if (expr.operator === 'Which') return ops.filter((_op, i) => i % 2 === 1);
   return undefined;
@@ -947,6 +1088,7 @@ function userCallKind(
     target.boundVars?.has(h) ||
     target.varsKeys?.has(h) ||
     target.localFunctions?.has(h) ||
+    walk.locals.has(h) ||
     walk.shadowed.has(h) ||
     walk.visiting.has(h)
   )
@@ -978,8 +1120,9 @@ function userCallKind(
   try {
     const body = literal.ops[0];
     const t = root ?? target;
-    if (scalarShapedValue(body, t, walk, depth + 1)) return 'scalar';
-    return pointShapedValue(body, t, walk, depth + 1);
+    const bodyWalk = { ...walk, locals: new Map<string, ValueKind>() };
+    if (scalarShapedValue(body, t, bodyWalk, depth + 1)) return 'scalar';
+    return pointShapedValue(body, t, bodyWalk, depth + 1);
   } finally {
     walk.visiting.delete(h);
     restore();
@@ -1029,7 +1172,12 @@ function userFunctionResultIsScalar(
   const restore = bindWalkNames(walk, bound, () => 'scalar');
   let answer: boolean;
   try {
-    answer = scalarShapedValue(literal.ops[0], root ?? target, walk, depth + 1);
+    answer = scalarShapedValue(
+      literal.ops[0],
+      root ?? target,
+      { ...walk, locals: new Map<string, ValueKind>() },
+      depth + 1
+    );
   } finally {
     walk.visiting.delete(h);
     restore();

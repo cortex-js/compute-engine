@@ -17,6 +17,7 @@ import {
   isDecidedLoopIndex,
   numericArrayCells,
   recordIntegerRange,
+  recordScalarParams,
 } from './javascript-value-facts.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
 import { resolveStorageHints } from './storage-hints.js';
@@ -3322,6 +3323,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Reduce: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
       );
+    // Product's canonical collection form is Reduce(Map(...), Multiply, 1).
+    if (
+      isSymbol(op) &&
+      (op.symbol === 'Add' || op.symbol === 'Multiply') &&
+      isNumber(init) &&
+      init.isSame(op.symbol === 'Add' ? 0 : 1) &&
+      BaseCompiler.collectionFoldsReal(coll)
+    ) {
+      const mapped = emitMappedReduction(
+        op.symbol === 'Add' ? 'Sum' : 'Product',
+        coll,
+        target
+      );
+      if (mapped !== undefined) return mapped;
+    }
     let combiner = builtinCombiner(
       op,
       BaseCompiler.foldLaneIsComplex(coll, init)
@@ -13278,6 +13294,53 @@ function emitRangeGatherReduction(
 }
 
 /**
+ * Fold a pure mapped collection in one traversal without its intermediate
+ * array. Native reduce preserves the source's order and skips sparse holes,
+ * as map followed by reduce does. Shared maps stay materialized so several
+ * consumers do not repeat the callback's work.
+ */
+function emitMappedReduction(
+  kind: 'Sum' | 'Product',
+  coll: Expression,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (
+    !isFunction(coll, 'Map') ||
+    coll.nops !== 2 ||
+    isCallerMapped(coll, target.cse?.harvestOptions) ||
+    BaseCompiler.hasSharedExpression(coll, target)
+  )
+    return undefined;
+  const mapping = coll.ops[0];
+  // Parameter annotations are syntax, not executable operator calls. Check a
+  // literal's body with those names bound, rather than treating its Typed
+  // parameter nodes as opaque computations.
+  const pure = isFunction(mapping, 'Function')
+    ? !isCallerMapped(mapping, target.cse?.harvestOptions) &&
+      BaseCompiler.isEmissionSkippable([coll.ops[1]], [], target) &&
+      BaseCompiler.isEmissionSkippable(
+        [mapping.ops[0]],
+        functionLiteralBoundNames(mapping.ops.slice(1)),
+        target
+      )
+    : BaseCompiler.isEmissionSkippable([coll], [], target);
+  if (!pure) return undefined;
+  const element = BaseCompiler.collectionElementTypeOf(coll);
+  if (element === undefined || !isSubtype(element, 'number')) return undefined;
+  const compile = (expr: Expression): string =>
+    BaseCompiler.compile(expr, target);
+  const source = elementsArg('Map', coll.ops[1], compile);
+  const callback = fnArg('Map', coll.ops[0], coll.ops[1], compile, [], target);
+  const identity = kind === 'Sum' ? '0' : '1';
+  const real = BaseCompiler.collectionFoldsReal(coll);
+  const step = real
+    ? `_a ${kind === 'Sum' ? '+' : '*'} _f(_x)`
+    : `_SYS.${kind === 'Sum' ? 'sadd' : 'smul'}(_a, _f(_x))`;
+  const result = `((_f) => (${source}).reduce((_a, _x) => ${step}, ${identity}))(${callback})`;
+  return real ? result : `_SYS.cplx(${result})`;
+}
+
+/**
  * Compile the collection form of `Sum`/`Product` — a reduce over the elements
  * of an indexed collection (e.g. `[3,4,5].total` → `Sum([3,4,5])`). The
  * identity seed (`0` for Sum, `1` for Product) makes the empty collection agree
@@ -13291,6 +13354,8 @@ function emitCollectionReduce(
   guarded: boolean
 ): string {
   if (!guarded) {
+    const mapped = emitMappedReduction(kind, coll, target);
+    if (mapped !== undefined) return mapped;
     // `total(P[a...b])`, `total(P[Join([i], a...b)])` and their `Product`
     // twins walk the gathered positions with a counted loop instead of
     // building the index list and the slice.
@@ -13472,6 +13537,32 @@ function unrolledClauseLane(
 }
 
 /**
+ * A non-negative loop index can keep radicals and logarithms real even when
+ * the upper bound is supplied at runtime. Adopt that fact only when the whole
+ * body becomes real; otherwise its complex accumulator still needs complex
+ * terms. A body with effects could change the counter, invalidating the bound.
+ */
+function realLoopClauseLane(
+  body: Expression,
+  index: string,
+  lower: number | undefined,
+  target: CompileTarget<Expression>
+): false | undefined {
+  if (
+    BaseCompiler.oracleFoldTarget === undefined ||
+    lower === undefined ||
+    lower < 0 ||
+    !Number.isSafeInteger(lower) ||
+    !BaseCompiler.isEmissionSkippable([body], [index], target) ||
+    !BaseCompiler.isComplexValuedUnderIndices(body, [index])
+  )
+    return undefined;
+  return BaseCompiler.withLoopIndexLowerBound(index, lower, () =>
+    BaseCompiler.isComplexValuedUnderIndices(body, [index]) ? undefined : false
+  );
+}
+
+/**
  * {@link unrolledClauseLane} for a whole `Sum`/`Product` NODE, as
  * `BaseCompiler.isComplexValued` asks it. Restricted to a single indexing
  * set: a multi-clause node's inner clauses are unrolled or looped by their
@@ -13488,7 +13579,14 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
   if (index === '_') return undefined;
   const lowerNum = BaseCompiler.bigOpBoundConstant(lowerExpr, target);
   const upperNum = BaseCompiler.bigOpBoundConstant(upperExpr, target);
-  if (lowerNum === undefined || upperNum === undefined) return undefined;
+  if (
+    lowerNum === undefined ||
+    upperNum === undefined ||
+    upperNum - lowerNum + 1 > UNROLL_LIMIT ||
+    (target.iterationBudget !== undefined &&
+      !(upperNum - lowerNum < target.iterationBudget))
+  )
+    return realLoopClauseLane(expr.ops[0], index, lowerNum, target);
   return unrolledClauseLane(
     expr.ops[0],
     [index],
@@ -13755,6 +13853,19 @@ function emitSumProduct(
     }
   }
 
+  // Keep the body, accumulator and parent on the same real representation.
+  const loopLane =
+    isRootClause && rest.length === 0
+      ? realLoopClauseLane(body, index, lowerNum, target)
+      : undefined;
+  const loopIsComplex = loopLane ?? bodyIsComplex;
+  const compileLoopTerm = (innerTarget: CompileTarget<Expression>): string =>
+    loopLane === false
+      ? BaseCompiler.withLoopIndexLowerBound(index, lowerNum!, () =>
+          compileTerm(innerTarget)
+        )
+      : compileTerm(innerTarget);
+
   // Emit a loop (either large constant range or symbolic bounds)
   const lowerCode = compileBound(lowerExpr, lowerNum, target);
   const upperCode = compileBound(upperExpr, upperNum, target);
@@ -13779,6 +13890,21 @@ function emitSumProduct(
     var: (id) => (id === index ? index : target.var(id)),
     boundVars: BaseCompiler.withBoundNames(target, [index]),
   };
+
+  // The counter stays numeric unless the body writes it. Declining on any
+  // same-named assignment also conservatively covers nested binder scopes.
+  const writesCounter = (expr: Expression): boolean => {
+    if (!isFunction(expr)) return false;
+    const options = target.cse?.harvestOptions;
+    if (options === undefined || isCallerMapped(expr, options)) return true;
+    if (
+      ['Assign', 'Declare'].includes(expr.operator) &&
+      (!isSymbol(expr.ops[0]) || expr.ops[0].symbol === index)
+    )
+      return true;
+    return expr.ops.some(writesCounter);
+  };
+  if (!writesCounter(body)) recordScalarParams(innerTarget, new Set([index]));
   if (BaseCompiler.isEmissionSkippable([body], indices, target)) {
     // Inspect only a complete numeric spelling, optionally floored by
     // compileBound; a numeric prefix of runtime code is not a constant.
@@ -13789,9 +13915,9 @@ function emitSumProduct(
   const { bindings: hoistedBindings, result: bodyCode } =
     rest.length === 0
       ? BaseCompiler.hoistLoopInvariants(body, [index], target, () =>
-          compileTerm(innerTarget)
+          compileLoopTerm(innerTarget)
         )
-      : { bindings: [], result: compileTerm(innerTarget) };
+      : { bindings: [], result: compileLoopTerm(innerTarget) };
   // The bindings follow the loop-entry guard and an EMPTY-RANGE return: a
   // range that runs zero iterations never evaluated the body, so it must not
   // evaluate the body's subexpressions either (an error they raise would be
@@ -13891,7 +14017,7 @@ function emitSumProduct(
     );
   }
 
-  if (bodyIsComplex) {
+  if (loopIsComplex) {
     const val = BaseCompiler.tempVar(target);
     if (isSum) {
       return expression(

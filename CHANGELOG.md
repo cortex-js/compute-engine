@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### Improvements
+
+- **Non-negative loop bounds keep real arithmetic real.** JavaScript sums and
+  products can use real square roots and logarithms when a known lower bound
+  proves their arguments non-negative, including loops with a runtime upper
+  bound. Nested bindings, complex terms, and iteration guards retain their
+  existing behavior.
+- **Pure mapped reductions avoid an intermediate array.** JavaScript can fuse
+  `Sum(Map(f, xs))` and `Product(Map(f, xs))` into one pass when the source and
+  callback are pure and the map is not shared. Reduction order, empty inputs,
+  sparse arrays, and complex results retain their existing behavior.
+- **Scalar helper chains retain facts through local assignments.** JavaScript
+  tracks scalar values through straight-line block locals and numeric loop
+  counters. Retained function bodies also use current explicit declarations for
+  free runtime inputs. This removes unnecessary broadcasting in nested helper
+  calls while preserving collection-valued locals and reassignments.
+
 ## 0.128.4 _2026-09-10_
 
 ### Resolved Issues
