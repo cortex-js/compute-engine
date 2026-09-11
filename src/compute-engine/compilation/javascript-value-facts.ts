@@ -588,7 +588,7 @@ function headShape(
     target.localFunctions?.has(h) ||
     walk.locals.has(h) ||
     walk.shadowed.has(h) ||
-    walk.visiting.has(h)
+    visitingCall(walk, h)
   )
     return 'opaque';
   if (isUserFunctionHead(expr)) return 'broadcast';
@@ -603,7 +603,20 @@ function headShape(
  * enclosing parameter or runtime input of the same name. */
 type ValueKind = 'scalar' | number | undefined;
 
+type CallDependencies = { names: Set<string>; cyclic: boolean };
+type CallAnswer = {
+  kind: ValueKind;
+  dependencies: CallDependencies;
+  /** Cycle-dependent answers apply only to this exact active-call set. */
+  visiting?: string;
+};
+
 type BodyWalk = {
+  calls: WeakMap<
+    CompileTarget<Expression>,
+    WeakMap<Expression, Map<string, CallAnswer[]>>
+  >;
+  callDependencies: CallDependencies[];
   locals: Map<string, ValueKind>;
   visiting: Set<string>;
   shadowed: Set<string>;
@@ -619,12 +632,36 @@ type BodyWalk = {
 /** A walk with nothing open: every leaf is judged by the input contract. */
 function freshWalk(inputsProven = true): BodyWalk {
   return {
+    calls: new WeakMap(),
+    callDependencies: [],
     locals: new Map(),
     visiting: new Set(),
     shadowed: new Set(),
     points: new Map(),
     inputsProven,
   };
+}
+
+/** Record the cycle guards a proof reads, including guards that did not fire.
+ * A later caller may have one of those functions open on its own stack. */
+function visitingCall(walk: BodyWalk, name: string): boolean {
+  const active = walk.visiting.has(name);
+  const dependencies = walk.callDependencies[walk.callDependencies.length - 1];
+  if (dependencies !== undefined) {
+    dependencies.names.add(name);
+    dependencies.cyclic ||= active;
+  }
+  return active;
+}
+
+function inheritCallDependencies(
+  walk: BodyWalk,
+  dependencies: CallDependencies
+): void {
+  const parent = walk.callDependencies[walk.callDependencies.length - 1];
+  if (parent === undefined) return;
+  for (const name of dependencies.names) parent.names.add(name);
+  parent.cyclic ||= dependencies.cyclic;
 }
 
 /**
@@ -1106,9 +1143,9 @@ function scalarShapedCall(
  *
  * A call whose arguments are all scalars is the memoized question
  * `userFunctionResultIsScalar` answers; a call with a POINT argument binds
- * that parameter as a point of the argument's width for the body walk and is
- * decided afresh each time (the memo is keyed on the callee alone, so it
- * cannot hold an answer that depends on the arguments' kinds).
+ * that parameter as a point of the argument's width for the body walk. The
+ * walk-local memo includes argument kinds and calling context, so it can
+ * also reuse point results and conservative declines.
  */
 function userCallKind(
   expr: Expression & FunctionInterface,
@@ -1124,13 +1161,68 @@ function userCallKind(
     target.localFunctions?.has(h) ||
     walk.locals.has(h) ||
     walk.shadowed.has(h) ||
-    walk.visiting.has(h)
+    visitingCall(walk, h)
   )
     return undefined;
   const literal = userFunctionLiteral(expr, h);
   if (literal === undefined || literal.ops.length < 1) return undefined;
   const kinds = expr.ops.map(argumentKind);
   if (kinds.some((k) => k === undefined)) return undefined;
+  // A shared helper can be reached repeatedly by both scalar and point
+  // analysis. Hypotheses and remaining depth must match. An acyclic proof
+  // also applies under another active-call set if none of the callees it
+  // inspected is active there. Cycle-dependent answers require the exact
+  // active set instead; a conservative cycle decline must not escape it.
+  let literals = walk.calls.get(target);
+  if (literals === undefined)
+    walk.calls.set(target, (literals = new WeakMap()));
+  let answers = literals.get(literal);
+  if (answers === undefined) literals.set(literal, (answers = new Map()));
+  const key = JSON.stringify([
+    h,
+    kinds,
+    depth,
+    walk.inputsProven,
+    [...walk.shadowed].sort(),
+    [...walk.points].sort(([a], [b]) => a.localeCompare(b)),
+  ]);
+  const visiting = JSON.stringify([...walk.visiting].sort());
+  const entries = answers.get(key) ?? [];
+  const cached = entries.find((entry) =>
+    entry.visiting !== undefined
+      ? entry.visiting === visiting
+      : ![...entry.dependencies.names].some((name) => walk.visiting.has(name))
+  );
+  if (cached !== undefined) {
+    inheritCallDependencies(walk, cached.dependencies);
+    return cached.kind;
+  }
+  const dependencies: CallDependencies = { names: new Set(), cyclic: false };
+  walk.callDependencies.push(dependencies);
+  let kind: ValueKind;
+  try {
+    kind = userCallBodyKind(h, literal, kinds, target, walk, depth);
+  } finally {
+    walk.callDependencies.pop();
+  }
+  entries.push({
+    kind,
+    dependencies,
+    visiting: dependencies.cyclic ? visiting : undefined,
+  });
+  answers.set(key, entries);
+  inheritCallDependencies(walk, dependencies);
+  return kind;
+}
+
+function userCallBodyKind(
+  h: string,
+  literal: Expression & FunctionInterface,
+  kinds: ReadonlyArray<ValueKind>,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number
+): ValueKind {
   if (
     kinds.every((k) => k === 'scalar') &&
     userFunctionResultIsScalar(h, literal, target, walk, depth)
