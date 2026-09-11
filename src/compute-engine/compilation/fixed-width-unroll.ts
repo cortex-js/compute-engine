@@ -673,6 +673,11 @@ function unrollReduction(
   const keepSeed =
     seed !== undefined &&
     !(identity !== undefined && isNumber(seed) && seed.isSame(identity));
+  // A singleton sum or product is its sole value. Keep it directly so the
+  // target cannot interpret a one-operand Multiply as a prefix operator,
+  // and so an identity addition does not change negative zero.
+  if (!keepSeed && list.nops === 1 && (head === 'Add' || head === 'Multiply'))
+    return list.op1;
   // STRUCTURAL, so the operand list reaches the target exactly as the list
   // held it — see the note on `isNonConstantLiteralList` about the numeric
   // fold a canonical rebuild would make behind `constantFold: false`.

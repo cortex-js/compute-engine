@@ -1,3 +1,21 @@
+## Unreleased
+
+### Resolved Issues
+
+- **Bound nested point-helper compilation in JavaScript.** Shape analysis now
+  reuses expression proofs within each binding scope, avoiding repeated argument
+  traversal in composed point helpers while preserving recursion guards and
+  local assignment facts (CE292).
+
+- **Preserve list-valued point coordinates in specialized JavaScript helpers.**
+  Runtime tuple inputs retain their coordinate types so `Dot` broadcasts across
+  lists in any coordinate. Constructed scalar points keep their separate,
+  unguarded helper variants (CE293).
+
+- **Compile singleton products correctly.** A product over a one-element literal
+  list emits that element directly, preserving negative zero and evaluating the
+  element once. Empty products retain the identity `1` (CE294).
+
 ## 0.128.7 _2026-09-11_
 
 ### Resolved Issues

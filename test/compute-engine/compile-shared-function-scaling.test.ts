@@ -81,6 +81,61 @@ describe('shared function shape analysis', () => {
     }
   );
 
+  test.each([1, 2, 3])(
+    'nested point composition level %i keeps argument analysis bounded',
+    (levels) => {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      const point = 'tuple<number, number, number>';
+      const register = (name: string, body: MathJsonExpression) => {
+        ce.declare(name, { signature: `(${point}, ${point}) -> ${point}` });
+        ce.assign(
+          name,
+          ce.expr([
+            'Function',
+            body,
+            ['Typed', 'a', point],
+            ['Typed', 'c', point],
+          ])
+        );
+      };
+      register('F', [
+        'Block',
+        ['Declare', 'p'],
+        ['Assign', 'p', ['PointX', 'a']],
+        [
+          'Tuple',
+          ['Add', 'p', ['PointX', 'c']],
+          ['Add', ['PointY', 'a'], ['PointY', 'c']],
+          ['Add', ['PointZ', 'a'], ['PointZ', 'c']],
+        ],
+      ]);
+      let previous = 'F';
+      for (let level = 1; level <= levels; level++) {
+        let body: MathJsonExpression = 'a';
+        for (let i = 0; i < 5; i++) body = [previous, body, 'c'];
+        const name = `F_${5 ** level}`;
+        register(name, body);
+        previous = name;
+      }
+      const result = compileBounded(
+        ce,
+        [previous, ['Tuple', 1, 2, 3], ['Tuple', 'x', 1, 2]],
+        200_000
+      );
+      const source = (result.preamble ?? '') + (result.code ?? '');
+      expect(source.length).toBeLessThan(3000);
+      expect(result.preamble).toContain('const _fn_F =');
+      expect(result.preamble).toMatch(/let p/);
+      for (const x of [-2, 0, 0.25, 4])
+        expect(result.run!({ x })).toEqual([
+          1 + 5 ** levels * x,
+          2 + 5 ** levels,
+          3 + 2 * 5 ** levels,
+        ]);
+    }
+  );
+
   test('asymmetric shared paths keep compilation bounded', () => {
     const ce = sharedGraph(20, false, true);
     // Different remaining depths need separate proofs. This larger graph

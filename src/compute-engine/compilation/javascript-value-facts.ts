@@ -538,6 +538,18 @@ function scalarShapedValue(
   walk: BodyWalk,
   depth: number
 ): boolean {
+  const kind = memoizedValueKind(expr, target, walk, depth, 'scalar', () =>
+    scalarShapedValueUncached(expr, target, walk, depth) ? 'scalar' : undefined
+  );
+  return kind === 'scalar';
+}
+
+function scalarShapedValueUncached(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number
+): boolean {
   if (depth > 32) return false;
   if (isNumber(expr)) return true;
   if (isSymbol(expr)) {
@@ -650,7 +662,15 @@ type CallAnswer = {
   visiting?: string;
 };
 
+type ValueAnswers = WeakMap<
+  CompileTarget<Expression>,
+  WeakMap<Expression, Map<string, CallAnswer>>
+>;
+
 type BodyWalk = {
+  /** Expression answers belong to one binding state; assignments and binders
+   * replace this cache. The separate call cache shares global body proofs. */
+  values: ValueAnswers;
   calls: WeakMap<
     CompileTarget<Expression>,
     WeakMap<Expression, Map<string, CallAnswer[]>>
@@ -674,6 +694,7 @@ type BodyWalk = {
 /** A walk with nothing open: every leaf is judged by the input contract. */
 function freshWalk(inputsProven = true, listsProven = false): BodyWalk {
   return {
+    values: new WeakMap(),
     calls: new WeakMap(),
     callDependencies: [],
     locals: new Map(),
@@ -683,6 +704,42 @@ function freshWalk(inputsProven = true, listsProven = false): BodyWalk {
     inputsProven,
     listsProven,
   };
+}
+
+/** Memoize the whole expression proof, including argument classification.
+ * Body-only memoization still repeats nested call arguments exponentially
+ * when scalar and point questions inspect the same composition. */
+function memoizedValueKind(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number,
+  query: 'scalar' | 'point',
+  compute: () => ValueKind
+): ValueKind {
+  if (!isFunction(expr) || depth > 32) return compute();
+  let expressions = walk.values.get(target);
+  if (expressions === undefined)
+    walk.values.set(target, (expressions = new WeakMap()));
+  let answers = expressions.get(expr);
+  if (answers === undefined) expressions.set(expr, (answers = new Map()));
+  const key = JSON.stringify([query, depth, [...walk.visiting].sort()]);
+  const cached = answers.get(key);
+  if (cached !== undefined) {
+    inheritCallDependencies(walk, cached.dependencies);
+    return cached.kind;
+  }
+  const dependencies: CallDependencies = { names: new Set(), cyclic: false };
+  walk.callDependencies.push(dependencies);
+  let kind: ValueKind;
+  try {
+    kind = compute();
+  } finally {
+    walk.callDependencies.pop();
+  }
+  answers.set(key, { kind, dependencies });
+  inheritCallDependencies(walk, dependencies);
+  return kind;
 }
 
 /** Record the cycle guards a proof reads, including guards that did not fire.
@@ -831,6 +888,8 @@ function bindWalkNames(
   names: ReadonlyArray<string>,
   kindOf: (index: number) => 'scalar' | number
 ): () => void {
+  const savedValues = walk.values;
+  walk.values = new WeakMap();
   const saved = new Map<
     string,
     {
@@ -860,6 +919,7 @@ function bindWalkNames(
     }
   });
   return () => {
+    walk.values = savedValues;
     for (const [n, state] of saved) {
       if (state.local) walk.locals.set(n, state.kind);
       else walk.locals.delete(n);
@@ -926,6 +986,18 @@ function indexedReductionIsScalar(
  *    arguments' kinds.
  */
 function pointShapedValue(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  walk: BodyWalk,
+  depth: number
+): number | undefined {
+  const kind = memoizedValueKind(expr, target, walk, depth, 'point', () =>
+    pointShapedValueUncached(expr, target, walk, depth)
+  );
+  return typeof kind === 'number' ? kind : undefined;
+}
+
+function pointShapedValueUncached(
   expr: Expression,
   target: CompileTarget<Expression>,
   walk: BodyWalk,
@@ -1069,7 +1141,11 @@ function blockValueKind(
     if (!isSymbol(stmt.ops[0])) return undefined;
     names.add(stmt.ops[0].symbol);
   }
-  const walk = { ...outer, locals: new Map(outer.locals) };
+  const walk: BodyWalk = {
+    ...outer,
+    values: new WeakMap(),
+    locals: new Map(outer.locals),
+  };
   for (const name of names) walk.locals.set(name, undefined);
   const facts = new Map<string, ValueKind>();
   const kindOf = (value: Expression): ValueKind =>
@@ -1151,6 +1227,7 @@ function blockValueKind(
       const name = stmt.ops[0].symbol;
       const kind = kindOf(value);
       walk.locals.set(name, kind);
+      walk.values = new WeakMap();
       facts.set(
         name,
         !facts.has(name) || facts.get(name) === kind ? kind : undefined
@@ -1382,6 +1459,7 @@ function userCallBodyKind(
   // locals. Only the callee's own parameters receive argument facts.
   const bodyWalk: BodyWalk = {
     ...walk,
+    values: new WeakMap(),
     locals: new Map(),
     shadowed: new Set(),
     points: new Map(),
@@ -1431,6 +1509,7 @@ function userFunctionResultIsScalar(
   // its definition's scope, without facts from the caller's bindings.
   const bodyWalk: BodyWalk = {
     ...walk,
+    values: new WeakMap(),
     locals: new Map(),
     shadowed: new Set(),
     points: new Map(),

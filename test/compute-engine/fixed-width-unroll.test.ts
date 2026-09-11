@@ -406,6 +406,51 @@ describe('FIXED-WIDTH UNROLL — reductions over a literal list', () => {
     }
   );
 
+  it.each(['Sum', 'Product'])(
+    'preserves a singleton %s value and evaluates it once',
+    (head) => {
+      const engine = new ComputeEngine();
+      engine.declare('x', 'real');
+      for (const constantFold of [true, false]) {
+        const r = compile(engine.expr([head, ['List', 'x']]), {
+          constantFold,
+          fallback: false,
+        });
+        expect(r.success).toBe(true);
+        for (const value of [-0, 0, -2, 3, NaN, Infinity, -Infinity])
+          expect(r.run!({ x: value })).toBe(value);
+        const impure = compile(
+          engine.expr([head, ['List', ['Add', 'x', ['Random']]]]),
+          { constantFold, fallback: false }
+        );
+        const random = jest.spyOn(Math, 'random').mockReturnValue(0.25);
+        try {
+          expect(impure.run!({ x: 2 })).toBe(2.25);
+          expect(random).toHaveBeenCalledTimes(1);
+        } finally {
+          random.mockRestore();
+        }
+      }
+    }
+  );
+
+  it('keeps the empty product identity and a non-identity singleton seed', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const empty = compile(engine.expr(['Product', ['List']]), {
+      fallback: false,
+    });
+    expect(empty.run!()).toBe(1);
+    const seeded = compile(
+      engine.expr(['Reduce', ['List', 'x'], 'Multiply', 2]),
+      {
+        fallback: false,
+      }
+    );
+    expect(seeded.run!({ x: 3 })).toBe(6);
+    expect(seeded.run!({ x: -0 })).toBe(-0);
+  });
+
   it('runs a compiled Product to the interpreter value', () => {
     const r: any = compile(ce.box(['Product', FIVE]), {
       to: 'javascript',

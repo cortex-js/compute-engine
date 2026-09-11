@@ -20126,6 +20126,17 @@ export class BaseCompiler {
             type: 'number' as Type,
           })),
         };
+        // Being one atomic point does not prove scalar coordinates. A
+        // runtime tuple may contain lists in any coordinate, and rebuilding
+        // it as tuple<number, ...> would erase component broadcasting.
+        if (
+          target.language === 'javascript' &&
+          provenScalarPointWidth(a, target) !== width
+        ) {
+          const actual = compilationType(a);
+          if (typeof actual !== 'string' && actual.kind === 'tuple') t = actual;
+          else return undefined;
+        }
       } else if (
         target.language === 'javascript'
           ? isConstructedScalar(a, target)

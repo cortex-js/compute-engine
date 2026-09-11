@@ -168,3 +168,59 @@ test('a caller-supplied function may mutate a point before its dot product', () 
   expect(source(r)).toContain('_SYS.matmul');
   expect(r.run!({ x: 1 })).toBeNaN();
 });
+
+test.each([false, true])(
+  'broad runtime point coordinates keep broadcasting, runtime first: %s',
+  (runtimeFirst) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const point = 'tuple<broadcastable<number>, broadcastable<number>>';
+    ce.declare('P', point);
+    ce.declare('dotPoint', {
+      signature: `(${point}) -> broadcastable<number>`,
+    });
+    ce.assign(
+      'dotPoint',
+      ce.expr(['Function', ['Dot', 'p', ['Tuple', 3, 4]], 'p'])
+    );
+    const signature = ce.box('dotPoint').type.toString();
+    const calls: MathJsonExpression[] = [
+      ['dotPoint', ['Tuple', 'x', ['Add', 'x', 1]]],
+      ['dotPoint', 'P'],
+    ];
+    if (runtimeFirst) calls.reverse();
+    const result = compile(ce.expr(['Tuple', ...calls]), { fallback: false });
+    expect(result.success).toBe(true);
+    expect(result.preamble?.match(/const _fn_dotPoint/g)).toHaveLength(2);
+    expect(source(result)).toContain('_SYS.bcast(');
+    const expected = (value: unknown) =>
+      runtimeFirst ? [value, 18] : [18, value];
+    for (const [P, value] of [
+      [[1, 2], 11],
+      [
+        [1, [1, 2]],
+        [7, 11],
+      ],
+      [
+        [[1, 2], 1],
+        [7, 10],
+      ],
+      [
+        [
+          [1, 2],
+          [3, 4],
+        ],
+        [15, 22],
+      ],
+      [[1, []], NaN],
+      [[[], 1], NaN],
+      [[NaN, 2], NaN],
+      [
+        [1, [NaN, Infinity]],
+        [NaN, Infinity],
+      ],
+    ] as [unknown, unknown][])
+      expect(result.run!({ x: 2, P })).toEqual(expected(value));
+    expect(ce.box('dotPoint').type.toString()).toBe(signature);
+  }
+);
