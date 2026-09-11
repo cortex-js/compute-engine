@@ -664,6 +664,16 @@ function inheritCallDependencies(
   parent.cyclic ||= dependencies.cyclic;
 }
 
+/** Width of an internally constructed point whose coordinates are scalar.
+ * Unlike a width-only array proof, this rejects list-valued coordinates.
+ * Declared point inputs keep their runtime shape checks. */
+export function provenScalarPointWidth(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): number | undefined {
+  return pointShapedValue(expr, target, freshWalk(false), 0);
+}
+
 /**
  * The width of `expr` when the code this compiler emits for it is an array
  * of that many scalars BY CONSTRUCTION — a point or list constructor with
@@ -1167,7 +1177,8 @@ function userCallKind(
   const kinds = expr.ops.map(argumentKind);
   if (kinds.some((k) => k === undefined)) return undefined;
   // A shared helper can be reached repeatedly by both scalar and point
-  // analysis. Hypotheses and remaining depth must match. An acyclic proof
+  // analysis. Argument kinds, input assumptions, and remaining depth must
+  // match; caller bindings do not enter the global body. An acyclic proof
   // also applies under another active-call set if none of the callees it
   // inspected is active there. Cycle-dependent answers require the exact
   // active set instead; a conservative cycle decline must not escape it.
@@ -1176,14 +1187,7 @@ function userCallKind(
     walk.calls.set(target, (literals = new WeakMap()));
   let answers = literals.get(literal);
   if (answers === undefined) literals.set(literal, (answers = new Map()));
-  const key = JSON.stringify([
-    h,
-    kinds,
-    depth,
-    walk.inputsProven,
-    [...walk.shadowed].sort(),
-    [...walk.points].sort(([a], [b]) => a.localeCompare(b)),
-  ]);
+  const key = JSON.stringify([h, kinds, depth, walk.inputsProven]);
   const visiting = JSON.stringify([...walk.visiting].sort());
   const entries = answers.get(key) ?? [];
   const cached = entries.find((entry) =>
@@ -1233,23 +1237,22 @@ function userCallBodyKind(
     return undefined;
   const root = target.userFunctions?.root;
   walk.visiting.add(h);
-  // Each parameter takes the kind of the argument at its position, and
-  // shadows whatever an enclosing frame holds under that name
-  // (`bindWalkNames`).
-  const restore = bindWalkNames(
-    walk,
-    params as ReadonlyArray<string>,
-    (i) => kinds[i]!
-  );
+  // Global callees capture document symbols, not the caller's parameters or
+  // locals. Only the callee's own parameters receive argument facts.
+  const bodyWalk: BodyWalk = {
+    ...walk,
+    locals: new Map(),
+    shadowed: new Set(),
+    points: new Map(),
+  };
+  bindWalkNames(bodyWalk, params as ReadonlyArray<string>, (i) => kinds[i]!);
   try {
     const body = literal.ops[0];
     const t = root ?? target;
-    const bodyWalk = { ...walk, locals: new Map<string, ValueKind>() };
     if (scalarShapedValue(body, t, bodyWalk, depth + 1)) return 'scalar';
     return pointShapedValue(body, t, bodyWalk, depth + 1);
   } finally {
     walk.visiting.delete(h);
-    restore();
   }
 }
 
@@ -1277,44 +1280,41 @@ function userFunctionResultIsScalar(
   depth: number
 ): boolean {
   const registry = target.userFunctions;
-  const cached = registry?.scalarShaped?.get(h);
+  // Registry facts trust declared input types. Construction-only proofs
+  // must use the walk-local memo, which records that different assumption.
+  const cached = walk.inputsProven ? registry?.scalarShaped?.get(h) : undefined;
   if (cached !== undefined) return cached;
   const root = registry?.root;
   walk.visiting.add(h);
-  // The body binds these names as SCALARS — that is the question this
-  // function asks — and a call of one of them inside the body denotes that
-  // binding, never the same-named engine definition. The binding shadows
-  // both hypothesis sets (`bindWalkNames`): a parameter whose name matches
-  // one the caller hypothesised as a POINT would otherwise keep the outer
-  // width for the whole body walk, and `Norm(p)` or `Dot(p, p)` over the
-  // callee's own scalar parameter would be admitted as a scalar read off a
-  // point.
+  // The callee's parameters are scalar; every other name must resolve in
+  // its definition's scope, without facts from the caller's bindings.
+  const bodyWalk: BodyWalk = {
+    ...walk,
+    locals: new Map(),
+    shadowed: new Set(),
+    points: new Map(),
+  };
   const bound = literal.ops
     .slice(1)
     .map((p) => parameterName(p))
     .filter((n): n is string => n !== undefined);
-  const restore = bindWalkNames(walk, bound, () => 'scalar');
+  bindWalkNames(bodyWalk, bound, () => 'scalar');
   let answer: boolean;
   try {
     answer = scalarShapedValue(
       literal.ops[0],
       root ?? target,
-      { ...walk, locals: new Map<string, ValueKind>() },
+      bodyWalk,
       depth + 1
     );
   } finally {
     walk.visiting.delete(h);
-    restore();
   }
-  // Only a verdict reached with NOTHING left over from the calling context is
-  // a property of `h` alone. A callee still open on the stack means the answer
-  // may have been cut short by the cycle guard. A name the caller hypothesised
-  // — as a scalar in `walk.shadowed`, or as a point in `walk.points` — can
-  // decide the answer just as well: a body that reads a document symbol of
-  // that same name is then judged against the hypothesis instead of against
-  // the symbol, and every later call site would reuse that verdict under
-  // names of its own.
+  // Cache only an answer from an outermost walk. Nested walks can stop at
+  // the cycle or depth limit, so their answers stay in the context-aware
+  // call memo instead of becoming a property of the function alone.
   if (
+    walk.inputsProven &&
     registry !== undefined &&
     root !== undefined &&
     walk.visiting.size === 0 &&

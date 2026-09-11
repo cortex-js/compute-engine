@@ -21,6 +21,7 @@ import {
   recordIntegerRange,
   recordScopeParent,
   provenPointWidth,
+  provenScalarPointWidth,
 } from './javascript-value-facts.js';
 import {
   javascriptStatements,
@@ -8705,6 +8706,16 @@ export class BaseCompiler {
         'Dot: broadcasting complex point coordinates is not supported by this target.'
       );
     const values = args.map(() => BaseCompiler.tempVar(target));
+    // A retained helper can have broad coordinate types while its body
+    // constructs scalar coordinates. Bind both operands once and use that
+    // value proof before selecting the component-broadcast fallback.
+    if (args.every((a) => provenScalarPointWidth(a, target) === n)) {
+      const sum = Array.from(
+        { length: n },
+        (_, k) => `${values[0]}[${k}] * ${values[1]}[${k}]`
+      ).join(' + ');
+      return `((${values.join(', ')}) => ${sum})(${args.map((a) => BaseCompiler.compile(a, target)).join(', ')})`;
+    }
     const params = components.map(() => BaseCompiler.tempVar(target));
     const coords = values.flatMap((v) =>
       Array.from({ length: n }, (_, k) => `${v}[${k}]`)

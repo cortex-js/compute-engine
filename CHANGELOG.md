@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Keep global helper shape proofs independent of caller parameters.** A
+  caller parameter with the same name as a captured global value no longer
+  changes how the helper result is classified. List-valued coordinates retain
+  broadcasting when called through such helpers. Shape-proof caches also keep
+  declared-input assumptions separate from runtime shape checks.
+
+### Improvements
+
+- **Scalar point helpers use direct JavaScript dot products.** `Dot` can use
+  helper bodies and block-local assignments to prove scalar coordinates even
+  when retained tuple types still permit lists. Proven operands are evaluated
+  once and combined with scalar multiply/add; list coordinates and unknown
+  runtime shapes retain broadcasting and validation.
+
 ## 0.128.6 _2026-09-10_
 
 ### Resolved Issues
