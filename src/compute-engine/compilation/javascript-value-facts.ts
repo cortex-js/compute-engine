@@ -1050,10 +1050,21 @@ function pointShapedValueUncached(
     return arms.conditions.every(scalar)
       ? commonWidth(arms.values.map(point))
       : undefined;
+  // A collection return ascription changes the static type but emits its
+  // value unchanged. Prove that value's width instead of trusting the type.
+  // Scalar ascriptions stay out: a complex promise can wrap the value in an
+  // object, so Typed is not transparent for every JavaScript representation.
+  const type = resolveTypeForCompilation(expr.type.type);
+  if (
+    h === 'Typed' &&
+    ops[0] !== undefined &&
+    typeof type !== 'string' &&
+    (type.kind === 'list' || type.kind === 'tuple')
+  )
+    return point(ops[0]);
   // List arithmetic broadcasts scalars and zips arrays component-wise.
   // Equal proven widths preserve the result length; unknown or unequal
   // widths retain the runtime broadcast path.
-  const type = resolveTypeForCompilation(expr.type.type);
   if (
     walk.listsProven &&
     typeof type !== 'string' &&

@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Improvements
+
+- **Constructed JavaScript vectors retain their shape through return types.**
+  Helpers declared with a fixed-size collection return type now avoid redundant
+  shape checks, broadcast fallbacks and small reductions when their bodies prove
+  that shape, including through stable locals. Public signatures, list-call
+  broadcasting and runtime array guards are preserved.
+
 ## 0.128.8 _2026-09-11_
 
 ### Resolved Issues

@@ -260,3 +260,102 @@ test.each<[string, MathJsonExpression]>([
     expect(reduced.run!({ x, y })).toBeCloseTo(sum.subs({ x, y }).N().re, 12);
   }
 });
+
+test.each(['Sum', 'Product'] as const)(
+  '%s sees constructed vectors through declared return types',
+  (head) => {
+    for (const local of [false, true]) {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.declare('y', 'real');
+      ce.declare('vector', { signature: '(real) -> list<real^2>' });
+      ce.assign(
+        'vector',
+        ce.expr(['Function', ['List', 't', ['Add', 't', 1]], 't'])
+      );
+      const before = ce.box('vector').type.toString();
+      const value = ce.box('vector').evaluate().json;
+      const sum: MathJsonExpression = ['Add', ['vector', 'x'], ['vector', 'y']];
+      const expression: MathJsonExpression = local
+        ? [
+            'Block',
+            ['Declare', 'v', 'list<real^2>'],
+            ['Assign', 'v', sum],
+            [head, 'v'],
+          ]
+        : [head, sum];
+      const r = compile(ce.expr(expression), { fallback: false });
+      expect(source(r)).not.toMatch(/Array\.isArray|_SYS\.bcast\(|\.reduce\(/);
+      expect(r.preamble?.match(/const _fn_vector/g)).toHaveLength(1);
+      for (const [x, y] of [
+        [2, 3],
+        [-0, -0],
+        [NaN, 1],
+        [Infinity, 1],
+        [1e16, -1e16],
+      ]) {
+        const terms = [x + y, x + 1 + (y + 1)];
+        const expected = terms.reduce(
+          (a, b) => (head === 'Sum' ? a + b : a * b),
+          head === 'Sum' ? 0 : 1
+        );
+        expect(r.run!({ x, y })).toBe(expected);
+      }
+      expect(ce.box('vector').type.toString()).toBe(before);
+      expect(ce.box('vector').evaluate().json).toEqual(value);
+    }
+  }
+);
+
+test.each([false, true])(
+  'return ascriptions preserve scalar and list calls, list first: %s',
+  (listFirst) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('L', 'list<real>');
+    ce.declare('vector', { signature: '(real) -> list<real^2>' });
+    ce.assign(
+      'vector',
+      ce.expr(['Function', ['List', 't', ['Add', 't', 1]], 't'])
+    );
+    const calls: MathJsonExpression[] = [
+      ['vector', 'x'],
+      ['vector', 'L'],
+    ];
+    if (listFirst) calls.reverse();
+    const r = compile(ce.expr(['Tuple', ...calls]), { fallback: false });
+    expect(source(r)).toContain('_SYS.bcastFn');
+    for (const L of [[], [1], [1, 2, 3], [NaN, Infinity]]) {
+      const expected = [[2, 3], L.map((t) => [t, t + 1])];
+      if (listFirst) expected.reverse();
+      expect(r.run!({ x: 2, L })).toEqual(expected);
+    }
+  }
+);
+
+test('an ascribed runtime array keeps its actual width and empty identity', () => {
+  const ce = new ComputeEngine();
+  ce.declare('x', 'real');
+  ce.declare('W', 'list<real>');
+  ce.declare('vector', { signature: '(real) -> list<real^2>' });
+  ce.assign('vector', ce.expr(['Function', 'W', 't']));
+  const r = compile(ce.expr(['Sum', ['vector', 'x']]), { fallback: false });
+  expect(source(r)).toContain('.reduce(');
+  expect(r.run!({ x: 2, W: [1, 2, 3] })).toBe(6);
+  expect(r.run!({ x: 2, W: [] })).toBe(0);
+});
+
+test('a complex ascription does not prove an array representation', () => {
+  const ce = engine();
+  const target = new JavaScriptTarget().createTarget({
+    cse: { enabled: false, instances: [], harvestOptions: {} },
+    userFunctions: { defs: new Map(), compiling: new Set() },
+  });
+  target.userFunctions!.root = target;
+  const value = ce.function(
+    'Typed',
+    [ce.expr(['List', 'x', 'y']), ce.string('complex')],
+    { structural: true }
+  );
+  expect(provenPointWidth(value, target)).toBeUndefined();
+});
