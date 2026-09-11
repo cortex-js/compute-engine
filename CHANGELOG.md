@@ -8,6 +8,12 @@
   that shape, including through stable locals. Public signatures, list-call
   broadcasting and runtime array guards are preserved.
 
+- **Constructed point-list sources avoid redundant validation.** JavaScript
+  `PointList` omits array checks for proven constructed sources and uses a
+  constant shortest zip length when source widths are known and operands
+  preserve them. Runtime sources keep validation and dynamic lengths;
+  iteration limits and single evaluation are preserved.
+
 ## 0.128.8 _2026-09-11_
 
 ### Resolved Issues

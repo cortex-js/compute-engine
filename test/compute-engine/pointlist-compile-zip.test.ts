@@ -913,3 +913,156 @@ describe('PointList — CSE now reaches a point-list-bearing artifact', () => {
     ]);
   });
 });
+
+describe('PointList zip — constructed source widths', () => {
+  it('uses a constant shortest length for constructed arrays', () => {
+    const ce = zipEngine();
+    const expr = ['PointList', ['List', 'k', 2, 3], ['List', 10, 20]];
+    const r = compile(ce.box(expr), { fallback: false });
+    expect(r.code).not.toMatch(/Array\.isArray|Math\.min|\.length/);
+    expect(r.run!({ k: 1 })).toEqual([
+      [1, 10],
+      [2, 20],
+    ]);
+    expect(r.run!({ k: 1 })).toEqual(interpret(expr, { k: 1 }));
+  });
+
+  it('retains helper references and proves arithmetic source widths', () => {
+    const ce = zipEngine();
+    ce.declare('vector', { signature: '(real) -> list<real^3>' });
+    ce.assign('vector', ce.expr(['Function', ['List', 't', 2, 3], 't']));
+    const r = compile(
+      ce.expr([
+        'PointList',
+        ['Multiply', 2, ['vector', 'k']],
+        ['List', 10, 20, 30],
+      ]),
+      { fallback: false }
+    );
+    expect(r.code).not.toMatch(/Array\.isArray|Math\.min|\.length/);
+    expect(r.preamble).toContain('const _fn_vector');
+    expect(r.run!({ k: 1 })).toEqual([
+      [2, 10],
+      [4, 20],
+      [6, 30],
+    ]);
+  });
+
+  it.each([0.5, 1, 2.9, 10])(
+    'preserves the iteration budget %s',
+    (iterationBudget) => {
+      const ce = zipEngine();
+      const r = compile(
+        ce.expr(['PointList', ['List', 'k', 2, 3], ['List', 10, 20]]),
+        { fallback: false, iterationBudget }
+      );
+      expect(r.code).not.toMatch(/Array\.isArray|Math\.min|\.length/);
+      expect(r.run!({ k: 1 })).toEqual(
+        [
+          [1, 10],
+          [2, 20],
+        ].slice(0, Math.floor(iterationBudget))
+      );
+    }
+  );
+
+  it('keeps empty sources empty even when another source has a proven width', () => {
+    const ce = zipEngine();
+    const r = compile(ce.expr(['PointList', ['List', 'k', 2], ['List']]), {
+      fallback: false,
+      constantFold: false,
+    });
+    expect(r.run!({ k: 1 })).toEqual([]);
+  });
+
+  it('keeps runtime validation and actual lengths for declared fixed-width inputs', () => {
+    const ce = zipEngine();
+    ce.declare('fixed', 'list<real^3>');
+    const r = compile(ce.expr(['PointList', ['List', 'k', 2, 3], 'fixed']), {
+      fallback: false,
+    });
+    expect(r.code?.match(/source component/g)).toHaveLength(1);
+    expect(r.code).toContain('source component 2');
+    expect(r.code).toContain('Math.min');
+    expect(r.run!({ k: 1, fixed: [10] })).toEqual([[1, 10]]);
+    expect(r.run!({ k: 1, fixed: [10, 20, 30, 40] })).toEqual([
+      [1, 10],
+      [2, 20],
+      [3, 30],
+    ]);
+    expect(r.run!({ k: 1, fixed: [] })).toEqual([]);
+    for (const fixed of [null, undefined, 'abc', 3, { length: 3 }])
+      expect(() => r.run!({ k: 1, fixed })).toThrow(
+        /source component 2 is not an array/
+      );
+  });
+
+  it('keeps runtime scalar-or-list role selection alongside a constructed source', () => {
+    const ce = zipEngine();
+    ce.declare('b', 'broadcastable<real>');
+    const r = compile(ce.expr(['PointList', ['List', 'k', 2, 3], 'b']), {
+      fallback: false,
+    });
+    expect(r.run!({ k: 1, b: 10 })).toEqual([
+      [1, 10],
+      [2, 10],
+      [3, 10],
+    ]);
+    expect(r.run!({ k: 1, b: [10, 20] })).toEqual([
+      [1, 10],
+      [2, 20],
+    ]);
+    expect(r.run!({ k: 1, b: [] })).toEqual([]);
+  });
+
+  it.each([0.5, 10])(
+    'evaluates components once in order with budget %s',
+    (iterationBudget) => {
+      const ce = zipEngine();
+      ce.declare('q', 'real');
+      const r = compile(
+        ce.expr(['PointList', ['List', 'k', 2, 3], ['List', 'q', 20], 'u']),
+        {
+          fallback: false,
+          iterationBudget,
+          vars: {
+            k: '(_.log.push("k"), _.k)',
+            q: '(_.log.push("q"), _.q)',
+            u: '(_.log.push("u"), _.u)',
+          },
+        }
+      );
+      const log: string[] = [];
+      expect(r.run!({ k: 1, q: 10, u: 7, log })).toEqual(
+        [
+          [1, 10, 7],
+          [2, 20, 7],
+        ].slice(0, Math.floor(iterationBudget))
+      );
+      expect(log).toEqual(['k', 'q', 'u']);
+    }
+  );
+  it('reads source lengths after a later operand mutates an alias', () => {
+    const ce = zipEngine();
+    ce.declare('mutate', { signature: '(list<real>) -> real' });
+    const r = compile(
+      ce.expr([
+        'Block',
+        ['Declare', 'v', 'list<real>'],
+        ['Assign', 'v', ['List', 'k', 2, 3]],
+        ['PointList', 'v', ['List', 10, 20, 30, 40, 50], ['mutate', 'v']],
+      ]),
+      {
+        fallback: false,
+        functions: { mutate: '(v => { v.push(4); return 7; })' },
+      }
+    );
+    expect(r.code).toContain('.length');
+    expect(r.run!({ k: 1 })).toEqual([
+      [1, 10, 7],
+      [2, 20, 7],
+      [3, 30, 7],
+      [4, 40, 7],
+    ]);
+  });
+});

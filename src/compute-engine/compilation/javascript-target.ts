@@ -2085,8 +2085,9 @@ function isProvablyNonScalarType(t: Type): boolean {
  *   sources is the source lowering's own, pre-existing behavior. Truncation
  *   semantics all the way down: a budget below 1 (`0.5`) floors to `0`, so the
  *   compiled point list is empty.
- * - Each hoisted source is checked with `Array.isArray` and throws a loud
- *   `RangeError` naming the component when it is not an array: a `vars`-splice
+ * - A source not proven to be a constructed array is checked with
+ *   `Array.isArray` and throws a `RangeError` naming the component when it is
+ *   not an array: a `vars`-splice
  *   type-contract breach fails fast, deliberately unmasked. (`Math.min` alone
  *   does not catch it — a string or an array-like has a `.length` and would
  *   zip into garbage.)
@@ -2099,6 +2100,7 @@ function compileJSPointList(
   const idx = BaseCompiler.tempVar(target);
   const bindings: string[] = [];
   const sources: string[] = [];
+  const widths: (number | undefined)[] = [];
   // Components whose type is `broadcastable<T>`: a source or a scalar slot,
   // decided at run time by `Array.isArray`.
   const maybeSources: string[] = [];
@@ -2123,13 +2125,15 @@ function compileJSPointList(
         );
       const name = BaseCompiler.tempVar(target);
       bindings.push(`const ${name} = ${compile(a)};`);
-      // A source MUST be an array: a string (or any array-like) has a
-      // `.length`, so `Math.min` would happily zip it into garbage. Check once
-      // per call, right after hoisting, and fail loudly instead.
-      bindings.push(
-        `if (!Array.isArray(${name})) throw new RangeError('PointList: ` +
-          `source component ${i + 1} is not an array at run time');`
-      );
+      const width = provenPointWidth(a, target);
+      // Constructed arrays need no type check. Runtime sources still fail
+      // loudly rather than letting a string or array-like object zip as data.
+      if (width === undefined)
+        bindings.push(
+          `if (!Array.isArray(${name})) throw new RangeError('PointList: ` +
+            `source component ${i + 1} is not an array at run time');`
+        );
+      widths.push(width);
       sources.push(name);
       parts.push(`${name}[${idx}]`);
       continue;
@@ -2179,13 +2183,24 @@ function compileJSPointList(
   if (sources.length === 0 && maybeSources.length === 0)
     return `(() => { ${bindings.join(' ')} return [${parts.join(', ')}]; })()`;
 
-  const lengths = sources.map((s) => `${s}.length`);
+  // Later operands may mutate a source through an alias. Use constant widths
+  // only when evaluating all operands preserves the arrays; otherwise read
+  // their lengths after every operand has run, as the runtime zip does.
+  const fixedWidthsSafe =
+    widths.some((w) => w !== undefined) &&
+    BaseCompiler.isEmissionSkippable(args, [], target);
+  const lengths: (number | string)[] = sources.map((s, i) =>
+    fixedWidthsSafe && widths[i] !== undefined ? widths[i]! : `${s}.length`
+  );
   // A run-time source joins the shortest-zip length only when it IS an array;
   // as a scalar it contributes no bound.
   for (const s of maybeSources)
     lengths.push(`(Array.isArray(${s}) ? ${s}.length : Infinity)`);
   const budget = target.iterationBudget;
-  if (budget !== undefined) lengths.push(String(Math.floor(budget)));
+  if (budget !== undefined) lengths.push(Math.floor(budget));
+  const length = lengths.every((n): n is number => typeof n === 'number')
+    ? String(Math.min(...lengths))
+    : `Math.min(${lengths.join(', ')})`;
   const n = BaseCompiler.tempVar(target);
   const out = BaseCompiler.tempVar(target);
   // With no static source and every run-time source a scalar, there is
@@ -2200,7 +2215,7 @@ function compileJSPointList(
   return (
     `(() => { ${bindings.join(' ')} ` +
     allScalar +
-    `const ${n} = Math.min(${lengths.join(', ')}); ` +
+    `const ${n} = ${length}; ` +
     `const ${out} = new Array(${n}); ` +
     `for (let ${idx} = 0; ${idx} < ${n}; ${idx}++) ` +
     `${out}[${idx}] = [${parts.join(', ')}]; ` +
