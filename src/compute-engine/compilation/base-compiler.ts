@@ -1820,7 +1820,7 @@ export class BaseCompiler {
     if (
       target.bareStatementBlocks &&
       typeof code === 'string' &&
-      code.includes('\n')
+      (code.includes('\n') || /^\s*(?:return|break|continue)\b/.test(code))
     ) {
       const head = expr !== undefined && isFunction(expr) ? expr.operator : '?';
       throw new Error(
@@ -17932,7 +17932,13 @@ export class BaseCompiler {
     const known = names.get(key);
     if (known !== undefined) return known;
     const taken = (registry.taken ??= new Set());
-    const base = prefix + id.replace(/[^\w$]/g, '_');
+    const raw = prefix + id.replace(/[^\w$]/g, '_');
+    // Shader identifiers cannot contain dollar signs or consecutive
+    // underscores. Normalize before collision allocation so distinct
+    // function names and specialization keys still get distinct bindings.
+    const shader =
+      registry.root?.language === 'glsl' || registry.root?.language === 'wgsl';
+    const base = shader ? raw.replace(/[$_]+/g, '_').replace(/_+$/, '') : raw;
     let name = base;
     for (let k = 2; taken.has(name); k++) name = `${base}_${k}`;
     taken.add(name);

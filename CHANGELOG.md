@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Reject unsupported statement-valued shader reduction terms.** GLSL and WGSL
+  sums and products now report a compilation failure when a term emits
+  statements where a value is required, instead of returning invalid shader
+  source behind a success flag. Supported nested reductions remain available.
+- **Keep visible color results in shader vector storage.** Helpers returning a
+  color constructor or conversion retain three-channel return types when an
+  intermediate local's type still permits broadcasting.
+- **Generate valid shader helper names.** Names derived from user functions and
+  point specializations avoid reserved consecutive underscores and dollar signs,
+  while remaining distinct when normalization produces a collision.
+
 ## 0.128.9 _2026-09-11_
 
 ### Improvements
@@ -11,8 +26,8 @@
 - **Constructed point-list sources avoid redundant validation.** JavaScript
   `PointList` omits array checks for proven constructed sources and uses a
   constant shortest zip length when source widths are known and operands
-  preserve them. Runtime sources keep validation and dynamic lengths;
-  iteration limits and single evaluation are preserved.
+  preserve them. Runtime sources keep validation and dynamic lengths; iteration
+  limits and single evaluation are preserved.
 
 ## 0.128.8 _2026-09-11_
 
@@ -38,15 +53,15 @@
 
 - **GPU color bindings use vector storage.** GLSL and WGSL locals, helper
   parameters and returns, and shared-expression temporaries retain the
-  three-channel color representation. Converted colors are normalized to
-  OKLCh at assignment and parameter boundaries so retained bindings preserve
-  their colors as well as producing valid shader types.
+  three-channel color representation. Converted colors are normalized to OKLCh
+  at assignment and parameter boundaries so retained bindings preserve their
+  colors as well as producing valid shader types.
 
-- **Keep global helper shape proofs independent of caller parameters.** A
-  caller parameter with the same name as a captured global value no longer
-  changes how the helper result is classified. List-valued coordinates retain
-  broadcasting when called through such helpers. Shape-proof caches also keep
-  declared-input assumptions separate from runtime shape checks.
+- **Keep global helper shape proofs independent of caller parameters.** A caller
+  parameter with the same name as a captured global value no longer changes how
+  the helper result is classified. List-valued coordinates retain broadcasting
+  when called through such helpers. Shape-proof caches also keep declared-input
+  assumptions separate from runtime shape checks.
 
 ### Improvements
 

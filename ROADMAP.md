@@ -481,6 +481,58 @@ their expected effect on the corpus.
   enclosure as read-only and drop the copy. Today no in-repo consumer writes
   to a returned enclosure. The copy stays until ruled otherwise.
 
+### Codegen audit follow-ups (CE 0.128.9)
+
+The CORE audit `ce-0.128.9.json` pairs all 784 records with
+`ce-0.128.8-369a447d4.json` on Tycho source `369a447d4`. Four JavaScript
+outputs lose 1,500 characters, twelve array checks and four dynamic minimum
+calculations; compilation outcomes are unchanged. Tycho has retired item 275.
+The remaining 165 broadcast occurrences include required collection work and
+fallback branches. They are not a count of redundant runtime operations.
+
+- **Support block-valued shader reduction terms.** The noise kernel in
+  `art/hyvhlz4chj` uses a `Sum` term with local declarations and assignments.
+  These blocks remain unsupported as shader value operands: compilation now
+  declines explicitly instead of reporting success with invalid GLSL/WGSL.
+  Supporting them requires a value-producing statement representation that
+  preserves local scope, evaluation order and return behavior. The bounded
+  witness and supported nested-reduction controls are in
+  `test/compute-engine/compile-gpu-audit-validity.test.ts`. Acceptance requires
+  compiling and linking the complete noise shader; removing the diagnostic
+  alone does not add support.
+- **Reuse invariant calculations across retained helper calls.** The
+  `exoplanet-transit` kernel calls `S(radius, time)` at forty radii, and each
+  call computes the same `m(time)` through a cosine and square root. Counting
+  calls in record 178's emitted JavaScript gives forty `m` evaluations for
+  each of `B(0, 0.6)`, `B(10, 0.6)` and `B(25, 0.6)`; the one-call control
+  counts one. The pattern also appears in records 179–183 on interval-js and
+  GLSL. Investigate a private helper variant receiving the invariant value;
+  preserve public signatures, evaluation order, empty-loop behavior and
+  effectful-call boundaries. This is an optimization opportunity, not a
+  numerical correctness defect or a measured speedup.
+- **Share frequently repeated small interval expressions.** Voronoi record
+  584 emits `_IA.div(_k2, _.n)` 48 times across its two helper bodies; nine
+  other interval records in that document emit it 28 times each. Investigate
+  target-aware CSE scoring for small interval operations, whose runtime work
+  is larger than their expression-tree size suggests. Keep bindings within
+  the relevant call and branch; do not cache across changing inputs or alter
+  interval enclosures. GLSL record 667 has the analogous repeated reciprocal,
+  but a driver may already eliminate that scalar work.
+- **Avoid constructing point rows only to project their columns.** Records
+  683, 694, 721 and 748 in `art/n7uhaaoq1q` construct the same three-point
+  list and extract its three coordinates with `.map`. Investigate direct
+  column projection with the shortest-source length retained, then propagate
+  the proven width into subsequent arithmetic. Record 748 is a control with
+  no remaining broadcast dispatch but three coordinate maps. Preserve empty
+  inputs, iteration limits, missing coordinates, single evaluation, caller
+  mappings and mutation behavior. These are additional allocation and shape
+  optimizations, not a reason to reopen the verified item 275.
+
+A static call-graph pass found no unreachable named helpers in the successful
+GLSL records, so dead-helper removal has no witness in this audit. Source size
+and occurrence counts above do not establish frame-time or compilation-time
+improvements.
+
 ### Residue of the point-shape compile round (OPEN, compile performance — found 2026-09-10 while settling the Tycho heat-map colour chain)
 
 The round proved a user-function application scalar or point-shaped under

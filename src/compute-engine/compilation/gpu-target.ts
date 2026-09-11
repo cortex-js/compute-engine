@@ -5073,7 +5073,8 @@ function compileGPUSumProduct(
           recordGPUCounter(innerTarget, index, k, k, String(k));
         let code: string;
         try {
-          code = BaseCompiler.compile(args[0], innerTarget);
+          // Each term must leave a value after any nested loops are hoisted.
+          code = BaseCompiler.compileValueOperand(args[0], innerTarget);
         } finally {
           clearGPUCounters(innerTarget);
         }
@@ -5159,9 +5160,11 @@ function compileGPUSumProduct(
               bodyTarget,
               target.cse.harvestOptions
             );
-            return BaseCompiler.compileCseRoot(args[0], bodyTarget);
+            return BaseCompiler.compileCseRoot(args[0], bodyTarget, 0, () =>
+              BaseCompiler.compileValueOperand(args[0], bodyTarget)
+            );
           }
-          return BaseCompiler.compile(args[0], bodyTarget);
+          return BaseCompiler.compileValueOperand(args[0], bodyTarget);
         } finally {
           clearGPUCounters(bodyTarget);
         }
@@ -10255,8 +10258,10 @@ function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
   if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';
   if (
     (!isSymbol(expr) || !BaseCompiler.localShapeFrameOf(expr.symbol)) &&
-    isSubtype(gpuType(expr), 'color')
+    (isSubtype(gpuType(expr), 'color') || colorSpaceOf(expr) !== undefined)
   )
+    // A visible color constructor or conversion emits three channels even
+    // when its cached type still permits broadcasting through a local.
     return gpuVecType(3, isWGSL);
   if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2, isWGSL);
   const n = BaseCompiler.aggregateComponentCount(expr);
