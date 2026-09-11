@@ -7262,7 +7262,10 @@ export class BaseCompiler {
         );
       // The write must use the SAME spelling a READ of this name compiles to,
       // or the two halves of the variable disagree (`assignLValue`).
-      return `${BaseCompiler.assignLValue(engine, args[0].symbol, target)} = ${BaseCompiler.compileOp(node, 1, target, 0, args[1])}`;
+      const name = BaseCompiler.assignLValue(engine, args[0].symbol, target);
+      const code = BaseCompiler.compileOp(node, 1, target, 0, args[1]);
+      const stored = target.assignmentValue?.(args[1], code, target) ?? code;
+      return `${name} = ${stored}`;
     }
     if (h === 'Return') {
       // A target with a statically typed signature checks the returned value's
@@ -11507,13 +11510,24 @@ export class BaseCompiler {
     // accepts (D6).
     const isGPUTarget =
       target.language === 'glsl' || target.language === 'wgsl';
+    const declaredVarTypes = BaseCompiler.statementListDeclaredVarTypes(
+      args,
+      target.declaredVarTypes
+    );
     const shapeName = (n: number) =>
       n === BaseCompiler.LOCAL_SCALAR ? 'scalar' : `${n}-component aggregate`;
     const noteVectorWidth = (name: string, value: Expression) => {
       // Only declared locals get a declaration (and hence a type hint).
       const prev = vectorFrame.get(name);
       if (prev === undefined) return;
-      const count = BaseCompiler.aggregateComponentCount(value);
+      // A shader color occupies three channels, even though its language
+      // type is atomic and its JavaScript representation is an object.
+      const count =
+        isGPUTarget &&
+        (!isSymbol(value) || !BaseCompiler.localShapeFrameOf(value.symbol)) &&
+        isSubtype(compilationType(value), 'color')
+          ? 3
+          : BaseCompiler.aggregateComponentCount(value);
       if (!isGPUTarget) {
         // Off-GPU a local is untyped, so any shape may be rebound: keep the
         // historical "first aggregate binding wins". A width of `0` is not
@@ -11556,7 +11570,17 @@ export class BaseCompiler {
       // complex-shaped from its declaration (`localComplexDefault`); the
       // strict default is real until a complex first binding.
       complexFrame.set(local, BaseCompiler.localComplexDefault());
-      vectorFrame.set(local, BaseCompiler.LOCAL_UNSET);
+      // A typed color may first be assigned inside a loop or conditional,
+      // outside the straight-line assignment scan below.
+      const declared = declaredVarTypes?.[local];
+      vectorFrame.set(
+        local,
+        isGPUTarget &&
+          declared !== undefined &&
+          isSubtype(resolveTypeForCompilation(declared), 'color')
+          ? 3
+          : BaseCompiler.LOCAL_UNSET
+      );
     }
     BaseCompiler._pushLocalComplex(complexFrame);
     // Pushed before inference AND kept for the compilation of the statements,
@@ -11592,7 +11616,8 @@ export class BaseCompiler {
       // would disagree with its own float assignment (`int r; r = 3.0;` — not
       // valid GLSL) and poison every downstream use in float math. Only a
       // complex-valued local needs a non-default hint (`vec2`/`vec2f`), as
-      // does a vector-valued (point/tuple) one (`vec2`…`vec4`); everything
+      // does a vector-valued (point/tuple) one (`vec2`…`vec4`) or a color
+      // (`vec3`); everything
       // else uses the `float` default in `target.declare`.
       const typeHints: Record<string, string | undefined> = {};
       if (target.declare && target.language) {
@@ -11618,14 +11643,6 @@ export class BaseCompiler {
           }
         }
       }
-
-      // The DECLARED types of typed block locals, for the raw-LHS lowerings
-      // (the protocol-property SET reads its receiver's static type from
-      // `declaredVarTypes` — see `CompileTarget.declaredVarTypes`).
-      const declaredVarTypes = BaseCompiler.statementListDeclaredVarTypes(
-        args,
-        target.declaredVarTypes
-      );
 
       // The function-valued locals of this list, so a call of one resolves to
       // its own binding (see `CompileTarget.localFunctions`). Filled IN
@@ -11746,7 +11763,10 @@ export class BaseCompiler {
                         0,
                         value
                       );
-                return [decl, `${name} = ${valueCode}`];
+                const stored =
+                  localTarget.assignmentValue?.(value, valueCode, localTarget) ??
+                  valueCode;
+                return [decl, `${name} = ${stored}`];
               }
               return [decl];
             }

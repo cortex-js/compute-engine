@@ -10213,6 +10213,7 @@ function gpuTypeOfDeclaredType(
   // shader type: compilation is type erasure (§4.6 step 1). Covers both a
   // nominal-typed value and a nominal declared parameter type.
   t = resolveTypeForCompilation(t);
+  if (isSubtype(t, 'color')) return gpuVecType(3, isWGSL);
   // Complex lowers to `vec2(re, im)` — the target's existing convention.
   if (isNonRealNumber(t)) return gpuVecType(2, isWGSL);
   if (isSubtype(t, 'boolean')) return 'bool';
@@ -10252,6 +10253,11 @@ function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
   }
   // A name framed `bool` by a synthesized user-function signature.
   if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';
+  if (
+    (!isSymbol(expr) || !BaseCompiler.localShapeFrameOf(expr.symbol)) &&
+    isSubtype(gpuType(expr), 'color')
+  )
+    return gpuVecType(3, isWGSL);
   if (BaseCompiler.isComplexValued(expr)) return gpuVecType(2, isWGSL);
   const n = BaseCompiler.aggregateComponentCount(expr);
   if (n !== undefined) {
@@ -10291,6 +10297,8 @@ type GPUUserFunctionSignature = {
   names: ReadonlyArray<string>;
   /** Shader type of each parameter, in order. */
   params: ReadonlyArray<string>;
+  /** Color parameters receive canonical OKLCh channels. */
+  colors: ReadonlyArray<boolean>;
   /** Shader return type. */
   ret: string;
 };
@@ -10457,6 +10465,16 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // an invariant `floor`, `sin` or `dot` inside one is paid millions of
       // times per frame.
       hoistScalarInvariants: true,
+      assignmentValue: (value, code, current) =>
+        isSubtype(gpuType(value), 'color')
+          ? gpuColorOperand(
+              'Assign',
+              value,
+              (v) =>
+                v === value ? code : BaseCompiler.compileValueOperand(v, current),
+              current
+            )
+          : code,
       cseMaterialize: (expr, name, code, current) => {
         if (
           !BaseCompiler.canHoist(current) ||
@@ -10808,6 +10826,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             : ([] as ReadonlyArray<Expression>);
           const complexFrame = new Map<string, boolean>();
           const vectorFrame = new Map<string, number>();
+          const colors: boolean[] = [];
           const paramTypes = params.map((p, i) => {
             const declared =
               parameterTypes?.[i] ??
@@ -10816,10 +10835,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             const t =
               declared === undefined || declared === 'unknown' ? own : declared;
             const shader = gpuTypeOfDeclaredType(t, isWGSL);
+            colors.push(
+              t !== undefined &&
+                isSubtype(resolveTypeForCompilation(t), 'color')
+            );
             if (shader === undefined)
               throw new Error(
                 `${id}: parameter "${p}" has no static ${language.toUpperCase()} ` +
-                  `type — only scalars, booleans, complex values and 2–4 ` +
+                  `type — only scalars, booleans, colors, complex values and 2–4 ` +
                   `component vectors have one, and a shader function ` +
                   `signature must be fully typed. Declare a narrower ` +
                   `signature for "${id}". Fail closed (D6).`
@@ -10835,7 +10858,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             const complex = t !== undefined && isNonRealNumber(t);
             const n = complex
               ? 2
-              : (gpuDeclaredComponentCount(t ?? 'unknown') ?? 0);
+              : colors[i]
+                ? 3
+                : (gpuDeclaredComponentCount(t ?? 'unknown') ?? 0);
             complexFrame.set(p, complex);
             vectorFrame.set(
               p,
@@ -10865,7 +10890,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 throw new Error(
                   `${id}: the return value has no static ` +
                     `${language.toUpperCase()} type — only scalars, booleans, ` +
-                    `complex values and 2–4 component vectors have one. Fail ` +
+                    `colors, complex values and 2–4 component vectors have one. Fail ` +
                     `closed (D6).`
                 );
               return {
@@ -10912,7 +10937,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // the shape gate above (whose message is the more specific one).
           gpuAssertReturnPlacement(id, code, language);
 
-          signatures.set(name, { names: params, params: paramTypes, ret });
+          signatures.set(name, {
+            names: params,
+            params: paramTypes,
+            colors,
+            ret,
+          });
           return declareFn(
             name,
             ret,
@@ -10976,7 +11006,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                   `between them. Declare a matching signature for "${id}". ` +
                   `Fail closed (D6).`
               );
-            return BaseCompiler.compileValueOperand(arg, target);
+            return sig.colors[i]
+              ? gpuColorOperand(
+                  id,
+                  arg,
+                  (value) => BaseCompiler.compileValueOperand(value, target),
+                  target
+                )
+              : BaseCompiler.compileValueOperand(arg, target);
           });
           return `${name}(${code.join(', ')})`;
         },

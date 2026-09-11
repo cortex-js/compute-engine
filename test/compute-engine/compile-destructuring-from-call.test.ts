@@ -139,13 +139,11 @@ describe('destructuring assign from a tuple-VALUED call', () => {
       'do { let v = 0; let j = 1; (v, j) := step(j); 100*v + j }'
     );
     const code = agrees(expr, 202);
-    // ONE call site. A non-literal argument carries a runtime broadcast
-    // guard, whose two branches each name the callee: the direct branch calls
-    // it, the dispatch branch hands it to `_SYS.bcastFn` as a value. The
-    // guard's own argument is bound once, ahead of both branches.
+    // The local argument is provably scalar, so the retained helper is called
+    // once without a broadcast guard.
     expect(code.match(/_fn_step\(/g)?.length ?? 0).toBe(1);
-    expect(code.match(/_SYS\.bcastFn\(_fn_step,/g)?.length ?? 0).toBe(1);
-    expect(code.match(/Array\.isArray/g)?.length ?? 0).toBe(1);
+    expect(code).not.toContain('_SYS.bcastFn');
+    expect(code).not.toContain('Array.isArray');
     // Every read of the temporary happens after the single bind, so the write
     // to `j` cannot clobber the `j` the call reads.
     const bind = code.search(/_tv\d+ = .*_fn_step\(/);

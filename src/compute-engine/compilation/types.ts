@@ -410,6 +410,14 @@ export interface CompileTarget<Expr = unknown> {
    *  inferred from subsequent assignments. */
   declare?: (name: string, typeHint?: string) => string;
 
+  /** Convert an assignment or declaration initializer to the target's stored
+   * representation. The supplied source has already been compiled once. */
+  assignmentValue?: (
+    value: Expr,
+    code: string,
+    target: CompileTarget<Expr>
+  ) => string;
+
   /** Format a block expression. Receives compiled statements; the last
    *  element is the block's return value (without `return` prefix).
    *  Default: JavaScript IIFE. */

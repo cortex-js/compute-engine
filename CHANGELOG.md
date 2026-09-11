@@ -2,6 +2,12 @@
 
 ### Resolved Issues
 
+- **GPU color bindings use vector storage.** GLSL and WGSL locals, helper
+  parameters and returns, and shared-expression temporaries retain the
+  three-channel color representation. Converted colors are normalized to
+  OKLCh at assignment and parameter boundaries so retained bindings preserve
+  their colors as well as producing valid shader types.
+
 - **Keep global helper shape proofs independent of caller parameters.** A
   caller parameter with the same name as a captured global value no longer
   changes how the helper result is classified. List-valued coordinates retain
