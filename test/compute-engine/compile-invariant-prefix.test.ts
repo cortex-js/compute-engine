@@ -23,6 +23,8 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import type { CompileTarget } from '../../src/compute-engine/compilation/types';
 
 const ce = new ComputeEngine();
 ce.declare('x', 'real');
@@ -337,10 +339,93 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
     );
   });
 
-  test('the shader targets are untouched', () => {
-    const r = compile(ce.box(['B', 'x', 'k']), { to: 'glsl', fallback: false });
+  test.each(['glsl', 'wgsl'] as const)(
+    'the %s target takes the prefix as an extra typed parameter',
+    (to) => {
+      const r = compile(ce.box(['B', 'x', 'k']), { to, fallback: false });
+      expect(r.success).toBe(true);
+      const source = (r.preamble ?? '') + r.code;
+      const lines = source.split('\n');
+      // The variant's signature carries the extra parameter, typed as the
+      // hoisted value: `float _fn_S_inv0(float r, float t, float _tv3)` /
+      // `fn _fn_S_inv0(r: f32, t: f32, _tv3: f32) -> f32`.
+      const signature = lines.find(
+        (l) => /_fn_S_inv0\(/.test(l) && /^(float|fn) /.test(l)
+      );
+      expect(signature).toMatch(
+        to === 'glsl'
+          ? /^float _fn_S_inv0\(float r, float t, float \w+\) \{/
+          : /^fn _fn_S_inv0\(r: f32, t: f32, \w+: f32\) -> f32 \{/
+      );
+      // `_fn_B` binds m(t) once and calls the variant forty times; the
+      // ordinary `_fn_S`, which nothing references, is not emitted.
+      const bStart = lines.findIndex((l) => /^(float|fn) _fn_B\(/.test(l));
+      const bBody = lines.slice(bStart).join('\n');
+      expect(bBody.match(/_fn_m\(/g)).toHaveLength(1);
+      expect(bBody.match(/_fn_S_inv0\(/g)).toHaveLength(40);
+      expect(source).not.toMatch(/^(float|fn) _fn_S\(/m);
+      // The statement structure the shader validity audit checks.
+      expect(source).not.toContain(';;');
+    }
+  );
+
+  test('a shader target keeps the ordinary call for a call outside a repetition', () => {
+    const r = compile(ce.box(['S', 'x', 'k']), { to: 'glsl', fallback: false });
     expect(r.success).toBe(true);
-    expect((r.preamble ?? '') + r.code).not.toContain('inv');
+    const source = (r.preamble ?? '') + r.code;
+    expect(source).toMatch(/^float _fn_S\(float r, float t\)/m);
+    expect(source).not.toContain('_inv');
+  });
+});
+
+describe('Pruning of unreferenced variants and their bases', () => {
+  type Registry = NonNullable<CompileTarget<any>['userFunctions']>;
+  const registry = (
+    defs: Record<string, string>,
+    variants: Record<string, string>
+  ): Registry => ({
+    defs: new Map(Object.entries(defs)),
+    compiling: new Set(),
+    variantBases: new Map(Object.entries(variants)),
+  });
+  const DEFS = {
+    _fn_g: 'const _fn_g = (t) => t + 1;',
+    _fn_f: 'const _fn_f = (r, t) => r * _fn_g(t);',
+    _fn_f$inv0: 'const _fn_f$inv0 = (r, t, _tv1) => r * _tv1;',
+  };
+  const VARIANTS = { _fn_f$inv0: '_fn_f' };
+
+  test('a base every call of which took the variant is dropped', () => {
+    const r = registry(DEFS, VARIANTS);
+    BaseCompiler.pruneUnreferencedVariantBases(r, '_fn_f$inv0(1, x, _tv1)');
+    expect([...r.defs.keys()]).toEqual(['_fn_g', '_fn_f$inv0']);
+  });
+
+  test('a variant no call site took is dropped, and the base stays', () => {
+    const r = registry(DEFS, VARIANTS);
+    BaseCompiler.pruneUnreferencedVariantBases(r, '_fn_f(1, x)');
+    expect([...r.defs.keys()]).toEqual(['_fn_g', '_fn_f']);
+  });
+
+  test('a base referenced by another definition stays', () => {
+    const r = registry(
+      { ...DEFS, _fn_h: 'const _fn_h = (t) => _fn_f(2, t);' },
+      VARIANTS
+    );
+    BaseCompiler.pruneUnreferencedVariantBases(r, '_fn_f$inv0(1, x, _tv1)');
+    expect(r.defs.has('_fn_f')).toBe(true);
+  });
+
+  test('a definition whose name merely contains `_inv` is never a candidate', () => {
+    const r = registry(
+      {
+        _fn_A: 'const _fn_A = (t) => t;',
+        _fn_A_inv1: 'const _fn_A_inv1 = (t) => 1 / t;',
+      },
+      {}
+    );
+    BaseCompiler.pruneUnreferencedVariantBases(r, '_fn_A_inv1(x)');
+    expect([...r.defs.keys()]).toEqual(['_fn_A', '_fn_A_inv1']);
   });
 });
 

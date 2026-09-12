@@ -2,6 +2,17 @@
 
 ### Resolved Issues
 
+- **The shader targets reuse a helper's invariant calculations too.** The
+  invariant-prefix variant of a user function — the private copy that
+  receives, as an extra parameter, a value the body computes from a subset of
+  its parameters — was confined to the JavaScript and interval-js targets.
+  GLSL and WGSL now emit it as well: the variant's signature carries the
+  hoisted value as an extra parameter typed as that value, the repetition
+  site binds the value once and passes it as a held argument, and a base
+  definition no call references any more is dropped from the preamble on
+  every target. The exoplanet transit kernel of the 0.128.9 code-generation
+  audit (record 183) evaluates `m(t)` once per fragment instead of forty
+  times; the emitted GLSL and WGSL compile and link under headless Chromium.
 - **A coordinate of a point list built from columns is the column.**
   `PointX(PointList([x₁, x₂, x₃], [y₁, y₂, y₃], [z₁, z₂, z₃]))` compiled by
   zipping the three columns into three points and mapping the first

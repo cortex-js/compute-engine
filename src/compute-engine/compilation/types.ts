@@ -1485,6 +1485,13 @@ export interface CompileTarget<Expr = unknown> {
      */
     literals?: Map<string, Expr>;
     /**
+     * The invariant-prefix VARIANTS emitted (`BaseCompiler.ensureUserFunctionVariantEmitted`),
+     * by local name, each mapped to the local name of the ordinary definition
+     * it is a variant of. Read by `BaseCompiler.pruneUnreferencedVariantBases`,
+     * which drops a variant or a base that nothing in the artifact references.
+     */
+    variantBases?: Map<string, string>;
+    /**
      * User functions whose call is currently being compiled INLINED — the
      * body beta-reduced at the call site because the target could not emit
      * the definition (`BaseCompiler.tryInlineUserFunctionCall`). A call to a
@@ -1526,6 +1533,16 @@ export interface CompileTarget<Expr = unknown> {
         parameterTypes?: readonly Type[];
         /** Target with the parameters shadowed and bound. */
         target: CompileTarget<Expr>;
+        /**
+         * The EXTRA parameters of an invariant-prefix variant
+         * (`BaseCompiler.ensureUserFunctionVariantEmitted`), appended after
+         * the formal ones: each is named `name` and holds the value of the
+         * body subexpression `expr`, whose occurrences in `body` already
+         * carry `name` as their code override. The lowering types each one
+         * from `expr`, under the same parameter shapes it types the body
+         * under, and fails closed when it has no static type.
+         */
+        extraParams?: ReadonlyArray<{ name: string; expr: Expr }>;
       }) => string;
 
       /**
@@ -1538,6 +1555,13 @@ export interface CompileTarget<Expr = unknown> {
         name: string;
         args: ReadonlyArray<Expr>;
         target: CompileTarget<Expr>;
+        /**
+         * The values of an invariant-prefix variant's extra parameters, in
+         * signature order after `args`: bound before the repetition site, so
+         * each compiles to the binding's name. Checked against the variant's
+         * signature like any argument.
+         */
+        held?: ReadonlyArray<Expr>;
       }) => string;
 
       /**

@@ -18557,7 +18557,6 @@ export class BaseCompiler {
         : BaseCompiler._prefixCallOverrides.get(node);
     if (
       prefixed !== undefined &&
-      !target.userFunctions?.lowering &&
       prefixed.values.every((v) => BaseCompiler._codeOverrides.has(v))
     ) {
       let variant: string | undefined;
@@ -18571,6 +18570,25 @@ export class BaseCompiler {
       } catch (e) {
         if (e instanceof Error && e.name === 'CancellationError') throw e;
         variant = undefined;
+      }
+      // A target with its own call-site lowering (the shader targets)
+      // receives the prefix values as HELD arguments and checks their
+      // static shape against the variant's signature; a mismatch it fails
+      // closed on sends the call back to the ordinary definition.
+      const variantLowering = target.userFunctions?.lowering;
+      if (variant !== undefined && variantLowering) {
+        try {
+          return variantLowering.call({
+            id: h,
+            name: variant,
+            args,
+            target,
+            held: prefixed.values,
+          });
+        } catch (e) {
+          if (e instanceof Error && e.name === 'CancellationError') throw e;
+          variant = undefined;
+        }
       }
       if (variant !== undefined)
         return BaseCompiler.emitUserFunctionCall(
@@ -21448,8 +21466,10 @@ export class BaseCompiler {
      * Emit the INVARIANT-PREFIX VARIANT of `h` instead of its definition:
      * the same body, with every occurrence of each listed prefix expression
      * read from an extra parameter appended after the ordinary ones, in
-     * list order (`ensureUserFunctionVariantEmitted`). JavaScript arrow
-     * form only.
+     * list order (`ensureUserFunctionVariantEmitted`). Emitted through the
+     * target's own definition lowering when it has one (the shader targets
+     * receive the prefixes as `extraParams`), else as the JavaScript arrow
+     * form.
      */
     prefixed?: {
       key: string;
@@ -21508,131 +21528,6 @@ export class BaseCompiler {
         // below can express. The `defs` entry still lands here, AFTER the body
         // compiled, so a nested dependency it emitted precedes it (GLSL
         // requires declaration before use).
-        const lowering = registry.lowering;
-        if (lowering && prefixed !== undefined)
-          throw new Error(
-            `${h}: an invariant-prefix variant has no lowering on target ` +
-              `'${target.language ?? 'unknown'}'`
-          );
-        if (lowering) {
-          // The body of a target-lowered definition gets its OWN nested
-          // harvest scope, exactly as the JavaScript arrow form below does:
-          // the body is not part of the root tree, so without a harvest of
-          // its own nothing inside it is ever a candidate and a subexpression
-          // repeated in the body is emitted — and evaluated — once per
-          // occurrence. A shader function body is a statement position with a
-          // hoist sink, which is where the temporaries land
-          // (`CompileTarget.cseMaterialize`). The Tycho code-generation audit
-          // of 2026-09-08 measured this on the GLSL corpus: no `_fn_*` body
-          // carried a single temporary, while bodies calling the same
-          // function twice were common.
-          const def = BaseCompiler.withEnforcedParams(literal, () =>
-            BaseCompiler.withNestedCseHarvest(
-              bodyExpr,
-              bodyTarget,
-              params,
-              () =>
-                lowering.define({
-                  id: h,
-                  name,
-                  params,
-                  body: bodyExpr,
-                  literal,
-                  parameterTypes: specialization?.types,
-                  target: bodyTarget,
-                })
-            )
-          );
-          // Wave 3 of the 2026-08-12 contradicted-declaration ruling, as a
-          // BACKSTOP on what `define` was willing to emit. A lowering that
-          // synthesizes a STATIC return type takes it from the body's
-          // declared/ascribed type, while the `return` statement emits what the
-          // body actually builds — so a scalar-declared, collection-
-          // constructing body yields a declaration that disagrees with its own
-          // return value (`float _fn_a(float t) { return vec2(…); }`), source
-          // no shader compiler accepts, shipped behind `success: true` because
-          // nothing downstream re-checks the preamble. Waves 1–2 gate the
-          // CONSUMING positions of such a call; a bare `a(u)` has no consuming
-          // head, so the definition still went out.
-          //
-          // Deliberately AFTER `define`, not before: every target-specific
-          // decline (`the return value has no static GLSL type`, the `At`
-          // aggregate-index diagnostic, the identifier checks) throws from
-          // inside `define` and is strictly more informative about ITS shape.
-          // Running last means this gate only ever speaks for a definition that
-          // emitted cleanly — exactly the case nothing else catches — and never
-          // masks a better message. The `defs` entry is still written after the
-          // body compiled, so a nested dependency it emitted precedes it (GLSL
-          // requires declaration before use); a throw here aborts the whole
-          // compilation, so the discarded entries do not matter.
-          //
-          // The gate lives in this shared emission path keyed on a property the
-          // TARGET declares, rather than inside the GPU `define` hook: the
-          // contradiction is a property of the FUNCTION, the same one waves 1–2
-          // read from the call site, and every emission route (bare call, value
-          // position, nested dependency) funnels through here. Targets without
-          // a static return type are structurally untouched — JavaScript (no
-          // lowering at all) keeps the bare `a(u)` shape the ruling protects,
-          // interval-js uses that same untyped arrow form, and a future
-          // dynamically-typed definition lowering (a Python `def` — the only
-          // user-function lowering Python could gain; it declines with "Unknown
-          // operator" today) would have no return type to contradict.
-          if (
-            lowering.staticReturnType === true &&
-            BaseCompiler.isContradictedScalarFunctionBody(bodyExpr)
-          )
-            throw new Error(
-              `${h}: the declaration of '${h}' says it returns a scalar ` +
-                `('${bodyExpr.type.toString()}'), but its body constructs a ` +
-                `collection. The declaration is contradicted by the body, so ` +
-                `the emitted definition would declare a scalar return type ` +
-                `over a collection return value. Fix the declaration (e.g. ` +
-                `'-> list<number>') or evaluate instead. Fail closed (D6).`
-            );
-          registry.defs.set(name, def);
-          return name;
-        }
-        // Each emitted definition body gets its OWN nested harvest scope in
-        // the same session (§5.4): its own regions and candidates — the body
-        // is not part of the root tree — but the same naming counter, so temp
-        // names never collide across the artifact. Duplication inside a called
-        // definition is therefore recovered once, in the emitted function.
-        // The body compiles under a frame binding each complex-lane parameter
-        // to `true`, so every operand analysis inside it — and so the emitted
-        // arithmetic — treats that parameter as the `{re, im}` object the
-        // call site actually passes. The frame is ISOLATED (it replaces the
-        // enclosing `_localComplex` frames instead of stacking on them): an
-        // emitted definition is a module-level function, so when this
-        // emission is triggered from inside a `Block` or another definition's
-        // body, the caller's local shapes must not reach this body — a
-        // global read here that happens to share a name with a caller's
-        // complex local would otherwise be lowered complex over its plain
-        // numeric value. This is the same discipline the GPU definition
-        // lowering applies to its own parameter frame.
-        // A parameter the signature DECLARES complex is complex in the body
-        // for every call site, so it is entered here whether or not this
-        // emission carries call-site lanes. Without it the body read the
-        // parameter in the real lane while the call site handed it a
-        // `{ re, im }` — `_fn_Q = (z) => ({ re: z + 0, im: 1 })` over an
-        // object, i.e. `re: '[object Object]0'` behind `success: true`.
-        //
-        // This is not radical PROMOTION and does not go through
-        // `complexPromotion`: nothing is being inferred complex from an
-        // operand's sign. The author WROTE `(complex) -> complex`, and the
-        // call site is made to honour it (`coerceToComplex` /`_SYS.cplx`), so
-        // the lane here is that declaration being read back — which is why
-        // the Tycho-190 rule ("the lane comes from the operand, never the
-        // node type") is not in tension with it.
-        const frames = {
-          complex: new Map<string, boolean>(),
-          vector: new Map<string, number>(),
-        };
-        BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
-        // Whether the emitted body returns a `{re, im}` object by
-        // construction, decided inside the same frames the body compiled
-        // under (`complexShapedEmission`), so a call site can skip the
-        // idempotent lift-at-use wrap (`liftWideResult`).
-        let complexShaped = false;
         // The variant's extra parameters, one per prefix, and the body nodes
         // that read them. Every occurrence of a prefix expression in the
         // body — a conditional position included: reading a parameter that
@@ -21698,6 +21593,136 @@ export class BaseCompiler {
             overridden.push(node);
           }
         }
+        const lowering = registry.lowering;
+        if (lowering) {
+          try {
+            // The body of a target-lowered definition gets its OWN nested
+            // harvest scope, exactly as the JavaScript arrow form below does:
+            // the body is not part of the root tree, so without a harvest of
+            // its own nothing inside it is ever a candidate and a subexpression
+            // repeated in the body is emitted — and evaluated — once per
+            // occurrence. A shader function body is a statement position with a
+            // hoist sink, which is where the temporaries land
+            // (`CompileTarget.cseMaterialize`). The Tycho code-generation audit
+            // of 2026-09-08 measured this on the GLSL corpus: no `_fn_*` body
+            // carried a single temporary, while bodies calling the same
+            // function twice were common.
+            const def = BaseCompiler.withEnforcedParams(literal, () =>
+              BaseCompiler.withNestedCseHarvest(
+                bodyExpr,
+                bodyTarget,
+                params,
+                () =>
+                  lowering.define({
+                    id: h,
+                    name,
+                    params,
+                    body: bodyExpr,
+                    literal,
+                    parameterTypes: specialization?.types,
+                    target: bodyTarget,
+                    extraParams: prefixed?.prefixes.map((p, i) => ({
+                      name: extraParams[i],
+                      expr: p.expr,
+                    })),
+                  })
+              )
+            );
+            // Wave 3 of the 2026-08-12 contradicted-declaration ruling, as a
+            // BACKSTOP on what `define` was willing to emit. A lowering that
+            // synthesizes a STATIC return type takes it from the body's
+            // declared/ascribed type, while the `return` statement emits what the
+            // body actually builds — so a scalar-declared, collection-
+            // constructing body yields a declaration that disagrees with its own
+            // return value (`float _fn_a(float t) { return vec2(…); }`), source
+            // no shader compiler accepts, shipped behind `success: true` because
+            // nothing downstream re-checks the preamble. Waves 1–2 gate the
+            // CONSUMING positions of such a call; a bare `a(u)` has no consuming
+            // head, so the definition still went out.
+            //
+            // Deliberately AFTER `define`, not before: every target-specific
+            // decline (`the return value has no static GLSL type`, the `At`
+            // aggregate-index diagnostic, the identifier checks) throws from
+            // inside `define` and is strictly more informative about ITS shape.
+            // Running last means this gate only ever speaks for a definition that
+            // emitted cleanly — exactly the case nothing else catches — and never
+            // masks a better message. The `defs` entry is still written after the
+            // body compiled, so a nested dependency it emitted precedes it (GLSL
+            // requires declaration before use); a throw here aborts the whole
+            // compilation, so the discarded entries do not matter.
+            //
+            // The gate lives in this shared emission path keyed on a property the
+            // TARGET declares, rather than inside the GPU `define` hook: the
+            // contradiction is a property of the FUNCTION, the same one waves 1–2
+            // read from the call site, and every emission route (bare call, value
+            // position, nested dependency) funnels through here. Targets without
+            // a static return type are structurally untouched — JavaScript (no
+            // lowering at all) keeps the bare `a(u)` shape the ruling protects,
+            // interval-js uses that same untyped arrow form, and a future
+            // dynamically-typed definition lowering (a Python `def` — the only
+            // user-function lowering Python could gain; it declines with "Unknown
+            // operator" today) would have no return type to contradict.
+            if (
+              lowering.staticReturnType === true &&
+              BaseCompiler.isContradictedScalarFunctionBody(bodyExpr)
+            )
+              throw new Error(
+                `${h}: the declaration of '${h}' says it returns a scalar ` +
+                  `('${bodyExpr.type.toString()}'), but its body constructs a ` +
+                  `collection. The declaration is contradicted by the body, so ` +
+                  `the emitted definition would declare a scalar return type ` +
+                  `over a collection return value. Fix the declaration (e.g. ` +
+                  `'-> list<number>') or evaluate instead. Fail closed (D6).`
+              );
+            (registry.literals ??= new Map()).set(name, literal);
+            registry.defs.set(name, def);
+            return name;
+          } finally {
+            for (const node of overridden)
+              BaseCompiler._codeOverrides.delete(node);
+          }
+        }
+        // Each emitted definition body gets its OWN nested harvest scope in
+        // the same session (§5.4): its own regions and candidates — the body
+        // is not part of the root tree — but the same naming counter, so temp
+        // names never collide across the artifact. Duplication inside a called
+        // definition is therefore recovered once, in the emitted function.
+        // The body compiles under a frame binding each complex-lane parameter
+        // to `true`, so every operand analysis inside it — and so the emitted
+        // arithmetic — treats that parameter as the `{re, im}` object the
+        // call site actually passes. The frame is ISOLATED (it replaces the
+        // enclosing `_localComplex` frames instead of stacking on them): an
+        // emitted definition is a module-level function, so when this
+        // emission is triggered from inside a `Block` or another definition's
+        // body, the caller's local shapes must not reach this body — a
+        // global read here that happens to share a name with a caller's
+        // complex local would otherwise be lowered complex over its plain
+        // numeric value. This is the same discipline the GPU definition
+        // lowering applies to its own parameter frame.
+        // A parameter the signature DECLARES complex is complex in the body
+        // for every call site, so it is entered here whether or not this
+        // emission carries call-site lanes. Without it the body read the
+        // parameter in the real lane while the call site handed it a
+        // `{ re, im }` — `_fn_Q = (z) => ({ re: z + 0, im: 1 })` over an
+        // object, i.e. `re: '[object Object]0'` behind `success: true`.
+        //
+        // This is not radical PROMOTION and does not go through
+        // `complexPromotion`: nothing is being inferred complex from an
+        // operand's sign. The author WROTE `(complex) -> complex`, and the
+        // call site is made to honour it (`coerceToComplex` /`_SYS.cplx`), so
+        // the lane here is that declaration being read back — which is why
+        // the Tycho-190 rule ("the lane comes from the operand, never the
+        // node type") is not in tension with it.
+        const frames = {
+          complex: new Map<string, boolean>(),
+          vector: new Map<string, number>(),
+        };
+        BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
+        // Whether the emitted body returns a `{re, im}` object by
+        // construction, decided inside the same frames the body compiled
+        // under (`complexShapedEmission`), so a call site can skip the
+        // idempotent lift-at-use wrap (`liftWideResult`).
+        let complexShaped = false;
         let body: TargetSource;
         try {
           body = BaseCompiler.withLocalShapeFrame(
@@ -22495,6 +22520,65 @@ export class BaseCompiler {
     const defs = target.userFunctions?.defs;
     if (!defs || defs.size === 0) return '';
     return [...defs.values()].join('\n') + '\n';
+  }
+
+  /**
+   * A pattern matching the identifier `name` as a whole word in emitted
+   * source: not preceded by an identifier character or a `.` (a property of
+   * the same name is not a reference), not followed by one.
+   */
+  static identifierPattern(name: string, flags = 'u'): RegExp {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<![\\w$.])${escaped}(?![\\w$])`, flags);
+  }
+
+  /**
+   * Remove, in place from `registry.defs`, every emitted invariant-prefix
+   * VARIANT and every BASE of one (`registry.variantBases`, recorded by
+   * `ensureUserFunctionVariantEmitted`) that nothing in the artifact
+   * references: neither the root code `rootCode` nor another definition
+   * names it. A repetition site that hoists a callee's prefix calls the
+   * variant, not the base, but the base was already emitted by the
+   * call-shape specialization the site's first call went through; and on a
+   * target with its own call lowering a variant can be emitted and then
+   * refused at the call site, which falls back to the base. A definition's
+   * declaration has no effect on any target, so an unreferenced one is dead
+   * text. Only variants and their bases are removed: every other definition
+   * is kept whether or not the artifact names it, so an artifact without a
+   * variant is emitted exactly as before. Repeated to a fixed point, since
+   * removing one definition can leave another that only it referenced
+   * unreferenced in turn. Called by each target where it assembles its
+   * preamble, before any pass that counts references to a definition.
+   */
+  static pruneUnreferencedVariantBases(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    rootCode: string
+  ): void {
+    const defs = registry.defs;
+    const variants = registry.variantBases;
+    if (variants === undefined || variants.size === 0) return;
+    const candidates = new Set<string>();
+    for (const [variant, base] of variants) {
+      candidates.add(variant);
+      candidates.add(base);
+    }
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const name of candidates) {
+        if (!defs.has(name)) continue;
+        const named = BaseCompiler.identifierPattern(name);
+        if (named.test(rootCode)) continue;
+        let referenced = false;
+        for (const [other, code] of defs)
+          if (other !== name && named.test(code)) {
+            referenced = true;
+            break;
+          }
+        if (referenced) continue;
+        defs.delete(name);
+        changed = true;
+      }
+    }
   }
 
   /**
@@ -24870,13 +24954,16 @@ export class BaseCompiler {
       // extra parameters (`_prefixCallOverrides`, read by
       // `tryCompileUserFunction`). The call's own arguments still compile
       // per repetition, so the rewrite is a recipe keyed on the node, not a
-      // code string. The variant is a JavaScript arrow definition, so only
-      // the JavaScript-convention targets rewrite.
+      // code string. The variant is emitted by the target's own definition
+      // lowering where it has one (the shader targets receive the prefix
+      // values as extra typed parameters), else as a JavaScript arrow
+      // definition.
       if (
         !invariant &&
         (target.language === 'javascript' ||
-          target.language === 'interval-javascript') &&
-        !target.userFunctions?.lowering &&
+          target.language === 'interval-javascript' ||
+          target.language === 'glsl' ||
+          target.language === 'wgsl') &&
         !BaseCompiler._prefixCallOverrides.has(node)
       ) {
         const synthesized = BaseCompiler.synthesizeInvariantPrefixes(
@@ -25433,7 +25520,7 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): string | undefined {
     const registry = target.userFunctions;
-    if (!registry || registry.lowering) return undefined;
+    if (!registry) return undefined;
     // The literal the BASE definition was emitted from, when it has been —
     // the call-shape specialization may have rebuilt it with the parameter
     // types the call proved (`registry.literals`) — else the engine's own.
@@ -25449,7 +25536,7 @@ export class BaseCompiler {
     const prefixes = prefixIndices.map((i) => all[i]);
     if (prefixes.some((p) => p === undefined)) return undefined;
     target.symbolDeps?.add(h);
-    return BaseCompiler.emitFunctionLiteralDefinition(
+    const variant = BaseCompiler.emitFunctionLiteralDefinition(
       h,
       literal,
       target,
@@ -25457,6 +25544,12 @@ export class BaseCompiler {
       undefined,
       { key: `${h}$inv${prefixIndices.join('_')}`, prefixes }
     );
+    if (variant !== undefined)
+      (registry.variantBases ??= new Map()).set(
+        variant,
+        BaseCompiler.userFunctionName(registry, h)
+      );
+    return variant;
   }
 
   /**

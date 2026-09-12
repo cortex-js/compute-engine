@@ -490,21 +490,6 @@ calculations; compilation outcomes are unchanged. Tycho has retired item 275.
 The remaining 165 broadcast occurrences include required collection work and
 fallback branches. They are not a count of redundant runtime operations.
 
-- **Reuse invariant calculations across retained helper calls on GLSL.** The
-  `exoplanet-transit` kernel calls `S(radius, time)` at forty radii, and each
-  call computes the same `m(time)` through a cosine and square root. On
-  JavaScript and interval-js (records 178–182) a repetition site now
-  evaluates such an invariant prefix once and calls a private variant of the
-  helper that receives the value as an extra parameter
-  (`BaseCompiler.invariantPrefixes`).
-  GLSL record 183 still evaluates `m(time)` forty times: the shader
-  definition lowering (`userFunctions.lowering.define`) synthesizes a static
-  signature from the declared parameter types and has no form for a variant
-  with extra parameters, so the rewrite is confined to the JavaScript arrow
-  definitions. Extend `define` to accept extra typed parameters whose type is
-  the static type of the hoisted value, then lift the `lowering` gate in
-  `loopInvariantHoistCandidates` and `ensureUserFunctionVariantEmitted`.
-
 A static call-graph pass found no unreachable named helpers in the successful
 GLSL records, so dead-helper removal has no witness in this audit. Source size
 and occurrence counts above do not establish frame-time or compilation-time

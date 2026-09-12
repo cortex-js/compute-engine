@@ -10193,6 +10193,17 @@ function gpuIsVectorComponentType(t: Type): boolean {
 }
 
 /**
+ * The component count a SHADER TYPE spelling denotes — `vec2`/`vec3`/`vec4`
+ * and the WGSL `vec2f`/`vec3<f32>` spellings — or `1` for a scalar and
+ * `bool`. The inverse reading of `gpuTypeOfValue`, for a value whose shader
+ * type is already known.
+ */
+function gpuComponentCountOfShaderType(shader: string): number {
+  const m = /^vec([234])/.exec(shader);
+  return m === null ? 1 : Number(m[1]);
+}
+
+/**
  * Static component count of a declared aggregate type, if it has one — and
  * only when every component fits a `vecN` slot (`gpuIsVectorComponentType`),
  * so a heterogeneous or non-numeric aggregate answers `undefined` and its
@@ -10827,9 +10838,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * compilation, in dependency order (a callee precedes its caller — which is
    * also what GLSL's declaration-before-use rule requires), or `''`.
    */
-  protected userFunctionDefs(): string {
-    const defs = this.currentUserFunctions?.defs;
-    if (!defs || defs.size === 0) return '';
+  protected userFunctionDefs(rootCode: string): string {
+    const registry = this.currentUserFunctions;
+    const defs = registry?.defs;
+    if (!registry || !defs || defs.size === 0) return '';
+    // A base definition every call of which was rewritten to an
+    // invariant-prefix variant is dead text: dropped here, where the
+    // definitions are read back (`BaseCompiler.pruneUnreferencedVariantBases`).
+    BaseCompiler.pruneUnreferencedVariantBases(registry, rootCode);
+    if (defs.size === 0) return '';
     return [...defs.values()].join('\n\n') + '\n';
   }
 
@@ -10874,6 +10891,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           literal,
           target,
           parameterTypes,
+          extraParams,
         }) => {
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
@@ -10884,6 +10902,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // `f(discard) := discard + 1` would otherwise emit
           // `float _fn_f(float discard)` behind a reported success.
           for (const p of params) gpuCheckIdentifier(p, language);
+          const extras = extraParams ?? [];
+          for (const x of extras) gpuCheckIdentifier(x.name, language);
 
           // PARAMETER TYPES. The declared signature is authoritative — a
           // parameter symbol's own type does not carry it (`f: (complex) ->
@@ -10940,6 +10960,47 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                   : BaseCompiler.LOCAL_SCALAR
             );
             return shader;
+          });
+
+          // EXTRA PARAMETERS of an invariant-prefix variant: each holds a
+          // body subexpression's value, so its shader type is that
+          // subexpression's, read under the parameter shapes just recorded
+          // (the frame is installed for the read, as it is for the body
+          // below). The parameter is then recorded in the same frames, so a
+          // body reading it through its code override is typed as it
+          // types the subexpression.
+          const extraTypes = BaseCompiler.withLocalShapeFrame(
+            complexFrame,
+            vectorFrame,
+            () =>
+              extras.map((x) => {
+                const shader = gpuTypeOfValue(x.expr, isWGSL);
+                if (shader === undefined)
+                  throw new Error(
+                    `${id}: the hoisted value \`${x.expr.toString()}\` has ` +
+                      `no static ${language.toUpperCase()} type, so no ` +
+                      `variant of "${id}" takes it as a parameter. Fail ` +
+                      `closed (D6).`
+                  );
+                return {
+                  shader,
+                  complex: BaseCompiler.isComplexValued(x.expr),
+                };
+              }),
+            true
+          );
+          extras.forEach((x, i) => {
+            const { shader, complex } = extraTypes[i];
+            const n = complex ? 2 : gpuComponentCountOfShaderType(shader);
+            complexFrame.set(x.name, complex);
+            vectorFrame.set(
+              x.name,
+              shader === 'bool'
+                ? BaseCompiler.LOCAL_BOOLEAN
+                : n >= 2
+                  ? n
+                  : BaseCompiler.LOCAL_SCALAR
+            );
           });
 
           // RETURN TYPE and BODY, both under the parameter shape frame — and
@@ -11006,26 +11067,38 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // the shape gate above (whose message is the more specific one).
           gpuAssertReturnPlacement(id, code, language);
 
+          const allNames = [...params, ...extras.map((x) => x.name)];
+          const allTypes = [...paramTypes, ...extraTypes.map((x) => x.shader)];
+          // An extra parameter is never a colour SLOT: a colour-typed formal
+          // parameter has its argument converted at the call site
+          // (`gpuColorOperand`), because the argument is written by the
+          // caller in whatever spelling a colour admits. A held value is the
+          // callee's own subexpression, compiled once as the body would have
+          // compiled it inline, so the body reads exactly the representation
+          // it produced.
           signatures.set(name, {
-            names: params,
-            params: paramTypes,
-            colors,
+            names: allNames,
+            params: allTypes,
+            colors: [...colors, ...extras.map(() => false)],
             ret,
           });
           return declareFn(
             name,
             ret,
-            params.map((p, i): [string, string] => [p, paramTypes[i]]),
+            allNames.map((p, i): [string, string] => [p, allTypes[i]]),
             code
           );
         },
 
-        call: ({ id, name, args, target }) => {
+        call: ({ id, name, args: ordinary, target, held }) => {
           const sig = signatures.get(name);
           // `define` always runs before the first `call`
           // (`ensureUserFunctionEmitted`), so this cannot be reached.
           if (sig === undefined)
             throw new Error(`Internal: no synthesized signature for "${id}"`);
+          // The held values of an invariant-prefix variant follow the
+          // ordinary arguments and are checked exactly like them.
+          const args = held === undefined ? ordinary : [...ordinary, ...held];
           if (args.length !== sig.params.length)
             throw new Error(
               `${id}: called with ${args.length} argument(s) but declared ` +
@@ -11385,7 +11458,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // reference (a `_gpu_powi` used only inside `f` is still a helper the
     // shader must declare), and appended AFTER the helpers so a definition
     // that calls one is declared second (GLSL: declaration before use).
-    const userDefs = this.userFunctionDefs();
+    const userDefs = this.userFunctionDefs(code);
     if (userDefs) code = `${code}\n${userDefs}`;
     let preamble = '';
     preamble += buildComplexPreamble(code, this.languageId);
