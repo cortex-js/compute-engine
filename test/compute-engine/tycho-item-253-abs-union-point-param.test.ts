@@ -131,6 +131,59 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     expect(r.run!({ Q: [] })).toEqual([]);
   });
 
+  test('a declaration that admits a list coordinate keeps the shape dispatch', () => {
+    // The scalar rebuild of a written point is exact only where the
+    // declaration rejects a list coordinate. `tuple<list<number>,
+    // list<number>>` admits two of them at once — a shape a single-position
+    // probe missed — and `broadcastable` coordinates admit one each; both
+    // keep the run-time dispatch (ruled 2026-09-11).
+    for (const type of [
+      'tuple<number, number> | tuple<list<number>, list<number>>',
+      'tuple<broadcastable<number>, broadcastable<number>>',
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('k', { signature: `(${type}) -> number` });
+      ce.assign(
+        'k',
+        ce.box(['Function', ['Abs', ['Subtract', 'P', ['Tuple', 4, 0]]], 'P'])
+      );
+      const r = compile(ce.parse('k\\left(\\left(x,y\\right)\\right)'), {
+        to: 'javascript',
+      });
+      expect(r.success).toBe(true);
+      expect(r.preamble).not.toContain('_fn_k_tuple_number__number_');
+      // The VALUE of these calls is not asserted: under such a declaration
+      // the compiled `Abs` disagrees with the interpreter (`[1, 1]` for the
+      // two-list-coordinate declaration, one norm for a point with a list
+      // coordinate, where the interpreter answers √2 and a per-coordinate
+      // list) — an open defect of the `Abs` lowering recorded in ROADMAP.md,
+      // separate from the specialization decision tested here.
+    }
+  });
+
+  test('a list arm of scalar-coordinate points still specializes the point call', () => {
+    // `list<tuple<number, number>>` holds points with scalar coordinates, so
+    // a written point with a list coordinate is not a member of either arm;
+    // the interpreter rejects it and the compiled call rebuilds the point at
+    // `tuple<number, number>`.
+    const ce = new ComputeEngine();
+    ce.declare('k', {
+      signature:
+        '(list<tuple<number, number>> | tuple<number, number>) -> number',
+    });
+    ce.assign(
+      'k',
+      ce.box(['Function', ['Abs', ['Subtract', 'P', ['Tuple', 4, 0]]], 'P'])
+    );
+    const r = compile(ce.parse('k\\left(\\left(x,y\\right)\\right)'), {
+      to: 'javascript',
+    });
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('_fn_k_tuple_number__number_');
+    expect(r.preamble).toContain('_SYS.norm(');
+    expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
+  });
+
   test('a union that admits a flat numeric list keeps the element-wise lowering', () => {
     // A compiled array carries no tuple-versus-list tag. For `P: list<number>
     // | tuple<number, number>` a flat array of numbers is a legitimate LIST,

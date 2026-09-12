@@ -20235,6 +20235,84 @@ export class BaseCompiler {
       : expr.type.type;
   }
 
+  /**
+   * Whether a parameter declared `declared` accepts a `width`-component
+   * point one of whose coordinates is a list (or any other non-scalar).
+   *
+   * Decided structurally, alternative by alternative, and conservatively:
+   * a tuple alternative of this width admits one when any of its element
+   * types is not provably a scalar (`unknown`, `broadcastable<number>`,
+   * `list<integer>`, a union); a list, set or collection alternative admits
+   * one when its element type can hold a list — a written point can be a
+   * member of `list<list<number> | number>`, but not of
+   * `list<tuple<number, number>>`, whose members are points with scalar
+   * coordinates; a scalar alternative and a tuple of another width cannot
+   * hold such a point at all; every other shape (`unknown`, `any`, `value`,
+   * a nominal reference, an intersection) is taken to admit it. Probing
+   * with example types instead — "is
+   * `tuple<list<number>, number>` a subtype?" — missed a declaration that
+   * admits two list coordinates, or a narrower element type such as
+   * `list<integer>`, and let the caller erase broadcasting for them.
+   *
+   * A declaration that admits none rejects such an argument at the
+   * interpreter's parameter check, so a compiled call may treat a written
+   * point's coordinates as scalars.
+   */
+  private static declaredPointAdmitsListCoordinate(
+    declared: Type,
+    width: number
+  ): boolean {
+    const isScalar = (t: Type) => isSubtype(t, 'scalar');
+    // A type none of whose values is a list: a scalar, a tuple of such
+    // types, or a union of them. Anything else is taken to hold a list.
+    const cannotHoldAList = (raw: Type): boolean => {
+      const t = resolveTypeForCompilation(raw);
+      if (typeof t === 'string') return isScalar(t);
+      if (t.kind === 'tuple')
+        return t.elements.every((e) => cannotHoldAList(e.type));
+      if (t.kind === 'union') return t.types.every(cannotHoldAList);
+      return false;
+    };
+    const resolved = resolveTypeForCompilation(declared);
+    const alternatives =
+      typeof resolved !== 'string' && resolved.kind === 'union'
+        ? resolved.types
+        : [resolved];
+    for (const raw of alternatives) {
+      const alt = resolveTypeForCompilation(raw);
+      if (typeof alt === 'string') {
+        if (isScalar(alt)) continue;
+        return true;
+      }
+      switch (alt.kind) {
+        case 'tuple':
+          if (alt.elements.length !== width) continue;
+          // Element types are resolved so a nominal type over a scalar
+          // (`type Meters = number`) is read as the scalar it wraps.
+          if (
+            alt.elements.some(
+              (e) => !isScalar(resolveTypeForCompilation(e.type))
+            )
+          )
+            return true;
+          continue;
+        case 'list':
+        case 'set':
+        case 'collection':
+        case 'indexed_collection':
+          if (cannotHoldAList(alt.elements)) continue;
+          return true;
+        case 'union':
+          if (BaseCompiler.declaredPointAdmitsListCoordinate(alt, width))
+            return true;
+          continue;
+        default:
+          return true;
+      }
+    }
+    return false;
+  }
+
   /** Compile one shared helper for each proven argument representation.
    * The private literal carries narrower parameters; the engine definition
    * remains available for list calls and function-value uses. */
@@ -20295,9 +20373,18 @@ export class BaseCompiler {
         // Being one atomic point does not prove scalar coordinates. A
         // runtime tuple may contain lists in any coordinate, and rebuilding
         // it as tuple<number, ...> would erase component broadcasting.
+        //
+        // That hazard exists only where the DECLARED parameter type admits a
+        // point with a list coordinate (`unknown`, or coordinates typed
+        // `broadcastable<number>`). Where it admits none — `P: list<number> |
+        // tuple<number, number>` — the interpreter rejects such an argument
+        // with an `incompatible-type` error before the body runs, so the only
+        // points the call can carry have scalar coordinates and the
+        // `tuple<number, …>` rebuild is exact (ruled 2026-09-11).
         if (
           target.language === 'javascript' &&
-          provenScalarPointWidth(a, target) !== width
+          provenScalarPointWidth(a, target) !== width &&
+          BaseCompiler.declaredPointAdmitsListCoordinate(declared, width)
         ) {
           const actual = compilationType(a);
           if (typeof actual !== 'string' && actual.kind === 'tuple') t = actual;

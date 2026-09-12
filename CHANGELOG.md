@@ -13,6 +13,13 @@
   still declines. The Tycho noise kernel (`art/hyvhlz4chj`), whose fractional
   Brownian motion term binds three locals from the loop index, compiles and
   links on both targets.
+- **A written point passed to a parameter that admits no list coordinate
+  specializes again.** For `P: list<number> | tuple<number, number>`, the
+  JavaScript compilation of `k((x, y))` builds the point helper and computes
+  the norm directly, as it did before 0.128.8. The interpreter rejects a list
+  coordinate under such a declaration, so the scalar rebuild is exact; a
+  parameter typed `unknown` or with `broadcastable` coordinates keeps the
+  run-time shape dispatch.
 - **Fixed a silent shader miscompile of a reduction assigned to a block local.**
   On GLSL and WGSL a loop-form `Sum` or `Product` on the right of a block-local
   assignment (`a := Σ…` inside a function body or a `Loop` body) had nowhere to

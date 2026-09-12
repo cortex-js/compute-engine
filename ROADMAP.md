@@ -397,26 +397,30 @@ their expected effect on the corpus.
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
 
-### `Abs` over a union-typed point parameter no longer selects the norm at a concrete point call (OPEN, ruling — found 2026-09-11 by the block-term round)
+### A compiled point with a LIST coordinate answers one norm where the interpreter answers one norm per coordinate (OPEN, JavaScript correctness — found 2026-09-11 while ruling on the item 253 specialization)
 
-`test/compute-engine/tycho-item-253-abs-union-point-param.test.ts`, "a union
-that admits a flat numeric list keeps the element-wise lowering", fails at
-HEAD: with `k: (list<number> | tuple<number, number>) -> number` and
-`k(P) := |P - (4, 0)|`, the JavaScript compilation of `k((x, y))` emits
-`_SYS.absShape(_SYS.bcast(…))` in the helper where it used to specialize the
-concrete point call and emit `_SYS.norm(`. The run-time value is unchanged
-(the test's `run` assertion is not reached). The test passed at `e93632df`
-(2026-09-10) and fails from `70d0cbaf` on ("enhance shape analysis and point
-handling in JavaScript", 2026-09-11, released in 0.128.8), an eleven-line
-change to `base-compiler.ts` that touched no test of item 253. That change
-is deliberate — its comment says one atomic point does not prove scalar
-coordinates, and rebuilding it as `tuple<number, …>` would erase component
-broadcasting — so the open question is a ruling: either the test's
-expectation is stale and the helper is meant to keep the shape dispatch for
-a point of free symbols, or a call whose coordinates are plain `number`
-symbols should still count as proven scalar and select the norm. Not
-touched by the block-term round: the shader-side statement sinks do not
-reach the JavaScript target.
+With `k(P) := |P - (4, 0)|` and `P` declared `unknown` or
+`tuple<broadcastable<number>, broadcastable<number>>`, the call `k((x, y))`
+with `x = [1, 2]`, `y = 3` evaluates to `[4.243, 3.606]` (the coordinate
+broadcasts, one norm per element) while the compiled JavaScript answers
+`4.690`: the helper is specialized at `tuple<unknown, unknown>`, its body's
+`Abs` lowers to `_SYS.norm(_SYS.bcast(…))`, and `_SYS.norm` reads the nested
+array as one vector. The other direction exists too: with `P` declared
+`tuple<number, number> | tuple<list<number>, list<number>>`, `k((5, 1))`
+evaluates to `√2` while the compiled call answers `[1, 1]` — the helper keeps
+the argument's own tuple type and its `Abs` lowers element-wise. Witnessed by
+the test "a declaration that admits a list coordinate keeps the shape
+dispatch" in `tycho-item-253-abs-union-point-param.test.ts`, which asserts
+the helper shape and deliberately not the value. The declined-specialization guard added for this case
+(`trySpecializedUserCall`, the `provenScalarPointWidth` check) does not reach
+it: the argument's own type is a tuple, so the helper is still built and the
+body still rewrites `Abs(point)` to the norm. A declaration that admits no
+list coordinate (`list<number> | tuple<number, number>`) is not affected — the
+interpreter rejects the argument there, and the compiled call specializes to
+`tuple<number, number>` by the ruling of 2026-09-11. The fix is a run-time
+dispatch in the `Abs`/`Norm` lowering when a coordinate may be a list, or
+declining the specialization AND the static `Abs` rewrite together for such
+declarations.
 
 ### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
 
