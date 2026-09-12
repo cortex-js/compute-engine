@@ -19885,6 +19885,8 @@ export class BaseCompiler {
         // definition — so the heads the caller overrode are read from the
         // target (`CompileTarget.unrollSkipHeads`).
         skipHeads: target.unrollSkipHeads,
+        iterationBudget: target.iterationBudget,
+        readsLiveSource: target.cse?.harvestOptions?.isStringVar,
       }
     );
     if (!inlined.isValid) return undefined;
@@ -21938,7 +21940,11 @@ export class BaseCompiler {
           literal
         )
       ),
-      { skipHeads: target.unrollSkipHeads }
+      {
+        skipHeads: target.unrollSkipHeads,
+        iterationBudget: target.iterationBudget,
+        readsLiveSource: target.cse?.harvestOptions?.isStringVar,
+      }
     );
   }
 

@@ -3427,7 +3427,11 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       undefined,
       options.functions
     );
-    expr = unrollFixedWidthCollections(expr, { skipHeads: unrollSkipHeads });
+    expr = unrollFixedWidthCollections(expr, {
+      skipHeads: unrollSkipHeads,
+      iterationBudget: options.iterationBudget,
+      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+    });
     const { functions, vars, preamble } = options;
     const unknowns = expr.unknowns;
 

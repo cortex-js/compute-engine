@@ -561,9 +561,15 @@ describe('PointList — GPU projection (D3)', () => {
 
   it('a source of MORE THAN 4 elements declines — and says so', () => {
     const ce = gpuEngine();
+    // Two sources of DIFFERENT widths: the column projection of the
+    // fixed-width pre-pass leaves this shape alone (the zip stops at the
+    // shorter column), so the GPU lowering's own arity check is reached.
     expect(() =>
       glsl.compile(
-        ce.box(['PointY', ['PointList', -6, ['List', 1, 2, 3, 4, 5]]]),
+        ce.box([
+          'PointY',
+          ['PointList', ['List', 1, 2, 3], ['List', 1, 2, 3, 4, 5]],
+        ]),
         // Opt out of constant folding: every operand here is a literal, so the
         // whole subtree would be evaluated at compile time and emitted as a
         // `float[5]` literal, short-circuiting the arity check under test.
@@ -572,6 +578,20 @@ describe('PointList — GPU projection (D3)', () => {
     ).toThrow(
       /source component 2 has 5 elements, and a shader vector holds 2 to 4/
     );
+  });
+
+  it('a lone source of MORE THAN 4 elements projects to the column', () => {
+    // With a scalar slot beside it, the second coordinate IS the source:
+    // the fixed-width pre-pass folds the accessor to the column
+    // (`projectPointListColumn`), and a five-element literal list has a
+    // shader lowering of its own. Before the fold this declined.
+    const ce = gpuEngine();
+    const r = glsl.compile(
+      ce.box(['PointY', ['PointList', -6, ['List', 1, 2, 3, 4, 5]]]),
+      { constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('float[5](1.0, 2.0, 3.0, 4.0, 5.0)');
   });
 
   it('an `unknown` slot declines (no `vecW(<aggregate>)`) — and says so', () => {

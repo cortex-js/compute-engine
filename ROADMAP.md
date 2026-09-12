@@ -504,15 +504,6 @@ fallback branches. They are not a count of redundant runtime operations.
   definitions. Extend `define` to accept extra typed parameters whose type is
   the static type of the hoisted value, then lift the `lowering` gate in
   `loopInvariantHoistCandidates` and `ensureUserFunctionVariantEmitted`.
-- **Avoid constructing point rows only to project their columns.** Records
-  683, 694, 721 and 748 in `art/n7uhaaoq1q` construct the same three-point
-  list and extract its three coordinates with `.map`. Investigate direct
-  column projection with the shortest-source length retained, then propagate
-  the proven width into subsequent arithmetic. Record 748 is a control with
-  no remaining broadcast dispatch but three coordinate maps. Preserve empty
-  inputs, iteration limits, missing coordinates, single evaluation, caller
-  mappings and mutation behavior. These are additional allocation and shape
-  optimizations, not a reason to reopen the verified item 275.
 
 A static call-graph pass found no unreachable named helpers in the successful
 GLSL records, so dead-helper removal has no witness in this audit. Source size

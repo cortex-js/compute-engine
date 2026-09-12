@@ -11362,7 +11362,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       options.operators,
       options.functions
     );
-    expr = unrollFixedWidthCollections(expr, { skipHeads: unrollSkipHeads });
+    expr = unrollFixedWidthCollections(expr, {
+      skipHeads: unrollSkipHeads,
+      iterationBudget: options.iterationBudget,
+      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+    });
     const {
       operators,
       functions,

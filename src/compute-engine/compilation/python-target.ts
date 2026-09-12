@@ -3802,7 +3802,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // withheld from the pass here: this target has no `functions`/`operators`
     // override channel, so no caller implementation can be handed operands the
     // pass changed.
-    expr = unrollFixedWidthCollections(expr);
+    expr = unrollFixedWidthCollections(expr, {
+      iterationBudget: options.iterationBudget,
+      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+    });
     const vars = options.vars as Record<string, string> | undefined;
     // Root compilation boundary: fresh, deterministic numbering for the
     // generated temporaries, seeded with the names this compilation must not

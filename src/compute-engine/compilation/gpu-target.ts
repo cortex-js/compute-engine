@@ -11258,7 +11258,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       undefined,
       options.functions
     );
-    expr = unrollFixedWidthCollections(expr, { skipHeads: unrollSkipHeads });
+    expr = unrollFixedWidthCollections(expr, {
+      skipHeads: unrollSkipHeads,
+      iterationBudget: options.iterationBudget,
+      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+    });
     const { functions: userFunctions, vars } = options;
     const allFunctions = this.getFunctions();
     const constants = this.getConstants();

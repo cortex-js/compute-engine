@@ -81,6 +81,26 @@ export interface UnrollOptions {
    * Build it with {@link overriddenCompilationHeads}.
    */
   readonly skipHeads?: ReadonlySet<string>;
+
+  /**
+   * The compilation's iteration budget (`CompileTarget.iterationBudget`),
+   * when the target has one. The JavaScript `PointList` lowering caps the
+   * zip of column sources at this many points, so a rewrite that reads a
+   * column PAST the zip — the column projection of rule 1 — is withheld when
+   * the column is wider than the budget: the projected column would hold
+   * every element where the zipped point list holds the budget's worth.
+   */
+  readonly iterationBudget?: number;
+
+  /**
+   * Does the named symbol read LIVE SOURCE — a `vars` entry whose value is a
+   * string, spliced verbatim into the emitted code? Such source can count
+   * its own reads, log, or draw a number, so a rewrite that stops evaluating
+   * a subexpression reading it changes behavior. The column projection of
+   * rule 1 discards every other column of the point list and is withheld
+   * when one of them reads such a symbol. Absent means no symbol does.
+   */
+  readonly readsLiveSource?: (name: string) => boolean;
 }
 
 /**
@@ -264,8 +284,17 @@ const POINT_ACCESSOR_POSITION: Readonly<Record<string, number>> = {
  * vector on the shader targets, a documented decline elsewhere — and
  * replacing that answer would be a change for its own sake.
  *
+ * A third operand is a `PointList` built from COLUMNS — one list per
+ * coordinate, zipped into points (`PointList([x₁, x₂, x₃], [y₁, y₂, y₃])`).
+ * Its coordinate is the column itself, cut to the shortest column
+ * (`projectPointListColumn`), so the accessor folds to that column when the
+ * columns are provably the same width: the point list is then never built,
+ * where the targets built every point only to read one coordinate back out
+ * of each (the Tycho code-generation audit of 0.128.9 measured a three-point
+ * list built once per row and projected three times, records 683–748).
+ *
  * Returns `undefined` — leaving the node for the target's own lowering, or
- * its own decline — when the operand is neither of those shapes, when the
+ * its own decline — when the operand is none of those shapes, when the
  * coordinate is past the arity of a literal point, or when a coordinate the
  * rewrite would DISCARD is impure: the interpreter evaluates the whole point
  * once, so dropping an impure coordinate would change how many times its
@@ -279,12 +308,98 @@ function foldPointAccessor(
   if (position === undefined || expr.nops !== 1) return undefined;
   const point = expr.op1;
   if (!isFunction(point)) return undefined;
+  // A point whose head the caller overrode is emitted by the caller's own
+  // implementation, which receives the node's operands; folding the accessor
+  // would drop that implementation. The walk skips such a node itself, but
+  // this rule reads it from the accessor above it.
+  if (options.skipHeads?.has(point.operator)) return undefined;
   if (literalPointOperands(point) !== undefined)
     return options.foldSingleLiteralPoint === true
       ? coordinateOf(point, expr.operator, position)
       : undefined;
   if (isUnrollableList(point))
     return coordinateOf(point, expr.operator, position);
+  if (isFunction(point, 'PointList'))
+    return projectPointListColumn(point, position, options);
+  return undefined;
+}
+
+/**
+ * Coordinate `position` (1-based) of a `PointList` built from columns: the
+ * column at that position, when reading it whole is what zipping the columns
+ * and reading the coordinate back would answer. `undefined` otherwise.
+ *
+ * The zip pairs the columns element by element and stops at the shortest
+ * column (the pairing contract of `docs/BROADCAST-MODEL.md`), and a scalar
+ * component is repeated for every point. So the column IS the coordinate when
+ * every other column has the same width — proven from the structure of each
+ * column (`staticListWidth`) rather than read from a declared type, which a
+ * value handed to the compiled code through `vars` can contradict — and no
+ * other component shortens the zip. A scalar slot at the read position is
+ * left alone: its coordinate is that scalar repeated, which the targets
+ * already emit. Every discarded column must be pure, for the reason
+ * `foldPointAccessor` gives, and must neither read live caller source
+ * (`UnrollOptions.readsLiveSource`) nor contain a head the caller overrode
+ * (`UnrollOptions.skipHeads`) — either would stop running code the caller
+ * supplied. The column must fit the iteration budget
+ * (`UnrollOptions.iterationBudget`), where the target has one; a target
+ * without one compiles the column as it compiles that list anywhere else.
+ */
+function projectPointListColumn(
+  point: Expression & FunctionInterface,
+  position: number,
+  options: UnrollOptions
+): Expression | undefined {
+  if (point.nops < position) return undefined;
+  const column = point.ops[position - 1];
+  const width = staticListWidth(column);
+  if (width === undefined) return undefined;
+  const callerSupplied = (e: Expression): boolean =>
+    (isSymbol(e) && options.readsLiveSource?.(e.symbol) === true) ||
+    (isFunction(e) &&
+      (options.skipHeads?.has(e.operator) === true ||
+        e.ops.some(callerSupplied)));
+  for (let i = 0; i < point.nops; i++) {
+    if (i === position - 1) continue;
+    const other = point.ops[i];
+    if (other.isPure !== true || callerSupplied(other)) return undefined;
+    if (isProvablyScalar(other)) continue;
+    if (staticListWidth(other) !== width) return undefined;
+  }
+  const budget = options.iterationBudget;
+  if (budget !== undefined && Math.floor(budget) < width) return undefined;
+  return column;
+}
+
+/**
+ * The number of elements of a list built from a literal `List` of provably
+ * scalar elements, through the arithmetic that keeps that width — a scalar
+ * multiple, a sum or difference with a scalar or with a list of the same
+ * width, a negation, a division. `undefined` for any other operand: a
+ * declared width is not read, because a value handed to the compiled code
+ * through `vars` is never checked against its declared type.
+ */
+function staticListWidth(e: Expression): number | undefined {
+  if (!isFunction(e)) return undefined;
+  if (e.operator === 'List')
+    return e.ops.every(isProvablyScalar) ? e.nops : undefined;
+  if (e.operator === 'Negate' && e.nops === 1) return staticListWidth(e.op1);
+  if (
+    e.operator === 'Add' ||
+    e.operator === 'Subtract' ||
+    e.operator === 'Multiply' ||
+    e.operator === 'Divide'
+  ) {
+    let width: number | undefined;
+    for (const op of e.ops) {
+      if (isProvablyScalar(op)) continue;
+      const w = staticListWidth(op);
+      if (w === undefined || (width !== undefined && w !== width))
+        return undefined;
+      width = w;
+    }
+    return width;
+  }
   return undefined;
 }
 

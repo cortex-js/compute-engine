@@ -176,6 +176,10 @@ export function compile<
           options.operators,
           options.functions
         ),
+        // The budget a DIRECT target applies is its own; the `iterationBudget`
+        // option is read by the registered-target route only.
+        iterationBudget: options.target.iterationBudget,
+        readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
       });
       // Install a fresh naming context for generated temporaries on every call,
       // so a target the caller reuses never carries stale numbering into the

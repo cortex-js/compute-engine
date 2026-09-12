@@ -2,6 +2,19 @@
 
 ### Resolved Issues
 
+- **A coordinate of a point list built from columns is the column.**
+  `PointX(PointList([x₁, x₂, x₃], [y₁, y₂, y₃], [z₁, z₂, z₃]))` compiled by
+  zipping the three columns into three points and mapping the first
+  coordinate back out of each; a row of the 0.128.9 code-generation audit
+  (`art/n7uhaaoq1q`, records 683–748) built the same three-point list once
+  per table and projected it three times. The target-independent pre-pass
+  now folds such an accessor to the column itself when every column is
+  provably the same width, no discarded column has an effect, and the column
+  fits the iteration budget, so no point is built on any target. A shape
+  the fold leaves alone — columns of different widths, a scalar slot at the
+  read position, a wider column under a budget — still zips as before. On
+  GLSL a lone five-element column beside a scalar slot compiles to the
+  column where it used to decline.
 - **The interval target binds small repeated operations.** The
   common-subexpression harvest admitted a repeated subexpression by its
   syntax size, a measure of a JavaScript expression's cost: a size-3 `1/n` is
