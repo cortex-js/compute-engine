@@ -6027,7 +6027,17 @@ export class BaseCompiler {
     // type-handler detection: a tuple-TYPED symbol is a point too — without
     // it, `|p|` for `p: tuple<real,real>` broadcast `Math.abs` over the
     // point's components behind `success: true`.
-    if (h === 'Abs' && args.length === 1 && isTuple(args[0])) {
+    //
+    // A union whose every arm is a tuple — `tuple<number, number> |
+    // tuple<list<number>, list<number>>` — is a point too: whichever arm the
+    // value takes, `Abs` of it is a norm (with the coordinate broadcast the
+    // `Norm` lowering performs for a list coordinate), never the
+    // component-wise `abs` the broadcast lowering emitted for it.
+    if (
+      h === 'Abs' &&
+      args.length === 1 &&
+      (isTuple(args[0]) || BaseCompiler.isUnionOfPoints(args[0]))
+    ) {
       return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
     }
 
@@ -20233,6 +20243,17 @@ export class BaseCompiler {
       isSubtype(inferred, expr.type.type)
       ? inferred
       : expr.type.type;
+  }
+
+  /**
+   * Whether `expr`'s type is a union whose every arm is a tuple — a value
+   * that is a point whichever arm it takes. A single tuple type is `isTuple`'s
+   * business; a union with a non-tuple arm is not a point.
+   */
+  private static isUnionOfPoints(expr: Expression): boolean {
+    const t = compilationType(expr);
+    if (typeof t === 'string' || t.kind !== 'union') return false;
+    return t.types.every((arm) => isTupleShapedType(arm));
   }
 
   /**

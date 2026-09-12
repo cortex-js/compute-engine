@@ -397,30 +397,33 @@ their expected effect on the corpus.
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
 
-### A compiled point with a LIST coordinate answers one norm where the interpreter answers one norm per coordinate (OPEN, JavaScript correctness — found 2026-09-11 while ruling on the item 253 specialization)
+### The interpreter's norm of a point with an EMPTY list coordinate answers the norm of a different point (OPEN, evaluation — found 2026-09-11 by the compiled-norm broadcast round)
 
-With `k(P) := |P - (4, 0)|` and `P` declared `unknown` or
-`tuple<broadcastable<number>, broadcastable<number>>`, the call `k((x, y))`
-with `x = [1, 2]`, `y = 3` evaluates to `[4.243, 3.606]` (the coordinate
-broadcasts, one norm per element) while the compiled JavaScript answers
-`4.690`: the helper is specialized at `tuple<unknown, unknown>`, its body's
-`Abs` lowers to `_SYS.norm(_SYS.bcast(…))`, and `_SYS.norm` reads the nested
-array as one vector. The other direction exists too: with `P` declared
-`tuple<number, number> | tuple<list<number>, list<number>>`, `k((5, 1))`
-evaluates to `√2` while the compiled call answers `[1, 1]` — the helper keeps
-the argument's own tuple type and its `Abs` lowers element-wise. Witnessed by
-the test "a declaration that admits a list coordinate keeps the shape
-dispatch" in `tycho-item-253-abs-union-point-param.test.ts`, which asserts
-the helper shape and deliberately not the value. The declined-specialization guard added for this case
-(`trySpecializedUserCall`, the `provenScalarPointWidth` check) does not reach
-it: the argument's own type is a tuple, so the helper is still built and the
-body still rewrites `Abs(point)` to the norm. A declaration that admits no
-list coordinate (`list<number> | tuple<number, number>`) is not affected — the
-interpreter rejects the argument there, and the compiled call specializes to
-`tuple<number, number>` by the ruling of 2026-09-11. The fix is a run-time
-dispatch in the `Abs`/`Norm` lowering when a coordinate may be a list, or
-declining the specialization AND the static `Abs` rewrite together for such
-declarations.
+`Norm(([], 3))` and `Abs(([], 3))` evaluate to `√10`, the norm of `(1, 3)`,
+while the element-wise operators keep the empty coordinate (`([], 3) + (1,
+1)` is `([], 4)`, `2 · ([], 3)` is `([], 6)`). A point with an empty list
+coordinate is zero points, so the broadcast norm should be the empty list
+(or the erasure marker, whichever the empty-broadcast ruling in this file
+settles on), never a number. The compiled route answers `NaN` for it, the
+compiled spelling of an empty broadcast position.
+
+### A nested point at an OPEN-typed coordinate is read as a list by the compiled norm (OPEN, representation — recorded 2026-09-11)
+
+A compiled array carries no tuple-versus-list tag. The compiled `Norm`,
+`Abs` and `Hypot` of an unwritten point read a coordinate by its static
+type: a `tuple<…>` coordinate is a nested point read whole, a `list<…>` or
+`broadcastable<…>` coordinate is a broadcast source, and a coordinate typed
+`unknown`, bare `tuple`, or `indexed_collection<number>` — which may hold
+either — is read as a list, the way the compiled arithmetic already reads
+every nested array. The one value where that differs from the interpreter is
+a nested point at such a coordinate: for `q: tuple<unknown, number>`,
+`Norm(((1, 2), 3))` evaluates to `√14` (the inner point's components join the
+vector) and compiles to `[√10, √13]` (one norm per element of the inner
+array). Declining the shape instead would refuse every untyped point
+parameter, the commonest shape a document function has, so the list reading
+is kept (`pointCoordinateKind`, `javascript-target.ts`). Closing the gap
+needs either a run-time tuple tag on compiled points or a ruling that a
+compiled array at a coordinate is a list.
 
 ### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
 

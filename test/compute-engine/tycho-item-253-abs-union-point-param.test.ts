@@ -152,12 +152,53 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       });
       expect(r.success).toBe(true);
       expect(r.preamble).not.toContain('_fn_k_tuple_number__number_');
-      // The VALUE of these calls is not asserted: under such a declaration
-      // the compiled `Abs` disagrees with the interpreter (`[1, 1]` for the
-      // two-list-coordinate declaration, one norm for a point with a list
-      // coordinate, where the interpreter answers √2 and a per-coordinate
-      // list) — an open defect of the `Abs` lowering recorded in ROADMAP.md,
-      // separate from the specialization decision tested here.
+      // The dispatch reads the point at run time: scalar coordinates are
+      // one norm, a list coordinate is one norm per element, as the
+      // interpreter answers (`Norm` broadcasts the coordinates of an
+      // unwritten point whose type admits a list coordinate).
+      expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
+      expect(r.run!({ x: [1, 2], y: [3, 4] })).toEqual([
+        expect.closeTo(Math.hypot(3, 3), 12),
+        expect.closeTo(Math.hypot(2, 4), 12),
+      ]);
+    }
+  });
+
+  test('a point with a list coordinate under an open declaration answers one norm per element', () => {
+    // `P: unknown` and `P: tuple<broadcastable<number>, …>` both admit a
+    // list coordinate; the interpreter reads `([1, 2], 3) − (4, 0)` as two
+    // points and answers `[|(−3, 3)|, |(−2, 3)|]`. `_SYS.norm` on the nested
+    // array flattened it to one number (4.69) behind `success: true`.
+    for (const type of [
+      'unknown',
+      'tuple<broadcastable<number>, broadcastable<number>>',
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('k', { signature: `(${type}) -> number` });
+      ce.assign(
+        'k',
+        ce.box(['Function', ['Abs', ['Subtract', 'P', ['Tuple', 4, 0]]], 'P'])
+      );
+      const r = compile(ce.parse('k\\left(\\left(x,y\\right)\\right)'), {
+        to: 'javascript',
+      });
+      expect(r.success).toBe(true);
+      expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
+      expect(r.run!({ x: [1, 2], y: 3 })).toEqual([
+        expect.closeTo(Math.hypot(3, 3), 12),
+        expect.closeTo(Math.hypot(2, 3), 12),
+      ]);
+      ce.assign('x', ce.box(['List', 1, 2]));
+      ce.assign('y', 3);
+      expect(
+        ce
+          .box(['k', ['Tuple', 'x', 'y']])
+          .N()
+          .ops!.map((op) => op.re)
+      ).toEqual([
+        expect.closeTo(Math.hypot(3, 3), 12),
+        expect.closeTo(Math.hypot(2, 3), 12),
+      ]);
     }
   });
 

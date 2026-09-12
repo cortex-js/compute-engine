@@ -13,6 +13,19 @@
   still declines. The Tycho noise kernel (`art/hyvhlz4chj`), whose fractional
   Brownian motion term binds three locals from the loop index, compiles and
   links on both targets.
+- **A compiled norm of a point with a list coordinate answers one norm per
+  element.** On JavaScript, `Norm`, `Abs` and `Hypot` of an unwritten point
+  whose coordinate type admits a list — a parameter typed `unknown` or
+  `tuple<broadcastable<number>, …>`, a symbol declared `tuple<list<number>,
+  number>`, a union of point types — now spread the coordinates into the
+  run-time broadcast, so `|([1, 2], 3) − (4, 0)|` answers `[4.24, 3.61]` as
+  the interpreter does. `_SYS.norm` used to flatten the nested array into one
+  number behind a success, and the provably-list shapes declined. Each
+  coordinate is read by its static type: a nested point joins the vector
+  whole, a list coordinate broadcasts, and an open-typed coordinate is read
+  as a list, the way the compiled arithmetic reads every nested array. `Abs`
+  over a union whose every arm is a point is a norm, not a component-wise
+  `abs`.
 - **A written point passed to a parameter that admits no list coordinate
   specializes again.** For `P: list<number> | tuple<number, number>`, the
   JavaScript compilation of `k((x, y))` builds the point helper and computes

@@ -57,7 +57,7 @@ import {
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
+import type { Type, TupleType } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -98,6 +98,222 @@ function isUnwrittenPointWithCollectionComponent(expr: Expression): boolean {
       return false;
     return isSubtype(et, collectionShape);
   });
+}
+
+/**
+ * The tuple alternatives of a POINT-typed operand: one for a tuple type, one
+ * per arm for a union whose every arm is a tuple, `undefined` for anything
+ * else (a scalar, a list, a union with a non-tuple arm). Aliases are
+ * resolved; a nominal reference stays opaque.
+ */
+function pointTypeAlternatives(t: Type): TupleType[] | undefined {
+  const r = resolveTypeForCompilation(t);
+  if (typeof r === 'string') return undefined;
+  if (r.kind === 'tuple') return [r];
+  if (r.kind !== 'union') return undefined;
+  const arms: TupleType[] = [];
+  for (const arm of r.types) {
+    const a = resolveTypeForCompilation(arm);
+    if (typeof a === 'string' || a.kind !== 'tuple') return undefined;
+    arms.push(a);
+  }
+  return arms.length > 0 ? arms : undefined;
+}
+
+/**
+ * How the `Norm` lowering reads one coordinate of an UNWRITTEN point, decided
+ * from the coordinate's static type:
+ *
+ * - `'scalar'` — provably a scalar: read as is.
+ * - `'point'` — a tuple: a nested point, read whole (its components join the
+ *   vector, as the interpreter flattens it).
+ * - `'source'` — every other type: a collection (`list<number>`,
+ *   `broadcastable<number>`, `list<number> | number`), or an open type
+ *   (`unknown`, `indexed_collection<number>`). The interpreter reads a point
+ *   with a list coordinate as one point per element, so the coordinate is a
+ *   source of `_SYS.bcast` and the norm is computed once per element.
+ *
+ * A compiled array carries no tuple-versus-list tag, so a value of an OPEN
+ * coordinate type is read the way every other compiled array is — as a list.
+ * The compiled arithmetic already reads it so (`_SYS.bcast` descends into a
+ * nested array whatever the interpreter called it), and the one value where
+ * the interpreter reads differently, a nested point at a coordinate typed
+ * `unknown` (`((1, 2), 3)`, flattened into one norm there), is not a value
+ * the plotting consumers produce; declining every untyped point parameter
+ * to guard it would refuse the commonest shape a document function has.
+ */
+type PointCoordinateKind = 'scalar' | 'point' | 'source' | 'refused';
+
+/**
+ * A `'refused'` coordinate is a collection whose ELEMENTS are known not to
+ * be scalars (`list<tuple<number, number>>`, `broadcastable<list<number>>`):
+ * `_SYS.bcast` would descend into each element, reading a point inside the
+ * list as a list of its own. The written-`Tuple` lowering refuses the same
+ * shape ("a collection of non-scalars"), and so does this one (fail closed,
+ * D6). A collection whose element type is open (`list<unknown>`) is read
+ * the way an open coordinate is.
+ */
+function pointCoordinateKind(elementType: Type): PointCoordinateKind {
+  const et = resolveTypeForCompilation(elementType);
+  if (isSubtype(et, 'scalar')) return 'scalar';
+  if (et === 'tuple' || (typeof et !== 'string' && et.kind === 'tuple'))
+    return 'point';
+  if (
+    typeof et !== 'string' &&
+    (et.kind === 'list' ||
+      et.kind === 'set' ||
+      et.kind === 'collection' ||
+      et.kind === 'indexed_collection' ||
+      et.kind === 'broadcastable')
+  ) {
+    const el = resolveTypeForCompilation(et.elements);
+    const open = el === 'unknown' || el === 'any' || el === 'value';
+    if (!open && !isSubtype(el, 'scalar')) return 'refused';
+  }
+  return 'source';
+}
+
+/**
+ * The coordinate kinds of an UNWRITTEN point-typed operand — one entry per
+ * coordinate, combined across the arms of a union of tuples — or `undefined`
+ * when the operand is not such a point (a written `Tuple`/`PointList`, a
+ * scalar, a list) or its arms disagree on the width, which no fixed
+ * component list can read. Across arms a coordinate that is a source in any
+ * arm is a source (`_SYS.bcast` takes a scalar source as is, and a nested
+ * point is read as a list, as `pointCoordinateKind` explains); one that is a
+ * point in some arm and a scalar elsewhere is read whole.
+ */
+function unwrittenPointCoordinateKinds(
+  expr: Expression
+): PointCoordinateKind[] | undefined {
+  if (isFunction(expr, 'Tuple') || isFunction(expr, 'PointList'))
+    return undefined;
+  const arms = pointTypeAlternatives(jsType(expr));
+  if (arms === undefined) return undefined;
+  const width = arms[0].elements.length;
+  if (arms.some((arm) => arm.elements.length !== width)) return undefined;
+  const kinds: PointCoordinateKind[] = [];
+  for (let i = 0; i < width; i++) {
+    const seen = new Set(
+      arms.map((arm) => pointCoordinateKind(arm.elements[i].type))
+    );
+    kinds.push(
+      seen.has('refused')
+        ? 'refused'
+        : seen.has('source')
+          ? 'source'
+          : seen.has('point')
+            ? 'point'
+            : 'scalar'
+    );
+  }
+  return kinds;
+}
+
+/**
+ * May this operand's TYPE hold a point with a list at a coordinate —
+ * `tuple<list<number>, number>`, `tuple<broadcastable<number>, …>`,
+ * `tuple<unknown, unknown>`, a union of tuples one of which does — without
+ * the point being written out as a `Tuple` literal
+ * (`unwrittenPointCoordinateKinds` has a `'source'` entry)?
+ *
+ * The interpreter reads such a point as several points, one per element of
+ * the list coordinate, and answers one norm per point. A written `Tuple`
+ * decides that per component at compile time
+ * (`pointHasBroadcastComponent`); an unwritten point (a parameter, a
+ * difference of points) is read at run time by `broadcastPointNorm`. The
+ * narrower `isUnwrittenPointWithCollectionComponent` — a coordinate PROVABLY
+ * a collection — is what `Dot` fails closed on; read here it missed
+ * `broadcastable` and `unknown` coordinates, and `_SYS.norm` then flattened
+ * `[[−3, −2], 3]` into one norm behind `success: true`.
+ */
+function unwrittenPointMayBroadcast(expr: Expression): boolean {
+  const kinds = unwrittenPointCoordinateKinds(expr);
+  return kinds !== undefined && kinds.includes('source');
+}
+
+/**
+ * Fail closed (D6) on an unwritten point one of whose coordinates is a
+ * collection of non-scalars (`'refused'` in `unwrittenPointCoordinateKinds`).
+ */
+function assertPointCoordinatesBroadcastable(
+  head: string,
+  expr: Expression
+): void {
+  const kinds = unwrittenPointCoordinateKinds(expr);
+  if (kinds !== undefined) {
+    if (!kinds.includes('refused')) return;
+    throw new Error(
+      `${head}: cannot compile a point whose coordinate is a collection of ` +
+        `non-scalars (a list of points): the run-time broadcast would ` +
+        `descend into each element. Fail closed (D6).`
+    );
+  }
+  // A union of tuples of DIFFERENT widths has no fixed component list to
+  // read, and `_SYS.norm` on the whole value would flatten a list
+  // coordinate. Such a union with a list coordinate in any arm fails closed;
+  // one whose every coordinate is a scalar or a nested point keeps the plain
+  // norm, which flattens exactly as the interpreter does for those.
+  if (isFunction(expr, 'Tuple') || isFunction(expr, 'PointList')) return;
+  const arms = pointTypeAlternatives(jsType(expr));
+  if (arms === undefined) return;
+  const readable = arms.every((arm) =>
+    arm.elements.every((el) => {
+      const kind = pointCoordinateKind(el.type);
+      return kind === 'scalar' || kind === 'point';
+    })
+  );
+  if (readable) return;
+  throw new Error(
+    `${head}: cannot compile a point typed as a union of tuples of ` +
+      `different widths with a collection coordinate: no fixed component ` +
+      `list reads it, and the whole-value norm would flatten the ` +
+      `coordinate. Fail closed (D6).`
+  );
+}
+
+/**
+ * The norm of an unwritten point `pointCode` with a list coordinate
+ * (`unwrittenPointMayBroadcast`), decided at run time: the point is bound
+ * once, each `'source'` coordinate feeds `_SYS.bcast`, and the closure
+ * rebuilds the point from the element parameters and the other coordinates
+ * read off the bound point, so a scalar coordinate is one number and a
+ * nested point contributes its Euclidean magnitude (`_SYS.norm` of it) —
+ * what the interpreter's flattening amounts to for the default norm, and
+ * what it does under an explicit order, where `_SYS.norm` given a nested
+ * array would read the point as a matrix. `_SYS.bcast` applies the
+ * scalar norm once when every source holds a number and once per element
+ * otherwise (sources of different lengths answer NaN, the compiled spelling
+ * of `incompatible-dimensions`). `_SYS.norm` on the point itself would
+ * FLATTEN a list coordinate into the vector. The order (`orderCode`, a
+ * p-norm's `p`) is bound once too, so an impure operand draws once.
+ */
+function broadcastPointNorm(
+  pointCode: string,
+  kinds: ReadonlyArray<PointCoordinateKind>,
+  target: CompileTarget<Expression>,
+  orderCode?: string
+): string {
+  const v = BaseCompiler.tempVar(target);
+  const params: string[] = [];
+  const sources: string[] = [];
+  const components = kinds.map((kind, i) => {
+    if (kind === 'point') return `_SYS.norm(${v}[${i}])`;
+    if (kind !== 'source') return `${v}[${i}]`;
+    const p = BaseCompiler.tempVar(target);
+    params.push(p);
+    sources.push(`${v}[${i}]`);
+    return p;
+  });
+  const o = orderCode === undefined ? undefined : BaseCompiler.tempVar(target);
+  const bound = o === undefined ? v : `${v}, ${o}`;
+  const values = o === undefined ? pointCode : `${pointCode}, ${orderCode}`;
+  const ord = o === undefined ? '' : `, ${o}`;
+  return (
+    `((${bound}) => _SYS.bcast((${params.join(', ')}) => ` +
+    `_SYS.norm([${components.join(', ')}]${ord}), ` +
+    `${sources.join(', ')}))(${values})`
+  );
 }
 
 import {
@@ -4762,11 +4978,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // provably holds NUMBERS is a source: a component that is a list of
     // points would make `_SYS.bcast` descend into each point, so that shape
     // fails closed (D6) and the interpreter answers.
-    if (isUnwrittenPointWithCollectionComponent(args[0]))
-      throw new Error(
-        'Norm: cannot compile a point with a collection component that is ' +
-          'not written out as a Tuple literal. Fail closed (D6).'
+    assertPointCoordinatesBroadcastable('Norm', args[0]);
+    if (unwrittenPointMayBroadcast(args[0])) {
+      if (
+        args[1] != null &&
+        isString(args[1]) &&
+        args[1].string !== 'Frobenius'
+      )
+        throw new Error(
+          `Norm: the "${args[1].string}" norm does not compile. ` +
+            `Fail closed (D6).`
+        );
+      return broadcastPointNorm(
+        compile(args[0]),
+        unwrittenPointCoordinateKinds(args[0])!,
+        target,
+        args[1] != null && !isString(args[1]) ? compile(args[1]) : undefined
       );
+    }
     if (pointHasBroadcastComponent(args[0])) {
       if (
         args[1] != null &&
@@ -6045,30 +6274,37 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Under a broadcast this handler is invoked on the closure's element
   // parameters instead, which are plain numbers, and it produces an ordinary
   // `Math.hypot(...)` call.
-  Hypot: (args, compile) => {
+  Hypot: (args, compile, target) => {
+    // A leg whose coordinates may hold a list is one norm PER ELEMENT at
+    // evaluation (`broadcastPointNorm`), so the hypotenuse then broadcasts
+    // over its legs; a written point with a collection component still
+    // declines, as `Norm` decides that shape per component and this handler
+    // does not.
+    let broadcasts = false;
     const leg = (a: Expression): string => {
       const t = jsType(a);
       const code = compile(a);
+      assertPointCoordinatesBroadcastable('Hypot', a);
+      if (unwrittenPointMayBroadcast(a)) {
+        broadcasts = true;
+        return broadcastPointNorm(
+          code,
+          unwrittenPointCoordinateKinds(a)!,
+          target
+        );
+      }
       if (typeof t === 'string' || t.kind !== 'tuple') return code;
-      // A point whose component is itself a collection produces one point per
-      // element at evaluation, and therefore one hypotenuse per element. The
-      // call below computes a single number, which would disagree with both
-      // the interpreter and the `list<number>` type this application declares.
-      // Refuse to compile it, exactly as `Norm` refuses the same operand, so
-      // the engine falls back to interpretation. Compiling it needs the nested
-      // broadcast that keeps a point atomic, which `Add` and `Multiply` use
-      // for a point summed with a list of points.
-      if (
-        pointHasBroadcastComponent(a) ||
-        isUnwrittenPointWithCollectionComponent(a)
-      )
+      if (pointHasBroadcastComponent(a))
         throw new Error(
           'Hypot: cannot compile a point with a broadcasting component. ' +
             'Fail closed (D6).'
         );
       return `_SYS.norm(${code})`;
     };
-    return `Math.hypot(${args.map(leg).join(', ')})`;
+    const legs = args.map(leg);
+    if (!broadcasts) return `Math.hypot(${legs.join(', ')})`;
+    const params = legs.map(() => BaseCompiler.tempVar(target));
+    return `_SYS.bcast((${params.join(', ')}) => Math.hypot(${params.join(', ')}), ${legs.join(', ')})`;
   },
   Degrees: ([x], compile) => {
     if (x === null) throw new Error('Degrees: no argument');

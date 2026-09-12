@@ -120,7 +120,11 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     // The non-list components and the other leg are bound outside the
     // broadcast closure, so an impure component draws once for the whole
     // list, as the interpreter's evaluate-once rule requires.
-    const { code } = compiled(['Hypot', ['Tuple', ['List', 1, 2], ['Random']], 4]);
+    const { code } = compiled([
+      'Hypot',
+      ['Tuple', ['List', 1, 2], ['Random']],
+      4,
+    ]);
     expect(code.match(/drawNextRandomNumber/g)).toHaveLength(1);
     expect(code).toMatch(/^_SYS\.bcast\(/);
   });
@@ -137,7 +141,12 @@ describe('a compiled Hypot consumes a point leg whole', () => {
         expect.closeTo(Math.sqrt(26), 12),
         expect.closeTo(Math.sqrt(29), 12),
       ]);
-      expect(ce.box(json).N().ops!.map((x) => x.re)).toEqual([
+      expect(
+        ce
+          .box(json)
+          .N()
+          .ops!.map((x) => x.re)
+      ).toEqual([
         expect.closeTo(Math.sqrt(26), 12),
         expect.closeTo(Math.sqrt(29), 12),
       ]);
@@ -154,37 +163,154 @@ describe('a compiled Hypot consumes a point leg whole', () => {
       expect.closeTo(Math.sqrt(26), 12),
       expect.closeTo(Math.sqrt(38), 12),
     ]);
-    expect(ce.box(json).N().ops!.map((x) => x.re)).toEqual([
+    expect(
+      ce
+        .box(json)
+        .N()
+        .ops!.map((x) => x.re)
+    ).toEqual([
       expect.closeTo(Math.sqrt(26), 12),
       expect.closeTo(Math.sqrt(38), 12),
     ]);
   });
 
-  test('a point with a collection component that is not written out fails closed', () => {
+  test('a point with a collection component that is not written out broadcasts at run time', () => {
     // A symbol bound to `([10, 20], 3)`, or declared `tuple<list<number>,
-    // number>`, is one point per element too, but the per-element emission
-    // reads the components off a `Tuple` literal and cannot see a symbol's.
-    // `_SYS.norm` would flatten the nested array to one wrong number
-    // (22.56 for `[10.44, 20.22]`), so `Norm`, `Abs` and `Hypot` decline and
-    // the interpreter answers.
+    // number>`, is one point per element too. The per-element emission of a
+    // written `Tuple` reads the components off the literal and cannot see a
+    // symbol's, so the point's coordinates are spread into `_SYS.bcast` at
+    // run time instead (`broadcastPointNorm`): every coordinate a number is
+    // one norm, a list coordinate is one norm per element. Before that
+    // lowering these shapes declined, and an unwritten point whose
+    // coordinate type merely ADMITTED a list (`broadcastable<number>`,
+    // `unknown`) went to `_SYS.norm`, which flattened the nested array to one
+    // wrong number (22.56 for `[10.44, 20.22]`) behind `success: true`.
     const engine = new ComputeEngine();
     engine.assign('p', engine.box(['Tuple', ['List', 10, 20], 3]));
     engine.declare('q', 'tuple<list<number>, number>');
+    const reference = new ComputeEngine();
+    reference.assign('p', reference.box(['Tuple', ['List', 10, 20], 3]));
+    reference.assign('q', reference.box(['Tuple', ['List', 10, 20], 3]));
     for (const json of [
       ['Norm', 'p'],
       ['Abs', 'p'],
       ['Hypot', 'p', 4],
       ['Norm', 'q'],
       ['Hypot', 'q', 4],
-    ]) {
-      expect(() =>
-        compile(engine.box(json), { fallback: false, constantFold: false })
-      ).toThrow(/Fail closed/);
+      ['Norm', 'q', 1],
+      ['Hypot', 'q', 'p'],
+    ] as const) {
+      const r = compile(engine.box(json as any), {
+        fallback: false,
+        constantFold: false,
+      });
+      const expected = reference
+        .box(json as any)
+        .N()
+        .ops!.map((x) => x.re);
+      expect(r.run!({ q: [[10, 20], 3] })).toEqual(
+        expected.map((v) => expect.closeTo(v, 12))
+      );
     }
-    expect(engine.box(['Norm', 'p']).N().ops!.map((x) => x.re)).toEqual([
+    expect(
+      engine
+        .box(['Norm', 'p'])
+        .N()
+        .ops!.map((x) => x.re)
+    ).toEqual([
       expect.closeTo(Math.sqrt(109), 12),
       expect.closeTo(Math.sqrt(409), 12),
     ]);
+  });
+
+  test('a nested point coordinate is read whole beside a list coordinate', () => {
+    // The coordinate kinds come from the static type: a `tuple<…>`
+    // coordinate is a nested point that contributes its magnitude (the
+    // interpreter flattens its components into the vector, the same value
+    // for the default norm), only the `list<number>` coordinate is a
+    // broadcast source. Spreading every coordinate into the broadcast would
+    // read the inner point as a list and answer `[√153, 4]` for `[13, 5]`.
+    const engine = new ComputeEngine();
+    engine.declare('q', 'tuple<tuple<number, number>, list<number>>');
+    const value = {
+      q: [
+        [3, 4],
+        [12, 0],
+      ],
+    };
+    const norm = (order?: number) =>
+      compile(
+        engine.box(order === undefined ? ['Norm', 'q'] : ['Norm', 'q', order]),
+        {
+          fallback: false,
+          constantFold: false,
+        }
+      ).run!(value);
+    expect(norm()).toEqual([13, 5]);
+    // Under an explicit order the nested point contributes its magnitude:
+    // the 1-norm is `|(3, 4)| + 12`, not `3 + 4 + 12`, and `_SYS.norm` given
+    // the nested array with an order would have read it as a matrix.
+    expect(norm(1)).toEqual([17, 5]);
+    expect(norm(2)).toEqual([13, 5]);
+    engine.assign('q', engine.box(['Tuple', ['Tuple', 3, 4], ['List', 12, 0]]));
+    expect(
+      engine
+        .box(['Norm', 'q'])
+        .N()
+        .ops!.map((x) => x.re)
+    ).toEqual([13, 5]);
+    expect(
+      engine
+        .box(['Norm', 'q', 1])
+        .N()
+        .ops!.map((x) => x.re)
+    ).toEqual([17, 5]);
+  });
+
+  test('a coordinate that is a list of points fails closed', () => {
+    // `_SYS.bcast` descends into every array, so a list of points at a
+    // coordinate would be broadcast through each point; the written-`Tuple`
+    // lowering refuses the same shape.
+    const engine = new ComputeEngine();
+    engine.declare('q', 'tuple<list<tuple<number, number>>, number>');
+    for (const json of [
+      ['Norm', 'q'],
+      ['Hypot', 'q', 1],
+    ]) {
+      expect(() =>
+        compile(engine.box(json as any), {
+          fallback: false,
+          constantFold: false,
+        })
+      ).toThrow(/collection of non-scalars/);
+    }
+  });
+
+  test('a union of tuples of different widths with a list coordinate fails closed', () => {
+    // No fixed component list reads such a value, and the whole-value
+    // `_SYS.norm` would flatten the list coordinate into one number.
+    const engine = new ComputeEngine();
+    engine.declare(
+      'q',
+      'tuple<list<number>, number> | tuple<number, number, number>'
+    );
+    expect(() =>
+      compile(engine.box(['Norm', 'q']), {
+        fallback: false,
+        constantFold: false,
+      })
+    ).toThrow(/different widths/);
+    // All-scalar arms of different widths keep the plain norm.
+    engine.declare(
+      'r',
+      'tuple<number, number> | tuple<number, number, number>'
+    );
+    const r = compile(engine.box(['Norm', 'r']), {
+      fallback: false,
+      constantFold: false,
+    });
+    expect(r.run!({ r: [3, 4] })).toBe(5);
+    expect(r.run!({ r: [1, 2, 2] })).toBe(3);
   });
 
   test('a complex element is projected element-wise; an all-complex list fails closed', () => {
