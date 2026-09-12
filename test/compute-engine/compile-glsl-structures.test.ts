@@ -338,11 +338,22 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(shader).toMatch(/float _tv\d+ = 0\.0;/);
     });
 
-    it('a Block still fails closed as a sub-expression', () => {
+    it('a Block as a sub-expression hoists as a scoped compound statement', () => {
       const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
-      expect(() => glsl.compile(ce.box(['Add', blk, 1] as any))).toThrow(
-        /multi-statement construct.*sub-expression/
+      const code = glsl.compile(ce.box(['Add', blk, 1] as any), NO_FOLD).code;
+      expect(code).toBe(
+        'float _tv1;\n{\n  float q;\n  q = 2.0;\n  _tv1 = q;\n}\nreturn _tv1 + 1.0;'
       );
+    });
+
+    it('a Block in a conditional arm still fails closed', () => {
+      const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
+      expect(() =>
+        glsl.compile(
+          ce.box(['If', ['Greater', 'x', 0], blk, 1] as any),
+          NO_FOLD
+        )
+      ).toThrow(/multi-statement construct.*sub-expression/);
     });
   });
 
@@ -774,9 +785,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
   it('still fails closed on a provably complex operand', () => {
     expect(() =>
       glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
-    ).toThrow(
-      /Mod: the target's lowering for this head is real-only/
-    );
+    ).toThrow(/Mod: the target's lowering for this head is real-only/);
     // `Mod` declares the finite real carrier (Contract B), so a non-real
     // LITERAL operand is already an `incompatible-type` error at boxing and
     // compile refuses the invalid expression — fail-closed at an earlier
@@ -789,9 +798,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     // replaced with operand recursion.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
-    ).toThrow(
-      /Mod: the target's lowering for this head is real-only/
-    );
+    ).toThrow(/Mod: the target's lowering for this head is real-only/);
   });
 });
 
@@ -844,13 +851,9 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
     // The item-144 pins are unchanged.
     expect(() =>
       glsl.compile(e.box(['Mod', ['Sqrt', -2], 1]), NO_FOLD)
-    ).toThrow(
-      /Mod: the target's lowering for this head is real-only/
-    );
+    ).toThrow(/Mod: the target's lowering for this head is real-only/);
     expect(() =>
       glsl.compile(e.box(['Mod', ['Multiply', 'ImaginaryUnit', 'x'], 1]))
-    ).toThrow(
-      /Mod: the target's lowering for this head is real-only/
-    );
+    ).toThrow(/Mod: the target's lowering for this head is real-only/);
   });
 });

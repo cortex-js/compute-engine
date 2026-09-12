@@ -462,14 +462,17 @@ function gpuAssertReturnPlacement(
  * (`<variable> = <code>;`). Neither position accepts a statement, and neither
  * GLSL nor WGSL has an expression-level block or immediately-invoked function
  * to wrap one in — so a body that lowers to a statement sequence (a `Block`
- * with more than one statement, a loop-form `Sum`/`Product`/`Loop`) or to a
- * bare `return` has no honest emission here. Before this gate both routes
- * spliced the statements in verbatim, producing source no driver accepts
- * (`gl_FragColor = float s;\ns = x;\nreturn return s;;`).
+ * that returns early, a loop-form `Sum`/`Product`/`Loop` with no sink to hoist
+ * into) or to a bare `return` has no honest emission here. Before this gate
+ * both routes spliced the statements in verbatim, producing source no driver
+ * accepts (`gl_FragColor = float s;\ns = x;\nreturn return s;;`).
  *
  * The shapes that DO reduce to an expression are untouched: a single-statement
  * `Block` already unwraps to its expression in the base compiler, so it never
- * reaches this check with a newline.
+ * reaches this check with a newline. On the `compileShader()` route, whose
+ * body statements carry a hoist sink, a multi-statement `Block` whose value is
+ * an expression and a loop-form `Sum` hoist their statements ahead of the
+ * assignment and answer a temporary, so they never reach this check either.
  *
  * A token scan on the source about to be emitted, deliberately — the same
  * technique (and the same two signals) as `gpuAssertReturnPlacement` and
@@ -5083,6 +5086,15 @@ function compileGPUSumProduct(
           continue;
         }
         // The sink is non-empty only when `canHoist(target)` held above.
+        //
+        // A term whose value is already a bare name — a block term stores its
+        // value in a temporary the hoisted statements declare (`valueBlock`)
+        // — is read through that name; binding it again would only copy it.
+        if (/^[A-Za-z_$][\w$]*$/.test(code)) {
+          BaseCompiler.hoistStatement(target, ...termSink.stmts);
+          terms.push(`(${code})`);
+          continue;
+        }
         const tv = BaseCompiler.tempVar(target);
         const scalar = isWGSL ? 'f32' : 'float';
         const decl = isWGSL ? `var ${tv}: ${scalar}` : `${scalar} ${tv}`;
@@ -6971,7 +6983,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const indexDecl = isWGSL
       ? `var ${index}: ${intType}`
       : `${intType} ${index}`;
-    return `for (${indexDecl} = ${lower}; ${index} <= ${upper}; ${index}++) {\n  ${bodyCode};\n}`;
+    // Every line of the body arrives terminated by the statement-list
+    // joiner (`compileStatementList`), so the body is only indented here.
+    const body = bodyCode
+      .split('\n')
+      .map((line) => `  ${line}`)
+      .join('\n');
+    return `for (${indexDecl} = ${lower}; ${index} <= ${upper}; ${index}++) {\n${body}\n}`;
   },
 
   // Statistical functions
@@ -10476,7 +10494,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               'Assign',
               value,
               (v) =>
-                v === value ? code : BaseCompiler.compileValueOperand(v, current),
+                v === value
+                  ? code
+                  : BaseCompiler.compileValueOperand(v, current),
               current
             )
           : code,
@@ -10498,11 +10518,53 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       },
       // A shader has no expression-level loop or IIFE, so the multi-statement
       // block forms (loop-form Sum/Product, Loop, Block) are only valid at
-      // statement position. Flag it so the base compiler fails closed (D6)
-      // rather than splice a bare block into a sub-expression. Gated to the pure
-      // GPU languages by language id.
+      // statement position. Flag it so the base compiler hoists them where a
+      // statement sink is available and fails closed (D6) elsewhere, rather
+      // than splice a bare block into a sub-expression. Gated to the pure GPU
+      // languages by language id.
       bareStatementBlocks:
         this.languageId === 'glsl' || this.languageId === 'wgsl',
+      // A multi-statement `Block` used as a VALUE — a `with` clause as the
+      // term of a `Sum`, or as an operand of an addition — becomes one
+      // compound statement in the enclosing sink: the block's locals are
+      // declared inside `{ … }`, so each unrolled term of a `Sum` gets its own
+      // `a` and two `with a = …` clauses can share a function body, and the
+      // value is stored in a temporary declared ahead of the braces (the
+      // temporary must outlive them). The temporary needs a static shader
+      // type; a value with none declines, as does a conditional arm (moving
+      // the statements out of the arm would run them unconditionally — see
+      // `compileGPUConditionalArm`), and the operand position then fails
+      // closed as before.
+      // A lazily-evaluated operand — the right side of `&&`/`||`, a
+      // `Coalesce` fallback — is compiled under the same guard as a
+      // conditional arm: a statement hoisted out of it would run
+      // unconditionally, ahead of the operand that decides whether it runs.
+      lazyOperand: (head, compiled, current) =>
+        compileGPUConditionalArm(head, compiled, current),
+      valueBlock: (valueNode, stmts, valueCode, current) => {
+        if (
+          !BaseCompiler.canHoist(current) ||
+          conditionalGPUSinks.has(current.hoist!)
+        )
+          return undefined;
+        const isWGSL = current.language === 'wgsl';
+        const type = gpuTypeOfValue(valueNode, isWGSL);
+        if (type === undefined) return undefined;
+        const tv = BaseCompiler.tempVar(current);
+        const body = BaseCompiler.joinShaderStatements([
+          ...stmts,
+          `${tv} = ${valueCode}`,
+        ])
+          .split('\n')
+          .map((line) => `  ${line}`)
+          .join('\n');
+        BaseCompiler.hoistStatement(
+          current,
+          isWGSL ? `var ${tv}: ${type};` : `${type} ${tv};`,
+          `{\n${body}\n}`
+        );
+        return tv;
+      },
       // A free symbol emitted as a bare identifier must not be a reserved word
       // of the shader language, or the generated shader fails to compile. Fail
       // closed (D6) with a clear diagnostic naming the offending identifier.
@@ -10613,7 +10675,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               `block must evaluate to a typed value.`
           );
         stmts[last] = `return ${stmts[last]}`;
-        return stmts.join(';\n') + ';';
+        // A statement a list member hoisted (a loop, a compound block) is
+        // already terminated; the joiner adds `;` only where one is missing.
+        return BaseCompiler.joinShaderStatements(stmts);
       },
       // Per-compilation naming state for generated temporaries (the loop
       // accumulator of `compileGPUSumProduct`). Numbered per compilation like

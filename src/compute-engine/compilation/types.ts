@@ -722,7 +722,62 @@ export interface CompileTarget<Expr = unknown> {
   hoist?: {
     stmts: string[];
     boundVars: ReadonlySet<string> | undefined;
+    /**
+     * The expression compiled AT the statement position that owns this sink
+     * (a user function's body), when the owner records it. A multi-statement
+     * `Block` that is this very expression is the position's own statement
+     * list and emits in place, `return`-prefixed. A `Block` anywhere else is
+     * a value operand and lowers through `valueBlock` instead.
+     */
+    root?: Expr;
   };
+
+  /**
+   * Lower a multi-statement `Block` that is a VALUE OPERAND on a
+   * `bareStatementBlocks` target — a `with` clause as a `Sum` term, or as
+   * one side of an addition.
+   *
+   * Neither shader language has an expression-level block, so the block's
+   * statements go to the enclosing hoist sink as ONE compound statement
+   * (`{ … }`, which scopes the block's locals so two blocks declaring the
+   * same name can sit in one body) that ends by storing the block's value in
+   * a temporary declared ahead of it; the temporary's name is returned and
+   * stands in for the block. `stmts` are the compiled non-final statements
+   * without terminators, `valueCode` the compiled final statement, and
+   * `valueNode` that statement's expression, so the target can type the
+   * temporary. Return `undefined` when this position cannot receive
+   * statements (a conditional arm) or the value has no static type; the
+   * block then emits as before and the operand position fails closed.
+   *
+   * The statements run when the enclosing statement runs, ahead of the rest
+   * of that statement — the same contract a hoisted loop-form `Sum` has.
+   */
+  valueBlock?: (
+    valueNode: Expr,
+    stmts: ReadonlyArray<string>,
+    valueCode: string,
+    target: CompileTarget<Expr>
+  ) => string | undefined;
+
+  /**
+   * Compile a LAZILY-EVALUATED operand — an operand after the first of a
+   * short-circuiting `And`/`Or`, a fallback of `Coalesce`, an arm of a
+   * conditional (`lazyOperandRegions`) — on a `bareStatementBlocks` target.
+   *
+   * Such an operand runs only when the operands before it do not decide the
+   * result, but a statement hoisted out of it (a loop-form `Sum`, a block
+   * used as a value, a temporary bound to an impure operand) would land ahead
+   * of the whole construct and run unconditionally — a write to a local, or
+   * a random draw, would then happen when the interpreter skips it. The hook
+   * compiles the operand with hoisting detected and refused; the shader
+   * targets implement it with the guard their conditional arms already use.
+   * `head` names the enclosing operator for the diagnostic.
+   */
+  lazyOperand?: (
+    head: string,
+    compiled: () => TargetSource,
+    target: CompileTarget<Expr>
+  ) => TargetSource;
 
   /**
    * When set, a cap on the trip count of emitted `Sum`/`Product` loops: a

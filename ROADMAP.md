@@ -397,6 +397,27 @@ their expected effect on the corpus.
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
 
+### `Abs` over a union-typed point parameter no longer selects the norm at a concrete point call (OPEN, ruling — found 2026-09-11 by the block-term round)
+
+`test/compute-engine/tycho-item-253-abs-union-point-param.test.ts`, "a union
+that admits a flat numeric list keeps the element-wise lowering", fails at
+HEAD: with `k: (list<number> | tuple<number, number>) -> number` and
+`k(P) := |P - (4, 0)|`, the JavaScript compilation of `k((x, y))` emits
+`_SYS.absShape(_SYS.bcast(…))` in the helper where it used to specialize the
+concrete point call and emit `_SYS.norm(`. The run-time value is unchanged
+(the test's `run` assertion is not reached). The test passed at `e93632df`
+(2026-09-10) and fails from `70d0cbaf` on ("enhance shape analysis and point
+handling in JavaScript", 2026-09-11, released in 0.128.8), an eleven-line
+change to `base-compiler.ts` that touched no test of item 253. That change
+is deliberate — its comment says one atomic point does not prove scalar
+coordinates, and rebuilding it as `tuple<number, …>` would erase component
+broadcasting — so the open question is a ruling: either the test's
+expectation is stale and the helper is meant to keep the shape dispatch for
+a point of free symbols, or a call whose coordinates are plain `number`
+symbols should still count as proven scalar and select the norm. Not
+touched by the block-term round: the shader-side statement sinks do not
+reach the JavaScript target.
+
 ### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
 
 - **Repeated range-gather reductions are shared (implemented).** `Sum` and
@@ -490,16 +511,6 @@ calculations; compilation outcomes are unchanged. Tycho has retired item 275.
 The remaining 165 broadcast occurrences include required collection work and
 fallback branches. They are not a count of redundant runtime operations.
 
-- **Support block-valued shader reduction terms.** The noise kernel in
-  `art/hyvhlz4chj` uses a `Sum` term with local declarations and assignments.
-  These blocks remain unsupported as shader value operands: compilation now
-  declines explicitly instead of reporting success with invalid GLSL/WGSL.
-  Supporting them requires a value-producing statement representation that
-  preserves local scope, evaluation order and return behavior. The bounded
-  witness and supported nested-reduction controls are in
-  `test/compute-engine/compile-gpu-audit-validity.test.ts`. Acceptance requires
-  compiling and linking the complete noise shader; removing the diagnostic
-  alone does not add support.
 - **Reuse invariant calculations across retained helper calls.** The
   `exoplanet-transit` kernel calls `S(radius, time)` at forty radii, and each
   call computes the same `m(time)` through a cosine and square root. Counting

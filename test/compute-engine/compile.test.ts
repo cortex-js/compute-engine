@@ -4726,11 +4726,15 @@ describe('a GPU user-function body with an early `Return`', () => {
   });
 
   it('a `Return` in a conditional BRANCH fails closed', () => {
+    // Two gates cover this shape and either may fire first: the value-operand
+    // gate (`compileValueOperand`), which sees the arm's bare `return`
+    // statement, and the emitted-source placement scan
+    // (`gpuAssertReturnPlacement`).
     for (const target of gpuTargets())
       expect(() =>
         target.compile(engineWithA(RETURN_IN_BRANCH).box(['a', 'u']))
       ).toThrow(
-        /an early `Return` here has no (GLSL|WGSL) lowering .* requires an expression/s
+        /an early `Return` here has no (GLSL|WGSL) lowering .* requires an expression|Return: a multi-statement construct .* cannot be used as a sub-expression/s
       );
   });
 
@@ -4885,12 +4889,38 @@ describe('the expression-only GPU routes decline statement bodies', () => {
       );
   });
 
-  it('compileShader() declines the same statement bodies', () => {
-    for (const body of [DECLARE_ASSIGN_RETURN, ASSIGN_THEN_VALUE, BARE_RETURN])
+  it('compileShader() declines the statement bodies that carry a `Return`', () => {
+    for (const body of [DECLARE_ASSIGN_RETURN, BARE_RETURN])
       for (const target of gpuTargets())
         expect(() => shaderFor(target, body, engineWithX())).toThrow(
           /compileShader\(\) body statement "(fragColor|output\.fragColor)": this route emits a single (GLSL|WGSL) EXPRESSION/
         );
+  });
+
+  it('compileShader() hoists a value block ahead of the assignment', () => {
+    // A body statement is a statement position with a hoist sink, so a block
+    // whose value is an expression lowers to a compound statement there (the
+    // block's locals scoped by the braces) and the assignment reads the
+    // temporary. `compileToSource()` has no sink and still declines above.
+    //
+    // The local is DECLARED here. `ASSIGN_THEN_VALUE` assigns `s`, a name the
+    // library scope pre-declares, so it is a free symbol on the shader
+    // targets — spelled bare for the caller to declare, like every free
+    // symbol — and no `float s;` is synthesized for it.
+    const body: MathJsonExpression = [
+      'Block',
+      ['Declare', 'q', 'number'],
+      ['Assign', 'q', 'x'],
+      'q',
+    ];
+    for (const target of gpuTargets()) {
+      const shader = shaderFor(target, body, engineWithX());
+      expect(shader).toMatch(
+        target instanceof WGSLTarget
+          ? /var _tv1: f32;\n\s*\{\n\s*var q: f32;\n\s*q = input\.x;\n\s*_tv1 = q;\n\s*\}\n\s*output\.fragColor = _tv1;/
+          : /float _tv1;\n\s*\{\n\s*float q;\n\s*q = x;\n\s*_tv1 = q;\n\s*\}\n\s*fragColor = _tv1;/
+      );
+    }
   });
 
   it('expression bodies are untouched on both routes', () => {

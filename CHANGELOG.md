@@ -2,10 +2,26 @@
 
 ### Resolved Issues
 
-- **Reject unsupported statement-valued shader reduction terms.** GLSL and WGSL
-  sums and products now report a compilation failure when a term emits
-  statements where a value is required, instead of returning invalid shader
-  source behind a success flag. Supported nested reductions remain available.
+- **Support block-valued terms and operands on the shader targets.** A
+  multi-statement block used as a value — a `with` clause as the term of a `Sum`
+  or `Product`, or as one operand of an addition — now compiles on GLSL and
+  WGSL. The block becomes one compound statement `{ … }` in the enclosing
+  statement position, which scopes the block's locals and stores the value in a
+  temporary the surrounding expression reads. Each unrolled term of a `Sum`
+  declares its own copy of the locals, and two blocks in one function body can
+  share a local name. A block in a conditional arm, or one that returns early,
+  still declines. The Tycho noise kernel (`art/hyvhlz4chj`), whose fractional
+  Brownian motion term binds three locals from the loop index, compiles and
+  links on both targets.
+- **Fixed a silent shader miscompile of a reduction assigned to a block local.**
+  On GLSL and WGSL a loop-form `Sum` or `Product` on the right of a block-local
+  assignment (`a := Σ…` inside a function body or a `Loop` body) had nowhere to
+  place its loop and spliced its whole statement block into the assignment
+  (`a = float _tv1 = 0.0; …`), reported as a success. Every statement of a block
+  now has a statement sink of its own, so the loop lands ahead of the assignment
+  inside the block's scope. The same sink makes a reduction as the final
+  statement of a function body and a nested reduction inside a `Loop` body
+  compile.
 - **Keep visible color results in shader vector storage.** Helpers returning a
   color constructor or conversion retain three-channel return types when an
   intermediate local's type still permits broadcasting.

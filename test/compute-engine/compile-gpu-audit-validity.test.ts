@@ -6,7 +6,7 @@ const source = (r: { code?: string; preamble?: string }) =>
 
 describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
   test.each(['Sum', 'Product'])(
-    '%s rejects statement bodies and keeps scalar-only blocks',
+    '%s lowers a block term to a scoped compound statement and rejects a Return term',
     (head) => {
       for (const upper of [3, 153, 'N']) {
         for (const cse of [false, true]) {
@@ -20,15 +20,35 @@ describe.each(['glsl', 'wgsl'] as const)('%s emitted shader validity', (to) => {
             const expr = ce.expr([head, body, ['Limits', 'j', 1, upper]]);
             expect(expr.isValid).toBe(true);
             const r = compile(expr, { to, constantFold: false, cse });
-            if (
-              Array.isArray(body) &&
-              body.length === 2 &&
-              body[0] === 'Block'
-            ) {
-              expect(r.success).toBe(true);
-            } else {
+            if (Array.isArray(body) && body[0] === 'Return') {
               expect(r.success).toBe(false);
               expect(r.error).toMatch(/cannot be used as a sub-expression/);
+              continue;
+            }
+            expect(r.success).toBe(true);
+            const code = source(r);
+            // No statement spliced into a value position, no `return` in a
+            // loop body (the shape the 0.128.9 corpus audit found).
+            expect(code).not.toMatch(
+              /[+*]?=\s*(?:return\b|(?:float|var|let)\s+[A-Za-z_]\w*\s*[;=:])/
+            );
+            expect(code).not.toContain(';;');
+            if (Array.isArray(body) && body.length > 2) {
+              // The block's local is declared inside braces of its own, once
+              // per unrolled term or once in the loop body.
+              const decl = to === 'wgsl' ? 'var a: f32;' : 'float a;';
+              const n = upper === 3 ? 3 : 1;
+              expect(
+                code.split(`{\n  ${decl}`).length -
+                  1 +
+                  code.split(`{\n    ${decl}`).length -
+                  1
+              ).toBe(n);
+            }
+            if (upper !== 'N') {
+              // JavaScript agrees with the interpreter.
+              const js = compile(expr);
+              expect(js.run!({})).toBe(expr.N().re);
             }
           }
         }

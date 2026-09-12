@@ -1770,10 +1770,14 @@ export class BaseCompiler {
    * multi-statement constructs are bare statement sequences
    * (`target.bareStatementBlocks`, i.e. GLSL/WGSL), it **fails closed** (D6)
    * when the operand compiled to such a block. A shader has no expression-level
-   * loop/IIFE, so a loop-form `Sum`/`Product`/`Loop`/`Block` cannot be a
-   * sub-expression; splicing it would emit invalid source (e.g.
-   * `return _acc; + 1.0`). The offending head is named in the error, which the
-   * engine-level `compile()` surfaces via `success: false` + `unsupported`.
+   * loop/IIFE, so a loop-form `Sum`/`Product`, a `Loop` or a multi-statement
+   * `Block` cannot be a sub-expression; splicing it would emit invalid source
+   * (e.g. `return _acc; + 1.0`). Where the enclosing position has a statement
+   * sink (`CompileTarget.hoist`) these lowerings move their statements there
+   * and answer a plain expression, so the gate fires only where no sink is
+   * available: a conditional arm, or an expression-only route. The offending
+   * head is named in the error, which the engine-level `compile()` surfaces
+   * via `success: false` + `unsupported`.
    */
   /**
    * Pick the target's absence axis (§3.F) for a position of type `t` by its
@@ -1826,7 +1830,9 @@ export class BaseCompiler {
       throw new Error(
         `${head}: a multi-statement construct (loop-form Sum/Product, Loop, or Block) ` +
           `cannot be used as a sub-expression in "${target.language ?? 'this'}" ` +
-          `— it is only valid as a top-level function body. Fail closed (D6).`
+          `here — this position has no statement sink to hoist its statements ` +
+          `into (a conditional arm, or an expression-only route), so it is ` +
+          `only valid as a top-level function body. Fail closed (D6).`
       );
     }
     return code;
@@ -1875,9 +1881,21 @@ export class BaseCompiler {
   static compileStatementBody(
     expr: Expression | undefined,
     target: CompileTarget<Expression>,
-    prec = 0
+    prec = 0,
+    root = false
   ): { stmts: string[]; code: string } {
-    const sink = { stmts: [] as string[], boundVars: target.boundVars };
+    // `root` records `expr` as the statement list this position OWNS: a
+    // multi-statement `Block` that is `expr` itself emits in place as the
+    // body's statements, while a `Block` nested anywhere inside `expr` is a
+    // value operand and lowers through the target's `valueBlock` hook. A
+    // position whose value lands on the right of an assignment (a
+    // `compileShader()` body statement) leaves `root` unset, so a `Block`
+    // there also takes the operand lowering.
+    const sink: NonNullable<CompileTarget<Expression>['hoist']> = {
+      stmts: [],
+      boundVars: target.boundVars,
+    };
+    if (root && expr !== undefined) sink.root = expr;
     const code = BaseCompiler.compile(expr, { ...target, hoist: sink }, prec);
     return { stmts: sink.stmts, code };
   }
@@ -1892,11 +1910,58 @@ export class BaseCompiler {
     expr: Expression | undefined,
     target: CompileTarget<Expression>
   ): string {
-    const { stmts, code } = BaseCompiler.compileStatementBody(expr, target);
+    const { stmts, code } = BaseCompiler.compileStatementBody(
+      expr,
+      target,
+      0,
+      true
+    );
     if (stmts.length === 0) return code;
     return [...stmts, code.includes('\n') ? code : `return ${code};`].join(
       '\n'
     );
+  }
+
+  /**
+   * Join statement lines for a `bareStatementBlocks` target, terminating each
+   * with `;` unless it already ends with one or with a closing brace — a
+   * hoisted statement (`float t = 0.0;`, a `for (…) { … }` loop, a compound
+   * `{ … }` block) arrives terminated, while a statement this compiler emits
+   * (`float a`, `a = x`, `return v`) does not. A blind `join(';\n')` would
+   * leave `;;` and `};` behind, which both languages accept but neither
+   * needs.
+   */
+  static joinShaderStatements(lines: ReadonlyArray<string>): string {
+    return lines
+      .map((line) => (/[;}]\s*$/.test(line) ? line : `${line};`))
+      .join('\n');
+  }
+
+  /**
+   * Compile one statement of a statement list on a `bareStatementBlocks`
+   * target with a hoist sink of its own, and return the statements it
+   * hoisted followed by its own emission. The sink's `boundVars` is the
+   * statement list's, so a lowering inside the statement that needs
+   * statements — a loop-form `Sum` on the right of an assignment, a block
+   * used as an operand, a CSE temporary — hoists them to just ahead of the
+   * statement, inside the list's own scope. Without a sink such a lowering
+   * had nowhere to put its statements and spliced its bare statement block
+   * into the assignment (`a = float _tv1 = 0.0; for (…) …`), reporting
+   * success on source no driver accepts. Hoisted statements are returned
+   * without their terminators so the caller's joiner treats them like its
+   * own lines.
+   *
+   * On every other target the statement compiles under `target` unchanged.
+   */
+  private static compileListStatement(
+    target: CompileTarget<Expression>,
+    compileWith: (t: CompileTarget<Expression>) => string[]
+  ): string[] {
+    if (!target.bareStatementBlocks) return compileWith(target);
+    const sink = { stmts: [] as string[], boundVars: target.boundVars };
+    const lines = compileWith({ ...target, hoist: sink });
+    if (sink.stmts.length === 0) return lines;
+    return [...sink.stmts.map((s) => s.replace(/;\s*$/, '')), ...lines];
   }
 
   /**
@@ -11125,8 +11190,26 @@ export class BaseCompiler {
     if (isFunction(expr, 'Block'))
       return BaseCompiler.compileBlock(expr.ops, target, expr, false);
     const stmts = BaseCompiler.desugarPatternAssign(expr, target);
-    if (stmts === null) return BaseCompiler.compile(expr, target);
+    // On a shader target the lone statement gets a statement sink of its own
+    // (see `compileListStatement`): a loop-form `Sum` on the right of the
+    // assignment has nowhere else to put its loop.
+    if (stmts === null)
+      return target.bareStatementBlocks
+        ? BaseCompiler.joinShaderStatements(
+            BaseCompiler.compileListStatement(target, (t) => [
+              BaseCompiler.compile(expr, t),
+            ])
+          )
+        : BaseCompiler.compile(expr, target);
     const stmtTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+    if (target.bareStatementBlocks)
+      return BaseCompiler.joinShaderStatements(
+        stmts.flatMap((s) =>
+          BaseCompiler.compileListStatement(stmtTarget, (t) => [
+            BaseCompiler.compile(s, t),
+          ])
+        )
+      );
     return stmts
       .map((s) => BaseCompiler.compile(s, stmtTarget))
       .join(`;${target.ws('\n')}`);
@@ -11468,6 +11551,19 @@ export class BaseCompiler {
       // parent — `Multiply(Block(Add(t, 1)), x)` emitted `x * t + 1`, read as
       // `(x * t) + 1`. Handing `prec` down makes the statement's own emission
       // parenthesize itself exactly as an unbracketed operand would.
+      //
+      // In EFFECT position on a shader target (a `Loop` body) the lone
+      // statement still gets a statement sink of its own, exactly as a
+      // member of a longer list does: a loop-form `Sum` on the right of the
+      // assignment has nowhere else to put its loop.
+      if (!valueUsed && target.bareStatementBlocks)
+        return BaseCompiler.joinShaderStatements(
+          BaseCompiler.compileListStatement(target, (t) => [
+            BaseCompiler.withCseScope(node, -1, t, () =>
+              BaseCompiler.compileOp(args[0], -1, t, prec, args[0])
+            ),
+          ])
+        );
       return BaseCompiler.withCseScope(node, -1, target, () =>
         BaseCompiler.compileOp(args[0], -1, target, prec, args[0])
       );
@@ -11680,113 +11776,118 @@ export class BaseCompiler {
       const stmts = args.filter((a) => !isSymbol(a, 'Nothing'));
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
         stmts
-          .flatMap((arg, i) => {
-            // Bring this statement's own function-valued binding into scope
-            // before compiling it (see `localFunctions` above).
-            BaseCompiler.noteLocalFunction(arg, localFunctions);
-            // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
-            // else has no value — the interpreter answers `Nothing`, which is
-            // the erasure marker and deliberately has no lowering — so
-            // `compileExpr`'s conditional, which needs all three operands,
-            // threw `If: wrong number of arguments` on it. That closed every
-            // function body containing a plain guard statement (the
-            // `parseNumber` scanner in the Epsil examples: `if cs[j] == "-"
-            // { sign = -1 … }`), even though the statement's value is
-            // discarded here, which is exactly the position where an
-            // else-less `if` IS expressible. Emit the statement form the
-            // loop-body dispatcher already uses (`if (c) { … }`, no else).
-            //
-            // The LAST statement of a value-carrying block is NOT a statement
-            // position — its value is the block's — so an else-less `If`
-            // there keeps failing closed (D6).
-            //
-            // PLAIN JavaScript ONLY. Every other target stays fail-closed, and
-            // each for its own verified reason — the admission is deliberately
-            // the narrowest one, since admitting is the direction that
-            // miscompiles:
-            //
-            //  - PYTHON. `compilePythonStatements` does statement-form an
-            //    else-less `If` correctly, but it is reached ONLY from a loop
-            //    body: a plain function-body `Block` reaches THIS routine,
-            //    whose emission is C-like and a syntax error in Python. Routing
-            //    to the Python emission from here needs a target hook (the
-            //    `block` hook receives already-COMPILED statements), which is a
-            //    separate change. Until then the shape declines with `If: wrong
-            //    number of arguments` and falls back to the interpreter.
-            //  - INTERVAL JavaScript. `compileLoopBody` DOES emit syntactically
-            //    valid code here, but not correct code: its
-            //    `scalarConditionTarget` unwraps only a `_IA.point(…)` spelling
-            //    (the plain-number loop counter it was written for), so a
-            //    condition over a free variable or an interval-valued local
-            //    emits `0 < _.x` against an `{lo, hi}` OBJECT — always `false`.
-            //    Verified: the else-LESS shape answers `[1,1]` for `x = [3,3]`
-            //    where the else-ful `_IA.piecewise` lowering answers the
-            //    correct `[-1,-1]`. (The same defect already affects an
-            //    else-less `If` inside an interval LOOP body — pre-existing,
-            //    separate, and not to be widened here.)
-            //  - The GPU targets: their own statement model, plus the above.
-            if (
-              isFunction(arg, 'If') &&
-              arg.nops === 2 &&
-              !(valueUsed && i === stmts.length - 1) &&
-              (target.language === undefined ||
-                target.language === 'javascript')
-            )
-              return [BaseCompiler.compileLoopBody(arg, localTarget)];
-            // For Declare, pass inferred type hint to the target hook
-            if (
-              isFunction(arg, 'Declare') &&
-              isSymbol(arg.ops[0]) &&
-              target.declare
-            ) {
-              const name = arg.ops[0].symbol;
-              const decl = target.declare(name, typeHints[name]);
-              // A `Declare` may carry an initial value (`Declare(sym, type, value)`
-              // or a `value` key in a trailing attributes dictionary). Emit it as a
-              // separate assignment statement, mirroring how a hoisted
-              // `Declare`+`Assign` pair compiles. (Two statements — not a combined
-              // initializer — so the declaration stays a plain `let`/`float`, which
-              // is what the subsequent assignment requires.)
-              const value = BaseCompiler.declareValueOperand(arg.ops);
-              if (value !== undefined) {
-                // `-1` is the whole-node region sentinel, so a value that is
-                // NOT one of `arg`'s operands (it may come from a trailing
-                // attributes dictionary) compiles plainly.
-                const valueIndex = arg.ops.indexOf(value);
-                const valueCode =
-                  valueIndex < 0
-                    ? BaseCompiler.compile(value, localTarget)
-                    : BaseCompiler.compileOp(
-                        arg,
-                        valueIndex,
-                        localTarget,
-                        0,
-                        value
-                      );
-                const stored =
-                  localTarget.assignmentValue?.(value, valueCode, localTarget) ??
-                  valueCode;
-                return [decl, `${name} = ${stored}`];
+          .flatMap((arg, i) =>
+            BaseCompiler.compileListStatement(localTarget, (stmtTarget) => {
+              // Bring this statement's own function-valued binding into scope
+              // before compiling it (see `localFunctions` above).
+              BaseCompiler.noteLocalFunction(arg, localFunctions);
+              // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
+              // else has no value — the interpreter answers `Nothing`, which is
+              // the erasure marker and deliberately has no lowering — so
+              // `compileExpr`'s conditional, which needs all three operands,
+              // threw `If: wrong number of arguments` on it. That closed every
+              // function body containing a plain guard statement (the
+              // `parseNumber` scanner in the Epsil examples: `if cs[j] == "-"
+              // { sign = -1 … }`), even though the statement's value is
+              // discarded here, which is exactly the position where an
+              // else-less `if` IS expressible. Emit the statement form the
+              // loop-body dispatcher already uses (`if (c) { … }`, no else).
+              //
+              // The LAST statement of a value-carrying block is NOT a statement
+              // position — its value is the block's — so an else-less `If`
+              // there keeps failing closed (D6).
+              //
+              // PLAIN JavaScript ONLY. Every other target stays fail-closed, and
+              // each for its own verified reason — the admission is deliberately
+              // the narrowest one, since admitting is the direction that
+              // miscompiles:
+              //
+              //  - PYTHON. `compilePythonStatements` does statement-form an
+              //    else-less `If` correctly, but it is reached ONLY from a loop
+              //    body: a plain function-body `Block` reaches THIS routine,
+              //    whose emission is C-like and a syntax error in Python. Routing
+              //    to the Python emission from here needs a target hook (the
+              //    `block` hook receives already-COMPILED statements), which is a
+              //    separate change. Until then the shape declines with `If: wrong
+              //    number of arguments` and falls back to the interpreter.
+              //  - INTERVAL JavaScript. `compileLoopBody` DOES emit syntactically
+              //    valid code here, but not correct code: its
+              //    `scalarConditionTarget` unwraps only a `_IA.point(…)` spelling
+              //    (the plain-number loop counter it was written for), so a
+              //    condition over a free variable or an interval-valued local
+              //    emits `0 < _.x` against an `{lo, hi}` OBJECT — always `false`.
+              //    Verified: the else-LESS shape answers `[1,1]` for `x = [3,3]`
+              //    where the else-ful `_IA.piecewise` lowering answers the
+              //    correct `[-1,-1]`. (The same defect already affects an
+              //    else-less `If` inside an interval LOOP body — pre-existing,
+              //    separate, and not to be widened here.)
+              //  - The GPU targets: their own statement model, plus the above.
+              if (
+                isFunction(arg, 'If') &&
+                arg.nops === 2 &&
+                !(valueUsed && i === stmts.length - 1) &&
+                (target.language === undefined ||
+                  target.language === 'javascript')
+              )
+                return [BaseCompiler.compileLoopBody(arg, stmtTarget)];
+              // For Declare, pass inferred type hint to the target hook
+              if (
+                isFunction(arg, 'Declare') &&
+                isSymbol(arg.ops[0]) &&
+                target.declare
+              ) {
+                const name = arg.ops[0].symbol;
+                const decl = target.declare(name, typeHints[name]);
+                // A `Declare` may carry an initial value (`Declare(sym, type, value)`
+                // or a `value` key in a trailing attributes dictionary). Emit it as a
+                // separate assignment statement, mirroring how a hoisted
+                // `Declare`+`Assign` pair compiles. (Two statements — not a combined
+                // initializer — so the declaration stays a plain `let`/`float`, which
+                // is what the subsequent assignment requires.)
+                const value = BaseCompiler.declareValueOperand(arg.ops);
+                if (value !== undefined) {
+                  // `-1` is the whole-node region sentinel, so a value that is
+                  // NOT one of `arg`'s operands (it may come from a trailing
+                  // attributes dictionary) compiles plainly.
+                  const valueIndex = arg.ops.indexOf(value);
+                  const valueCode =
+                    valueIndex < 0
+                      ? BaseCompiler.compile(value, stmtTarget)
+                      : BaseCompiler.compileOp(
+                          arg,
+                          valueIndex,
+                          stmtTarget,
+                          0,
+                          value
+                        );
+                  const stored =
+                    stmtTarget.assignmentValue?.(
+                      value,
+                      valueCode,
+                      stmtTarget
+                    ) ?? valueCode;
+                  return [decl, `${name} = ${stored}`];
+                }
+                return [decl];
               }
-              return [decl];
-            }
-            // An EMPTY block in effect position — not the last statement,
-            // or any statement of a list whose own value is discarded — is
-            // an empty statement with nothing to emit. (The last statement of
-            // a value-carrying list is the list's value; an empty block there
-            // declines through `compileOp`, since `Nothing` has no compiled
-            // representation.)
-            if (
-              isFunction(arg, 'Block') &&
-              arg.nops === 0 &&
-              (!valueUsed || i < stmts.length - 1)
-            )
-              return [];
-            // A bare expression statement is its own bindable region, keyed
-            // `(statement, -1)`; every other statement head reaches its own
-            // value edges from `compileExpr` (Assign RHS, Return value, …).
-            return [BaseCompiler.compileOp(arg, -1, localTarget, 0, arg)];
-          })
+              // An EMPTY block in effect position — not the last statement,
+              // or any statement of a list whose own value is discarded — is
+              // an empty statement with nothing to emit. (The last statement of
+              // a value-carrying list is the list's value; an empty block there
+              // declines through `compileOp`, since `Nothing` has no compiled
+              // representation.)
+              if (
+                isFunction(arg, 'Block') &&
+                arg.nops === 0 &&
+                (!valueUsed || i < stmts.length - 1)
+              )
+                return [];
+              // A bare expression statement is its own bindable region, keyed
+              // `(statement, -1)`; every other statement head reaches its own
+              // value edges from `compileExpr` (Assign RHS, Return value, …).
+              return [BaseCompiler.compileOp(arg, -1, stmtTarget, 0, arg)];
+            })
+          )
           .filter((s) => s !== '')
       );
 
@@ -11812,7 +11913,53 @@ export class BaseCompiler {
       // first iteration. (Reachable on any target whose loop bodies route
       // here — the shader targets — for any multi-statement body,
       // destructuring or not.)
-      if (!valueUsed) return result.join(`;${target.ws('\n')}`);
+      if (!valueUsed)
+        return target.bareStatementBlocks
+          ? BaseCompiler.joinShaderStatements(result)
+          : result.join(`;${target.ws('\n')}`);
+
+      // A multi-statement block that is a VALUE OPERAND on a shader target —
+      // a `with` clause as a `Sum` term, or on one side of an addition — has
+      // no expression form of its own. When the enclosing position can take
+      // statements, the target's `valueBlock` hook moves the block's
+      // statements there as one compound statement that stores the value in
+      // a temporary, and the temporary stands in for the block. The block
+      // that IS the enclosing statement position (`hoist.root`, a function
+      // body) emits in place below; so does a block whose final statement has
+      // no value (a declaration, an assignment, a `Loop`, a `Return`, a
+      // `Break` or `Continue` — checked on the statement and on its emission,
+      // which the `Loop` lowering spells as a `for` statement) or that
+      // returns early, since neither can be stored in a temporary — those
+      // keep the statement-sequence emission, which the operand position then
+      // refuses (`compileValueOperand`, fail closed).
+      if (
+        target.bareStatementBlocks &&
+        target.valueBlock !== undefined &&
+        BaseCompiler.canHoist(target) &&
+        target.hoist!.root !== node
+      ) {
+        const last = stmts[stmts.length - 1];
+        const lastIsStatement =
+          last === undefined ||
+          statementBodyHead(last) !== undefined ||
+          (isFunction(last) &&
+            ['Loop', 'Return', 'Break', 'Continue'].includes(last.operator)) ||
+          /^\s*(?:for|while|if|return|break|continue)\b/.test(
+            result[result.length - 1]
+          );
+        if (
+          !lastIsStatement &&
+          !args.some((a) => BaseCompiler.containsEarlyReturn(a))
+        ) {
+          const hoisted = target.valueBlock(
+            last,
+            result.slice(0, -1),
+            result[result.length - 1],
+            target
+          );
+          if (hoisted !== undefined) return hoisted;
+        }
+      }
 
       if (target.block) return target.block(result);
 
@@ -15399,6 +15546,19 @@ export class BaseCompiler {
     if (!isFunction(e)) return false;
     if (e.operator === 'Return') return true;
     return e.ops.some(BaseCompiler.containsReturn);
+  }
+
+  /**
+   * Whether `e` contains a `Return` that returns from the ENCLOSING function
+   * — one outside any nested function literal. A `Return` inside a nested
+   * `Function` literal returns from that literal, so it does not make a
+   * block that contains the literal an early-returning block.
+   */
+  private static containsEarlyReturn(e: Expression): boolean {
+    if (!isFunction(e)) return false;
+    if (e.operator === 'Return') return true;
+    if (e.operator === 'Function') return false;
+    return e.ops.some(BaseCompiler.containsEarlyReturn);
   }
 
   /**
@@ -23847,8 +24007,23 @@ export class BaseCompiler {
     operand?: Expression
   ): TargetSource {
     const expr = operand ?? BaseCompiler.operandAt(parent, opIndex);
+    // A lazily-evaluated operand (the right side of `And`/`Or`, a `Coalesce`
+    // fallback) must not hoist statements ahead of the construct that may
+    // skip it: the target's `lazyOperand` hook compiles it with hoisting
+    // refused. A conditional arm reaches here through that same guard and is
+    // detected once.
+    const lazy =
+      target.lazyOperand !== undefined &&
+      isFunction(parent) &&
+      lazyOperandRegions(parent).some((site) => site.index === opIndex);
     return BaseCompiler.withCseOperand(parent, opIndex, target, () =>
-      BaseCompiler.compileValueOperand(expr, target, prec)
+      lazy
+        ? target.lazyOperand!(
+            parent!.operator,
+            () => BaseCompiler.compileValueOperand(expr, target, prec),
+            target
+          )
+        : BaseCompiler.compileValueOperand(expr, target, prec)
     );
   }
 
