@@ -2,6 +2,18 @@
 
 ### Resolved Issues
 
+- **The interval target binds small repeated operations.** The
+  common-subexpression harvest admitted a repeated subexpression by its
+  syntax size, a measure of a JavaScript expression's cost: a size-3 `1/n` is
+  one division there and a temporary saves nothing. On the interval target
+  every operation is a library call that allocates its result, so a compile
+  target can now declare its own admission thresholds (`cseMinSize`,
+  `cseMinScore`) and the interval target binds a node of two or three nodes
+  at three occurrences. A Voronoi cell distance from the 0.128.9
+  code-generation audit (record 584) computed `_IA.div(_k1, _.n)` 48 times
+  across its two helper bodies; a five-offset reduction of it now computes the
+  reciprocal once per call and runs 10% faster, with the enclosure unchanged
+  endpoint for endpoint. The JavaScript target keeps its defaults.
 - **A helper's invariant calculations are reused across the calls of a
   repetition site.** A user function called from every term of a `Sum` with
   the same argument at some parameter recomputed, on every call, the parts of

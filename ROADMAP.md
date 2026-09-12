@@ -504,14 +504,6 @@ fallback branches. They are not a count of redundant runtime operations.
   definitions. Extend `define` to accept extra typed parameters whose type is
   the static type of the hoisted value, then lift the `lowering` gate in
   `loopInvariantHoistCandidates` and `ensureUserFunctionVariantEmitted`.
-- **Share frequently repeated small interval expressions.** Voronoi record
-  584 emits `_IA.div(_k2, _.n)` 48 times across its two helper bodies; nine
-  other interval records in that document emit it 28 times each. Investigate
-  target-aware CSE scoring for small interval operations, whose runtime work
-  is larger than their expression-tree size suggests. Keep bindings within
-  the relevant call and branch; do not cache across changing inputs or alter
-  interval enclosures. GLSL record 667 has the analogous repeated reciprocal,
-  but a driver may already eliminate that scalar work.
 - **Avoid constructing point rows only to project their columns.** Records
   683, 694, 721 and 748 in `art/n7uhaaoq1q` construct the same three-point
   list and extract its three coordinates with `.map`. Investigate direct

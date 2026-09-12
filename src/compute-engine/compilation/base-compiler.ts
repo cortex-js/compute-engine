@@ -24096,6 +24096,10 @@ export class BaseCompiler {
       // does — see `CompileTarget.shareSymbolSquares`). Carried on the
       // session so nested harvests of user-function bodies apply it too.
       shareSymbolSquares: target.shareSymbolSquares,
+      // A target's own admission thresholds (`CompileTarget.cseMinSize`,
+      // `cseMinScore`), carried on the session for the same reason.
+      minSize: target.cseMinSize,
+      minScore: target.cseMinScore,
       // PURE user-function applications are admitted at the root too (item 120
       // follow-up): a repeated `f(x+1)` at the root is the same redundant call
       // as one inside a definition body. Admission validates the resolved

@@ -288,6 +288,10 @@ export type CseSession = {
     /** The target's `shareSymbolSquares` setting, carried so a nested
      * harvest of a user-defined function's body applies it too. */
     shareSymbolSquares?: boolean;
+    /** The target's `cseMinSize` / `cseMinScore` thresholds, carried for the
+     * same reason. */
+    minSize?: number;
+    minScore?: number;
   };
 
   /** The emission-time region instance stack, innermost last. */
@@ -912,6 +916,24 @@ export interface CompileTarget<Expr = unknown> {
    * ordinary thresholds on every target.
    */
   shareSymbolSquares?: boolean;
+
+  /**
+   * The common-subexpression harvest's admission thresholds for this target,
+   * replacing the defaults (`CSE_MIN_SIZE`, `CSE_MIN_SCORE` in `cse.ts`): a
+   * repeated subexpression is bound to a temporary when its syntax size is
+   * at least `cseMinSize` nodes and `(occurrences − 1) × size` is at least
+   * `cseMinScore`. The defaults measure the cost of a JavaScript expression,
+   * where a size-3 `1/n` is one division and a temporary saves nothing. A
+   * target that lowers every operation to a library call on an allocated
+   * value — the interval target, where `1/n` is `_IA.div(_k1, _.n)`: a call,
+   * a division with directed rounding at each endpoint, and a new `{lo, hi}`
+   * object — saves that call and allocation at every reuse, so it sets lower
+   * thresholds. (The Tycho code-generation audit of 0.128.9 counted one such
+   * reciprocal 48 times across the two helper bodies of a Voronoi cell
+   * distance, record 584.) Absent means the defaults.
+   */
+  cseMinSize?: number;
+  cseMinScore?: number;
 
   /**
    * The storage hints of this compilation, validated and normalized from the

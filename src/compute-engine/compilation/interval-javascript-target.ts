@@ -3300,6 +3300,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // Bind index-free scalar subexpressions of a `Sum`/`Product` body once
       // per call rather than once per term (see `CompileTarget`).
       hoistScalarInvariants: true,
+      // Every operation on this target is a library call that allocates its
+      // result, so a repeated subexpression of two or three nodes — `1/n`,
+      // `sin(x)`, `n·x` — pays for a temporary where the JavaScript target's
+      // syntax-size thresholds would not bind it (see
+      // `CompileTarget.cseMinSize`): a node of size 2 or 3 is bound at three
+      // occurrences.
+      cseMinSize: 2,
+      cseMinScore: 4,
       // Per-compilation naming state for generated temporaries (see the
       // JavaScript target).
       naming: { counter: 0, usedNames: new Set<string>() },
