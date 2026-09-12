@@ -2,6 +2,20 @@
 
 ### Resolved Issues
 
+- **A helper's invariant calculations are reused across the calls of a
+  repetition site.** A user function called from every term of a `Sum` with
+  the same argument at some parameter recomputed, on every call, the parts of
+  its body that read only that parameter. The JavaScript and interval-js
+  targets now evaluate each such invariant prefix once, before the terms, and
+  call a private variant of the helper that receives the value as an extra
+  parameter; a prefix is an expensive subexpression (a user-function call or
+  a transcendental) that reads a strict subset of the parameters, is pure, and
+  is evaluated on every call. The exoplanet transit kernel of the 0.128.9
+  code-generation audit (`S(r_i, t)` at forty radii, each call recomputing
+  `m(t)`) now runs within 5% of its hand-hoisted form, which had measured 2.6
+  times faster than the emitted code. A hoisted value is bound behind a
+  loop's empty-range guard, an argument that varies with the term or has an
+  effect is never hoisted, and the shader targets are unchanged.
 - **Support block-valued terms and operands on the shader targets.** A
   multi-statement block used as a value — a `with` clause as the term of a `Sum`
   or `Product`, or as one operand of an addition — now compiles on GLSL and

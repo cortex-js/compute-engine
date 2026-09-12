@@ -308,6 +308,17 @@ export type CseSession = {
 /**
  * Target language compilation configuration
  */
+/**
+ * One invariant prefix of a user function's body (see
+ * `CompileTarget.userFunctions.prefixes`): the subexpression `expr`, written
+ * in terms of the function's own parameters, and `params`, the parameters it
+ * reads, in the function's parameter order.
+ */
+export interface InvariantPrefix<Expr> {
+  expr: Expr;
+  params: ReadonlyArray<string>;
+}
+
 export interface CompileTarget<Expr = unknown> {
   /** Get operator representation for the target language */
   operators?: (op: MathJsonSymbol) => [op: string, prec: number] | undefined;
@@ -1427,6 +1438,30 @@ export interface CompileTarget<Expr = unknown> {
     /** Private literals compiled for a particular argument representation. */
     specializations?: Map<string, Expr>;
     specializing?: Set<string>;
+    /**
+     * The INVARIANT PREFIXES of each user function, keyed by the function's
+     * symbol: the subexpressions of its body that read a strict, non-empty
+     * subset of its parameters, that are expensive to evaluate (a call of a
+     * user function, or a transcendental), and that the body evaluates on
+     * every call. A repetition site (an unrolled or looped `Sum`) that calls
+     * the function with the SAME arguments at those parameters on every
+     * repetition evaluates each prefix once, before the repetitions, and
+     * calls a VARIANT of the function that receives the prefix values as
+     * extra parameters. Computed once per function and compilation by
+     * `BaseCompiler.invariantPrefixes`; an empty array records a function
+     * with no prefix.
+     */
+    prefixes?: Map<string, ReadonlyArray<InvariantPrefix<Expr>>>;
+    /**
+     * The `Function` literal each definition in `defs` was emitted from, by
+     * local name. The call-shape specialization emits a REBUILT literal —
+     * the body re-boxed with the parameter types a call proved — under the
+     * function's own name; a variant of that definition
+     * (`BaseCompiler.ensureUserFunctionVariantEmitted`) must be emitted from
+     * the same literal, so its body compiles exactly as the base's did.
+     * Recorded by `BaseCompiler.emitFunctionLiteralDefinition`.
+     */
+    literals?: Map<string, Expr>;
     /**
      * User functions whose call is currently being compiled INLINED — the
      * body beta-reduced at the call site because the target could not emit

@@ -164,6 +164,7 @@ import type {
   ComplexResult,
   CseRegionInstance,
   CseSession,
+  InvariantPrefix,
   NamingContext,
   OperandCompiler,
   TargetSource,
@@ -2757,6 +2758,23 @@ export class BaseCompiler {
    * the guarded head.
    */
   private static readonly _codeOverrides = new Map<Expression, string>();
+
+  /**
+   * The calls of a user function that a repetition site has rewritten to
+   * call the function's INVARIANT-PREFIX VARIANT, keyed by the call node
+   * (`hoistLoopInvariants` installs an entry, `tryCompileUserFunction` reads
+   * it). `prefixes` are the indices into the callee's prefix list
+   * (`invariantPrefixes`) that this site hoists; `values` are the prefix
+   * expressions with the call's arguments substituted for the callee's
+   * parameters, one per index, in the same order. The site binds each value
+   * once before the repetitions and gives its node a code override, so the
+   * call site compiles each value to the binding's name and passes it as an
+   * extra argument.
+   */
+  private static readonly _prefixCallOverrides = new Map<
+    Expression,
+    { prefixes: ReadonlyArray<number>; values: ReadonlyArray<Expression> }
+  >();
 
   /**
    * Is `expr` STATICALLY a non-real number — a value that certainly has a
@@ -7984,7 +8002,7 @@ export class BaseCompiler {
       // remains a possible future feature, not a bug fix.
       const userFn = target.boundVars?.has(h)
         ? undefined
-        : BaseCompiler.tryCompileUserFunction(engine, h, args, target);
+        : BaseCompiler.tryCompileUserFunction(engine, h, args, target, node);
       if (userFn !== undefined) return userFn;
       throw new Error(
         BaseCompiler.noLoweringMessage(
@@ -18372,7 +18390,12 @@ export class BaseCompiler {
     engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** The call node itself, when the caller has it. A repetition site that
+     * hoisted an invariant prefix of the callee out of the repetitions keys
+     * its rewrite on this node (`_prefixCallOverrides`); without it the call
+     * compiles as the ordinary call. */
+    node?: Expression
   ): TargetSource | undefined {
     // Fail closed (D6) BEFORE emission: whether the callee can be emitted at
     // all is irrelevant to whether an emitted call would be sound, and the
@@ -18469,39 +18492,6 @@ export class BaseCompiler {
       );
     }
 
-    // A callee the target cannot emit as a definition — a shader target
-    // given a point-typed parameter it has no static type for, the interval
-    // target given a body with a head it has no lowering for — is compiled
-    // INLINED at this call site when that is sound (`tryInlineUserFunctionCall`);
-    // the definition's own decline is rethrown when it is not.
-    let name: string | undefined;
-    try {
-      name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
-    } catch (e) {
-      // A cancellation (deadline, abort, iteration limit) must propagate;
-      // identified by NAME, never `instanceof` — a plugin bundle re-bundles
-      // the engine, so a `CancellationError` crossing a bundle boundary is
-      // not an instance of the host's class (the `box.ts` convention).
-      if (e instanceof Error && e.name === 'CancellationError') throw e;
-      const inlined = BaseCompiler.tryInlineUserFunctionCall(
-        engine,
-        h,
-        args,
-        target
-      );
-      if (inlined !== undefined) return inlined;
-      throw e;
-    }
-    if (name === undefined) return undefined;
-
-    // A target with its own call-site lowering (the shader targets, which must
-    // check the argument shapes against the statically synthesized signature)
-    // owns the whole call site: none of the JS convention handling below —
-    // complex `{re, im}` coercion, the `_SYS.bcastFn` runtime broadcast — has
-    // an analog there.
-    const lowering = target.userFunctions?.lowering;
-    if (lowering) return lowering.call({ id: h, name, args, target });
-
     // A real-analyzed argument bound to a complex-typed parameter is coerced
     // to the `{ re, im }` convention (the call-boundary face of the Tycho
     // item-60 convention-mismatch class): the body consumes such a parameter
@@ -18535,21 +18525,105 @@ export class BaseCompiler {
     // still hands the call an array, which the interpreter broadcasts. The
     // dispatch applies the closure directly when no argument is an array, so
     // the only cost is one closure on the scalar path.
+    //
+    // No `literal !== undefined` pre-gate: `userFunctionIsGeneric` itself
+    // accepts an absent literal (a multi-clause callee) and can still
+    // answer from the operator/value definition's declared polymorphic
+    // signature. Gating on `literal` here would silently drop that
+    // definition-sourced answer for any literal-less callee, which is
+    // harmless today only because a literal-less function currently routes
+    // to the multi-clause emitter before this generic-bound dispatch is
+    // ever reached.
+    const generic = BaseCompiler.userFunctionIsGeneric(engine, h, literal);
+    const paramsAreScalar = BaseCompiler.userFunctionParamsAreScalar(engine, h);
+
+    // A call a repetition site rewrote to the callee's INVARIANT-PREFIX
+    // VARIANT (`hoistLoopInvariants`): the prefix values are bound once
+    // before the repetitions, each value node carries the binding's name as
+    // its code override, and the variant takes them as extra parameters
+    // after the ordinary ones. The ordinary arguments go through the same
+    // call emitter as before, so the call keeps every convention of an
+    // ordinary call (the broadcast dispatch, the `Array.isArray` guard); the
+    // prefix values are HELD arguments, appended to every call form and
+    // never broadcast over, because the body reads a prefix value whole — a
+    // hoisted list the body indexes must reach it as that list. Falls
+    // through to the ordinary call when the site discarded
+    // a value's binding (its node has no override), or when the variant
+    // cannot be emitted — the ordinary definition then declines or inlines
+    // exactly as it would have.
+    const prefixed =
+      node === undefined
+        ? undefined
+        : BaseCompiler._prefixCallOverrides.get(node);
+    if (
+      prefixed !== undefined &&
+      !target.userFunctions?.lowering &&
+      prefixed.values.every((v) => BaseCompiler._codeOverrides.has(v))
+    ) {
+      let variant: string | undefined;
+      try {
+        variant = BaseCompiler.ensureUserFunctionVariantEmitted(
+          engine,
+          h,
+          prefixed.prefixes,
+          target
+        );
+      } catch (e) {
+        if (e instanceof Error && e.name === 'CancellationError') throw e;
+        variant = undefined;
+      }
+      if (variant !== undefined)
+        return BaseCompiler.emitUserFunctionCall(
+          variant,
+          args,
+          target,
+          coerceToComplex,
+          paramsAreScalar,
+          generic,
+          prefixed.values.map((v) => BaseCompiler.compile(v, target))
+        );
+    }
+
+    // A callee the target cannot emit as a definition — a shader target
+    // given a point-typed parameter it has no static type for, the interval
+    // target given a body with a head it has no lowering for — is compiled
+    // INLINED at this call site when that is sound (`tryInlineUserFunctionCall`);
+    // the definition's own decline is rethrown when it is not.
+    let name: string | undefined;
+    try {
+      name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    } catch (e) {
+      // A cancellation (deadline, abort, iteration limit) must propagate;
+      // identified by NAME, never `instanceof` — a plugin bundle re-bundles
+      // the engine, so a `CancellationError` crossing a bundle boundary is
+      // not an instance of the host's class (the `box.ts` convention).
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
+      const inlined = BaseCompiler.tryInlineUserFunctionCall(
+        engine,
+        h,
+        args,
+        target
+      );
+      if (inlined !== undefined) return inlined;
+      throw e;
+    }
+    if (name === undefined) return undefined;
+
+    // A target with its own call-site lowering (the shader targets, which must
+    // check the argument shapes against the statically synthesized signature)
+    // owns the whole call site: none of the JS convention handling below —
+    // complex `{re, im}` coercion, the `_SYS.bcastFn` runtime broadcast — has
+    // an analog there.
+    const lowering = target.userFunctions?.lowering;
+    if (lowering) return lowering.call({ id: h, name, args, target });
+
     return BaseCompiler.emitUserFunctionCall(
       name,
       args,
       target,
       coerceToComplex,
-      BaseCompiler.userFunctionParamsAreScalar(engine, h),
-      // No `literal !== undefined` pre-gate: `userFunctionIsGeneric` itself
-      // accepts an absent literal (a multi-clause callee) and can still
-      // answer from the operator/value definition's declared polymorphic
-      // signature. Gating on `literal` here would silently drop that
-      // definition-sourced answer for any literal-less callee, which is
-      // harmless today only because a literal-less function currently routes
-      // to the multi-clause emitter before this generic-bound dispatch is
-      // ever reached.
-      BaseCompiler.userFunctionIsGeneric(engine, h, literal)
+      paramsAreScalar,
+      generic
     );
   }
 
@@ -18788,7 +18862,17 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     coerceToComplex: ReadonlyArray<boolean>,
     paramsAreScalar: boolean,
-    alwaysDispatch = false
+    alwaysDispatch = false,
+    /**
+     * Compiled arguments appended after `args` in EVERY call form, and
+     * never broadcast over: the values of an invariant-prefix variant's
+     * extra parameters (`tryCompileUserFunction`). A hoisted prefix is a
+     * value the callee's body reads whole — a list the body indexes must
+     * reach it as that list — so it is passed the way an atomic argument
+     * is, whatever its run-time shape, while the ordinary arguments keep
+     * their dispatch.
+     */
+    held: ReadonlyArray<string> = []
   ): TargetSource {
     const provablyScalarArg = BaseCompiler.provablyScalarArg;
 
@@ -18866,11 +18950,12 @@ export class BaseCompiler {
 
     /** The scalar call, with each argument's complex coercion applied. */
     const directCall = (codes: ReadonlyArray<string>) =>
-      `${name}(${codes
-        .map((code, i) =>
+      `${name}(${[
+        ...codes.map((code, i) =>
           coerceToComplex[i] ? complexWrap(code, args[i], target) : code
-        )
-        .join(', ')})`;
+        ),
+        ...held,
+      ].join(', ')})`;
 
     /**
      * `_SYS.bcastFn(closure, …)` over `codes`.
@@ -18893,12 +18978,17 @@ export class BaseCompiler {
       // `f(...)`), so a named function behaves exactly as the arrow did, and
       // one closure per call site is saved. (The Tycho code-generation audit
       // of 2026-09-08 measured 297 such eta-expanded dispatches.)
-      if (!coerceToComplex.some((c) => c))
+      // A held argument is appended inside the closure, so the broadcast
+      // never sees it as a source.
+      if (!coerceToComplex.some((c) => c) && held.length === 0)
         return `_SYS.bcastFn(${name}, ${codes.join(', ')})`;
       const params = args.map(() => BaseCompiler.tempVar(target));
-      const callParams = params.map((p, i) =>
-        coerceToComplex[i] ? complexWrap(p, args[i], target) : p
-      );
+      const callParams = [
+        ...params.map((p, i) =>
+          coerceToComplex[i] ? complexWrap(p, args[i], target) : p
+        ),
+        ...held,
+      ];
       return `_SYS.bcastFn((${params.join(', ')}) => ${name}(${callParams.join(
         ', '
       )}), ${codes.join(', ')})`;
@@ -18978,7 +19068,7 @@ export class BaseCompiler {
       return (
         `((${[...bound.values()].join(', ')}) => ` +
         `_SYS.bcastFn((${[...element.values()].join(', ')}) => ` +
-        `${name}(${callArgs.join(', ')}), ${sources.join(', ')}))` +
+        `${name}(${[...callArgs, ...held].join(', ')}), ${sources.join(', ')}))` +
         `(${outerArgs.join(', ')})`
       );
     }
@@ -21351,11 +21441,22 @@ export class BaseCompiler {
       key: string;
       types: readonly Type[];
       pointWidths?: readonly (number | undefined)[];
+    },
+    /**
+     * Emit the INVARIANT-PREFIX VARIANT of `h` instead of its definition:
+     * the same body, with every occurrence of each listed prefix expression
+     * read from an extra parameter appended after the ordinary ones, in
+     * list order (`ensureUserFunctionVariantEmitted`). JavaScript arrow
+     * form only.
+     */
+    prefixed?: {
+      key: string;
+      prefixes: ReadonlyArray<InvariantPrefix<Expression>>;
     }
   ): string | undefined {
     const name = BaseCompiler.userFunctionName(
       registry,
-      specialization?.key ?? h
+      prefixed?.key ?? specialization?.key ?? h
     );
 
     if (!registry.defs.has(name)) {
@@ -21406,6 +21507,11 @@ export class BaseCompiler {
         // compiled, so a nested dependency it emitted precedes it (GLSL
         // requires declaration before use).
         const lowering = registry.lowering;
+        if (lowering && prefixed !== undefined)
+          throw new Error(
+            `${h}: an invariant-prefix variant has no lowering on target ` +
+              `'${target.language ?? 'unknown'}'`
+          );
         if (lowering) {
           // The body of a target-lowered definition gets its OWN nested
           // harvest scope, exactly as the JavaScript arrow form below does:
@@ -21525,33 +21631,111 @@ export class BaseCompiler {
         // under (`complexShapedEmission`), so a call site can skip the
         // idempotent lift-at-use wrap (`liftWideResult`).
         let complexShaped = false;
-        const body = BaseCompiler.withLocalShapeFrame(
-          frames.complex,
-          frames.vector,
-          () =>
-            BaseCompiler.withEnforcedParams(literal, () =>
-              BaseCompiler.withNestedCseHarvest(
-                bodyExpr,
-                bodyTarget,
-                params,
-                () => {
-                  const code = BaseCompiler.compile(bodyExpr, bodyTarget);
-                  complexShaped = BaseCompiler.complexShapedEmission(bodyExpr);
-                  return code;
-                }
-              )
-            ),
-          true
-        );
+        // The variant's extra parameters, one per prefix, and the body nodes
+        // that read them. Every occurrence of a prefix expression in the
+        // body — a conditional position included: reading a parameter that
+        // is already bound evaluates nothing — gets the parameter's name as
+        // its code override, so the body compile emits the name where it
+        // would have emitted the expression. The names come from the
+        // compilation's temporary-name counter, so they collide with nothing
+        // in the artifact. The overrides are removed after the body compile,
+        // whether or not it succeeds.
+        const extraParams =
+          prefixed?.prefixes.map(() => BaseCompiler.tempVar(bodyTarget)) ?? [];
+        const overridden: Expression[] = [];
+        if (prefixed !== undefined) {
+          // Occurrences are matched by their MathJSON, not by `isSame`: the
+          // prefixes were read off the engine's literal, while the body
+          // compiled here may be the call-shape specialization's rebuild of
+          // it, whose parameter symbols are bound in a different scope and
+          // never `isSame` the originals. The MathJSON of a body node is the
+          // same in both.
+          const prefixJson = prefixed.prefixes.map((p) =>
+            JSON.stringify(p.expr.json)
+          );
+          const matches: Array<[Expression, number]> = [];
+          const match = (node: Expression): void => {
+            if (!isFunction(node)) return;
+            if (BaseCompiler._codeOverrides.has(node)) return;
+            const k = prefixed.prefixes.findIndex(
+              (p, i) =>
+                isFunction(p.expr) &&
+                p.expr.operator === node.operator &&
+                prefixJson[i] === JSON.stringify(node.json)
+            );
+            if (k >= 0) {
+              matches.push([node, k]);
+              return;
+            }
+            // The walk enters a `Block` (the canonical body is one) and
+            // stops at every other binder, as the prefix analysis does.
+            if (
+              node.operator === 'Function' ||
+              (node.operator !== 'Block' && node.operatorDefinition?.scoped)
+            )
+              return;
+            for (const op of node.ops) match(op);
+          };
+          match(bodyExpr);
+          // Every prefix must be read somewhere in THIS body. The prefixes
+          // were read off the engine's literal, and a rebuilt literal can
+          // differ from it; a prefix with no occurrence would be computed,
+          // passed and never read, while the body computed it again inline.
+          // Declining here sends the call site back to the ordinary call.
+          const unread = prefixed.prefixes.findIndex(
+            (_p, k) => !matches.some(([, j]) => j === k)
+          );
+          if (unread >= 0)
+            throw new Error(
+              `${h}: the invariant prefix ` +
+                `\`${prefixed.prefixes[unread].expr.toString()}\` has no ` +
+                `occurrence in the emitted body, so no variant is emitted`
+            );
+          for (const [node, k] of matches) {
+            BaseCompiler._codeOverrides.set(node, extraParams[k]);
+            overridden.push(node);
+          }
+        }
+        let body: TargetSource;
+        try {
+          body = BaseCompiler.withLocalShapeFrame(
+            frames.complex,
+            frames.vector,
+            () =>
+              BaseCompiler.withEnforcedParams(literal, () =>
+                BaseCompiler.withNestedCseHarvest(
+                  bodyExpr,
+                  bodyTarget,
+                  params,
+                  () => {
+                    const code = BaseCompiler.compile(bodyExpr, bodyTarget);
+                    complexShaped =
+                      BaseCompiler.complexShapedEmission(bodyExpr);
+                    return code;
+                  }
+                )
+              ),
+            true
+          );
+        } finally {
+          for (const node of overridden)
+            BaseCompiler._codeOverrides.delete(node);
+        }
         if (complexShaped) (registry.complexShaped ??= new Set()).add(h);
+        (registry.literals ??= new Map()).set(name, literal);
         const statements = javascriptStatements(bodyTarget);
+        const allParams = [...params, ...extraParams];
         registry.defs.set(
           name,
           statements?.has(body)
-            ? `const ${name} = (${params.join(', ')}) => { ${statements.functionBody(body)} };`
-            : `const ${name} = (${params.join(', ')}) => ${body};`
+            ? `const ${name} = (${allParams.join(', ')}) => { ${statements.functionBody(body)} };`
+            : `const ${name} = (${allParams.join(', ')}) => ${body};`
         );
+        // A variant is never memoized: the last-call memo keys on the
+        // ordinary parameters, and a variant's value depends on the extra
+        // ones as well.
         if (
+          prefixed === undefined &&
           BaseCompiler.lastCallMemoEligible(
             h,
             bodyExpr,
@@ -21717,6 +21901,47 @@ export class BaseCompiler {
    * is off (the nested harvest merges the same names, but only when a
    * session is enabled).
    */
+  /**
+   * The body of `literal` as an emitted DEFINITION compiles it: canonical,
+   * angular-unit rewritten, nested collection-valued calls substituted and
+   * fixed-width collections unrolled. Shared by the emission
+   * (`prepareUserFunctionBody`) and the invariant-prefix analysis
+   * (`invariantPrefixes`), so the analysis reads the same tree the emission
+   * compiles.
+   *
+   * These are the same two target-independent rewrites the public compile
+   * entries apply, so an emitted definition gets the fixed-width unroll its
+   * inlined counterpart gets (`fixed-width-unroll.ts`). The entry hooks
+   * never see this body — it comes from the engine definition — so the
+   * heads the caller overrode are read from the target
+   * (`CompileTarget.unrollSkipHeads`).
+   *
+   * The nested collection-valued calls are substituted FIRST: the unroll
+   * reads the width of a collection off a literal `List`, and a call that
+   * returns one hides that width
+   * (`inlineCollectionValuedCallsInDefinitionBody`).
+   */
+  private static definitionBodyExpr(
+    literal: Expression & FunctionInterface,
+    target: CompileTarget<Expression>,
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    h?: string
+  ): Expression {
+    return unrollFixedWidthCollections(
+      BaseCompiler.inlineCollectionValuedCallsInDefinitionBody(
+        rewriteAngularUnit(literal.ops[0].canonical),
+        target,
+        registry,
+        BaseCompiler.enclosingDefinitionOf(
+          literal.engine as unknown as ComputeEngine,
+          h,
+          literal
+        )
+      ),
+      { skipHeads: target.unrollSkipHeads }
+    );
+  }
+
   private static prepareUserFunctionBody(
     literal: Expression & FunctionInterface,
     target: CompileTarget<Expression>,
@@ -21732,29 +21957,11 @@ export class BaseCompiler {
     const declared = literal.ops
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
-    // The same two target-independent rewrites the public compile entries
-    // apply, so an emitted DEFINITION gets the fixed-width unroll its
-    // inlined counterpart gets (`fixed-width-unroll.ts`). The entry hooks
-    // never see this body — it comes from the engine definition — so the
-    // heads the caller overrode are read from the target
-    // (`CompileTarget.unrollSkipHeads`).
-    //
-    // The nested collection-valued calls are substituted FIRST: the unroll
-    // reads the width of a collection off a literal `List`, and a call that
-    // returns one hides that width
-    // (`inlineCollectionValuedCallsInDefinitionBody`).
-    const bodyExpr = unrollFixedWidthCollections(
-      BaseCompiler.inlineCollectionValuedCallsInDefinitionBody(
-        rewriteAngularUnit(literal.ops[0].canonical),
-        target,
-        registry,
-        BaseCompiler.enclosingDefinitionOf(
-          literal.engine as unknown as ComputeEngine,
-          h,
-          literal
-        )
-      ),
-      { skipHeads: target.unrollSkipHeads }
+    const bodyExpr = BaseCompiler.definitionBodyExpr(
+      literal,
+      target,
+      registry,
+      h
     );
     const root = registry.root ?? target;
     // The SAME parameter-shadowing rule as the inline lambda lowering, through
@@ -24246,7 +24453,7 @@ export class BaseCompiler {
     emit: (bindings: ReadonlyArray<LoopInvariantBinding>) => T,
     accept?: (node: Expression, code: string) => boolean
   ): { bindings: Array<LoopInvariantBinding>; result: T } {
-    const classes = BaseCompiler.loopInvariantHoistCandidates(
+    const { classes, prefixCalls } = BaseCompiler.loopInvariantHoistCandidates(
       expr,
       new Set(varyingNames),
       target
@@ -24332,6 +24539,8 @@ export class BaseCompiler {
       return { bindings, result: emit(bindings) };
     } finally {
       for (const node of installed) BaseCompiler._codeOverrides.delete(node);
+      for (const call of prefixCalls)
+        BaseCompiler._prefixCallOverrides.delete(call);
     }
   }
 
@@ -24451,35 +24660,27 @@ export class BaseCompiler {
     expr: Expression,
     varying: ReadonlySet<string>,
     target: CompileTarget<Expression>
-  ): Expression[][] {
+  ): { classes: Expression[][]; prefixCalls: Expression[] } {
+    // Calls rewritten to an invariant-prefix variant at this site
+    // (`_prefixCallOverrides`); the caller removes the entries when its
+    // emission is done.
+    const prefixCalls: Expression[] = [];
+    const none = { classes: [], prefixCalls };
     // Hoisting replaces many emissions of a subexpression with one binding
     // referenced by name — the CSE transform, applied where CSE's own
     // node-keyed reuse cannot reach. `cse: false` turns that sharing off here
     // as it does everywhere else.
-    if (target.cse?.enabled !== true) return [];
+    if (target.cse?.enabled !== true) return none;
 
     const admission = BaseCompiler.cseAdmission(target, varying);
-    if (admission === undefined) return [];
+    if (admission === undefined) return none;
 
     // A symbol assigned anywhere in the repeated code changes between
     // repetitions, exactly as a loop index does (the same rule the CSE
     // harvest applies through a region's `assignedNames`). A destructuring
     // target (`Declare(Tuple(a, b), …)`) writes every leaf symbol of the
     // pattern.
-    const assigned = new Set<string>();
-    const recordAssignedTarget = (t: Expression | undefined): void => {
-      if (t === undefined) return;
-      if (isSymbol(t)) assigned.add(t.symbol);
-      else if (isFunction(t, 'Tuple'))
-        for (const leaf of t.ops) recordAssignedTarget(leaf);
-    };
-    const collectAssigned = (node: Expression): void => {
-      if (!isFunction(node)) return;
-      if (node.operator === 'Assign' || node.operator === 'Declare')
-        recordAssignedTarget(node.ops[0]);
-      for (const op of node.ops) collectAssigned(op);
-    };
-    collectAssigned(expr);
+    const assigned = BaseCompiler.assignedNamesIn(expr);
 
     const mentionsVarying = (node: Expression): boolean => {
       if (isSymbol(node))
@@ -24648,6 +24849,39 @@ export class BaseCompiler {
         record(node);
         return;
       }
+      // A VARYING call of a user function whose body has an invariant
+      // prefix — a subexpression of the body that reads only parameters this
+      // call passes the same argument to on every repetition
+      // (`invariantPrefixes`): each such prefix, with this call's arguments
+      // substituted for the callee's parameters, is a synthesized invariant
+      // of the repetition. It is recorded as an ordinary class — compiled,
+      // bound and given a code override like any other — and the call is
+      // rewritten to the callee's variant that takes the bound values as
+      // extra parameters (`_prefixCallOverrides`, read by
+      // `tryCompileUserFunction`). The call's own arguments still compile
+      // per repetition, so the rewrite is a recipe keyed on the node, not a
+      // code string. The variant is a JavaScript arrow definition, so only
+      // the JavaScript-convention targets rewrite.
+      if (
+        !invariant &&
+        (target.language === 'javascript' ||
+          target.language === 'interval-javascript') &&
+        !target.userFunctions?.lowering &&
+        !BaseCompiler._prefixCallOverrides.has(node)
+      ) {
+        const synthesized = BaseCompiler.synthesizeInvariantPrefixes(
+          node,
+          varying,
+          assigned,
+          admission,
+          target
+        );
+        if (synthesized !== undefined) {
+          for (const value of synthesized.values) record(value);
+          BaseCompiler._prefixCallOverrides.set(node, synthesized);
+          prefixCalls.push(node);
+        }
+      }
       const lazy = lazyOperandRegions(node);
       for (let i = 0; i < node.ops.length; i++)
         if (!lazy.some((site) => site.index === i)) visit(node.ops[i]);
@@ -24657,7 +24891,7 @@ export class BaseCompiler {
     };
 
     visit(expr);
-    if (classes.length === 0) return classes;
+    if (classes.length === 0) return { classes, prefixCalls };
 
     // A maximal invariant node is recorded WHOLE and never descended into, so
     // a subexpression that two of those nodes share — or that one of them
@@ -24753,7 +24987,466 @@ export class BaseCompiler {
       for (const op of node.ops) attach(op);
     };
     attach(expr);
-    return [...shared, ...classes];
+    return { classes: [...shared, ...classes], prefixCalls };
+  }
+
+  /**
+   * The names `expr` ASSIGNS anywhere (`Assign`/`Declare`). A destructuring
+   * target (`Declare(Tuple(a, b), …)`) writes every leaf symbol of the
+   * pattern. A read of such a name can change between two evaluations of
+   * the code around it even though the reading node is itself pure.
+   */
+  private static assignedNamesIn(expr: Expression): Set<string> {
+    const assigned = new Set<string>();
+    const recordTarget = (t: Expression | undefined): void => {
+      if (t === undefined) return;
+      if (isSymbol(t)) assigned.add(t.symbol);
+      else if (isFunction(t, 'Tuple'))
+        for (const leaf of t.ops) recordTarget(leaf);
+    };
+    const collect = (node: Expression): void => {
+      if (!isFunction(node)) return;
+      if (node.operator === 'Assign' || node.operator === 'Declare')
+        recordTarget(node.ops[0]);
+      for (const op of node.ops) collect(op);
+    };
+    collect(expr);
+    return assigned;
+  }
+
+  /**
+   * The operators whose application is EXPENSIVE enough for an invariant
+   * prefix to be worth a variant of the callee: a transcendental call, which
+   * costs tens of nanoseconds, where the arithmetic around it costs one. A
+   * call of a user-defined function counts too (`invariantPrefixes`), since
+   * its body can hold any amount of work.
+   */
+  private static readonly EXPENSIVE_PREFIX_HEADS: ReadonlySet<string> = new Set(
+    [
+      'Sin',
+      'Cos',
+      'Tan',
+      'Sinh',
+      'Cosh',
+      'Tanh',
+      'Arcsin',
+      'Arccos',
+      'Arctan',
+      'Arctan2',
+      'Arsinh',
+      'Arcosh',
+      'Artanh',
+      'Exp',
+      'Ln',
+      'Log',
+      'Lb',
+      'Lg',
+      'Gamma',
+      'LogGamma',
+      'Erf',
+      'Erfc',
+    ]
+  );
+
+  /**
+   * The INVARIANT PREFIXES of user function `h`: the subexpressions of its
+   * body that a call site can evaluate once and hand to the body, when the
+   * site calls `h` repeatedly with the same arguments at the parameters the
+   * subexpression reads (`CompileTarget.userFunctions.prefixes`).
+   *
+   * A definition body is compiled once and called from every repetition of
+   * a loop, so a subexpression of it that depends on one parameter only is
+   * evaluated again on every call even when the call passes that parameter
+   * the same value each time — an exoplanet transit kernel called
+   * `S(r_i, t)` forty times per sample, and each call recomputed a
+   * transcendental `m(t)` that never changed (Tycho code-generation audit of
+   * 0.128.9, records 178–183). Ordinary CSE cannot reach it: the repeated
+   * evaluation is inside the callee, and the callee's own harvest sees one
+   * call.
+   *
+   * A prefix is a MAXIMAL subexpression of the body that:
+   *  - is an application reading a strict, non-empty subset of the
+   *    parameters (a subexpression that reads every parameter varies with
+   *    the call; one that reads none is a constant the callee's own
+   *    emission already folds or binds), and reads no parameter its
+   *    expensive parts do not read (`m(t)·r` is not a prefix; `m(t)` is —
+   *    the product is computed per call, and a site where only `r` varies
+   *    still hoists `m(t)`);
+   *  - reads no name the body assigns, and contains no binder or lambda
+   *    (their bound names would be captured by the substitution at the call
+   *    site);
+   *  - is pure and admissible to evaluate once (`isPure`,
+   *    `isCseAdmissible`), and not complex-valued — the same bar a hoisted
+   *    loop invariant clears;
+   *  - is expensive: it contains a user-function call or a transcendental
+   *    (`EXPENSIVE_PREFIX_HEADS`);
+   *  - is evaluated on every call: it sits in no lazily evaluated operand
+   *    position (`lazyOperandRegions`) — a call site evaluates every prefix
+   *    unconditionally, and evaluating what a conditional arm would have
+   *    skipped is what the loop-invariant hoist refuses to do as well.
+   *
+   * MAXIMAL, with two cuts. A candidate that contains an expensive unit the
+   * body evaluates elsewhere too (`m(t)² · … / m(t)`) is not recorded whole,
+   * because the call site would then evaluate that unit once for the
+   * candidate and once for the other occurrence; the walk descends into such
+   * a candidate instead, and the shared unit becomes the prefix — one extra
+   * parameter read by both occurrences. And a candidate is cut back to the
+   * parameters its expensive units read (the first bullet above): the cheap
+   * arithmetic around them is computed per call.
+   *
+   * Returns the empty list for a function whose call sites cannot take a
+   * variant: a generic function, a multi-clause set, a function with a
+   * rest or destructuring parameter, one parameter or fewer, a body that
+   * assigns a parameter, a parameter that binds a collection or point whole
+   * (`userFunctionParamsAreScalar`), or a function whose definition is
+   * currently being compiled (a recursive reference). Computed once per
+   * function and compilation.
+   */
+  static invariantPrefixes(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>
+  ): ReadonlyArray<InvariantPrefix<Expression>> {
+    const registry = target.userFunctions;
+    if (!registry) return [];
+    const cached = registry.prefixes?.get(h);
+    if (cached !== undefined) return cached;
+    const prefixes = BaseCompiler.computeInvariantPrefixes(
+      engine,
+      h,
+      target,
+      registry
+    );
+    (registry.prefixes ??= new Map()).set(h, prefixes);
+    return prefixes;
+  }
+
+  private static computeInvariantPrefixes(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>,
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+  ): ReadonlyArray<InvariantPrefix<Expression>> {
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return [];
+    if (BaseCompiler.userFunctionIsGeneric(engine, h, literal)) return [];
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return [];
+    if (registry.compiling.has(BaseCompiler.userFunctionName(registry, h)))
+      return [];
+    const params = literal.ops.slice(1);
+    if (params.length < 2) return [];
+    if (params.some((p) => isRestParameter(p) || isDestructuringParameter(p)))
+      return [];
+    const names: string[] = [];
+    for (const p of params) {
+      const name = functionLiteralParameterName(p);
+      if (name === undefined) return [];
+      names.push(name);
+    }
+    const paramSet = new Set(names);
+    // A body that assigns a parameter reads it at more than one value; the
+    // substitution at the call site would read the argument only.
+    const writesParameter = (node: Expression): boolean =>
+      isFunction(node) &&
+      ((node.operator === 'Assign' &&
+        node.op1.symbols.some((s) => paramSet.has(s))) ||
+        node.ops.some(writesParameter));
+    if (writesParameter(literal.op1)) return [];
+    // A self-recursive body would call the ordinary definition from inside
+    // the variant, so both would be emitted and the recursion would gain
+    // nothing; such a function keeps its ordinary call.
+    const callsItself = (node: Expression): boolean =>
+      isFunction(node) && (node.operator === h || node.ops.some(callsItself));
+    if (callsItself(literal.op1)) return [];
+
+    const root = registry.root ?? target;
+    const admission = BaseCompiler.cseAdmission(root, paramSet);
+    if (admission === undefined) return [];
+
+    const bodyExpr = BaseCompiler.definitionBodyExpr(
+      literal,
+      target,
+      registry,
+      h
+    );
+    const assigned = BaseCompiler.assignedNamesIn(bodyExpr);
+
+    /** The parameters `node` reads, memoized per node object. */
+    const readsMemo = new Map<Expression, ReadonlySet<string>>();
+    const reads = (node: Expression): ReadonlySet<string> => {
+      const cached = readsMemo.get(node);
+      if (cached !== undefined) return cached;
+      const result = new Set<string>();
+      if (isSymbol(node)) {
+        if (paramSet.has(node.symbol)) result.add(node.symbol);
+      } else if (isFunction(node))
+        for (const op of node.ops) for (const s of reads(op)) result.add(s);
+      readsMemo.set(node, result);
+      return result;
+    };
+    const mentionsLocal = (node: Expression): boolean =>
+      node.symbols.some((s) => assigned.has(s));
+    const containsBinder = (node: Expression): boolean =>
+      isFunction(node) &&
+      (node.operator === 'Function' ||
+        node.operatorDefinition?.scoped ||
+        node.ops.some(containsBinder));
+    // A canonical function body is a `Block` (a scoped operator: it binds
+    // the parameters and its own locals), so the walk enters a `Block` —
+    // the names a block assigns are excluded through `assigned` — and stops
+    // at every other binder and at a lambda.
+    const isOpaqueBinder = (node: Expression & FunctionInterface): boolean =>
+      node.operator === 'Function' ||
+      (node.operator !== 'Block' && Boolean(node.operatorDefinition?.scoped));
+    const isUserCall = (node: Expression): boolean =>
+      isFunction(node) &&
+      !paramSet.has(node.operator) &&
+      BaseCompiler.userFunctionLiteral(engine, node.operator) !== undefined;
+    const isExpensive = (node: Expression): boolean =>
+      isFunction(node) &&
+      (BaseCompiler.EXPENSIVE_PREFIX_HEADS.has(node.operator) ||
+        isUserCall(node));
+    const containsExpensive = (node: Expression): boolean =>
+      isFunction(node) &&
+      (isExpensive(node) || node.ops.some(containsExpensive));
+    /** The parameters the expensive units inside `node` (itself included)
+     * read, memoized per node object. */
+    const unitReadsMemo = new Map<Expression, ReadonlySet<string>>();
+    const unitReads = (node: Expression): ReadonlySet<string> => {
+      const cached = unitReadsMemo.get(node);
+      if (cached !== undefined) return cached;
+      const result = new Set<string>();
+      if (isExpensive(node)) for (const s of reads(node)) result.add(s);
+      else if (isFunction(node))
+        for (const op of node.ops) for (const s of unitReads(op)) result.add(s);
+      unitReadsMemo.set(node, result);
+      return result;
+    };
+    /** Does `node` have the shape of a prefix, expense aside? */
+    const shapeMemo = new Map<Expression, boolean>();
+    const hasPrefixShape = (node: Expression): boolean => {
+      const cached = shapeMemo.get(node);
+      if (cached !== undefined) return cached;
+      let result = false;
+      if (isFunction(node)) {
+        const r = reads(node);
+        result =
+          r.size > 0 &&
+          r.size < paramSet.size &&
+          !mentionsLocal(node) &&
+          !containsBinder(node) &&
+          node.isPure === true &&
+          !BaseCompiler.isComplexValued(node) &&
+          isCseAdmissible(node, admission);
+      }
+      shapeMemo.set(node, result);
+      return result;
+    };
+
+    // Structural classes, as `loopInvariantHoistCandidates` keeps them.
+    const byHash = new Map<number, Expression[][]>();
+    const classOf = (node: Expression): Expression[] | undefined => {
+      const bucket = byHash.get(node.hash);
+      if (bucket !== undefined)
+        for (const cls of bucket) if (cls[0].isSame(node)) return cls;
+      return undefined;
+    };
+    const record = (node: Expression, into?: Expression[][]): Expression[] => {
+      const found = classOf(node);
+      if (found !== undefined) {
+        found.push(node);
+        return found;
+      }
+      const cls = [node];
+      into?.push(cls);
+      const bucket = byHash.get(node.hash);
+      if (bucket === undefined) byHash.set(node.hash, [cls]);
+      else bucket.push(cls);
+      return cls;
+    };
+
+    // First pass: how often does each prefix-shaped expensive UNIT occur in
+    // an unconditionally evaluated position of the body? A unit that occurs
+    // more than once must become a prefix of its own rather than be
+    // evaluated inside a larger prefix — see the exception above.
+    const unitCount = new Map<Expression[], number>();
+    const countUnits = (node: Expression): void => {
+      if (!isFunction(node)) return;
+      if (isOpaqueBinder(node)) return;
+      if (isExpensive(node) && hasPrefixShape(node)) {
+        const cls = record(node);
+        unitCount.set(cls, (unitCount.get(cls) ?? 0) + 1);
+      }
+      const lazy = lazyOperandRegions(node);
+      for (let i = 0; i < node.ops.length; i++)
+        if (!lazy.some((site) => site.index === i)) countUnits(node.ops[i]);
+    };
+    countUnits(bodyExpr);
+    /** Every prefix-shaped expensive unit strictly inside `node` occurs
+     * once in the body. */
+    const occursOnce = (unit: Expression): boolean => {
+      const cls = classOf(unit);
+      return cls !== undefined && unitCount.get(cls) === 1;
+    };
+    const innerUnitsSingle = (node: Expression): boolean =>
+      !isFunction(node) ||
+      node.ops.every(
+        (op) =>
+          (!isExpensive(op) || !hasPrefixShape(op) || occursOnce(op)) &&
+          innerUnitsSingle(op)
+      );
+
+    // Second pass: the maximal prefixes, in body order. A prefix reads no
+    // parameter its expensive units do not read: the cheap arithmetic
+    // around them must not widen the parameter set, or a site where only
+    // that added parameter varies would lose the hoist (`m(t)·r` reads
+    // `r`; the prefix is `m(t)`, and the product is computed per call).
+    const prefixes: Expression[][] = [];
+    const visit = (node: Expression): void => {
+      if (!isFunction(node)) return;
+      if (isOpaqueBinder(node)) return;
+      if (
+        hasPrefixShape(node) &&
+        containsExpensive(node) &&
+        unitReads(node).size === reads(node).size &&
+        innerUnitsSingle(node)
+      ) {
+        const cls = classOf(node);
+        if (cls !== undefined && prefixes.includes(cls)) cls.push(node);
+        else if (cls !== undefined) prefixes.push(cls);
+        else record(node, prefixes);
+        return;
+      }
+      const lazy = lazyOperandRegions(node);
+      for (let i = 0; i < node.ops.length; i++)
+        if (!lazy.some((site) => site.index === i)) visit(node.ops[i]);
+    };
+    visit(bodyExpr);
+    return prefixes.map((cls) => ({
+      expr: cls[0],
+      params: names.filter((n) => reads(cls[0]).has(n)),
+    }));
+  }
+
+  /**
+   * The invariant prefixes of the callee that the user-function call `node`
+   * can hoist at a repetition site, with the call's arguments substituted
+   * for the callee's parameters: the recipe `hoistLoopInvariants` installs
+   * as the call's `_prefixCallOverrides` entry. `undefined` when the call
+   * hoists nothing.
+   *
+   * A prefix is hoistable at this call when every argument at a parameter
+   * it reads is invariant across the repetitions (`varying`, `assigned` are
+   * the site's own varying and assigned names), pure and admissible to
+   * evaluate once, not complex-valued, and free of binders (the
+   * substitution is not capture-avoiding); and when no OTHER symbol the
+   * prefix reads — a global of the callee's body — is bound at the call
+   * site, where the substituted expression is compiled: a site-bound name
+   * would capture it. The substituted expression must pass the same
+   * invariance bar itself.
+   */
+  private static synthesizeInvariantPrefixes(
+    node: Expression & FunctionInterface,
+    varying: ReadonlySet<string>,
+    assigned: ReadonlySet<string>,
+    admission: CseHarvestOptions,
+    target: CompileTarget<Expression>
+  ):
+    | { prefixes: ReadonlyArray<number>; values: ReadonlyArray<Expression> }
+    | undefined {
+    const h = node.operator;
+    if (target.boundVars?.has(h)) return undefined;
+    const engine = node.engine as unknown as ComputeEngine;
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return undefined;
+    const prefixes = BaseCompiler.invariantPrefixes(engine, h, target);
+    if (prefixes.length === 0) return undefined;
+    const paramNames = literal.ops
+      .slice(1)
+      .map((p) => functionLiteralParameterName(p));
+    if (node.nops !== paramNames.length) return undefined;
+    const argOf = new Map<string, Expression>();
+    paramNames.forEach((p, i) => {
+      if (p !== undefined) argOf.set(p, node.ops[i]);
+    });
+    const siteBound = (s: string): boolean =>
+      varying.has(s) || assigned.has(s) || target.boundVars?.has(s) === true;
+    const mentionsSiteVarying = (e: Expression): boolean =>
+      e.symbols.some((s) => varying.has(s) || assigned.has(s));
+    const containsBinder = (e: Expression): boolean =>
+      isFunction(e) &&
+      (e.operator === 'Function' ||
+        e.operatorDefinition?.scoped ||
+        e.ops.some(containsBinder));
+    const invariantHere = (e: Expression): boolean =>
+      !mentionsSiteVarying(e) &&
+      e.isPure === true &&
+      !containsBinder(e) &&
+      !BaseCompiler.isComplexValued(e) &&
+      isCseAdmissible(e, admission);
+
+    const chosen: number[] = [];
+    const values: Expression[] = [];
+    prefixes.forEach((prefix, index) => {
+      const args = prefix.params.map((p) => argOf.get(p));
+      if (args.some((a) => a === undefined || !invariantHere(a))) return;
+      if (
+        prefix.expr.symbols.some(
+          (s) => !prefix.params.includes(s) && siteBound(s)
+        )
+      )
+        return;
+      const substitution: Record<string, Expression> = {};
+      prefix.params.forEach((p, j) => {
+        substitution[p] = args[j]!;
+      });
+      const value = prefix.expr.subs(substitution);
+      if (!isFunction(value) || !invariantHere(value)) return;
+      chosen.push(index);
+      values.push(value);
+    });
+    if (chosen.length === 0) return undefined;
+    return { prefixes: chosen, values };
+  }
+
+  /**
+   * Emit the INVARIANT-PREFIX VARIANT of user function `h` that takes the
+   * prefixes at `prefixIndices` (indices into `invariantPrefixes`) as extra
+   * parameters after the ordinary ones, once per distinct index set, and
+   * return its local name. The ordinary definition of `h` is untouched: a
+   * call that hoists nothing still calls it.
+   */
+  private static ensureUserFunctionVariantEmitted(
+    engine: ComputeEngine,
+    h: string,
+    prefixIndices: ReadonlyArray<number>,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry || registry.lowering) return undefined;
+    // The literal the BASE definition was emitted from, when it has been —
+    // the call-shape specialization may have rebuilt it with the parameter
+    // types the call proved (`registry.literals`) — else the engine's own.
+    const base = registry.literals?.get(
+      BaseCompiler.userFunctionName(registry, h)
+    );
+    const literal =
+      base !== undefined && isFunction(base, 'Function')
+        ? (base as Expression & FunctionInterface)
+        : BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return undefined;
+    const all = BaseCompiler.invariantPrefixes(engine, h, target);
+    const prefixes = prefixIndices.map((i) => all[i]);
+    if (prefixes.some((p) => p === undefined)) return undefined;
+    target.symbolDeps?.add(h);
+    return BaseCompiler.emitFunctionLiteralDefinition(
+      h,
+      literal,
+      target,
+      registry,
+      undefined,
+      { key: `${h}$inv${prefixIndices.join('_')}`, prefixes }
+    );
   }
 
   /**

@@ -10695,6 +10695,50 @@ const VARS_OBJECT_READ = /(?<![\w$])_\.(?=[\p{L}_$])/u;
 const MEMO_MIN_BODY_LENGTH = 600;
 
 /**
+ * Remove, in place from `registry.defs`, every user-function definition that
+ * is the BASE of an emitted invariant-prefix variant (`<name>$inv…`, see
+ * `BaseCompiler.ensureUserFunctionVariantEmitted`) and that nothing in the
+ * artifact references any more: neither the root code nor another
+ * definition names it. A repetition site that hoists a callee's prefix
+ * calls the variant, not the base, but the base was already emitted by the
+ * call-shape specialization the site's first call went through — a
+ * definition is an arrow function whose declaration has no effect, so an
+ * unreferenced one is dead text. Only such bases are removed: every other
+ * definition is kept whether or not the artifact names it, so an artifact
+ * without a variant is emitted exactly as before. Repeated to a fixed point,
+ * since removing a base can leave a definition only it referenced (another
+ * base) unreferenced in turn.
+ */
+function pruneUnreferencedVariantBases(
+  registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+  rootCode: string
+): void {
+  const defs = registry.defs;
+  const bases = new Set<string>();
+  for (const name of defs.keys()) {
+    const at = name.indexOf('$inv');
+    if (at > 0) bases.add(name.slice(0, at));
+  }
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const base of bases) {
+      if (!defs.has(base)) continue;
+      const pattern = identifierPattern(base);
+      if (pattern.test(rootCode)) continue;
+      let referenced = false;
+      for (const [other, code] of defs)
+        if (other !== base && pattern.test(code)) {
+          referenced = true;
+          break;
+        }
+      if (referenced) continue;
+      defs.delete(base);
+      changed = true;
+    }
+  }
+}
+
+/**
  * Wrap, in place in `registry.defs`, every emitted user-function definition
  * that a LAST-CALL MEMO can serve: a closure that remembers the arguments
  * and the result of its most recent call and answers a repeated call with
@@ -11690,7 +11734,8 @@ function compileToTarget(
     // definition the artifact calls from two or more places is wrapped in a
     // last-call memo first (`memoizeSharedDefinitions`), so that both the
     // spliced `code` and the runner below carry the same definitions.
-    if (target.userFunctions)
+    if (target.userFunctions) {
+      pruneUnreferencedVariantBases(target.userFunctions, body);
       memoizeSharedDefinitions(
         target.userFunctions,
         body,
@@ -11698,6 +11743,7 @@ function compileToTarget(
         false,
         javascriptStatements(target)
       );
+    }
     const userDefs = BaseCompiler.userFunctionsPreamble(target);
     // A compiled lambda is called with its declared parameters only — there is
     // no vars object in scope — so a free symbol emitted as `_.<id>` (here or
@@ -11777,7 +11823,8 @@ function compileToTarget(
   // two or more places is wrapped in a last-call memo first
   // (`memoizeSharedDefinitions`), so that the spliced `preamble` and the
   // runner below carry the same definitions.
-  if (target.userFunctions)
+  if (target.userFunctions) {
+    pruneUnreferencedVariantBases(target.userFunctions, js);
     memoizeSharedDefinitions(
       target.userFunctions,
       js,
@@ -11785,6 +11832,7 @@ function compileToTarget(
       true,
       javascriptStatements(target)
     );
+  }
   const userDefs = BaseCompiler.userFunctionsPreamble(target);
   const preamble = userDefs
     ? target.preamble

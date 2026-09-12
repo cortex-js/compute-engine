@@ -490,16 +490,20 @@ calculations; compilation outcomes are unchanged. Tycho has retired item 275.
 The remaining 165 broadcast occurrences include required collection work and
 fallback branches. They are not a count of redundant runtime operations.
 
-- **Reuse invariant calculations across retained helper calls.** The
+- **Reuse invariant calculations across retained helper calls on GLSL.** The
   `exoplanet-transit` kernel calls `S(radius, time)` at forty radii, and each
-  call computes the same `m(time)` through a cosine and square root. Counting
-  calls in record 178's emitted JavaScript gives forty `m` evaluations for
-  each of `B(0, 0.6)`, `B(10, 0.6)` and `B(25, 0.6)`; the one-call control
-  counts one. The pattern also appears in records 179–183 on interval-js and
-  GLSL. Investigate a private helper variant receiving the invariant value;
-  preserve public signatures, evaluation order, empty-loop behavior and
-  effectful-call boundaries. This is an optimization opportunity, not a
-  numerical correctness defect or a measured speedup.
+  call computes the same `m(time)` through a cosine and square root. On
+  JavaScript and interval-js (records 178–182) a repetition site now
+  evaluates such an invariant prefix once and calls a private variant of the
+  helper that receives the value as an extra parameter
+  (`BaseCompiler.invariantPrefixes`).
+  GLSL record 183 still evaluates `m(time)` forty times: the shader
+  definition lowering (`userFunctions.lowering.define`) synthesizes a static
+  signature from the declared parameter types and has no form for a variant
+  with extra parameters, so the rewrite is confined to the JavaScript arrow
+  definitions. Extend `define` to accept extra typed parameters whose type is
+  the static type of the hoisted value, then lift the `lowering` gate in
+  `loopInvariantHoistCandidates` and `ensureUserFunctionVariantEmitted`.
 - **Share frequently repeated small interval expressions.** Voronoi record
   584 emits `_IA.div(_k2, _.n)` 48 times across its two helper bodies; nine
   other interval records in that document emit it 28 times each. Investigate
