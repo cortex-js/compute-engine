@@ -2,6 +2,23 @@
 
 ### Resolved Issues
 
+- **A comprehension over literal domains compiles on the shader targets.**
+  GLSL and WGSL have no dynamic arrays, and a `Comprehension` declined whole
+  on both — the four point-table rows of the 3-D art document
+  `art/n7uhaaoq1q` in the 0.128.9 code-generation audit, `[PointList(…) for
+  y = 1..4, x = 1..3]`. The target-independent pre-pass now writes a
+  comprehension out as the literal list of its substituted bodies, in the
+  interpreter's order, when every domain is a literal range or list and the
+  total is at most 64 elements, on the targets that ask for it; the shader
+  targets lower a list of points of one arity as an array of vectors
+  (`vec3[12](…)`, `array<vec3f, 12>(…)`), and a literal index into a literal
+  range folds to the number. The emitted GLSL and WGSL compile and link
+  under headless Chromium. Where such an array reaches a position the shader
+  languages have no form for — a local declaration, arithmetic, a selection
+  between two of them — the compilation fails closed instead of emitting
+  source no driver accepts. A symbolic bound, a dependent domain, a body with
+  an effect, or a larger comprehension still declines with the same message;
+  the JavaScript target keeps its loop.
 - **A list of static width compiles on the interval target.** The interval
   target has no lowering for a `List` — its values are one interval each — and
   every list-valued subexpression declined, while the fixed-width pre-pass

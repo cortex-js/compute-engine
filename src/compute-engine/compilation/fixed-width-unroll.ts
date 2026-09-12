@@ -120,6 +120,15 @@ export interface UnrollOptions {
    * fold works on emitted code, and a list has none.
    */
   readonly unrollConstantLists?: boolean;
+
+  /**
+   * Write a `Comprehension` over LITERAL domains out as the literal list of
+   * its substituted bodies (rule 6). Off by default: a target with a loop
+   * lowering for a comprehension keeps it. The shader targets set it: they
+   * have no dynamic arrays, and a comprehension of a small, statically known
+   * size is a fixed-size array literal there.
+   */
+  readonly unrollComprehensions?: boolean;
 }
 
 /**
@@ -243,7 +252,8 @@ function rewrite(
       tryUnrollMap(node, options) ??
       unrollReduction(node) ??
       distributeOverList(node, options) ??
-      foldLiteralIndex(node, options);
+      foldLiteralIndex(node, options) ??
+      unrollComprehension(node, options);
     if (next === undefined) break;
     node = rewrite(next, settled, options);
   }
@@ -895,7 +905,8 @@ const ELEMENTWISE_HEADS = new Set([
 /**
  * Every head any rule of this pass can rewrite: the point accessors (rule 1),
  * `Map` (rule 2), the reductions (rule 3), the element-wise heads (rule 4)
- * and a literal index (rule 5).
+ * a literal index (rule 5) and a comprehension over literal domains (rule
+ * 6).
  *
  * Read by {@link overriddenCompilationHeads} for the one case where the
  * overridden heads cannot be enumerated: withholding all of these makes the
@@ -908,6 +919,7 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   'Reduce',
   ...ELEMENTWISE_HEADS,
   'At',
+  'Comprehension',
 ]);
 
 /**
@@ -989,10 +1001,11 @@ function distributeOverList(
 
 /**
  * `At([e₁, …, eₙ], k)` with `k` a positive integer literal no greater than
- * `n`, rewritten to `eₖ`. The list is written out and the index is known, so
- * the element is the value; every target then compiles the element instead
- * of building the list and indexing it (the interval target has no list to
- * build at all). Any other index — out of range, negative, non-literal — is
+ * `n`, rewritten to `eₖ`; `At(a..b, k)` over a literal `Range` likewise,
+ * to the k-th number of the range. The list is written out and the index is
+ * known, so the element is the value; every target then compiles the element
+ * instead of building the list and indexing it (the interval target has no
+ * list to build at all). Any other index — out of range, negative, non-literal — is
  * left to the target's `At` lowering and its own answer for it; so is a
  * complex index, whose real part is not the index. Every DISCARDED element
  * must be pure and free of caller-supplied code (`readsCallerSource`): the
@@ -1006,20 +1019,168 @@ function foldLiteralIndex(
   options: UnrollOptions
 ): Expression | undefined {
   if (expr.operator !== 'At' || expr.nops !== 2) return undefined;
-  const [list, index] = expr.ops;
-  if (!isFunction(list, 'List') || list.nops === 0) return undefined;
-  if (options.skipHeads?.has('List') === true) return undefined;
+  const [base, index] = expr.ops;
+  if (!isFunction(base)) return undefined;
+  if (options.skipHeads?.has(base.operator) === true) return undefined;
   if (!isNumber(index) || index.im !== 0) return undefined;
   const k = index.re;
-  if (!Number.isInteger(k) || k < 1 || k > list.nops) return undefined;
+  if (!Number.isInteger(k) || k < 1) return undefined;
+  if (base.operator === 'Range') {
+    // Read through the range's own indexed access: nothing is enumerated,
+    // and an index past the count is left alone.
+    if (!isLiteralRange(base)) return undefined;
+    const count = base.count;
+    if (count === undefined || !Number.isFinite(count) || k > count)
+      return undefined;
+    return typeof base.at === 'function' ? base.at(k) : undefined;
+  }
+  if (base.operator !== 'List' || base.nops === 0 || k > base.nops)
+    return undefined;
   if (
-    list.ops.some(
+    base.ops.some(
       (e, i) =>
         i !== k - 1 && (e.isPure !== true || readsCallerSource(e, options))
     )
   )
     return undefined;
-  return list.ops[k - 1];
+  return base.ops[k - 1];
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule 6 — a comprehension over literal domains
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The most elements a written-out comprehension may have. A shader array
+ * literal of this size is still a modest constant table; a larger
+ * comprehension is left to the target, which declines it where it has no
+ * loop lowering.
+ */
+const MAX_UNROLLED_COMPREHENSION_SIZE = 64;
+
+/**
+ * `Comprehension(body, Element(v₁, D₁), …, Element(vₙ, Dₙ))` with every
+ * domain a LITERAL `Range` with number-literal bounds or a literal `List` of
+ * pure elements, rewritten to the literal list of the bodies with the
+ * clause variables substituted — in the interpreter's order, the first
+ * clause outermost and the last varying fastest. Only when the target asks
+ * for it (`UnrollOptions.unrollComprehensions`): the shader targets, which
+ * have no loop lowering for a comprehension and lower the written-out list
+ * as a fixed-size array.
+ *
+ * The body must be pure and bind no name of its own (the substitution is
+ * not capture-avoiding), every clause must bind a plain symbol, no domain
+ * may read an earlier clause's variable (a dependent domain has no literal
+ * elements), and the element count is capped
+ * (`MAX_UNROLLED_COMPREHENSION_SIZE`, and the target's iteration budget when
+ * it has one). The counts are read before anything is enumerated, so an
+ * infinite or enormous literal range is declined without being walked. An
+ * empty domain writes the empty list, which is what the interpreter answers.
+ */
+function unrollComprehension(
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
+): Expression | undefined {
+  if (options.unrollComprehensions !== true) return undefined;
+  if (expr.operator !== 'Comprehension' || expr.nops < 2) return undefined;
+  const body = expr.op1;
+  if (body.isPure !== true) return undefined;
+  if (collectBinderNames(body).size > 0) return undefined;
+  // A domain whose head the caller overrode is the caller's to enumerate,
+  // and a domain element reading caller source must keep running it.
+  if (
+    expr.ops
+      .slice(1)
+      .some(
+        (clause) =>
+          isFunction(clause) &&
+          clause.nops === 2 &&
+          readsCallerSource(clause.ops[1], options)
+      )
+  )
+    return undefined;
+  const clauses: Array<[name: string, elements: ReadonlyArray<Expression>]> =
+    [];
+  // The target's iteration budget, when it has one, caps the count as it
+  // caps every other repetition the pass writes out.
+  const cap = Math.min(
+    MAX_UNROLLED_COMPREHENSION_SIZE,
+    options.iterationBudget === undefined
+      ? Infinity
+      : Math.floor(options.iterationBudget)
+  );
+  let total = 1;
+  for (const clause of expr.ops.slice(1)) {
+    if (!isFunction(clause, 'Element') || clause.nops !== 2) return undefined;
+    const [pattern, domain] = clause.ops;
+    if (!isSymbol(pattern)) return undefined;
+    if (clauses.some(([name]) => domain.symbols.includes(name)))
+      return undefined;
+    // The count is read before anything is enumerated: a literal range can
+    // be enormous, and one past the cap is declined without materializing.
+    const count = literalDomainCount(domain);
+    if (count === undefined) return undefined;
+    total *= count;
+    if (total > cap) return undefined;
+    const elements = literalDomainElements(domain);
+    if (elements === undefined) return undefined;
+    clauses.push([pattern.symbol, elements]);
+  }
+  const ce = expr.engine;
+  const rows: Expression[] = [];
+  const visit = (k: number, substitution: Record<string, Expression>): void => {
+    if (k === clauses.length) {
+      rows.push(body.subs(substitution));
+      return;
+    }
+    const [name, elements] = clauses[k];
+    for (const element of elements)
+      visit(k + 1, { ...substitution, [name]: element });
+  };
+  visit(0, {});
+  return ce.function('List', rows);
+}
+
+/**
+ * Is this a `Range` with number-literal bounds (and step)?
+ */
+function isLiteralRange(
+  domain: Expression
+): domain is Expression & FunctionInterface {
+  return isFunction(domain, 'Range') && domain.ops.every((op) => isNumber(op));
+}
+
+/**
+ * The element count of a LITERAL domain — a literal range (`count`, which
+ * the engine computes from the bounds without enumerating) or a literal
+ * `List` of pure elements — or `undefined` for any other domain, and for a
+ * range whose count is not finite.
+ */
+function literalDomainCount(domain: Expression): number | undefined {
+  if (isLiteralRange(domain)) {
+    const count = domain.count;
+    return count !== undefined && Number.isFinite(count) ? count : undefined;
+  }
+  if (isFunction(domain, 'List'))
+    return domain.ops.every((e) => e.isPure === true) ? domain.nops : undefined;
+  return undefined;
+}
+
+/**
+ * The elements of a LITERAL domain (see `literalDomainCount`), a literal
+ * range enumerated by the engine's own range iteration. Callers check the
+ * count against their cap first, so a range is never enumerated past it.
+ */
+function literalDomainElements(
+  domain: Expression
+): ReadonlyArray<Expression> | undefined {
+  if (isLiteralRange(domain)) {
+    if (typeof domain.each !== 'function') return undefined;
+    return [...domain.each()];
+  }
+  if (isFunction(domain, 'List'))
+    return domain.ops.every((e) => e.isPure === true) ? domain.ops : undefined;
+  return undefined;
 }
 
 /**

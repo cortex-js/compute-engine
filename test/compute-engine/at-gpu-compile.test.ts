@@ -542,8 +542,12 @@ describe('At — every declining shape names its OWN cause', () => {
     ['`Missing` base', ['At', 'Missing', 1], /base is the absence marker/],
     [
       'aggregate (complex) element',
-      ['At', ['List', 1, 2, 3, ['Complex', 1, 2]], 1],
-      /element 4 of the base is itself an aggregate/,
+      // A run-time index over an all-complex base: a literal index folds to
+      // the element before the lowering is reached (`foldLiteralIndex`,
+      // `fixed-width-unroll.ts`), and a base that MIXES complex and real
+      // elements is refused by the mixed-collection gate first.
+      ['At', ['List', ['Complex', 1, 2], ['Complex', 3, 4]], 'k'],
+      /element 1 of the base is itself an aggregate/,
     ],
     // The TYPE-based readings of the same question. `complex` IS a number and
     // lowers to a `vec2`, so "is it a number?" admitted these and emitted
@@ -596,7 +600,8 @@ describe('At — every declining shape names its OWN cause', () => {
   // `T | missing` type first, with its own message. Stated here so nobody
   // hunts for a missing `At` reason.
   test('an object-domain element base is pre-empted by the §3.F gate', () => {
-    expect(why(['At', ['List', 'True', 'False', 'True'], 1])).toMatch(
+    // A run-time index, for the reason given on the complex element above.
+    expect(why(['At', ['List', 'True', 'False', 'True'], 'k'])).toMatch(
       /object-domain absent \('missing'\) position .* Discharge with 'Coalesce'/
     );
     expect(why(['At', 'sl', 1])).toMatch(/object-domain absent/);

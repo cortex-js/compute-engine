@@ -1134,6 +1134,14 @@ export interface CompileTarget<Expr = unknown> {
   unrollConstantLists?: boolean;
 
   /**
+   * Write a comprehension over literal domains out as a literal list
+   * (`UnrollOptions.unrollComprehensions`). The shader targets set it: they
+   * have no loop lowering for a comprehension, and a small one is a
+   * fixed-size array literal there. Absent means the pass keeps it.
+   */
+  unrollComprehensions?: boolean;
+
+  /**
    * The set of names currently **bound** by an enclosing binding form — lambda
    * parameters, `Sum`/`Product`/`Loop` indices, `Block` locals, comprehension
    * variables, `Match` captures. A bound name shadows any same-named engine

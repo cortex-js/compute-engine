@@ -5,6 +5,7 @@ import {
   GPUShaderTarget,
   compileGPUMatrix,
   assertGPUScalarComponents,
+  gpuUniformVectorWidth,
   gpuAssertExpressionBody,
   gpuOperandShape,
   type GPUShapeRules,
@@ -20,6 +21,10 @@ function compileGLSLList(
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string
 ) {
+  // A list of points of one arity is an array of vectors.
+  const vector = gpuUniformVectorWidth(args);
+  if (vector !== undefined)
+    return `vec${vector}[${args.length}](${args.map((x) => compile(x)).join(', ')})`;
   assertGPUScalarComponents(
     args,
     args.length >= 2 && args.length <= 4 ? `vec${args.length}` : 'float[]'

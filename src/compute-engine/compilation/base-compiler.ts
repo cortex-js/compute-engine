@@ -11646,6 +11646,23 @@ export class BaseCompiler {
       if (prev === undefined) return;
       // A shader color occupies three channels, even though its language
       // type is atomic and its JavaScript representation is an object.
+      // A written list of points lowers on a shader target as an ARRAY of
+      // vectors, for which no local declaration is synthesized here (the
+      // element count would declare a `vecN` over a `vecK[N]` initializer).
+      // Fail closed (D6) rather than emit a declaration that contradicts
+      // its own initializer.
+      if (
+        isGPUTarget &&
+        (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
+        value.nops > 0 &&
+        value.ops.every((op) => BaseCompiler.isNonScalarShape(op))
+      )
+        throw new Error(
+          `${name}: a local holding a list of points has no static shader ` +
+            `declaration — the value lowers as an array of vectors, and a ` +
+            `local is declared as a vector or an array of scalars. Read the ` +
+            `points where they are written instead. Fail closed (D6).`
+        );
       const count =
         isGPUTarget &&
         (!isSymbol(value) || !BaseCompiler.localShapeFrameOf(value.symbol)) &&
@@ -19907,6 +19924,7 @@ export class BaseCompiler {
         readsLiveSource: target.cse?.harvestOptions?.isStringVar,
         minWidth: target.unrollMinWidth,
         unrollConstantLists: target.unrollConstantLists,
+        unrollComprehensions: target.unrollComprehensions,
       }
     );
     if (!inlined.isValid) return undefined;
@@ -22023,6 +22041,7 @@ export class BaseCompiler {
         readsLiveSource: target.cse?.harvestOptions?.isStringVar,
         minWidth: target.unrollMinWidth,
         unrollConstantLists: target.unrollConstantLists,
+        unrollComprehensions: target.unrollComprehensions,
       }
     );
   }

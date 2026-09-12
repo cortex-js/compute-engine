@@ -108,9 +108,11 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     });
 
     it('fails closed on a nested list (no scalar components)', () => {
+      // A nested list lowers as an ARRAY of vectors, which has no static
+      // vec2–vec4 shape for a componentwise call.
       const m = ['Sin', ['List', ['List', 1, 2], ['List', 3, 4]]];
-      expect(() => g(m)).toThrow(/has no GPU lowering/);
-      expect(() => w(m)).toThrow(/has no GPU lowering/);
+      expect(() => g(m)).toThrow(/has no static vec2–vec4 shape/);
+      expect(() => w(m)).toThrow(/has no static vec2–vec4 shape/);
     });
 
     it('fails closed when the scalar lowering calls a scalar-only preamble helper', () => {

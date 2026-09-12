@@ -1092,7 +1092,11 @@ function gpuElementIsShaderFloat(t: Type): boolean {
  * See `gpuElementIsShaderFloat` for the element test this applies.
  */
 function gpuHasShaderScalarElements(expr: Expression): boolean {
-  if (isFunction(expr, 'List') || isFunction(expr, 'Tuple')) return true;
+  // A written list or tuple is a vector only when its elements are scalars:
+  // a list of points lowers as an ARRAY of vectors (`gpuUniformVectorWidth`),
+  // which no `vecN` consumer may read as a vector of its element count.
+  if (isFunction(expr, 'List') || isFunction(expr, 'Tuple'))
+    return expr.ops.every((op) => !BaseCompiler.isNonScalarShape(op));
   if (BaseCompiler.isComplexValued(expr)) return true;
   if (
     isSymbol(expr) &&
@@ -1145,6 +1149,28 @@ function gpuComponentCount(expr: Expression | null): 2 | 3 | 4 | undefined {
   const n = BaseCompiler.vectorComponentCount(expr);
   if (n === undefined) return undefined;
   return gpuHasShaderScalarElements(expr!) ? n : undefined;
+}
+
+/**
+ * The component count every element of a `List` literal shares when EVERY
+ * element is a vector value of one width between 2 and 4 — a list of points
+ * of the same arity, which lowers as a fixed-size array of `vecK`
+ * (`vec3[N](…)` / `array<vec3f, N>(…)`) — or `undefined` when the elements
+ * are scalars, of mixed widths, or not vectors at all.
+ */
+export function gpuUniformVectorWidth(
+  args: ReadonlyArray<Expression>
+): number | undefined {
+  if (args.length === 0) return undefined;
+  let width: number | undefined;
+  for (const arg of args) {
+    if (!BaseCompiler.isNonScalarShape(arg)) return undefined;
+    const n = BaseCompiler.aggregateComponentCount(arg);
+    if (n === undefined || n < 2 || n > 4) return undefined;
+    if (width !== undefined && n !== width) return undefined;
+    width = n;
+  }
+  return width;
 }
 
 /**
@@ -1352,6 +1378,30 @@ function gpuIsTupleShaped(expr: Expression): boolean {
 }
 
 /** Fail closed (D6) on a shape the element-wise selection cannot render. */
+/**
+ * Fail closed (D6) when a value arm of a selection is a WRITTEN list or
+ * tuple that lowers to a shader ARRAY — a list of points (`vec2[2](…)`) or
+ * a list of five or more scalars: GLSL's ternary and WGSL's `select` take
+ * scalars and vectors, and neither language selects between arrays. Only
+ * the written shapes are judged here, before any arm is compiled; every
+ * other arm keeps the selection lowering's own, more specific gates.
+ */
+function gpuAssertSelectableArms(
+  head: string,
+  values: ReadonlyArray<Expression | null | undefined>
+): void {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (!isFunction(value, 'List') && !isFunction(value, 'Tuple')) continue;
+    if (gpuOperandShape(value) !== 'array') continue;
+    throw new Error(
+      `${head}: the value \`${value.toString()}\` lowers to a shader ARRAY, ` +
+        `and a selection (a GLSL ternary, a WGSL \`select\`) chooses between ` +
+        `scalars or vectors only. Fail closed (D6).`
+    );
+  }
+}
+
 function gpuSelectionDecline(reason: string): never {
   throw new Error(`Which: ${reason} Fail closed (D6).`);
 }
@@ -1882,6 +1932,16 @@ export function gpuOperandShape(
     return 'scalar';
   const width = gpuComponentCount(expr);
   if (width !== undefined) return width;
+  // A written list of points is emitted as an ARRAY of vectors
+  // (`gpuUniformVectorWidth`), never as a matrix, whatever its type's
+  // dimensions say: the shape must agree with the emission, or a scalar
+  // times a nested list would pass the matrix reading and emit
+  // `x * vec2[2](…)`, which no shader accepts.
+  if (
+    (isFunction(expr, 'List') || isFunction(expr, 'Tuple')) &&
+    gpuUniformVectorWidth(expr.ops) !== undefined
+  )
+    return 'array';
   if (isFunction(expr, 'Matrix')) return 'matrix';
   const t = gpuType(expr);
   if (
@@ -2099,6 +2159,10 @@ function gpuTopLevelCall(
  */
 const GPU_AGGREGATE_CONSTRUCTOR =
   /^(?:[iub]?vec[234]|mat[234]|array\s*<|(?:float|f32|int|i32|uint|u32|bool)\s*\[)/;
+
+/** The callee of an array-of-vectors constructor: `vec3[12]` (GLSL) or
+ * `array<vec3f, 12>` (WGSL) — the lowering of a written list of points. */
+const GPU_VECTOR_ARRAY_CONSTRUCTOR = /^(?:[iub]?vec[234]\s*\[|array\s*<\s*vec)/;
 
 /**
  * `GPU_AGGREGATE_CONSTRUCTOR` unanchored: does an aggregate constructor appear
@@ -2450,7 +2514,11 @@ function gpuSourceIsVector(
 ): boolean {
   const call = gpuTopLevelCall(code);
   if (call === undefined) return false;
-  if (GPU_AGGREGATE_CONSTRUCTOR.test(call.callee)) return true;
+  // An ARRAY of vectors — `vec2[2](…)`, `array<vec2f, 2>(…)`, the lowering
+  // of a written list of points — is not a vector value, though its callee
+  // starts like one.
+  if (GPU_AGGREGATE_CONSTRUCTOR.test(call.callee))
+    return !GPU_VECTOR_ARRAY_CONSTRUCTOR.test(call.callee);
   if (!slots.has(call.callee)) return false;
   return call.operands.some((o) => gpuSourceIsVector(o, slots));
 }
@@ -5614,6 +5682,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // expressible here.
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
+    gpuAssertSelectableArms('If', [args[1], args[2]]);
     // The condition is evaluated unconditionally, so it may hoist; the two arms
     // are selected and must not (see `compileGPUConditionalArm`). Operand
     // indices preserve their CSE regions, allowing reuse of outer bindings.
@@ -5645,6 +5714,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
       throw new Error('Which: expected condition/value pairs');
+    gpuAssertSelectableArms(
+      'Which',
+      args.filter((_, i) => i % 2 === 1)
+    );
     // The fall-through NaN must match the branch values' shape (see
     // `gpuNaNFor`); every branch of a well-typed `Which` shares one shape,
     // so the first determinable value decides.
@@ -10499,6 +10572,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // an invariant `floor`, `sin` or `dot` inside one is paid millions of
       // times per frame.
       hoistScalarInvariants: true,
+      // A shader has no loop lowering for a comprehension; a small one over
+      // literal domains is written out as a fixed-size array literal, in a
+      // definition body or an inlined body as at the entry
+      // (`CompileTarget.unrollComprehensions`).
+      unrollComprehensions: true,
       assignmentValue: (value, code, current) =>
         isSubtype(gpuType(value), 'color')
           ? gpuColorOperand(
@@ -11335,6 +11413,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       skipHeads: unrollSkipHeads,
       iterationBudget: options.iterationBudget,
       readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+      // A shader has no loop lowering for a comprehension; a small one over
+      // literal domains is written out as a fixed-size array literal
+      // (`CompileTarget.unrollComprehensions`).
+      unrollComprehensions: true,
     });
     const { functions: userFunctions, vars } = options;
     const allFunctions = this.getFunctions();

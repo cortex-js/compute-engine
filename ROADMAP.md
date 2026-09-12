@@ -232,36 +232,6 @@ The report was reviewed on 2026-09-09 and each item was reproduced against
 HEAD from source before it was listed here. The items are in the order of
 their expected effect on the corpus.
 
-- **Juxtaposition with a `missing | T` operand becomes a silent `Tuple`
-  (defect).** A piecewise with no default arm types `missing | T`
-  (`g(t) := \{0.5 if t < 1\}` gives `g(3): missing | real`), and the
-  invisible-operator canonicalization tests each operand with
-  `type.matches('number')` (`boxed-expression/invisible-operator.ts`, the
-  two tests near lines 396 and 726), which a `missing | real` type fails. So
-  `2 g(3)` parses to `["Tuple", 2, ["g", 3]]`, and the Desmos row
-  `0\cos(T_4(t))\cos(T_4(t))l_0(t)` (document `neyret/zstlwmmpkp`, record
-  #256) types `tuple<integer, number, number, missing | real>`; the
-  `PointList` around it then declines on every target. The earlier test in
-  the same file (line 194) already uses the looser `couldMatch('number')`.
-  Fix: strip the `missing` marker (or use `couldMatch`) at the two sites,
-  with a pin for the piecewise case. RULED 2026-09-09 (Option A): a
-  default-less `Which` and the else-less `If` KEEP the type `missing | T`
-  and the value `Missing`; the consumers that reject that type are fixed
-  (this file's juxtaposition sites, a sweep of the other `matches('number')`
-  gates, and Tycho's importer probe). Typing the result as `T` was rejected
-  because the 2026-09-01 "a type describes the successes" ruling covers
-  UNDECLARED partiality, while a missing default arm is absence the author
-  wrote down.
-- **`Add` and `Multiply` do not absorb a `Missing` that arrives as an
-  evaluated operand VALUE (defect).** With the same `g`, `g(3) + 1` and
-  `2 \cdot g(3)` evaluate to the symbolic `["Add", "Missing", 1]` and
-  `["Multiply", 2, "Missing"]` (`.N()` answers NaN), and the else-less
-  `If(3 < 1, 0.5) + 1` does the same, while a literal `Missing` operand
-  (`ce.box(["Add", "Missing", 1])`) and every other numeric head tried
-  (`Sin`, `Sqrt`, `Max`, `Power`, `Sum`) answer NaN as
-  `docs/ERROR-MODEL.md` §3 requires ("in a numeric slot, Missing is
-  normalized to NaN at the boundary"). The boundary normalization runs on the
-  syntactic operand, not on the operand's evaluated value.
 - **A user function declared `-> unknown` types `broadcastable<number>`
   through every broadcastable head** (`\sin(u(t))` for
   `u: (unknown) -> unknown`). This is the cause of the audit's largest item
@@ -269,51 +239,13 @@ their expected effect on the corpus.
   importer declares each user function `(unknown, …) -> unknown` and refines
   the result only when its probe reads a type that `matches('number')` —
   `missing | number` (the default-less piecewise again) fails that test, so
-  the result stays `unknown`. The typing is honest on CE's side; the lever
-  is the piecewise typing above plus a Tycho-side change to accept
-  `missing | T` as scalar. The 2026-09-08 note "J3 is not reproducible at
-  HEAD" was true only for the constructions tried; the `-> unknown`
-  declaration with the body assigned in ANOTHER scope reproduces it.
-- **Complex arithmetic after the fixed-width `Sum` unroll (audit C2).**
-  `B(s, j) := \sum_{i=1}^{6} (1 - j(1 - \sqrt{1 - 0.025^2 (i - 0.5)^2})) s`
-  compiles to six `_SYS.csqrt` sites, the radicand emitted as
-  `-(0.25 * _tv1) + 1` with `_tv1` a hoisted constant — not a literal — so
-  the fold-before-shape override (`_withFoldedRealOverride`,
-  `base-compiler.ts`) never sees a literal and the complex hedge for the
-  unknown-sign radicand stands; the 80-factor product of the exoplanet row is
-  then multiplied as complex pairs (record #147, 33 KB). Two changes: re-run
-  the complexness analysis on the unrolled, substituted body (or fold the
-  hoisted constant radicand before the analysis), and multiply the real
-  factors of a product in real arithmetic when one factor is complex.
-- **CSE never binds a two-operand `Min`/`Max`/`ElementMin`/`ElementMax`
-  call.** `Math.min(_.v, 0.8)` repeated three times is left inline while
-  `Math.cos(_.u)` repeated twice is bound (record #766: six evaluations).
-  `sizeOf` in `compilation/cse.ts` is a plain node count, 3 for such a call,
-  below `CSE_MIN_SIZE = 4`. Weight a function call like the trig calls are.
-- **`Mod(a, 1)` on JavaScript is the three-operation idiom
-  `((a % 1) + 1) % 1`** (1 128 sites), and it answers `0` for
-  `a = -1e-20` where the interpreter answers `1 - 1e-20` and GLSL `fract`
-  answers `1`. `a - Math.floor(a)` is one floor and agrees with `fract`;
-  the general `a - b * Math.floor(a / b)` is the GLSL `mod` definition. A
-  non-literal divisor is still evaluated three times.
-- **Small peepholes, each reproduced:** a folded trig literal leaves
-  `* 1` and `0 *` factors in a product (`1 * x → x` is always safe;
-  `0 * x → 0` only when `x` is finite-typed); `PointX(PointList(a, b))`
-  lowers to `[a, b][0] ?? NaN` instead of `a`; `Equal(9543, k)` for a
-  comprehension index over an integer range still emits the tolerance
-  compare because the index is not typed `integer` (record #131, 53 terms ×
-  22 500 iterations, each followed by a NaN test the body type rules out);
-  the `throw new RangeError` prologue is emitted for literal bounds; the
-  GLSL fold prints float32(2π) at double precision (`6.2831854820251465`).
-- **Target gaps with corpus demand:** interval-js has no lowering for
-  `Arg(a + i b)` (2 declines;
-  the JavaScript target rewrites it to `Math.atan2(b, a)`, and `_IA.atan2`
-  exists); GLSL declines a `Comprehension` over literal domains (4 declines;
-  the seam is `compilation/fixed-width-unroll.ts`); the interval constant
-  hoist (`_k`) does not reach user-function bodies or the enclosure
-  literals (`{ kind: 'interval', … }`, 293 inline sites); a `scale`
-  primitive for a scalar factor is still open. The interval `negate`
-  (270 sites) and the piecewise-arm closures are unchanged.
+  the result stays `unknown`. The typing is honest on CE's side; a
+  default-less piecewise keeps its `missing | T` type by ruling
+  (2026-09-09), so the remaining lever is the Tycho-side change to accept
+  `missing | T` as scalar in that probe. The 2026-09-08 note "J3 is not
+  reproducible at HEAD" was true only for the constructions tried; the
+  `-> unknown` declaration with the body assigned in ANOTHER scope
+  reproduces it.
 - **Absence at the boxing seam, residue found while fixing the consumers
   (2026-09-09).** (1) `Partition(L, k(0))` with `k` a default-less piecewise
   returning an integer is rejected as `incompatible-type` (`integer | missing`
@@ -350,17 +282,6 @@ their expected effect on the corpus.
   `at` field is documented in that operand's coordinate, so this second-operand
   jump cannot be expressed without widening the contract for existing
   `Arctan2` callers. Needs a ruling before the condition is widened.
-- **Compiled `NotEqual` over a NaN operand disagrees with the interpreter
-  whenever the tolerance form is used (found 2026-09-09 while typing integer
-  range indices).** `compile(r \ne 3)` with `r: real` emits
-  `Math.abs(r - 3) > 1e-10`; called with no `r`, the difference is NaN,
-  `NaN > 1e-10` is false, and the compiled function answers "equal" where
-  the interpreter answers `NotEqual(NaN, 3) → True`. The fix is one operator,
-  `!(|a − b| <= tol)`, identical for every non-NaN pair, but the spelling is
-  pinned on the JavaScript and Python targets and the same seam lives in
-  `_SYS.neq` / `_ce_eqcoll`, so it is a cross-target contract change. The
-  exact `===` form (now admitted for `integer | nan` operands) already
-  agrees with the interpreter.
 - **The runtime conformance check cannot police an OPEN generic parameter
   (found 2026-09-09 while fixing `Partition`'s union-typed size slot).**
   `runtimeCheckExemptParam` exempts any parameter type with a free type

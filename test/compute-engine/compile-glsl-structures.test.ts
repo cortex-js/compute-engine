@@ -586,9 +586,20 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
     expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
   });
 
-  it('a nested tuple fails closed rather than emit vec2(vec2, vec2)', () => {
+  it('a nested tuple of points of one arity is an array of vectors', () => {
+    // Every element is a 2-D point, so the tuple is an array of `vec2`
+    // (`gpuUniformVectorWidth`), never the invalid `vec2(vec2, vec2)`.
     const expr = ce.box(['Tuple', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
-    expect(() => glsl.compile(expr)).toThrow(/Fail closed/);
+    expect(glsl.compile(expr, { constantFold: false }).code).toBe(
+      'vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))'
+    );
+  });
+
+  it('a tuple mixing a point and a scalar still fails closed', () => {
+    const expr = ce.box(['Tuple', ['Tuple', 1, 2], 't']);
+    expect(() => glsl.compile(expr, { constantFold: false })).toThrow(
+      /Fail closed/
+    );
   });
 
   it('an all-scalar tuple still lowers to vec2', () => {
