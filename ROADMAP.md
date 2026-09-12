@@ -397,34 +397,6 @@ their expected effect on the corpus.
   operator" declines (importer binding), and the 2× re-compile of every
   declined row.
 
-### The interpreter's norm of a point with an EMPTY list coordinate answers the norm of a different point (OPEN, evaluation — found 2026-09-11 by the compiled-norm broadcast round)
-
-`Norm(([], 3))` and `Abs(([], 3))` evaluate to `√10`, the norm of `(1, 3)`,
-while the element-wise operators keep the empty coordinate (`([], 3) + (1,
-1)` is `([], 4)`, `2 · ([], 3)` is `([], 6)`). A point with an empty list
-coordinate is zero points, so the broadcast norm should be the empty list
-(or the erasure marker, whichever the empty-broadcast ruling in this file
-settles on), never a number. The compiled route answers `NaN` for it, the
-compiled spelling of an empty broadcast position.
-
-### A nested point at an OPEN-typed coordinate is read as a list by the compiled norm (OPEN, representation — recorded 2026-09-11)
-
-A compiled array carries no tuple-versus-list tag. The compiled `Norm`,
-`Abs` and `Hypot` of an unwritten point read a coordinate by its static
-type: a `tuple<…>` coordinate is a nested point read whole, a `list<…>` or
-`broadcastable<…>` coordinate is a broadcast source, and a coordinate typed
-`unknown`, bare `tuple`, or `indexed_collection<number>` — which may hold
-either — is read as a list, the way the compiled arithmetic already reads
-every nested array. The one value where that differs from the interpreter is
-a nested point at such a coordinate: for `q: tuple<unknown, number>`,
-`Norm(((1, 2), 3))` evaluates to `√14` (the inner point's components join the
-vector) and compiles to `[√10, √13]` (one norm per element of the inner
-array). Declining the shape instead would refuse every untyped point
-parameter, the commonest shape a document function has, so the list reading
-is kept (`pointCoordinateKind`, `javascript-target.ts`). Closing the gap
-needs either a run-time tuple tag on compiled points or a ruling that a
-compiled array at a coordinate is a list.
-
 ### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
 
 - **Repeated range-gather reductions are shared (implemented).** `Sum` and

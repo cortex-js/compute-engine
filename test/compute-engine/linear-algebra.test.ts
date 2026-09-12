@@ -3503,6 +3503,64 @@ describe('Norm — a non-numeric component is refused in every order', () => {
   });
 });
 
+describe('Norm — a point with an EMPTY broadcasting component is zero points', () => {
+  // `‖([1, 2], 3)‖` is one norm per element of the list component. With an
+  // empty component there are no points, so the norm is the empty list —
+  // what an empty LIST of points answers too. `Abs([])` evaluates to
+  // `Nothing`, the erasure marker, and the sum and product folds erased it,
+  // so the norm was `√(1 + 9)`: the empty product for the erased component
+  // plus the other one, the norm of a different point. `Hypot` builds its
+  // hypotenuse from the point's norm and answered the malformed
+  // `√(16 + []²)`.
+  const ce = new ComputeEngine();
+  const P: Expression = ['Tuple', ['List'], 3];
+
+  test('Norm and Abs answer the empty list, at every order', () => {
+    expect(ce.box(['Norm', P]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Abs', P]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Norm', P, 1]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Norm', P, 3]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Norm', ['Tuple', ['List'], ['List', 1, 2]]]).evaluate().json).toEqual(['List']);
+  });
+
+  test('zero points have no infinite or NaN norm either', () => {
+    // The empty component is decided before the infinite-component
+    // dominance and the NaN answer: there is no point for them to dominate.
+    expect(ce.box(['Norm', ['Tuple', ['List'], 'PositiveInfinity']]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Norm', ['Tuple', ['List'], 'NaN']]).evaluate().json).toEqual(['List']);
+  });
+
+  test('an empty nested TUPLE component is an atomic point of norm 0', () => {
+    // A tuple component is never a broadcast source, so `(( ), 3)` is one
+    // point whose inner point has norm 0.
+    expect(ce.box(['Norm', ['Tuple', ['Tuple'], 3]]).evaluate().re).toBe(3);
+  });
+
+  test('Hypot with such a point leg answers the empty list', () => {
+    expect(ce.box(['Hypot', P, 4]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Hypot', 4, P]).N().json).toEqual(['List']);
+    // Decided before the infinite-leg and NaN-leg dominance, as `Norm` is.
+    expect(ce.box(['Hypot', ['Tuple', ['List'], 'PositiveInfinity'], 3]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Hypot', P, 'PositiveInfinity']).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Hypot', ['Tuple', ['List'], 'NaN'], 4]).evaluate().json).toEqual(['List']);
+  });
+
+  test('the non-empty broadcast and the plain point are unchanged', () => {
+    expect(ce.box(['Norm', ['Tuple', ['List', 1, 2], 3]]).N().ops!.map((x) => x.re)).toEqual([
+      expect.closeTo(Math.sqrt(10), 12),
+      expect.closeTo(Math.sqrt(13), 12),
+    ]);
+    expect(ce.box(['Hypot', ['Tuple', ['List', 1, 2], 3], 4]).N().ops!.map((x) => x.re)).toEqual([
+      expect.closeTo(Math.sqrt(26), 12),
+      expect.closeTo(Math.sqrt(29), 12),
+    ]);
+    expect(ce.box(['Norm', ['Tuple', ['List', 1, 2], 'PositiveInfinity']]).evaluate().json).toBe('PositiveInfinity');
+    expect(ce.box(['Norm', ['Tuple', 3, 4]]).evaluate().re).toBe(5);
+    expect(ce.box(['Hypot', ['Tuple', 3, 4], 12]).evaluate().re).toBe(13);
+    expect(ce.box(['Hypot', ['Tuple', 1, 1], 1]).evaluate().json).toEqual(['Sqrt', 3]);
+  });
+});
+
 describe('Norm — the Frobenius norm at rank 3', () => {
   it('is the entry-wise L2 norm of every cell', () => {
     const eng = new ComputeEngine();

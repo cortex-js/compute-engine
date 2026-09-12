@@ -250,6 +250,19 @@ The inference is trusted here, unlike at a top-level input, because the body
 never chooses what reaches it: the call sites do, and they are all
 broadcast-aware.
 
+A compiled array carries no tuple-versus-list tag, and the compiled norm of
+a point reads each coordinate by its static type: a scalar as is, a `tuple`
+coordinate as a nested point that contributes its magnitude, a `list` or
+`broadcastable` coordinate as a broadcast source, and a coordinate typed
+`unknown`, bare `tuple` or `indexed_collection` — which may hold either — as
+a list, the way the compiled arithmetic reads every nested array (user ruling
+2026-09-11). The one value where that differs from the interpreter is a
+nested point at such a coordinate, `((1, 2), 3)` under `tuple<unknown,
+number>`, which the interpreter flattens into one norm and the compiled code
+broadcasts. Declining the shape instead would refuse every untyped point
+parameter whose body takes a norm, the commonest shape a document function
+has, and the nested point is not a value the plotting consumers produce.
+
 A parameter typed `unknown` or `any` has the same standing (user ruling
 2026-09-09). The argument for it is the one above, and it does not depend on
 the parameter's own type at all: what makes the parameter a run-time scalar is

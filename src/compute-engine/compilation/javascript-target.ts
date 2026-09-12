@@ -140,7 +140,9 @@ function pointTypeAlternatives(t: Type): TupleType[] | undefined {
  * the interpreter reads differently, a nested point at a coordinate typed
  * `unknown` (`((1, 2), 3)`, flattened into one norm there), is not a value
  * the plotting consumers produce; declining every untyped point parameter
- * to guard it would refuse the commonest shape a document function has.
+ * to guard it would refuse the commonest shape a document function has
+ * (user ruling 2026-09-11, recorded in `docs/COMPILATION-MODEL.md`,
+ * "Collections").
  */
 type PointCoordinateKind = 'scalar' | 'point' | 'source' | 'refused';
 

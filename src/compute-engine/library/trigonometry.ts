@@ -469,6 +469,19 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // A fixed-arity point squares through its Euclidean norm (`Square` of a
       // bare `Tuple` is inert): Hypot((3,4), 1) = √(‖(3,4)‖² + 1²).
       evaluate: ([x, y], { engine, numericApproximation }) => {
+        // A point leg enters through its norm. A point with an EMPTY
+        // broadcasting component is zero points, and its norm is the empty
+        // list; the hypotenuse of no points is the empty list too, whatever
+        // the other leg holds — an infinite or NaN sibling dominates a
+        // point, not the absence of one, so this test comes before the two
+        // below (`‖([], +∞)‖` is `[]` for the same reason). Decided here
+        // because the construction at the end cannot: `Square([])` stays
+        // inert and the answer was the malformed `√(16 + []²)`.
+        const legs = [x, y].map((v) =>
+          isTuple(v) ? engine.expr(['Norm', v]).evaluate() : v
+        );
+        if (legs.some((l) => l.isFiniteCollection === true && l.count === 0))
+          return engine.function('List', []);
         // An infinite leg makes the hypotenuse infinite whatever the other
         // leg is, NaN included — so this test comes before the NaN one
         // (`hypotLegIsInfinite` states the rule and its IEEE grounding).
@@ -484,10 +497,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // anyway (through the point's own norm), and the sign handler
         // reads the same helper, so all three agree.
         if (hypotLegIsNaN(x) || hypotLegIsNaN(y)) return engine.NaN;
-        const sq = (v: Expression): Expression =>
-          engine.expr(isTuple(v) ? ['Square', ['Norm', v]] : ['Square', v]);
+        const sq = (v: Expression): Expression => engine.expr(['Square', v]);
         return engine
-          .expr(['Sqrt', ['Add', sq(x), sq(y)]])
+          .expr(['Sqrt', ['Add', sq(legs[0]), sq(legs[1])]])
           .evaluate({ numericApproximation });
       },
     },

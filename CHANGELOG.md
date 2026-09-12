@@ -13,6 +13,12 @@
   still declines. The Tycho noise kernel (`art/hyvhlz4chj`), whose fractional
   Brownian motion term binds three locals from the loop index, compiles and
   links on both targets.
+- **The norm of a point with an empty list coordinate is the empty list.**
+  `Norm(([], 3))`, `Abs(([], 3))` and `Hypot(([], 3), 4)` evaluate to `[]`, one
+  norm per point of no points, the answer an empty list of points gets. They
+  answered `√10` and the malformed `√(16 + []²)`: `Abs([])` evaluates to the
+  erasure marker, which the sum and product folds erased, leaving the empty
+  product for the missing component.
 - **A compiled norm of a point with a list coordinate answers one norm per
   element.** On JavaScript, `Norm`, `Abs` and `Hypot` of an unwritten point
   whose coordinate type admits a list — a parameter typed `unknown` or

@@ -2597,11 +2597,33 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // and the folds below zip it. Text has to be tested before that
           // exemption, because a string IS a collection — of characters —
           // and would otherwise slip through it.
+          // A collection component other than text (a string is a
+          // collection of characters, and has no norm).
+          const isCollectionComponent = (el: Expression): boolean =>
+            !isString(el) && !isCharacter(el) && el.isCollection;
           for (const el of elements) {
-            if (!isString(el) && !isCharacter(el) && el.isCollection) continue;
+            if (isCollectionComponent(el)) continue;
             if (admissionOf(el, 'number') === 'refute')
               return ce.typeError('number', el.type, el);
           }
+
+          // A broadcasting component that is EMPTY zips zero points, so the
+          // norm is the empty list — one norm per point, of no points — the
+          // answer an empty LIST of points gets below. Decided before the
+          // folds: `Abs([])` evaluates to `Nothing`, the erasure marker,
+          // which the sum and product folds erase, so `‖([], 3)‖` answered
+          // `√(1 + 9)` — the empty product for the erased component, plus
+          // the other component — the norm of a different point. A TUPLE
+          // component is a nested point, atomic, never a broadcast source:
+          // an empty one has norm 0 and takes the folds below.
+          for (const el of elements)
+            if (
+              isCollectionComponent(el) &&
+              !isTuple(el) &&
+              el.isFiniteCollection === true &&
+              el.count === 0
+            )
+              return ce.function('List', []);
 
           // An infinite component makes the norm `+∞` for each of those orders
           // (each of `Σ|xᵢ|`, `√(Σ|xᵢ|²)`, `(Σ|xᵢ|^p)^(1/p)` and `max |xᵢ|` is
