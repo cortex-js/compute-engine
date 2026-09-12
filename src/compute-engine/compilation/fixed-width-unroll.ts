@@ -101,6 +101,25 @@ export interface UnrollOptions {
    * when one of them reads such a symbol. Absent means no symbol does.
    */
   readonly readsLiveSource?: (name: string) => boolean;
+
+  /**
+   * The narrowest literal list the fan-out rules (the point accessor over a
+   * list of points, `Map`, the element-wise heads) rewrite. Defaults to
+   * {@link MIN_UNROLLED_WIDTH}, below which every target with a native
+   * narrow-list lowering answers for itself. A target with NO list lowering
+   * at all — the interval target, whose values are one interval each — sets
+   * `1`: for it a list of any width is either fanned out here or a decline.
+   */
+  readonly minWidth?: number;
+
+  /**
+   * Also fan out a literal list of NUMBER LITERALS. Off by default: such a
+   * list is a compile-time constant the constant folder answers whole, and a
+   * caller who turned constant folding off asked for the target's own
+   * fan-out over the constants. The interval target sets it: its constant
+   * fold works on emitted code, and a list has none.
+   */
+  readonly unrollConstantLists?: boolean;
 }
 
 /**
@@ -154,6 +173,11 @@ const MAX_REWRITE_ROUNDS = 16;
  * targets it would replace one vector operation with four scalar ones. From
  * five elements up no target has a native fixed-width shape: the collection is
  * either a runtime array or a decline, which is where the fan-out pays.
+ *
+ * A target with NO native list lowering — the interval target, whose values
+ * are one interval each — lowers this floor through `UnrollOptions.minWidth`
+ * (and `unrollConstantLists`): for it, a list of any width is either fanned
+ * out here or a decline.
  *
  * The REDUCTION rule (rule 3) has no width gate, because the claim above is
  * false for it. `Min([a, b, c])` is not a narrow-list lowering anywhere: the
@@ -216,9 +240,10 @@ function rewrite(
     if (!isFunction(node)) break;
     const next =
       foldPointAccessor(node, options) ??
-      tryUnrollMap(node) ??
+      tryUnrollMap(node, options) ??
       unrollReduction(node) ??
-      distributeOverList(node);
+      distributeOverList(node, options) ??
+      foldLiteralIndex(node, options);
     if (next === undefined) break;
     node = rewrite(next, settled, options);
   }
@@ -279,10 +304,12 @@ const POINT_ACCESSOR_POSITION: Readonly<Record<string, number>> = {
  * points add and negate componentwise and a scalar multiple scales each
  * coordinate.
  *
- * "Wide" is {@link MIN_UNROLLED_WIDTH}: a narrower list of points is a shape
- * the targets answer for themselves — a component swizzle over a native
- * vector on the shader targets, a documented decline elsewhere — and
- * replacing that answer would be a change for its own sake.
+ * "Wide" is {@link MIN_UNROLLED_WIDTH}, or the narrower floor a target sets
+ * through `UnrollOptions.minWidth`: a narrower list of points is a shape the
+ * targets answer for themselves — a component swizzle over a native vector on
+ * the shader targets, a documented decline elsewhere — and replacing that
+ * answer would be a change for its own sake. The interval target, which has
+ * no list lowering at all, sets the floor to one element.
  *
  * A third operand is a `PointList` built from COLUMNS — one list per
  * coordinate, zipped into points (`PointList([x₁, x₂, x₃], [y₁, y₂, y₃])`).
@@ -317,7 +344,7 @@ function foldPointAccessor(
     return options.foldSingleLiteralPoint === true
       ? coordinateOf(point, expr.operator, position)
       : undefined;
-  if (isUnrollableList(point))
+  if (isUnrollableList(point, options))
     return coordinateOf(point, expr.operator, position);
   if (isFunction(point, 'PointList'))
     return projectPointListColumn(point, position, options);
@@ -354,21 +381,32 @@ function projectPointListColumn(
   const column = point.ops[position - 1];
   const width = staticListWidth(column);
   if (width === undefined) return undefined;
-  const callerSupplied = (e: Expression): boolean =>
-    (isSymbol(e) && options.readsLiveSource?.(e.symbol) === true) ||
-    (isFunction(e) &&
-      (options.skipHeads?.has(e.operator) === true ||
-        e.ops.some(callerSupplied)));
   for (let i = 0; i < point.nops; i++) {
     if (i === position - 1) continue;
     const other = point.ops[i];
-    if (other.isPure !== true || callerSupplied(other)) return undefined;
+    if (other.isPure !== true || readsCallerSource(other, options))
+      return undefined;
     if (isProvablyScalar(other)) continue;
     if (staticListWidth(other) !== width) return undefined;
   }
   const budget = options.iterationBudget;
   if (budget !== undefined && Math.floor(budget) < width) return undefined;
   return column;
+}
+
+/**
+ * Does `e` emit code the CALLER supplied — a symbol mapped to live source
+ * (`UnrollOptions.readsLiveSource`) or an application of a head the caller
+ * overrode (`UnrollOptions.skipHeads`), anywhere in its subtree? A rewrite
+ * that stops evaluating such a subtree stops running the caller's code, which
+ * may count its own calls or draw a number, so the rules that DISCARD a
+ * subexpression refuse one that answers `true`.
+ */
+function readsCallerSource(e: Expression, options: UnrollOptions): boolean {
+  if (isSymbol(e)) return options.readsLiveSource?.(e.symbol) === true;
+  if (!isFunction(e)) return false;
+  if (options.skipHeads?.has(e.operator) === true) return true;
+  return e.ops.some((op) => readsCallerSource(op, options));
 }
 
 /**
@@ -432,8 +470,14 @@ function isNonConstantLiteralList(
  * expand? {@link isNonConstantLiteralList}, and WIDE — see
  * {@link MIN_UNROLLED_WIDTH}, which also says why rule 3 does not ask this.
  */
-function isUnrollableList(e: Expression): e is Expression & FunctionInterface {
-  return isNonConstantLiteralList(e) && e.nops >= MIN_UNROLLED_WIDTH;
+function isUnrollableList(
+  e: Expression,
+  options: UnrollOptions
+): e is Expression & FunctionInterface {
+  if (!isFunction(e, 'List') || e.nops === 0) return false;
+  if (options.unrollConstantLists !== true && !isNonConstantLiteralList(e))
+    return false;
+  return e.nops >= (options.minWidth ?? MIN_UNROLLED_WIDTH);
 }
 
 /**
@@ -557,14 +601,18 @@ function literalPointOperands(
  *    and substitution repeats the element at each mention, while the
  *    interpreter evaluates the element once.
  *
- * A list narrower than {@link MIN_UNROLLED_WIDTH} is left to the target's own
- * `Map` lowering.
+ * A list narrower than {@link MIN_UNROLLED_WIDTH} — or than the floor a target
+ * sets through `UnrollOptions.minWidth` — is left to the target's own `Map`
+ * lowering.
  */
-function tryUnrollMap(expr: Expression): Expression | undefined {
+function tryUnrollMap(
+  expr: Expression,
+  options: UnrollOptions
+): Expression | undefined {
   if (!isFunction(expr, 'Map') || expr.nops !== 2) return undefined;
   const callback = expr.op1;
   const list = expr.op2;
-  if (!isUnrollableList(list)) return undefined;
+  if (!isUnrollableList(list, options)) return undefined;
   if (isSymbol(callback))
     return unrollMapOfNamedFunction(callback.symbol, list);
   const lambda = callback;
@@ -846,7 +894,8 @@ const ELEMENTWISE_HEADS = new Set([
 
 /**
  * Every head any rule of this pass can rewrite: the point accessors (rule 1),
- * `Map` (rule 2), the reductions (rule 3) and the element-wise heads (rule 4).
+ * `Map` (rule 2), the reductions (rule 3), the element-wise heads (rule 4)
+ * and a literal index (rule 5).
  *
  * Read by {@link overriddenCompilationHeads} for the one case where the
  * overridden heads cannot be enumerated: withholding all of these makes the
@@ -858,11 +907,13 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   ...Object.keys(REDUCTION_HEADS),
   'Reduce',
   ...ELEMENTWISE_HEADS,
+  'At',
 ]);
 
 /**
  * An element-wise head with a WIDE literal list operand (at least
- * {@link MIN_UNROLLED_WIDTH} elements), rewritten to the literal list of the
+ * {@link MIN_UNROLLED_WIDTH} elements, or the floor a target sets through
+ * `UnrollOptions.minWidth`), rewritten to the literal list of the
  * per-element applications: `x - [a, b, c, d, e]` becomes
  * `[x - a, x - b, x - c, x - d, x - e]`.
  *
@@ -878,14 +929,17 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
  * widths — is left to the target's own broadcast lowering.
  */
 function distributeOverList(
-  expr: Expression & FunctionInterface
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
 ): Expression | undefined {
   if (!ELEMENTWISE_HEADS.has(expr.operator)) return undefined;
   const ops = expr.ops;
   if (ops.length === 0) return undefined;
 
   const listOps = ops.map((op) =>
-    isUnrollableList(op) && op.ops.every(isProvablyScalar) ? op.ops : undefined
+    isUnrollableList(op, options) && op.ops.every(isProvablyScalar)
+      ? op.ops
+      : undefined
   );
   const width = listOps.find((l) => l !== undefined)?.length;
   if (width === undefined) return undefined;
@@ -930,6 +984,43 @@ function distributeOverList(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Rule 5 — a literal index into a literal list
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * `At([e₁, …, eₙ], k)` with `k` a positive integer literal no greater than
+ * `n`, rewritten to `eₖ`. The list is written out and the index is known, so
+ * the element is the value; every target then compiles the element instead
+ * of building the list and indexing it (the interval target has no list to
+ * build at all). Any other index — out of range, negative, non-literal — is
+ * left to the target's `At` lowering and its own answer for it; so is a
+ * complex index, whose real part is not the index. Every DISCARDED element
+ * must be pure and free of caller-supplied code (`readsCallerSource`): the
+ * interpreter evaluates the whole list, so dropping an element with an
+ * effect would change how many times that effect runs. A `List` head the
+ * caller overrode is left alone as well: the caller's implementation
+ * receives the elements, and the index is then its business.
+ */
+function foldLiteralIndex(
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
+): Expression | undefined {
+  if (expr.operator !== 'At' || expr.nops !== 2) return undefined;
+  const [list, index] = expr.ops;
+  if (!isFunction(list, 'List') || list.nops === 0) return undefined;
+  if (options.skipHeads?.has('List') === true) return undefined;
+  if (!isNumber(index) || index.im !== 0) return undefined;
+  const k = index.re;
+  if (!Number.isInteger(k) || k < 1 || k > list.nops) return undefined;
+  if (
+    list.ops.some(
+      (e, i) =>
+        i !== k - 1 && (e.isPure !== true || readsCallerSource(e, options))
+    )
+  )
+    return undefined;
+  return list.ops[k - 1];
+}
 
 /**
  * Is this operand provably a single number — never a collection?

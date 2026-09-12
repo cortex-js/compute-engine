@@ -1121,6 +1121,19 @@ export interface CompileTarget<Expr = unknown> {
   unrollSkipHeads?: ReadonlySet<MathJsonSymbol>;
 
   /**
+   * The narrowest literal list the fixed-width unroll fans out on this
+   * target, and whether it fans out a list of number literals as well
+   * (`UnrollOptions.minWidth` / `unrollConstantLists` in
+   * `fixed-width-unroll.ts`). Absent means the pass's defaults, which leave
+   * a list of four elements or fewer, and every constant list, to the
+   * target's own lowering. The interval target has no list lowering at all —
+   * its values are one interval each — so it sets `1` and `true`: a list
+   * there is either written out by the pass or a decline.
+   */
+  unrollMinWidth?: number;
+  unrollConstantLists?: boolean;
+
+  /**
    * The set of names currently **bound** by an enclosing binding form — lambda
    * parameters, `Sum`/`Product`/`Loop` indices, `Block` locals, comprehension
    * variables, `Match` captures. A bound name shadows any same-named engine

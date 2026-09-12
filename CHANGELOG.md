@@ -2,6 +2,18 @@
 
 ### Resolved Issues
 
+- **A list of static width compiles on the interval target.** The interval
+  target has no lowering for a `List` — its values are one interval each — and
+  every list-valued subexpression declined, while the fixed-width pre-pass
+  wrote a list out into scalar code only from five elements up. The interval
+  target now asks the pass to write out a list of any width, a list of number
+  literals included, and inlines a helper whose value is a list at the root
+  call site first, so `F(x, y)[1]` becomes an element of a written-out list
+  and `Total(f(x + 1, y) + f(x − 1, y))` a sum of scalars. The seven
+  `interval-js` declines of the 0.128.9 code-generation audit that named
+  `List` (`1dee4lkte2`, `oeupgr064p`) compile, with enclosures a few ulps
+  wide around the interpreter's value. On every target, a literal index into
+  a literal list, `[a, b][1]`, now compiles to the element itself.
 - **The shader targets reuse a helper's invariant calculations too.** The
   invariant-prefix variant of a user function — the private copy that
   receives, as an extra parameter, a value the body computes from a subset of

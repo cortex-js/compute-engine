@@ -152,10 +152,17 @@ test('free numeric arrays retain the check for an unexpected nested cell', () =>
 });
 
 test('heterogeneous array cells retain general access', () => {
-  const { js } = fixture();
-  const r = js(['At', ['List', 1, 'True'], 2]);
+  const { ce, js } = fixture();
+  // A literal index into a literal list is the element itself
+  // (`foldLiteralIndex`, `fixed-width-unroll.ts`): no access at all.
+  const folded = js(['At', ['List', 1, 'True'], 2]);
+  expect(folded.code).toBe('true');
+  expect(folded.run()).toBe(true);
+  // A run-time index keeps the general access: the cells are not numeric.
+  ce.declare('k', 'integer');
+  const r = js(['At', ['List', 1, 'True'], 'k']);
   expect(r.code).toContain('_SYS.at');
-  expect(r.run()).toBe(true);
+  expect(r.run({ k: 2 })).toBe(true);
 });
 
 test('overflowing counter arithmetic does not establish a safe integer range', () => {

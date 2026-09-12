@@ -305,8 +305,8 @@ their expected effect on the corpus.
   22 500 iterations, each followed by a NaN test the body type rules out);
   the `throw new RangeError` prologue is emitted for literal bounds; the
   GLSL fold prints float32(2π) at double precision (`6.2831854820251465`).
-- **Target gaps with corpus demand:** interval-js has no lowering for a
-  `List` of static length (4 declines) nor for `Arg(a + i b)` (2 declines;
+- **Target gaps with corpus demand:** interval-js has no lowering for
+  `Arg(a + i b)` (2 declines;
   the JavaScript target rewrites it to `Math.atan2(b, a)`, and `_IA.atan2`
   exists); GLSL declines a `Comprehension` over literal domains (4 declines;
   the seam is `compilation/fixed-width-unroll.ts`); the interval constant
@@ -350,18 +350,6 @@ their expected effect on the corpus.
   `at` field is documented in that operand's coordinate, so this second-operand
   jump cannot be expressed without widening the contract for existing
   `Arctan2` callers. Needs a ruling before the condition is widened.
-- **Static-length `List` on `interval-js` (7 declines: `neyret/1dee4lkte2`
-  #580/#582/#585/#587, `oeupgr064p` #485/#490/#499).** A `List` entry in the
-  interval operator table is ruled out (it would make a literal list a legal
-  value in every scalar position; `b(t) := [t < 1, t < 2]` is pinned to
-  decline). The list has to be REMOVED before emission, in the shared
-  `compilation/fixed-width-unroll.ts` pass: (1) inline a list-valued user
-  function at its call site so `F(x, y)[1]` becomes `At` over a literal list,
-  which already compiles and alone fixes the three `oeupgr064p` rows; (2)
-  component-wise `Add`/`Subtract`/`Negate` of equal static widths, scalar ×
-  list, list ÷ scalar, and `Total` of a fixed-width list; (3) a decision on
-  `Power` of a list (component-wise or dot product) before the pass
-  distributes it. Widths that are not compile-time literals fail closed.
 - **Compiled `NotEqual` over a NaN operand disagrees with the interpreter
   whenever the tolerance form is used (found 2026-09-09 while typing integer
   range indices).** `compile(r \ne 3)` with `r: real` emits

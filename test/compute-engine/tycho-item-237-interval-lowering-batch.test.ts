@@ -133,13 +133,19 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
       { to: 'interval-js' }
     );
     expect(nested.success).toBe(false);
-    // Two collection operands of an element-wise head: a zip, not a map —
-    // left undecomposed rather than guessed at.
+    // Two collection operands of an element-wise head are ZIPPED by the
+    // fixed-width pre-pass, as the interpreter zips them (`[1, 2] + [3, 4]`
+    // is `[4, 6]`), and this target asks the pass to write a list of any
+    // width out: the sum compiles to the scalar 10.
     const zip = compile(
       ce().box(['Sum', ['Add', ['List', 1, 2], ['List', 3, 4]]]),
       { to: 'interval-js' }
     );
-    expect(zip.success).toBe(false);
+    expect(zip.success).toBe(true);
+    const v: any = zip.run!({});
+    const iv = v.value ?? v;
+    expect(iv.lo).toBeLessThanOrEqual(10);
+    expect(iv.hi).toBeGreaterThanOrEqual(10);
   });
 
   test('Range decomposition follows the interpreter contract', () => {
@@ -172,9 +178,12 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
   });
 
   test('a non-literal seed fails closed', () => {
-    const r = compile(ce().box(['WithRandomSeed', ['Add', 'n', 1], ['Random']]), {
-      to: 'interval-js',
-    });
+    const r = compile(
+      ce().box(['WithRandomSeed', ['Add', 'n', 1], ['Random']]),
+      {
+        to: 'interval-js',
+      }
+    );
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/literal finite real or string seed/);
   });
@@ -191,20 +200,19 @@ describe('Tycho item 237 — interval-js lowering batch', () => {
     // Under-applied: the interpreter curries; a JS call would bind
     // `undefined`.
     const under = compile(
-      ce().box([
-        'Apply',
-        ['Function', ['Add', 's', 't'], 's', 't'],
-        'x',
-      ]),
+      ce().box(['Apply', ['Function', ['Add', 's', 't'], 's', 't'], 'x']),
       { to: 'interval-js' }
     );
     expect(under.success).toBe(false);
   });
 
   test('the indexed Sum form is unchanged', () => {
-    const r = compile(ce().box(['Sum', ['Power', 'x', 'k'], ['Tuple', 'k', 1, 5]]), {
-      to: 'interval-js',
-    });
+    const r = compile(
+      ce().box(['Sum', ['Power', 'x', 'k'], ['Tuple', 'k', 1, 5]]),
+      {
+        to: 'interval-js',
+      }
+    );
     expect(r.success).toBe(true);
     // 2 + 4 + 8 + 16 + 32 at x = 2.
     expect(pointOf(r.run({ x: 2 }))).toBe(62);

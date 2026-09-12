@@ -1986,15 +1986,17 @@ describe('COMPILE CSE — non-scalar aliasing', () => {
     const on = compile(expr, { fallback: false });
     const off = compile(expr, { fallback: false, cse: false });
 
-    // One temporary, the LIST itself.
+    // The two direct reads `L[1]`, `L[2]` fold to the elements themselves
+    // (`foldLiteralIndex`, `fixed-width-unroll.ts`), which CSE then shares
+    // with the list; the LIST is one temporary, read by the two helpers.
     expect(on.code).toContain(
-      'const _cse1 = [Math.sin(_.u), Math.cos(_.u), Math.sinh(_.u), Math.cosh(_.u)]'
+      'const _cse3 = [_cse1, _cse2, Math.sinh(_.u), Math.cosh(_.u)]'
     );
-    expect(occurrences(on.code, '_cse1')).toBe(5); // 1 binding + 4 uses
+    expect(occurrences(on.code, '_cse3')).toBe(3); // 1 binding + 2 uses
     // The mutation-prone helpers copy first — the audited invariant, in the
     // emitted source.
-    expect(on.code).toContain('(_cse1).slice().sort(');
-    expect(on.code).toContain('(_cse1).slice().reverse(');
+    expect(on.code).toContain('(_cse3).slice().sort(');
+    expect(on.code).toContain('(_cse3).slice().reverse(');
 
     for (const u of [0.7, -1.3, 0]) {
       const a = (on.run as (v: any) => number)({ u });

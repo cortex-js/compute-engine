@@ -3427,13 +3427,21 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       undefined,
       options.functions
     );
-    expr = unrollFixedWidthCollections(expr, {
+    const unrollOptions = {
       skipHeads: unrollSkipHeads,
       iterationBudget: options.iterationBudget,
-      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
-    });
+      readsLiveSource: (name: string) =>
+        typeof options.vars?.[name] === 'string',
+      // This target has no list lowering at all, so a list of ANY width is
+      // written out (`CompileTarget.unrollMinWidth`).
+      minWidth: 1,
+      unrollConstantLists: true,
+    };
+    expr = unrollFixedWidthCollections(expr, unrollOptions);
     const { functions, vars, preamble } = options;
-    const unknowns = expr.unknowns;
+    // Refreshed below, after the helper inlining that can expose a global
+    // the callee body reads.
+    let unknowns = expr.unknowns;
 
     // Process custom functions
     // Null-prototype: this table collects CALLER-supplied function overrides
@@ -3496,6 +3504,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // See `CompileTarget.unrollSkipHeads`: the same answer the entry above
       // used, for the definition bodies this entry never sees.
       unrollSkipHeads,
+      unrollMinWidth: 1,
+      unrollConstantLists: true,
       // The SOUND fold — evaluating a closed constant subtree's own interval
       // code at compile time (`foldConstantIntervalCode`) — is on by default
       // and honors the caller's `constantFold: false`, which promises the
@@ -3549,6 +3559,20 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // THIS target plus its own parameters, never against a nested requesting
     // one (see `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
+
+    // A helper whose value is a LIST has no by-reference call on this target
+    // (its definition would have to return a list). Substituting the body at
+    // the call site exposes the list to the unroll, which writes it out:
+    // `F(x, y)[1]` becomes an index into a written-out list, and
+    // `Total(F(x, y) + G(x, y))` a sum of scalars. The registry the
+    // substitution consults exists only now, so this second pass follows the
+    // target's creation, and the unknowns are read again afterwards: a
+    // callee body can read a global the root expression never named.
+    expr = unrollFixedWidthCollections(
+      BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target),
+      unrollOptions
+    );
+    unknowns = expr.unknowns;
 
     // Common-subexpression elimination (design §4.2), on the same
     // post-`rewriteAngularUnit` tree the emitters walk. The G1b provenance

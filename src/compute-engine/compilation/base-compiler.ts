@@ -19905,6 +19905,8 @@ export class BaseCompiler {
         skipHeads: target.unrollSkipHeads,
         iterationBudget: target.iterationBudget,
         readsLiveSource: target.cse?.harvestOptions?.isStringVar,
+        minWidth: target.unrollMinWidth,
+        unrollConstantLists: target.unrollConstantLists,
       }
     );
     if (!inlined.isValid) return undefined;
@@ -20108,16 +20110,56 @@ export class BaseCompiler {
    * substitution and can therefore tell a captured symbol from a substituted
    * argument.
    */
+  /**
+   * The ROOT-entry form of {@link inlineCollectionValuedCalls}: `expr` with
+   * every user-function call whose value is not provably a scalar replaced
+   * by the callee's substituted body, under one inlining budget and no
+   * enclosing definition. For a target with no list lowering at all (the
+   * interval target), this is what lets the fixed-width unroll see the width
+   * of a list a helper returns — `F(x, y)[1]` becomes an index into a
+   * written-out list — where the call by reference would decline. The
+   * target must carry its user-function registry.
+   */
+  static inlineCollectionValuedCallsAtRoot(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): Expression {
+    return BaseCompiler.inlineCollectionValuedCalls(
+      expr.engine as unknown as ComputeEngine,
+      expr,
+      target,
+      new Set<string>(),
+      { left: BaseCompiler.MAX_NESTED_INLINES },
+      undefined,
+      true
+    );
+  }
+
+  /**
+   * `collectionBodiesOnly` narrows the substitution to a callee whose BODY is
+   * collection-valued by its own type — the root-entry form on the interval
+   * target, where a call is inlined so the fixed-width unroll can see the
+   * list it returns. Without it, a scalar-valued helper whose declared result
+   * type is open (`-> unknown`) is "not provably a scalar" and would be
+   * copied into every call site of the root expression, where the
+   * definition-body route has parameter evidence the root does not.
+   *
+   * A head the caller overrode (`CompileTarget.unrollSkipHeads`) is left as
+   * written, and so is everything under it: the caller's implementation
+   * replaces the emission and receives the node's own operands.
+   */
   private static inlineCollectionValuedCalls(
     engine: ComputeEngine,
     expr: Expression,
     target: CompileTarget<Expression>,
     onPath: Set<string>,
     budget: { left: number },
-    enclosing?: EnclosingDefinition
+    enclosing?: EnclosingDefinition,
+    collectionBodiesOnly = false
   ): Expression {
     if (!isFunction(expr)) return expr;
     if (boundVariableNames(expr).length > 0) return expr;
+    if (target.unrollSkipHeads?.has(expr.operator) === true) return expr;
     const ops = expr.ops.map((op) =>
       BaseCompiler.inlineCollectionValuedCalls(
         engine,
@@ -20125,7 +20167,8 @@ export class BaseCompiler {
         target,
         onPath,
         budget,
-        enclosing
+        enclosing,
+        collectionBodiesOnly
       )
     );
     const node: Expression = ops.every((op, i) => op === expr.ops[i])
@@ -20156,6 +20199,14 @@ export class BaseCompiler {
     // the wrong body instead.
     if (enclosing?.localNames.has(node.operator) === true) return node;
     if (BaseCompiler.provablyScalarArg(node)) return node;
+    if (collectionBodiesOnly) {
+      const literal = BaseCompiler.userFunctionLiteral(engine, node.operator);
+      if (
+        literal === undefined ||
+        !literal.ops[0].type.matches('collection<any>')
+      )
+        return node;
+    }
     const body = BaseCompiler.substitutedUserFunctionBody(
       engine,
       node.operator,
@@ -20176,7 +20227,8 @@ export class BaseCompiler {
         target,
         onPath,
         budget,
-        enclosing
+        enclosing,
+        collectionBodiesOnly
       );
     } finally {
       onPath.delete(node.operator);
@@ -21969,6 +22021,8 @@ export class BaseCompiler {
         skipHeads: target.unrollSkipHeads,
         iterationBudget: target.iterationBudget,
         readsLiveSource: target.cse?.harvestOptions?.isStringVar,
+        minWidth: target.unrollMinWidth,
+        unrollConstantLists: target.unrollConstantLists,
       }
     );
   }
