@@ -1921,6 +1921,7 @@ export class BaseCompiler {
       boundVars: target.boundVars,
     };
     if (root && expr !== undefined) sink.root = expr;
+    sink.unit = expr;
     const code = BaseCompiler.compile(expr, { ...target, hoist: sink }, prec);
     return { stmts: sink.stmts, code };
   }
@@ -1980,10 +1981,12 @@ export class BaseCompiler {
    */
   private static compileListStatement(
     target: CompileTarget<Expression>,
+    /** The statement itself, recorded on the sink as `hoist.unit`. */
+    unit: Expression | undefined,
     compileWith: (t: CompileTarget<Expression>) => string[]
   ): string[] {
     if (!target.bareStatementBlocks) return compileWith(target);
-    const sink = { stmts: [] as string[], boundVars: target.boundVars };
+    const sink = { stmts: [] as string[], boundVars: target.boundVars, unit };
     const lines = compileWith({ ...target, hoist: sink });
     if (sink.stmts.length === 0) return lines;
     return [...sink.stmts.map((s) => s.replace(/;\s*$/, '')), ...lines];
@@ -4567,15 +4570,17 @@ export class BaseCompiler {
   /**
    * Is `expr` impure once every assigned symbol value it reaches is looked
    * through? `expr.isPure` stops at a symbol that has a value, so
-   * `a := r + r` with `r := Random()` reports pure. A value evaluated once
-   * where the interpreter re-evaluates it at every reference must not be
-   * shared, and that decision needs the transitive answer.
+   * `a := r + r` with `r := Random()` reports pure; the body of a called
+   * user-defined function is looked through the same way. A value
+   * evaluated once where the interpreter re-evaluates it at every
+   * reference must not be shared, and that decision needs the transitive
+   * answer.
    *
    * Linear in the DISTINCT nodes reached (memoized by identity for the
    * compilation); a value that refers to itself is answered `false` on
    * re-entry.
    */
-  private static foldValueImpure(expr: Expression): boolean {
+  static foldValueImpure(expr: Expression): boolean {
     const memo = BaseCompiler._foldValueImpureMemo;
     const cached = memo.get(expr);
     if (cached !== undefined) return cached;
@@ -4600,6 +4605,22 @@ export class BaseCompiler {
         }
         if (isFunction(node)) {
           for (const op of node.ops) if (visit(op)) return true;
+          // A call of a user-defined function inlines its body on a shader
+          // target, and the engine's purity does not look through a symbol
+          // with a value inside that body either (`f(n) := n + r` with
+          // `r := Random()` is pure to the engine): the literal is read
+          // the same way, each clause of a multi-clause function too.
+          const literal = BaseCompiler.userFunctionLiteral(
+            engine,
+            node.operator
+          );
+          if (literal !== undefined)
+            return BaseCompiler.foldValueImpure(literal);
+          const clauses = multiClauseState(
+            engine.lookupDefinition(node.operator)
+          )?.clauses;
+          if (clauses !== undefined)
+            return clauses.some((c) => BaseCompiler.foldValueImpure(c.literal));
         }
         return false;
       };
@@ -10576,7 +10597,7 @@ export class BaseCompiler {
    * takes precedence over the dictionary's `value`. Returns `undefined` when
    * the declaration has no value (`Declare(sym)` / `Declare(sym, type)`).
    */
-  private static declareValueOperand(
+  static declareValueOperand(
     ops: ReadonlyArray<Expression>
   ): Expression | undefined {
     let rest = ops.slice(1);
@@ -11549,7 +11570,7 @@ export class BaseCompiler {
     if (stmts === null)
       return target.bareStatementBlocks
         ? BaseCompiler.joinShaderStatements(
-            BaseCompiler.compileListStatement(target, (t) => [
+            BaseCompiler.compileListStatement(target, expr, (t) => [
               BaseCompiler.compile(expr, t),
             ])
           )
@@ -11558,7 +11579,7 @@ export class BaseCompiler {
     if (target.bareStatementBlocks)
       return BaseCompiler.joinShaderStatements(
         stmts.flatMap((s) =>
-          BaseCompiler.compileListStatement(stmtTarget, (t) => [
+          BaseCompiler.compileListStatement(stmtTarget, s, (t) => [
             BaseCompiler.compile(s, t),
           ])
         )
@@ -11911,7 +11932,7 @@ export class BaseCompiler {
       // assignment has nowhere else to put its loop.
       if (!valueUsed && target.bareStatementBlocks)
         return BaseCompiler.joinShaderStatements(
-          BaseCompiler.compileListStatement(target, (t) => [
+          BaseCompiler.compileListStatement(target, args[0], (t) => [
             BaseCompiler.withCseScope(node, -1, t, () =>
               BaseCompiler.compileOp(args[0], -1, t, prec, args[0])
             ),
@@ -12147,116 +12168,120 @@ export class BaseCompiler {
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
         stmts
           .flatMap((arg, i) =>
-            BaseCompiler.compileListStatement(localTarget, (stmtTarget) => {
-              // Bring this statement's own function-valued binding into scope
-              // before compiling it (see `localFunctions` above).
-              BaseCompiler.noteLocalFunction(arg, localFunctions);
-              // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
-              // else has no value — the interpreter answers `Nothing`, which is
-              // the erasure marker and deliberately has no lowering — so
-              // `compileExpr`'s conditional, which needs all three operands,
-              // threw `If: wrong number of arguments` on it. That closed every
-              // function body containing a plain guard statement (the
-              // `parseNumber` scanner in the Epsil examples: `if cs[j] == "-"
-              // { sign = -1 … }`), even though the statement's value is
-              // discarded here, which is exactly the position where an
-              // else-less `if` IS expressible. Emit the statement form the
-              // loop-body dispatcher already uses (`if (c) { … }`, no else).
-              //
-              // The LAST statement of a value-carrying block is NOT a statement
-              // position — its value is the block's — so an else-less `If`
-              // there keeps failing closed (D6).
-              //
-              // PLAIN JavaScript ONLY. Every other target stays fail-closed, and
-              // each for its own verified reason — the admission is deliberately
-              // the narrowest one, since admitting is the direction that
-              // miscompiles:
-              //
-              //  - PYTHON. `compilePythonStatements` does statement-form an
-              //    else-less `If` correctly, but it is reached ONLY from a loop
-              //    body: a plain function-body `Block` reaches THIS routine,
-              //    whose emission is C-like and a syntax error in Python. Routing
-              //    to the Python emission from here needs a target hook (the
-              //    `block` hook receives already-COMPILED statements), which is a
-              //    separate change. Until then the shape declines with `If: wrong
-              //    number of arguments` and falls back to the interpreter.
-              //  - INTERVAL JavaScript. `compileLoopBody` DOES emit syntactically
-              //    valid code here, but not correct code: its
-              //    `scalarConditionTarget` unwraps only a `_IA.point(…)` spelling
-              //    (the plain-number loop counter it was written for), so a
-              //    condition over a free variable or an interval-valued local
-              //    emits `0 < _.x` against an `{lo, hi}` OBJECT — always `false`.
-              //    Verified: the else-LESS shape answers `[1,1]` for `x = [3,3]`
-              //    where the else-ful `_IA.piecewise` lowering answers the
-              //    correct `[-1,-1]`. (The same defect already affects an
-              //    else-less `If` inside an interval LOOP body — pre-existing,
-              //    separate, and not to be widened here.)
-              //  - The GPU targets: their own statement model, plus the above.
-              if (
-                isFunction(arg, 'If') &&
-                arg.nops === 2 &&
-                !(valueUsed && i === stmts.length - 1) &&
-                (target.language === undefined ||
-                  target.language === 'javascript')
-              )
-                return [BaseCompiler.compileLoopBody(arg, stmtTarget)];
-              // For Declare, pass inferred type hint to the target hook
-              if (
-                isFunction(arg, 'Declare') &&
-                isSymbol(arg.ops[0]) &&
-                target.declare
-              ) {
-                const name = arg.ops[0].symbol;
-                const decl = target.declare(name, typeHints[name]);
-                // A `Declare` may carry an initial value (`Declare(sym, type, value)`
-                // or a `value` key in a trailing attributes dictionary). Emit it as a
-                // separate assignment statement, mirroring how a hoisted
-                // `Declare`+`Assign` pair compiles. (Two statements — not a combined
-                // initializer — so the declaration stays a plain `let`/`float`, which
-                // is what the subsequent assignment requires.)
-                const value = BaseCompiler.declareValueOperand(arg.ops);
-                if (value !== undefined) {
-                  // `-1` is the whole-node region sentinel, so a value that is
-                  // NOT one of `arg`'s operands (it may come from a trailing
-                  // attributes dictionary) compiles plainly.
-                  const valueIndex = arg.ops.indexOf(value);
-                  const valueCode =
-                    valueIndex < 0
-                      ? BaseCompiler.compile(value, stmtTarget)
-                      : BaseCompiler.compileOp(
-                          arg,
-                          valueIndex,
-                          stmtTarget,
-                          0,
-                          value
-                        );
-                  const stored =
-                    stmtTarget.assignmentValue?.(
-                      value,
-                      valueCode,
-                      stmtTarget
-                    ) ?? valueCode;
-                  return [decl, `${name} = ${stored}`];
+            BaseCompiler.compileListStatement(
+              localTarget,
+              arg,
+              (stmtTarget) => {
+                // Bring this statement's own function-valued binding into scope
+                // before compiling it (see `localFunctions` above).
+                BaseCompiler.noteLocalFunction(arg, localFunctions);
+                // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
+                // else has no value — the interpreter answers `Nothing`, which is
+                // the erasure marker and deliberately has no lowering — so
+                // `compileExpr`'s conditional, which needs all three operands,
+                // threw `If: wrong number of arguments` on it. That closed every
+                // function body containing a plain guard statement (the
+                // `parseNumber` scanner in the Epsil examples: `if cs[j] == "-"
+                // { sign = -1 … }`), even though the statement's value is
+                // discarded here, which is exactly the position where an
+                // else-less `if` IS expressible. Emit the statement form the
+                // loop-body dispatcher already uses (`if (c) { … }`, no else).
+                //
+                // The LAST statement of a value-carrying block is NOT a statement
+                // position — its value is the block's — so an else-less `If`
+                // there keeps failing closed (D6).
+                //
+                // PLAIN JavaScript ONLY. Every other target stays fail-closed, and
+                // each for its own verified reason — the admission is deliberately
+                // the narrowest one, since admitting is the direction that
+                // miscompiles:
+                //
+                //  - PYTHON. `compilePythonStatements` does statement-form an
+                //    else-less `If` correctly, but it is reached ONLY from a loop
+                //    body: a plain function-body `Block` reaches THIS routine,
+                //    whose emission is C-like and a syntax error in Python. Routing
+                //    to the Python emission from here needs a target hook (the
+                //    `block` hook receives already-COMPILED statements), which is a
+                //    separate change. Until then the shape declines with `If: wrong
+                //    number of arguments` and falls back to the interpreter.
+                //  - INTERVAL JavaScript. `compileLoopBody` DOES emit syntactically
+                //    valid code here, but not correct code: its
+                //    `scalarConditionTarget` unwraps only a `_IA.point(…)` spelling
+                //    (the plain-number loop counter it was written for), so a
+                //    condition over a free variable or an interval-valued local
+                //    emits `0 < _.x` against an `{lo, hi}` OBJECT — always `false`.
+                //    Verified: the else-LESS shape answers `[1,1]` for `x = [3,3]`
+                //    where the else-ful `_IA.piecewise` lowering answers the
+                //    correct `[-1,-1]`. (The same defect already affects an
+                //    else-less `If` inside an interval LOOP body — pre-existing,
+                //    separate, and not to be widened here.)
+                //  - The GPU targets: their own statement model, plus the above.
+                if (
+                  isFunction(arg, 'If') &&
+                  arg.nops === 2 &&
+                  !(valueUsed && i === stmts.length - 1) &&
+                  (target.language === undefined ||
+                    target.language === 'javascript')
+                )
+                  return [BaseCompiler.compileLoopBody(arg, stmtTarget)];
+                // For Declare, pass inferred type hint to the target hook
+                if (
+                  isFunction(arg, 'Declare') &&
+                  isSymbol(arg.ops[0]) &&
+                  target.declare
+                ) {
+                  const name = arg.ops[0].symbol;
+                  const decl = target.declare(name, typeHints[name]);
+                  // A `Declare` may carry an initial value (`Declare(sym, type, value)`
+                  // or a `value` key in a trailing attributes dictionary). Emit it as a
+                  // separate assignment statement, mirroring how a hoisted
+                  // `Declare`+`Assign` pair compiles. (Two statements — not a combined
+                  // initializer — so the declaration stays a plain `let`/`float`, which
+                  // is what the subsequent assignment requires.)
+                  const value = BaseCompiler.declareValueOperand(arg.ops);
+                  if (value !== undefined) {
+                    // `-1` is the whole-node region sentinel, so a value that is
+                    // NOT one of `arg`'s operands (it may come from a trailing
+                    // attributes dictionary) compiles plainly.
+                    const valueIndex = arg.ops.indexOf(value);
+                    const valueCode =
+                      valueIndex < 0
+                        ? BaseCompiler.compile(value, stmtTarget)
+                        : BaseCompiler.compileOp(
+                            arg,
+                            valueIndex,
+                            stmtTarget,
+                            0,
+                            value
+                          );
+                    const stored =
+                      stmtTarget.assignmentValue?.(
+                        value,
+                        valueCode,
+                        stmtTarget
+                      ) ?? valueCode;
+                    return [decl, `${name} = ${stored}`];
+                  }
+                  return [decl];
                 }
-                return [decl];
+                // An EMPTY block in effect position — not the last statement,
+                // or any statement of a list whose own value is discarded — is
+                // an empty statement with nothing to emit. (The last statement of
+                // a value-carrying list is the list's value; an empty block there
+                // declines through `compileOp`, since `Nothing` has no compiled
+                // representation.)
+                if (
+                  isFunction(arg, 'Block') &&
+                  arg.nops === 0 &&
+                  (!valueUsed || i < stmts.length - 1)
+                )
+                  return [];
+                // A bare expression statement is its own bindable region, keyed
+                // `(statement, -1)`; every other statement head reaches its own
+                // value edges from `compileExpr` (Assign RHS, Return value, …).
+                return [BaseCompiler.compileOp(arg, -1, stmtTarget, 0, arg)];
               }
-              // An EMPTY block in effect position — not the last statement,
-              // or any statement of a list whose own value is discarded — is
-              // an empty statement with nothing to emit. (The last statement of
-              // a value-carrying list is the list's value; an empty block there
-              // declines through `compileOp`, since `Nothing` has no compiled
-              // representation.)
-              if (
-                isFunction(arg, 'Block') &&
-                arg.nops === 0 &&
-                (!valueUsed || i < stmts.length - 1)
-              )
-                return [];
-              // A bare expression statement is its own bindable region, keyed
-              // `(statement, -1)`; every other statement head reaches its own
-              // value edges from `compileExpr` (Assign RHS, Return value, …).
-              return [BaseCompiler.compileOp(arg, -1, stmtTarget, 0, arg)];
-            })
+            )
           )
           .filter((s) => s !== '')
       );
@@ -24976,6 +25001,56 @@ export class BaseCompiler {
           )
         : BaseCompiler.compileValueOperand(expr, target, prec)
     );
+  }
+
+  /**
+   * Does `e` have an effect the rest of the enclosing expression can
+   * observe — is it impure by the engine's own purity, which follows a
+   * called user function into its body? The engine calls a `Block` impure
+   * when it assigns its OWN locals, but those writes are not visible
+   * outside the block, so a block is read statement by statement instead:
+   * an `Assign` to a name the block declared earlier (a plain name, or the
+   * names of a destructuring pattern) is not an effect and only its value
+   * is read; the initializer of a `Declare` (positional, or the `value` of
+   * its attributes dictionary) is read; any other statement is read as an
+   * expression. An `Assign` to any other name — an enclosing binding — is
+   * an effect the rest of the expression can read. Every other node is
+   * read by `foldValueImpure`: impure itself, or reaching an impure value
+   * through an assigned symbol the shader inlines.
+   */
+  static hasObservableEffect(e: Expression): boolean {
+    if (isFunction(e, 'Block')) {
+      const own = new Set<string>();
+      return e.ops.some((stmt) => {
+        if (isFunction(stmt, 'Declare')) {
+          const declared = stmt.ops[0];
+          if (isSymbol(declared)) own.add(declared.symbol);
+          else if (
+            isFunction(declared, 'Tuple') ||
+            isFunction(declared, 'List') ||
+            isFunction(declared, 'Delimiter') ||
+            isFunction(declared, 'Sequence')
+          )
+            for (const leaf of declared.ops)
+              if (isSymbol(leaf)) own.add(leaf.symbol);
+          // The initializer is positional or under the `value` key of a
+          // trailing attributes dictionary; a dictionary is pure as a value,
+          // so the initializer is read out of it, not through it.
+          const init = BaseCompiler.declareValueOperand(stmt.ops);
+          return init !== undefined && BaseCompiler.hasObservableEffect(init);
+        }
+        if (isFunction(stmt, 'Assign')) {
+          const name = stmt.ops[0];
+          if (!isSymbol(name) || !own.has(name.symbol)) return true;
+          return BaseCompiler.hasObservableEffect(stmt.ops[1]);
+        }
+        return BaseCompiler.hasObservableEffect(stmt);
+      });
+    }
+    // Through `foldValueImpure`, not `isPure`: a symbol with a value is pure
+    // to the engine, while the shader inlines the value — a symbol assigned
+    // `Random()` draws where it is read.
+    return BaseCompiler.foldValueImpure(e);
   }
 
   private static operandAt(

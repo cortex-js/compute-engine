@@ -54,6 +54,7 @@ import {
 } from './base-compiler.js';
 import type { LoopInvariantBinding } from './base-compiler.js';
 import {
+  signatureEffects,
   finitePartOfType,
   isNonRealNumber,
   resolveTypeAlias,
@@ -62,6 +63,7 @@ import {
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
@@ -1244,6 +1246,250 @@ function gpuNaNFor(
 // but optional array-index specialization must not add such statements.
 const conditionalGPUSinks = new WeakSet<object>();
 
+// Sinks whose NEXT conditional-arm compile is a CAPTURE by the statement form
+// of a conditional (`compileGPUStatementSelection`): the arm's statements are
+// wanted, and land inside the arm's own branch, so the guard of
+// `compileGPUConditionalArm` is skipped once and re-armed for any ternary arm
+// nested inside.
+const statementCaptureSinks = new WeakSet<object>();
+
+/**
+ * Does compiling `e` on a shader target need STATEMENTS — a loop-form
+ * `Sum`/`Product`, a `Block` or a `Loop` used as a value — which a ternary
+ * arm cannot hold? A structural test over the subtree: a `Sum` whose bounds
+ * let it unroll needs none and then takes the statement form of a
+ * conditional (`compileGPUStatementSelection`) for nothing more than an
+ * assignment, which is still correct. Exported for its test only.
+ */
+export function gpuNeedsStatements(e: Expression): boolean {
+  // A boxed expression is a DAG: a node reached twice is visited once, or
+  // a tower of shared operands unfolds exponentially.
+  const seen = new Set<Expression>();
+  const walk = (x: Expression): boolean => {
+    if (seen.has(x)) return false;
+    seen.add(x);
+    // A symbol with a value is inlined by the shader targets: its value is
+    // read as if written in place. (A name an enclosing binder rebinds is
+    // read the same way; the worst case is a statement form taken for an
+    // arm that needed none, which is still correct.)
+    if (isSymbol(x)) {
+      const value = x.engine._getSymbolValue(x.symbol);
+      return value !== undefined && walk(value);
+    }
+    if (!isFunction(x)) return false;
+    const h = x.operator;
+    // Every `Sum`/`Product` is read as needing statements: a loop form
+    // certainly does, and an unrolled one may still hoist a loop-invariant
+    // declaration for a term that does not depend on the index. An impure
+    // operand a lowering binds to a temporary is not read here: a selection
+    // with an effect never takes the statement form (see
+    // `compileGPUStatementSelection`).
+    if (h === 'Sum' || h === 'Product' || h === 'Block' || h === 'Loop')
+      return true;
+    return x.ops.some(walk);
+  };
+  return walk(e);
+}
+
+/**
+ * Does the declared signature of `name` — an operator, or a symbol whose
+ * value is a function — carry an effect that writes a binding: `scope` (a
+ * write to an enclosing binding), `state` (a store), or `any` (unknown)?
+ * The engine refuses to assign a function literal that writes outside
+ * itself under a signature without the label, so the declared signature is
+ * the record of what a call may write.
+ */
+function gpuSignatureWrites(node: Expression, name: string): boolean {
+  const def = node.engine.lookupDefinition(name);
+  const types: (Type | undefined)[] = [];
+  if (isOperatorDef(def)) types.push(def.operator.signature?.type);
+  else if (isValueDef(def))
+    types.push(def.value.type?.type, def.value.value?.type?.type);
+  return types.some((t) => {
+    // `signatureEffects` is the engine's one reader of a signature's
+    // effects: it also reads an overload set (an intersection of
+    // signatures) and an extracted element (a union with `missing`).
+    const effects = signatureEffects(t);
+    return (
+      effects === 'any' ||
+      effects?.includes('scope') === true ||
+      effects?.includes('state') === true
+    );
+  });
+}
+
+/**
+ * Does `node` write a binding anywhere outside the nodes in `inside` (and
+ * their subtrees)? A write is an `Assign`, a `Declare` or an `Assume` at any
+ * depth, or a call of a function whose signature declares a write effect
+ * (`gpuSignatureWrites`, the head of an application or a function-valued
+ * symbol operand), or a symbol whose inlined value is impure. A node pure
+ * through every inlined value (`foldValueImpure`) writes nothing; a `Block`
+ * is read by `BaseCompiler.hasObservableEffect`, so its writes to its own
+ * locals do not count.
+ */
+function gpuWritesOutside(
+  node: Expression,
+  inside: ReadonlySet<Expression>
+): boolean {
+  if (inside.has(node)) return false;
+  // A symbol's inlined value may hold anything; an impure one is refused
+  // as a possible write (`foldValueImpure` looks through the value).
+  if (isSymbol(node))
+    return (
+      gpuSignatureWrites(node, node.symbol) ||
+      BaseCompiler.foldValueImpure(node)
+    );
+  if (!isFunction(node) || !BaseCompiler.foldValueImpure(node)) return false;
+  if (node.operator === 'Block') return BaseCompiler.hasObservableEffect(node);
+  const op = node.operator;
+  if (op === 'Assign' || op === 'Declare' || op === 'Assume') return true;
+  if (node.ops.some((x) => gpuWritesOutside(x, inside))) return true;
+  return gpuSignatureWrites(node, op);
+}
+
+/**
+ * A `Which` (clauses in `Which` shape) as a STATEMENT — `if … else if … else`
+ * storing the selected value in a temporary declared ahead of it — for a
+ * selection whose arm, or condition past the first, needs statements a
+ * ternary cannot hold (`gpuNeedsStatements`): the loop of a loop-form `Sum`
+ * then runs INSIDE its branch, only when that branch is selected, which is
+ * what the interpreter does and what the ternary form could not express
+ * (`compileGPUConditionalArm` refuses to hoist the loop ahead of the
+ * ternary, where it would run unconditionally). The Tycho code-generation
+ * audit document `yac5cxfjm1` declined 14 records on this shape:
+ * `f(x, N) := Which(1 ≤ N, Σ_{n=1}^{⌊N⌋} cos(…)/√N_m, True, 0)`.
+ *
+ * Each clause is compiled with its hoisted statements CAPTURED and placed in
+ * its own branch, ahead of the assignment; a later condition's statements
+ * sit in the `else` of the clause before it, so they run only when that
+ * clause was not taken. The temporary needs one static shader type shared
+ * by every arm. `undefined` — the ternary form then applies, and declines
+ * as before — when the position has no statement sink, when the sink is a
+ * ternary arm of an enclosing conditional (the guard of
+ * `compileGPUConditionalArm`), when the arms have no one static type, and
+ * when running the selection ahead of its statement position could be
+ * observed (the gate below).
+ */
+function compileGPUStatementSelection(
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression, i: number) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!BaseCompiler.canHoist(target) || conditionalGPUSinks.has(target.hoist!))
+    return undefined;
+  // Hoisted as one statement, the selection runs ahead of the whole
+  // expression at its statement position (`hoist.unit`), so a sibling
+  // written BEFORE the selection runs after it. Two things could observe
+  // that order, and the gate refuses both: an effect inside the selection
+  // — a draw would shift the random stream past a sibling's draw — and a
+  // sibling that WRITES a binding, since the selection could read that
+  // binding before the write, directly, through a symbol whose value is
+  // inlined, or inside a function it calls. Where a read hides is not
+  // examined; the writes are: an assignment anywhere in the unit outside
+  // the selection's own clauses, and a call of a function whose signature
+  // declares a write (`gpuWritesOutside`). The engine's effect labels are
+  // not read on the unit as a whole: they mark a block's write to its own
+  // local `scope` too, and such a block is no hazard. The unit is unknown
+  // at a sink no statement position recorded; the gate then refuses too. Every
+  // refusal keeps the ternary form, which declines the hoisting arm as it
+  // did before (`ROADMAP.md`, "A statement hoisted on a shader target runs
+  // ahead of an operand written before it"). `hasObservableEffect` reads a
+  // block by the values it assigns to its own locals, so a block arm that
+  // declares and assigns its own locals is not an effect.
+  const unit = target.hoist!.unit;
+  if (unit === undefined) return undefined;
+  // A statement that is itself the store of its right side — `q := If(…)`,
+  // `Declare(q, real, If(…))` — stores after that side is evaluated, so
+  // only the evaluated side is examined for writes.
+  const evaluated = isFunction(unit, 'Assign')
+    ? unit.ops[1]
+    : isFunction(unit, 'Declare')
+      ? BaseCompiler.declareValueOperand(unit.ops)
+      : unit;
+  if (evaluated === undefined) return undefined;
+  if (args.some(BaseCompiler.hasObservableEffect)) return undefined;
+  if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
+  const isWGSL = target.language === 'wgsl';
+  const arms = args.filter((_, i) => i % 2 === 1);
+  const types = arms.map((a) => gpuTypeOfValue(a, isWGSL));
+  if (types.some((t) => t === undefined) || new Set(types).size !== 1)
+    return undefined;
+  const type = types[0]!;
+  // A position no clause selects is the codomain's NaN; a temporary of an
+  // integer or boolean type has none, so such a selection needs a `True`
+  // default clause to take this form.
+  if (
+    !/^(float|vec[234]|f32|vec[234]f)$/.test(type) &&
+    !isSymbol(args[args.length - 2], 'True')
+  )
+    return undefined;
+  const sink = target.hoist!;
+  // `lazy`: the clause is a lazily-evaluated operand of the selection (an
+  // arm, a condition past the first), which the operand compiler hands to
+  // `compileGPUConditionalArm`; the guard is skipped once for it. The first
+  // condition is evaluated unconditionally and carries no guard.
+  const capture = (
+    f: () => string,
+    lazy: boolean
+  ): { code: string; stmts: string[] } => {
+    const before = sink.stmts.length;
+    if (lazy) statementCaptureSinks.add(sink);
+    let code: string;
+    try {
+      code = f();
+    } finally {
+      statementCaptureSinks.delete(sink);
+    }
+    const stmts = sink.stmts
+      .splice(before)
+      .map((stmt) => stmt.replace(/;\s*$/, ''));
+    return { code, stmts };
+  };
+  // A captured statement may span lines (a loop with its body); it stays
+  // one element, indented line by line, so the terminator test below reads
+  // its END, as the sink's own joiner does.
+  const indent = (stmts: ReadonlyArray<string>): string[] =>
+    stmts.map((stmt) => `  ${stmt.replace(/\n/g, '\n  ')}`);
+  const terminated = (stmt: string): string =>
+    /[;{}]\s*$/.test(stmt) ? stmt : `${stmt};`;
+  const tv = BaseCompiler.tempVar(target);
+  const shapeRef = arms.find((v) => gpuComponentCount(v)) ?? null;
+  const build = (i: number): string[] => {
+    if (i >= args.length) return [`${tv} = ${gpuNaNFor(shapeRef, target)}`];
+    const cond = args[i];
+    const val = args[i + 1];
+    // `True` marks the default branch.
+    if (isSymbol(cond, 'True')) {
+      const arm = capture(() => compile(val, i + 1), true);
+      return [...arm.stmts, `${tv} = ${arm.code}`];
+    }
+    // The condition first, as the ternary form compiles it: the first
+    // condition is not lazy, so a subexpression it shares with the arm is
+    // bound ahead of the selection and the arm reads the binding, where
+    // the arm compiled first would emit the subexpression in full — for a
+    // shared operand tower, once per occurrence.
+    const c = capture(() => compile(cond, i), i > 0);
+    const arm = capture(() => compile(val, i + 1), true);
+    const armLines = [...arm.stmts, `${tv} = ${arm.code}`];
+    return [
+      ...c.stmts,
+      `if (${c.code}) {`,
+      ...indent(armLines),
+      `} else {`,
+      ...indent(build(i + 2)),
+      `}`,
+    ];
+  };
+  const lines = build(0);
+  BaseCompiler.hoistStatement(
+    target,
+    isWGSL ? `var ${tv}: ${type};` : `${type} ${tv};`,
+    lines.map(terminated).join('\n')
+  );
+  return tv;
+}
+
 /**
  * Compile a **conditionally-evaluated** operand of a GPU conditional — an
  * `If`/`When`/`Which`/`Match` arm, or a `Which` condition past the first —
@@ -1269,6 +1515,10 @@ function compileGPUConditionalArm(
   target: CompileTarget<Expression>
 ): string {
   const sink = BaseCompiler.canHoist(target) ? target.hoist : undefined;
+  if (sink !== undefined && statementCaptureSinks.has(sink)) {
+    statementCaptureSinks.delete(sink);
+    return compiled();
+  }
   const before = sink?.stmts.length ?? 0;
   const alreadyConditional =
     sink !== undefined && conditionalGPUSinks.has(sink);
@@ -5133,7 +5383,11 @@ function compileGPUSumProduct(
       for (let k = lowerNum; k <= upperNum; k++) {
         const kStr = formatGPUNumber(k);
         const termBoundVars = BaseCompiler.withBoundNames(target, [index]);
-        const termSink = { stmts: [] as string[], boundVars: termBoundVars };
+        const termSink = {
+          stmts: [] as string[],
+          boundVars: termBoundVars,
+          unit: args[0],
+        };
         const innerTarget: CompileTarget<Expression> = {
           ...target,
           var: (id) => (id === index ? kStr : target.var(id)),
@@ -5201,7 +5455,11 @@ function compileGPUSumProduct(
   // The body binds `index`, so it gets its OWN sink: a statement it hoists
   // belongs inside this loop (a nested Sum), not ahead of it.
   const bodyBoundVars = BaseCompiler.withBoundNames(target, [index]);
-  const bodySink = { stmts: [] as string[], boundVars: bodyBoundVars };
+  const bodySink = {
+    stmts: [] as string[],
+    boundVars: bodyBoundVars,
+    unit: args[0],
+  };
   const bodyTarget: CompileTarget<Expression> = {
     ...target,
     var: (id) =>
@@ -5683,6 +5941,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     gpuAssertSelectableArms('If', [args[1], args[2]]);
+    // An arm that needs statements takes the statement form; the clause list
+    // is in `Which` shape, so its position 3 is the `If` node's operand 2.
+    if (gpuNeedsStatements(args[1]) || gpuNeedsStatements(args[2])) {
+      const statement = compileGPUStatementSelection(
+        [args[0], args[1], args[0].engine.True, args[2]],
+        (e, i) => compile(e, i === 3 ? 2 : i),
+        target
+      );
+      if (statement !== undefined) return statement;
+    }
     // The condition is evaluated unconditionally, so it may hoist; the two arms
     // are selected and must not (see `compileGPUConditionalArm`). Operand
     // indices preserve their CSE regions, allowing reuse of outer bindings.
@@ -5704,6 +5972,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // The masked branch's NaN must match the value's SHAPE (a tuple-valued
     // body compiles to a vecN) — see `gpuNaNFor` (Tycho item 49).
     if (isSymbol(args[1], 'False')) return gpuNaNFor(args[0], target);
+    // A value that needs statements takes the statement form; the clause
+    // list is in `Which` shape (condition, value), the `When` operands the
+    // other way round.
+    if (gpuNeedsStatements(args[0])) {
+      const statement = compileGPUStatementSelection(
+        [args[1], args[0]],
+        (e, i) => compile(e, i === 0 ? 1 : 0),
+        target
+      );
+      if (statement !== undefined) return statement;
+    }
     return gpuConditional(
       compile(args[1], 1),
       compileGPUConditionalArm('When', () => compile(args[0], 0), target),
@@ -5718,6 +5997,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       'Which',
       args.filter((_, i) => i % 2 === 1)
     );
+    // An arm, or a condition past the first, that needs statements takes the
+    // statement form (`compileGPUStatementSelection`); the ternary chain
+    // below cannot hold them.
+    if (args.some((a, i) => i > 0 && gpuNeedsStatements(a))) {
+      const statement = compileGPUStatementSelection(args, compile, target);
+      if (statement !== undefined) return statement;
+    }
     // The fall-through NaN must match the branch values' shape (see
     // `gpuNaNFor`); every branch of a well-typed `Which` shares one shape,
     // so the first determinable value decides.

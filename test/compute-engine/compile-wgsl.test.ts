@@ -702,18 +702,18 @@ describe('WGSL COMPILATION', () => {
       expect(code.trimEnd().endsWith(`return ${acc} + 1.0;`)).toBe(true);
     });
 
-    // Same fail-closed rule as GLSL — see the note there. WGSL's `select` is a
-    // function (both operands evaluated), but the counter-ordering hazard is
-    // identical, so the guard is not language-gated.
-    it('a conditionally-evaluated branch fails closed', () => {
-      expect(() =>
-        wgsl.compile(
-          ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any),
-          NO_FOLD
-        )
-      ).toThrow(
-        /conditionally-evaluated branch contains a multi-statement construct/
-      );
+    // Same statement form as GLSL — see the note there. WGSL's `select` is a
+    // function (both operands evaluated), so the `if` statement is what keeps
+    // the loop inside its branch here.
+    it('a conditionally-evaluated branch with a loop takes the statement form', () => {
+      const code = wgsl.compile(
+        ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any),
+        NO_FOLD
+      ).code;
+      expect(code).toMatch(/^var _tv\d+: f32;\nif \(0\.0 < x\) \{\n  var/);
+      expect(code).toContain('for (var i: i32 = 1; i <= 1000; i++)');
+      expect(code.indexOf('for (')).toBeLessThan(code.indexOf('} else {'));
+      expect(code).toMatch(/return _tv\d+;$/);
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {

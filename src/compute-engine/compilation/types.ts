@@ -745,6 +745,16 @@ export interface CompileTarget<Expr = unknown> {
      * a value operand and lowers through `valueBlock` instead.
      */
     root?: Expr;
+    /**
+     * The expression compiled at the statement position this sink serves —
+     * a function body, the right side of a shader-body assignment, one
+     * statement of a block — whose hoisted statements the sink collects.
+     * A statement hoisted into the sink runs ahead of this whole
+     * expression; the statement form of a shader conditional reads it to
+     * decide whether a sibling written before the conditional could be
+     * affected by that order.
+     */
+    unit?: Expr;
   };
 
   /**

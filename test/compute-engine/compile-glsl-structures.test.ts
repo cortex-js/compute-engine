@@ -264,34 +264,36 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(code).toMatch(/return \(\(_\w+\) \+ \(_\w+\)\);$/m);
     });
 
-    // A shader conditional is an EXPRESSION (a ternary), so an arm has no
-    // statement position of its own. Hoisting the loop out would run it
-    // whichever branch is selected — and a compiled `Random()` advances a
-    // runtime counter, so a loop stranded ahead of a branch it never feeds
-    // would shift every later draw. Fail closed (D6) instead.
-    describe('a conditionally-evaluated branch fails closed', () => {
+    // A shader ternary is an EXPRESSION, so an arm has no statement position
+    // of its own, and hoisting the loop out would run it whichever branch is
+    // selected — a compiled `Random()` advances a runtime counter, so a loop
+    // stranded ahead of a branch it never feeds would shift every later
+    // draw. Such a conditional is emitted as a STATEMENT instead
+    // (`compileGPUStatementSelection`): `if … else …` storing the selected
+    // value in a temporary, the loop inside its own branch.
+    describe('a conditionally-evaluated branch with statements takes the statement form', () => {
       for (const [label, expr] of [
         ['If', ['If', ['Greater', 'x', 0], bigSum, 0]],
         ['Which', ['Which', ['Greater', 'x', 0], bigSum, 'True', 0]],
         ['When', ['When', bigSum, ['Greater', 'x', 0]]],
       ] as [string, any][]) {
         it(`${label} arm containing a loop-form Sum`, () => {
-          expect(() => glsl.compile(ce.box(expr), NO_FOLD)).toThrow(
-            /conditionally-evaluated branch contains a multi-statement construct/
-          );
+          const code = glsl.compile(ce.box(expr), NO_FOLD).code;
+          expect(code).toMatch(/^float _tv\d+;\nif \(0\.0 < x\) \{\n  float/);
+          // The loop runs inside the selected branch only.
+          expect(code.indexOf('if (')).toBeLessThan(code.indexOf('for ('));
+          expect(code).toMatch(/\} else \{\n  _tv\d+ = /);
+          expect(code).toMatch(/return _tv\d+;$/);
         });
       }
 
       it('the loop is never emitted ahead of the conditional', () => {
-        let code = '';
-        try {
-          code = glsl.compile(
-            ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any)
-          ).code;
-        } catch {
-          /* fail-closed is the expected path */
-        }
-        expect(code).not.toContain('for (');
+        const code = glsl.compile(
+          ce.box(['If', ['Greater', 'x', 0], bigSum, 0] as any),
+          NO_FOLD
+        ).code;
+        expect(code.indexOf('for (')).toBeGreaterThan(code.indexOf('if ('));
+        expect(code.indexOf('for (')).toBeLessThan(code.indexOf('} else {'));
       });
 
       it('a conditional with scalar arms is unaffected', () => {
@@ -346,14 +348,16 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       );
     });
 
-    it('a Block in a conditional arm still fails closed', () => {
+    it('a Block in a conditional arm takes the statement form', () => {
+      // The compound statement lands inside the branch that selects it.
       const blk = ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'];
-      expect(() =>
-        glsl.compile(
-          ce.box(['If', ['Greater', 'x', 0], blk, 1] as any),
-          NO_FOLD
-        )
-      ).toThrow(/multi-statement construct.*sub-expression/);
+      const code = glsl.compile(
+        ce.box(['If', ['Greater', 'x', 0], blk, 1] as any),
+        NO_FOLD
+      ).code;
+      expect(code).toBe(
+        'float _tv1;\nif (0.0 < x) {\n  float _tv2;\n  {\n    float q;\n    q = 2.0;\n    _tv2 = q;\n  }\n  _tv1 = _tv2;\n} else {\n  _tv1 = 1.0;\n}\nreturn _tv1;'
+      );
     });
   });
 

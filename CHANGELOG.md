@@ -2,6 +2,35 @@
 
 ### Resolved Issues
 
+- **A shader conditional whose arm needs statements is emitted as a
+  statement.** A GLSL ternary and a WGSL `select` are expressions, so an
+  arm has no statement position: a loop-form `Sum` (a bound the compiler
+  cannot unroll) in an arm could only be hoisted ahead of the conditional,
+  where it would run whichever branch is selected — and shift every later
+  draw of the shader's random stream — so such arms failed closed. The
+  Tycho code-generation audit document `yac5cxfjm1` declined 14 records on
+  exactly that shape, `f(x, N) := Which(1 ≤ N, Σ_{n=1}^{⌊N⌋} cos(…)/√N_m,
+  True, 0)`. `Which`, `If` and `When` on the GLSL and WGSL targets now emit
+  `if … else …` storing the selected value in a temporary declared ahead of
+  it, each clause's statements captured into its own branch and a later
+  condition's statements inside the `else` of the clause before it, so the
+  loop runs only when its clause is taken. The same form serves a `Block`
+  used as an arm. A selection with an effect the rest of the expression can
+  observe — a draw from the random stream, a write to an enclosing binding,
+  directly or inside a called function — keeps the ternary form and
+  declines as before: hoisted as a statement, the effect would run ahead of
+  an operand written before the selection (the ordering every hoisted
+  statement has, recorded in `ROADMAP.md`). For the same reason a selection
+  keeps the ternary form when anything else at its statement position
+  writes a binding — an assignment outside the selection, as `k := 1` in
+  `(k := 1, If(k > 0, Σ…, 0))`, or a called function that writes one:
+  hoisted, the selection could read the binding before that write,
+  directly, through a symbol whose value is inlined, or inside a function
+  it calls. A
+  conditional with plain arms
+  keeps its ternary, and a ternary nested inside a captured branch keeps
+  its own guard. The emitted shaders were compiled by a WebGL2 and a WebGPU
+  implementation.
 - **A list of numbers at an untyped parameter gets a specialized helper on
   the JavaScript target.** The document `njncrg9fkv` of the code-generation
   audit scales a cube's points with `W(p, x, y, z) := PointList(x·PointX(p),

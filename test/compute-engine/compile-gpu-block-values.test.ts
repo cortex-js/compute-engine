@@ -247,14 +247,20 @@ describe.each(['glsl', 'wgsl'] as const)(
       ).toThrow(/final statement of a block|EXPRESSION/);
     });
 
-    test('a conditional arm still fails closed', () => {
+    test('a conditional arm takes the statement form of the conditional', () => {
+      // The block's compound statement lands inside the branch that selects
+      // it (`compileGPUStatementSelection`), never ahead of the conditional.
       const ce = engine();
       const r = compile(ce.expr(['If', ['Greater', 'x', 0], term, 0]), {
         to,
         constantFold: false,
       });
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/cannot be used as a sub-expression/);
+      expect([r.success, r.error]).toEqual([true, undefined]);
+      const code = r.code!;
+      expect(code.indexOf('if (0.0 < x) {')).toBeGreaterThanOrEqual(0);
+      // The block's own compound statement: a bare brace line inside the branch.
+      expect(code).toMatch(/\n  \{\n/);
+      expect(code.indexOf('} else {')).toBeGreaterThan(code.indexOf('if ('));
     });
 
     test('a block whose final statement is a Return still fails closed', () => {

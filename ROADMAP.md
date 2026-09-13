@@ -1242,11 +1242,12 @@ the 12 `interval-js` `Which` and `List` records of `ccoc40kfhj`, 2 of
 20 records with smaller code (`ccoc40kfhj` JavaScript rows 817 → 188
 characters: one scalar selection where a run-time selection over three
 broadcast arrays was emitted) and 2 records twice as fast. Left for later
-rounds, each with its witness above: `Cross` of two 3-tuples should type
-`tuple<number, number, number>`; the `glsl` statement-form `Which` with a
-loop arm; `glsl` `Integrate` by fixed quadrature; `interval-js` `D` through
-interval jets; the `javascript` `PointList` component typed
-`collection<number>` (`2ki2hjsouf`). Of the `PointList` component group,
+rounds, each with its witness above: `glsl` `Integrate` by fixed
+quadrature; `interval-js` `D` through interval jets; the `javascript`
+`PointList` component typed `collection<number>` (`2ki2hjsouf`). Landed
+since: `Cross` of two points is a point (ruled 2026-09-13), and the `glsl`
+`Which` with a loop-form `Sum` arm takes a statement form (the 14 records of
+`yac5cxfjm1`, 2026-09-13). Of the `PointList` component group,
 `njncrg9fkv`'s call `W(C(u, v), [0.8, 0.2, 0.8, 0.2], …)` compiles since
 2026-09-13 (a list argument beside a point is specialized); its sum
 `W(…) + PointList(…)` fails closed on Tycho's declaration of `W`'s result,
@@ -1576,6 +1577,75 @@ fix belongs in the element-wise ordering relations — mark a cell whose
 operand is NaN absent, as the equality does — after which the two forms
 agree and the pre-pass note on `indexedOperands` can go. Witness probe:
 `build/probe-nan-sel.ts`.
+
+### A statement hoisted on a shader target runs ahead of an operand written before it (OPEN, ruling — found 2026-09-13 by the review of the statement-form conditional)
+
+On the GLSL and WGSL targets a lowering that needs statements — a loop-form
+`Sum`/`Product`, a `Block` used as a value, the statement form of a
+conditional, a lowering that binds an impure operand to a temporary
+(`Cot(Random())`) — hoists them into the enclosing statement sink, AHEAD of
+the whole enclosing expression. An operand written EARLIER in that
+expression then runs after them where the interpreter runs it first: with
+constant folding off, `(Random(), Σ_{n=1}^{⌊t⌋} Random())` emits the loop and
+then `return vec2(_gpu_rnd_draw(…), _tv1);` — the first component is the
+draw after the loop's; `(k := 1, Σ_{n} k·n)` reads `k` before the assignment.
+The class is as old as the loop-form `Sum` hoisting (Tycho item 110). The
+statement-form conditional landed 2026-09-13 takes only selections without
+observable effects, so it adds no case to the class beyond the reads a pure
+selection makes of a binding an earlier sibling writes — the second witness.
+
+A general fix was built and withdrawn in the same round after eleven review
+rounds kept finding compile paths it did not cover. What it must be, for
+the next attempt: (1) the choke point is `compileExpr` — the parent's
+lowering dispatch — not the operand compiler: infix operators, string-mapped
+functions and per-head handlers compile their operands through different
+paths, and `At` compiles its index before its base; (2) decide per OCCURRENCE,
+never by object identity — `Arctan2(e, e)` holds one object twice; (3) bind
+an earlier operand ahead of a hoisting sibling when the operand has an
+effect, or when the sibling WRITES a binding (a draw changes no value an
+earlier read sees), and read a `Block` by the values it assigns to its own
+locals (`BaseCompiler.hasObservableEffect`); (4) predict hoisting
+conservatively: every `Sum`/`Product` (an unrolled one hoists loop
+invariants), every impure application (a twice-spliced operand is bound),
+and accept the unneeded temporaries that over-reading costs; (5) a constant
+(pure, no symbol at all — `unknowns` misses assigned symbols reachable as
+caller-mapped names) needs no binding, and a bound operand needs a static
+shader type (fail closed otherwise); (6) never bind inside a lazy region or
+a selection's own operands. The question to rule on: is this ordering worth
+that mechanism, or should the shader targets keep declaring hoisting order
+as a documented difference from the interpreter for expressions that mix a
+hoisting operand with an effect written before it?
+
+### A shared subexpression inside a shader conditional arm is emitted once per occurrence (OPEN — found 2026-09-13 by the review of the statement-form conditional)
+
+A boxed expression is a DAG: `Max(e, e)` holds `e` once. Outside a
+conditional the GLSL and WGSL targets bind such a shared node to a
+temporary through the common-subexpression pass, so a tower `Max(e, e)` of
+depth 16 emits 542 characters. Inside the arm of a conditional the pass
+binds nothing — an arm is a lazy region, and a binding hoisted out of it
+would run whichever branch is taken — so the arm's text unfolds the
+sharing: the same tower as the arm of `If(x > 0, …, 0)` emits 917 521
+characters (2.4 s), and depth 20 emits 14 MB (36 s). Measured at HEAD
+(commit f7689669) and unchanged by the statement form of a conditional,
+which binds nothing inside a captured branch either. The fix is a binding
+placed INSIDE the branch: the statement form gives each captured branch a
+statement position of its own, where a shared node of that arm can be
+declared ahead of its first use without running for the other branch.
+
+### `Match` with a case body that needs statements still declines on the shader targets (OPEN — found 2026-09-13 by the review of the statement-form conditional)
+
+`If`, `When` and `Which` on the GLSL and WGSL targets take a statement form
+when an arm needs statements (a loop-form `Sum`/`Product`, a `Block`, a
+`Loop`): `compileGPUStatementSelection` in
+`src/compute-engine/compilation/gpu-target.ts`. `Match` lowers through the
+shared `compileMatchTernary`, whose case bodies are compiled by
+`compileGPUConditionalArm` alone, so a `Match` whose case body holds a
+loop-form `Sum` declines as every conditional arm did before the statement
+form existed. The fix is to give `compileMatchTernary` the same statement
+form: the case tests become the conditions and the case bodies the arms,
+under the same gate (no effect in a case, no write outside the cases at the
+statement position). No document of the code-generation audit has the
+shape; the entry records the reachable decline.
 
 ### `When` over a list-shaped condition zips a POINT value where `Which` lifts it whole (OPEN, ruling — found 2026-09-12 in the full-corpus code-generation audit, `njncrg9fkv`)
 
