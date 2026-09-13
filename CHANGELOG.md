@@ -2,6 +2,39 @@
 
 ### Resolved Issues
 
+- **A literal index reaches through an element-wise selection, the
+  relations, `Mod`, and a literal range.** The Tycho code-generation audit
+  document `ccoc40kfhj` writes a colour channel as
+  `Which(|6((x + [3, 2, 1]/3) mod 1) − 3| − 1 < 0, 0, …)[1]`: a `Which`
+  broadcast over a three-element list, read back at one index. The interval
+  target has no element-wise selection and the shader targets have no
+  run-time list to index, so 24 records declined. The pre-pass now pushes
+  the index through a `Which`/`If` whose first condition is a list (a later
+  scalar condition and a scalar or point arm are repeated at every
+  position, as the interpreter lifts them), through the ordering relations
+  (`Equal`/`NotEqual` only against a scalar: two lists compare as whole
+  values), through `Mod` and the other element-wise heads, and through a
+  literal `Range` (read at the index, never enumerated). The row is one
+  scalar selection on every target, with the interpreter's values. A
+  selection with no default clause and a point arm is left alone: a position
+  no clause selects is `NaN` element-wise but `Missing` for a scalar
+  selection, which lowers differently for a point.
+- **A `Which`/`If` over a wide list-shaped condition is written out per
+  position.** With the first condition a list of five or more elements built
+  from non-constant lists, the selection is now the literal list of its
+  per-position scalar selections (rule 7 of the pre-pass, capped at 64
+  positions). The JavaScript target emitted one thunk per clause and an
+  array per condition through the run-time helper `_SYS.select`; the shader
+  targets lowered a condition of vector width two to four only; the interval
+  target none. `Mod` joins the element-wise heads the pre-pass fans out.
+- **A point arm of the JavaScript run-time selection is lifted whole.** A
+  point and a list are both arrays at the JavaScript ABI, so
+  `Which([T, F, F], (1, 2))` read the point as a list arm of the wrong
+  length and answered `NaN` where the interpreter answers
+  `[(1, 2), NaN, NaN]`. An arm whose type is a point is now wrapped
+  (`_SYS.wholeArm`) and the helper lifts it to every position that selects
+  it.
+
 - **Nested run-time broadcasts fuse into one loop on the JavaScript target.**
   Scalar arithmetic over a list whose width the compiler cannot see (a
   declared `list<number>` input) lowered to one `_SYS.bcast` call per head,

@@ -7,6 +7,7 @@ import {
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { isTupleShapedType } from '../collection-utils.js';
+import { isPointElementType } from '../../common/type/utils.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
@@ -253,7 +254,8 @@ function rewrite(
       unrollReduction(node) ??
       distributeOverList(node, options) ??
       foldLiteralIndex(node, options) ??
-      unrollComprehension(node, options);
+      unrollComprehension(node, options) ??
+      distributeSelection(node, options);
     if (next === undefined) break;
     node = rewrite(next, settled, options);
   }
@@ -420,38 +422,41 @@ function readsCallerSource(e: Expression, options: UnrollOptions): boolean {
 }
 
 /**
- * The number of elements of a list built from a literal `List` of provably
- * scalar elements, through the arithmetic that keeps that width — a scalar
- * multiple, a sum or difference with a scalar or with a list of the same
- * width, a negation, a division. `undefined` for any other operand: a
- * declared width is not read, because a value handed to the compiled code
- * through `vars` is never checked against its declared type. Read by the
- * column projection (`projectPointListColumn`) and by the literal index fold
- * (`foldLiteralIndex`), whose `indexInto` accepts exactly the heads this
- * function walks.
+ * The number of elements of a list the pass can see the width of: a literal
+ * `List` of provably scalar elements, or a literal `Range` when `ranges` is
+ * set, through every head that applies element-wise over such a list and
+ * keeps its width — the arithmetic and function heads, the relations, a
+ * `Which`/`If` in its element-wise mode, a `PointList` zipped from columns
+ * ({@link indexedOperands} lists them and the operand mix each admits).
+ * `undefined` for any other operand: a declared width is not read, because
+ * a value handed to the compiled code through `vars` is never checked
+ * against its declared type. Read by the column projection
+ * (`projectPointListColumn`), by the literal index fold (`foldLiteralIndex`)
+ * and by the selection fan-out (`distributeSelection`); `indexInto` walks
+ * exactly the heads this function walks.
+ *
+ * A `Range` is a compile-time constant that no target builds as a list; the
+ * rules that INDEX into the width read through it (`ranges`), while the
+ * column projection, which hands the column on whole, does not.
  */
-function staticListWidth(e: Expression): number | undefined {
+function staticListWidth(e: Expression, ranges = false): number | undefined {
   if (!isFunction(e)) return undefined;
   if (e.operator === 'List')
     return e.ops.every(isProvablyScalar) ? e.nops : undefined;
-  if (e.operator === 'Negate' && e.nops === 1) return staticListWidth(e.op1);
-  if (
-    e.operator === 'Add' ||
-    e.operator === 'Subtract' ||
-    e.operator === 'Multiply' ||
-    e.operator === 'Divide'
-  ) {
-    let width: number | undefined;
-    for (const op of e.ops) {
-      if (isProvablyScalar(op)) continue;
-      const w = staticListWidth(op);
-      if (w === undefined || (width !== undefined && w !== width))
-        return undefined;
-      width = w;
-    }
-    return width;
+  if (e.operator === 'Range') {
+    if (!ranges) return undefined;
+    return literalRangeCount(e);
   }
-  return undefined;
+  const indexed = indexedOperands(e);
+  if (indexed === undefined) return undefined;
+  let width: number | undefined;
+  for (const op of indexed) {
+    const w = staticListWidth(op, ranges);
+    if (w === undefined || (width !== undefined && w !== width))
+      return undefined;
+    width = w;
+  }
+  return width;
 }
 
 /**
@@ -871,9 +876,12 @@ function unrollReduction(
  * heads the JavaScript target broadcasts through `_SYS.bcast`. For these, and
  * only these, `op(s, [a, b])` and `[op(s, a), op(s, b)]` are the same value.
  *
- * `Equal`/`NotEqual` and the ordering relations are deliberately absent: over
- * two collections the interpreter compares them as WHOLE values rather than
- * element-wise, so an unrolled form would not agree with it.
+ * The relations are deliberately absent: `Equal`/`NotEqual` over two
+ * collections compare them as WHOLE values rather than element-wise, and the
+ * compiled relations have their own element-wise lowering with its own
+ * treatment of an absent cell, which a fan-out to scalar comparisons would
+ * replace. A literal index is still pushed through a relation
+ * ({@link indexedOperands}), which keeps one position and drops none.
  */
 const ELEMENTWISE_HEADS = new Set([
   'Abs',
@@ -891,6 +899,7 @@ const ELEMENTWISE_HEADS = new Set([
   'Log',
   'Log2',
   'Log10',
+  'Mod',
   'Multiply',
   'Negate',
   'Power',
@@ -908,8 +917,8 @@ const ELEMENTWISE_HEADS = new Set([
 /**
  * Every head any rule of this pass can rewrite: the point accessors (rule 1),
  * `Map` (rule 2), the reductions (rule 3), the element-wise heads (rule 4)
- * a literal index (rule 5) and a comprehension over literal domains (rule
- * 6).
+ * a literal index (rule 5), a comprehension over literal domains (rule 6)
+ * and a selection over a list-shaped condition (rule 7).
  *
  * Read by {@link overriddenCompilationHeads} for the one case where the
  * overridden heads cannot be enumerated: withholding all of these makes the
@@ -923,6 +932,8 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   ...ELEMENTWISE_HEADS,
   'At',
   'Comprehension',
+  'Which',
+  'If',
 ]);
 
 /**
@@ -960,12 +971,17 @@ function distributeOverList(
   if (width === undefined) return undefined;
   if (listOps.some((l) => l !== undefined && l.length !== width))
     return undefined;
-  // A remaining operand must be a scalar the rewrite may repeat. A list-shaped
-  // operand whose width is not literal falls here too, and stops the rewrite.
+  // A remaining operand must be a scalar the rewrite may repeat: pure, and
+  // free of caller-supplied code (`readsCallerSource`), which runs once in
+  // the original and would run once per element here. A list-shaped operand
+  // whose width is not literal falls here too, and stops the rewrite.
   if (
     !ops.every(
       (op, i) =>
-        listOps[i] !== undefined || (isProvablyScalar(op) && op.isPure === true)
+        listOps[i] !== undefined ||
+        (isProvablyScalar(op) &&
+          op.isPure === true &&
+          !readsCallerSource(op, options))
     )
   )
     return undefined;
@@ -1018,18 +1034,22 @@ function distributeOverList(
  * receives the elements, and the index is then its business.
  *
  * The index is also PUSHED THROUGH a list that is not written out as one
- * `List` but built from one by element-wise arithmetic, or zipped from
- * columns into points: `(0.1·[a, b, c] + 0.4)[2]` is `0.1·b + 0.4`, and
- * `PointList([a₁, a₂], [b₁, b₂], 5)[2]` is the point `PointList(a₂, b₂, 5)`.
- * The interpreter computes the whole list and reads one element back; the
- * rewrite computes that element alone, which is what the shader targets
- * need — they have no run-time list to index — and what every target
- * prefers. The width of such a list must be PROVABLE from its structure
- * (`staticListWidth`, `staticPointListWidth`): a scalar operand is kept as
- * it is, and a list-shaped operand is indexed in turn (`indexInto`). A
- * `PointList` whose every component is a scalar is one POINT, not a list of
- * them; an index into it reads a coordinate, which is a different value and
- * is left to the target.
+ * `List` but built from one — or from a literal `Range` — by element-wise
+ * arithmetic, a relation, a `Which`/`If` over a list-shaped condition, or
+ * zipped from columns into points: `(0.1·[a, b, c] + 0.4)[2]` is
+ * `0.1·b + 0.4`, `PointList([a₁, a₂], [b₁, b₂], 5)[2]` is the point
+ * `PointList(a₂, b₂, 5)`, and `Which(|x + [3, 2, 1]/3| < 1, 0, True, 1)[2]`
+ * is `Which(|x + 2/3| < 1, 0, True, 1)`. The interpreter computes the whole
+ * list and reads one element back; the rewrite computes that element alone,
+ * which is what the shader and interval targets need — they have no run-time
+ * list to index, and the interval target has no element-wise selection at
+ * all — and what every target prefers. The width of such a list must be
+ * PROVABLE from its structure (`staticListWidth`): an operand the head
+ * repeats at every position is kept as it is, and a list-shaped operand is
+ * indexed in turn (`indexInto`; `indexedOperands` says which operands are
+ * which for each head). A `PointList` whose every component is a scalar is
+ * one POINT, not a list of them; an index into it reads a coordinate, which
+ * is a different value and is left to the target.
  */
 function foldLiteralIndex(
   expr: Expression & FunctionInterface,
@@ -1042,22 +1062,16 @@ function foldLiteralIndex(
   if (!isNumber(index) || index.im !== 0) return undefined;
   const k = index.re;
   if (!Number.isInteger(k) || k < 1) return undefined;
-  if (base.operator === 'Range') {
-    // Read through the range's own indexed access: nothing is enumerated,
-    // and an index past the count is left alone.
-    if (!isLiteralRange(base)) return undefined;
-    const count = base.count;
-    if (count === undefined || !Number.isFinite(count) || k > count)
-      return undefined;
-    return typeof base.at === 'function' ? base.at(k) : undefined;
-  }
+  // A literal range is read through its own indexed access; an index past
+  // the count is left alone.
+  if (base.operator === 'Range') return indexInto(base, k, options);
   // A written-out `List` has its width in view whatever its elements are; a
   // list built by arithmetic or zipped from columns must prove it.
   if (base.operator === 'List') {
     if (base.nops === 0 || k > base.nops) return undefined;
     return indexInto(base, k, options);
   }
-  const width = staticListWidth(base) ?? staticPointListWidth(base);
+  const width = staticListWidth(base, true);
   if (width === undefined || k > width) return undefined;
   // A target with an iteration budget builds at most that many elements of a
   // list it computes (the zip of a `PointList` stops there), so an index past
@@ -1100,18 +1114,26 @@ function indexInto(
       return undefined;
     return e.ops[k - 1];
   }
+  if (e.operator === 'Range') {
+    // Read through the range's own indexed access: nothing is enumerated.
+    const count = literalRangeCount(e);
+    if (count === undefined || k > count) return undefined;
+    return typeof e.at === 'function' ? e.at(k) : undefined;
+  }
+  const indexed = indexedOperands(e);
+  if (indexed === undefined) return undefined;
+  // One position of a selection runs the arms that position reaches, where
+  // the original runs every arm some position reaches; a clause that reads
+  // caller-supplied code (`readsCallerSource`) could then run a different
+  // number of times, so such a selection is left alone.
   if (
-    e.operator !== 'Negate' &&
-    e.operator !== 'Add' &&
-    e.operator !== 'Subtract' &&
-    e.operator !== 'Multiply' &&
-    e.operator !== 'Divide' &&
-    e.operator !== 'PointList'
+    SELECTION_HEADS.has(e.operator) &&
+    e.ops.some((op) => readsCallerSource(op, options))
   )
     return undefined;
   const ops: Expression[] = [];
   for (const op of e.ops) {
-    if (isProvablyScalar(op)) {
+    if (!indexed.has(op)) {
       ops.push(op);
       continue;
     }
@@ -1122,26 +1144,100 @@ function indexInto(
   return e.engine.function(e.operator, ops, { form: 'structural' });
 }
 
+/** The heads whose element-wise lowering a literal index is pushed through. */
+const ORDERING_RELATION_HEADS: ReadonlySet<string> = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+]);
+const EQUALITY_HEADS: ReadonlySet<string> = new Set(['Equal', 'NotEqual']);
+const SELECTION_HEADS: ReadonlySet<string> = new Set(['Which', 'If']);
+
 /**
- * The number of points of a `PointList` zipped from COLUMNS — at least one
- * list-shaped component, every such component of the same provable width
- * (`staticListWidth`), a scalar component repeated for every point.
- * `undefined` for a `PointList` whose every component is a scalar (that is
- * one point) and for one whose column widths are unproven or disagree: the
- * zip stops at the shortest column, and which column that is would then be
- * unknown.
+ * Is this operand one VALUE a `Which`/`If` broadcast over a list-shaped
+ * condition repeats at every position — a number, a boolean (a condition
+ * that is scalar, the `True` of the default clause), or one point (a tuple
+ * type, or a union of tuple types, `isPointElementType`)? The
+ * interpreter lifts such an operand whole: `Which([T, F, F], (1, 2))` is
+ * `[(1, 2), NaN, NaN]`, the point at the selected position and not its
+ * coordinates spread over the positions.
  */
-function staticPointListWidth(e: Expression): number | undefined {
-  if (!isFunction(e, 'PointList')) return undefined;
-  let width: number | undefined;
-  for (const op of e.ops) {
-    if (isProvablyScalar(op)) continue;
-    const w = staticListWidth(op);
-    if (w === undefined || (width !== undefined && w !== width))
-      return undefined;
-    width = w;
+function isSelectionScalar(op: Expression): boolean {
+  return (
+    isProvablyScalar(op) ||
+    op.type.matches('boolean') ||
+    isPointElementType(op.type.type)
+  );
+}
+
+/**
+ * For a node whose head applies ELEMENT-WISE over a list-shaped operand, the
+ * operands that are list-shaped — the ones an index is pushed into, the
+ * other operands being kept whole — or `undefined` when the head is not one
+ * the index fold walks, or when the mix of operands is not one the
+ * interpreter applies element-wise. The heads, and the operand mix each
+ * admits (verified against the interpreter):
+ *
+ * - the element-wise arithmetic and function heads ({@link ELEMENTWISE_HEADS})
+ *   and a `PointList` zipped from columns: a provably scalar operand is kept
+ *   whole, every other operand is a list of the common width. A `PointList`
+ *   whose every component is a scalar is one POINT, not a list of them, and
+ *   is not walked;
+ * - the ordering relations, over two operands: `[1, 2] < 2` is `[True,
+ *   False]` and `[1, 2] < [2, 2]` likewise zips the two lists;
+ * - `Equal`/`NotEqual`, over two operands of which exactly ONE is a list:
+ *   `[1, 2] = 2` is `[False, True]`, but two lists compare as WHOLE values
+ *   (`[1, 2] = [1, 2]` is `True`) and are not walked;
+ * - `Which`/`If` whose FIRST condition is a list: the interpreter is then in
+ *   its element-wise mode, where a later scalar condition and a scalar or
+ *   point arm ({@link isSelectionScalar}) lift to every position and a list
+ *   condition or arm is read at each. A scalar FIRST condition is not walked:
+ *   when it is true the interpreter answers that arm WHOLE, a scalar the
+ *   index would then reject. Every clause must be pure: the rewrite keeps
+ *   one position and the interpreter evaluates every condition and every
+ *   reached arm. One input is answered differently by the two forms, and
+ *   the difference is a defect of the element-wise form recorded in
+ *   `ROADMAP.md` ("An element-wise ordering relation compares a NaN operand
+ *   where the scalar branch treats it as undecided"): with `b` NaN,
+ *   `Which([a, b, c] < 2, 1, True, 0)[2]` is `0` (the cell `NaN < 2` is
+ *   `False`) where the scalar `Which(b < 2, 1, True, 0)` is `Missing`, the
+ *   undecided-condition answer every scalar branch gives. The rewrite gives
+ *   the scalar answer. A selection with NO default clause and a point arm
+ *   is not walked: a position no clause selects is `NaN` in the element-wise
+ *   mode, while a scalar selection with no default answers `Missing`, which
+ *   is the same value only where the selection is numeric.
+ */
+function indexedOperands(
+  e: Expression & FunctionInterface
+): ReadonlySet<Expression> | undefined {
+  const head = e.operator;
+  if (ELEMENTWISE_HEADS.has(head) || head === 'PointList') {
+    const lists = e.ops.filter((op) => !isProvablyScalar(op));
+    return lists.length > 0 ? new Set(lists) : undefined;
   }
-  return width;
+  if (ORDERING_RELATION_HEADS.has(head) || EQUALITY_HEADS.has(head)) {
+    if (e.nops !== 2) return undefined;
+    const lists = e.ops.filter((op) => !isProvablyScalar(op));
+    if (lists.length === 0) return undefined;
+    if (EQUALITY_HEADS.has(head) && lists.length !== 1) return undefined;
+    return new Set(lists);
+  }
+  if (SELECTION_HEADS.has(head)) {
+    if (e.nops < 2 || isSelectionScalar(e.op1)) return undefined;
+    if (!e.ops.every((op) => op.isPure === true)) return undefined;
+    const hasDefault =
+      head === 'If'
+        ? e.nops === 3
+        : e.nops % 2 === 0 && isSymbol(e.ops[e.nops - 2], 'True');
+    if (
+      !hasDefault &&
+      e.ops.some((op, i) => i % 2 === 1 && isPointElementType(op.type.type))
+    )
+      return undefined;
+    return new Set(e.ops.filter((op) => !isSelectionScalar(op)));
+  }
+  return undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1239,6 +1335,91 @@ function unrollComprehension(
   return ce.function('List', rows);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Rule 7 — a selection over a list-shaped condition
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The most positions a `Which`/`If` over a list-shaped condition is written
+ * out into (rule 7). A literal `List` condition is already that wide in the
+ * source; the cap bounds a literal `Range` condition, whose count is not.
+ */
+const MAX_UNROLLED_SELECTION_WIDTH = 64;
+
+/**
+ * `Which`/`If` whose FIRST condition is list-shaped with a provable width
+ * (`staticListWidth`), written out as the literal list of the per-position
+ * selections: `Which(x + [a, b, c, d, e] < 2, 0, True, 1)` becomes
+ * `[Which(x + a < 2, 0, True, 1), Which(x + b < 2, 0, True, 1), …]`. Each
+ * position is `indexInto` applied to every list-shaped clause while a
+ * scalar, boolean or point clause is repeated (`indexedOperands` gives the
+ * element-wise mode of the interpreter that this reproduces).
+ *
+ * The fan-out gate is the one of the other rules: the width must reach
+ * `UnrollOptions.minWidth` (below it the JavaScript target's run-time
+ * selection and the shader targets' vector selection answer for
+ * themselves), and a condition built only from number-literal lists and
+ * ranges is a compile-time constant left to the constant folder unless
+ * `UnrollOptions.unrollConstantLists` asks for it. The width is capped at
+ * {@link MAX_UNROLLED_SELECTION_WIDTH}. The arithmetic UNDER the condition
+ * is distributed by rule 4 at the same gate; this rule reads through it
+ * either way.
+ *
+ * Measured need: the JavaScript target lowers this shape through the
+ * run-time helper `_SYS.select` (one thunk per clause, an array per
+ * condition), the shader targets only for a condition of vector width two
+ * to four, and the interval target not at all. The written-out form is a
+ * list of scalar selections every target compiles.
+ */
+function distributeSelection(
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
+): Expression | undefined {
+  if (!SELECTION_HEADS.has(expr.operator)) return undefined;
+  if (options.skipHeads?.has(expr.operator) === true) return undefined;
+  const indexed = indexedOperands(expr);
+  if (indexed === undefined) return undefined;
+  // The width is proven over EVERY list-shaped clause, not the first
+  // condition alone: a list arm wider than the condition is a dimension
+  // mismatch the interpreter reports and the run-time selection answers
+  // with NaN, which a fan-out cut to the condition's width would hide.
+  const width = staticListWidth(expr, true);
+  if (width === undefined || width > MAX_UNROLLED_SELECTION_WIDTH)
+    return undefined;
+  // A clause that reads caller-supplied code (`readsCallerSource`) runs
+  // once in the original selection; repeating a scalar clause at every
+  // position, or reading a list clause at some positions only, would change
+  // how many times that code runs.
+  if (expr.ops.some((op) => readsCallerSource(op, options))) return undefined;
+
+  if (width < (options.minWidth ?? MIN_UNROLLED_WIDTH)) return undefined;
+  if (
+    options.unrollConstantLists !== true &&
+    !expr.ops.some((op) => indexed.has(op) && readsNonConstantList(op))
+  )
+    return undefined;
+
+  const ce = expr.engine;
+  const elements: Expression[] = [];
+  for (let k = 1; k <= width; k++) {
+    const element = indexInto(expr, k, options);
+    if (element === undefined) return undefined;
+    elements.push(element);
+  }
+  return ce.function('List', elements);
+}
+
+/**
+ * Does `e` hold a literal `List` with an element that is not a number
+ * literal (`isNonConstantLiteralList`) anywhere below it? A literal `Range`
+ * is a constant, and so is a `List` of number literals.
+ */
+function readsNonConstantList(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'List') return isNonConstantLiteralList(e);
+  return e.ops.some(readsNonConstantList);
+}
+
 /**
  * Is this a `Range` with number-literal bounds (and step)?
  */
@@ -1249,16 +1430,24 @@ function isLiteralRange(
 }
 
 /**
+ * The element count of a literal `Range` (`count`, which the engine computes
+ * from the bounds without enumerating), or `undefined` for a range whose
+ * bounds are not number literals or whose count is not finite.
+ */
+function literalRangeCount(range: Expression): number | undefined {
+  if (!isLiteralRange(range)) return undefined;
+  const count = range.count;
+  return count !== undefined && Number.isFinite(count) ? count : undefined;
+}
+
+/**
  * The element count of a LITERAL domain — a literal range (`count`, which
  * the engine computes from the bounds without enumerating) or a literal
  * `List` of pure elements — or `undefined` for any other domain, and for a
  * range whose count is not finite.
  */
 function literalDomainCount(domain: Expression): number | undefined {
-  if (isLiteralRange(domain)) {
-    const count = domain.count;
-    return count !== undefined && Number.isFinite(count) ? count : undefined;
-  }
+  if (isFunction(domain, 'Range')) return literalRangeCount(domain);
   if (isFunction(domain, 'List'))
     return domain.ops.every((e) => e.isPure === true) ? domain.nops : undefined;
   return undefined;

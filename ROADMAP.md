@@ -455,12 +455,6 @@ broadcast sites to 9. What those 9 are:
   helper's trigonometric arithmetic no longer uses runtime broadcast dispatch.
   See `docs/CALL-SHAPE-SPECIALIZATION.md` for the call-typing contract and the
   CORE source comparison.
-- **A product of two calls whose declared result is `broadcastable<number>`
-  keeps `_SYS.mul`** (6 sites, the domain warp `f_Bm(x, y) · |f_Bm(x, y)|`
-  inside `R_ec`). The same shape written against a plainly typed helper
-  compiles to scalar arithmetic, so the analysis has the rule; what it does
-  not have is a verdict for this particular callee at that call site. Not
-  diagnosed further — the remaining cost is two multiplications a sample.
 
 A residue of the `Dot` typing half is that `PointList(1, L)` with `L` a list
 types `list<tuple<…>>`, so `Dot(PointList(1, L), PointList(3, 4))` reports
@@ -1484,6 +1478,30 @@ compiled-JS sampling path is not enough — e.g. an implicit-curve row that need
 interval arithmetic for robustness, or a shaded-region row that needs the shader
 target.
 
+**Landed 2026-09-12, in the pre-pass `fixed-width-unroll.ts`, from the full
+corpus run of the code-generation audit (below).** The corpus refuted the
+"demand at zero" paragraph that follows: `ccoc40kfhj` (24 `interval-js`
+records) writes every colour channel as a `Which` broadcast over a
+three-element list read back at one index, `Which(|6((x + [3, 2, 1]/3) mod
+1) − 3| − 1 < 0, 0, …)[1]`. Two rules cover it. A literal index is pushed
+through a `Which`/`If` whose first condition is a list — a later scalar
+condition and a scalar or point arm repeat at every position, as the
+interpreter lifts them — and on through the ordering relations,
+`Equal`/`NotEqual` against a scalar, `Mod`, the other element-wise heads and
+a literal `Range`, down to the literal list: the row is one scalar selection
+on every target. And a `Which`/`If` whose first condition is a WIDE list
+built from non-constant lists (five or more elements, at most 64) is written
+out as the list of its per-position selections. What is NOT covered, with
+the reason: a selection with no default clause and a point arm (a position
+no clause selects is `NaN` element-wise but `Missing` for a scalar
+selection); a `Which` in statement form inside a lambda the pass does not enter
+(`5qn5kcrszu`, 6 `javascript` records); the Voronoi witness above, whose condition is
+built from a list of POINTS (`|P − (x, y)|` over a `PointList` literal) —
+the width walk reads lists of scalars only; and `When` over a list
+condition, whose interpreter semantics for a point value are undecided (the
+ruling entry that follows this one). `test/compute-engine/compile-elementwise-selection-unroll.test.ts`
+pins the rows, the walk's refusals and the shader compiles.
+
 **Demand measured at zero (2026-08-20).** Tycho retracted the escalation after
 measuring against 0.116.1: the blocker was on their side, one layer upstream of
 the compile route — a collection-carrier predicate that consulted their own
@@ -1498,6 +1516,56 @@ Caveat recorded by the reporter: their oracle fix was still uncommitted in a
 working tree when measured, so this is "stop scoping", not "cause proven
 landed". The two cautions above about the `glsl` `Power`-of-vec hole and the
 vec-width cap remain accurate and remain unmotivated by any consumer.
+
+### An element-wise ordering relation compares a NaN operand where the scalar branch treats it as undecided (OPEN — found 2026-09-12 by the Codex review of the selection index push-through)
+
+A scalar branch whose relation has a NaN operand is UNDECIDED: the
+interpreter answers `Which(NaN < 2, 1, True, 0)` with `Missing`, and the
+JavaScript target guards the operand (`_.b === _.b && _.b !== undefined`)
+and answers `NaN`. The element-wise form of the same selection decides the
+position instead: `Which([1, NaN, 3] < 2, 1, True, 0)` is `[1, 0, 0]` in the
+interpreter (the cell `NaN < 2` evaluates to `False`) and in the compiled
+run-time selection (the fused loop reads `NaN < 2` as `false` and takes the
+default). The element-wise EQUALITY already marks such a cell absent (the
+compiled-equality absent marker landed 2026-09-10), so `select` consumes the
+position and answers `NaN` there; the ordering relations (`Less`,
+`LessEqual`, `Greater`, `GreaterEqual`) do not mark it, in the interpreter's
+element-wise relation handler or in the JavaScript emitter. The pre-pass
+index push-through of 2026-09-12 (`fixed-width-unroll.ts`, `indexedOperands`)
+rewrites `Which([a, b, c] < 2, 1, True, 0)[2]` to the scalar
+`Which(b < 2, 1, True, 0)`, so a NaN `b` now answers the undecided value
+(`NaN`, `Missing`) where the element-wise form answered `0`. The rewrite is
+kept: the scalar answer is the ratified undecided-condition contract, and the
+fix belongs in the element-wise ordering relations — mark a cell whose
+operand is NaN absent, as the equality does — after which the two forms
+agree and the pre-pass note on `indexedOperands` can go. Witness probe:
+`build/probe-nan-sel.ts`.
+
+### `When` over a list-shaped condition zips a POINT value where `Which` lifts it whole (OPEN, ruling — found 2026-09-12 in the full-corpus code-generation audit, `njncrg9fkv`)
+
+`Which([True, False, False], (1, 2))` evaluates to `[(1, 2), NaN, NaN]`: the
+point is one value, lifted whole to the position that selects it. The
+masking form of the same selection, `When((1, 2), [True, False, False])` —
+what `p{cond}` parses to — evaluates to `[1, Missing]`: the point is read as
+a two-element collection and zipped against the three-element condition,
+which stops at the shorter operand. The two heads disagree on whether a
+point under a list condition is a value or a collection; the Tycho document
+writes `p := (u, v, …); p{0.08u + PointZ(p) + |v(1..3)/3| + 1 < …}` and
+expects the point at the positions where the condition holds. The compile
+route declines the statement (`assertScalarCondition`: "a branch condition
+is a collection-valued expression"), so no compiled value is wrong; the
+interpreter's value is the one to rule on.
+
+Options: (1) `When` lifts a point value whole, like `Which` — the answer is
+`[(1, 2), Missing, Missing]`, and the compile route can then lower the
+statement through the run-time selection (`_SYS.select` with the point arm
+wrapped, `_SYS.wholeArm`, landed 2026-09-12 for `Which`); (2) the zip is
+the intended reading, and the document's row is a user error to report. If
+nothing is decided the interpreter keeps zipping and the compile route keeps
+declining. Recommendation: (1) — the type system already treats a union of
+tuple element types as POINTS everywhere (Tycho items 287 and 288), and the
+zip answers a list of one coordinate and one `Missing`, which no consumer
+can read as a masked point.
 
 ### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
 

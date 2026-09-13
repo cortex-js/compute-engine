@@ -1547,6 +1547,13 @@ function compileJSCollectionBoolean(
  * so a scalar complex arm broadcasts to its selected positions correctly. An
  * arm therefore compiles exactly as it would outside the selection, and the
  * assembled array agrees with interpretation cell by cell.
+ *
+ * A POINT arm is the one value that test gets wrong: a point is an array at
+ * this ABI, and the interpreter lifts it whole — `Which([T, F, F], (1, 2))`
+ * is `[(1, 2), NaN, NaN]`, where the helper read the two-element array as a
+ * list arm of the wrong length and answered `NaN`. An arm whose TYPE may be
+ * a point (`mayBePointArm`) is therefore wrapped (`_SYS.wholeArm`), and the
+ * helper lifts the wrapped value whole.
  */
 function compileJSSelection(
   args: ReadonlyArray<Expression>,
@@ -1584,9 +1591,38 @@ function compileJSSelection(
   // position after the first condition is a conditionally-evaluated operand:
   // pass its index, and the CSE pass pushes the matching region instance
   // (`OperandCompiler`, design §5.1).
+  // An arm the type proves to be one POINT is an array at this ABI, exactly
+  // like a list arm, so the helper could not tell which to index and which
+  // to lift whole; the wrapper says so (`WholeArm`).
   return `_SYS.select(${args
-    .map((x, i) => `() => (${compile(x, i)})`)
+    .map((x, i) =>
+      i % 2 === 1 && mayBePointArm(x.type.type)
+        ? `() => _SYS.wholeArm(${compile(x, i)})`
+        : `() => (${compile(x, i)})`
+    )
     .join(', ')})`;
+}
+
+/**
+ * May a selection arm of this type be one POINT at run time? A point type
+ * (`isPointElementType`: a tuple, or a union of tuples), or a union that
+ * holds a point arm beside SCALAR arms — `integer | tuple<integer, integer>`,
+ * the type of a nested selection whose branches disagree — but no arm that
+ * is a collection other than a point: such a value would have to be
+ * indexed, and the run-time selection cannot both lift an arm whole and
+ * index it. Wrapping a scalar is harmless — the helper lifts a scalar whole
+ * in any case — so the union is wrapped as a whole.
+ */
+function mayBePointArm(t: Type): boolean {
+  if (isPointElementType(t)) return true;
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved === 'string' || resolved.kind !== 'union') return false;
+  return (
+    resolved.types.some((arm) => isPointElementType(arm)) &&
+    resolved.types.every(
+      (arm) => isPointElementType(arm) || !isSubtype(arm, 'collection<any>')
+    )
+  );
 }
 
 /**
@@ -8143,6 +8179,15 @@ function bcastWith(
 }
 
 /**
+ * A selection arm the compiler proved to be one POINT — an array at this
+ * ABI, like a list arm, but a value to lift WHOLE to every position that
+ * selects it (see `compileJSSelection`). `select` unwraps it.
+ */
+class WholeArm {
+  constructor(readonly value: unknown) {}
+}
+
+/**
  * Element-wise conditional selection — the runtime side of a compiled
  * `Which`/`If` whose condition may be an indexed collection (`np.select`
  * semantics, R1–R4 of
@@ -8210,7 +8255,8 @@ function select(...clauses: Array<() => unknown>): unknown {
   if (n < 0) {
     const last = selectors[selectors.length - 1];
     if (last !== true) return NaN;
-    return armThunks[armThunks.length - 1]();
+    const v = armThunks[armThunks.length - 1]();
+    return v instanceof WholeArm ? v.value : v;
   }
 
   // 3/ Selection: the first clause that is `true` at each position (`-1`: no
@@ -8258,20 +8304,27 @@ function select(...clauses: Array<() => unknown>): unknown {
     }
   }
 
-  // 4/ Each REACHED arm once, whole (R2), in clause order.
+  // 4/ Each REACHED arm once, whole (R2), in clause order. Whether an arm is
+  // indexed or lifted whole is a property of the arm, decided here once: a
+  // list arm is indexed, and is a length participant (R3); a scalar, and a
+  // point the compiler wrapped (`WholeArm`), is lifted.
   const values: unknown[] = new Array(selectors.length);
+  const indexed: boolean[] = new Array(selectors.length).fill(false);
   for (let k = 0; k < selectors.length; k++) {
     if (reached[k] === 0) continue;
     const v = armThunks[k]();
-    // A list-valued arm is a length participant too (R3).
-    if (Array.isArray(v) && v.length !== n) return NaN;
+    if (v instanceof WholeArm) {
+      values[k] = v.value;
+      continue;
+    }
+    if (Array.isArray(v)) {
+      if (v.length !== n) return NaN;
+      indexed[k] = true;
+    }
     values[k] = v;
   }
 
-  // 5/ Assemble, position by position. Whether an arm is indexed or lifted
-  // whole is a property of the arm, decided once outside the loop.
-  const indexed: boolean[] = new Array(values.length);
-  for (let k = 0; k < values.length; k++) indexed[k] = Array.isArray(values[k]);
+  // 5/ Assemble, position by position.
   const out: unknown[] = new Array(n);
   for (let j = 0; j < n; j++) {
     const k = selection[j];
@@ -9189,6 +9242,8 @@ const SYS_HELPERS = {
   // Element-wise `Which`/`If` selection over a condition that may be a
   // collection at run time — see `select` and `compileJSSelection`.
   select,
+  // A point arm of such a selection, lifted whole rather than indexed.
+  wholeArm: (value: unknown): WholeArm => new WholeArm(value),
   // NaN propagates (Contract B `propagate` default, ratified 2026-08-27):
   // without the leading arm both comparisons are false for NaN and the
   // kernel answered the final arm's `1` — a fail-closed violation.
