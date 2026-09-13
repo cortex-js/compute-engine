@@ -8,6 +8,7 @@ import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
+  isPointElementType,
   resolveTypeAlias,
   resolveTypeForCompilation as resolveType,
   widen,
@@ -187,6 +188,18 @@ function isTupleOperand(d: OperandDescriptor, engine: PureEngineView): boolean {
   if (vt === undefined) return false;
   const resolved = resolveTypeAlias(vt);
   return typeof resolved !== 'string' && resolved.kind === 'tuple';
+}
+
+/**
+ * Is this operand POINT-SHAPED — the bare `tuple`, a parameterized tuple, a
+ * union of tuples (`isPointElementType`), or a symbol holding such a value?
+ * Wider than `isTupleOperand`, which reads a parameterized tuple only: a
+ * symbol declared plain `tuple` and assigned later is a point too.
+ */
+function isPointOperand(d: OperandDescriptor, engine: PureEngineView): boolean {
+  if (isPointElementType(d.type)) return true;
+  const vt = heldValueType(d, engine);
+  return vt !== undefined && isPointElementType(vt);
 }
 
 /**
@@ -1998,14 +2011,42 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // vector products must agree on what a vector is. The bare `tuple`
       // param does the admission (the `Norm` pattern — the type language has
       // no variadic tuple) and the handler narrows to provable numeric
-      // 3-tuples. The result is a `List` for tuple operands too — collection
-      // operators are not kind-preserving; a `tuple` operand yields
-      // `list<T>`.
-      signature: '(vector|tuple, vector|tuple) -> vector',
+      // 3-tuples.
+      //
+      // The result has the KIND of the operands: two POINTS give a point
+      // (`tuple<number, number, number>`), so the cross product of two
+      // points adds to a point — the Frenet frame of a space curve,
+      // `F_2(t) = F_1(t) × F_0(t)` drawn as `sin(θ)·F_2 + cos(θ)·F_1 − f`,
+      // is a point at every step (user-ruled 2026-09-13, from the audit
+      // document `frthw0ihk5`, whose rows answered three type errors while
+      // the result was a list). Two lists, or a list beside a point, give a
+      // list, as before.
+      signature: '(vector|tuple, vector|tuple) -> vector | tuple',
+      // The type describes the SUCCESS (`docs/ERROR-MODEL.md`): a cross
+      // product of two points succeeds only as a numeric 3-point, so two
+      // point-shaped operands — the bare `tuple`, a parameterized tuple, a
+      // union of tuples, or a symbol holding a point — type the point
+      // whatever their components are. A `Cross` that stays symbolic (a
+      // component that is a collection, an unbound symbol) is not a success
+      // and contradicts nothing.
+      type: ([a, b], { engine }) =>
+        BoxedType.forResult(
+          engine.type(
+            a !== undefined &&
+              b !== undefined &&
+              isPointOperand(a, engine) &&
+              isPointOperand(b, engine)
+              ? 'tuple<number, number, number>'
+              : 'vector'
+          ),
+          engine._typeResolver
+        ),
       // Provable declines only (both operands must be tensor values); success
       // also requires two 3-vectors — see `canEnumerateTensorOperands`.
       canEnumerate: canEnumerateTensorOperands,
       evaluate: ([a, b], { engine: ce }) => {
+        // Two points answer a point; any list operand answers a list.
+        const head = isTuple(a) && isTuple(b) ? 'Tuple' : 'List';
         // Lower each fixed numeric tuple operand to its component vector,
         // exactly as `Dot` does. A tuple operand that is not (yet) a
         // provable numeric tuple with accessible components — a symbolic
@@ -2047,7 +2088,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const b3 = ce.expr(bTensor.at(3) ?? ce.Zero);
 
         return ce
-          .function('List', [
+          .function(head, [
             a2.mul(b3).sub(a3.mul(b2)),
             a3.mul(b1).sub(a1.mul(b3)),
             a1.mul(b2).sub(a2.mul(b1)),

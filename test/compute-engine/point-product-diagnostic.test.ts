@@ -135,7 +135,7 @@ describe('a product between two points names its alternatives', () => {
         .box(['Cross', ['Tuple', 1, 0, 0], ['Tuple', 0, 1, 0]])
         .evaluate()
         .toString()
-    ).toEqual('[0,0,1]');
+    ).toEqual('(0, 0, 1)');
   });
 
   test('the products that ARE defined are untouched', () => {

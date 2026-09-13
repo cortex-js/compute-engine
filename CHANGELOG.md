@@ -2,6 +2,18 @@
 
 ### Resolved Issues
 
+- **The cross product of two points is a point.** `Cross((1, 2, 3), (4, 5,
+  6))` answered the list `[-3, 6, -3]`, so adding a point to it broadcast
+  the point into each element: `Cross(A, B) + P` was three type errors in
+  the interpreter and a decline ("scalar arithmetic over a list-valued
+  operand") on the JavaScript target. The Frenet-frame document
+  `frthw0ihk5` of the code-generation audit draws `sin(θ)·(F_1 × F_0) +
+  cos(θ)·F_1 − f` at every point of a space curve and could not be drawn.
+  Two point operands (tuples, or `PointList` rows) now answer a point typed
+  `tuple<number, number, number>`, on the interpreter and on every compile
+  target; a list beside a point, or two lists, still answer a list.
+  (User-ruled 2026-09-13.)
+
 - **The numeric derivative of a point-valued function has a value on both
   routes.** The Frenet-frame document `frthw0ihk5` of the Tycho
   code-generation audit defines a space curve `f(t) = PointList(x(t), y(t),

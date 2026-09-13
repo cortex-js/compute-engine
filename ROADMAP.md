@@ -1571,39 +1571,6 @@ operand is NaN absent, as the equality does — after which the two forms
 agree and the pre-pass note on `indexedOperands` can go. Witness probe:
 `build/probe-nan-sel.ts`.
 
-### `Cross` of two POINTS answers a list, so the Frenet frame of a space curve cannot be added to a point (OPEN, ruling — found 2026-09-13 in the full-corpus code-generation audit, `frthw0ihk5`, 10 `javascript` records)
-
-`Cross((1, 2, 3), (4, 5, 6))` evaluates to the LIST `[-3, 6, -3]`, typed
-`vector`, by a recorded design decision: "collection operators are not
-kind-preserving; a `tuple` operand yields `list<T>`" (`Cross` in
-`library/linear-algebra.ts`, pinned by `test/compute-engine/cross-tuple-operands.test.ts`).
-The 3-D documents write the cross product of two points as a point:
-`frthw0ihk5` builds a Frenet frame, `F_2(t) = F_1(t) × F_0(t)` (Tycho's
-importer resolves the juxtaposition of two proven 3-vectors to `Cross`),
-and draws `c·(sin(τv)·F_2(u) + cos(τv)·F_1(u)) − f(u)` with `F_1(u)` and
-`f(u)` points. With the list result, `Cross(A, B) + P` broadcasts the point
-`P` into each list element, so the interpreter answers `[Error(incompatible-type,
-tuple, number), …]` — the row draws nothing — and the JavaScript target
-declines at `Add` ("scalar arithmetic over a list-valued operand"). The
-derivative half of the same row (the numeric derivative of the point-valued
-unit tangent) landed 2026-09-13; the cross-product half is this ruling.
-
-Example: today `Cross((1, 2, 3), (4, 5, 6)) + (1, 1, 1)` is three type
-errors; under option (1) it is the point `(-2, 7, -2)`.
-
-Options: (1) `Cross` of two POINTS (tuple operands, or `PointList` rows —
-the operands `Dot` already admits as points) answers a POINT
-(`tuple<number, number, number>`), while two lists keep answering a list;
-the pinned test changes for the tuple case, and the type handler answers
-the tuple type when both operands are point-typed. (2) Keep the list
-result and teach `Add`/`Subtract` of a 3-element list and a 3-point to add
-component-wise — a wider change that makes lists and points interchangeable
-in arithmetic, which the point-shape work of 2026-09-10 deliberately does
-not do. (3) Keep both as they are; the document's rows stay undrawable. If
-nothing is decided, (3) holds. Recommendation: (1) — the cross product of
-two points is a point in every geometric use, and the kind rule was
-recorded for the admission of tuple operands, not for their result.
-
 ### `When` over a list-shaped condition zips a POINT value where `Which` lifts it whole (OPEN, ruling — found 2026-09-12 in the full-corpus code-generation audit, `njncrg9fkv`)
 
 `Which([True, False, False], (1, 2))` evaluates to `[(1, 2), NaN, NaN]`: the
