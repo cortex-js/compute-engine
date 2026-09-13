@@ -417,10 +417,10 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
 
   test('the statement-needs scan is linear in the distinct nodes of a shared arm', () => {
     // A tower `Max(e, e)` of depth 30 holds 31 distinct nodes and unfolds to
-    // 2^30; a scan that unfolds it does not finish. (The ternary emission of
-    // such an arm unfolds it — a code-size defect recorded in `ROADMAP.md`,
-    // "A shared subexpression inside a shader conditional arm is emitted
-    // once per occurrence" — so the scan is tested on its own.)
+    // 2^30; a scan that unfolds it does not finish. Tested on the scan
+    // directly: a full compile of a scalar-arm ternary holding the tower
+    // still unfolds it in the emitted text (a ternary arm has no statement
+    // position for a binding — see `ROADMAP.md`), so it could not run here.
     let tower = ce.box(['Add', 'x', 't']);
     for (let i = 0; i < 30; i++) tower = ce.function('Max', [tower, tower]);
     expect(gpuNeedsStatements(tower)).toBe(false);
@@ -429,6 +429,93 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
       ce.box(['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]]),
     ]);
     expect(gpuNeedsStatements(withLoop)).toBe(true);
+  });
+
+  test('a shared subexpression of a statement-form arm is bound inside the branch', () => {
+    // The arm needs statements (a loop-form Sum), so it takes the statement
+    // form, whose captured branch is a statement position: the shared tower
+    // is declared there, once, instead of expanded once per occurrence.
+    let tower = ce.box(['Add', 'x', 't']);
+    for (let i = 0; i < 6; i++) tower = ce.function('Max', [tower, tower]);
+    const r = compile(
+      ce.function('If', [
+        ce.box(['Greater', 'x', 0]),
+        ce.function('Add', [
+          tower,
+          ce.box(['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]]),
+        ]),
+        ce.box(0),
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code!.length).toBeLessThan(1000);
+    // The declaration sits inside the branch, after the opening `if (`.
+    expect(r.code!.search(/float _cse\d+ =/)).toBeGreaterThan(
+      r.code!.indexOf('if (')
+    );
+  });
+
+  test('each branch of a statement-form selection binds its shared work separately', () => {
+    // A temporary lives inside its branch's braces, so a subexpression shared
+    // by two arms is declared once PER branch, never once ahead of the
+    // conditional where the sibling branch could not reach it.
+    let tower = ce.box(['Add', 'x', 't']);
+    for (let i = 0; i < 4; i++) tower = ce.function('Max', [tower, tower]);
+    const r = compile(
+      ce.function('Which', [
+        ce.box(['Greater', 'x', 0]),
+        ce.function('Add', [
+          tower,
+          ce.box(['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]]),
+        ]),
+        ce.symbol('True'),
+        ce.function('Add', [
+          tower,
+          ce.box(['Sum', 'm', ['Limits', 'm', 1, ['Floor', 't']]]),
+        ]),
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    const code = r.code!;
+    // No temporary is declared ahead of the first branch.
+    expect(code.search(/float _cse\d+ =/)).toBeGreaterThan(
+      code.indexOf('if (')
+    );
+    // The else branch declares its own.
+    const elseAt = code.indexOf('} else {');
+    expect(code.slice(elseAt).search(/float _cse\d+ =/)).toBeGreaterThanOrEqual(
+      0
+    );
+  });
+
+  test('a shared subexpression in a nested lazy operand of an arm stays inline', () => {
+    // The `And` right side is a lazy operand of its own: a binding hoisted
+    // out of it would run even when the `And` short-circuits, so it keeps
+    // the ternary form and the tower there is not bound.
+    let tower = ce.box(['Add', 'x', 't']);
+    for (let i = 0; i < 4; i++) tower = ce.function('Max', [tower, tower]);
+    const r = compile(
+      ce.function('If', [
+        ce.box(['Greater', 'x', 0]),
+        ce.function('Add', [
+          ce.box(['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]]),
+          ce.function('If', [
+            ce.function('And', [
+              ce.box(['Greater', 'x', 1]),
+              ce.box(['Greater', tower, 0]),
+            ]),
+            ce.box(1),
+            ce.box(2),
+          ]),
+        ]),
+        ce.box(0),
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('_cse');
   });
 
   test('a subexpression the first condition shares with its arm is bound once', () => {

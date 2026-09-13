@@ -1616,21 +1616,24 @@ that mechanism, or should the shader targets keep declaring hoisting order
 as a documented difference from the interpreter for expressions that mix a
 hoisting operand with an effect written before it?
 
-### A shared subexpression inside a shader conditional arm is emitted once per occurrence (OPEN — found 2026-09-13 by the review of the statement-form conditional)
+### A shared subexpression inside a TERNARY shader conditional arm is emitted once per occurrence (OPEN — found 2026-09-13 by the review of the statement-form conditional)
 
 A boxed expression is a DAG: `Max(e, e)` holds `e` once. Outside a
 conditional the GLSL and WGSL targets bind such a shared node to a
 temporary through the common-subexpression pass, so a tower `Max(e, e)` of
-depth 16 emits 542 characters. Inside the arm of a conditional the pass
-binds nothing — an arm is a lazy region, and a binding hoisted out of it
-would run whichever branch is taken — so the arm's text unfolds the
-sharing: the same tower as the arm of `If(x > 0, …, 0)` emits 917 521
-characters (2.4 s), and depth 20 emits 14 MB (36 s). Measured at HEAD
-(commit f7689669) and unchanged by the statement form of a conditional,
-which binds nothing inside a captured branch either. The fix is a binding
-placed INSIDE the branch: the statement form gives each captured branch a
-statement position of its own, where a shared node of that arm can be
-declared ahead of its first use without running for the other branch.
+depth 16 emits about 540 characters. An arm whose value needs statements —
+a loop-form `Sum`/`Product`, a `Block` — now takes the statement form of a
+conditional, whose captured branch is a statement position where the shared
+node is declared once (`cseCanMaterialize`). An arm that is a plain
+expression stays a TERNARY, which has no statement position: the pass binds
+nothing there, and the arm's text unfolds the sharing. A tower of depth 16
+as the arm of `If(x > 0, tower, 0)` emits about 917 000 characters, and
+depth 20 about 14 MB. The same holds for a lazy operand nested inside a
+captured branch (the right side of an `&&`/`||`), which is a ternary of its
+own. The fix is to give the ternary form a statement position too — emit
+every conditional in the statement form when an arm shares work worth
+binding, not only when an arm needs statements — or a scoped let-expression
+where the language has one (WGSL does not).
 
 ### `Match` with a case body that needs statements still declines on the shader targets (OPEN — found 2026-09-13 by the review of the statement-form conditional)
 

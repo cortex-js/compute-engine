@@ -2,6 +2,17 @@
 
 ### Resolved Issues
 
+- **A subexpression shared inside a shader conditional's statement-form
+  arm is bound once.** When a `Which`/`If`/`When` arm takes the statement
+  form on the GLSL or WGSL target, its captured branch is a statement
+  position of its own, so a subexpression the arm repeats is declared once
+  in that branch instead of written out at every occurrence. An expression
+  that shares a subtree many ways — `Max(e, e)` nested deep — no longer
+  unfolds into megabytes of arm text. Each branch declares its own copy,
+  inside its braces, so a declaration never escapes to a branch that did
+  not run. An arm that stays a ternary is unchanged, and so is a lazy
+  operand nested inside a branch (the right side of an `&&`/`||`), which is
+  a ternary of its own.
 - **A shader conditional whose arm needs statements is emitted as a
   statement.** A GLSL ternary and a WGSL `select` are expressions, so an
   arm has no statement position: a loop-form `Sum` (a bound the compiler

@@ -26420,10 +26420,16 @@ export class BaseCompiler {
     const available = BaseCompiler.availableCseBinding(session, expr);
     if (available !== undefined) return available;
 
-    // Statement-only targets cannot place a new declaration inside a lazy
-    // expression. Already-bound enclosing values remain usable above.
+    // A statement-declaring target cannot place a new declaration inside a
+    // lazy expression that runs conditionally: a declaration hoisted out of
+    // it would run unconditionally. The exception is the captured branch of
+    // a conditional's statement form, a statement position of its own where
+    // the declaration is captured into the branch — `cseCanMaterialize`
+    // reports it. Already-bound enclosing values remain usable above either
+    // way.
     if (
       target.cseMaterialize &&
+      target.cseCanMaterialize?.(target) !== true &&
       session.instances.some(
         (instance) =>
           BaseCompiler.cseRegionOf(instance)?.kind === 'lazy-operand'

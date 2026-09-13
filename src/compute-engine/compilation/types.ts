@@ -515,6 +515,19 @@ export interface CompileTarget<Expr = unknown> {
   ) => boolean;
 
   /**
+   * Can a common-subexpression declaration be placed at the CURRENT
+   * position? A statement-declaring target (`cseMaterialize`) blocks
+   * binding inside a lazy operand — a conditional arm, an `&&`/`||` right
+   * side — because a declaration hoisted out of it runs unconditionally.
+   * The exception is the captured branch of a conditional's statement
+   * form, which is a statement position of its own where a declaration is
+   * captured into the branch, not hoisted ahead of it. This predicate
+   * reports that exception. Absent means the position is safe only outside
+   * a lazy operand (the pre-existing rule).
+   */
+  cseCanMaterialize?: (target: CompileTarget<Expr>) => boolean;
+
+  /**
    * Per-compilation common-subexpression-elimination state — the static
    * harvest plus the emission-time region-instance stack. See `CseSession`: a
    * shared object reference, created once per root compilation boundary, that

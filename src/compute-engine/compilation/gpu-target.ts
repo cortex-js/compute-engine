@@ -1491,6 +1491,20 @@ function compileGPUStatementSelection(
 }
 
 /**
+ * Can a statement be placed at the current position on a shader target? A
+ * statement sink must exist (`canHoist`) and must not be a
+ * conditionally-evaluated arm of a conditional (`conditionalGPUSinks`),
+ * out of which a statement would run unconditionally. The captured branch
+ * of a conditional's statement form has a sink that is not marked
+ * conditional, so it answers yes.
+ */
+function gpuCanPlaceStatement(target: CompileTarget<Expression>): boolean {
+  return (
+    BaseCompiler.canHoist(target) && !conditionalGPUSinks.has(target.hoist!)
+  );
+}
+
+/**
  * Compile a **conditionally-evaluated** operand of a GPU conditional — an
  * `If`/`When`/`Which`/`Match` arm, or a `Which` condition past the first —
  * with hoisting forbidden.
@@ -10875,12 +10889,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               current
             )
           : code,
+      // A common-subexpression declaration can be placed here when there is
+      // a statement sink that is not a conditionally-evaluated arm
+      // (`gpuCanPlaceStatement`). In the captured branch of a conditional's
+      // statement form the sink is present and not marked conditional, so a
+      // shared subexpression of that arm is bound there rather than emitted
+      // once per occurrence.
+      cseCanMaterialize: gpuCanPlaceStatement,
       cseMaterialize: (expr, name, code, current) => {
-        if (
-          !BaseCompiler.canHoist(current) ||
-          conditionalGPUSinks.has(current.hoist!)
-        )
-          return false;
+        if (!gpuCanPlaceStatement(current)) return false;
         const type = gpuTypeOfValue(expr, current.language === 'wgsl');
         if (type === undefined) return false;
         BaseCompiler.hoistStatement(
