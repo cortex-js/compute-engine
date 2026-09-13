@@ -11487,6 +11487,28 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // The `vars` names, for the seed ABI check (§7): a seed that resolves to a
     // HOST-supplied uniform is the deferred ABI row, and must fail loudly
     // rather than silently draw a different stream than the host.
+    // A helper whose value is a LIST has no by-reference lowering here (a
+    // shader function cannot return a run-time list), and the fixed-width
+    // unroll cannot see the list's width through the call. Substituting the
+    // helper's body at the root call site exposes the list, as the interval
+    // entry does at its root and the definition route does inside an emitted
+    // body. Only a LIST-bodied helper is substituted: a point-valued helper
+    // has its own shared `vecN` definition. The registry the substitution
+    // consults exists only now, so this second pass follows the target's
+    // creation. The text-typed-symbol gate the target carries already
+    // followed every user-function body reachable from the root, so it
+    // needs no second reading. A `vars` splice that the substituted body
+    // repeats (a parameter read twice) is evaluated twice in the shader,
+    // which is the same value each time: shader source has no side effects.
+    expr = unrollFixedWidthCollections(
+      BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target, 'list<any>'),
+      {
+        skipHeads: unrollSkipHeads,
+        iterationBudget: options.iterationBudget,
+        readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+        unrollComprehensions: true,
+      }
+    );
     if (vars) gpuRandomState(target).varNames = new Set(Object.keys(vars));
 
     // A statement position: the emitted `code` is a function body, so a

@@ -404,6 +404,34 @@ GLSL records, so dead-helper removal has no witness in this audit. Source size
 and occurrence counts above do not establish frame-time or compilation-time
 improvements.
 
+**Fresh run against this source, 2026-09-12** (Tycho commit `ccb21367a`;
+Tycho's collector run with the package name mapped to `src/compute-engine.ts`
+through a `tsconfig` `paths` entry, so the product pipeline compiles against
+the working tree; the `--compare` arm was `ce-0.128.9.json`): 769 records,
+no new decline, 6 resolved (the five `interval-js` `List` declines and the
+column-indexed GLSL comprehension row), 67 records with changed code (the
+invariant-prefix variants, the interval `List` write-outs, the smaller
+`62urmx2dcm` certificates). What the run left, after the index push-through
+and the root substitution of list-valued helpers landed the same day:
+
+- `interval-js`: 4 point-list VALUE roots and 1 `Range` root in
+  `art/n7uhaaoq1q`, 1 `Range` in `1a9de333a1`, `Mandelbrot`, `Julia` — the
+  design declines listed under the fixed-width residue below.
+- `glsl`: `At` over a by-reference `indexed_collection` in `game-of-life`
+  and `1a9de333a1` — the sampler half, Tycho's DV GPU work.
+- `javascript`: 4 records of `art/n7uhaaoq1q`, all the BY-REFERENCE form of
+  a row whose helper `c` reaches the engine as a valueless COLLECTION-typed
+  symbol, not a function (`lookupDefinition('c')` is a value definition
+  typed `list<tuple<…>> | …` with no value; `c(u, v)` types `unknown`). One
+  record says `Unknown operator c`; three fail at `Add` over the
+  `broadcastable` result. The engine cannot substitute a body it cannot
+  see, so these are the binding failures Tycho's importer README describes
+  ("Unknown operator declines are BINDING failures"), each followed by the
+  successful compile of the expanded row. Not a Compute Engine defect; the
+  by-reference form of the same rows compiles when `c` is assigned as a
+  function — substituted at the shader roots, called by reference with the
+  broadcast dispatch on JavaScript (`compile-index-push-through.test.ts`).
+
 ### Residue of the point-shape compile round (OPEN, compile performance — found 2026-09-10 while settling the Tycho heat-map colour chain)
 
 The round proved a user-function application scalar or point-shaped under
@@ -1190,6 +1218,32 @@ The two disagree whenever a value mentions a parameter name of a function that
 reads it. Whichever side is right is a ruling on the activation-skip rule (the
 2026-08-21 symbol-resolution round in `docs/plans`); the compiler side was left
 as it was. Pre-existing, not introduced by the folded-value preamble.
+
+### A valueless global read inside a callee body is captured by a same-named binder of the caller (OPEN, ruling — found 2026-09-12 while testing the root substitution of list-valued helpers)
+
+With `w` declared real and holding no value, and `W(x) := [w·x, x]`, the
+interpreter answers `[W(w)[1] for w in [1, 2, 3]]` as `[1, 4, 9]` and
+`Σ_{w=1}^{3} W(w)[1]` as `14`: the `w` inside `W`'s body, which names the
+GLOBAL, is read by name from the caller's comprehension or sum binding. With a
+different binder name (`[W(k)[1] for k in [1, 2, 3]]`) the answer is
+`[w, 2w, 3w]`, and with `w := 2.5` assigned the binder no longer intercepts
+(`[2.5, 5, 7.5]`). A lambda parameter does not intercept either
+(`Apply((w ↦ W(w)[1]), 2)` is `2w`): the 2026-08-21 symbol-resolution round
+made value resolution skip a foreign CALL-FRAME activation, and kept by-name
+interception for ordinary declarations — which a comprehension or `Sum`
+binder is — pending a ruling (`docs/SCOPING-MODEL.md` calls by-name a
+compatibility hatch). The compiled route reads the global: the inliner
+declines to substitute `W`'s body under a binder named `w`
+(`substitutedUserFunctionBody`, the capture check on the enclosing local
+names), and the emitted `_fn_W` reads `w` as a run-time input. So the two
+routes disagree on this shape, and the constant folder, which evaluates a
+root with no unknowns through the interpreter, bakes the interpreter's
+`[1, 4, 9]` into the compiled code. The ruling is the one the 2026-08-21
+round left open: whether an ordinary declaration's by-name interception
+stays. If it goes, three tests that pin the interception as a feature and the
+interpreter-fallback runner of the compiler need rewriting (the memory of
+that round lists them). Until then the compiled route's lexical reading is
+the one the tests pin.
 
 ### Compiling a DAG-shared symbol value on the inline targets still refuses above the fold-size guard (OPEN, no urgency — the JavaScript-family targets were resolved 2026-08-29)
 

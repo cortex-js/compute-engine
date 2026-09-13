@@ -2,6 +2,36 @@
 
 ### Resolved Issues
 
+- **A literal index reaches through list arithmetic and through a point list
+  zipped from columns.** `(0.1·[a, b, c] + 0.4)[2]` compiled the whole list
+  and read one element back, and `PointList([a₁, a₂], [b₁, b₂], 5)[2]` had no
+  shader lowering at all: the pre-pass folded a literal index only into a
+  written-out `List`. The index is now pushed through element-wise arithmetic
+  over lists of provable width and through the columns of a `PointList`, so
+  the element — `0.1·b + 0.4`, the point `(a₂, b₂, 5)` — is computed alone.
+  The three point-table rows of the 3-D art document `art/n7uhaaoq1q` that
+  index a zipped point list inside a comprehension compile on GLSL and WGSL
+  to a fixed-size array of vectors; a fresh run of the code-generation audit
+  against this source records no GLSL decline in that document. A point list
+  of ONE point (every component a scalar) is left alone: an index into it is
+  a coordinate, a different value. Alongside, a sum of two all-scalar points
+  whose component types cross (`(a, b, 2) + (0, 0, 0.8)`) typed as the union
+  of the two tuple types, a type no value has, and the shader targets read no
+  component count from it; it now types component-wise
+  (`tuple<real, real, real>`).
+- **A helper whose value is a list is substituted at the shader root, and
+  under a sum or a comprehension too.** The interval entry already
+  substituted such a helper's body at the root call site so the fixed-width
+  pre-pass could see the list; the shader entries now do the same for a
+  list-valued helper (a shader function cannot return a run-time list, and a
+  point-valued helper keeps its own shared `vecN` definition), so the audit
+  rows written by reference compile to the same array of vectors as written
+  out. The substitution — at a root and inside an emitted definition body
+  alike — now descends into a node that binds names, a `Sum` or a
+  comprehension, with the bound names guarding against capture: a helper
+  whose body reads a global one of them would shadow stays a call. The
+  JavaScript target keeps its retained helpers, which carry a static-width
+  analysis of their own.
 - **A comprehension over literal domains compiles on the shader targets.**
   GLSL and WGSL have no dynamic arrays, and a `Comprehension` declined whole
   on both — the four point-table rows of the 3-D art document

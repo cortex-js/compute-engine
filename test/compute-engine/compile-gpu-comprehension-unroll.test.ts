@@ -12,6 +12,12 @@
  * vectors (`vec3[12](…)`, `array<vec3f, 12>(…)`). A literal index into a
  * literal range folds to the number (rule 5), which the substituted rows
  * need. The JavaScript target keeps its loop.
+ *
+ * Of the four audit rows, the one pinned here — a literal index into a
+ * COLUMN of the point list — compiled with the unroll alone. The other three
+ * index the point list itself (`PointList(cols)[x]`) and needed the index
+ * pushed through the zip; they are pinned in
+ * `compile-index-push-through.test.ts`.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';

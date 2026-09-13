@@ -324,7 +324,15 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
     });
   }
 
-  test('glsl fails closed on a destructuring assign inside a loop body', () => {
+  test('glsl compiles a destructuring assign inside a loop body once the callee is substituted', () => {
+    // `step` is a tuple-valued helper, and the substitution of such a helper
+    // inside an emitted definition body now reaches into the `for` loop (a
+    // node that binds `n`). The assign then destructures a tuple LITERAL,
+    // which this target writes to temporaries before either local is
+    // assigned, so `j` is read once for both components: g(1) is 508 —
+    // (v, j) goes (2, 2), (3, 4), (5, 8). Before the descent the call
+    // itself reached the destructuring lowering, which fails closed here.
+
     const expr = withDefs(
       STEP +
         'function g(k) {\n' +
@@ -341,8 +349,14 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
     // constant folding would otherwise emit a literal and never reach the
     // destructuring-assignment refusal under test.
     const r = compile(expr, { to: 'glsl', constantFold: false });
-    expect(r?.success).toBe(false);
-    expect(r?.error).toMatch(/destructuring assignment/);
+    expect(r?.success).toBe(true);
+    expect(r.preamble).not.toContain('_fn_step');
+    const body = r.preamble ?? '';
+    expect(body.indexOf('_tv1 = j + 1.0;')).toBeGreaterThan(-1);
+    expect(body.indexOf('_tv2 = 2.0 * j;')).toBeGreaterThan(-1);
+    expect(body.indexOf('v = _tv1;')).toBeGreaterThan(body.indexOf('_tv2 = 2.0 * j;'));
+    expect(body.indexOf('j = _tv2;')).toBeGreaterThan(body.indexOf('v = _tv1;'));
+    expect(compile(expr).run!({})).toBe(508);
   });
 });
 

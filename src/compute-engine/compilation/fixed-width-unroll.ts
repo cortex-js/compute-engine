@@ -425,7 +425,10 @@ function readsCallerSource(e: Expression, options: UnrollOptions): boolean {
  * multiple, a sum or difference with a scalar or with a list of the same
  * width, a negation, a division. `undefined` for any other operand: a
  * declared width is not read, because a value handed to the compiled code
- * through `vars` is never checked against its declared type.
+ * through `vars` is never checked against its declared type. Read by the
+ * column projection (`projectPointListColumn`) and by the literal index fold
+ * (`foldLiteralIndex`), whose `indexInto` accepts exactly the heads this
+ * function walks.
  */
 function staticListWidth(e: Expression): number | undefined {
   if (!isFunction(e)) return undefined;
@@ -1013,6 +1016,20 @@ function distributeOverList(
  * effect would change how many times that effect runs. A `List` head the
  * caller overrode is left alone as well: the caller's implementation
  * receives the elements, and the index is then its business.
+ *
+ * The index is also PUSHED THROUGH a list that is not written out as one
+ * `List` but built from one by element-wise arithmetic, or zipped from
+ * columns into points: `(0.1·[a, b, c] + 0.4)[2]` is `0.1·b + 0.4`, and
+ * `PointList([a₁, a₂], [b₁, b₂], 5)[2]` is the point `PointList(a₂, b₂, 5)`.
+ * The interpreter computes the whole list and reads one element back; the
+ * rewrite computes that element alone, which is what the shader targets
+ * need — they have no run-time list to index — and what every target
+ * prefers. The width of such a list must be PROVABLE from its structure
+ * (`staticListWidth`, `staticPointListWidth`): a scalar operand is kept as
+ * it is, and a list-shaped operand is indexed in turn (`indexInto`). A
+ * `PointList` whose every component is a scalar is one POINT, not a list of
+ * them; an index into it reads a coordinate, which is a different value and
+ * is left to the target.
  */
 function foldLiteralIndex(
   expr: Expression & FunctionInterface,
@@ -1034,16 +1051,97 @@ function foldLiteralIndex(
       return undefined;
     return typeof base.at === 'function' ? base.at(k) : undefined;
   }
-  if (base.operator !== 'List' || base.nops === 0 || k > base.nops)
-    return undefined;
-  if (
-    base.ops.some(
-      (e, i) =>
-        i !== k - 1 && (e.isPure !== true || readsCallerSource(e, options))
+  // A written-out `List` has its width in view whatever its elements are; a
+  // list built by arithmetic or zipped from columns must prove it.
+  if (base.operator === 'List') {
+    if (base.nops === 0 || k > base.nops) return undefined;
+    return indexInto(base, k, options);
+  }
+  const width = staticListWidth(base) ?? staticPointListWidth(base);
+  if (width === undefined || k > width) return undefined;
+  // A target with an iteration budget builds at most that many elements of a
+  // list it computes (the zip of a `PointList` stops there), so an index past
+  // the budget is out of range for it and is left to its own answer.
+  const budget = options.iterationBudget;
+  if (budget !== undefined && k > Math.floor(budget)) return undefined;
+  return indexInto(base, k, options);
+}
+
+/**
+ * Element `k` (1-based, within the width the caller proved) of a list built
+ * from written-out `List`s: the element itself for a `List`; for the
+ * element-wise arithmetic `staticListWidth` accepts, and for a `PointList`
+ * zipped from columns, the same head applied to the k-th element of each
+ * list-shaped operand while a scalar operand is kept whole. `undefined` when
+ * a discarded element of a `List` has an effect or reads caller-supplied
+ * code (`readsCallerSource`), or when a head the caller overrode is reached
+ * (`UnrollOptions.skipHeads`): that head's implementation receives the
+ * whole operands, and the rewrite would stop running it.
+ *
+ * The rebuilt nodes are STRUCTURAL, for the reason given on
+ * `isNonConstantLiteralList`: canonicalizing `0.1·b + 0.4 + 0.4` would fold
+ * the two literals before a `constantFold: false` compilation can see them.
+ */
+function indexInto(
+  e: Expression,
+  k: number,
+  options: UnrollOptions
+): Expression | undefined {
+  if (!isFunction(e)) return undefined;
+  if (options.skipHeads?.has(e.operator) === true) return undefined;
+  if (e.operator === 'List') {
+    if (k > e.nops) return undefined;
+    if (
+      e.ops.some(
+        (el, i) =>
+          i !== k - 1 && (el.isPure !== true || readsCallerSource(el, options))
+      )
     )
+      return undefined;
+    return e.ops[k - 1];
+  }
+  if (
+    e.operator !== 'Negate' &&
+    e.operator !== 'Add' &&
+    e.operator !== 'Subtract' &&
+    e.operator !== 'Multiply' &&
+    e.operator !== 'Divide' &&
+    e.operator !== 'PointList'
   )
     return undefined;
-  return base.ops[k - 1];
+  const ops: Expression[] = [];
+  for (const op of e.ops) {
+    if (isProvablyScalar(op)) {
+      ops.push(op);
+      continue;
+    }
+    const element = indexInto(op, k, options);
+    if (element === undefined) return undefined;
+    ops.push(element);
+  }
+  return e.engine.function(e.operator, ops, { form: 'structural' });
+}
+
+/**
+ * The number of points of a `PointList` zipped from COLUMNS — at least one
+ * list-shaped component, every such component of the same provable width
+ * (`staticListWidth`), a scalar component repeated for every point.
+ * `undefined` for a `PointList` whose every component is a scalar (that is
+ * one point) and for one whose column widths are unproven or disagree: the
+ * zip stops at the shortest column, and which column that is would then be
+ * unknown.
+ */
+function staticPointListWidth(e: Expression): number | undefined {
+  if (!isFunction(e, 'PointList')) return undefined;
+  let width: number | undefined;
+  for (const op of e.ops) {
+    if (isProvablyScalar(op)) continue;
+    const w = staticListWidth(op);
+    if (w === undefined || (width !== undefined && w !== width))
+      return undefined;
+    width = w;
+  }
+  return width;
 }
 
 // ─────────────────────────────────────────────────────────────────────────

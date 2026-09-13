@@ -999,10 +999,9 @@ function pointListElementTypeOf(t0: Type): Type | undefined {
  * and a descriptor's facts here, an expression there.
  */
 /**
- * The component-wise sum type of operands that are ALL tuples of one arity
- * when at least one component is a list-shaped collection, or `undefined`
- * when the operands are not that shape (a non-tuple operand, tuples of
- * different arities, or all-scalar components, which `widen` types exactly).
+ * The component-wise sum type of operands that are ALL tuples of one arity,
+ * or `undefined` when the operands are not that shape (a non-tuple operand,
+ * or tuples of different arities).
  *
  * At each position the component types combine the way `addTypeOnTypes`
  * combines whole operands: a list-shaped component absorbs the scalar
@@ -1010,6 +1009,15 @@ function pointListElementTypeOf(t0: Type): Type | undefined {
  * `list<number>`), and scalar-only positions widen. The result keeps the
  * tuple kind, with the component names dropped: a sum has no field names to
  * preserve.
+ *
+ * All-scalar tuples take this path too. Widening the whole tuple types
+ * instead answers a UNION when neither operand's type contains the other's:
+ * `(a, b, 2) + (0, 0, 0.8)` with `a`, `b` real widened
+ * `tuple<real, real, integer>` against `tuple<integer, integer, real>` to
+ * the union of the two, a type no evaluated value has (the value is
+ * `(a, b, 2.8)`, a `tuple<real, real, real>`), and a consumer that sizes a
+ * value by its type — the shader targets' component count — read no point
+ * there. The per-position widen is the exact type.
  */
 function tupleComponentwiseAddType(
   args: ReadonlyArray<OperandDescriptor>
@@ -1030,8 +1038,6 @@ function tupleComponentwiseAddType(
         (r.kind === 'list' || r.kind === 'indexed_collection'))
     );
   };
-  if (!tuples.some((t) => t.elements.some((e) => isListShaped(e.type))))
-    return undefined;
   const elements: NamedElement[] = [];
   for (let i = 0; i < arity; i++) {
     const components = tuples.map((t) =>
@@ -1039,6 +1045,15 @@ function tupleComponentwiseAddType(
     );
     const lists = components.filter(isListShaped);
     if (lists.length === 0) {
+      // An `unknown` component stays `unknown`: the join drops `unknown` in
+      // favour of the other type, but a component nothing is known about
+      // (a helper declared `-> unknown`) may hold a list at run time, and
+      // reporting the other operand's `number` for the position would let a
+      // scalar-only lowering read it.
+      if (components.some((c) => c === 'unknown')) {
+        elements.push({ type: 'unknown' });
+        continue;
+      }
       // A sum is not closed over `imaginary` (`i + (−i) = 0` is real):
       // `complex` covers the closure — the same repair the scalar tail of
       // `addTypeOnTypes` applies, and `absorbScalarsIntoCells` applies to a
@@ -1118,9 +1133,10 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
     // `tuple<list<number>, list<number>> | tuple<number, number>`, a type no
     // evaluated value ever has; a consumer that routes on the type (a layout
     // classifier over the JavaScript compile target's output) cannot admit a
-    // union of two layouts (Tycho item 246). Only a tuple with a list-shaped
-    // component takes this branch: for all-scalar tuples `widen` already
-    // answers the exact component-wise type.
+    // union of two layouts (Tycho item 246). The same union came out of two
+    // all-scalar tuples whose component types cross (`tuple<real, real,
+    // integer>` plus `tuple<integer, integer, real>`), so every same-arity
+    // tuple sum takes this branch; `tupleComponentwiseAddType` says why.
     const componentwise = tupleComponentwiseAddType(args);
     if (componentwise !== undefined) return componentwise;
     return widen(...args.map((x) => stripNumericRanges(x.type)));

@@ -20130,17 +20130,23 @@ export class BaseCompiler {
    */
   /**
    * The ROOT-entry form of {@link inlineCollectionValuedCalls}: `expr` with
-   * every user-function call whose value is not provably a scalar replaced
-   * by the callee's substituted body, under one inlining budget and no
-   * enclosing definition. For a target with no list lowering at all (the
-   * interval target), this is what lets the fixed-width unroll see the width
-   * of a list a helper returns — `F(x, y)[1]` becomes an index into a
-   * written-out list — where the call by reference would decline. The
-   * target must carry its user-function registry.
+   * every user-function call of a callee whose BODY type matches `bodyType`
+   * replaced by the callee's substituted body, under one inlining budget and
+   * no enclosing definition. For a target with no list lowering at all (the
+   * interval target, `bodyType` the collection top), this is what lets the
+   * fixed-width unroll see the width of a list a helper returns — `F(x, y)[1]`
+   * becomes an index into a written-out list — where the call by reference
+   * would decline. The shader targets ask for LIST bodies only (`list<any>`):
+   * a shader function cannot return a run-time list, while a point-valued
+   * helper has its own shared `vecN` definition there. The JavaScript target
+   * does not use this form: its retained helpers carry a static-width
+   * analysis of their own (`docs/CALL-SHAPE-SPECIALIZATION.md`). The target
+   * must carry its user-function registry.
    */
   static inlineCollectionValuedCallsAtRoot(
     expr: Expression,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    bodyType: string = 'collection<any>'
   ): Expression {
     return BaseCompiler.inlineCollectionValuedCalls(
       expr.engine as unknown as ComputeEngine,
@@ -20149,18 +20155,24 @@ export class BaseCompiler {
       new Set<string>(),
       { left: BaseCompiler.MAX_NESTED_INLINES },
       undefined,
-      true
+      bodyType
     );
   }
 
   /**
-   * `collectionBodiesOnly` narrows the substitution to a callee whose BODY is
-   * collection-valued by its own type — the root-entry form on the interval
-   * target, where a call is inlined so the fixed-width unroll can see the
-   * list it returns. Without it, a scalar-valued helper whose declared result
-   * type is open (`-> unknown`) is "not provably a scalar" and would be
-   * copied into every call site of the root expression, where the
-   * definition-body route has parameter evidence the root does not.
+   * `bodyType`, when given, narrows the substitution to a callee whose BODY
+   * matches that type by its own typing — the root-entry form, where a call
+   * is inlined so the fixed-width unroll can see the list it returns.
+   * Without it, a scalar-valued helper whose declared result type is open
+   * (`-> unknown`) is "not provably a scalar" and would be copied into every
+   * call site of the root expression, where the definition-body route has
+   * parameter evidence the root does not. Under `bodyType` every argument
+   * must also be provably scalar by its type: the root has no parameter
+   * evidence, and a call over an open-typed argument stays a call — by
+   * reference it admits a list at run time through its broadcast dispatch,
+   * while the substituted body would read the list as the point or number
+   * the body was written for. A literal point argument passes: its shape is
+   * in view.
    *
    * A head the caller overrode (`CompileTarget.unrollSkipHeads`) is left as
    * written, and so is everything under it: the caller's implementation
@@ -20173,11 +20185,68 @@ export class BaseCompiler {
     onPath: Set<string>,
     budget: { left: number },
     enclosing?: EnclosingDefinition,
-    collectionBodiesOnly = false
+    bodyType?: string
   ): Expression {
     if (!isFunction(expr)) return expr;
-    if (boundVariableNames(expr).length > 0) return expr;
     if (target.unrollSkipHeads?.has(expr.operator) === true) return expr;
+    const bound = boundVariableNames(expr);
+    if (bound.length > 0) {
+      // A node that BINDS names — a comprehension, a `Sum`, a `Block` with a
+      // local — is descended with those names added to the enclosing local
+      // names, so a callee body whose free symbol one of them would capture
+      // is declined by `substitutedUserFunctionBody`, and a call of a bound
+      // name is left a call. The rebuilt node keeps ITS OWN scope
+      // (`scopeForRebuild`): a fresh scope would be parented at this site
+      // while a binder nested inside goes on pointing at the original one.
+      // When the scope cannot be reused the node is left as written. A
+      // `Function` literal is opaque here as it is to the fixed-width
+      // unroll: rebuilding one re-runs the literal canonicalization, which
+      // declares the parameters into a scope of its own.
+      if (expr.operator === 'Function' || expr.localScope === undefined)
+        return expr;
+      // A name this node binds anew shadows an enclosing parameter of the
+      // same name, so it leaves the scalar evidence: the binding may hold a
+      // collection where the parameter held a scalar. A name the enclosing
+      // definition already binds (its own parameters, bound by the body
+      // `Block`) keeps its evidence — and then nothing changes, so the
+      // record is reused rather than rebuilt.
+      const outerLocal = enclosing?.localNames ?? NO_NAMES;
+      const fresh = bound.filter((n) => !outerLocal.has(n));
+      const within: EnclosingDefinition =
+        fresh.length === 0 && enclosing !== undefined
+          ? enclosing
+          : {
+              scalarNames:
+                enclosing === undefined
+                  ? NO_NAMES
+                  : new Set(
+                      [...enclosing.scalarNames].filter(
+                        (n) => !fresh.includes(n)
+                      )
+                    ),
+              localNames: new Set([...outerLocal, ...fresh]),
+            };
+      const inner = expr.ops.map((op) =>
+        BaseCompiler.inlineCollectionValuedCalls(
+          engine,
+          op,
+          target,
+          onPath,
+          budget,
+          within,
+          bodyType
+        )
+      );
+      if (inner.every((op, i) => op === expr.ops[i])) return expr;
+      const scope = scopeForRebuild(
+        expr.localScope,
+        engine,
+        expr.operator,
+        inner
+      );
+      if (scope === undefined) return expr;
+      return engine.function(expr.operator, inner, { scope });
+    }
     const ops = expr.ops.map((op) =>
       BaseCompiler.inlineCollectionValuedCalls(
         engine,
@@ -20186,7 +20255,7 @@ export class BaseCompiler {
         onPath,
         budget,
         enclosing,
-        collectionBodiesOnly
+        bodyType
       )
     );
     const node: Expression = ops.every((op, i) => op === expr.ops[i])
@@ -20217,11 +20286,17 @@ export class BaseCompiler {
     // the wrong body instead.
     if (enclosing?.localNames.has(node.operator) === true) return node;
     if (BaseCompiler.provablyScalarArg(node)) return node;
-    if (collectionBodiesOnly) {
+    if (bodyType !== undefined) {
       const literal = BaseCompiler.userFunctionLiteral(engine, node.operator);
+      if (literal === undefined || !literal.ops[0].type.matches(bodyType))
+        return node;
+      // A literal point is a shape the substitution reads exactly, as
+      // `substitutedUserFunctionBody` admits it for a definition body.
       if (
-        literal === undefined ||
-        !literal.ops[0].type.matches('collection<any>')
+        !node.ops.every(
+          (a) =>
+            BaseCompiler.provablyScalarArg(a) || BaseCompiler.isSinglePointArg(a)
+        )
       )
         return node;
     }
@@ -20246,7 +20321,7 @@ export class BaseCompiler {
         onPath,
         budget,
         enclosing,
-        collectionBodiesOnly
+        bodyType
       );
     } finally {
       onPath.delete(node.operator);
