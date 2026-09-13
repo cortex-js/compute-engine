@@ -380,6 +380,79 @@ function composedCenteredDiff(
   );
 }
 
+/**
+ * `centeredDiffHigherOrder` for a function whose value is a VECTOR of
+ * machine numbers — a point, or a list of numbers — evaluated ONCE per
+ * stencil sample. The coefficients, the order of the additions and the
+ * composition for a higher order are exactly those of the scalar stencil,
+ * so every component agrees bit-for-bit with the scalar stencil applied to
+ * that component alone. The component count is read from the first sample;
+ * a sample that is not an array of that length, or a function that answers
+ * no array, makes the result `undefined`.
+ */
+export function centeredDiffHigherOrderVector(
+  f: (x: number) => ReadonlyArray<number> | undefined,
+  x: number,
+  order: number,
+  h = 0.1
+): number[] | undefined {
+  if (!Number.isFinite(order) || order <= 0) {
+    const v = f(x);
+    return v === undefined ? undefined : [...v];
+  }
+  const k = Math.floor(order);
+  return composedCenteredDiffVector(f, x, k, h / k);
+}
+
+function composedCenteredDiffVector(
+  f: (x: number) => ReadonlyArray<number> | undefined,
+  x: number,
+  k: number,
+  step: number
+): number[] | undefined {
+  if (k <= 1) return centeredDiff8thOrderVector(f, x, step);
+  return centeredDiff8thOrderVector(
+    (y) => composedCenteredDiffVector(f, y, k - 1, step),
+    x,
+    step
+  );
+}
+
+function centeredDiff8thOrderVector(
+  f: (x: number) => ReadonlyArray<number> | undefined,
+  x: number,
+  h: number
+): number[] | undefined {
+  const samples = [
+    f(x - 4 * h),
+    f(x - 3 * h),
+    f(x - 2 * h),
+    f(x - h),
+    f(x + h),
+    f(x + 2 * h),
+    f(x + 3 * h),
+    f(x + 4 * h),
+  ];
+  const first = samples[0];
+  if (first === undefined) return undefined;
+  const n = first.length;
+  if (samples.some((v) => v === undefined || v.length !== n)) return undefined;
+  const s = samples as ReadonlyArray<ReadonlyArray<number>>;
+  const out: number[] = new Array(n);
+  for (let i = 0; i < n; i++)
+    out[i] =
+      (s[0][i] / 280 -
+        (4 * s[1][i]) / 105 +
+        s[2][i] / 5 -
+        (4 * s[3][i]) / 5 +
+        (4 * s[4][i]) / 5 -
+        s[5][i] / 5 +
+        (4 * s[6][i]) / 105 -
+        s[7][i] / 280) /
+      h;
+  return out;
+}
+
 export function centeredDiff8thOrder(
   f: (x: number) => number,
   x: number,

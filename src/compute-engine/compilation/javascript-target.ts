@@ -327,6 +327,7 @@ import {
   realLcm as lcm,
   limit,
   centeredDiffHigherOrder,
+  centeredDiffHigherOrderVector,
   SMALL_INTEGER,
 } from '../numerics/numeric.js';
 import {
@@ -8960,18 +8961,23 @@ function caseFoldText(s: unknown): string {
  * plain-number-returning callback costs one `typeof` per evaluation.
  */
 function realFn(f: (x: number) => unknown): (x: number) => number {
-  return (x: number): number => {
-    const v = f(x);
-    if (typeof v === 'number') return v;
-    if (
-      typeof v === 'object' &&
-      v !== null &&
-      typeof (v as ComplexResult).re === 'number' &&
-      (v as ComplexResult).im === 0
-    )
-      return (v as ComplexResult).re;
-    return NaN;
-  };
+  return (x: number): number => machineReal(f(x));
+}
+
+/**
+ * A value as a machine real: a number as it is, a complex result object
+ * with a zero imaginary part as its real part, anything else `NaN`.
+ */
+function machineReal(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as ComplexResult).re === 'number' &&
+    (v as ComplexResult).im === 0
+  )
+    return (v as ComplexResult).re;
+  return NaN;
 }
 
 /**
@@ -9202,10 +9208,30 @@ const SYS_HELPERS = {
   // interpreter's fallback calls (`centeredDiffHigherOrder`,
   // numerics/numeric.ts), so compiled and interpreted values are
   // bit-identical — Tycho's route-parity requirement.
+  // A point- or list-valued function (a space curve) is differentiated
+  // component by component through the vector form of the same stencil,
+  // one evaluation per sample; the interpreter's fallback does the same
+  // (`stencilDerivativeAt`, library/calculus.ts). `shape` is what the
+  // emitter read from the function's result type; without it the function
+  // is probed once at `x`. A function that answers no vector of one length
+  // at every sample is NaN, like a scalar sample that is not a real.
   nd:
-    (f: (x: number) => number, order: number) =>
-    (x: number): number =>
-      centeredDiffHigherOrder(realFn(f), x, order),
+    (f: (x: number) => unknown, order: number, shape?: 'vector' | 'scalar') =>
+    (x: number): number | number[] => {
+      const vector =
+        shape === 'vector' || (shape === undefined && Array.isArray(f(x)));
+      if (!vector) return centeredDiffHigherOrder(realFn(f), x, order);
+      return (
+        centeredDiffHigherOrderVector(
+          (t) => {
+            const at = f(t);
+            return Array.isArray(at) ? at.map(machineReal) : undefined;
+          },
+          x,
+          order
+        ) ?? NaN
+      );
+    },
   // Fixed exponents avoid repeated base evaluation and the general power
   // kernel. Keep multiplication order explicit for small real powers.
   pow2: (x: number) => x * x,

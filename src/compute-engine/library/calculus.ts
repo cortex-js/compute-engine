@@ -9,7 +9,7 @@ import type {
 } from '../global-types.js';
 
 import type { Type } from '../../common/type/types.js';
-import { functionResult } from '../../common/type/utils.js';
+import { functionResult, isPointElementType } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { checkType } from '../boxed-expression/validate.js';
 import {
@@ -56,8 +56,8 @@ import {
 } from '../numerics/gauss-kronrod.js';
 import { integrateSemiInfiniteOscillatory } from '../numerics/oscillatory-quadrature.js';
 import {
-  centeredDiff8thOrder,
   centeredDiffHigherOrder,
+  centeredDiffHigherOrderVector,
   limit,
   LIMIT_PROBE_ITERATION_BUDGET,
 } from '../numerics/numeric.js';
@@ -1043,7 +1043,9 @@ function compileNumericDerivativeFallback(
       const body = args[0];
       if (!body.isPure) return undefined;
       const fn = ce.function('Function', [body, v]);
-      return `_SYS.nd(${compile(rewriteAngularUnit(fn))}, 1)(${compile(v)})`;
+      return `_SYS.nd(${compile(rewriteAngularUnit(fn))}, 1${shapeArgument(
+        fn
+      )})(${compile(v)})`;
     }
 
     // `Derivative(f, order?)` is FUNCTION-valued; `ND(f, x)` is a value at a
@@ -1061,14 +1063,18 @@ function compileNumericDerivativeFallback(
       if (args.length > 2) return undefined;
       const order = args[1] === undefined ? 1 : Math.floor(args[1].N().re);
       if (!Number.isFinite(order) || order < 1) return undefined;
-      return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, ${order})`;
+      return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, ${order}${shapeArgument(
+        lit
+      )})`;
     }
 
     // `ND` — previously compilable only when the point was numeric at
     // compile time (the evaluate handler ran the stencil then); a runtime
     // point now lowers to the same stencil evaluated at run time.
     if (args.length !== 2) return undefined;
-    return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, 1)(${compile(args[1])})`;
+    return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, 1${shapeArgument(
+      lit
+    )})(${compile(args[1])})`;
   } catch {
     // The body contains a head the target cannot lower — same contract as
     // the closed-form branch: decline, never let the inner error escape.
@@ -1122,6 +1128,18 @@ function resolveDerivativeFunctionLiteral(
 }
 
 /**
+ * The third argument of the emitted `_SYS.nd(f, order, shape)`: the shape
+ * of the function's value read from its result type
+ * (`derivativeValueShape`), so the helper runs the scalar or the vector
+ * stencil without probing the function; nothing when the type says
+ * nothing, and the helper probes once at run time.
+ */
+function shapeArgument(lit: Expression): string {
+  const shape = derivativeValueShape(functionResult(lit.type.type));
+  return shape === undefined ? '' : `, '${shape}'`;
+}
+
+/**
  * The INTERPRETED half of the item-177 numeric-derivative fallback: given an
  * `Apply(Derivative(f, order?), x)` that stayed symbolic because no closed
  * form was found (the differentiation growth budget, or an unresolvable
@@ -1130,6 +1148,12 @@ function resolveDerivativeFunctionLiteral(
  * bit-for-bit). Returns `undefined` — leaving the expression symbolic — when
  * the shape is not the univariate pure single-point case, mirroring
  * `compileNumericDerivativeFallback`'s gates.
+ *
+ * A function whose value is a POINT or a LIST of numbers — a space curve
+ * `t ↦ (x(t), y(t), z(t))` — is differentiated component by component, each
+ * component through the same stencil, exactly as the compiled `_SYS.nd`
+ * does; the result has the kind of the function's value (a point for a
+ * point-valued function, a list otherwise).
  *
  * Called ONLY from `Apply`'s evaluate handler under `numericApproximation`
  * (library/core.ts): plain `evaluate()` keeps the exactness contract and
@@ -1155,15 +1179,159 @@ export function numericDerivativeOfApply(
   const x = expr.ops[1].N().re;
   if (Number.isNaN(x)) return undefined;
 
-  // Same evaluation vehicle as `ND`'s evaluate handler: the compiled literal
-  // where JIT is available, the interpreted applier otherwise.
-  const compiled = implicitCompile(ce, lit);
-  const fn = (compiled?.run as (x: number) => number) ?? applicableN1(lit);
-  const v = centeredDiffHigherOrder(fn, x, order);
-  if (Number.isNaN(v)) return undefined;
-  // Machine arithmetic throughout (the stencil runs compiled JS), so box a
-  // machine number directly — same rationale as `ND`'s evaluate handler.
-  return new BoxedNumber(ce, v);
+  return stencilDerivativeAt(ce, lit, x, order);
+}
+
+/**
+ * The numeric `order`-th derivative of the univariate function literal
+ * `lit` at `x`, through the stencil `centeredDiffHigherOrder` — the SAME
+ * function the compiled JavaScript target's `_SYS.nd` runs, so the two
+ * routes agree bit-for-bit. A scalar function answers a machine number; a
+ * point- or list-valued function is differentiated component by component
+ * through the vector form of the stencil (`centeredDiffHigherOrderVector`,
+ * one evaluation per sample) and answers a point (`Tuple`) when the
+ * literal's result type is a point, a `List` otherwise, a component that
+ * the stencil cannot compute being `NaN` in place — the value the compiled
+ * route emits. `undefined` — the expression stays symbolic — when a scalar
+ * stencil answers NaN, or when the function does not answer a vector of one
+ * length at every sample.
+ *
+ * Which stencil runs is decided from the literal's result type
+ * (`derivativeValueShape`); only a function whose type says nothing is
+ * probed at `x` once, so the common typed scalar case costs no extra
+ * evaluation. The evaluation vehicle is the compiled literal where JIT is
+ * available and the interpreted application otherwise (`numericApplier`).
+ * The values are machine arithmetic throughout, so they are boxed as machine
+ * numbers rather than wrapped in a `BigDecimal` at a higher engine
+ * precision.
+ */
+function stencilDerivativeAt(
+  ce: ComputeEngine,
+  lit: Expression,
+  x: number,
+  order: number
+): Expression | undefined {
+  const result = functionResult(lit.type.type);
+  const shape = derivativeValueShape(result);
+  const fn = numericApplier(ce, lit);
+  const vector =
+    shape === 'vector' || (shape === undefined && Array.isArray(fn(x)));
+  if (!vector) {
+    const v = centeredDiffHigherOrder(
+      (t) => {
+        const value = fn(t);
+        return typeof value === 'number' ? value : NaN;
+      },
+      x,
+      order
+    );
+    if (Number.isNaN(v)) return undefined;
+    return new BoxedNumber(ce, v);
+  }
+  const components = centeredDiffHigherOrderVector(
+    (t) => {
+      const value = fn(t);
+      return Array.isArray(value) ? value : undefined;
+    },
+    x,
+    order
+  );
+  if (components === undefined) return undefined;
+  const boxed = components.map((c) => new BoxedNumber(ce, c));
+  return ce.function(isPointElementType(result) ? 'Tuple' : 'List', boxed);
+}
+
+/**
+ * The shape of the value of a function whose result type is `result`, for
+ * the numeric derivative: `'vector'` for a point or a list of numbers,
+ * `'scalar'` for a number, `undefined` when the type says nothing (`any`,
+ * `unknown`, or absent) — the stencil then probes the function once.
+ */
+export function derivativeValueShape(
+  result: Type | undefined
+): 'vector' | 'scalar' | undefined {
+  if (result === undefined || result === 'any' || result === 'unknown')
+    return undefined;
+  if (isPointElementType(result) || isSubtype(result, 'list<number>'))
+    return 'vector';
+  if (isSubtype(result, 'number')) return 'scalar';
+  return undefined;
+}
+
+/**
+ * Does `e` hold an application of the `D` operator anywhere below it? The
+ * symbolic differentiator leaves a `D(body, v)` where it has no rule
+ * (`symbolic/derivative.ts`), so one inside a closed form marks it
+ * incomplete. A user function that happens to be NAMED `D` is read the same
+ * way; the cost of that misreading is the stencil where a closed form
+ * existed, never a wrong value.
+ */
+function holdsUnresolvedD(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'D') return true;
+  return e.ops.some(holdsUnresolvedD);
+}
+
+/**
+ * A machine-number applier for a univariate function literal: the compiled
+ * literal where JIT is available, the interpreted application otherwise. A
+ * point- or list-valued function answers an array of its components, a
+ * scalar one a number.
+ */
+function numericApplier(
+  ce: ComputeEngine,
+  lit: Expression
+): (x: number) => number | number[] {
+  // The application is NUMERICIZED (`N()`), not merely evaluated: an exact
+  // constant inside the value — `sin(1)` in `t ↦ [sin(1), t]` — would
+  // otherwise stay symbolic at every sample and read as NaN.
+  const interpreted = (x: number): number | number[] => {
+    const value = ce.function('Apply', [lit, ce.number(x)]).N();
+    if (isNumber(value)) return realPart(value);
+    // `each` is absent on a collection whose elements cannot be enumerated.
+    if (value.isCollection && typeof value.each === 'function')
+      return [...value.each()].map((c) => (isNumber(c) ? realPart(c) : NaN));
+    return NaN;
+  };
+  const run = implicitCompile(ce, lit)?.run as
+    | ((x: number) => unknown)
+    | undefined;
+  if (run === undefined) return interpreted;
+  return (x) => {
+    const value = run(x);
+    // A compiled SYMBOL (a function name the caller did not resolve to its
+    // literal) answers `undefined` for a positional argument; the
+    // interpreted application still answers it.
+    if (value === undefined) return interpreted(x);
+    return Array.isArray(value) ? value.map(machineReal) : machineReal(value);
+  };
+}
+
+/**
+ * A number literal as a machine real: its real part when its imaginary
+ * part is zero, `NaN` otherwise — the same test the compiled route's
+ * `realFn` applies, so a complex sample is rejected on both routes rather
+ * than silently read as its real part.
+ */
+function realPart(n: Expression): number {
+  return isNumber(n) && n.im === 0 ? n.re : NaN;
+}
+
+/**
+ * A value the compiled literal answered, as a machine real: a number as it
+ * is, a complex result object with a zero imaginary part as its real part,
+ * anything else `NaN` (the test of the compiled route's `realFn`).
+ */
+function machineReal(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { re?: unknown }).re === 'number' &&
+    (value as { im?: unknown }).im === 0
+  )
+    return (value as { re: number }).re;
+  return NaN;
 }
 
 /**
@@ -1395,6 +1563,20 @@ volumes
           if (r === undefined) return undefined;
           // Order 0 (or an already-lifted result) is the function itself.
           if (isFunction(r, 'Function')) return r;
+          // An INCOMPLETE closed form — a `D` the symbolic differentiator
+          // could not resolve is left inside the body, such as the
+          // derivative of the norm of a point-valued function inside the
+          // quotient rule for `t ↦ f'(t)/|f'(t)|` — is no closed form: the
+          // node stays inert, so an application of it stays an `Apply` and
+          // `N()` answers it through the stencil fallback
+          // (`numericDerivativeOfApply`), as the compiled JavaScript target
+          // already does for the same application. Returned bare or lifted
+          // into a function literal instead, the residue reached every
+          // consumer as a symbolic `D(…)` that no route could numericize.
+          // (Checked before the `Derivative`-carrying case below: such a
+          // body may hold a legitimate `Apply(Derivative(f, 2), t)` beside
+          // the unresolved `D`.)
+          if (holdsUnresolvedD(r)) return undefined;
           if (r.operator === 'Derivative' || r.has('Derivative')) return r;
 
           // A named-parameter function literal: the derivative was taken with
@@ -1660,7 +1842,29 @@ volumes
       description: 'Numerical derivative evaluated at a point.',
       broadcastable: false,
       lazy: true,
-      signature: '(function, at:number) -> number',
+      signature: '(function, at:number) -> number | tuple | list<number>',
+      // The value has the kind of the function's value: a number for a
+      // scalar function, a point for a point-valued one (a space curve),
+      // a list for a list-valued one. `number` when the literal's result
+      // type says nothing, the overwhelmingly common case.
+      type: ([fn], { engine }) => {
+        const informative = (t: Type | undefined): Type | undefined =>
+          t === undefined || t === 'any' || t === 'unknown' ? undefined : t;
+        // The declared signature first; then, as the `Derivative` type
+        // handler does, the literal a symbol declared plain `function`
+        // holds, whose codomain is known where the declaration's is not.
+        let result =
+          fn !== undefined ? informative(functionResult(fn.type)) : undefined;
+        if (result === undefined && fn !== undefined) {
+          const held = heldValueTypeOf(fn, engine);
+          if (held !== undefined) result = informative(functionResult(held));
+        }
+        const type =
+          result !== undefined && derivativeValueShape(result) === 'vector'
+            ? result
+            : 'number';
+        return BoxedType.forResult(engine.type(type), engine._typeResolver);
+      },
       canonical: (ops, { engine }) => {
         const fn = canonicalFunctionLiteral(ops[0]);
         if (!fn) return null;
@@ -1668,16 +1872,16 @@ volumes
         return engine._fn('ND', [fn, x]);
       },
       evaluate: ([body, x], { engine }) => {
-        // ND uses compiled JS functions (machine arithmetic), so box
-        // the result directly as a machine number to avoid wrapping
-        // in BigDecimal at higher engine precisions.
+        // The same stencil as `Apply(Derivative(f), x).N()` and as the
+        // compiled `_SYS.nd`, component by component for a point- or
+        // list-valued function (`stencilDerivativeAt`).
         const xValue = x.N().re;
         if (isNaN(xValue)) return undefined;
-
-        const compiled = implicitCompile(engine, body);
-        const fn =
-          (compiled?.run as (x: number) => number) ?? applicableN1(body);
-        return new BoxedNumber(engine, centeredDiff8thOrder(fn, xValue));
+        // A function NAME is resolved to the literal it is bound to, so the
+        // stencil runs the compiled literal — the same code the compiled
+        // JavaScript route runs — rather than an interpreted application.
+        const lit = resolveDerivativeFunctionLiteral(body) ?? body;
+        return stencilDerivativeAt(engine, lit, xValue, 1);
       },
       compile: (args, compile, context) =>
         compileDerivative('ND', args, compile, context),

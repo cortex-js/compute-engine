@@ -3556,11 +3556,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (isFunction(result, 'Apply')) {
           // An application of a `Derivative` with no symbolic closed form
           // (the differentiation growth budget tripped on a deeply-nested
-          // body, or the head stayed unresolved) numericizes through the
-          // stencil fallback — the SAME `centeredDiffHigherOrder` the
-          // compiled javascript target emits as `_SYS.nd`, so the two
-          // routes agree bit-for-bit (Tycho item 177, user-ruled
-          // shared-budget fallback 2026-08-14). Only under
+          // body, the head stayed unresolved, or the closed form was
+          // incomplete and the `Derivative` handler kept the node inert)
+          // numericizes through the stencil fallback — the SAME
+          // `centeredDiffHigherOrder` the compiled javascript target emits
+          // as `_SYS.nd`, so the two routes agree bit-for-bit (Tycho item
+          // 177, user-ruled shared-budget fallback 2026-08-14). Only under
           // `numericApproximation`: plain `evaluate()` returned above,
           // keeping the exactness contract (symbolic, unchanged).
           return numericDerivativeOfApply(result) ?? result;

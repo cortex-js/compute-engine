@@ -2,6 +2,29 @@
 
 ### Resolved Issues
 
+- **The numeric derivative of a point-valued function has a value on both
+  routes.** The Frenet-frame document `frthw0ihk5` of the Tycho
+  code-generation audit defines a space curve `f(t) = PointList(x(t), y(t),
+  z(t))`, its unit tangent `F_0(t) = f'(t)/|f'(t)|`, and reads `F_0'(t)`.
+  The symbolic differentiator has no rule for the derivative of the norm of
+  a point-valued function, so the closed form of `F_0'` was INCOMPLETE — a
+  `D(|f'(t)|, t)` residue inside an otherwise differentiated body — and
+  `N()` returned that residue: no numeric value. The compiled JavaScript
+  target, which already took the numeric stencil for the whole application,
+  answered `NaN`: its stencil helper read the point the function returns as
+  a non-number. The `Derivative` handler now treats an incomplete closed
+  form as no closed form (the node stays inert, and `evaluate()` keeps the
+  exactness contract), so `N()` of the application takes the same stencil
+  fallback as the compiled route, and both stencils — the interpreter's
+  `numericDerivativeOfApply` and the compiled `_SYS.nd` — differentiate a
+  point- or list-valued function component by component; the value has the
+  kind of the function's value (a point for a space curve). `ND` follows:
+  it was scalar-only, answered `NaN` for a function NAME bound to a literal
+  (the compiled name answers nothing for a positional argument), and typed
+  `number` whatever the function returns; it now resolves the name to its
+  literal, differentiates component by component, and types by the
+  literal's codomain.
+
 - **A literal index reaches through an element-wise selection, the
   relations, `Mod`, and a literal range.** The Tycho code-generation audit
   document `ccoc40kfhj` writes a colour channel as
