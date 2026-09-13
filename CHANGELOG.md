@@ -2,6 +2,20 @@
 
 ### Resolved Issues
 
+- **Nested run-time broadcasts fuse into one loop on the JavaScript target.**
+  Scalar arithmetic over a list whose width the compiler cannot see (a
+  declared `list<number>` input) lowered to one `_SYS.bcast` call per head,
+  each building an intermediate array and running its own element loop: the
+  implicit-surface rows of the 3-D art document `art/khpocp8io0` in the
+  code-generation audit nested twelve such calls over a 225-element list, at
+  21 µs a sample. The emitter now absorbs an operand that is itself a plain
+  broadcast into the enclosing closure — its element parameters join the
+  outer ones, its operand sources join the call, and its result is a `const`
+  binding inside the closure — so the row runs one loop with no intermediate
+  array (3.6 µs a sample, the same values). A repeated list source is passed
+  once. A value the common-subexpression pass bound is still computed once,
+  a user-function dispatch keeps its own call, and every operand source is
+  still evaluated once as a call argument.
 - **A literal index reaches through list arithmetic and through a point list
   zipped from columns.** `(0.1·[a, b, c] + 0.4)[2]` compiled the whole list
   and read one element back, and `PointList([a₁, a₂], [b₁, b₂], 5)[2]` had no

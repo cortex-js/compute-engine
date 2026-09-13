@@ -10034,7 +10034,238 @@ export class BaseCompiler {
         `${outerSources.join(', ')}))(${compiledArgs.join(', ')})`
       );
     }
-    return `_SYS.bcast(${closure}, ${compiledArgs.join(', ')})`;
+    // Fusion moves the element reads of an absorbed operand after the
+    // evaluation of every operand source of the call, where the nested form
+    // read them before the later sources ran. That is the same value only
+    // when no source has an effect and none is caller-supplied code
+    // (`isCallerMapped`: an emitter this compiler does not see may hand a
+    // mutable array on) — the admission the rotation views ask for.
+    const fusionAllowed =
+      admission !== undefined &&
+      args.every((a) => a.isPure === true && !isCallerMapped(a, admission));
+    return BaseCompiler.emitFusedBroadcast(
+      h,
+      params,
+      body,
+      compiledArgs,
+      fusionAllowed
+    );
+  }
+
+  /**
+   * The parts of a plain `_SYS.bcast` emission — its element parameters,
+   * the statements and result of its closure body, and its operand sources —
+   * kept by the emitted text, so that an enclosing broadcast can absorb the
+   * emission instead of nesting it ({@link emitFusedBroadcast}).
+   *
+   * The text is the key because the text is what an enclosing emitter holds
+   * for an operand; the decomposition is a function of the text alone, so an
+   * entry recorded by an earlier compilation that produced the same text
+   * decomposes it the same way. Two facts make that sound, and a change to
+   * either must revisit this memo: `tempVar` never repeats a name within one
+   * compilation, so an absorbed closure's parameters cannot collide with the
+   * enclosing closure's; and the rendered text of a well-formed emission
+   * determines its parts, so a lookup hit is the emission it was recorded
+   * for and never a different call that happens to print the same. Bounded:
+   * cleared when it grows past {@link PLAIN_BROADCAST_MEMO_LIMIT} entries,
+   * after which the affected operands simply nest.
+   */
+  private static readonly PLAIN_BROADCASTS = new Map<
+    string,
+    {
+      params: string[];
+      statements: string[];
+      result: string;
+      args: string[];
+      /** Every operand source pure and compiler-emitted (see the caller). */
+      pure: boolean;
+    }
+  >();
+  private static readonly PLAIN_BROADCAST_MEMO_LIMIT = 4096;
+
+  /**
+   * The heads whose scalar lowering answers NaN whenever one operand is NaN
+   * (IEEE propagation through the JavaScript operators and `Math` calls),
+   * read by {@link emitFusedBroadcast}. `Power` is the exception among the
+   * arithmetic heads (`Math.pow(NaN, 0)` is 1) and is handled there; the
+   * relational and logical heads answer `false`/`true` for a NaN operand or
+   * let a dominant operand absorb it (`guardConnectiveAbsence`).
+   */
+  private static readonly NAN_PROPAGATING_BROADCAST_HEADS: ReadonlySet<string> =
+    new Set([
+      'Add',
+      'Subtract',
+      'Multiply',
+      'Divide',
+      'Negate',
+      'Sqrt',
+      'Square',
+      'Abs',
+      'Exp',
+      'Ln',
+      'Log',
+      'Log2',
+      'Log10',
+      'Sin',
+      'Cos',
+      'Tan',
+      'Sinh',
+      'Cosh',
+      'Tanh',
+      'Arcsin',
+      'Arccos',
+      'Arctan',
+      'Floor',
+      'Ceil',
+      'Round',
+      'Sign',
+      'Mod',
+      'Min',
+      'Max',
+    ]);
+
+  /**
+   * One `_SYS.bcast` call for a broadcastable head whose OPERANDS may
+   * themselves be plain broadcasts: each such operand is absorbed into the
+   * closure as a `const` binding of its element parameter, its own element
+   * parameters join the closure's, and its operand sources join the call.
+   * `(a + [1, 2]) · c` over lists then runs ONE loop that computes the whole
+   * scalar expression per element, where the nested form built an
+   * intermediate array and dispatched a second loop over it (the 12-deep
+   * nest of a 225-element implicit-surface row in the Tycho code-generation
+   * audit cost 8× a single loop).
+   *
+   * Per position the value is the nested form's: the runtime helper zips its
+   * operands position by position and applies the closure once per
+   * position, and binding the inner result per position is what the
+   * intermediate array held there. The two forms differ only when the inner
+   * broadcast answers ONE scalar NaN for the whole operand — an empty list,
+   * or lists of different lengths, the interpreter's error positions — where
+   * the nested form hands that NaN to the outer head as a scalar and the
+   * fused form answers NaN for the whole call. So an operand is absorbed
+   * only under a head whose lowering propagates a NaN operand
+   * ({@link NAN_PROPAGATING_BROADCAST_HEADS}; `Power` when the absorbed
+   * operand is the exponent, or the base under a non-zero literal
+   * exponent): the outer answer is NaN either way. Under a relational or
+   * logical head the operand stays a nested call, because there a dominant
+   * operand absorbs the error as the interpreter does (`And(False, error)`
+   * is `False`), which the fused call could not answer.
+   *
+   * Absorbing also moves the element reads of the inner operands after the
+   * evaluation of every source of the outer call, so it is done only when
+   * every source of both calls is pure and emitted by this compiler
+   * (`pure`, decided at the call site); a source with an effect or from
+   * caller-supplied code keeps the nested order.
+   *
+   * An operand that is not a plain broadcast — a shared temporary the
+   * common-subexpression pass bound (so a value used twice is still computed
+   * once), a user-function dispatch, a rotation view, any scalar source — is
+   * passed through as one operand. Operand sources are evaluated once, as
+   * call arguments, in both forms; only the closure body, which is pure
+   * scalar code over the parameters, is rearranged. When nothing is
+   * absorbed the emission is the plain form, unchanged. When something is,
+   * a repeatable source (`REPEATABLE_SOURCE`: a name, a property chain, a
+   * literal) that several operands read is passed once and the later
+   * parameters alias the first — the helper then reads the list once per
+   * position instead of once per occurrence; a source that is not
+   * repeatable is a call or an expression, evaluated per occurrence in the
+   * nested form too, so it keeps its own position.
+   */
+  private static emitFusedBroadcast(
+    h: string,
+    params: ReadonlyArray<string>,
+    body: string,
+    compiledArgs: ReadonlyArray<string>,
+    pure: boolean
+  ): string {
+    const absorbable = (i: number): boolean => {
+      const inner = BaseCompiler.PLAIN_BROADCASTS.get(compiledArgs[i]);
+      if (inner === undefined || !pure || !inner.pure) return false;
+      if (BaseCompiler.NAN_PROPAGATING_BROADCAST_HEADS.has(h)) return true;
+      if (h === 'Power') {
+        if (i === 1) return true;
+        const exponent = compiledArgs[1];
+        return /^-?\d+(?:\.\d+)?$/.test(exponent) && Number(exponent) !== 0;
+      }
+      return false;
+    };
+    const absorbed = compiledArgs.map((_, i) => absorbable(i));
+    if (!absorbed.some((a) => a)) {
+      const code = `_SYS.bcast((${params.join(', ')}) => ${body}, ${compiledArgs.join(', ')})`;
+      BaseCompiler.rememberPlainBroadcast(
+        code,
+        [...params],
+        [],
+        body,
+        [...compiledArgs],
+        pure
+      );
+      return code;
+    }
+    const fusedParams: string[] = [];
+    const statements: string[] = [];
+    const sources: string[] = [];
+    const firstParamOf = new Map<string, string>();
+    const add = (param: string, source: string): void => {
+      if (BaseCompiler.REPEATABLE_SOURCE.test(source)) {
+        const first = firstParamOf.get(source);
+        if (first !== undefined) {
+          statements.push(`const ${param} = ${first};`);
+          return;
+        }
+        firstParamOf.set(source, param);
+      }
+      fusedParams.push(param);
+      sources.push(source);
+    };
+    compiledArgs.forEach((code, i) => {
+      if (!absorbed[i]) {
+        add(params[i], code);
+        return;
+      }
+      const inner = BaseCompiler.PLAIN_BROADCASTS.get(code)!;
+      // The absorbed closure's own statements may read its parameters, so
+      // its parameters are bound before its statements are appended.
+      inner.params.forEach((p, j) => add(p, inner.args[j]));
+      statements.push(
+        ...inner.statements,
+        `const ${params[i]} = ${inner.result};`
+      );
+    });
+    const closure = `(${fusedParams.join(', ')}) => { ${statements.join(' ')} return ${body}; }`;
+    const code = `_SYS.bcast(${closure}, ${sources.join(', ')})`;
+    BaseCompiler.rememberPlainBroadcast(
+      code,
+      fusedParams,
+      statements,
+      body,
+      sources,
+      pure
+    );
+    return code;
+  }
+
+  /** Record a plain broadcast emission in {@link PLAIN_BROADCASTS}. */
+  private static rememberPlainBroadcast(
+    code: string,
+    params: string[],
+    statements: string[],
+    result: string,
+    args: string[],
+    pure: boolean
+  ): void {
+    if (
+      BaseCompiler.PLAIN_BROADCASTS.size >=
+      BaseCompiler.PLAIN_BROADCAST_MEMO_LIMIT
+    )
+      BaseCompiler.PLAIN_BROADCASTS.clear();
+    BaseCompiler.PLAIN_BROADCASTS.set(code, {
+      params,
+      statements,
+      result,
+      args,
+      pure,
+    });
   }
 
   /**

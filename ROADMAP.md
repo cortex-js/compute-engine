@@ -419,6 +419,14 @@ and the root substitution of list-valued helpers landed the same day:
   design declines listed under the fixed-width residue below.
 - `glsl`: `At` over a by-reference `indexed_collection` in `game-of-life`
   and `1a9de333a1` — the sampler half, Tycho's DV GPU work.
+- `javascript`, not a decline but the largest run-time cost the run shows:
+  152 `_SYS.bcast` sites in 26 records, 95 of them in the implicit-surface
+  rows of `art/khpocp8io0` (a list of 225 spheres, twelve nested broadcasts
+  a row) and 34 in `rccfsvo93r`, where an undeclared symbol `W` reaches the
+  engine and every arithmetic head over it dispatches at run time — a
+  declaration gap on the Tycho side (`W` declared real removes them all).
+  The `khpocp8io0` nests are fused into one loop per row by the broadcast
+  fusion landed 2026-09-12 (`compile-broadcast-fusion.test.ts`).
 - `javascript`: 4 records of `art/n7uhaaoq1q`, all the BY-REFERENCE form of
   a row whose helper `c` reaches the engine as a valueless COLLECTION-typed
   symbol, not a function (`lookupDefinition('c')` is a value definition
@@ -1414,6 +1422,19 @@ three sides together:
 
 If nothing is decided, the compiled route stays `NaN` where the interpreter
 answers `[]` for a product or sum over an empty list.
+
+**Scope widened 2026-09-13 by the broadcast fusion** (`emitFusedBroadcast`,
+`base-compiler.ts`): a chain of run-time broadcasts under arithmetic heads is
+now one call, so the error positions of an INNER broadcast — an empty list,
+or two lists of different lengths — are the outer call's own. Where the
+nested form answered an array of NaN sized to the surviving operand
+(`Sin([]) + [1, 2]` gave `[NaN, NaN]`), the fused call answers one NaN, and
+that for a genuine length mismatch as well as for an empty operand
+(`Sin([1, 2, 3]) + [1, 2]`). The interpreter answers `[1, 2]` for the first
+(a `Nothing` operand leaves a sum) and an `incompatible-dimensions` error for
+the second, so neither compiled form was faithful; whoever settles this
+ruling settles it for the fused form (`compile-broadcast-fusion.test.ts`
+pins the current answers).
 
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 

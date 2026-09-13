@@ -118,12 +118,13 @@ describe('Tycho item 248 — loop-form Sum', () => {
     const [body] = whileBodies(code);
     expect(body).not.toContain('_SYS.bcast(');
     expect(body).not.toContain('reduce(');
-    // The body's list is built once (three broadcasts: two scalings and the
-    // sum) and both reductions read the binding — the list's class is
-    // recorded before its consumers (dependency order). The upper bound's
-    // own `Length(list)` is compiled before the loop's hoist and builds the
-    // list a second time, once per loop entry.
-    expect(count(code, '_SYS.bcast(')).toBe(6);
+    // The body's list is built once (the two scalings and the sum fuse into
+    // ONE broadcast call, `emitFusedBroadcast`) and both reductions read the
+    // binding — the list's class is recorded before its consumers
+    // (dependency order). The upper bound's own `Length(list)` is compiled
+    // before the loop's hoist and builds the list a second time, once per
+    // loop entry: two calls in all.
+    expect(count(code, '_SYS.bcast(')).toBe(2);
     const Q = [10, 20, 30, 40];
     const v = 0.25;
     const mixed = P.map((p, i) => 0.75 * p + 0.25 * Q[i]);
