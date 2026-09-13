@@ -2,6 +2,40 @@
 
 ### Resolved Issues
 
+- **A list of numbers at an untyped parameter gets a specialized helper on
+  the JavaScript target.** The document `njncrg9fkv` of the code-generation
+  audit scales a cube's points with `W(p, x, y, z) := PointList(x·PointX(p),
+  y·PointY(p), z·PointZ(p))`, `p` declared "a point or a list of points" and
+  the scales untyped, called as `W(C(u, v), [0.8, 0.2, 0.8, 0.2], [0.2, 0.8,
+  0.2, 0.8], 0.6)`. The target specialized a call on scalar and point
+  arguments only; a list argument fell to the generic definition, where the
+  broad `p` reads its coordinate as a collection of numbers and the
+  `PointList` built from it had no list source to zip — the call declined.
+  A real-number list beside a point argument is now admitted, and bound as
+  the interpreter binds it: WHOLE, with its own type in a helper of its own
+  (`W` declares its point parameter, so `W(…, [0.8, 0.2, 0.8, 0.2], …)` is
+  four points), or BROADCAST at the call boundary with the point held when
+  the definition declares no point or collection parameter (the untyped
+  `f(p, x) := 42` over a two-element list is `[42, 42]`). A list alone,
+  with no point beside it, keeps the generic definition (the same
+  broadcast, plus the last-call memo).
+- **A value that may be a point or a list of points, added to a list of
+  points, is decided at run time — or fails closed.** Once such a call
+  compiled, the static point-list plan of `Add` kept the union-typed value
+  atomic and added it whole to every point of the list, which answered NaN
+  at every element behind `success: true` when the value was a list of
+  four points (measured on the same document's `W(…) + PointList(…)`).
+  `Add` now binds both operands once and decides by the value's shape when
+  the declaration allows it (`list<tuple<…>> | tuple<…>`): a list of points
+  is zipped against the list (unequal lengths are the interpreter's
+  dimension error, NaN), a point is added to every point of the list (a
+  point of another arity is NaN), and a number is the per-element type
+  error, NaN at every position — in either operand order, with the
+  interpreter's values. A declaration under which a flat array of numbers
+  is also a legal value (`indexed_collection<number | tuple<…>>`, what
+  the document declares for `W`) cannot be decided by shape and fails
+  closed with a message naming the declaration to tighten.
+
 - **The cross product of two points is a point.** `Cross((1, 2, 3), (4, 5,
   6))` answered the list `[-3, 6, -3]`, so adding a point to it broadcast
   the point into each element: `Cross(A, B) + P` was three type errors in

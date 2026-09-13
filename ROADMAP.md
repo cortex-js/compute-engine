@@ -1246,8 +1246,14 @@ rounds, each with its witness above: `Cross` of two 3-tuples should type
 `tuple<number, number, number>`; the `glsl` statement-form `Which` with a
 loop arm; `glsl` `Integrate` by fixed quadrature; `interval-js` `D` through
 interval jets; the `javascript` `PointList` component typed
-`collection<number>` (`2ki2hjsouf`). A timing list from an audit run on a
-loaded box is not evidence: the first rerun of this round reported one
+`collection<number>` (`2ki2hjsouf`). Of the `PointList` component group,
+`njncrg9fkv`'s call `W(C(u, v), [0.8, 0.2, 0.8, 0.2], …)` compiles since
+2026-09-13 (a list argument beside a point is specialized); its sum
+`W(…) + PointList(…)` fails closed on Tycho's declaration of `W`'s result,
+`indexed_collection<number | tuple<…>> | list<tuple<…>> | tuple<…>`, under
+which a flat array of numbers is a legal value with the shape of a point —
+`list<tuple<…>> | tuple<…>` is decided by shape at run time. A timing list
+from an audit run on a loaded box is not evidence: the first rerun of this round reported one
 "Timeout exceeded" decline and 262 slower records with four jobs on the
 box; alone, that record compiled in 49 ms against 37 ms before.
 

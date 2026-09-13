@@ -1283,6 +1283,30 @@ function isRuntimePointShaped(a: Expression): boolean {
 }
 
 /**
+ * For an operand `isRuntimePointShaped` admitted, can its run-time value be
+ * told apart as a point or a list of points by its SHAPE alone? Every tuple
+ * arm of the union must be a point of plain NUMBERS (a coordinate that is
+ * itself a collection would be read as a list of points), and every other
+ * arm must be a NUMBER — never an array, so the shape test cannot mistake
+ * it — or a collection of POINTS (`isPointElementType`): a collection arm
+ * that admits plain numbers — `list<number>`, or the
+ * `indexed_collection<number | tuple<…>>` a document may declare — could
+ * hold a flat array of numbers, which has the shape of a point. Read by the
+ * run-time point-or-list plan of `Add`.
+ */
+function runtimePointShapeIsUnambiguous(a: Expression): boolean {
+  const r = resolveTypeForCompilation(a.type.type);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  return r.types.every((branch) => {
+    const b = resolveTypeForCompilation(branch);
+    if (b === 'never' || isSubtype(b, 'number')) return true;
+    if (typeof b !== 'string' && b.kind === 'tuple')
+      return b.elements.every((c) => isSubtype(c.type, 'number'));
+    return isPointElementType(collectionElementType(b));
+  });
+}
+
+/**
  * The finite real number a piece of EMITTED code denotes when it is a bare
  * numeric literal — `undefined` for anything else.
  *
@@ -9361,7 +9385,8 @@ export class BaseCompiler {
     // Set with `atomicTuple` when the OTHER operand is a list of POINTS (the
     // `Add` point-list shape below): the outer level must then map exactly
     // one level deep, where `_SYS.bcast` would descend into each point.
-    let atomicTupleOverPoints: false | 'static' | 'runtime' = false;
+    let atomicTupleOverPoints: false | 'static' | 'runtime' | 'runtime-list' =
+      false;
     // The operand whose shape the `'runtime'` lift tests when emitting.
     let runtimePointOperand: Expression | undefined;
     if (h === 'Multiply') {
@@ -9651,7 +9676,38 @@ export class BaseCompiler {
         )
           return null;
         atomicTuple = tuples[0];
-        atomicTupleOverPoints = 'static';
+        // An operand that may be a point OR a list of points at run time
+        // (`isRuntimePointShaped`: the union a document helper declares for
+        // its result) beside a list of points is decided by its shape at run
+        // time (the `'runtime-list'` emission below): a list of points is
+        // zipped against the list, a point is added to every point of the
+        // list. Kept atomic in the static plan it was added whole to every
+        // point, which answered NaN at every element when the value was a
+        // list of four points (the audit document `njncrg9fkv`, `W(…) +
+        // PointList(…)` with `W` declared to return a point or a list of
+        // points).
+        if (isRuntimePointShaped(tuples[0])) {
+          // The run-time test reads the value's SHAPE: an array of arrays is
+          // a list of points, a flat array a point. A union whose arms can
+          // give both shapes to one kind of value — a point with a LIST
+          // coordinate, or a collection arm that admits plain numbers, so
+          // that a flat array of numbers looks like a point — cannot be
+          // decided that way and fails closed, naming the declaration.
+          if (!runtimePointShapeIsUnambiguous(tuples[0]))
+            throw new Error(
+              `Add: cannot compile — the operand of type ` +
+                `\`${typeToString(tuples[0].type.type)}\` may be a point ` +
+                `or a list of points at run time, and its declaration also ` +
+                `admits a value whose run-time shape is the same as a ` +
+                `point's (a point with a collection coordinate, or a list ` +
+                `of numbers), so the sum with a list of points cannot be ` +
+                `decided by the value's shape. Declare the operand as a ` +
+                `point, or as a list of points (\`list<tuple<…>> | ` +
+                `tuple<…>\`). Fail closed (D6).`
+            );
+          runtimePointOperand = tuples[0];
+          atomicTupleOverPoints = 'runtime-list';
+        } else atomicTupleOverPoints = 'static';
       }
     }
 
@@ -9982,6 +10038,44 @@ export class BaseCompiler {
     // point's array against the list, the very shape this emission avoids.
     if (atomicTuple !== undefined) {
       const bound = args.map(() => BaseCompiler.tempVar(target));
+      if (atomicTupleOverPoints === 'runtime-list') {
+        // The run-time point-or-list operand beside a list of POINTS, both
+        // evaluated once. A value that is an array of arrays (or empty) is a
+        // list of points: it is zipped against the list, point by point,
+        // and unequal lengths are the interpreter's `incompatible-dimensions`
+        // error projected to NaN. A flat array is a point, added to every
+        // point of the list. A number is the interpreter's per-element
+        // `incompatible-type` error, NaN at every position. The list operand
+        // that is not an array at run time is NaN, as in the static plan.
+        const m = args.indexOf(runtimePointOperand!);
+        const src = bound[m];
+        const list = bound[1 - m];
+        const p = BaseCompiler.tempVar(target);
+        const k = BaseCompiler.tempVar(target);
+        const q = BaseCompiler.tempVar(target);
+        const zipped = bound.map((b, i) => (i === m ? p : `${list}[${k}]`));
+        const mapped = bound.map((b, i) => (i === m ? b : q));
+        // A flat point of another arity than the list's points is the
+        // interpreter's dimension error, NaN; the arity is read from the
+        // list's element type, which `isProvablyPointList` proved a tuple.
+        const elt = collectionElementType(compilationType(args[1 - m]));
+        const arity =
+          elt !== undefined && typeof elt !== 'string' && elt.kind === 'tuple'
+            ? elt.elements.length
+            : undefined;
+        const arityTest =
+          arity === undefined ? '' : `${src}.length !== ${arity} ? NaN : `;
+        return (
+          `((${bound.join(', ')}) => ` +
+          `(!Array.isArray(${list}) ? NaN : ` +
+          `!Array.isArray(${src}) ? ${list}.map(() => NaN) : ` +
+          `(${src}.length === 0 || Array.isArray(${src}[0])) ? ` +
+          `(${src}.length !== ${list}.length ? NaN : ` +
+          `${src}.map((${p}, ${k}) => _SYS.bcast(${closure}, ${zipped.join(', ')}))) : ` +
+          `${arityTest}${list}.map((${q}) => _SYS.bcast(${closure}, ${mapped.join(', ')}))))` +
+          `(${compiledArgs.join(', ')})`
+        );
+      }
       if (atomicTupleOverPoints === 'runtime') {
         const m = args.indexOf(runtimePointOperand!);
         const src = bound[m];
@@ -19658,6 +19752,22 @@ export class BaseCompiler {
   }
 
   /**
+   * Is this argument a LIST of real numbers by its type — an indexed
+   * collection whose element type is a real number subtype (`vector<real^4>`,
+   * `list<number>`) — and not a point? A complex element type is refused:
+   * the specialized body would be compiled in the real lane.
+   */
+  private static isRealListArg(a: Expression): boolean {
+    if (BaseCompiler.isSinglePointArg(a)) return false;
+    const t = resolveTypeForCompilation(a.type.type);
+    if (!isSubtype(t, 'indexed_collection<number>')) return false;
+    const elt = collectionElementType(t);
+    return (
+      elt !== undefined && isSubtype(elt, 'number') && !isNonRealNumber(elt)
+    );
+  }
+
+  /**
    * The 0-based position of the first argument that is a single point
    * ({@link isSinglePointArg}) bound to a parameter of `h` that has NO type
    * — `unknown` or `any`, the type an unannotated parameter keeps when no use
@@ -20526,7 +20636,8 @@ export class BaseCompiler {
       if (
         !node.ops.every(
           (a) =>
-            BaseCompiler.provablyScalarArg(a) || BaseCompiler.isSinglePointArg(a)
+            BaseCompiler.provablyScalarArg(a) ||
+            BaseCompiler.isSinglePointArg(a)
         )
       )
         return node;
@@ -20863,12 +20974,25 @@ export class BaseCompiler {
     const pointWidths: (number | undefined)[] = [];
     let preservesPoints: boolean | undefined;
     let narrower = false;
+    let pointArgument = false;
+    let listArgument = false;
+    // How the interpreter binds a LIST argument at an untyped parameter
+    // depends on the definition as a whole (`paramsAreScalar`): when every
+    // parameter is scalar or untyped the call is BROADCAST over the list,
+    // element by element; when any parameter is declared a point or a
+    // collection every argument is bound WHOLE (`k(p: tuple, x) := 42` is
+    // `42` over a list, the untyped `k(p, x) := 42` is `[42, 42]`).
+    const bindsListsWhole = !BaseCompiler.userFunctionParamsAreScalar(
+      engine,
+      h
+    );
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
       const declared =
         BaseCompiler.userFunctionParamType(engine, h, i) ?? params[i].type.type;
       let t = a.type.type;
       if (BaseCompiler.isSinglePointArg(a)) {
+        pointArgument = true;
         const width = BaseCompiler.aggregateComponentCount(a);
         if (width === undefined) return undefined;
         t = {
@@ -20905,6 +21029,31 @@ export class BaseCompiler {
       ) {
         if (BaseCompiler.isComplexValued(a)) return undefined;
         t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
+      } else if (
+        target.language === 'javascript' &&
+        (declared === 'unknown' ||
+          declared === 'any' ||
+          declared === 'value') &&
+        BaseCompiler.isRealListArg(a)
+      ) {
+        // A LIST of real numbers at a parameter the definition leaves
+        // untyped, beside a point argument (checked after the loop: a list
+        // alone keeps the generic definition, which broadcasts the same way
+        // and carries the last-call memo). Bound as the interpreter binds
+        // it (`bindsListsWhole`): whole, with its own type, when the
+        // definition declares a point or collection parameter — the helper
+        // then compiles the parameter as the array it is at this ABI; or
+        // broadcast at the call boundary otherwise — the helper is then the
+        // one the scalar call gets (the ELEMENT type), and the call below
+        // maps it over the list with the point held. The witness is the
+        // Tycho code-generation audit document `njncrg9fkv`: `W(p, x, y, z)
+        // := PointList(x·PointX(p), …)` with `p` declared "a point or a
+        // list of points" and the scales untyped, called with `x = [0.8,
+        // 0.2, 0.8, 0.2]` — the generic definition compiled against the
+        // broad `p` reads its coordinate as a collection of numbers and the
+        // `PointList` had no list source, so the call declined.
+        listArgument = true;
+        t = bindsListsWhole ? a.type.type : 'number';
       } else return undefined;
       if (
         declared !== 'unknown' &&
@@ -20943,13 +21092,13 @@ export class BaseCompiler {
       }
       pointWidths.push(pointWidth);
     }
+    if (listArgument && !pointArgument) return undefined;
     const hasPointProof = pointWidths.some((w) => w !== undefined);
     if (!narrower && !hasPointProof) return undefined;
     if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))
       return undefined;
     const scalarDefinition =
-      BaseCompiler.userFunctionParamsAreScalar(engine, h) &&
-      types.every((t) => isSubtype(t, 'number'));
+      !bindsListsWhole && types.every((t) => isSubtype(t, 'number'));
     // A declared tuple and a constructed point can have the same type.
     // Only the constructed variant may omit runtime shape checks.
     const proofKey = hasPointProof
@@ -21023,6 +21172,20 @@ export class BaseCompiler {
     // Scalar definitions already have a broadcast-aware call boundary and a
     // memoization policy. Reuse it after preparing the typed body.
     if (scalarDefinition) return undefined;
+    // A list argument the interpreter broadcasts is mapped over at the call
+    // boundary, the point arguments held whole: the "atomic argument beside
+    // a collection" form of `emitUserFunctionCall`, whose closure calls the
+    // specialized helper once per element. The helper's mapped parameters
+    // are scalars, which is what `paramsAreScalar` states there. A list the
+    // interpreter binds whole takes the direct call below.
+    if (listArgument && !bindsListsWhole)
+      return BaseCompiler.emitUserFunctionCall(
+        name,
+        args,
+        target,
+        args.map(() => false),
+        true
+      );
     if (registry.lowering)
       return registry.lowering.call({ id: h, name, args, target });
     return `${name}(${args.map((a) => BaseCompiler.compileValueOperand(a, target)).join(', ')})`;
