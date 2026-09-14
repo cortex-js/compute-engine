@@ -49,10 +49,42 @@ describe('DMS Parsing', () => {
     ]);
   });
 
+  test('parse DMS seconds with two postfix \\prime tokens', () => {
+    check('9°30\\prime 15\\prime\\prime', [
+      'Degrees',
+      ['Rational', 2281, 240],
+    ]);
+  });
+
   test('parse DMS via \\degree trigger', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse("9\\degree 30'", { form: 'raw' });
     expect(expr.json).toEqual(['Degrees', ['Rational', 19, 2]]);
+  });
+
+  test('parse DMS with \\minute and \\second', () => {
+    check('9\\degree 30\\minute 15\\second', [
+      'Degrees',
+      ['Rational', 2281, 240],
+    ]);
+  });
+
+  test('parse DMS with superscript arc markers', () => {
+    check('9^{\\circ}30^{\\prime}15^{\\doubleprime}', [
+      'Degrees',
+      ['Rational', 2281, 240],
+    ]);
+  });
+
+  test('parse DMS seconds with two superscript \\prime tokens', () => {
+    check('9^{\\circ}30^{\\prime}15^{\\prime\\prime}', [
+      'Degrees',
+      ['Rational', 2281, 240],
+    ]);
+  });
+
+  test('parse DMS degrees and minutes with \\minute', () => {
+    check('9\\degree 30\\minute', ['Degrees', ['Rational', 19, 2]]);
   });
 });
 
