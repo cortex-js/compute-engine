@@ -1505,6 +1505,55 @@ function gpuCanPlaceStatement(target: CompileTarget<Expression>): boolean {
 }
 
 /**
+ * Does `e` — a conditional arm, or a later `Which` condition — repeat a
+ * subexpression that a ternary would emit more than once? A boxed
+ * expression is a DAG: a function node reached by two or more paths within
+ * `e` is written once per path in a ternary arm, which has no statement
+ * position to bind it, so a deeply shared node grows the emitted text
+ * super-linearly. The statement form gives the arm a statement position
+ * where the common-subexpression pass binds such a node once. A leaf (a
+ * symbol or a number) is never worth binding; sharing only BETWEEN `e` and
+ * something outside it is bound by that outer position already, so the walk
+ * is seeded fresh for each arm and counts only sharing within `e`.
+ */
+function gpuArmSharesWork(e: Expression): boolean {
+  // A function node reached a second time is shared work. A symbol's value
+  // is followed on the current path only (`expanding`), removed on the way
+  // out, so a value cycle `a := b; b := a` terminates while two separate
+  // references to one symbol still meet at its value's root in `seen`.
+  const seen = new Set<Expression>();
+  const expanding = new Set<string>();
+  let shared = false;
+  const walk = (x: Expression): void => {
+    if (shared) return;
+    // A symbol with a value is inlined by the shader targets, its value read
+    // in place (as `gpuNeedsStatements` also reads it): two references inline
+    // it twice, and sharing inside one inlined value repeats the same way.
+    // Walking into the value lets the function-node check below see both. A
+    // valueless symbol — a plot variable — is a leaf worth nothing.
+    if (isSymbol(x)) {
+      const name = x.symbol;
+      if (expanding.has(name)) return;
+      const value = x.engine._getSymbolValue(name);
+      if (value === undefined) return;
+      expanding.add(name);
+      walk(value);
+      expanding.delete(name);
+      return;
+    }
+    if (!isFunction(x)) return;
+    if (seen.has(x)) {
+      shared = true;
+      return;
+    }
+    seen.add(x);
+    for (const op of x.ops) walk(op);
+  };
+  walk(e);
+  return shared;
+}
+
+/**
  * Compile a **conditionally-evaluated** operand of a GPU conditional — an
  * `If`/`When`/`Which`/`Match` arm, or a `Which` condition past the first —
  * with hoisting forbidden.
@@ -5955,9 +6004,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     gpuAssertSelectableArms('If', [args[1], args[2]]);
-    // An arm that needs statements takes the statement form; the clause list
-    // is in `Which` shape, so its position 3 is the `If` node's operand 2.
-    if (gpuNeedsStatements(args[1]) || gpuNeedsStatements(args[2])) {
+    // An arm that needs statements, or that repeats a subexpression a
+    // ternary would expand once per occurrence, takes the statement form;
+    // the clause list is in `Which` shape, so its position 3 is the `If`
+    // node's operand 2.
+    if (
+      gpuNeedsStatements(args[1]) ||
+      gpuNeedsStatements(args[2]) ||
+      (gpuCanPlaceStatement(target) &&
+        (gpuArmSharesWork(args[1]) || gpuArmSharesWork(args[2])))
+    ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
         (e, i) => compile(e, i === 3 ? 2 : i),
@@ -5989,7 +6045,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // A value that needs statements takes the statement form; the clause
     // list is in `Which` shape (condition, value), the `When` operands the
     // other way round.
-    if (gpuNeedsStatements(args[0])) {
+    if (
+      gpuNeedsStatements(args[0]) ||
+      (gpuCanPlaceStatement(target) && gpuArmSharesWork(args[0]))
+    ) {
       const statement = compileGPUStatementSelection(
         [args[1], args[0]],
         (e, i) => compile(e, i === 0 ? 1 : 0),
@@ -6014,7 +6073,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // An arm, or a condition past the first, that needs statements takes the
     // statement form (`compileGPUStatementSelection`); the ternary chain
     // below cannot hold them.
-    if (args.some((a, i) => i > 0 && gpuNeedsStatements(a))) {
+    const canPlace = gpuCanPlaceStatement(target);
+    if (
+      args.some(
+        (a, i) =>
+          i > 0 && (gpuNeedsStatements(a) || (canPlace && gpuArmSharesWork(a)))
+      )
+    ) {
       const statement = compileGPUStatementSelection(args, compile, target);
       if (statement !== undefined) return statement;
     }

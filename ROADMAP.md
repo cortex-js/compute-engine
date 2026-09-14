@@ -1616,24 +1616,45 @@ that mechanism, or should the shader targets keep declaring hoisting order
 as a documented difference from the interpreter for expressions that mix a
 hoisting operand with an effect written before it?
 
-### A shared subexpression inside a TERNARY shader conditional arm is emitted once per occurrence (OPEN — found 2026-09-13 by the review of the statement-form conditional)
+### A shared subexpression inside a shader lazy operand with no statement position expands once per occurrence (OPEN — found 2026-09-13, narrowed 2026-09-13)
 
-A boxed expression is a DAG: `Max(e, e)` holds `e` once. Outside a
-conditional the GLSL and WGSL targets bind such a shared node to a
-temporary through the common-subexpression pass, so a tower `Max(e, e)` of
-depth 16 emits about 540 characters. An arm whose value needs statements —
-a loop-form `Sum`/`Product`, a `Block` — now takes the statement form of a
-conditional, whose captured branch is a statement position where the shared
-node is declared once (`cseCanMaterialize`). An arm that is a plain
-expression stays a TERNARY, which has no statement position: the pass binds
-nothing there, and the arm's text unfolds the sharing. A tower of depth 16
-as the arm of `If(x > 0, tower, 0)` emits about 917 000 characters, and
-depth 20 about 14 MB. The same holds for a lazy operand nested inside a
-captured branch (the right side of an `&&`/`||`), which is a ternary of its
-own. The fix is to give the ternary form a statement position too — emit
-every conditional in the statement form when an arm shares work worth
-binding, not only when an arm needs statements — or a scoped let-expression
-where the language has one (WGSL does not).
+A boxed expression is a DAG: `Max(e, e)` holds `e` once. The GLSL and WGSL
+targets bind such a shared node to a temporary through the
+common-subexpression pass wherever a statement position exists. A
+conditional whose arm repeats a subexpression now takes the statement form
+(`gpuArmSharesWork` selects it, `compileGPUStatementSelection` emits it),
+whose captured branch is a statement position where the shared node is
+declared once. What remains is a shared subexpression in a lazy operand
+that has NO reachable statement position: the right side of an `&&`/`||`,
+and a conditional nested where hoisting is refused — inside another arm, or
+an expression-only position. There the pass binds nothing and the operand's
+text unfolds the sharing. Both shader languages lack a scoped
+let-expression, so closing this needs a restructure that lifts such an
+operand to a statement, or the acceptance that a deeply shared lazy operand
+stays inline. (A separate, pre-existing cost: the common-subexpression pass
+itself runs super-linearly on a very deeply shared DAG — a depth-20 shared
+tower takes tens of seconds to compile even with no conditional, its
+emission linear. That is in the harvest, not the conditional lowering.)
+
+### Six GLSL/WGSL compile pins fail — a nominal point flows into the list-of-points array form where the pins expect a decline (OPEN — found 2026-09-13, predates the statement-form work)
+
+Six tests fail on the shader targets at `f7a45759` and every commit since,
+so they predate this session's statement-form and common-subexpression
+work (verified by running them at that commit). They are:
+`type-constructors-compile.test.ts` (a nominal tuple-typed symbol as a
+`Tuple` component; a tuple-body constructor; a parameterized nominal body),
+`at-collection-index-compile.test.ts` (the `At`-on-the-GPU route-parity
+pin), and `list-valued-summand-compile.test.ts` (a contradicted `-> unknown`
+declaration still compiling a bare call on glsl and wgsl). The shared
+symptom in the tuple cases is that `Tuple(n, n)` for a nominal point `n`
+now emits `vec2[2](n, n)` — the list-of-points array form added on
+2026-09-12 — where the pin expects a decline, on the rule that a `vecN`
+component must be a scalar. Each pin needs triage: either the list-of-points
+form is intended to cover a `Tuple` of points and the pins are stale (update
+them to the new emission), or the form leaks into a position it should not
+(a defect to fix at the source). The pins were invisible to the shader test
+subset used this session; that subset has been widened (see the working
+notes) so a shader-emission regression cannot hide again.
 
 ### `Match` with a case body that needs statements still declines on the shader targets (OPEN — found 2026-09-13 by the review of the statement-form conditional)
 

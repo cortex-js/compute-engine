@@ -418,9 +418,10 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
   test('the statement-needs scan is linear in the distinct nodes of a shared arm', () => {
     // A tower `Max(e, e)` of depth 30 holds 31 distinct nodes and unfolds to
     // 2^30; a scan that unfolds it does not finish. Tested on the scan
-    // directly: a full compile of a scalar-arm ternary holding the tower
-    // still unfolds it in the emitted text (a ternary arm has no statement
-    // position for a binding — see `ROADMAP.md`), so it could not run here.
+    // directly rather than through a compile: the common-subexpression pass
+    // itself runs super-linearly on a very deeply shared tower (a separate,
+    // pre-existing cost recorded in `ROADMAP.md`), so a full compile of a
+    // depth-30 tower would not finish here for a reason unrelated to the scan.
     let tower = ce.box(['Add', 'x', 't']);
     for (let i = 0; i < 30; i++) tower = ce.function('Max', [tower, tower]);
     expect(gpuNeedsStatements(tower)).toBe(false);
@@ -516,6 +517,79 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     );
     expect(r.success).toBe(true);
     expect(r.code).not.toContain('_cse');
+  });
+
+  test('a scalar arm that repeats a subexpression takes the statement form', () => {
+    // No loop, block, or loop-form sum: a plain expression arm that shares a
+    // deep subtree. The ternary would unfold the sharing; the statement form
+    // binds it once in the branch, so the emission stays small.
+    let tower = ce.box(['Add', 'x', 't']);
+    for (let i = 0; i < 16; i++) tower = ce.function('Max', [tower, tower]);
+    const r = compile(
+      ce.function('If', [ce.box(['Greater', 'x', 0]), tower, ce.box(0)]),
+      {
+        to: 'glsl',
+        fallback: false,
+        constantFold: false,
+      }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('if (0.0 < x) {');
+    expect(r.code!.length).toBeLessThan(1000);
+  });
+
+  test('a symbol value cycle in an arm does not hang the shared-work scan', () => {
+    // `a := b; b := a` is a value cycle; the scan follows a value on the
+    // current path only, so it terminates instead of overflowing the stack.
+    ce.declare('cyc_a', 'number');
+    ce.declare('cyc_b', 'number');
+    ce.assign('cyc_a', ce.symbol('cyc_b'));
+    ce.assign('cyc_b', ce.symbol('cyc_a'));
+    const r = compile(
+      ce.function('If', [
+        ce.box(['Greater', 'x', 0]),
+        ce.symbol('cyc_a'),
+        ce.box(0),
+      ]),
+      {
+        to: 'glsl',
+        fallback: true,
+        constantFold: false,
+      }
+    );
+    // The point is that compilation returns rather than hangs; either a
+    // fail-closed fallback or a compile is acceptable.
+    expect(r).toBeDefined();
+  });
+
+  test('an arm repeating a symbol whose value is shared takes the statement form', () => {
+    // The shader inlines `k`'s value, so `k + k` inlines a shared tower twice;
+    // the detector reads through the symbol as the statement-needs scan does.
+    let tower = ce.box(['Add', 'x', 't']);
+    for (let i = 0; i < 10; i++) tower = ce.function('Max', [tower, tower]);
+    ce.declare('k_shared', 'number');
+    ce.assign('k_shared', tower);
+    const r = compile(
+      ce.function('If', [
+        ce.box(['Greater', 'x', 0]),
+        ce.function('Add', [ce.symbol('k_shared'), ce.symbol('k_shared')]),
+        ce.box(0),
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('if (0.0 < x) {');
+  });
+
+  test('a scalar conditional whose arms share nothing keeps its ternary', () => {
+    // The extension must not turn every conditional into an if/else: an arm
+    // with no repeated subexpression stays a compact ternary.
+    const code = shader(
+      String.raw`\begin{cases}x+1&t<0\\0&\top\end{cases}`,
+      'glsl'
+    );
+    expect(code).not.toContain('if (');
+    expect(code).toContain('? (');
   });
 
   test('a subexpression the first condition shares with its arm is bound once', () => {

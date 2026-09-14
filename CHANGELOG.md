@@ -2,6 +2,20 @@
 
 ### Resolved Issues
 
+- **A shader conditional whose arm repeats a subexpression is emitted in
+  the statement form so the subexpression is bound once.** A `Which`/`If`/
+  `When` on the GLSL or WGSL target now takes the `if … else …` statement
+  form not only when an arm needs statements (a loop-form `Sum`, a
+  `Block`), but also when an arm repeats a subexpression a ternary would
+  write out at every occurrence — a `Max(e, e)` tower shared many ways. The
+  statement form's branch is a statement position where the
+  common-subexpression pass binds the shared node once, so an arm that a
+  ternary expanded into hundreds of kilobytes (a depth-16 shared tower)
+  now emits a few hundred bytes. A conditional whose arms share nothing, or
+  a conditional with no reachable statement position (nested inside another
+  branch, or the right side of an `&&`/`||`), keeps the ternary form
+  unchanged.
+
 - **A subexpression shared inside a shader conditional's statement-form
   arm is bound once.** When a `Which`/`If`/`When` arm takes the statement
   form on the GLSL or WGSL target, its captured branch is a statement
