@@ -2,6 +2,21 @@
 
 ### Resolved Issues
 
+- **A coordinate accessor over a point-or-point-list union now has the precise
+  result type.** `PointX`/`PointY`/`PointZ` over an operand typed
+  `list<tuple<…>> | tuple<…>` — the "point or a list of points" a plot builds
+  from a helper — previously widened its result to `collection<number>`, the
+  abstract collection top. That top is not provably array-shaped, so any
+  arithmetic on the coordinate failed to compile on the JavaScript target. The
+  accessor now distributes over the union arms and yields `number |
+  list<number>` (a scalar from a single point, a list of coordinates from a
+  list of points), which compiles through element-wise broadcast. A single
+  point still yields `number` and a point list still yields `list<number>`,
+  unchanged. A union arm whose element type is itself `number | tuple` — a
+  collection that could be one point spelled flat or a list of points — states
+  nothing definite and is left as `collection<number>`, still failing closed.
+  Audit witness: `neyret/wgxnrn87sx`, a hue built as `360·PointX(P) + 0.5`.
+
 - **A point scaled by a list-bound `indexed_collection<number>` symbol now
   compiles on the JavaScript target.** Multiplying a point by a symbol whose
   declared type is `indexed_collection<number>` failed closed, because a

@@ -2221,6 +2221,29 @@ function isProvablyEmptyCollectionD(xs: OperandDescriptor): boolean {
   return s?.kind === 'list-literal' && s.elements.length === 0;
 }
 
+/**
+ * The component type of a point TYPE at a 1-based position: a tuple's component
+ * at that position, or the widening of a union of tuple spellings. `undefined`
+ * when the type states no component there — a bare `tuple` (no components), a
+ * non-tuple arm, or a position past the arity — so the caller declines rather
+ * than fabricating a coordinate.
+ */
+function tupleComponentType(t: Type, position: number): Type | undefined {
+  const e = resolveTypeAlias(t);
+  if (typeof e === 'string') return undefined;
+  if (e.kind === 'tuple') return e.elements[position - 1]?.type;
+  if (e.kind === 'union') {
+    const comps: Type[] = [];
+    for (const branch of e.types) {
+      const c = tupleComponentType(branch, position);
+      if (c === undefined) return undefined;
+      comps.push(c);
+    }
+    return comps.length > 0 ? (widen(...comps) as Type) : undefined;
+  }
+  return undefined;
+}
+
 /** Descriptor twin of {@link pointComponentType}. */
 function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   const t = xs.type;
@@ -2257,6 +2280,67 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
     }
     if (componentTypes.length === t.types.length && componentTypes.length > 0)
       return withMarker(widen(...componentTypes));
+  }
+  // A union of point AND point-list arms — the "point or a list of points"
+  // type a document helper returns (`list<tuple<…>> | tuple<…>`). The accessor
+  // is defined on every arm: a single point (a `tuple` arm) gives the
+  // coordinate at this position, and a list of points (a collection whose
+  // elements are points) broadcasts to a list of coordinates. Distribute over
+  // the arms and widen — `number | list<number>` — instead of falling through
+  // to the collection arm below, whose `mapResultType` widens a union to the
+  // abstract `collection<number>`. That top is not provably array-shaped, so
+  // the JavaScript compile target fails closed over the coordinate, whereas
+  // `number | list<number>` compiles through `_SYS.bcast`, which applies the
+  // coordinate closure to a scalar directly and element-wise to a list. An arm
+  // that is neither a point nor a provable point list (a numeric collection,
+  // whose elements are a point spelled flat; a bare `list`) states nothing
+  // definite, so the whole union declines to distribute and falls through.
+  if (typeof t !== 'string' && t.kind === 'union') {
+    const parts: Type[] = [];
+    let distributes = true;
+    for (const branch of t.types) {
+      const arm = resolveTypeAlias(branch);
+      if (typeof arm === 'string') {
+        distributes = false;
+        break;
+      }
+      if (arm.kind === 'tuple') {
+        // A single point: the coordinate at this position. A tuple missing a
+        // component here (`PointZ` over a 2-point) is an absence the arms
+        // below mark; decline rather than guess a coordinate for it.
+        const ct = arm.elements[position - 1]?.type;
+        if (ct === undefined) {
+          distributes = false;
+          break;
+        }
+        parts.push(ct);
+      } else if (
+        isSubtype(arm, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        isPointElementType(collectionElementType(arm))
+      ) {
+        // An ORDERED collection of points broadcasts to a list of the
+        // coordinate at this position. The `indexed_collection` guard keeps a
+        // keyed `dictionary`/`record` arm out: its synthesized `tuple<string,
+        // V>` element type would otherwise read as a point. The coordinate
+        // type is the point element's component at this position, not a bare
+        // `number` — a point list may carry a non-numeric coordinate, whose
+        // honest type must survive so a numeric consumer still fails closed
+        // over it rather than compiling against a wrong `list<number>`.
+        const coord = tupleComponentType(
+          collectionElementType(arm) as Type,
+          position
+        );
+        if (coord === undefined) {
+          distributes = false;
+          break;
+        }
+        parts.push({ kind: 'list', elements: coord });
+      } else {
+        distributes = false;
+        break;
+      }
+    }
+    if (distributes && parts.length > 0) return withMarker(widen(...parts));
   }
   // A coordinate of an empty collection, decided by the DECLARED element type
   // before the emptiness test, exactly as `pointComponentAt` decides the value.

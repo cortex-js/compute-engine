@@ -1322,10 +1322,32 @@ Open, each with a witness:
   list). This is the open point-with-a-list-coordinate shape (ruled A,
   `COMPILATION-MODEL.md`), not the list-symbol case.
 
-Separate item: the color family (`asOklab(c)` for `c: color`, and a
-`list<color>`) — `s8ishknvhe`, `wgxnrn87sx`, `woeywky0kj`, `iqnkdz3ptt` (6
-records total) — belongs with the color-broadcast work, not with point-list
-arithmetic.
+The "color family" (`s8ishknvhe`, `wgxnrn87sx`, `woeywky0kj`, `iqnkdz3ptt`, 6
+records) is NOT a distinct color-broadcast gap (reproduced 2026-09-14). The
+color-broadcast path already handles a head over a list of colors:
+`AsOklab` over a `list<color>` compiles to `_SYS.bcastColor`. These records
+trace to point-list arithmetic surfacing in color-heavy documents:
+
+- `wgxnrn87sx`: RESOLVED 2026-09-14. A color channel is built from `PointX` of
+  `P`, a point-or-point-list union with pure tuple-element arms
+  (`indexed_collection<tuple<…>> | list<tuple<…>> | tuple<…>`). The coordinate
+  accessor used to widen its result to the abstract `collection<number>`, which
+  fails closed; it now distributes over the union arms to `number |
+  list<number>`, which compiles. See the CHANGELOG entry.
+- `s8ishknvhe`: still declines. Its operand `C_c` carries a `number | tuple`
+  ELEMENT arm (`indexed_collection<number | tuple<…>> | …`), an imprecise
+  parameter-union artifact (Tycho D-229) that could be a point spelled flat OR
+  a list of points. The accessor leaves that as `collection<number>` — it is
+  genuinely ambiguous, so failing closed is sound. The fix is at the type
+  source: narrowing the arm away (Tycho's return-type narrowing, or wherever
+  `C_c`'s type is set), after which the accessor distributes and it compiles.
+- `iqnkdz3ptt` (2 records): the failing row is a point plus a number list
+  (`(⌊…⌋, …) + [0, 1]`), which the interpreter answers as an
+  `incompatible-type` error per element (measured 2026-09-14) — so the decline
+  matches interpretation and is not a defect.
+- `woeywky0kj`: builds an RGB triple in a `list<color>` context; the exact
+  failing operand was not pinned (the isolated row compiles), and needs a clean
+  audit run to capture.
 
 ### A valueless global read inside a callee body is captured by a same-named binder of the caller (OPEN, ruling — found 2026-09-12 while testing the root substitution of list-valued helpers)
 
