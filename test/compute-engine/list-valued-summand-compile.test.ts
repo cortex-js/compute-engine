@@ -849,14 +849,47 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
   });
 
   // CONTROL: the HONEST `-> unknown` spelling of the SAME body. Its type is not
-  // `matches('number')`, so the gate is structurally unable to fire, and the GPU
-  // return type is then synthesized from the body — `vec2`, legal shader source.
+  // `matches('number')`, so the gate is structurally unable to fire. The body
+  // is a `List`, and the shader targets substitute a call of a LIST-bodied
+  // helper whose every argument is provably scalar by its type (`u` is
+  // declared `number`) with the helper's body
+  // (`inlineCollectionValuedCallsAtRoot` in `base-compiler.ts`, asked for
+  // `list<any>` bodies): a shader function cannot return a run-time list, so
+  // the call site receives the body's own `vec2` constructor and no `_fn_a`
+  // definition is emitted.
   test.each(['glsl', 'wgsl'] as const)(
     'the `-> unknown` control still compiles bare `a(u)` on %s',
     (to) => {
       const ce = withDeclaration('(unknown) -> unknown');
       const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
       expect(r?.success).toBe(true);
+      expect((r as any).code).toBe(
+        to === 'glsl' ? 'vec2(cos(u), sin(u))' : 'vec2f(cos(u), sin(u))'
+      );
+      expect((r as any).preamble ?? '').not.toContain('_fn_a');
+    }
+  );
+
+  // CONTROL: the same honest spelling over a TUPLE body. A point-valued helper
+  // keeps its own shared definition on the shader targets, and its return type
+  // is synthesized from the body — `vec2`, legal shader source.
+  test.each(['glsl', 'wgsl'] as const)(
+    'the `-> unknown` control over a Tuple body emits a `vec2` definition on %s',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.declare('a', { signature: '(unknown) -> unknown' });
+      ce.assign(
+        'a',
+        ce.box([
+          'Function',
+          ['Block', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+          't',
+        ])
+      );
+      ce.declare('u', 'number');
+      const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
+      expect(r?.success).toBe(true);
+      expect((r as any).code).toBe('_fn_a(u)');
       expect((r as any).preamble).toMatch(
         to === 'glsl' ? /vec2 _fn_a\(float t\)/ : /fn _fn_a\(t: f32\) -> vec2f/
       );

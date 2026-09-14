@@ -1636,26 +1636,6 @@ itself runs super-linearly on a very deeply shared DAG — a depth-20 shared
 tower takes tens of seconds to compile even with no conditional, its
 emission linear. That is in the harvest, not the conditional lowering.)
 
-### Six GLSL/WGSL compile pins fail — a nominal point flows into the list-of-points array form where the pins expect a decline (OPEN — found 2026-09-13, predates the statement-form work)
-
-Six tests fail on the shader targets at `f7a45759` and every commit since,
-so they predate this session's statement-form and common-subexpression
-work (verified by running them at that commit). They are:
-`type-constructors-compile.test.ts` (a nominal tuple-typed symbol as a
-`Tuple` component; a tuple-body constructor; a parameterized nominal body),
-`at-collection-index-compile.test.ts` (the `At`-on-the-GPU route-parity
-pin), and `list-valued-summand-compile.test.ts` (a contradicted `-> unknown`
-declaration still compiling a bare call on glsl and wgsl). The shared
-symptom in the tuple cases is that `Tuple(n, n)` for a nominal point `n`
-now emits `vec2[2](n, n)` — the list-of-points array form added on
-2026-09-12 — where the pin expects a decline, on the rule that a `vecN`
-component must be a scalar. Each pin needs triage: either the list-of-points
-form is intended to cover a `Tuple` of points and the pins are stale (update
-them to the new emission), or the form leaks into a position it should not
-(a defect to fix at the source). The pins were invisible to the shader test
-subset used this session; that subset has been widened (see the working
-notes) so a shader-emission regression cannot hide again.
-
 ### `Match` with a case body that needs statements still declines on the shader targets (OPEN — found 2026-09-13 by the review of the statement-form conditional)
 
 `If`, `When` and `Which` on the GLSL and WGSL targets take a statement form

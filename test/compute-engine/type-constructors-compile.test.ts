@@ -173,12 +173,22 @@ describe('REFERENCE UNFOLDING at the compile type gates (§4.6 step 1)', () => {
     ce.declareType('point', 'tuple<number, number>');
     ce.declare('n', 'point');
     ce.declare('q', 'tuple<number, number>');
-    // A `vecN` component must be a scalar, so a vec2-valued component has no
-    // shader lowering: both fail closed, identically. (Before the unfold, the
-    // nominal one emitted `vec2(n, n)` — invalid shader source behind
+    ce.declare('x', 'number');
+    // A tuple whose every component is a 2-vector is a list of points of one
+    // arity, which the shader targets lower as an ARRAY of `vec2`
+    // (`gpuUniformVectorWidth` in `gpu-target.ts`): the same emission at the
+    // nominal and at the structural spelling. (Before the unfold, the nominal
+    // one emitted `vec2(n, n)` — invalid shader source behind
     // `success: true`.)
-    expect(glslCode(ce, ['Tuple', 'n', 'n'])).toBe('DECLINE');
-    expect(glslCode(ce, ['Tuple', 'q', 'q'])).toBe('DECLINE');
+    expect(glslCode(ce, ['Tuple', 'n', 'n'])).toBe(
+      glslCode(ce, ['Tuple', 'q', 'q']).replace(/q/g, 'n')
+    );
+    expect(glslCode(ce, ['Tuple', 'n', 'n'])).toBe('vec2[2](n, n)');
+    // A `vecN` component must be a scalar: a tuple that mixes a 2-vector with
+    // a scalar has neither the vector nor the array lowering, so both fail
+    // closed, identically.
+    expect(glslCode(ce, ['Tuple', 'n', 'x'])).toBe('DECLINE');
+    expect(glslCode(ce, ['Tuple', 'q', 'x'])).toBe('DECLINE');
     // Opacity (D3) is untouched: a `point` is not an indexed collection, so
     // `At(n, 1)` never reaches the compiler at all.
     expect(ce.box(['At', 'n', 1]).isValid).toBe(false);
@@ -258,20 +268,30 @@ describe('TUPLE-BODY CONSTRUCTOR — follows `Tuple` (D11 step B)', () => {
     expect(jsCode(ce, ['point', 1, ['Unknown9', 'x']])).toBe('');
   });
 
-  test('GLSL: DECLINES exactly where `Tuple` declines', () => {
+  test('GLSL: compiles and DECLINES exactly where `Tuple` does', () => {
     const ce = new ComputeEngine();
     ce.declareType('pair', 'tuple<tuple<number,number>, tuple<number,number>>');
+    ce.declareType('mixed', 'tuple<tuple<number,number>, number>');
     ce.declare('q', 'tuple<number, number>');
-    // A `vecN` component must be a scalar: a tuple of tuples has no shader
-    // lowering. Both fail closed.
-    expect(glslCode(ce, ['Tuple', 'q', 'q'])).toBe('DECLINE');
-    expect(glslCode(ce, ['pair', 'q', 'q'])).toBe('DECLINE');
-    // The very same body DOES compile on JS, where a tuple is a plain array —
-    // "wherever the plain shape compiles" is answered per target.
-    expect(jsCode(ce, ['pair', 'q', 'q'])).toBe(
-      jsCode(ce, ['Tuple', 'q', 'q'])
+    ce.declare('x', 'number');
+    // A tuple of two 2-vectors is a list of points of one arity, which the
+    // shader targets lower as an ARRAY of `vec2` (`gpuUniformVectorWidth` in
+    // `gpu-target.ts`) — for the plain tuple and for the constructor alike.
+    expect(glslCode(ce, ['pair', 'q', 'q'])).toBe(
+      glslCode(ce, ['Tuple', 'q', 'q'])
     );
-    expect(jsCode(ce, ['pair', 'q', 'q'])).toBe('[_.q, _.q]');
+    expect(glslCode(ce, ['pair', 'q', 'q'])).toBe('vec2[2](q, q)');
+    // A `vecN` component must be a scalar: a tuple that mixes a 2-vector with
+    // a scalar has neither the vector nor the array lowering. Both fail
+    // closed.
+    expect(glslCode(ce, ['Tuple', 'q', 'x'])).toBe('DECLINE');
+    expect(glslCode(ce, ['mixed', 'q', 'x'])).toBe('DECLINE');
+    // The very same mixed body DOES compile on JS, where a tuple is a plain
+    // array — "wherever the plain shape compiles" is answered per target.
+    expect(jsCode(ce, ['mixed', 'q', 'x'])).toBe(
+      jsCode(ce, ['Tuple', 'q', 'x'])
+    );
+    expect(jsCode(ce, ['mixed', 'q', 'x'])).toBe('[_.q, _.x]');
   });
 });
 
@@ -524,12 +544,12 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
       glslCode(ce, ['Tuple', 'x', 'y'])
     );
     expect(glslCode(ce, ['pt', 'x', 'y'])).toBe('vec2(x, y)');
-    // A `vecN` component must be a scalar: a tuple of tuples has no shader
-    // lowering, at either spelling.
+    // A tuple of two 2-vectors is a list of points of one arity, which the
+    // shader targets lower as an ARRAY of `vec2` — at either spelling.
     expect(glslCode(ce, ['pt', 'q', 'q'])).toBe(
       glslCode(ce, ['Tuple', 'q', 'q'])
     );
-    expect(glslCode(ce, ['pt', 'q', 'q'])).toBe('DECLINE');
+    expect(glslCode(ce, ['pt', 'q', 'q'])).toBe('vec2[2](q, q)');
   });
 
   test('DECLINES cleanly where the plain shape declines — never throws', () => {

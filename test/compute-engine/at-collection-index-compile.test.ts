@@ -450,7 +450,21 @@ describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
 
   test('the JS route specializes positive scalar indices and keeps the gather helper', () => {
     // Disable folding to inspect the access instead of its constant result.
-    expect(compile(at(2), { constantFold: false })!.code).toContain('?? NaN');
+    // A WRITTEN-OUT list base never reaches the target's `At` lowering: the
+    // fixed-width pre-pass (`foldLiteralIndex` in `fixed-width-unroll.ts`)
+    // rewrites `At(List(…), k)` to element `k` of the list as a STRUCTURAL
+    // read — it rewrites `At(List(a, b, 10), 2)` to `b` the same way — so
+    // `constantFold: false`, which governs numeric folds, does not keep the
+    // access in view on a literal-list base.
+    expect(compile(at(2), { constantFold: false })!.code).toBe('20');
+    // A base the pre-pass leaves alone — a symbol whose value is a numeric
+    // list — shows the specialization: a direct 1-based read with the
+    // nullish fallback for an absent position, and no `_SYS.at` call.
+    ce.assign('xs', ce.box(P as any));
+    const direct = compile(ce.box(['At', 'xs', 2]), { constantFold: false })!
+      .code;
+    expect(direct).toContain('?? NaN');
+    expect(direct).not.toContain('_SYS.at');
     expect(compile(at(['List', 1, 3]), { constantFold: false })!.code).toMatch(
       /_SYS\.at\(/
     );
