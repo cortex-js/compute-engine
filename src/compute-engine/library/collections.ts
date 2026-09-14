@@ -1334,7 +1334,15 @@ function mapResultType(
     // rule").
     if (source === 'string')
       return { kind: 'list', elements: elementType as Type };
-    // dictionary/record/tuple/etc.: yield a plain collection of the results.
+    // A TUPLE source maps to an ordered LIST of the lambda results (ruled
+    // 2026-09-14), the same rule the structured-tuple arm applies below. The
+    // bare `tuple` spelling (a `PrimitiveType` string, from `ce.declare('t',
+    // 'tuple')`) reaches this branch, so it is demoted here too — otherwise the
+    // list-out contract would depend on whether the tuple was declared bare or
+    // spelled with its element types.
+    if (source === 'tuple')
+      return { kind: 'list', elements: elementType as Type };
+    // dictionary/record/etc.: yield a plain collection of the results.
     return { kind: 'collection', elements: elementType as Type };
   }
   if (source.kind === 'list') {
@@ -1348,8 +1356,18 @@ function mapResultType(
     return { kind: 'set', elements: elementType as Type };
   if (source.kind === 'collection')
     return { kind: 'collection', elements: elementType as Type };
-  // tuple/dictionary/record and anything else: fall back to a plain
-  // collection of the lambda results.
+  // A TUPLE source maps to an ordered LIST of the lambda results (ruled
+  // 2026-09-14). `Map` is an ordered element transform, so it follows the same
+  // rule as `Reverse`/`Take`/`Drop`/`Filter`, which all demote a tuple to a
+  // `list`. Keeping the `tuple` kind would promise a fixed arity the mapped
+  // value does not owe, and letting it fall to the `collection` catch-all below
+  // sheds the ordered-ness the value keeps — the abstract `collection` top is
+  // not provably array-shaped, so arithmetic on the result then fails closed on
+  // the JavaScript compile target.
+  if (source.kind === 'tuple')
+    return { kind: 'list', elements: elementType as Type };
+  // dictionary/record and anything else: fall back to a plain collection of the
+  // lambda results.
   return { kind: 'collection', elements: elementType as Type };
 }
 
@@ -5692,6 +5710,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             return BoxedType.forResult('list', engine._typeResolver);
           if (s === 'indexed_collection' && ops[1].type !== s)
             return BoxedType.forResult(s, engine._typeResolver);
+          // A TUPLE source must not be echoed either. `Map` over a tuple yields
+          // an ordered LIST (ruled 2026-09-14, the same rule `mapResultType`
+          // applies on the known-element path), so echoing the tuple type here
+          // would both promise a fixed arity the value does not owe and — worse
+          // — report the SOURCE's element types while the value holds the
+          // lambda's results (a mapped predicate materializes booleans yet was
+          // typed `tuple<integer, …>`). The element type is the unknown one
+          // this branch handles, so the result is a bare `list`. The bare
+          // `tuple` spelling (a `PrimitiveType` string) reaches here as `s ===
+          // 'tuple'` and must be demoted too, not echoed verbatim.
+          if (s === 'tuple' || (typeof s !== 'string' && s.kind === 'tuple'))
+            return BoxedType.forResult('list', engine._typeResolver);
           // The source type is echoed even when it is not a collection type
           // at all. That is deliberate, and it is what the expressions shape
           // did: wrapping a non-collection source in `collection<unknown>`

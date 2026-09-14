@@ -2,6 +2,23 @@
 
 ### Resolved Issues
 
+- **`Map` over a tuple now yields an ordered list, value and type, whichever
+  way the callback is written.** `Map` over a tuple was inconsistent three
+  ways. The result type depended on whether the callback's result type could be
+  derived: a callback held in a symbol echoed the source type
+  (`tuple<integer, …>`, and — worse — the source's element types, so a mapped
+  predicate reported `tuple<integer, …>` while its value held booleans), while
+  an inline callback widened to the abstract `collection` top. The materialized
+  container followed the type: an indexed type rebuilt a `List`, a `collection`
+  type rebuilt a `Set` — and the set rebuild deduplicated, so `Map(x ↦ 0, (1,
+  2))` collapsed to a single element, a wrong count. `Map` over a tuple now
+  types `list<R>` (`R` the callback's result type) and materializes an ordered
+  list, matching `Reverse`/`Take`/`Drop`/`Filter`, which already demote a tuple
+  to a list. This also lets arithmetic on the result compile on the JavaScript
+  target, where the abstract `collection` top failed closed. A list source is
+  unchanged, and a keyed source (`dictionary`/`record`) still yields a plain
+  collection.
+
 - **A coordinate accessor over a point-or-point-list union now has the precise
   result type.** `PointX`/`PointY`/`PointZ` over an operand typed
   `list<tuple<…>> | tuple<…>` — the "point or a list of points" a plot builds
