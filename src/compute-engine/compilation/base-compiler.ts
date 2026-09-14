@@ -9504,7 +9504,8 @@ export class BaseCompiler {
         if (tuples.length === 1) {
           if (
             !collection.every(
-              (a) => a === tuples[0] || BaseCompiler.isScalarElementSource(a, target)
+              (a) =>
+                a === tuples[0] || BaseCompiler.isScalarElementSource(a, target)
             )
           )
             return null;
