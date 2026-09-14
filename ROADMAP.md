@@ -1258,6 +1258,75 @@ from an audit run on a loaded box is not evidence: the first rerun of this round
 "Timeout exceeded" decline and 262 slower records with four jobs on the
 box; alone, that record compiled in 49 ms against 37 ms before.
 
+### JavaScript list-arithmetic declines, triaged (2026-09-14, the point-list-arithmetic candidate)
+
+A fresh CORE-corpus audit at HEAD found 52 `javascript` records that fail
+closed with "cannot compile scalar arithmetic over a list-valued operand"
+(and one `Abs` variant). They are not one gap. Each bin below carries its
+witness; the record counts are from the 2026-09-14 run.
+
+Landed this round. **A point scaled by a symbol declared
+`indexed_collection<number>` whose binding is provably a list of scalars now
+compiles** (`isScalarElementSource`, base-compiler.ts). The declaration alone
+did not prove a list — a `tuple` inhabits `indexed_collection<number>`, so the
+symbol could be a single point — but reading the binding does: a value typed
+`list<number>` (a `Range`, or the broadcast arithmetic over one that a plot
+uses to build a list of sample points) is never a point. The binding is
+trusted only when the compiler emits it — inline or as a baked constant. A
+symbol the caller maps by reference (a `vars` input read live from the
+caller's scope) and a compile-bound name (a `Sum` index, or a lambda or
+user-function parameter, which shadows any same-named engine symbol) are both
+declined, since the value read at compile time is then not the value the
+kernel runs. Witness `neyret/xkusqcyzsx`, `R × (cos t, sin t) + (D_c + X, Y)`
+with `R` a `Range`-derived list emitted inline, now compiles.
+
+Not defects (the interpreter itself does not produce a value):
+
+- **Invalid input.** `2ki2hjsouf` (10 records) boxes with an
+  `Error(incompatible-type)` node inside it, and `ifnnzttcqg` (1) likewise;
+  `6kalzeiedk` (1) references an undefined operator `B`. The compiler
+  correctly refuses an expression the interpreter also rejects.
+- **A point summed with a scalar.** `urbddymicb` (8) is
+  `(x − C_x)² + (y − C_y)² + (−R_2, −o_ut)` — a scalar plus a point. The
+  interpreter answers `Error(incompatible-type, "tuple", "number")` at that
+  sum (measured 2026-09-14), so failing closed matches interpretation.
+
+Open, each with a witness:
+
+- **A point summed with a symbol declared as a point-OR-point-list union
+  (`indexed_collection<number | tuple<…>> | list<tuple<…>> | tuple<…>`) fails
+  closed, and that is a RULING for Tycho, not a compiler change.** The
+  declaration admits a flat array of numbers, which at run time has the same
+  shape as a point, so the sum with a point list cannot be decided by the
+  value's shape (`runtimePointShapeIsUnambiguous`). Concrete input:
+  `W(…) + PointList(…)` where Tycho declares `W`'s result with that union
+  (`0d6251b03c`, `n7uhaaoq1q`, `pwceub9smn`, and the earlier `njncrg9fkv`).
+  Options: (a) Tycho narrows the declaration to `list<tuple<…>> | tuple<…>`,
+  which the shape test decides at run time and the sum then compiles; (b) the
+  compiler adds a scalar-shape dispatch arm that answers `NaN` where the
+  interpreter errors, which loses the interpreter's per-element error. If
+  nothing is decided, these ~5 records keep failing closed. Recommend (a):
+  it makes the sum compile without changing any answer.
+- **`Power` over an operand that is a point, a list, or a list of points is
+  element-wise identically** — `(3,4)² = (9,16)`, `[3,4]² = [9,16]`, a list
+  of points → `[(9,16),(25,36)]` (measured 2026-09-14) — so the point-vs-list
+  ambiguity that blocks `Add` does not change `Power`'s answer. A union-typed
+  SYMBOL operand already compiles for `Power` (probed 2026-09-14), so the
+  corpus rows decline in a call structure not yet reproduced: `hpr2q4kles`
+  (9 records, `P(U(x, y), …)`), `hbvzf9yk1r` (1), and the `Power` records of
+  `jgcclk1njk`. A follow-up must reproduce one of those rows and locate the
+  decline before broadening the `Power` broadcast admission.
+- **A point whose own coordinate is a list.** `u1bpof8xfg`'s Multiply now
+  compiles, but the enclosing `Add` still fails closed: the point
+  `(−cos t, sin t · sgn R)` has a list second coordinate (`sgn R` over a
+  list). This is the open point-with-a-list-coordinate shape (ruled A,
+  `COMPILATION-MODEL.md`), not the list-symbol case.
+
+Separate item: the color family (`asOklab(c)` for `c: color`, and a
+`list<color>`) — `s8ishknvhe`, `wgxnrn87sx`, `woeywky0kj`, `iqnkdz3ptt` (6
+records total) — belongs with the color-broadcast work, not with point-list
+arithmetic.
+
 ### A valueless global read inside a callee body is captured by a same-named binder of the caller (OPEN, ruling — found 2026-09-12 while testing the root substitution of list-valued helpers)
 
 With `w` declared real and holding no value, and `W(x) := [w·x, x]`, the

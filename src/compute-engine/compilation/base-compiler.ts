@@ -8613,7 +8613,10 @@ export class BaseCompiler {
    * whose element kind is unprovable (a top-typed call), is not one: the
    * outer broadcast would descend into each point.
    */
-  private static isScalarElementSource(a: Expression): boolean {
+  private static isScalarElementSource(
+    a: Expression,
+    target?: CompileTarget<Expression>
+  ): boolean {
     const t = compilationType(a);
     if (typeof t !== 'string' && t.kind === 'broadcastable')
       return isSubtype(t.elements, 'number');
@@ -8625,12 +8628,55 @@ export class BaseCompiler {
     // A SYMBOL declared `indexed_collection<number>` may itself be bound to a
     // point (a tuple inhabits that type); only a list-kind declaration proves
     // a symbol holds a list of scalars.
-    if (isSymbol(a))
-      return (
+    if (isSymbol(a)) {
+      if (
         t === 'list' ||
         t === 'range' ||
         (typeof t !== 'string' && t.kind === 'list')
-      );
+      )
+        return true;
+      // The declared type does not prove list-ness, but the symbol's BINDING
+      // can: a value whose own type is a list of scalars — a `Range`, or the
+      // broadcast arithmetic over one that a plot uses to build a list of
+      // sample points, which types `list<number>` — is never a point, which
+      // resolves the concern the `indexed_collection` declaration leaves open.
+      // A `Tuple` binding keeps declining.
+      //
+      // Two shapes must NOT trust the binding, because the value the compiler
+      // reads here is not the value the kernel runs:
+      //   - a COMPILE-BOUND name (a `Sum`/`Product` index, a lambda or
+      //     user-function parameter, a broadcast element) shadows any
+      //     same-named engine symbol, so reading a value through it would
+      //     dereference the wrong definition. This is the guard
+      //     `isComplexValued` applies before it reads a symbol's value.
+      //   - a caller-`vars`-mapped symbol is a live by-reference input: the
+      //     kernel reads it from the caller's scope, so only its declared type
+      //     is the contract, and that admits a point. (When the symbol is not
+      //     mapped, the compiler emits its binding inline or as a baked
+      //     constant, so the binding is exactly what runs.)
+      // Both decline, keeping the fail-closed behavior the declaration asks
+      // for.
+      if (BaseCompiler.isCompileBoundName(a.symbol)) return false;
+      if (
+        target !== undefined &&
+        BaseCompiler.mentionsExcludedName(
+          a,
+          target.varsKeys,
+          target.foldExcludedOps
+        )
+      )
+        return false;
+      // Read the node's OWN scope-correct binding (`a.value`), not a name-based
+      // engine lookup.
+      const value = a.value;
+      if (value === undefined || isTuple(value)) return false;
+      const vt = compilationType(value);
+      // A `Range` binding types `range` — a list of integers, never a point.
+      if (vt === 'range') return true;
+      if (typeof vt === 'string' || vt.kind !== 'list') return false;
+      const velt = collectionElementType(vt);
+      return velt !== undefined && isSubtype(velt, 'number');
+    }
     return true;
   }
 
@@ -8668,7 +8714,7 @@ export class BaseCompiler {
     const dir =
       a.operator === 'RotateLeft' ? 1 : a.operator === 'RotateRight' ? -1 : 0;
     if (dir === 0 || a.nops < 1 || a.nops > 2) return undefined;
-    if (!BaseCompiler.isScalarElementSource(a.op1)) return undefined;
+    if (!BaseCompiler.isScalarElementSource(a.op1, target)) return undefined;
     if (isCallerMapped(a, admission)) return undefined;
     if (BaseCompiler._codeOverrides.has(a)) return undefined;
     const session = target.cse;
@@ -9458,7 +9504,7 @@ export class BaseCompiler {
         if (tuples.length === 1) {
           if (
             !collection.every(
-              (a) => a === tuples[0] || BaseCompiler.isScalarElementSource(a)
+              (a) => a === tuples[0] || BaseCompiler.isScalarElementSource(a, target)
             )
           )
             return null;

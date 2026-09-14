@@ -2,6 +2,20 @@
 
 ### Resolved Issues
 
+- **A point scaled by a list-bound `indexed_collection<number>` symbol now
+  compiles on the JavaScript target.** Multiplying a point by a symbol whose
+  declared type is `indexed_collection<number>` failed closed, because a
+  `tuple` inhabits that type, so the declaration alone could not prove the
+  symbol holds a list of scalars rather than a single point. The compiler now
+  reads the symbol's binding: a value whose own type is a list of scalars — a
+  `Range`, or the broadcast arithmetic over one that a plot uses to build a
+  list of sample points, which types `list<number>` — is never a point, so the
+  point is scaled at every element and the result is a list of points, exactly
+  what the interpreter answers. A symbol with no binding, or one bound to a
+  point or to a list of points, still fails closed. Audit witness:
+  `neyret/xkusqcyzsx`, `R × (cos t, sin t) + (D_c + X, Y)` with `R` a
+  `Range`-derived list.
+
 - **A shader conditional whose arm repeats a subexpression is emitted in
   the statement form so the subexpression is bound once.** A `Which`/`If`/
   `When` on the GLSL or WGSL target now takes the `if … else …` statement
