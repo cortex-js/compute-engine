@@ -115,28 +115,27 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   bounded by a collection size, a digit count, a prime gap, or an existing cap
   (`MAX_RANDOM_ELEMENT_COUNT`, `MAX_EXACT_COMBINATORICS_DIGITS`,
   `MAX_GAMMA_Q_SERIES_ORDER`, the Beta product's 100 factors, Pollard rho's own
-  iteration cap in `numerics/primes.ts`) need nothing. Fixed in the same
-  round: the `Eulerian` and `Stirling` recurrences were EXPONENTIAL (no memo)
-  and, memoized, exhausted the heap under the step budget (`Stirling(4000,
-  2000)`: millions of ten-thousand-digit memo entries) — `Eulerian`,
-  `Stirling`, `StirlingS1` and `NPartition` are now bottom-up walks keeping
-  one row, gated by an estimate of states × result digits
-  (`MAX_EXACT_RECURRENCE_WORK`, `library/number-theory.ts`) that keeps a call
-  too large to materialize symbolic, and `BernoulliB` takes the same gate;
-  `IsAbundant`, `divisorsAscending` and the Bernoulli recurrence got the step
-  backstop (`valueScaledStep`, the `NextPrime`/`PrimePi` convention);
-  `MatrixPower` multiplies by squaring under an exponent cap instead of
-  |n| − 1 times; `ComplexRoots`, `Colormap` (resampling), `Chunk` and the
-  `D(f, {x, n})` order stay symbolic past a result-count cap. The review of
-  the round added: the JavaScript target shares the `Chunk`, `Colormap` and
-  `MatrixPower` caps (`numerics/value-scaled-caps.ts` — a literal past a cap
-  fails closed, a run-time operand past it answers NaN, and `_SYS.matpow`
-  squares too); the `canEnumerate`/`elementCount` promises of `Chunk`,
-  `ComplexRoots` and `Divisors` decline what evaluate now declines; the
-  constant columns (`Stirling(n, 0)`, `Stirling(n, n)`, `Eulerian(n, 0)`, …)
-  are answered before the work estimate; and the estimate counts the exact
-  states of the one-row walk and treats an operand too large for a `number`
-  as too large. Pinned in
+  iteration cap in `numerics/primes.ts`) need nothing. Fixed in the same round:
+  the `Eulerian` and `Stirling` recurrences were EXPONENTIAL (no memo) and,
+  memoized, exhausted the heap under the step budget (`Stirling(4000, 2000)`:
+  millions of ten-thousand-digit memo entries) — `Eulerian`, `Stirling`,
+  `StirlingS1` and `NPartition` are now bottom-up walks keeping one row, gated
+  by an estimate of states × result digits (`MAX_EXACT_RECURRENCE_WORK`,
+  `library/number-theory.ts`) that keeps a call too large to materialize
+  symbolic, and `BernoulliB` takes the same gate; `IsAbundant`,
+  `divisorsAscending` and the Bernoulli recurrence got the step backstop
+  (`valueScaledStep`, the `NextPrime`/`PrimePi` convention); `MatrixPower`
+  multiplies by squaring under an exponent cap instead of |n| − 1 times;
+  `ComplexRoots`, `Colormap` (resampling), `Chunk` and the `D(f, {x, n})` order
+  stay symbolic past a result-count cap. The review of the round added: the
+  JavaScript target shares the `Chunk`, `Colormap` and `MatrixPower` caps
+  (`numerics/value-scaled-caps.ts` — a literal past a cap fails closed, a
+  run-time operand past it answers NaN, and `_SYS.matpow` squares too); the
+  `canEnumerate`/`elementCount` promises of `Chunk`, `ComplexRoots` and
+  `Divisors` decline what evaluate now declines; the constant columns
+  (`Stirling(n, 0)`, `Stirling(n, n)`, `Eulerian(n, 0)`, …) are answered before
+  the work estimate; and the estimate counts the exact states of the one-row
+  walk and treats an operand too large for a `number` as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
 ### Colour handling residue (audit of 2026-09-08; the five colour rulings — a tuple is 0–1 sRGB, `ColorFromColorspace` answers the route's canonical components, a well-formed spelling that packs to zero is transparent black, a list is not a colour, `ContrastingColor` answers the candidate — landed 2026-09-09)
@@ -149,54 +148,54 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   shape gate, not a wrong value; pre-existing.
 - A colour tuple that reaches a colour operator through a VARIABLE keeps the
   route's canonical reading (OKLCh on the compiled targets): its shape is
-  unknowable at compile time. Documented in the handler comments and pinned;
-  no better answer exists without a runtime tag on colour values.
+  unknowable at compile time. Documented in the handler comments and pinned; no
+  better answer exists without a runtime tag on colour values.
 
 ### Compiled colour values are not one representation (OPEN, ruling — found 2026-09-09 while fixing the `AsRgb` broadcast regression)
 
-The JavaScript compile target has two different runtime spellings for a
-colour, and nothing in a value says which one it is.
+The JavaScript compile target has two different runtime spellings for a colour,
+and nothing in a value says which one it is.
 
 - A colour VALUE is the canonical OKLCh triple. `_SYS.rgb`, `_SYS.hsv`,
   `_SYS.hsl`, `_SYS.oklab` and `_SYS.oklch` all convert their operands to
   `[L, C, H]` (or `[L, C, H, alpha]`), and every helper that consumes a colour
   reads an array that way.
-- A CONVERSION answers bare channels in the space it names. `_SYS.asRgb`
-  answers 0–1 sRGB, `_SYS.asHsv` answers `[h, s, v]`, and
-  `_SYS.colorToColorspace` answers whatever its space operand asks for. The
-  arrays are the same shape as a colour value and carry no space of their own.
+- A CONVERSION answers bare channels in the space it names. `_SYS.asRgb` answers
+  0–1 sRGB, `_SYS.asHsv` answers `[h, s, v]`, and `_SYS.colorToColorspace`
+  answers whatever its space operand asks for. The arrays are the same shape as
+  a colour value and carry no space of their own.
 
 Two consequences, both measured.
 
-- A conversion of a conversion misreads its operand. With
-  `constantFold: false`, `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` compiled to
+- A conversion of a conversion misreads its operand. With `constantFold: false`,
+  `AsRgb(AsRgb(Hsv(0.3, 0.5, 0.5)))` compiled to
   `_SYS.asRgb(_SYS.asRgb(_SYS.hsv(0.3, 0.5, 0.5)))` and ran to
-  `[0.7137, 0, 0.3686]`, where the interpreter answers
-  `Rgb(0.5, 0.2513, 0.25)`. `AsHsv(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to
-  `[329.01, 1, 0.7137]` against the interpreter's `Hsv(0.3, 0.5, 0.5)`.
-- The default `compile()` fallback cannot carry a colour back. A declined
-  colour expression falls back to the interpreter, and `interpretedRunValue`
-  has no serialization for a colour head, so the caller receives a scalar
-  `NaN` instead of a colour.
+  `[0.7137, 0, 0.3686]`, where the interpreter answers `Rgb(0.5, 0.2513, 0.25)`.
+  `AsHsv(AsRgb(Hsv(0.3, 0.5, 0.5)))` ran to `[329.01, 1, 0.7137]` against the
+  interpreter's `Hsv(0.3, 0.5, 0.5)`.
+- The default `compile()` fallback cannot carry a colour back. A declined colour
+  expression falls back to the interpreter, and `interpretedRunValue` has no
+  serialization for a colour head, so the caller receives a scalar `NaN` instead
+  of a colour.
 
 What is done about it for now: every head that reads a colour operand fails
 closed when the STATIC nesting is visible — an operand that is itself one of
 `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab`, `AsOklch` or `ColorToColorspace`,
 including inside a literal `List`. The guard sits in `compileColorOperand`,
-which every colour head goes through, and in `tryCompileColorBroadcast`, the
-one route that does not (both in
+which every colour head goes through, and in `tryCompileColorBroadcast`, the one
+route that does not (both in
 `src/compute-engine/compilation/javascript-target.ts`). A wrong colour is
-replaced by a decline, and the decline states the mechanism. What is still
-NOT caught is nesting that reaches a conversion through a variable: the value
+replaced by a decline, and the decline states the mechanism. What is still NOT
+caught is nesting that reaches a conversion through a variable: the value
 carries no space, so `c := AsRgb(x); ColorDelta(c, y)` still misreads the
 channels at run time.
 
 Two candidate resolutions, one of which the user has to choose:
 
-- Tag a compiled colour value with its space — an object, or a leading
-  sentinel channel — so that every consumer can convert from whatever it is
-  handed. This costs an allocation per colour and touches every `_SYS` colour
-  helper and both shader targets, which have no such tag available.
+- Tag a compiled colour value with its space — an object, or a leading sentinel
+  channel — so that every consumer can convert from whatever it is handed. This
+  costs an allocation per colour and touches every `_SYS` colour helper and both
+  shader targets, which have no such tag available.
 - Make every conversion answer the canonical OKLCh triple, and apply the named
   space only where the value LEAVES the compiled code (the runner's result
   projection). This keeps one representation inside the compiled program, but
@@ -213,98 +212,95 @@ for them, and the second resolution above would need a Tycho change to keep
 colours right. That constraint suggests a third resolution:
 
 - Keep every `_SYS.as*` answer as it is for the consumer, and mark it with a
-  NON-ENUMERABLE property naming its space (`Object.defineProperty(channels,
-  '__space', …)`). A consumer indexing the array sees nothing; a `_SYS` colour
-  helper handed a marked array converts it back to the canonical OKLCh triple
-  (or refuses) before operating, so a conversion result reaching a second
-  colour operator through a variable becomes CORRECT instead of misread, and
-  the static nested-conversion decline can be lifted. Costs one property
-  definition per conversion result. The shader targets have no such tag; there
-  the static decline stays.
+  NON-ENUMERABLE property naming its space
+  (`Object.defineProperty(channels, '__space', …)`). A consumer indexing the
+  array sees nothing; a `_SYS` colour helper handed a marked array converts it
+  back to the canonical OKLCh triple (or refuses) before operating, so a
+  conversion result reaching a second colour operator through a variable becomes
+  CORRECT instead of misread, and the static nested-conversion decline can be
+  lifted. Costs one property definition per conversion result. The shader
+  targets have no such tag; there the static decline stays.
 
-If nothing is decided, the static decline stands: the nested forms fall back
-to the interpreter, and the fallback answers `NaN` for them until
+If nothing is decided, the static decline stands: the nested forms fall back to
+the interpreter, and the fallback answers `NaN` for them until
 `interpretedRunValue` learns to serialize a colour.
 
 ### Findings of the Tycho code-generation audit of 2026-09-09 (OPEN — CE 0.127.0; report `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-09-report.md`, records in `ce-0.127.0.json` of that folder)
 
-The report was reviewed on 2026-09-09 and each item was reproduced against
-HEAD from source before it was listed here. The items are in the order of
-their expected effect on the corpus.
+The report was reviewed on 2026-09-09 and each item was reproduced against HEAD
+from source before it was listed here. The items are in the order of their
+expected effect on the corpus.
 
-- **A user function declared `-> unknown` types `broadcastable<number>`
-  through every broadcastable head** (`\sin(u(t))` for
-  `u: (unknown) -> unknown`). This is the cause of the audit's largest item
-  (465 `_SYS.bcast` sites, 42 `PointList` declines on GLSL): Tycho's
-  importer declares each user function `(unknown, …) -> unknown` and refines
-  the result only when its probe reads a type that `matches('number')` —
-  `missing | number` (the default-less piecewise again) fails that test, so
-  the result stays `unknown`. The typing is honest on CE's side; a
-  default-less piecewise keeps its `missing | T` type by ruling
+- **A user function declared `-> unknown` types `broadcastable<number>` through
+  every broadcastable head** (`\sin(u(t))` for `u: (unknown) -> unknown`). This
+  is the cause of the audit's largest item (465 `_SYS.bcast` sites, 42
+  `PointList` declines on GLSL): Tycho's importer declares each user function
+  `(unknown, …) -> unknown` and refines the result only when its probe reads a
+  type that `matches('number')` — `missing | number` (the default-less piecewise
+  again) fails that test, so the result stays `unknown`. The typing is honest on
+  CE's side; a default-less piecewise keeps its `missing | T` type by ruling
   (2026-09-09), so the remaining lever is the Tycho-side change to accept
   `missing | T` as scalar in that probe. The 2026-09-08 note "J3 is not
   reproducible at HEAD" was true only for the constructions tried; the
-  `-> unknown` declaration with the body assigned in ANOTHER scope
-  reproduces it.
+  `-> unknown` declaration with the body assigned in ANOTHER scope reproduces
+  it.
 - **Absence at the boxing seam, residue found while fixing the consumers
   (2026-09-09).** (1) `Partition(L, k(0))` with `k` a default-less piecewise
   returning an integer is rejected as `incompatible-type` (`integer | missing`
-  against `((integer) any -> boolean) | integer`), while `At`, `Take`,
-  `Drop`, `Repeat`, `Range`, `Chunk`, `Round` accept the same operand:
-  the size parameter is a two-arm union, so the derived `missingBehavior` is
-  `pass-through` and `missingStrip` never strips the marker at that slot.
-  Needs per-slot granularity for a union-typed parameter, or a declared
-  behavior on `Partition` whose no-answer value is `Missing` (its codomain
-  is a list). (2) A bare `missing` big-operator bound
-  (`Sum(x, (x, Missing, 3))`) is still an `incompatible-type` error while a
-  `NaN` bound stays symbolic; `checkBound` (`library/utils.ts`) now accepts
-  `missing | numeric` only. Decide whether the early diagnostic or the §3
-  normalization wins. (3) `g(3) + 0` evaluates to `Missing` while
-  `g(3) + 1` evaluates to `NaN`, because the identity element is dropped at
-  canonicalization and no numeric slot remains for the absence gate. Judged
-  consistent with the ruling (`g(3) + 0` IS `g(3)`), recorded so the
+  against `((integer) any -> boolean) | integer`), while `At`, `Take`, `Drop`,
+  `Repeat`, `Range`, `Chunk`, `Round` accept the same operand: the size
+  parameter is a two-arm union, so the derived `missingBehavior` is
+  `pass-through` and `missingStrip` never strips the marker at that slot. Needs
+  per-slot granularity for a union-typed parameter, or a declared behavior on
+  `Partition` whose no-answer value is `Missing` (its codomain is a list). (2) A
+  bare `missing` big-operator bound (`Sum(x, (x, Missing, 3))`) is still an
+  `incompatible-type` error while a `NaN` bound stays symbolic; `checkBound`
+  (`library/utils.ts`) now accepts `missing | numeric` only. Decide whether the
+  early diagnostic or the §3 normalization wins. (3) `g(3) + 0` evaluates to
+  `Missing` while `g(3) + 1` evaluates to `NaN`, because the identity element is
+  dropped at canonicalization and no numeric slot remains for the absence gate.
+  Judged consistent with the ruling (`g(3) + 0` IS `g(3)`), recorded so the
   difference is a known one.
 - **`Undefined` in a numeric slot stays symbolic (reported by the Tycho
   re-measure of 2026-09-09).** The restriction form `expr\{cond\}` (a `When`)
-  answers the masking `Undefined` when its condition fails, and
-  `\cos(T_4(t))` with such a `T_4` evaluates under `.N()` to the symbolic
-  `cos("Undefined")` where the compiled lane answers `NaN`. Decide whether
-  `Undefined` in a numeric slot is normalized like `Missing` (`Cos(Missing)`
-  is `NaN`) or stays a symbolic marker on purpose; if it is normalized, the
-  `When` result type (`number` today) is the same question as the
-  `missing | T` arm of `Which`.
+  answers the masking `Undefined` when its condition fails, and `\cos(T_4(t))`
+  with such a `T_4` evaluates under `.N()` to the symbolic `cos("Undefined")`
+  where the compiled lane answers `NaN`. Decide whether `Undefined` in a numeric
+  slot is normalized like `Missing` (`Cos(Missing)` is `NaN`) or stays a
+  symbolic marker on purpose; if it is normalized, the `When` result type
+  (`number` today) is the same question as the `missing | T` arm of `Which`.
 - **Interval `atan2` reports no jump when `y` is exactly `[0, 0]` and `x`
   straddles zero (found 2026-09-09 while lowering `Arg` on `interval-js`).**
   `_IA.atan2([0,0], [-1,1])` answers the plain hull `[0, π]`, although the
   function jumps from π (`x < 0`) to 0 (`x > 0`) inside that box. The hull is
   sound; what is missing is the `singular` verdict the `y`-crossing case
-  carries. The jump test reads the crossing in the FIRST operand and the
-  `at` field is documented in that operand's coordinate, so this second-operand
-  jump cannot be expressed without widening the contract for existing
-  `Arctan2` callers. Needs a ruling before the condition is widened.
-- **The runtime conformance check cannot police an OPEN generic parameter
-  (found 2026-09-09 while fixing `Partition`'s union-typed size slot).**
-  `runtimeCheckExemptParam` exempts any parameter type with a free type
-  variable because `admissionOf` asserts on an open type and the conformance
-  plan is built once from the DECLARED signature, so a settled bad value at
-  such a slot (`Partition([1,2,3,4], Missing)` at evaluation) gets its verdict
-  from the operator's own handler, not from the generic check that serves
-  `Chunk`. Every generic operator with a checkable value parameter is in the
-  same position. Instantiating the plan per call site would close it; a
-  design change, low urgency.
-- **The piecewise decidedness guard is NOT redundant after the exact
-  equality (checked 2026-09-09, closing a note that said the opposite):** a
-  comparison operand behind the guard `(v === v) ? … : NaN` still needs it.
-  `Which(Equal(NaN, 5), 1, True, 0)` evaluates to `Missing` in the
-  interpreter, so the compiled piecewise must answer `NaN` when the compared
-  value is `NaN`; without the guard `NaN === 5` is `false` and the else arm
-  would answer instead. The exact test answers `false` on `NaN`, which is the
-  right answer for the COMPARISON, not for the piecewise that contains it.
-  Tycho's item 276 asks for the guard to be dropped; it stays, and the test
+  carries. The jump test reads the crossing in the FIRST operand and the `at`
+  field is documented in that operand's coordinate, so this second-operand jump
+  cannot be expressed without widening the contract for existing `Arctan2`
+  callers. Needs a ruling before the condition is widened.
+- **The runtime conformance check cannot police an OPEN generic parameter (found
+  2026-09-09 while fixing `Partition`'s union-typed size slot).**
+  `runtimeCheckExemptParam` exempts any parameter type with a free type variable
+  because `admissionOf` asserts on an open type and the conformance plan is
+  built once from the DECLARED signature, so a settled bad value at such a slot
+  (`Partition([1,2,3,4], Missing)` at evaluation) gets its verdict from the
+  operator's own handler, not from the generic check that serves `Chunk`. Every
+  generic operator with a checkable value parameter is in the same position.
+  Instantiating the plan per call site would close it; a design change, low
+  urgency.
+- **The piecewise decidedness guard is NOT redundant after the exact equality
+  (checked 2026-09-09, closing a note that said the opposite):** a comparison
+  operand behind the guard `(v === v) ? … : NaN` still needs it.
+  `Which(Equal(NaN, 5), 1, True, 0)` evaluates to `Missing` in the interpreter,
+  so the compiled piecewise must answer `NaN` when the compared value is `NaN`;
+  without the guard `NaN === 5` is `false` and the else arm would answer
+  instead. The exact test answers `false` on `NaN`, which is the right answer
+  for the COMPARISON, not for the piecewise that contains it. Tycho's item 276
+  asks for the guard to be dropped; it stays, and the test
   `compile-equality-exact.test.ts` pins the interpreter's `Missing`.
 - **Not CE's:** the inline `At` lambda (Tycho's own override), the "Unknown
-  operator" declines (importer binding), and the 2× re-compile of every
-  declined row.
+  operator" declines (importer binding), and the 2× re-compile of every declined
+  row.
 
 ### Residue of the Tycho items 275–280 round (OPEN — found by the dual review of 2026-09-09, not fixed in the round)
 
@@ -315,9 +311,9 @@ their expected effect on the corpus.
   sum runs an index-independent gather once. Regression coverage:
   `test/compute-engine/compile-audit-followups.test.ts`.
 
-- **A SCALAR compiled comparison answers a decided boolean where the
-  interpreter is undecided.** `Equal(a, b)` with either operand absent from the
-  object of variables compiles to `false` (and `NotEqual` to `true`), where the
+- **A SCALAR compiled comparison answers a decided boolean where the interpreter
+  is undecided.** `Equal(a, b)` with either operand absent from the object of
+  variables compiles to `false` (and `NotEqual` to `true`), where the
   interpreter answers `Missing` for `Equal(Missing, 5)` and for
   `NotEqual(Missing, 5)` alike. The ELEMENT-WISE runtime was made three-valued
   (an absent cell is marked `NaN`, which the selection runtime and the
@@ -339,62 +335,83 @@ their expected effect on the corpus.
 - **Whole-collection equality answers `false` when an element is absent.**
   `Equal(a, b)` over two ARRAYS is collection equality, a single boolean, and
   its recursion treats an element pair that is not decided equal as unequal. So
-  two arrays with matching absent cells compile to `false` where the
-  interpreter answers `True` (measured: `Equal([1, Missing], [1, Missing])` is
-  `True`), and an absent cell against a present one compiles to `false` where
-  the interpreter leaves the comparison unevaluated. The element-wise shape
-  (array against scalar) is unaffected: it marks exactly the absent positions.
-  Deciding this needs an answer to what an undecided WHOLE-collection
-  comparison should be — a single marker, or a decided `false` — which is a
-  question about the absence contract (`docs/ERROR-MODEL.md`), not a codegen
-  fix.
-- **`Re((x+ib)^2)` still builds one `{re, im}` object (noted by the
-  complex-lane slice of 2026-09-09).** The statement lowering removed the
-  closures; splitting a small-integer `Power` of a complex operand into its
-  two real parts at the reader (`tryGetJSComplexParts`) would emit
-  `x*x - b*b` with no object at all, at the cost of splicing each part twice
-  (a cheapness gate is needed) and of inheriting the reader's `re = 0`
-  convention for a non-finite imaginary factor. A new optimization, not a
-  defect; the expression-position `code` keeps one enclosing function by
-  contract either way.
-- **Symbolic differentiation grows super-exponentially with the order
-  because the chain rule is built with `.mul()`, which distributes over
-  sums (measured 2026-09-09 on `f(x) := √(x+√(x+√(x+√(x+x))))`: `d1` 49 ms
-  and 0.9 KB, `d2` 614 ms and 7.5 KB, `d3` 14 s and 172 KB, then 4.5 s of
-  `simplify`).** The compiled JavaScript route no longer pays it (jets), but
-  the interpreter's `Derivative(f, 3).evaluate()` and `.N()` still do.
-  Building the chain rule with `mulFactored` gives a three times smaller
-  first derivative and is 35 times SLOWER at order two, because normalizing
-  the nested quotients sends `Product.asRationalExpression` → `factor()`
-  into a near-exponential walk (17 s of a 20 s run). Two open questions: can
-  `factor()` handle nested quotients in near-linear time, and should the
-  differentiation rules then keep their results factored — which changes
-  the shape of many `evaluate()` results and needs a snapshot-churn ruling.
-- **`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with `F := [f, f', f'', f''']`
-  does not parse as the application of a list element** — `F(\epsilon)`
-  parses as a juxtaposition — so the corpus row of Tycho item 284 never
-  reaches the compiler in the shape the record implies. The explicit
-  four-term sum compiles in 65 ms and matches `.N()`; the record's exact
-  spelling should be recovered and re-tested on the Tycho side.
-- **`_gpu_powi` vector variants answer NaN for a zero component under a
-  negative odd exponent** (`sign(x) · pow(0, n)` is `0 · ∞`), where the
-  scalar helper answers `+∞`. Both sit in hardware-undefined territory (a
-  pole); a per-component `select` would make the two agree. Reachable now
-  that a negative run-time exponent over a `vecN` base routes to the helper.
+  two arrays with matching absent cells compile to `false` where the interpreter
+  answers `True` (measured: `Equal([1, Missing], [1, Missing])` is `True`), and
+  an absent cell against a present one compiles to `false` where the interpreter
+  leaves the comparison unevaluated. The element-wise shape (array against
+  scalar) is unaffected: it marks exactly the absent positions. Deciding this
+  needs an answer to what an undecided WHOLE-collection comparison should be — a
+  single marker, or a decided `false` — which is a question about the absence
+  contract (`docs/ERROR-MODEL.md`), not a codegen fix.
+- **`Re((x+ib)^2)` still builds one `{re, im}` object (noted by the complex-lane
+  slice of 2026-09-09).** The statement lowering removed the closures; splitting
+  a small-integer `Power` of a complex operand into its two real parts at the
+  reader (`tryGetJSComplexParts`) would emit `x*x - b*b` with no object at all,
+  at the cost of splicing each part twice (a cheapness gate is needed) and of
+  inheriting the reader's `re = 0` convention for a non-finite imaginary factor.
+  A new optimization, not a defect; the expression-position `code` keeps one
+  enclosing function by contract either way.
+- **Symbolic differentiation grows super-exponentially with the order because
+  the chain rule is built with `.mul()`, which distributes over sums (measured
+  2026-09-09 on `f(x) := √(x+√(x+√(x+√(x+x))))`: `d1` 49 ms and 0.9 KB, `d2` 614
+  ms and 7.5 KB, `d3` 14 s and 172 KB, then 4.5 s of `simplify`).** The compiled
+  JavaScript route no longer pays it (jets), but the interpreter's
+  `Derivative(f, 3).evaluate()` and `.N()` still do. Building the chain rule
+  with `mulFactored` gives a three times smaller first derivative and is 35
+  times SLOWER at order two, because normalizing the nested quotients sends
+  `Product.asRationalExpression` → `factor()` into a near-exponential walk (17 s
+  of a 20 s run). Two open questions: can `factor()` handle nested quotients in
+  near-linear time, and should the differentiation rules then keep their results
+  factored — which changes the shape of many `evaluate()` results and needs a
+  snapshot-churn ruling.
+- **`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with
+  `F := [f, f', f'', f''']` does not parse as the application of a list
+  element** — `F(\epsilon)` parses as a juxtaposition — so the corpus row of
+  Tycho item 284 never reaches the compiler in the shape the record implies. The
+  explicit four-term sum compiles in 65 ms and matches `.N()`; the record's
+  exact spelling should be recovered and re-tested on the Tycho side.
+- **`_gpu_powi` vector variants answer NaN for a zero component under a negative
+  odd exponent** (`sign(x) · pow(0, n)` is `0 · ∞`), where the scalar helper
+  answers `+∞`. Both sit in hardware-undefined territory (a pole); a
+  per-component `select` would make the two agree. Reachable now that a negative
+  run-time exponent over a `vecN` base routes to the helper.
 - **The interval-js runner copies its answer on the way out.** The constant
   table now lives for the artifact's lifetime, so `freshIntervalValue` copies
-  the top-level result (and, for a collection-valued root, every element) so
-  a caller that writes into a returned enclosure cannot corrupt the table.
-  One or two small allocations per call; for a collection-valued root the
-  copy is linear in its length. The alternative is to document the returned
-  enclosure as read-only and drop the copy. Today no in-repo consumer writes
-  to a returned enclosure. The copy stays until ruled otherwise.
+  the top-level result (and, for a collection-valued root, every element) so a
+  caller that writes into a returned enclosure cannot corrupt the table. One or
+  two small allocations per call; for a collection-valued root the copy is
+  linear in its length. The alternative is to document the returned enclosure as
+  read-only and drop the copy. Today no in-repo consumer writes to a returned
+  enclosure. The copy stays until ruled otherwise.
+
+### A point argument with a complex-valued coordinate declines where the interpreter answers a real number (OPEN — found 2026-09-15 in the Tycho corpus document `neyret/hpr2q4kles`)
+
+`P_0(M_0, D, d, e_0, a, T_0, r_0) = l(d_{iv}(r(M_0, -a) - C(D, d), A(e_0))) - (D + d) / 2`
+with `A(e_0) = (1, \sqrt{1 - e_0^2})` and `l(V) = \sqrt{V.x^2 + V.y^2}`. Under
+the default `auto` discipline the square root of `1 - e_0^2` (an unknown-sign
+parameter expression) promotes to the complex kernel, so the inlined `d_{iv}`
+hands `l` a point whose second coordinate is a `{re, im}` object. The emitted
+`_fn_l` reads a point parameter's coordinates as plain numbers, so the call used
+to answer `NaN` behind `success: true`; it now fails closed at that call
+(`compile-point-complex-coordinate.test.ts`). The interpreter answers 1.024 for
+the document's eccentricities (all below 1).
+
+The correct lowering needs the inline substitution to read through the
+return-type ascription an inlined helper leaves around its point
+(`Typed(PointList(…), '…')`) AND the enclosing arithmetic's lane analysis to see
+the inlined body instead of the call node — removing the wrapper alone was
+measured to concatenate a string (`"-0.39[object Object]"`), because the
+enclosing `Add` had analyzed the call as real. The lane analysis of a call whose
+written-out point argument carries a complex coordinate is already answered from
+the substituted body (`isComplexValuedUserCall`); extending that reading to the
+ascription-wrapped case, and making the substitution accept it, is the remaining
+work.
 
 ### Codegen audit follow-ups (CE 0.128.9)
 
 The CORE audit `ce-0.128.9.json` pairs all 784 records with
-`ce-0.128.8-369a447d4.json` on Tycho source `369a447d4`. Four JavaScript
-outputs lose 1,500 characters, twelve array checks and four dynamic minimum
+`ce-0.128.8-369a447d4.json` on Tycho source `369a447d4`. Four JavaScript outputs
+lose 1,500 characters, twelve array checks and four dynamic minimum
 calculations; compilation outcomes are unchanged. Tycho has retired item 275.
 The remaining 165 broadcast occurrences include required collection work and
 fallback branches. They are not a count of redundant runtime operations.
@@ -404,218 +421,213 @@ GLSL records, so dead-helper removal has no witness in this audit. Source size
 and occurrence counts above do not establish frame-time or compilation-time
 improvements.
 
-**Fresh run against this source, 2026-09-12** (Tycho commit `ccb21367a`;
-Tycho's collector run with the package name mapped to `src/compute-engine.ts`
-through a `tsconfig` `paths` entry, so the product pipeline compiles against
-the working tree; the `--compare` arm was `ce-0.128.9.json`): 769 records,
-no new decline, 6 resolved (the five `interval-js` `List` declines and the
-column-indexed GLSL comprehension row), 67 records with changed code (the
-invariant-prefix variants, the interval `List` write-outs, the smaller
-`62urmx2dcm` certificates). What the run left, after the index push-through
-and the root substitution of list-valued helpers landed the same day:
+**Fresh run against this source, 2026-09-12** (Tycho commit `ccb21367a`; Tycho's
+collector run with the package name mapped to `src/compute-engine.ts` through a
+`tsconfig` `paths` entry, so the product pipeline compiles against the working
+tree; the `--compare` arm was `ce-0.128.9.json`): 769 records, no new decline, 6
+resolved (the five `interval-js` `List` declines and the column-indexed GLSL
+comprehension row), 67 records with changed code (the invariant-prefix variants,
+the interval `List` write-outs, the smaller `62urmx2dcm` certificates). What the
+run left, after the index push-through and the root substitution of list-valued
+helpers landed the same day:
 
 - `interval-js`: 4 point-list VALUE roots and 1 `Range` root in
   `art/n7uhaaoq1q`, 1 `Range` in `1a9de333a1`, `Mandelbrot`, `Julia` — the
   design declines listed under the fixed-width residue below.
-- `glsl`: `At` over a by-reference `indexed_collection` in `game-of-life`
-  and `1a9de333a1` — the sampler half, Tycho's DV GPU work.
-- `javascript`, not a decline but the largest run-time cost the run shows:
-  152 `_SYS.bcast` sites in 26 records, 95 of them in the implicit-surface
-  rows of `art/khpocp8io0` (a list of 225 spheres, twelve nested broadcasts
-  a row) and 34 in `rccfsvo93r`, where an undeclared symbol `W` reaches the
-  engine and every arithmetic head over it dispatches at run time — a
-  declaration gap on the Tycho side (`W` declared real removes them all).
-  The `khpocp8io0` nests are fused into one loop per row by the broadcast
-  fusion landed 2026-09-12 (`compile-broadcast-fusion.test.ts`).
-- `javascript`: 4 records of `art/n7uhaaoq1q`, all the BY-REFERENCE form of
-  a row whose helper `c` reaches the engine as a valueless COLLECTION-typed
-  symbol, not a function (`lookupDefinition('c')` is a value definition
-  typed `list<tuple<…>> | …` with no value; `c(u, v)` types `unknown`). One
-  record says `Unknown operator c`; three fail at `Add` over the
-  `broadcastable` result. The engine cannot substitute a body it cannot
-  see, so these are the binding failures Tycho's importer README describes
-  ("Unknown operator declines are BINDING failures"), each followed by the
-  successful compile of the expanded row. Not a Compute Engine defect; the
-  by-reference form of the same rows compiles when `c` is assigned as a
-  function — substituted at the shader roots, called by reference with the
-  broadcast dispatch on JavaScript (`compile-index-push-through.test.ts`).
+- `glsl`: `At` over a by-reference `indexed_collection` in `game-of-life` and
+  `1a9de333a1` — the sampler half, Tycho's DV GPU work.
+- `javascript`, not a decline but the largest run-time cost the run shows: 152
+  `_SYS.bcast` sites in 26 records, 95 of them in the implicit-surface rows of
+  `art/khpocp8io0` (a list of 225 spheres, twelve nested broadcasts a row) and
+  34 in `rccfsvo93r`, where an undeclared symbol `W` reaches the engine and
+  every arithmetic head over it dispatches at run time — a declaration gap on
+  the Tycho side (`W` declared real removes them all). The `khpocp8io0` nests
+  are fused into one loop per row by the broadcast fusion landed 2026-09-12
+  (`compile-broadcast-fusion.test.ts`).
+- `javascript`: 4 records of `art/n7uhaaoq1q`, all the BY-REFERENCE form of a
+  row whose helper `c` reaches the engine as a valueless COLLECTION-typed
+  symbol, not a function (`lookupDefinition('c')` is a value definition typed
+  `list<tuple<…>> | …` with no value; `c(u, v)` types `unknown`). One record
+  says `Unknown operator c`; three fail at `Add` over the `broadcastable`
+  result. The engine cannot substitute a body it cannot see, so these are the
+  binding failures Tycho's importer README describes ("Unknown operator declines
+  are BINDING failures"), each followed by the successful compile of the
+  expanded row. Not a Compute Engine defect; the by-reference form of the same
+  rows compiles when `c` is assigned as a function — substituted at the shader
+  roots, called by reference with the broadcast dispatch on JavaScript
+  (`compile-index-push-through.test.ts`).
 
 ### Residue of the point-shape compile round (OPEN, compile performance — found 2026-09-10 while settling the Tycho heat-map colour chain)
 
-The round proved a user-function application scalar or point-shaped under
-point arguments, taught `Dot` and point arithmetic to emit component code at
-a static width, and made a parameter's scalar standing survive a binder
-inside its own body. The Tycho noise kernel `hyvhlz4chj` went from 15.5 to
-2.5 microseconds a sample and its emitted definitions from 64 runtime
-broadcast sites to 9. What those 9 are:
+The round proved a user-function application scalar or point-shaped under point
+arguments, taught `Dot` and point arithmetic to emit component code at a static
+width, and made a parameter's scalar standing survive a binder inside its own
+body. The Tycho noise kernel `hyvhlz4chj` went from 15.5 to 2.5 microseconds a
+sample and its emitted definitions from 64 runtime broadcast sites to 9. What
+those 9 are:
 
-- **Point-parameter helper specialization is implemented.** Proven point
-  calls now share a helper compiled at their argument widths, while the
-  function's original declaration continues to admit lists. The `p_rand`
-  helper's trigonometric arithmetic no longer uses runtime broadcast dispatch.
-  See `docs/CALL-SHAPE-SPECIALIZATION.md` for the call-typing contract and the
-  CORE source comparison.
+- **Point-parameter helper specialization is implemented.** Proven point calls
+  now share a helper compiled at their argument widths, while the function's
+  original declaration continues to admit lists. The `p_rand` helper's
+  trigonometric arithmetic no longer uses runtime broadcast dispatch. See
+  `docs/CALL-SHAPE-SPECIALIZATION.md` for the call-typing contract and the CORE
+  source comparison.
 
 A residue of the `Dot` typing half is that `PointList(1, L)` with `L` a list
 types `list<tuple<…>>`, so `Dot(PointList(1, L), PointList(3, 4))` reports
-`incompatible-type` where the tuple spelling `(1, L)` now answers the
-broadcast inner product. The two spellings should agree; deciding which one
-moves is a typing ruling on what `PointList` of a collection component means.
+`incompatible-type` where the tuple spelling `(1, L)` now answers the broadcast
+inner product. The two spellings should agree; deciding which one moves is a
+typing ruling on what `PointList` of a collection component means.
 
 **Dot with declared broadcastable coordinates is implemented.** Tuple
 coordinates are broadcast before their scalar inner products are computed.
-`Dot(a, b)` with `a = [1, [1, 2]]` and `b = [3, 4]` now returns `[7, 11]`,
-while scalar-coordinate inputs still return a scalar. Operands are bound once;
-inputs whose widths disagree with the declarations retain the runtime matrix
-fallback. Written tuples with numeric list components use the same path.
+`Dot(a, b)` with `a = [1, [1, 2]]` and `b = [3, 4]` now returns `[7, 11]`, while
+scalar-coordinate inputs still return a scalar. Operands are bound once; inputs
+whose widths disagree with the declarations retain the runtime matrix fallback.
+Written tuples with numeric list components use the same path.
 
 ### Residue of the Tycho code-generation audit of 2026-09-08 (OPEN — the audit's C1, I2, J1/G1, G2–G9, J4–J9 items landed 2026-09-08)
 
-The audit (`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md`,
-CE 0.126.2, 862 records over 71 documents) was worked in eight slices; what
-follows is what the slices measured and did not change. Each line names the
-decision or the work that remains.
+The audit
+(`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md`, CE
+0.126.2, 862 records over 71 documents) was worked in eight slices; what follows
+is what the slices measured and did not change. Each line names the decision or
+the work that remains.
 
 - **Interval-js library residue after outward rounding (2026-09-08).**
   `integrate.ts` keeps its `widen()` margin for the partition widths, with a
-  deliberate factor of three; the composed hyperbolic and reciprocal
-  routines are built from unrounded kernels and take one step at their own
-  export, except `remainder`, whose three-operation composition takes three.
+  deliberate factor of three; the composed hyperbolic and reciprocal routines
+  are built from unrounded kernels and take one step at their own export, except
+  `remainder`, whose three-operation composition takes three.
 - **Identity lowerings that return their operand's code, other targets.** The
   JavaScript handlers were fixed this round (`identityPassthrough`,
-  `javascript-target.ts`). The same pattern — `return compile(op)` spliced
-  bare into an infix parent — is likely in `python-target.ts` and
-  `gpu-target.ts` and was not checked; the arithmetic passthroughs of the
-  JavaScript target (`Add`/`Multiply` with one operand left after filtering
-  identities, `Power(x, 1)`, `Divide(x, 1)`) are reachable only from
-  non-canonical input, and non-canonical `Multiply(3, Multiply(Add(x, 1)))`
-  emits `3 * * _.x + 1`, a syntax error. One sweep across the three targets,
-  or threading the caller's precedence into `OperandCompiler` (it compiles at
-  precedence 0 today), closes the family.
+  `javascript-target.ts`). The same pattern — `return compile(op)` spliced bare
+  into an infix parent — is likely in `python-target.ts` and `gpu-target.ts` and
+  was not checked; the arithmetic passthroughs of the JavaScript target
+  (`Add`/`Multiply` with one operand left after filtering identities,
+  `Power(x, 1)`, `Divide(x, 1)`) are reachable only from non-canonical input,
+  and non-canonical `Multiply(3, Multiply(Add(x, 1)))` emits `3 * * _.x + 1`, a
+  syntax error. One sweep across the three targets, or threading the caller's
+  precedence into `OperandCompiler` (it compiles at precedence 0 today), closes
+  the family.
 - **`_SYS.cabs` squares before the square root**, so `|3e-200 + 4e-200 i|`
   answers 0 where `Math.hypot` answers `5e-200`. The split real-part lowering
-  added this round uses `Math.hypot`; the object form still goes through
-  `cabs`. Consider `Math.hypot(z.re, z.im)` in the helper.
-- **Audit item J3 is not reproducible at HEAD.** The 496 `_SYS.bcast` sites
-  over user-function results needed the call to type top; every construction
-  tried (assign, declared `-> unknown`, `Block`, `If`, `Which`, piecewise)
-  types `number` at HEAD — the Block analysis moved to value-before-type on
-  2026-09-08, after the 0.126.2 run. The constructed-scalar arm added this
-  round is a guard for weaker inference. Re-run the audit against HEAD before
-  spending more here.
+  added this round uses `Math.hypot`; the object form still goes through `cabs`.
+  Consider `Math.hypot(z.re, z.im)` in the helper.
+- **Audit item J3 is not reproducible at HEAD.** The 496 `_SYS.bcast` sites over
+  user-function results needed the call to type top; every construction tried
+  (assign, declared `-> unknown`, `Block`, `If`, `Which`, piecewise) types
+  `number` at HEAD — the Block analysis moved to value-before-type on
+  2026-09-08, after the 0.126.2 run. The constructed-scalar arm added this round
+  is a guard for weaker inference. Re-run the audit against HEAD before spending
+  more here.
 - **`Sum(At(P, Range(a, b)))` materializes the range.** The 24 `Array.from`
-  range sites in the corpus are all places where the range is needed as a
-  list (7 gather indices, 15 spread elements, 2 broadcast operands); a
-  counting loop has no site. The 7 gather sites would take a gather/reduce
-  fusion in `emitCollectionReduce` (`javascript-target.ts`) — a new lowering.
+  range sites in the corpus are all places where the range is needed as a list
+  (7 gather indices, 15 spread elements, 2 broadcast operands); a counting loop
+  has no site. The 7 gather sites would take a gather/reduce fusion in
+  `emitCollectionReduce` (`javascript-target.ts`) — a new lowering.
 - **GLSL `fract` and `exp2` apply to scalar operands only.** The peepholes
-  consume an operand, so the emitted call has fewer arguments than the head
-  has operands and `gpuCheckOperandShapes` declines a vector (`Mod(v, 1)`
-  stays `mod(v, 1.0)`). Teaching the gate about operand-consuming lowerings
+  consume an operand, so the emitted call has fewer arguments than the head has
+  operands and `gpuCheckOperandShapes` declines a vector (`Mod(v, 1)` stays
+  `mod(v, 1.0)`). Teaching the gate about operand-consuming lowerings
   (`markAggregateConsuming` exists) lifts the restriction.
-- **GPU literal spelling.** Folded GPU literals are spelled with the full
-  double `toString` through `formatFloat` (`0.00015625001105945557`); the
-  shortest float32 round-trip spelling would be about 9 digits and shrink
-  shaders further. `formatFloat` is shared by every GPU emission.
-- **Interval preamble constants are per call, not per compile.** The
-  interval-js wrapper builds one function whose body is `preamble; return
-  expression`, so a hoisted constant is allocated once per call (40 → 21 on a
-  20-term sum), not once per compiled artifact. Once-ever needs an outer
-  closure around the wrapper (`toString`, the Proxy and the arity all read
-  the wrapper).
-- **Audit item J6a (the 200-character index lambda, 211 sites) is Tycho's.**
-  The lambda is emitted by Tycho's own `At` override
+- **GPU literal spelling.** Folded GPU literals are spelled with the full double
+  `toString` through `formatFloat` (`0.00015625001105945557`); the shortest
+  float32 round-trip spelling would be about 9 digits and shrink shaders
+  further. `formatFloat` is shared by every GPU emission.
+- **Interval preamble constants are per call, not per compile.** The interval-js
+  wrapper builds one function whose body is `preamble; return expression`, so a
+  hoisted constant is allocated once per call (40 → 21 on a 20-term sum), not
+  once per compiled artifact. Once-ever needs an outer closure around the
+  wrapper (`toString`, the Proxy and the arity all read the wrapper).
+- **Audit item J6a (the 200-character index lambda, 211 sites) is Tycho's.** The
+  lambda is emitted by Tycho's own `At` override
   (`~/dev/tycho/src/graph-paper/graph/at-index-semantics.ts`, `atDef.compile`),
   not by the engine. Its semantics differ from `_SYS.at` (no
   negative-from-the-end indexing; a per-position absence marker for a list
   index). The engine now ships `_SYS.atNoWrap(base, index)` with exactly the
   lambda's semantics; the 42 KB is recovered when Tycho's override calls it.
   Hand off to Tycho.
-- **Audit item I4 (interval piecewise arms as per-call closures; the `Sum`
-  bound read through an inline shape probe) was not worked** this round.
-- **A record reaching an `unknown`-typed parameter through a callback value
-  is broadcast over its fields.** The broadcast-aware wrapper a function
-  value receives decides with `Array.isArray`, and a record, tuple or
-  nominal value lowers to a bare JavaScript array. A parameter TYPED as one
-  of those keeps the bare reference (`signatureParamsLowerToScalars`,
-  `base-compiler.ts`); a parameter left `unknown` is admitted, as the
-  interpreter's own broadcast gate admits it, so `Map(f, persons)` with an
-  unannotated `f(p)` would map over each person's fields. Objects have no
-  compiled representation yet, so no corpus reaches this; recorded so the
-  gate is tightened when they do.
+- **Audit item I4 (interval piecewise arms as per-call closures; the `Sum` bound
+  read through an inline shape probe) was not worked** this round.
+- **A record reaching an `unknown`-typed parameter through a callback value is
+  broadcast over its fields.** The broadcast-aware wrapper a function value
+  receives decides with `Array.isArray`, and a record, tuple or nominal value
+  lowers to a bare JavaScript array. A parameter TYPED as one of those keeps the
+  bare reference (`signatureParamsLowerToScalars`, `base-compiler.ts`); a
+  parameter left `unknown` is admitted, as the interpreter's own broadcast gate
+  admits it, so `Map(f, persons)` with an unannotated `f(p)` would map over each
+  person's fields. Objects have no compiled representation yet, so no corpus
+  reaches this; recorded so the gate is tightened when they do.
 - **The broadcast wrapper around an inline function literal is wider than
-  callback position.** The `Function`-literal lowering cannot see its parent,
-  so the wrapper also lands on a block-local definition (`let g = (k) ↦ …`,
-  whose call sites are already broadcast-aware), on an `Apply` head
-  (`\sin'(x)`) and on a whole-artifact function result. Redundant, not
-  wrong: one extra call frame and one `Array.isArray` per call. Narrowing it
-  means moving the wrap into the callback funnel of `javascript-target.ts`
-  (`hoistedCallbackLambda` / `fnArg`), which was carrying a peer's in-flight
-  work when this landed (2026-09-08). Also: `Map(Length, xs)` does not
-  compile on the JavaScript target — the synthesized parameter is typed
-  `unknown`, so `Length` declines (a fallback, not a wrong value).
+  callback position.** The `Function`-literal lowering cannot see its parent, so
+  the wrapper also lands on a block-local definition (`let g = (k) ↦ …`, whose
+  call sites are already broadcast-aware), on an `Apply` head (`\sin'(x)`) and
+  on a whole-artifact function result. Redundant, not wrong: one extra call
+  frame and one `Array.isArray` per call. Narrowing it means moving the wrap
+  into the callback funnel of `javascript-target.ts` (`hoistedCallbackLambda` /
+  `fnArg`), which was carrying a peer's in-flight work when this landed
+  (2026-09-08). Also: `Map(Length, xs)` does not compile on the JavaScript
+  target — the synthesized parameter is typed `unknown`, so `Length` declines (a
+  fallback, not a wrong value).
 - **A partly nested source diverges between the routes.** With
   `k(L: list) := Map(f, L)` and `f: (number) -> number`, the interpreter types
   the whole source `[[1, 2], 3]` as a union a scalar satisfies and broadcasts
-  each row (`[[2, 4], 6]`), while the compiled reference tests one element at
-  a time and answers `[NaN, 6]` — the ruling of 2026-09-08 (a declared-scalar
-  callback refuses a collection element) spelled per element. A per-element
-  test cannot reconstruct the source's type; documented in
+  each row (`[[2, 4], 6]`), while the compiled reference tests one element at a
+  time and answers `[NaN, 6]` — the ruling of 2026-09-08 (a declared-scalar
+  callback refuses a collection element) spelled per element. A per-element test
+  cannot reconstruct the source's type; documented in
   `docs/COMPILATION-MODEL.md` § Collections.
-- **A record reaching an `unknown`-typed parameter through a callback value
-  is broadcast over its fields.** The broadcast-aware wrapper a function
-  value receives decides with `Array.isArray`, and a record, tuple or
-  nominal value lowers to a bare JavaScript array. A parameter TYPED as one
-  of those keeps the bare reference (`signatureParamsLowerToScalars`,
-  `base-compiler.ts`); a parameter left `unknown` is admitted, as the
-  interpreter's own broadcast gate admits it, so `Map(f, persons)` with an
-  unannotated `f(p)` would map over each person's fields. Objects have no
-  compiled representation yet, so no corpus reaches this; recorded so the
-  gate is tightened when they do.
+- **A record reaching an `unknown`-typed parameter through a callback value is
+  broadcast over its fields.** The broadcast-aware wrapper a function value
+  receives decides with `Array.isArray`, and a record, tuple or nominal value
+  lowers to a bare JavaScript array. A parameter TYPED as one of those keeps the
+  bare reference (`signatureParamsLowerToScalars`, `base-compiler.ts`); a
+  parameter left `unknown` is admitted, as the interpreter's own broadcast gate
+  admits it, so `Map(f, persons)` with an unannotated `f(p)` would map over each
+  person's fields. Objects have no compiled representation yet, so no corpus
+  reaches this; recorded so the gate is tightened when they do.
 - **The broadcast wrapper around an inline function literal is wider than
-  callback position.** The `Function`-literal lowering cannot see its parent,
-  so the wrapper also lands on a block-local definition (`let g = (k) ↦ …`,
-  whose call sites are already broadcast-aware), on an `Apply` head
-  (`\sin'(x)`) and on a whole-artifact function result. Redundant, not
-  wrong: one extra call frame and one `Array.isArray` per call. Narrowing it
-  means moving the wrap into the callback funnel of `javascript-target.ts`
-  (`hoistedCallbackLambda` / `fnArg`), which was carrying a peer's in-flight
-  work when this landed (2026-09-08). Also: `Map(Length, xs)` does not
-  compile on the JavaScript target — the synthesized parameter is typed
-  `unknown`, so `Length` declines (a fallback, not a wrong value).
-- **`Map` over a nested source: the interpreter refuses a literal, the
-  compiled route maps.** `Map(f, [[1, 2], [3, 4]])` with `f: (number) -> number`
-  is an `incompatible-type` error when evaluated (the literal source's
-  element type is checked against the callback), while `f([1, 2])` applied
-  directly broadcasts to `[2, 4]`, and the compiled `Map(f, xs)` over a
-  caller-supplied nested array now broadcasts per row (it answered
-  `[NaN, NaN]` before 2026-09-08). The two interpreter answers disagree with
-  each other; decide which one `Map` should give before aligning the
-  compiled route's static check.
+  callback position.** The `Function`-literal lowering cannot see its parent, so
+  the wrapper also lands on a block-local definition (`let g = (k) ↦ …`, whose
+  call sites are already broadcast-aware), on an `Apply` head (`\sin'(x)`) and
+  on a whole-artifact function result. Redundant, not wrong: one extra call
+  frame and one `Array.isArray` per call. Narrowing it means moving the wrap
+  into the callback funnel of `javascript-target.ts` (`hoistedCallbackLambda` /
+  `fnArg`), which was carrying a peer's in-flight work when this landed
+  (2026-09-08). Also: `Map(Length, xs)` does not compile on the JavaScript
+  target — the synthesized parameter is typed `unknown`, so `Length` declines (a
+  fallback, not a wrong value).
+- **`Map` over a nested source: the interpreter refuses a literal, the compiled
+  route maps.** `Map(f, [[1, 2], [3, 4]])` with `f: (number) -> number` is an
+  `incompatible-type` error when evaluated (the literal source's element type is
+  checked against the callback), while `f([1, 2])` applied directly broadcasts
+  to `[2, 4]`, and the compiled `Map(f, xs)` over a caller-supplied nested array
+  now broadcasts per row (it answered `[NaN, NaN]` before 2026-09-08). The two
+  interpreter answers disagree with each other; decide which one `Map` should
+  give before aligning the compiled route's static check.
 - **An accepted hoist binding can be left unread on GLSL.** For
-  `\sum_{i=1}^{200}(i x + \min([1,2,3]))` the list literal is hoisted as its
-  own class (`vec3 _tv2 = vec3(1.0, 2.0, 3.0);`) and the `Min` class then
-  folds to `1.0` without reading the override, so the declaration has no
-  reader. Valid shader source (dead code the driver drops), not a miscompile.
-  The fix is in the hoist contract or in `gpu-target.ts` (the caller writes
-  the declarations into the returned string), found by the review of this
-  round.
-- **Plain arithmetic over a captured symbol whose scalar type was inferred
-  does not broadcast at run time.** `compile(2y)` emits `2 * _.y` and
-  `run({ y: [1, 2, 3] })` answers NaN where the interpreter answers
-  `[2, 4, 6]`. This is the compile target's standing contract for a free
-  symbol (a number unless typed as a collection), not a regression of this
-  round; the user-function call guard covers only call sites. Recorded so the
-  contract is decided knowingly if a consumer asks.
-- **Not this round, noted by the slices:** `vars: { g: '…' }` does not
-  override a user-function head — the call still emits `_fn_g` from the
-  engine definition (head resolution); `ColorMix((1,0,0), (0,0,1), 0.5)`
-  compiles the tuples as OKLCh components, which may not be the intended
-  reading of a bare tuple (colour lowering owner); compiled `\arg(x - iy)` at
-  `x = -3, y = 0` is `atan2(-0, -3) = -π` where the interpreter answers `+π`
-  (pre-existing signed-zero seam); JavaScript unrolled sums below four terms
-  have no statement form and do not hoist; the Python target does not hoist
-  at all.
+  `\sum_{i=1}^{200}(i x + \min([1,2,3]))` the list literal is hoisted as its own
+  class (`vec3 _tv2 = vec3(1.0, 2.0, 3.0);`) and the `Min` class then folds to
+  `1.0` without reading the override, so the declaration has no reader. Valid
+  shader source (dead code the driver drops), not a miscompile. The fix is in
+  the hoist contract or in `gpu-target.ts` (the caller writes the declarations
+  into the returned string), found by the review of this round.
+- **Plain arithmetic over a captured symbol whose scalar type was inferred does
+  not broadcast at run time.** `compile(2y)` emits `2 * _.y` and
+  `run({ y: [1, 2, 3] })` answers NaN where the interpreter answers `[2, 4, 6]`.
+  This is the compile target's standing contract for a free symbol (a number
+  unless typed as a collection), not a regression of this round; the
+  user-function call guard covers only call sites. Recorded so the contract is
+  decided knowingly if a consumer asks.
+- **Not this round, noted by the slices:** `vars: { g: '…' }` does not override
+  a user-function head — the call still emits `_fn_g` from the engine definition
+  (head resolution); `ColorMix((1,0,0), (0,0,1), 0.5)` compiles the tuples as
+  OKLCh components, which may not be the intended reading of a bare tuple
+  (colour lowering owner); compiled `\arg(x - iy)` at `x = -3, y = 0` is
+  `atan2(-0, -3) = -π` where the interpreter answers `+π` (pre-existing
+  signed-zero seam); JavaScript unrolled sums below four terms have no statement
+  form and do not hoist; the Python target does not hoist at all.
 
 ### Open items from the small-fix release batch (2026-08-31)
 
@@ -642,10 +654,10 @@ element per turn on the interpreter since the literal-list fold of 2026-09-04
 (857 ms at 1000 turns; the compiled route was already a native array copy per
 turn): an immutable append copies the list. Levers not taken, for a later round
 if interpreted loops of many thousands of turns matter: a growable backing
-buffer with prefix views (amortized O(1) append, safe without ownership
-analysis because every holder of an older value keeps its own prefix) paired
-with an incremental type for the new node, and a per-node descriptor cache on
-the type cache's invalidation axis.
+buffer with prefix views (amortized O(1) append, safe without ownership analysis
+because every holder of an older value keeps its own prefix) paired with an
+incremental type for the new node, and a per-node descriptor cache on the type
+cache's invalidation axis.
 
 ### Open items from the undecided-condition ruling (2026-09-02)
 
@@ -804,8 +816,7 @@ elementwise reading of Fungrim's Cartesian power in entry `4099d2`.)
   the `arnog/fungrim` fork change (`pygrim/formulas/pi.py`) is committed.
 - A Compute Engine `CartesianPower` operator would make entry `4099d2`
   evaluable: `grim2mathjson` emits the shell `CartesianPower(S, n)` for a
-  set-based `Pow`, so the entry is `not-evaluable` instead of False — OPEN,
-  low.
+  set-based `Pow`, so the entry is `not-evaluable` instead of False — OPEN, low.
 
 ### A re-declared operator carrying a caller `compile` handler switches off the compiler's call-sharing (OPEN, design — measured 2026-08-21 under Tycho item 217)
 
@@ -1221,75 +1232,74 @@ reads it. Whichever side is right is a ruling on the activation-skip rule (the
 2026-08-21 symbol-resolution round in `docs/plans`); the compiler side was left
 as it was. Pre-existing, not introduced by the folded-value preamble.
 
-**Full-corpus run, 2026-09-12** (`--all`: 734 documents, 18,703 records
-against the same Tycho commit; the CORE run above covers 769). 580 declines:
-151 `javascript`, 261 `interval-js`, 168 `glsl`. The largest groups, by
-records and documents — `javascript` list arithmetic (59 records, 15
-documents, mostly union-typed 3-D scenes, `Cross` typed `vector` in
-`frthw0ihk5`), `interval-js` list VALUE roots (42 / 16, by design),
-`interval-js` `PointList` roots (34 / 5), `glsl` sampler `At` (30 / 10,
-Tycho's), `interval-js` `Range` roots (23 / 12), `javascript` `PointList`
-component typed `collection<number>` (21 / 4), `interval-js` `Tuple` (20 /
-4), `glsl` `PointList` component collection (20 / 6), `interval-js` `D` (16
-/ 8, needs interval automatic differentiation), `javascript` `Power` over a
-list (15 / 4), `glsl` `Integrate` (15 / 3), `glsl` `Which` with a loop-form
-`Sum` in an arm (14 / 1, `yac5cxfjm1`), `interval-js` `Which` over a
-collection condition (13 / 2), `javascript` branch condition collection (11
-/ 4). The selection index push-through of 2026-09-13 (`fixed-width-unroll.ts`,
-entry "Static broadcast unroll for the compile route") resolved 15 of them —
-the 12 `interval-js` `Which` and `List` records of `ccoc40kfhj`, 2 of
-`37c316659d`, 1 of `cxlreu2mu9` — with 0 new declines over 18,701 records,
-20 records with smaller code (`ccoc40kfhj` JavaScript rows 817 → 188
-characters: one scalar selection where a run-time selection over three
+**Full-corpus run, 2026-09-12** (`--all`: 734 documents, 18,703 records against
+the same Tycho commit; the CORE run above covers 769). 580 declines: 151
+`javascript`, 261 `interval-js`, 168 `glsl`. The largest groups, by records and
+documents — `javascript` list arithmetic (59 records, 15 documents, mostly
+union-typed 3-D scenes, `Cross` typed `vector` in `frthw0ihk5`), `interval-js`
+list VALUE roots (42 / 16, by design), `interval-js` `PointList` roots (34 / 5),
+`glsl` sampler `At` (30 / 10, Tycho's), `interval-js` `Range` roots (23 / 12),
+`javascript` `PointList` component typed `collection<number>` (21 / 4),
+`interval-js` `Tuple` (20 / 4), `glsl` `PointList` component collection (20 /
+6), `interval-js` `D` (16 / 8, needs interval automatic differentiation),
+`javascript` `Power` over a list (15 / 4), `glsl` `Integrate` (15 / 3), `glsl`
+`Which` with a loop-form `Sum` in an arm (14 / 1, `yac5cxfjm1`), `interval-js`
+`Which` over a collection condition (13 / 2), `javascript` branch condition
+collection (11 / 4). The selection index push-through of 2026-09-13
+(`fixed-width-unroll.ts`, entry "Static broadcast unroll for the compile route")
+resolved 15 of them — the 12 `interval-js` `Which` and `List` records of
+`ccoc40kfhj`, 2 of `37c316659d`, 1 of `cxlreu2mu9` — with 0 new declines over
+18,701 records, 20 records with smaller code (`ccoc40kfhj` JavaScript rows 817 →
+188 characters: one scalar selection where a run-time selection over three
 broadcast arrays was emitted) and 2 records twice as fast. Left for later
-rounds, each with its witness above: `glsl` `Integrate` by fixed
-quadrature; `interval-js` `D` through interval jets; the `javascript`
-`PointList` component typed `collection<number>` (`2ki2hjsouf`). Landed
-since: `Cross` of two points is a point (ruled 2026-09-13), and the `glsl`
-`Which` with a loop-form `Sum` arm takes a statement form (the 14 records of
-`yac5cxfjm1`, 2026-09-13). Of the `PointList` component group,
-`njncrg9fkv`'s call `W(C(u, v), [0.8, 0.2, 0.8, 0.2], …)` compiles since
-2026-09-13 (a list argument beside a point is specialized); its sum
-`W(…) + PointList(…)` fails closed on Tycho's declaration of `W`'s result,
-`indexed_collection<number | tuple<…>> | list<tuple<…>> | tuple<…>`, under
-which a flat array of numbers is a legal value with the shape of a point —
-`list<tuple<…>> | tuple<…>` is decided by shape at run time. A timing list
-from an audit run on a loaded box is not evidence: the first rerun of this round reported one
-"Timeout exceeded" decline and 262 slower records with four jobs on the
-box; alone, that record compiled in 49 ms against 37 ms before.
+rounds, each with its witness above: `glsl` `Integrate` by fixed quadrature;
+`interval-js` `D` through interval jets; the `javascript` `PointList` component
+typed `collection<number>` (`2ki2hjsouf`). Landed since: `Cross` of two points
+is a point (ruled 2026-09-13), and the `glsl` `Which` with a loop-form `Sum` arm
+takes a statement form (the 14 records of `yac5cxfjm1`, 2026-09-13). Of the
+`PointList` component group, `njncrg9fkv`'s call
+`W(C(u, v), [0.8, 0.2, 0.8, 0.2], …)` compiles since 2026-09-13 (a list argument
+beside a point is specialized); its sum `W(…) + PointList(…)` fails closed on
+Tycho's declaration of `W`'s result,
+`indexed_collection<number | tuple<…>> | list<tuple<…>> | tuple<…>`, under which
+a flat array of numbers is a legal value with the shape of a point —
+`list<tuple<…>> | tuple<…>` is decided by shape at run time. A timing list from
+an audit run on a loaded box is not evidence: the first rerun of this round
+reported one "Timeout exceeded" decline and 262 slower records with four jobs on
+the box; alone, that record compiled in 49 ms against 37 ms before.
 
 ### JavaScript list-arithmetic declines, triaged (2026-09-14, the point-list-arithmetic candidate)
 
-A fresh CORE-corpus audit at HEAD found 52 `javascript` records that fail
-closed with "cannot compile scalar arithmetic over a list-valued operand"
-(and one `Abs` variant). They are not one gap. Each bin below carries its
-witness; the record counts are from the 2026-09-14 run.
+A fresh CORE-corpus audit at HEAD found 52 `javascript` records that fail closed
+with "cannot compile scalar arithmetic over a list-valued operand" (and one
+`Abs` variant). They are not one gap. Each bin below carries its witness; the
+record counts are from the 2026-09-14 run.
 
 Landed this round. **A point scaled by a symbol declared
 `indexed_collection<number>` whose binding is provably a list of scalars now
 compiles** (`isScalarElementSource`, base-compiler.ts). The declaration alone
 did not prove a list — a `tuple` inhabits `indexed_collection<number>`, so the
 symbol could be a single point — but reading the binding does: a value typed
-`list<number>` (a `Range`, or the broadcast arithmetic over one that a plot
-uses to build a list of sample points) is never a point. The binding is
-trusted only when the compiler emits it — inline or as a baked constant. A
-symbol the caller maps by reference (a `vars` input read live from the
-caller's scope) and a compile-bound name (a `Sum` index, or a lambda or
-user-function parameter, which shadows any same-named engine symbol) are both
-declined, since the value read at compile time is then not the value the
-kernel runs. Witness `neyret/xkusqcyzsx`, `R × (cos t, sin t) + (D_c + X, Y)`
-with `R` a `Range`-derived list emitted inline, now compiles.
+`list<number>` (a `Range`, or the broadcast arithmetic over one that a plot uses
+to build a list of sample points) is never a point. The binding is trusted only
+when the compiler emits it — inline or as a baked constant. A symbol the caller
+maps by reference (a `vars` input read live from the caller's scope) and a
+compile-bound name (a `Sum` index, or a lambda or user-function parameter, which
+shadows any same-named engine symbol) are both declined, since the value read at
+compile time is then not the value the kernel runs. Witness `neyret/xkusqcyzsx`,
+`R × (cos t, sin t) + (D_c + X, Y)` with `R` a `Range`-derived list emitted
+inline, now compiles.
 
 Not defects (the interpreter itself does not produce a value):
 
 - **Invalid input.** `2ki2hjsouf` (10 records) boxes with an
   `Error(incompatible-type)` node inside it, and `ifnnzttcqg` (1) likewise;
-  `6kalzeiedk` (1) references an undefined operator `B`. The compiler
-  correctly refuses an expression the interpreter also rejects.
+  `6kalzeiedk` (1) references an undefined operator `B`. The compiler correctly
+  refuses an expression the interpreter also rejects.
 - **A point summed with a scalar.** `urbddymicb` (8) is
   `(x − C_x)² + (y − C_y)² + (−R_2, −o_ut)` — a scalar plus a point. The
-  interpreter answers `Error(incompatible-type, "tuple", "number")` at that
-  sum (measured 2026-09-14), so failing closed matches interpretation.
+  interpreter answers `Error(incompatible-type, "tuple", "number")` at that sum
+  (measured 2026-09-14), so failing closed matches interpretation.
 
 Open, each with a witness:
 
@@ -1305,46 +1315,46 @@ Open, each with a witness:
   which the shape test decides at run time and the sum then compiles; (b) the
   compiler adds a scalar-shape dispatch arm that answers `NaN` where the
   interpreter errors, which loses the interpreter's per-element error. If
-  nothing is decided, these ~5 records keep failing closed. Recommend (a):
-  it makes the sum compile without changing any answer.
+  nothing is decided, these ~5 records keep failing closed. Recommend (a): it
+  makes the sum compile without changing any answer.
 - **`Power` over an operand that is a point, a list, or a list of points is
-  element-wise identically** — `(3,4)² = (9,16)`, `[3,4]² = [9,16]`, a list
-  of points → `[(9,16),(25,36)]` (measured 2026-09-14) — so the point-vs-list
+  element-wise identically** — `(3,4)² = (9,16)`, `[3,4]² = [9,16]`, a list of
+  points → `[(9,16),(25,36)]` (measured 2026-09-14) — so the point-vs-list
   ambiguity that blocks `Add` does not change `Power`'s answer. A union-typed
-  SYMBOL operand already compiles for `Power` (probed 2026-09-14), so the
-  corpus rows decline in a call structure not yet reproduced: `hpr2q4kles`
-  (9 records, `P(U(x, y), …)`), `hbvzf9yk1r` (1), and the `Power` records of
-  `jgcclk1njk`. A follow-up must reproduce one of those rows and locate the
-  decline before broadening the `Power` broadcast admission.
+  SYMBOL operand already compiles for `Power` (probed 2026-09-14), so the corpus
+  rows decline in a call structure not yet reproduced: `hpr2q4kles` (9 records,
+  `P(U(x, y), …)`), `hbvzf9yk1r` (1), and the `Power` records of `jgcclk1njk`. A
+  follow-up must reproduce one of those rows and locate the decline before
+  broadening the `Power` broadcast admission.
 - **A point whose own coordinate is a list.** `u1bpof8xfg`'s Multiply now
   compiles, but the enclosing `Add` still fails closed: the point
-  `(−cos t, sin t · sgn R)` has a list second coordinate (`sgn R` over a
-  list). This is the open point-with-a-list-coordinate shape (ruled A,
+  `(−cos t, sin t · sgn R)` has a list second coordinate (`sgn R` over a list).
+  This is the open point-with-a-list-coordinate shape (ruled A,
   `COMPILATION-MODEL.md`), not the list-symbol case.
 
 The "color family" (`s8ishknvhe`, `wgxnrn87sx`, `woeywky0kj`, `iqnkdz3ptt`, 6
 records) is NOT a distinct color-broadcast gap (reproduced 2026-09-14). The
-color-broadcast path already handles a head over a list of colors:
-`AsOklab` over a `list<color>` compiles to `_SYS.bcastColor`. These records
-trace to point-list arithmetic surfacing in color-heavy documents:
+color-broadcast path already handles a head over a list of colors: `AsOklab`
+over a `list<color>` compiles to `_SYS.bcastColor`. These records trace to
+point-list arithmetic surfacing in color-heavy documents:
 
 - `wgxnrn87sx`: RESOLVED 2026-09-14. A color channel is built from `PointX` of
   `P`, a point-or-point-list union with pure tuple-element arms
   (`indexed_collection<tuple<…>> | list<tuple<…>> | tuple<…>`). The coordinate
   accessor used to widen its result to the abstract `collection<number>`, which
-  fails closed; it now distributes over the union arms to `number |
-  list<number>`, which compiles. See the CHANGELOG entry.
+  fails closed; it now distributes over the union arms to
+  `number | list<number>`, which compiles. See the CHANGELOG entry.
 - `s8ishknvhe`: still declines. Its operand `C_c` carries a `number | tuple`
   ELEMENT arm (`indexed_collection<number | tuple<…>> | …`), an imprecise
-  parameter-union artifact (Tycho D-229) that could be a point spelled flat OR
-  a list of points. The accessor leaves that as `collection<number>` — it is
+  parameter-union artifact (Tycho D-229) that could be a point spelled flat OR a
+  list of points. The accessor leaves that as `collection<number>` — it is
   genuinely ambiguous, so failing closed is sound. The fix is at the type
   source: narrowing the arm away (Tycho's return-type narrowing, or wherever
   `C_c`'s type is set), after which the accessor distributes and it compiles.
 - `iqnkdz3ptt` (2 records): the failing row is a point plus a number list
-  (`(⌊…⌋, …) + [0, 1]`), which the interpreter answers as an
-  `incompatible-type` error per element (measured 2026-09-14) — so the decline
-  matches interpretation and is not a defect.
+  (`(⌊…⌋, …) + [0, 1]`), which the interpreter answers as an `incompatible-type`
+  error per element (measured 2026-09-14) — so the decline matches
+  interpretation and is not a defect.
 - `woeywky0kj`: builds an RGB triple in a `list<color>` context; the exact
   failing operand was not pinned (the isolated row compiles), and needs a clean
   audit run to capture.
@@ -1358,22 +1368,21 @@ GLOBAL, is read by name from the caller's comprehension or sum binding. With a
 different binder name (`[W(k)[1] for k in [1, 2, 3]]`) the answer is
 `[w, 2w, 3w]`, and with `w := 2.5` assigned the binder no longer intercepts
 (`[2.5, 5, 7.5]`). A lambda parameter does not intercept either
-(`Apply((w ↦ W(w)[1]), 2)` is `2w`): the 2026-08-21 symbol-resolution round
-made value resolution skip a foreign CALL-FRAME activation, and kept by-name
-interception for ordinary declarations — which a comprehension or `Sum`
-binder is — pending a ruling (`docs/SCOPING-MODEL.md` calls by-name a
-compatibility hatch). The compiled route reads the global: the inliner
-declines to substitute `W`'s body under a binder named `w`
-(`substitutedUserFunctionBody`, the capture check on the enclosing local
-names), and the emitted `_fn_W` reads `w` as a run-time input. So the two
-routes disagree on this shape, and the constant folder, which evaluates a
-root with no unknowns through the interpreter, bakes the interpreter's
-`[1, 4, 9]` into the compiled code. The ruling is the one the 2026-08-21
-round left open: whether an ordinary declaration's by-name interception
-stays. If it goes, three tests that pin the interception as a feature and the
-interpreter-fallback runner of the compiler need rewriting (the memory of
-that round lists them). Until then the compiled route's lexical reading is
-the one the tests pin.
+(`Apply((w ↦ W(w)[1]), 2)` is `2w`): the 2026-08-21 symbol-resolution round made
+value resolution skip a foreign CALL-FRAME activation, and kept by-name
+interception for ordinary declarations — which a comprehension or `Sum` binder
+is — pending a ruling (`docs/SCOPING-MODEL.md` calls by-name a compatibility
+hatch). The compiled route reads the global: the inliner declines to substitute
+`W`'s body under a binder named `w` (`substitutedUserFunctionBody`, the capture
+check on the enclosing local names), and the emitted `_fn_W` reads `w` as a
+run-time input. So the two routes disagree on this shape, and the constant
+folder, which evaluates a root with no unknowns through the interpreter, bakes
+the interpreter's `[1, 4, 9]` into the compiled code. The ruling is the one the
+2026-08-21 round left open: whether an ordinary declaration's by-name
+interception stays. If it goes, three tests that pin the interception as a
+feature and the interpreter-fallback runner of the compiler need rewriting (the
+memory of that round lists them). Until then the compiled route's lexical
+reading is the one the tests pin.
 
 ### Compiling a DAG-shared symbol value on the inline targets still refuses above the fold-size guard (OPEN, no urgency — the JavaScript-family targets were resolved 2026-08-29)
 
@@ -1395,88 +1404,86 @@ still exceeds 300 s on the fallback.
 
 ### Fixed-width collection chains: residue after the 2026-09-08 and 2026-09-09 rounds (OPEN, compile performance — consult with Tycho, Desmos state 62urmx2dcm)
 
-Landed 2026-09-08 (commits 71d91afa and a9cf103c): a loop-invariant hoist
-over callback lambda bodies on the JavaScript target (`hoistedCallbackLambda`,
+Landed 2026-09-08 (commits 71d91afa and a9cf103c): a loop-invariant hoist over
+callback lambda bodies on the JavaScript target (`hoistedCallbackLambda`,
 `javascript-target.ts`); the target-independent fixed-width unroll pass
-(`compilation/fixed-width-unroll.ts`, run at every compile entry and inside
-the call-site inliner); and, on the definition-emission route, substitution
-of nested pure collection-valued user-function calls before the unroll
+(`compilation/fixed-width-unroll.ts`, run at every compile entry and inside the
+call-site inliner); and, on the definition-emission route, substitution of
+nested pure collection-valued user-function calls before the unroll
 (`inlineCollectionValuedCallsInDefinitionBody`, `base-compiler.ts`). The
-by-reference Voronoi row went from 58 µs/sample to about 2 µs on JavaScript
-(the inlined form is 0.8 µs) and compiles on `glsl`, `wgsl` and
-`interval-js`. Landed 2026-09-09 on top of that: the last-call memo on pure
-scalar definitions (`memoizeSharedDefinitions`, row 3.4 → 2.7 µs); a point
-bound to an untyped parameter is inlined at the call site instead of reaching
-scalar arithmetic as a JavaScript array (`pointArgumentAtUntypedParameter`);
-the inliner's capture guard counts only the free symbols of the callee body
-(`freeSymbolNames`); `Map` with a bare user-function head and
-`Reduce(list, Add|Multiply|Min|Max, seed)` are unrolled; `Reduce`/`Scan`
-combiner lambdas get the callback hoist; and a literal single point at the
-compile ROOT lowers on `interval-js` to an array of coordinate intervals.
-What remains:
+by-reference Voronoi row went from 58 µs/sample to about 2 µs on JavaScript (the
+inlined form is 0.8 µs) and compiles on `glsl`, `wgsl` and `interval-js`. Landed
+2026-09-09 on top of that: the last-call memo on pure scalar definitions
+(`memoizeSharedDefinitions`, row 3.4 → 2.7 µs); a point bound to an untyped
+parameter is inlined at the call site instead of reaching scalar arithmetic as a
+JavaScript array (`pointArgumentAtUntypedParameter`); the inliner's capture
+guard counts only the free symbols of the callee body (`freeSymbolNames`); `Map`
+with a bare user-function head and `Reduce(list, Add|Multiply|Min|Max, seed)`
+are unrolled; `Reduce`/`Scan` combiner lambdas get the callback hoist; and a
+literal single point at the compile ROOT lowers on `interval-js` to an array of
+coordinate intervals. What remains:
 
 - **Cross-definition CSE: the shared block inside two definitions.** The
   2026-09-09 last-call memo (`memoizeSharedDefinitions`, `javascript-target.ts`)
   removed one of the three evaluations of the nine-point block per sample: the
   row's second call of `m(x, y)` is now answered from the record of the call
-  inside `m2` (by-reference row 3.4 → 2.7 µs per sample; the inlined row is
-  1.2 µs on the same machine at the same time). The remaining 2× is the block
+  inside `m2` (by-reference row 3.4 → 2.7 µs per sample; the inlined row is 1.2
+  µs on the same machine at the same time). The remaining 2× is the block
   itself, computed once inside `m2` (its own inlined `d(x, y)`) and once inside
   `m`. Sharing it means emitting the block once as a helper over `(x, y)` that
-  returns the nine distances, memoized the same way, and reading from it in
-  both bodies. Scoped 2026-09-09 and NOT built, because it needs two new
-  concepts: a CSE harvest whose region spans several emitted definitions
-  (`cse.ts` regions are per root today, and a candidate found in two bodies
-  must be materialized as a call that passes the bodies' parameters, not as a
-  `const` at a region entry), and an alignment of parameter names across the
-  bodies (`m(x, y)` and `m2(x, y)` share names by luck of authorship; `m(u, v)`
-  would not match without alpha-renaming the harvest). The memo of an ARRAY
-  result — which the helper would return — is a third question the current
-  memo deliberately declines (an array compares by identity and may be
-  mutated by its consumer). Inlining small scalar callees at call sites was
-  measured and rejected earlier: a size bound on the AUTHORED body does not
-  bound the EMITTED code (`m` is 4 nodes authored, 2 456 characters emitted),
-  and making the inliner the primary route retargets 374 `_fn_*` call shapes
-  across 35 test files. Tycho was asked to re-measure on 0.127.0 before this
-  is reconsidered. Corpus count (tycho-perf, 2026-09-09, 71 documents): a
-  collection-valued helper reached from two or more definitions occurs in 2
-  of 30 core documents, and only ONE plotted row anywhere — this Voronoi
-  diamond — reaches such a helper through two callers. An array-result memo
-  would fire on that one row; it is not a general mechanism on this corpus.
+  returns the nine distances, memoized the same way, and reading from it in both
+  bodies. Scoped 2026-09-09 and NOT built, because it needs two new concepts: a
+  CSE harvest whose region spans several emitted definitions (`cse.ts` regions
+  are per root today, and a candidate found in two bodies must be materialized
+  as a call that passes the bodies' parameters, not as a `const` at a region
+  entry), and an alignment of parameter names across the bodies (`m(x, y)` and
+  `m2(x, y)` share names by luck of authorship; `m(u, v)` would not match
+  without alpha-renaming the harvest). The memo of an ARRAY result — which the
+  helper would return — is a third question the current memo deliberately
+  declines (an array compares by identity and may be mutated by its consumer).
+  Inlining small scalar callees at call sites was measured and rejected earlier:
+  a size bound on the AUTHORED body does not bound the EMITTED code (`m` is 4
+  nodes authored, 2 456 characters emitted), and making the inliner the primary
+  route retargets 374 `_fn_*` call shapes across 35 test files. Tycho was asked
+  to re-measure on 0.127.0 before this is reconsidered. Corpus count
+  (tycho-perf, 2026-09-09, 71 documents): a collection-valued helper reached
+  from two or more definitions occurs in 2 of 30 core documents, and only ONE
+  plotted row anywhere — this Voronoi diamond — reaches such a helper through
+  two callers. An array-result memo would fire on that one row; it is not a
+  general mechanism on this corpus.
 - **A fixed width known only from a TYPE** (`P: list<tuple<number, number>^9>`
   as a symbol, `At(P, i)` reads) is not unrolled; the pass needs a literal
   `List`. Unrolling from the type would rewrite `Map(f, P)` to
   `[f(At(P, 1)), …, f(At(P, 9))]`, which then needs an `At` lowering over a
-  declared list on the shader targets. Corpus count (tycho-perf, 2026-09-09):
-  0 sites on every target — Tycho expands value macros before compiling, so a
-  wide list reaches the engine as a literal `List`. The only witness is the
-  by-reference Voronoi row, which the audit harness cannot see: its
-  by-reference records fail at binding on Tycho's side (`Unknown operator
-  d`). Not built.
-- **A point bound to an untyped parameter that cannot be inlined fails
-  closed.** The call-site substitution declines for an impure point argument,
-  a recursive or multi-clause callee, and a body that is invalid over a point
-  (`P·P`, `2P + 1`); the compile then reports the reason and the
-  `fallback: true` route answers through the interpreter. A parameter the
-  body never mentions keeps the by-reference call, whatever its argument is.
-  A per-shape specialization of the emitted definition would compile those
-  cases too; not built, no consumer has asked.
+  declared list on the shader targets. Corpus count (tycho-perf, 2026-09-09): 0
+  sites on every target — Tycho expands value macros before compiling, so a wide
+  list reaches the engine as a literal `List`. The only witness is the
+  by-reference Voronoi row, which the audit harness cannot see: its by-reference
+  records fail at binding on Tycho's side (`Unknown operator d`). Not built.
+- **A point bound to an untyped parameter that cannot be inlined fails closed.**
+  The call-site substitution declines for an impure point argument, a recursive
+  or multi-clause callee, and a body that is invalid over a point (`P·P`,
+  `2P + 1`); the compile then reports the reason and the `fallback: true` route
+  answers through the interpreter. A parameter the body never mentions keeps the
+  by-reference call, whatever its argument is. A per-shape specialization of the
+  emitted definition would compile those cases too; not built, no consumer has
+  asked.
 - **`Map(h, list)` with a bare head is unrolled only for a user function with
   ONE plain parameter.** A variadic `h` would be sound for a bare head (the
   rewrite writes `h(e)` either way) but is declined with the lambda case for
-  now; a library operator head (`Map(Sin, list)`) is not unrolled either.
-  Both are missed optimizations, not defects.
-- **A point VALUE in an OPERAND position still has no `interval-js`
-  lowering** (`2·(a, b)`, a point under `Which`). The root lowering landed;
-  the target's kernels take one interval per operand by design and a general
-  `Tuple` lowering was refused for the reason stated on
-  `compileIntervalCollectionOperand` (`interval-javascript-target.ts`). A
-  point-valued arithmetic lowering (componentwise `_IA.mul` over the array)
-  would be a new value model for the target, not a gap filled by a handler.
-  Corpus count (tycho-perf, 2026-09-09): 4 declines at HEAD, all in one 3-D
-  art document (`art/n7uhaaoq1q`), and all of them LIST arithmetic over
-  `list<number>` operands rather than a scalar point under a kernel; the 3
-  root-point declines of 0.127.0 now compile. Decided: the decline stands.
+  now; a library operator head (`Map(Sin, list)`) is not unrolled either. Both
+  are missed optimizations, not defects.
+- **A point VALUE in an OPERAND position still has no `interval-js` lowering**
+  (`2·(a, b)`, a point under `Which`). The root lowering landed; the target's
+  kernels take one interval per operand by design and a general `Tuple` lowering
+  was refused for the reason stated on `compileIntervalCollectionOperand`
+  (`interval-javascript-target.ts`). A point-valued arithmetic lowering
+  (componentwise `_IA.mul` over the array) would be a new value model for the
+  target, not a gap filled by a handler. Corpus count (tycho-perf, 2026-09-09):
+  4 declines at HEAD, all in one 3-D art document (`art/n7uhaaoq1q`), and all of
+  them LIST arithmetic over `list<number>` operands rather than a scalar point
+  under a kernel; the 3 root-point declines of 0.127.0 now compile. Decided: the
+  decline stands.
 - **Consumer-side fact for Tycho:** on `glsl`/`interval-js` the by-reference
   route needs the plot variables DECLARED (or supplied through `vars`): an
   `unknown`-typed argument could hold a collection the by-reference call would
@@ -1499,17 +1506,18 @@ refusals remain, and stripping `missing` does not settle either:
   ruling changed. The fact-level check that follows it (`refutingFact`) already
   accepts the gated value, because substituting gives `True{0<a}`, so the type
   pre-gate is stricter than the check it guards.
-- **A range-bracketed declaration.** `ce.declare('e', 'integer<3<..>');
-  ce.assign('e', 5\{a>0\})` throws "`integer | missing` is not compatible
-  with `integer<4..>`", while the same value binds to a plain `integer`.
+- **A range-bracketed declaration.**
+  `ce.declare('e', 'integer<3<..>'); ce.assign('e', 5\{a>0\})` throws
+  "`integer | missing` is not compatible with `integer<4..>`", while the same
+  value binds to a plain `integer`.
 
 The shared cause is that forming the union erases the literal value type:
 `ce.box(5).type` is the literal `5`, but `5\{a>0\}` types `integer | missing`,
 which strips to `integer`, and `integer` satisfies no range. Two decisions
-settle both: (a) whether an assumption constrains a value that may be absent
-at all — the fact-level check says no, so the type pre-gate could defer to it
-for a value whose type carries `missing`; (b) whether a restriction should
-preserve the literal value type through the gate (`5 | missing` rather than
+settle both: (a) whether an assumption constrains a value that may be absent at
+all — the fact-level check says no, so the type pre-gate could defer to it for a
+value whose type carries `missing`; (b) whether a restriction should preserve
+the literal value type through the gate (`5 | missing` rather than
 `integer | missing`), a change to restriction typing with its own blast radius
 (every pin that reads the type of a gated literal). No test pins the current
 refusals; nothing consumer-facing depends on them today.
@@ -1518,8 +1526,8 @@ If nothing is decided, both refusals stand.
 
 ### A broadcast over a lone EMPTY operand answers `Nothing` on the compiled route and in the unary heads, but `[]` in `Add`/`Multiply` (OPEN, ruling — found 2026-09-09 while fixing `PointX([])`)
 
-Three sides disagree. `docs/BROADCAST-MODEL.md` states that a lone empty
-operand broadcasts to `Nothing` (`Not([])`), and the compiled JavaScript helper
+Three sides disagree. `docs/BROADCAST-MODEL.md` states that a lone empty operand
+broadcasts to `Nothing` (`Not([])`), and the compiled JavaScript helper
 `_SYS.bcast` implements that: with `N: list<number>`, `compile(2·N)` emits
 `_SYS.bcast((a, b) => a * b, 2, _.N)` and `run({N: []})` answers `NaN`. The
 interpreter follows the document for the unary and elementwise heads —
@@ -1533,30 +1541,29 @@ compiled artifact `NaN`. That is a fail-closed violation of
 three sides together:
 
 - adopt `[]` everywhere — the runtime `bcastWith` already carries an
-  `emptyIsList` flag for user-function application, so the helper change is
-  one line, but it flips the documented rule, its comment pin, and an unmeasured
+  `emptyIsList` flag for user-function application, so the helper change is one
+  line, but it flips the documented rule, its comment pin, and an unmeasured
   number of tests that record `Nothing`/`NaN`;
 - keep `Nothing` for the unary family and accept `Add`/`Multiply` as a
   deliberate exception, then teach the compiled lane the per-head split
   (`bcastWith` is head-blind today);
-- make `Add`/`Multiply` answer `Nothing` too, which contradicts the `[]`
-  shipped for `2 · PointX([])`.
+- make `Add`/`Multiply` answer `Nothing` too, which contradicts the `[]` shipped
+  for `2 · PointX([])`.
 
 If nothing is decided, the compiled route stays `NaN` where the interpreter
 answers `[]` for a product or sum over an empty list.
 
 **Scope widened 2026-09-13 by the broadcast fusion** (`emitFusedBroadcast`,
 `base-compiler.ts`): a chain of run-time broadcasts under arithmetic heads is
-now one call, so the error positions of an INNER broadcast — an empty list,
-or two lists of different lengths — are the outer call's own. Where the
-nested form answered an array of NaN sized to the surviving operand
-(`Sin([]) + [1, 2]` gave `[NaN, NaN]`), the fused call answers one NaN, and
-that for a genuine length mismatch as well as for an empty operand
-(`Sin([1, 2, 3]) + [1, 2]`). The interpreter answers `[1, 2]` for the first
-(a `Nothing` operand leaves a sum) and an `incompatible-dimensions` error for
-the second, so neither compiled form was faithful; whoever settles this
-ruling settles it for the fused form (`compile-broadcast-fusion.test.ts`
-pins the current answers).
+now one call, so the error positions of an INNER broadcast — an empty list, or
+two lists of different lengths — are the outer call's own. Where the nested form
+answered an array of NaN sized to the surviving operand (`Sin([]) + [1, 2]` gave
+`[NaN, NaN]`), the fused call answers one NaN, and that for a genuine length
+mismatch as well as for an empty operand (`Sin([1, 2, 3]) + [1, 2]`). The
+interpreter answers `[1, 2]` for the first (a `Nothing` operand leaves a sum)
+and an `incompatible-dimensions` error for the second, so neither compiled form
+was faithful; whoever settles this ruling settles it for the fused form
+(`compile-broadcast-fusion.test.ts` pins the current answers).
 
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 
@@ -1608,27 +1615,15 @@ target.
 
 **Landed 2026-09-12, in the pre-pass `fixed-width-unroll.ts`, from the full
 corpus run of the code-generation audit (below).** The corpus refuted the
-"demand at zero" paragraph that follows: `ccoc40kfhj` (24 `interval-js`
-records) writes every colour channel as a `Which` broadcast over a
-three-element list read back at one index, `Which(|6((x + [3, 2, 1]/3) mod
-1) − 3| − 1 < 0, 0, …)[1]`. Two rules cover it. A literal index is pushed
-through a `Which`/`If` whose first condition is a list — a later scalar
-condition and a scalar or point arm repeat at every position, as the
-interpreter lifts them — and on through the ordering relations,
-`Equal`/`NotEqual` against a scalar, `Mod`, the other element-wise heads and
-a literal `Range`, down to the literal list: the row is one scalar selection
-on every target. And a `Which`/`If` whose first condition is a WIDE list
-built from non-constant lists (five or more elements, at most 64) is written
-out as the list of its per-position selections. What is NOT covered, with
-the reason: a selection with no default clause and a point arm (a position
-no clause selects is `NaN` element-wise but `Missing` for a scalar
-selection); a `Which` in statement form inside a lambda the pass does not enter
-(`5qn5kcrszu`, 6 `javascript` records); the Voronoi witness above, whose condition is
-built from a list of POINTS (`|P − (x, y)|` over a `PointList` literal) —
-the width walk reads lists of scalars only; and `When` over a list
-condition, whose interpreter semantics for a point value are undecided (the
-ruling entry that follows this one). `test/compute-engine/compile-elementwise-selection-unroll.test.ts`
-pins the rows, the walk's refusals and the shader compiles.
+"demand at zero" paragraph that follows: `ccoc40kfhj` (24 `interval-js` records)
+writes every colour channel as a `Which` broadcast over a three-element list
+read back at one index, `Which(|6((x + [3, 2, 1]/3) mod
+
+1. − 3| − 1 < 0, 0,
+   …)[1]`. Two rules cover it. A literal index is pushed through a `Which`/`If`whose first condition is a list — a later scalar condition and a scalar or point arm repeat at every position, as the interpreter lifts them — and on through the ordering relations,`Equal`/`NotEqual`against a scalar,`Mod`, the other element-wise heads and a literal `Range`, down to the literal list: the row is one scalar selection on every target. And a `Which`/`If`whose first condition is a WIDE list built from non-constant lists (five or more elements, at most 64) is written out as the list of its per-position selections. What is NOT covered, with the reason: a selection with no default clause and a point arm (a position no clause selects is`NaN`element-wise but`Missing`for a scalar selection); a`Which` in statement form inside a lambda the pass does not enter (`5qn5kcrszu`, 6 `javascript` records); the Voronoi witness above, whose condition is built from a list of POINTS (`|P
+   − (x,
+   y)|`over a`PointList`literal) — the width walk reads lists of scalars only; and`When`over a list condition, whose interpreter semantics for a point value are undecided (the ruling entry that follows this one).`test/compute-engine/compile-elementwise-selection-unroll.test.ts`
+   pins the rows, the walk's refusals and the shader compiles.
 
 **Demand measured at zero (2026-08-20).** Tycho retracted the escalation after
 measuring against 0.116.1: the blocker was on their side, one layer upstream of
@@ -1647,126 +1642,122 @@ vec-width cap remain accurate and remain unmotivated by any consumer.
 
 ### An element-wise ordering relation compares a NaN operand where the scalar branch treats it as undecided (OPEN — found 2026-09-12 by the Codex review of the selection index push-through)
 
-A scalar branch whose relation has a NaN operand is UNDECIDED: the
-interpreter answers `Which(NaN < 2, 1, True, 0)` with `Missing`, and the
-JavaScript target guards the operand (`_.b === _.b && _.b !== undefined`)
-and answers `NaN`. The element-wise form of the same selection decides the
-position instead: `Which([1, NaN, 3] < 2, 1, True, 0)` is `[1, 0, 0]` in the
-interpreter (the cell `NaN < 2` evaluates to `False`) and in the compiled
-run-time selection (the fused loop reads `NaN < 2` as `false` and takes the
-default). The element-wise EQUALITY already marks such a cell absent (the
-compiled-equality absent marker landed 2026-09-10), so `select` consumes the
-position and answers `NaN` there; the ordering relations (`Less`,
-`LessEqual`, `Greater`, `GreaterEqual`) do not mark it, in the interpreter's
-element-wise relation handler or in the JavaScript emitter. The pre-pass
-index push-through of 2026-09-12 (`fixed-width-unroll.ts`, `indexedOperands`)
-rewrites `Which([a, b, c] < 2, 1, True, 0)[2]` to the scalar
-`Which(b < 2, 1, True, 0)`, so a NaN `b` now answers the undecided value
-(`NaN`, `Missing`) where the element-wise form answered `0`. The rewrite is
-kept: the scalar answer is the ratified undecided-condition contract, and the
-fix belongs in the element-wise ordering relations — mark a cell whose
-operand is NaN absent, as the equality does — after which the two forms
-agree and the pre-pass note on `indexedOperands` can go. Witness probe:
-`build/probe-nan-sel.ts`.
+A scalar branch whose relation has a NaN operand is UNDECIDED: the interpreter
+answers `Which(NaN < 2, 1, True, 0)` with `Missing`, and the JavaScript target
+guards the operand (`_.b === _.b && _.b !== undefined`) and answers `NaN`. The
+element-wise form of the same selection decides the position instead:
+`Which([1, NaN, 3] < 2, 1, True, 0)` is `[1, 0, 0]` in the interpreter (the cell
+`NaN < 2` evaluates to `False`) and in the compiled run-time selection (the
+fused loop reads `NaN < 2` as `false` and takes the default). The element-wise
+EQUALITY already marks such a cell absent (the compiled-equality absent marker
+landed 2026-09-10), so `select` consumes the position and answers `NaN` there;
+the ordering relations (`Less`, `LessEqual`, `Greater`, `GreaterEqual`) do not
+mark it, in the interpreter's element-wise relation handler or in the JavaScript
+emitter. The pre-pass index push-through of 2026-09-12 (`fixed-width-unroll.ts`,
+`indexedOperands`) rewrites `Which([a, b, c] < 2, 1, True, 0)[2]` to the scalar
+`Which(b < 2, 1, True, 0)`, so a NaN `b` now answers the undecided value (`NaN`,
+`Missing`) where the element-wise form answered `0`. The rewrite is kept: the
+scalar answer is the ratified undecided-condition contract, and the fix belongs
+in the element-wise ordering relations — mark a cell whose operand is NaN
+absent, as the equality does — after which the two forms agree and the pre-pass
+note on `indexedOperands` can go. Witness probe: `build/probe-nan-sel.ts`.
 
 ### A statement hoisted on a shader target runs ahead of an operand written before it (OPEN, ruling — found 2026-09-13 by the review of the statement-form conditional)
 
 On the GLSL and WGSL targets a lowering that needs statements — a loop-form
-`Sum`/`Product`, a `Block` used as a value, the statement form of a
-conditional, a lowering that binds an impure operand to a temporary
-(`Cot(Random())`) — hoists them into the enclosing statement sink, AHEAD of
-the whole enclosing expression. An operand written EARLIER in that
-expression then runs after them where the interpreter runs it first: with
-constant folding off, `(Random(), Σ_{n=1}^{⌊t⌋} Random())` emits the loop and
-then `return vec2(_gpu_rnd_draw(…), _tv1);` — the first component is the
-draw after the loop's; `(k := 1, Σ_{n} k·n)` reads `k` before the assignment.
-The class is as old as the loop-form `Sum` hoisting (Tycho item 110). The
-statement-form conditional landed 2026-09-13 takes only selections without
-observable effects, so it adds no case to the class beyond the reads a pure
-selection makes of a binding an earlier sibling writes — the second witness.
+`Sum`/`Product`, a `Block` used as a value, the statement form of a conditional,
+a lowering that binds an impure operand to a temporary (`Cot(Random())`) —
+hoists them into the enclosing statement sink, AHEAD of the whole enclosing
+expression. An operand written EARLIER in that expression then runs after them
+where the interpreter runs it first: with constant folding off,
+`(Random(), Σ_{n=1}^{⌊t⌋} Random())` emits the loop and then
+`return vec2(_gpu_rnd_draw(…), _tv1);` — the first component is the draw after
+the loop's; `(k := 1, Σ_{n} k·n)` reads `k` before the assignment. The class is
+as old as the loop-form `Sum` hoisting (Tycho item 110). The statement-form
+conditional landed 2026-09-13 takes only selections without observable effects,
+so it adds no case to the class beyond the reads a pure selection makes of a
+binding an earlier sibling writes — the second witness.
 
 A general fix was built and withdrawn in the same round after eleven review
-rounds kept finding compile paths it did not cover. What it must be, for
-the next attempt: (1) the choke point is `compileExpr` — the parent's
-lowering dispatch — not the operand compiler: infix operators, string-mapped
-functions and per-head handlers compile their operands through different
-paths, and `At` compiles its index before its base; (2) decide per OCCURRENCE,
-never by object identity — `Arctan2(e, e)` holds one object twice; (3) bind
-an earlier operand ahead of a hoisting sibling when the operand has an
-effect, or when the sibling WRITES a binding (a draw changes no value an
-earlier read sees), and read a `Block` by the values it assigns to its own
-locals (`BaseCompiler.hasObservableEffect`); (4) predict hoisting
-conservatively: every `Sum`/`Product` (an unrolled one hoists loop
-invariants), every impure application (a twice-spliced operand is bound),
-and accept the unneeded temporaries that over-reading costs; (5) a constant
-(pure, no symbol at all — `unknowns` misses assigned symbols reachable as
-caller-mapped names) needs no binding, and a bound operand needs a static
-shader type (fail closed otherwise); (6) never bind inside a lazy region or
-a selection's own operands. The question to rule on: is this ordering worth
-that mechanism, or should the shader targets keep declaring hoisting order
-as a documented difference from the interpreter for expressions that mix a
-hoisting operand with an effect written before it?
+rounds kept finding compile paths it did not cover. What it must be, for the
+next attempt: (1) the choke point is `compileExpr` — the parent's lowering
+dispatch — not the operand compiler: infix operators, string-mapped functions
+and per-head handlers compile their operands through different paths, and `At`
+compiles its index before its base; (2) decide per OCCURRENCE, never by object
+identity — `Arctan2(e, e)` holds one object twice; (3) bind an earlier operand
+ahead of a hoisting sibling when the operand has an effect, or when the sibling
+WRITES a binding (a draw changes no value an earlier read sees), and read a
+`Block` by the values it assigns to its own locals
+(`BaseCompiler.hasObservableEffect`); (4) predict hoisting conservatively: every
+`Sum`/`Product` (an unrolled one hoists loop invariants), every impure
+application (a twice-spliced operand is bound), and accept the unneeded
+temporaries that over-reading costs; (5) a constant (pure, no symbol at all —
+`unknowns` misses assigned symbols reachable as caller-mapped names) needs no
+binding, and a bound operand needs a static shader type (fail closed otherwise);
+(6) never bind inside a lazy region or a selection's own operands. The question
+to rule on: is this ordering worth that mechanism, or should the shader targets
+keep declaring hoisting order as a documented difference from the interpreter
+for expressions that mix a hoisting operand with an effect written before it?
 
 ### A shared subexpression inside a shader lazy operand with no statement position expands once per occurrence (OPEN — found 2026-09-13, narrowed 2026-09-13)
 
 A boxed expression is a DAG: `Max(e, e)` holds `e` once. The GLSL and WGSL
-targets bind such a shared node to a temporary through the
-common-subexpression pass wherever a statement position exists. A
-conditional whose arm repeats a subexpression now takes the statement form
-(`gpuArmSharesWork` selects it, `compileGPUStatementSelection` emits it),
-whose captured branch is a statement position where the shared node is
-declared once. What remains is a shared subexpression in a lazy operand
-that has NO reachable statement position: the right side of an `&&`/`||`,
-and a conditional nested where hoisting is refused — inside another arm, or
-an expression-only position. There the pass binds nothing and the operand's
-text unfolds the sharing. Both shader languages lack a scoped
-let-expression, so closing this needs a restructure that lifts such an
-operand to a statement, or the acceptance that a deeply shared lazy operand
-stays inline. (A separate, pre-existing cost: the common-subexpression pass
-itself runs super-linearly on a very deeply shared DAG — a depth-20 shared
-tower takes tens of seconds to compile even with no conditional, its
-emission linear. That is in the harvest, not the conditional lowering.)
+targets bind such a shared node to a temporary through the common-subexpression
+pass wherever a statement position exists. A conditional whose arm repeats a
+subexpression now takes the statement form (`gpuArmSharesWork` selects it,
+`compileGPUStatementSelection` emits it), whose captured branch is a statement
+position where the shared node is declared once. What remains is a shared
+subexpression in a lazy operand that has NO reachable statement position: the
+right side of an `&&`/`||`, and a conditional nested where hoisting is refused —
+inside another arm, or an expression-only position. There the pass binds nothing
+and the operand's text unfolds the sharing. Both shader languages lack a scoped
+let-expression, so closing this needs a restructure that lifts such an operand
+to a statement, or the acceptance that a deeply shared lazy operand stays
+inline. (A separate, pre-existing cost: the common-subexpression pass itself
+runs super-linearly on a very deeply shared DAG — a depth-20 shared tower takes
+tens of seconds to compile even with no conditional, its emission linear. That
+is in the harvest, not the conditional lowering.)
 
 ### `Match` with a case body that needs statements still declines on the shader targets (OPEN — found 2026-09-13 by the review of the statement-form conditional)
 
-`If`, `When` and `Which` on the GLSL and WGSL targets take a statement form
-when an arm needs statements (a loop-form `Sum`/`Product`, a `Block`, a
-`Loop`): `compileGPUStatementSelection` in
+`If`, `When` and `Which` on the GLSL and WGSL targets take a statement form when
+an arm needs statements (a loop-form `Sum`/`Product`, a `Block`, a `Loop`):
+`compileGPUStatementSelection` in
 `src/compute-engine/compilation/gpu-target.ts`. `Match` lowers through the
 shared `compileMatchTernary`, whose case bodies are compiled by
-`compileGPUConditionalArm` alone, so a `Match` whose case body holds a
-loop-form `Sum` declines as every conditional arm did before the statement
-form existed. The fix is to give `compileMatchTernary` the same statement
-form: the case tests become the conditions and the case bodies the arms,
-under the same gate (no effect in a case, no write outside the cases at the
-statement position). No document of the code-generation audit has the
-shape; the entry records the reachable decline.
+`compileGPUConditionalArm` alone, so a `Match` whose case body holds a loop-form
+`Sum` declines as every conditional arm did before the statement form existed.
+The fix is to give `compileMatchTernary` the same statement form: the case tests
+become the conditions and the case bodies the arms, under the same gate (no
+effect in a case, no write outside the cases at the statement position). No
+document of the code-generation audit has the shape; the entry records the
+reachable decline.
 
 ### `When` over a list-shaped condition zips a POINT value where `Which` lifts it whole (OPEN, ruling — found 2026-09-12 in the full-corpus code-generation audit, `njncrg9fkv`)
 
 `Which([True, False, False], (1, 2))` evaluates to `[(1, 2), NaN, NaN]`: the
-point is one value, lifted whole to the position that selects it. The
-masking form of the same selection, `When((1, 2), [True, False, False])` —
-what `p{cond}` parses to — evaluates to `[1, Missing]`: the point is read as
-a two-element collection and zipped against the three-element condition,
-which stops at the shorter operand. The two heads disagree on whether a
-point under a list condition is a value or a collection; the Tycho document
-writes `p := (u, v, …); p{0.08u + PointZ(p) + |v(1..3)/3| + 1 < …}` and
-expects the point at the positions where the condition holds. The compile
-route declines the statement (`assertScalarCondition`: "a branch condition
-is a collection-valued expression"), so no compiled value is wrong; the
-interpreter's value is the one to rule on.
+point is one value, lifted whole to the position that selects it. The masking
+form of the same selection, `When((1, 2), [True, False, False])` — what
+`p{cond}` parses to — evaluates to `[1, Missing]`: the point is read as a
+two-element collection and zipped against the three-element condition, which
+stops at the shorter operand. The two heads disagree on whether a point under a
+list condition is a value or a collection; the Tycho document writes
+`p := (u, v, …); p{0.08u + PointZ(p) + |v(1..3)/3| + 1 < …}` and expects the
+point at the positions where the condition holds. The compile route declines the
+statement (`assertScalarCondition`: "a branch condition is a collection-valued
+expression"), so no compiled value is wrong; the interpreter's value is the one
+to rule on.
 
 Options: (1) `When` lifts a point value whole, like `Which` — the answer is
-`[(1, 2), Missing, Missing]`, and the compile route can then lower the
-statement through the run-time selection (`_SYS.select` with the point arm
-wrapped, `_SYS.wholeArm`, landed 2026-09-12 for `Which`); (2) the zip is
-the intended reading, and the document's row is a user error to report. If
-nothing is decided the interpreter keeps zipping and the compile route keeps
-declining. Recommendation: (1) — the type system already treats a union of
-tuple element types as POINTS everywhere (Tycho items 287 and 288), and the
-zip answers a list of one coordinate and one `Missing`, which no consumer
-can read as a masked point.
+`[(1, 2), Missing, Missing]`, and the compile route can then lower the statement
+through the run-time selection (`_SYS.select` with the point arm wrapped,
+`_SYS.wholeArm`, landed 2026-09-12 for `Which`); (2) the zip is the intended
+reading, and the document's row is a user error to report. If nothing is decided
+the interpreter keeps zipping and the compile route keeps declining.
+Recommendation: (1) — the type system already treats a union of tuple element
+types as POINTS everywhere (Tycho items 287 and 288), and the zip answers a list
+of one coordinate and one `Missing`, which no consumer can read as a masked
+point.
 
 ### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
 
@@ -4314,150 +4305,147 @@ The item-17 / B-series performance pass is largely complete (`ln`, `exp`, `kˣ`,
 
 #### P1. Symbolic evaluation still 1.2–1.5× slower than 0.118.2 after the 2026-09-05 fix (OPEN, perf — residual)
 
-Found while regenerating the CHANGELOG benchmark tables for 0.124.0: against
-the same Mathematica baseline, the symbolic ratios of the current build were
-about half of those published with 0.116.0, while the 200-digit numeric rows
-were unchanged. Timing each published bundle and the current build in ONE
-warm process (`benchmarks/runners/run_ce_rubi.mjs` with `CE_PUBLISHED_BUNDLE`
-pointed at each release; the bundles for 0.116.0 through 0.123.2 are
-provisioned under `benchmarks/.competitors/`) showed the slowdown accumulated
-in steps at 0.119.0, 0.120.0, 0.121.0 and 0.122.0 — 1.7–2.8× in total on
-simplification, integration, definite integrals and solving.
+Found while regenerating the CHANGELOG benchmark tables for 0.124.0: against the
+same Mathematica baseline, the symbolic ratios of the current build were about
+half of those published with 0.116.0, while the 200-digit numeric rows were
+unchanged. Timing each published bundle and the current build in ONE warm
+process (`benchmarks/runners/run_ce_rubi.mjs` with `CE_PUBLISHED_BUNDLE` pointed
+at each release; the bundles for 0.116.0 through 0.123.2 are provisioned under
+`benchmarks/.competitors/`) showed the slowdown accumulated in steps at 0.119.0,
+0.120.0, 0.121.0 and 0.122.0 — 1.7–2.8× in total on simplification, integration,
+definite integrals and solving.
 
 **Fixed (2026-09-05, unreleased; the CHANGELOG entry describes it):** three
-causes, found with CPU profiles of unminified bundles of the release tags
-diffed function by function. (1) `BoxedNumber._computeLiteralType` read
-`bignumRe` — a working-precision square root for a radical — on every fresh
-exact literal, twice (exactness test, enclosure); the exactness test no longer
-reads it and `literalEnclosureType` works from the double `re`. (2) The
-directed decimal rounding of every derived range bound (`finalizeInterval`)
-and of the enclosure ran through `BigDecimal`; `roundSignificantToward`
+causes, found with CPU profiles of unminified bundles of the release tags diffed
+function by function. (1) `BoxedNumber._computeLiteralType` read `bignumRe` — a
+working-precision square root for a radical — on every fresh exact literal,
+twice (exactness test, enclosure); the exactness test no longer reads it and
+`literalEnclosureType` works from the double `re`. (2) The directed decimal
+rounding of every derived range bound (`finalizeInterval`) and of the enclosure
+ran through `BigDecimal`; `roundSignificantToward`
 (`numerics/interval-arithmetic.ts`) does it in double arithmetic, bit-identical
 to the decimal route (pinned by
 `test/compute-engine/round-significant-toward.test.ts`). (3) `factsFromType`
-computed the collection facts (two `provablyDisjoint` proofs) whenever a
-handler asked only for finiteness, and the `typeFact(…) === true` probes across
-the library paid a `provablyDisjoint` on their `false` arm for an answer they
-never read; the facts are per-fact now and the probes are `isSubtype` tests.
-Plus cheap first checks in `provablyNaNOperand`, `isExtendedRealOperand`,
+computed the collection facts (two `provablyDisjoint` proofs) whenever a handler
+asked only for finiteness, and the `typeFact(…) === true` probes across the
+library paid a `provablyDisjoint` on their `false` arm for an answer they never
+read; the facts are per-fact now and the probes are `isSubtype` tests. Plus
+cheap first checks in `provablyNaNOperand`, `isExtendedRealOperand`,
 `isTensorOperand`, `isNumericTuple` and `isTuple`.
 
 **What remains** (µs per call, one warm process per build, interleaved runs,
 median of 50; box load 1.5–2.5):
 
-| Case | 0.118.2 | 0.124.0 | fixed | fixed ÷ 0.118.2 |
-| --- | --: | --: | --: | --: |
-| box `√6x + √2x` | 60 | 147 | 79 | 1.32 |
-| simplify `√6x + √2x` | 716 | 1526 | 957 | 1.34 |
-| simplify `√(3+2√2)` | 194 | 360 | 225 | 1.16 |
-| solve `x⁴+x²−1=0` | 4940 | 8540 | 5950 | 1.20 |
-| `∫1/(x³+1)dx` | 2380 | 4740 | 3120 | 1.31 |
-| `∫₁² 1/x dx` | 163 | 301 | 242 | 1.48 |
+| Case                 | 0.118.2 | 0.124.0 | fixed | fixed ÷ 0.118.2 |
+| -------------------- | ------: | ------: | ----: | --------------: |
+| box `√6x + √2x`      |      60 |     147 |    79 |            1.32 |
+| simplify `√6x + √2x` |     716 |    1526 |   957 |            1.34 |
+| simplify `√(3+2√2)`  |     194 |     360 |   225 |            1.16 |
+| solve `x⁴+x²−1=0`    |    4940 |    8540 |  5950 |            1.20 |
+| `∫1/(x³+1)dx`        |    2380 |    4740 |  3120 |            1.31 |
+| `∫₁² 1/x dx`         |     163 |     301 |   242 |            1.48 |
 
 The residual is diffuse — no single function above 3 % of a call. Per-function
-self-time diffs of the fixed build against 0.118.2 (simplify case, µs per
-call) name: garbage collection +18, `isSubtype` +15, the memoized type
-derivation of function nodes (`type`/`compute`/`cachedValue`) +12,
-`structureOfExpression` +8, `addTypeOnTypes` with `foldIntervalsOfTypes` /
-`finalizeInterval` +8, `get finite` +5, `sortProductOperands` +4, `isSame`
-+3. Two structural sources behind those numbers: the type derivations that
-the `Add`/`Multiply` canonicalization forced on every intermediate product
-and sum through `isTuple` / `isNumericTuple` (a quarter of a simplify call),
-and the allocation per derivation (a descriptor and its facts object per
-operand, a structure view per `structureOf()` call, an interval per fold, a
-fresh literal type per fresh literal).
+self-time diffs of the fixed build against 0.118.2 (simplify case, µs per call)
+name: garbage collection +18, `isSubtype` +15, the memoized type derivation of
+function nodes (`type`/`compute`/`cachedValue`) +12, `structureOfExpression` +8,
+`addTypeOnTypes` with `foldIntervalsOfTypes` / `finalizeInterval` +8,
+`get finite` +5, `sortProductOperands` +4, `isSame` +3. Two structural sources
+behind those numbers: the type derivations that the `Add`/`Multiply`
+canonicalization forced on every intermediate product and sum through `isTuple`
+/ `isNumericTuple` (a quarter of a simplify call), and the allocation per
+derivation (a descriptor and its facts object per operand, a structure view per
+`structureOf()` call, an interval per fold, a fresh literal type per fresh
+literal).
 
 **Forced derivations removed (2026-09-06, unreleased; the CHANGELOG entry
-describes it).** `isTuple` / `isNumericTuple` now answer from the operands
-for an arithmetic application (`SCALAR_LIFT_HEADS` in `collection-utils.ts`:
-tuple-shaped only when an operand is), the evaluate-time NaN gate no longer
-asks an application (`isNaN === true` is never its answer), the runtime
-conformance check declines a symbolic operand before reading its type, and
+describes it).** `isTuple` / `isNumericTuple` now answer from the operands for
+an arithmetic application (`SCALAR_LIFT_HEADS` in `collection-utils.ts`:
+tuple-shaped only when an operand is), the evaluate-time NaN gate no longer asks
+an application (`isNaN === true` is never its answer), the runtime conformance
+check declines a symbolic operand before reading its type, and
 `nonNumericOperandError` skips literals and `number`-typed operands. With
 `isSubtype` fast paths and four smaller cuts: 5–12 % less time per call on
 simplify, solve and the indefinite integral; boxing and `∫₁² 1/x` unchanged.
-Measured with the lock held at box load 3–5, five interleaved rounds,
-medians (µs per call):
+Measured with the lock held at box load 3–5, five interleaved rounds, medians
+(µs per call):
 
-| Case | 0.118.2 | 0.124.1 | now | now ÷ 0.118.2 |
-| --- | --: | --: | --: | --: |
-| box `√6x + √2x` | 41 | 45 | 44 | 1.07 |
-| simplify `√6x + √2x` | 234 | 292 | 279 | 1.19 |
-| simplify `√(3+2√2)` | 85 | 95 | 87 | 1.02 |
-| solve `x⁴+x²−1=0` | 2475 | 3165 | 2859 | 1.16 |
-| `∫1/(x³+1)dx` | 1985 | 2661 | 2393 | 1.21 |
-| `∫₁² 1/x dx` | 173 | 221 | 220 | 1.27 |
+| Case                 | 0.118.2 | 0.124.1 |  now | now ÷ 0.118.2 |
+| -------------------- | ------: | ------: | ---: | ------------: |
+| box `√6x + √2x`      |      41 |      45 |   44 |          1.07 |
+| simplify `√6x + √2x` |     234 |     292 |  279 |          1.19 |
+| simplify `√(3+2√2)`  |      85 |      95 |   87 |          1.02 |
+| solve `x⁴+x²−1=0`    |    2475 |    3165 | 2859 |          1.16 |
+| `∫1/(x³+1)dx`        |    1985 |    2661 | 2393 |          1.21 |
+| `∫₁² 1/x dx`         |     173 |     221 |  220 |          1.27 |
 
-**What remains** is the cost of a derivation itself and its allocation. A
-fresh `Add(x, y)` / `Power(x, 2)` / `Multiply(√6, x)` node types in 2.3 /
-2.8 / 3.3 µs against 1.2 / 1.1 / 2.5 µs on 0.118.2 (micro-benchmark on
-`ce._fn` nodes, 20 000 each), and no single line of the derivation carries
-it: the handler call (Add/Multiply/Power handlers with their interval folds)
-is ~0.4 µs, the function's own body ~0.5 µs (closures, descriptor array,
-the missing-absorption and broadcast scans over the operands), then
-`skipBroadcastForVectorOps`, `provablyNaNOperand`, `isExtendedRealOperand`,
-`broadcastsOverTuples` at 0.1–0.2 µs each. The solve case's per-function
-self-time deltas against 0.118.2 (µs per call) are led by garbage
-collection +160, then `roundSignificantToward` +70 (now cut for integer
-bounds), `get re` in `getImaginaryFactor` +45, `makeNumericFunction` +38,
-`replace` +32, `provablyNaNOperand` +31, `structureOfExpression` +28,
-`factor` +27, `canonicalPower` +26, the derivation body +26,
-`broadcastsOverTuples` +25 (now a set lookup), `isPrimitiveSubtype` +24,
-`makeNumericValue` +22, `addTypeOnTypes` +22, `_BoxedExpression` +22 (more
-nodes built), `finiteFromType` +21. The definite integral's gap is in
-boxing, not evaluation: `makeCanonicalFunctionCore` 110 vs 81 µs,
-`applyOperatorDefinition` 63 vs 48, with `hasSignatureArm`,
-`reduceUnionType` (under `widen`), `recordTypeProvenance` and
-`_withoutFacts` new since 0.118.2 at 1–3 µs each. The next round is designed in
-`docs/plans/2026-09-06-type-facts-per-type.md`: an instrumented count shows
-that the volume is not the derivations (146 per solve call) but the
-questions asked of types afterwards (4 389 subtype queries over 1 121
-distinct pairs, 1 818 type reads), so the facts a type has are to be
-computed once per type value and read by every predicate. Levers after
-that: a per-value literal-type cache (the same rational or radical value
-boxes to the same type object), a descriptor pool, and a memo of
-`broadcastsOverTuples` / `broadcastableParamSlots` per definition.
+**What remains** is the cost of a derivation itself and its allocation. A fresh
+`Add(x, y)` / `Power(x, 2)` / `Multiply(√6, x)` node types in 2.3 / 2.8 / 3.3 µs
+against 1.2 / 1.1 / 2.5 µs on 0.118.2 (micro-benchmark on `ce._fn` nodes, 20 000
+each), and no single line of the derivation carries it: the handler call
+(Add/Multiply/Power handlers with their interval folds) is ~0.4 µs, the
+function's own body ~0.5 µs (closures, descriptor array, the missing-absorption
+and broadcast scans over the operands), then `skipBroadcastForVectorOps`,
+`provablyNaNOperand`, `isExtendedRealOperand`, `broadcastsOverTuples` at 0.1–0.2
+µs each. The solve case's per-function self-time deltas against 0.118.2 (µs per
+call) are led by garbage collection +160, then `roundSignificantToward` +70 (now
+cut for integer bounds), `get re` in `getImaginaryFactor` +45,
+`makeNumericFunction` +38, `replace` +32, `provablyNaNOperand` +31,
+`structureOfExpression` +28, `factor` +27, `canonicalPower` +26, the derivation
+body +26, `broadcastsOverTuples` +25 (now a set lookup), `isPrimitiveSubtype`
++24, `makeNumericValue` +22, `addTypeOnTypes` +22, `_BoxedExpression` +22 (more
+nodes built), `finiteFromType` +21. The definite integral's gap is in boxing,
+not evaluation: `makeCanonicalFunctionCore` 110 vs 81 µs,
+`applyOperatorDefinition` 63 vs 48, with `hasSignatureArm`, `reduceUnionType`
+(under `widen`), `recordTypeProvenance` and `_withoutFacts` new since 0.118.2 at
+1–3 µs each. The next round is designed in
+`docs/plans/2026-09-06-type-facts-per-type.md`: an instrumented count shows that
+the volume is not the derivations (146 per solve call) but the questions asked
+of types afterwards (4 389 subtype queries over 1 121 distinct pairs, 1 818 type
+reads), so the facts a type has are to be computed once per type value and read
+by every predicate. Levers after that: a per-value literal-type cache (the same
+rational or radical value boxes to the same type object), a descriptor pool, and
+a memo of `broadcastsOverTuples` / `broadcastableParamSlots` per definition.
 
-**Literal types are not the lever (measured 2026-09-06, box load 2.7,
-three interleaved rounds, medians).** Four retreats from the literal-tier
-types were timed against the shipped 0.124.1 build on the same six probes,
-and the fourteen type-related test suites were run under each to count the
-proofs lost: replacing the enclosure of a non-machine-exact literal
-(`real<2.4..2.5>` for `√6`) by the open sign range `real<0<..>` changes NO
-timing (79 / 953 / 6210 µs on box / simplify / solve, identical) and fails 15
-pins; typing such a literal by its bare tier fails 16 pins for 5–10 %;
-keeping value types for integers only fails 27 pins for the same 5–10 %; and
-dropping literal types altogether fails 81 pins for 10–18 %, at most a third
-of the remaining gap to 0.118.2. The capability lost is concrete:
-`arcsin(1/3)` and `artanh(1/3)` type `complex` instead of `real` without the
-enclosure, `arcsin(0.5)` needs the value type of a non-integer, and
-`1/(x + 1/3)` with `x: real<0..1>` loses its bounds. Decision: keep the
-literal-tier types as they are; the residual lies in the derivation of
+**Literal types are not the lever (measured 2026-09-06, box load 2.7, three
+interleaved rounds, medians).** Four retreats from the literal-tier types were
+timed against the shipped 0.124.1 build on the same six probes, and the fourteen
+type-related test suites were run under each to count the proofs lost: replacing
+the enclosure of a non-machine-exact literal (`real<2.4..2.5>` for `√6`) by the
+open sign range `real<0<..>` changes NO timing (79 / 953 / 6210 µs on box /
+simplify / solve, identical) and fails 15 pins; typing such a literal by its
+bare tier fails 16 pins for 5–10 %; keeping value types for integers only fails
+27 pins for the same 5–10 %; and dropping literal types altogether fails 81 pins
+for 10–18 %, at most a third of the remaining gap to 0.118.2. The capability
+lost is concrete: `arcsin(1/3)` and `artanh(1/3)` type `complex` instead of
+`real` without the enclosure, `arcsin(0.5)` needs the value type of a
+non-integer, and `1/(x + 1/3)` with `x: real<0..1>` loses its bounds. Decision:
+keep the literal-tier types as they are; the residual lies in the derivation of
 function nodes, above.
 
 **Shared type facts and boxed handler results implemented (2026-09-06,
-unreleased).** `OperatorTypeHandlerOnTypes` now returns
-`BoxedType | undefined`. Immutable types share lazy proofs, intervals,
-normalized boxes, and equal numeric value/range identities. Mutable types
-and aliases keep live reads; literal precision and derived bounds are
-preserved. Two warm, interleaved comparisons against 0.124.2 reduce time by
-14–16% on `√6x + √2x` simplification, 7% on solving `x⁴+x²−1=0`, 9% on
-`∫1/(x³+1)dx`, and 25% on `∫₁² 1/x dx`. Boxing improves 5–8%, nested-root
-simplification 3–4%, and the ranged-product type control 44–46%. Subtype
-queries fall 871 → 26 / 4 243 → 333 / 4 491 → 392 on simplify / solve /
-integrate, while descriptor counts are unchanged. The measured setup and
-raw results are in
+unreleased).** `OperatorTypeHandlerOnTypes` now returns `BoxedType | undefined`.
+Immutable types share lazy proofs, intervals, normalized boxes, and equal
+numeric value/range identities. Mutable types and aliases keep live reads;
+literal precision and derived bounds are preserved. Two warm, interleaved
+comparisons against 0.124.2 reduce time by 14–16% on `√6x + √2x` simplification,
+7% on solving `x⁴+x²−1=0`, 9% on `∫1/(x³+1)dx`, and 25% on `∫₁² 1/x dx`. Boxing
+improves 5–8%, nested-root simplification 3–4%, and the ranged-product type
+control 44–46%. Subtype queries fall 871 → 26 / 4 243 → 333 / 4 491 → 392 on
+simplify / solve / integrate, while descriptor counts are unchanged. The
+measured setup and raw results are in
 [`docs/plans/2026-09-06-type-facts-per-type.md`](docs/plans/2026-09-06-type-facts-per-type.md#measured-outcome).
-P1 stays open: the next experiment is a scalar arithmetic dispatch path;
-the historical gap to 0.118.2 has not been remeasured in this round.
+P1 stays open: the next experiment is a scalar arithmetic dispatch path; the
+historical gap to 0.118.2 has not been remeasured in this round.
 
-Reproduce a measurement with `CE_PUBLISHED_BUNDLE=<bundle to compare> node
-benchmarks/runners/run_ce_rubi.mjs`: it times the published bundle and the
-current build (`dist/esm-min/compute-engine.js`, so build first) on the whole
-case set in one warm process — one shared engine per build, a warm-up pass,
-then the median of up to 50 timed calls per case — and prints one JSON line
-per (engine, case); compare the `ce-pub` and `ce-current` lines of a case.
-Take the box lock: the numbers are meaningless under load.
+Reproduce a measurement with
+`CE_PUBLISHED_BUNDLE=<bundle to compare> node benchmarks/runners/run_ce_rubi.mjs`:
+it times the published bundle and the current build
+(`dist/esm-min/compute-engine.js`, so build first) on the whole case set in one
+warm process — one shared engine per build, a warm-up pass, then the median of
+up to 50 timed calls per case — and prints one JSON line per (engine, case);
+compare the `ce-pub` and `ce-current` lines of a case. Take the box lock: the
+numbers are meaningless under load.
 
 #### P0. `.N()` over nested user-function applications is exponential (filed 2026-07-26)
 

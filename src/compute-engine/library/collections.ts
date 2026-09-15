@@ -1835,12 +1835,21 @@ function setComprehensionElementType(
  * `facts.elementType`. */
 function componentTypeD(xs: OperandDescriptor, position: number): Type {
   const elt = xs.facts.elementType;
-  if (elt !== undefined) return elt;
   const t = xs.type;
+  // A tuple type states a type PER POSITION, and the `elttype` handler's
+  // answer is the widening of every component. The positional type is the
+  // precise one: over `(1, sqrt(1 - e^2))` the first component is an
+  // integer, while the widening admits a complex value because the second
+  // component may be one — and a consumer that reads the widening lowers a
+  // real division on the complex lane against an operand emitted as a plain
+  // number (a `NaN` at run time). The handler's answer is kept only when it
+  // is narrower than the positional type, as it is for a symbol declared
+  // `tuple<number, number>` whose value holds integers.
   if (typeof t !== 'string' && t.kind === 'tuple' && position >= 1) {
     const e = t.elements[position - 1]?.type;
-    if (e) return e;
+    if (e) return elt !== undefined && isSubtype(elt, e) ? elt : e;
   }
+  if (elt !== undefined) return elt;
   return collectionElementType(t) ?? 'any';
 }
 
@@ -2239,6 +2248,37 @@ function isProvablyEmptyCollectionD(xs: OperandDescriptor): boolean {
   return s?.kind === 'list-literal' && s.elements.length === 0;
 }
 
+/** The arms of an element type, read through a union: the type itself when
+ * it is not a union. */
+function elementTypeArms(element: Type): Type[] {
+  const e = resolveTypeAlias(element);
+  return typeof e !== 'string' && e.kind === 'union' ? [...e.types] : [e];
+}
+
+/** The arms of an element type that are numbers (`number` and its
+ * subtypes), read through a union. Empty when there is none. */
+function numericElementArms(element: Type): Type[] {
+  return elementTypeArms(element).filter((arm) => isSubtype(arm, 'number'));
+}
+
+/** The arms of an element type that are points (tuples), read through a
+ * union. Empty when there is none. */
+function pointElementArms(element: Type): Type[] {
+  return elementTypeArms(element).filter((arm) => isPointElementType(arm));
+}
+
+/** Every arm of the element type is a number or a point, and at least one
+ * arm is a point: the element type of a collection that holds either one
+ * point written flat or a list of points. */
+function isPointOrNumberElementType(element: Type | undefined): boolean {
+  if (element === undefined) return false;
+  const arms = elementTypeArms(element);
+  return (
+    pointElementArms(element).length > 0 &&
+    arms.every((arm) => isSubtype(arm, 'number') || isPointElementType(arm))
+  );
+}
+
 /**
  * The component type of a point TYPE at a 1-based position: a tuple's component
  * at that position, or the widening of a union of tuple spellings. `undefined`
@@ -2334,7 +2374,7 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         parts.push(ct);
       } else if (
         isSubtype(arm, INDEXED_COLLECTION_SHAPE_TYPE) &&
-        isPointElementType(collectionElementType(arm))
+        isPointOrNumberElementType(collectionElementType(arm))
       ) {
         // An ORDERED collection of points broadcasts to a list of the
         // coordinate at this position. The `indexed_collection` guard keeps a
@@ -2344,8 +2384,26 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         // `number` — a point list may carry a non-numeric coordinate, whose
         // honest type must survive so a numeric consumer still fails closed
         // over it rather than compiling against a wrong `list<number>`.
+        //
+        // The elements may also be numbers OR points —
+        // `indexed_collection<number | tuple<number, number>>`, the spelling
+        // a document declares for a helper that answers either one point
+        // written flat or a list of points. The accessor decides by the
+        // first element (`pointComponentAt`): a list of points broadcasts to
+        // the coordinate list, and a list of numbers is one point written
+        // flat, whose coordinate is the element at this position — a
+        // number. Both readings are exact, so both join the union.
+        // The element-indexing reading answers the ELEMENT at this
+        // position, whatever its arm: a list whose first element is a
+        // number may still hold a point later (`PointY([5, (1, 2)])` is the
+        // point `(1, 2)`), so every arm of the element type joins, not the
+        // numeric ones alone.
+        const element = collectionElementType(arm) as Type;
+        const numeric = numericElementArms(element);
+        if (numeric.length > 0) parts.push(...elementTypeArms(element));
+        const points = pointElementArms(element);
         const coord = tupleComponentType(
-          collectionElementType(arm) as Type,
+          points.length === 1 ? points[0] : { kind: 'union', types: points },
           position
         );
         if (coord === undefined) {

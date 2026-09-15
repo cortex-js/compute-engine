@@ -3562,7 +3562,28 @@ export class BaseCompiler {
     // inside `a(t) := √(t−1)` promotes THERE, and the call's wide result type
     // would otherwise report it real (item 190's witness). Under strict
     // shapes without promotion the type-based answer below is exact.
-    if (!BaseCompiler.promotionActive) return undefined;
+    // A written-out point argument with a complex-shaped coordinate never
+    // reaches the emitted definition, which reads coordinates as real
+    // numbers: the call is inlined instead (`tryCompileUserFunction`), and
+    // the inlined body reads that coordinate at its own lane. The verdict
+    // must be the inlined body's, so the enclosing arithmetic reads the
+    // call the way it is emitted: the body is analyzed with the point
+    // substituted for its parameter. A real reading of `1 + g((x, i·x))`
+    // with `g(P) = P.y` added the `{re, im}` object as a string
+    // (`"[object Object]1"`), and a blanket complex reading of
+    // `1 + h((x, i·x))` with `h(P) = P.x` read `.re` off the plain number
+    // `x` (`NaN`); the substituted verdict gets both right.
+    let analyzed: Expression = body;
+    if (BaseCompiler.writtenPointWithComplexCoordinateAt(expr.ops) >= 0) {
+      const substitution: Record<string, Expression> = {};
+      literal.ops.slice(1).forEach((p, i) => {
+        const name = functionLiteralParameterName(p);
+        const arg = expr.ops[i];
+        if (name !== undefined && arg !== undefined)
+          substitution[name] = BaseCompiler.throughTyped(arg);
+      });
+      analyzed = body.subs(substitution);
+    } else if (!BaseCompiler.promotionActive) return undefined;
     const mask = BaseCompiler.userCallMask(literal);
     const nextVisited = new Set(visited);
     nextVisited.add(op);
@@ -3570,7 +3591,7 @@ export class BaseCompiler {
     BaseCompiler._userCallVisited = nextVisited;
     try {
       return BaseCompiler.withBinderMask(mask, () =>
-        BaseCompiler.isComplexValued(body)
+        BaseCompiler.isComplexValued(analyzed)
       );
     } finally {
       BaseCompiler._userCallVisited = prevVisited;
@@ -18868,6 +18889,47 @@ export class BaseCompiler {
           );
       }
     }
+    // A point argument with a complex-shaped coordinate — `(x / 1, y / √(1 −
+    // e²))`, where the second coordinate lowers through the complex kernels
+    // — cannot reach an emitted definition: the definition reads a point
+    // parameter's coordinates as plain numbers in every discipline (`V[1]`,
+    // `_SYS.pow2`), so a `{re, im}` coordinate computes `NaN` there, behind
+    // `success: true`. The call is inlined instead, which reads each
+    // coordinate at its own lane (`PointY(PointList(a, b))` folds to `b`);
+    // when it cannot be inlined, the call fails closed. Measured on the
+    // Tycho corpus (`neyret/hpr2q4kles`, 2026-09-15): `P_0` answered `NaN`
+    // where the interpreter answers 1.024. A target with its own definition
+    // lowering (the shader targets) synthesizes a static signature and checks
+    // its argument shapes itself, as the strict lane check above leaves it
+    // to; the gate is JavaScript's.
+    if (literal !== undefined && !target.userFunctions?.lowering) {
+      const at = BaseCompiler.complexCoordinateArgumentAt(engine, args, target);
+      if (at >= 0) {
+        // The arguments are handed to the substitution as they are: an
+        // inlined helper leaves its point wrapped in a return-type
+        // ascription (`Typed(PointList(…), '…')`), which the substitution
+        // does not read through, so such a call declines. Removing the
+        // wrapper here was measured to be unsound: the inlined body then
+        // emits a complex-shaped value where the enclosing arithmetic had
+        // analyzed the CALL node as real (its declared result type), and
+        // `-0.39 + {re, im}` concatenated a string at run time.
+        const inlined = BaseCompiler.tryInlineUserFunctionCall(
+          engine,
+          h,
+          args,
+          target
+        );
+        if (inlined !== undefined) return inlined;
+        throw new Error(
+          `Cannot compile a call of \`${h}\`: argument ${at + 1} is a point ` +
+            `with a complex-valued coordinate, and the emitted definition ` +
+            `reads a point parameter's coordinates as real numbers, so it ` +
+            `would compute a different value than the interpreter does. The ` +
+            `call could not be inlined instead. Fail closed (D6).`
+        );
+      }
+    }
+
     const specialized =
       literal === undefined
         ? undefined
@@ -19813,6 +19875,62 @@ export class BaseCompiler {
    * static type is tuple-shaped, such as a symbol declared
    * `tuple<real, real>`.
    */
+  /**
+   * The first argument position holding a single point (`isSinglePointArg`)
+   * whose coordinates are not all plain real numbers at run time — a
+   * coordinate that lowers to a `{re, im}` object, or coordinates of mixed
+   * shapes (`operandElementLane`) — or `-1`. Such a point cannot be passed
+   * to an emitted definition, which reads coordinates as real numbers.
+   */
+  private static complexCoordinateArgumentAt(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): number {
+    const written = BaseCompiler.writtenPointWithComplexCoordinateAt(args);
+    if (written >= 0) return written;
+    for (let i = 0; i < args.length; i++) {
+      const a = BaseCompiler.throughTyped(args[i]);
+      if (!BaseCompiler.isSinglePointArg(a)) continue;
+      // A written-out point was decided above.
+      if (isFunction(a, 'Tuple') || isFunction(a, 'PointList')) continue;
+      const lane = BaseCompiler.operandElementLane(a, engine, target);
+      if (lane === true || lane === 'mixed') return i;
+    }
+    return -1;
+  }
+
+  /**
+   * The first argument position holding a point WRITTEN OUT — a `Tuple` or
+   * a `PointList` of scalar coordinates, which is what an inlined
+   * point-valued helper leaves behind — one of whose coordinates is
+   * complex-shaped (`isComplexValued`), or `-1`. Each coordinate is read on
+   * its own lane; `elementComplexness` reads a `Tuple` the same way but
+   * answers nothing for a `PointList`, whose components may also be list
+   * columns. Read through a return-type ascription (`throughTyped`).
+   */
+  private static writtenPointWithComplexCoordinateAt(
+    args: ReadonlyArray<Expression>
+  ): number {
+    for (let i = 0; i < args.length; i++) {
+      const a = BaseCompiler.throughTyped(args[i]);
+      if (!isFunction(a, 'Tuple') && !isFunction(a, 'PointList')) continue;
+      if (!BaseCompiler.isSinglePointArg(a)) continue;
+      if (a.ops.some((c) => BaseCompiler.isComplexValued(c))) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * `a` without its return-type ascriptions: an inlined helper whose
+   * declared result is wider than its body leaves its value wrapped in
+   * `Typed(value, '…')`.
+   */
+  private static throughTyped(a: Expression): Expression {
+    while (isFunction(a, 'Typed')) a = a.op1;
+    return a;
+  }
+
   private static isSinglePointArg(a: Expression): boolean {
     if (isFunction(a, 'Tuple')) return true;
     if (

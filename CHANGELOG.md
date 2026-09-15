@@ -1,3 +1,52 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A point argument with a complex-valued coordinate no longer computes `NaN`
+  inside an emitted definition (JavaScript target).** An emitted user-function
+  definition reads a point parameter's coordinates as plain numbers. A point
+  whose coordinate lowers through the complex kernels —
+  `(x / 1, y / \sqrt{1 - e^2})` under the default `auto` discipline, where the
+  square root of an unknown-sign operand is promoted — handed that definition a
+  `{re, im}` object, and the body answered `NaN` behind `success: true`
+  (`l(V) = \sqrt{V.x^2 + V.y^2}` applied to it in the Tycho corpus document
+  `hpr2q4kles`, where the interpreter answers 1.024). The call is now inlined
+  when the substitution admits the argument, which reads each coordinate at its
+  own lane (`l((1, i))` compiles to 0, and a promoted square root gives the
+  interpreter's complex result); otherwise it fails closed with
+  `Cannot compile a call of …: argument N is a point with a complex-valued coordinate … Fail closed (D6)`.
+  The enclosing arithmetic reads such a call the way it is emitted: the call's
+  lane is answered from the body with the point substituted, so
+  `1 + g((x, i x))` with `g(P) = P.y` is the complex sum (before,
+  `"[object Object]1"`), and `1 + h((x, i x))` with `h(P) = P.x` is the plain
+  sum.
+
+- **A coordinate read off a written-out point keeps the type of that
+  component.** `PointX((1, \sqrt{1 - e^2}))` typed `complex | nan` — the
+  widening of both components — and is now `integer | nan`; `PointY` of it stays
+  `number`. A division by that first coordinate lowered on the complex lane
+  against a coordinate emitted as the plain number `1`, which is `NaN` at run
+  time; it now compiles on the real lane and matches the interpreter.
+
+- **A coordinate accessor over a collection that holds numbers or points
+  distributes its type.** `PointX(P)` with `P` declared
+  `indexed_collection<number | tuple<number, number>> | list<tuple<number, number>> | tuple<number, number>`
+  — the union a document helper read through `.x`/`.y` is declared with — typed
+  the abstract `collection<number>`, over which every `Power`, `Abs`, `Sqrt` and
+  arithmetic head failed closed on the JavaScript target (`\sqrt{V.x^2 + V.y^2}`
+  in the Tycho corpus). It now types
+  `number | tuple<number, number> | list<number>`: a list whose first element is
+  a number element-indexes, answering the element at that position (a number, or
+  a point in a mixed list), and a list of points broadcasts to a list of
+  coordinates; both readings compile through the run-time coordinate helper.
+
+- **Juxtaposition with a union-typed operand is multiplication, not a pair.**
+  `2\mathrm{PointX}(P)` with the coordinate typed `number | list<number>` parsed
+  as the tuple `(2, PointX(P))`; a union whose every arm is value-like (a
+  number, a list of numbers, a point) now reads as scaling, as the
+  `broadcastable<…>` spelling of the same idea already did. A union with an arm
+  that is not value-like (`string | number`) still groups as a `Tuple`.
+
 ## 0.128.11 _2026-09-14_
 
 ### Resolved Issues
