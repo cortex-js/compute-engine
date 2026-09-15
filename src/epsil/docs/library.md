@@ -586,7 +586,7 @@ rationalize(sqrt(3), 1/500)
 | `jacobianMatrix` | `JacobianMatrix` | `(any, any?) -> value` | JacobianMatrix(fs, vars): the matrix of partial derivatives |
 | `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function |
 | `limits` | `Limits` | `(index: symbol, lower: value, upper: value) -> tuple` | Limits of a function |
-| `nd` | `ND` | `(function, at: number) -> number` | Numerical derivative evaluated at a point. |
+| `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
 | `ndSolve` | `NDSolve` | `(expression, symbol, limits: symbol \| tuple, number, number?) -> list` | Numerical differential equation solver. |
 | `ndSolveFunction` | `NDSolveFunction` | `(expression, symbol, limits: symbol \| tuple, number) -> function` | Numerically solve an ordinary differential equation and return the solution as an applicable function (a `Function` literal wrapping an `InterpolatingFunction`), usable at any point of the integration interval. |
 | `nIntegrate` | `NIntegrate` | `(function, limits: (symbol \| tuple)?) -> number` | Numerical approximation of a definite integral. |
@@ -899,7 +899,7 @@ stirlingS1(5, 2)
 | `characteristicPolynomial` | `CharacteristicPolynomial` | `(matrix, any?) -> expression` | Characteristic polynomial det(x·I − A) of a square matrix (monic). |
 | `choleskyDecomposition` | `CholeskyDecomposition` | `(matrix) -> matrix` | Cholesky decomposition of a positive-definite matrix. |
 | `conjugateTranspose` | `ConjugateTranspose` | `(value, axis1: integer?, axis2: integer?) -> value` | Conjugate transpose (Hermitian adjoint) of a matrix or tensor. |
-| `cross` | `Cross` | `(tuple \| vector, tuple \| vector) -> vector` | Cross product of two 3-vectors. |
+| `cross` | `Cross` | `(tuple \| vector, tuple \| vector) -> tuple \| vector` | Cross product of two 3-vectors. |
 | `degree` | `Degree` | `(value) -> integer` | Degree of an object |
 | `determinant` | `Determinant` | `(matrix) -> number` | Determinant of a square matrix. |
 | `diagonal` | `Diagonal` | `(value) -> value` | Extract a matrix diagonal or build a diagonal matrix. |

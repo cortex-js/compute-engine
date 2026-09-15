@@ -47,6 +47,10 @@ import {
 import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
 import { errorValue } from './boxed-expression/error-value.js';
 import {
+  listRecursionPlan,
+  evaluateListRecursion,
+} from './boxed-expression/recursive-list-builder.js';
+import {
   beginProvisionalCapture,
   endProvisionalCapture,
   provisionalLiteral,
@@ -2783,7 +2787,8 @@ function makeLambda(
 
   const invoke = (
     args: ReadonlyArray<Expression>,
-    options?: ApplyOptions
+    options?: ApplyOptions,
+    iterationStatements?: ReadonlyArray<Expression>
   ): Expression | undefined => {
     // BOUND-VARIABLE parameters (`bindParameters`) are eliminated first, by
     // substitution: the parameter is replaced in the body by the symbol the
@@ -3154,6 +3159,7 @@ function makeLambda(
     // fact-blind bracket, and the two answers must not be confused
     // (`docs/plans/2026-08-30-assumptions-memo-inventory.md`).
     const memoArgs =
+      iterationStatements === undefined &&
       evaluatedArgs.every((a) => isNumber(a)) &&
       isPureComputedEffects(effectsOf(body))
         ? `${ce._factsHidden() ? 'H' : ''}|${evaluatedArgs
@@ -3177,6 +3183,36 @@ function makeLambda(
       evaluatedArgs.some((a) => containsFreeSymbol(a))
     )
       throw new SymbolicRecursion(fnExpr.hash);
+
+    // A list-producing recursion can run one ordinary call frame per step.
+    // Analyze current bindings and effects here, after argument validation,
+    // instead of changing the stored definition or trusting assignment-time
+    // purity. Private step results never enter the application memo.
+    if (
+      iterationStatements === undefined &&
+      !options?.holdArguments &&
+      evaluatedArgs.length === params.length &&
+      evaluatedArgs.every(isNumber) &&
+      debugStatementHook === undefined &&
+      debugStatementResultHook === undefined
+    ) {
+      const plan = listRecursionPlan(fnExpr);
+      if (plan !== undefined) {
+        const result = evaluateListRecursion(
+          plan,
+          evaluatedArgs,
+          (next, step) =>
+            invoke(
+              next,
+              { ...options, numericApproximation: false },
+              step === undefined ? bodyFn.ops : [step]
+            )
+        );
+        return result !== undefined && numeric
+          ? evaluateInOwnBindings(ce, result, { numericApproximation: true })
+          : result;
+      }
+    }
 
     //
     // 5/ Create a fresh scope per call with parent = the defining scope.
@@ -3235,7 +3271,10 @@ function makeLambda(
     // the memo (see the numeric pass below).
     let exactResult: Expression | undefined = undefined;
     try {
-      result = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
+      result = unwrapReturn(
+        ce,
+        evaluateStatements(ce, iterationStatements ?? bodyFn.ops)
+      );
 
       // A function body whose final value is a *bare symbol* bound to a
       // user-defined function literal (`helper(x) = …`, which creates an

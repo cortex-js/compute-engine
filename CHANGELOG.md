@@ -1,3 +1,33 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **List-building self-recursion can evaluate iteratively while preserving
+  the stored function and its termination conditions.** Piecewise functions
+  whose recursive arms prepend a list to a direct self-call now accumulate
+  their output without growing the JavaScript stack or repeatedly copying the
+  accumulated list. Execution supports multiple numeric parameters, multiple
+  guarded clauses, different base lists and prefixes, and arbitrary next
+  arguments, including descending, non-unit, and exact rational steps. The
+  evaluator checks current dependencies before each call; impure or unknown
+  effects retain ordinary recursive evaluation. The stored function remains
+  unchanged for serialization and compilation. Iterative execution honors
+  `ce.iterationLimit`: unreachable base cases, including starts past the bound,
+  throw `CancellationError` with cause `iteration-limit-exceeded` instead of
+  producing an empty list. Raise the iteration limit for larger builds, such
+  as a 10,000-point list.
+
+- **A postfix list-method call parses as the prefix call with the receiver
+  first.** `L.\operatorname{join}\left(M\right)` now parses as `Join(L, M)`
+  (Desmos list-method semantics: the receiver becomes the first argument),
+  with any number of arguments (`[1].join(2, 3)` is `Join([1], 2, 3)`).
+  Previously a postfix method carrying arguments did not parse, and inside a
+  piecewise it poisoned the whole row. The no-argument member accessors
+  (`.x`, `.total`, `.max`, …) are unchanged and still leave a following
+  `(...)` for implicit multiplication (`L.total (x+1)` is `Sum(L)·(x+1)`).
+  `join` is the only method the document corpus spells with arguments, so it
+  is the only one mapped; other Desmos list methods can be added as needed.
+
 ## 0.128.10 _2026-09-14_
 
 ### Resolved Issues
@@ -379,6 +409,55 @@
 - **Generate valid shader helper names.** Names derived from user functions and
   point specializations avoid reserved consecutive underscores and dollar signs,
   while remaining distinct when normalization produces a collision.
+
+### Benchmarks
+
+#### Numeric performance (200-digit precision)
+
+Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+
+| Expression | CE (current) | CE 0.128.9 | SymPy | math.js | Mathematica |
+| --- | --: | --: | --: | --: | --: |
+| $\pi^2$ | 11 | 13 | 179 | 143 | 3.9 |
+| $\sin 1$ | 23 | 23 | 221 | 449 | 5.1 |
+| $\cos 1$ | 22 | 23 | 223 | 513 | 6.8 |
+| $\ln 2$ | 18 | 18 | 357 | 4,460 | 3.7 |
+| $e^{\pi}$ | 17 | 17 | 216 | 4,948 | 4.6 |
+| $\zeta(3)$ | 1,584 | 1,588 | 281 | — | 50 |
+| $\Gamma(\tfrac13)$ | 841 | 848 | 368 | — | 204 |
+| $\psi(\tfrac13)$ | 740 | 739 | 2,810 | — | 164 |
+
+#### Symbolic capability & performance
+
+Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.128.9** columns to see what is *new this release* (a `—` under `0.128.9` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+
+| Operation | CE (current) | CE + R/F | CE 0.128.9 | SymPy | math.js | Mathematica |
+| --- | :--: | :--: | :--: | :--: | :--: | :--: |
+| **Antiderivatives** |  |  |  |  |  |  |
+| $\int\frac{1}{\sqrt x}\,dx$ | 2.7× | 1.7× | 2.1× | 0.5× | — | 1× |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 5.8× | 1.0× | 4.3× | 0.09× | — | 1× |
+| $\int\frac{1}{x^3+1}\,dx$ | 3.1× | 0.6× | 2.4× | 0.3× | — | 1× |
+| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.2× | — | 0.1× | — | 1× |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 0.7× | — | 0.009× | — | 1× |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 0.7× | — | 0.007× | — | 1× |
+| **Derivatives** |  |  |  |  |  |  |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.02× | 0.02× | 0.02× | 0.001× | 0.004× | 1× |
+| **Simplification** |  |  |  |  |  |  |
+| $\sqrt{3+2\sqrt2}$ | 37× | 28× | 24× | — | — | 1× |
+| $\sqrt6\,x+\sqrt2\,x$ | 57× | 54× | 36× | 3.2× | 17× | 1× |
+| **Evaluation** |  |  |  |  |  |  |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 27× | 12× | 24× | 3.2× | — | 1× |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 3.3× | 3.0× | 3.1× | 2.1× | — | 1× |
+| $\int_1^2\tfrac1x\,dx$ | 2125× | 2561× | 1563× | 91× | — | 1× |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 173× | 70× | 146× | 2.5× | — | 1× |
+| **Solving** |  |  |  |  |  |  |
+| $x^4+x^2-1=0$ | 0.1× | 0.2× | 0.1× | 0.06× | — | 1× |
+| $x^3-x-1=0$ | 1.3× | 1.3× | 1.1× | 0.04× | — | 1× |
+
+Across the cases both solve, Compute Engine is a **median 3.1× faster than Mathematica** (up to 2125×) — in the browser, not a proprietary kernel.
+
+<sub>Measured 2026-09-15 · Compute Engine `0.128.10` @ `bf918be0` (current build) · published `0.128.9` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `15.0.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+</sub>
 
 ## 0.128.9 _2026-09-11_
 

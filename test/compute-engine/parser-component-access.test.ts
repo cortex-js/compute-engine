@@ -251,4 +251,74 @@ describe('Parser: component access', () => {
       expect(ce.parse('p.q').isValid).toBe(false);
     });
   });
+
+  describe('member METHOD calls (receiver-first prefix call)', () => {
+    // A postfix method call `receiver.\operatorname{name}(args)` parses as the
+    // prefix call `Name(receiver, ...args)` — the receiver becomes the first
+    // argument (Desmos list-method semantics). `join` is the only method in the
+    // corpus that takes arguments.
+    test('L.join(M) → Join(L, M), receiver first', () => {
+      expect(rawParse('L.\\operatorname{join}\\left(M\\right)')).toEqual([
+        'Join',
+        'L',
+        'M',
+      ]);
+    });
+
+    test('a list literal receiver: [2].join(3) → Join([2], 3)', () => {
+      expect(
+        rawParse('\\left[2\\right].\\operatorname{join}\\left(3\\right)')
+      ).toEqual(['Join', ['List', 2], 3]);
+    });
+
+    test('multiple arguments: [1].join(2, 3) → Join([1], 2, 3)', () => {
+      expect(
+        rawParse('\\left[1\\right].\\operatorname{join}\\left(2,3\\right)')
+      ).toEqual(['Join', ['List', 1], 2, 3]);
+    });
+
+    test('the method call is valid inside a piecewise branch', () => {
+      // The whole reason this matters: an unparsed postfix method poisons the
+      // enclosing row. A piecewise whose branch joins a base case must parse.
+      expect(
+        parse(
+          '\\left\\{n=1:\\left[1\\right], \\left[2\\right].\\operatorname{join}\\left(3\\right)\\right\\}'
+        )
+      ).toEqual(['Which', ['Equal', 'n', 1], ['List', 1], 'True', ['List', 2, 3]]);
+    });
+
+    test('a no-argument accessor still leaves a following (...) for implicit multiplication', () => {
+      // `total` is an accessor (Sum), not a method: it must NOT swallow the
+      // parentheses as an argument list. `[2,3].total(x+1)` is `Sum([2,3])·(x+1)`,
+      // never `Sum([2,3], x+1)`.
+      expect(
+        rawParse('\\left[2,3\\right].\\operatorname{total}\\left(x+1\\right)')
+      ).toEqual(['InvisibleOperator', ['Sum', ['List', 2, 3]], ['Delimiter', ['Add', 'x', 1]]]);
+    });
+
+    test('only a parenthesized group is the argument list — a bracket stays an index, bars stay a factor', () => {
+      // `parseArguments('enclosure')` accepts any matchfix, so without the
+      // parenthesis check `[3]` and `|3|` after `.join` would be swallowed as
+      // arguments. They must be left for the caller: the bracket indexes the
+      // receiver-only call, the bars are a juxtaposed absolute value.
+      expect(rawParse('L.\\operatorname{join}\\left[3\\right]')).toEqual([
+        'At',
+        ['Join', 'L'],
+        3,
+      ]);
+      expect(rawParse('L.\\operatorname{join}\\left|3\\right|')).toEqual([
+        'InvisibleOperator',
+        ['Join', 'L'],
+        ['Abs', 3],
+      ]);
+      // Both parenthesis spellings still carry the arguments.
+      expect(rawParse('L.\\operatorname{join}(M)')).toEqual(['Join', 'L', 'M']);
+    });
+
+    test('the prefix spelling join(L, M) is unchanged', () => {
+      expect(
+        rawParse('\\operatorname{join}\\left(\\left[2\\right],3\\right)')
+      ).toEqual(['Join', ['List', 2], 3]);
+    });
+  });
 });

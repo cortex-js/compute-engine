@@ -71,6 +71,37 @@ function memberHead(name: string): string | null {
   return COMPONENT_ACCESS_HEADS[name] ?? null;
 }
 
+// Member METHODS: a postfix method call `receiver.\operatorname{name}(args)`
+// parses as the prefix call `Name(receiver, ...args)` — the receiver becomes
+// the first argument (Desmos list-method semantics). This is separate from the
+// no-argument accessors above on purpose: a method CONSUMES a following
+// `(...)` as its argument list, whereas an accessor must leave `(...)` for
+// implicit multiplication (`L.\operatorname{total}(x+1)` is `Sum(L)·(x+1)`, not
+// `Sum(L, x+1)`). Only `join` occurs with arguments in the document corpus, so
+// it is the only method mapped here; other Desmos list methods (`sort`,
+// `shuffle`, `random`) can be added when a document needs them.
+const COMPONENT_METHOD_HEADS: Record<string, string> = {
+  join: 'Join',
+};
+
+/**
+ * Is the next token the start of a parenthesized group — a bare `(` or a
+ * `\left(`? Looks one token past `\left` by advancing and restoring the
+ * parser's index, since the parser exposes no two-token peek.
+ */
+function nextIsParenthesis(parser: Parser): boolean {
+  if (parser.peek === '(') return true;
+  if (parser.peek !== '\\left') return false;
+  const saved = parser.index;
+  parser.nextToken();
+  // Annotated as `string`: TypeScript narrowed `parser.peek` to `'\left'`
+  // above and does not know `nextToken()` advanced it, so the comparison
+  // below would otherwise be flagged as impossible.
+  const next: string = parser.peek;
+  parser.index = saved;
+  return next === '(';
+}
+
 /**
  * Extract the decimal digit string of a non-negative decimal integer numeral
  * `lhs` (a machine number or a big-integer `{num}` object), or `null` if it is
@@ -342,7 +373,25 @@ function parseComponentAccess(
   if (parser.match('\\operatorname')) {
     const name = parser.parseStringGroup();
     if (name === null) return null;
-    const head = memberHead(name.trim());
+    const trimmed = name.trim();
+    // Method form first: `receiver.\operatorname{join}(args)` →
+    // `Join(receiver, ...args)`. The receiver is prepended as the first
+    // argument. An enclosure argument list is consumed if present; a bare
+    // method name with no `(...)` yields the receiver-only call.
+    const methodHead = COMPONENT_METHOD_HEADS[trimmed];
+    if (methodHead !== undefined) {
+      // Only a PARENTHESIZED argument list belongs to the method:
+      // `parseArguments('enclosure')` would otherwise accept any matchfix
+      // (`L.\operatorname{join}[3]`, `L.\operatorname{join}|3|`), swallowing a
+      // following index or literal as arguments. Anything else is left for the
+      // caller, so `[…]` stays an index and the method is the receiver-only
+      // call.
+      const args = nextIsParenthesis(parser)
+        ? (parser.parseArguments('enclosure') ?? [])
+        : [];
+      return [methodHead, lhs, ...args] as MathJsonExpression;
+    }
+    const head = memberHead(trimmed);
     if (head === null) return null;
     return [head, lhs] as MathJsonExpression;
   }
