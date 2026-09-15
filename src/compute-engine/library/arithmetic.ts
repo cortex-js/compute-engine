@@ -626,6 +626,32 @@ function isNonTupleCollectionOperand(x: Expression): boolean {
 }
 
 /**
+ * The tuple shape a point operand contributes to one CELL of a broadcast:
+ * the type itself for a tuple, and for a union the join of every tuple it
+ * may hold — its tuple arms, and the tuple shape inside each dimensionless
+ * collection arm (`tuple<integer, integer> | list<tuple<real, real>>` gives
+ * `tuple<real, real>`; the mixed arm `indexed_collection<number | tuple<…>>`
+ * contributes its element's tuple). A collection arm's own list rank is
+ * left out on purpose: the broadcast re-adds it. The caller has established
+ * `typeCouldBeNumericTuple`, so at least one tuple arm exists.
+ */
+function numericTupleArms(t0: Type): Type {
+  const t = resolveTypeAlias(t0);
+  if (typeof t === 'string' || t.kind !== 'union') return t as Type;
+  const arms: Type[] = [];
+  for (const arm of t.types) {
+    if (typeCouldBeNumericTuple(arm)) {
+      arms.push(numericTupleArms(arm));
+      continue;
+    }
+    const element = dimensionlessIndexedElementType(arm);
+    if (element !== undefined && typeCouldBeNumericTuple(element))
+      arms.push(numericTupleArms(element));
+  }
+  return widen(...arms);
+}
+
+/**
  * The type of a numeric tuple scaled by scalar factors: each NUMERIC component
  * widened by the factors' types (`tuple<integer, integer>`
  * times a `number` is `tuple<number, number>`), arity preserved. A component
@@ -643,8 +669,38 @@ function scaleTupleComponents(
   // alias of `tuple<integer, integer>`) has real components, which `ipt` no
   // longer describes (the alias policy of the broadcast lift).
   t = resolveTypeAlias(t);
-  if (typeof t === 'string' || t.kind !== 'tuple' || scalarTypes.length === 0)
-    return t as Type;
+  if (scalarTypes.length === 0) return t as Type;
+  // A plain numeric arm inside a scaled union (a symbol declared
+  // `number | tuple<…>`, or the `number` element of the mixed
+  // `indexed_collection<number | tuple<…>>` arm) is a number the factors
+  // multiply, so it widens like a tuple component does; anything else that
+  // is not a tuple, a union or a collection (`unknown`, a string, the bare
+  // `tuple`) is left as written.
+  if (typeof t === 'string')
+    return factsOf(t).belowNumber
+      ? (widen(t, ...scalarTypes.map((x) => stripNumericRanges(x))) as Type)
+      : (t as Type);
+  // A point-or-point-list union (`tuple<…> | list<tuple<…>>`) scales arm by
+  // arm: the tuple arm as a tuple, a list or indexed-collection arm of
+  // tuples as that collection of the scaled tuple. Any other arm — a plain
+  // number, a collection of numbers — is left as written.
+  if (t.kind === 'union')
+    return {
+      kind: 'union',
+      types: t.types.map((arm) => scaleTupleComponents(arm, scalarTypes)),
+    };
+  // A collection arm scales its element, whatever shape it has: a tuple
+  // element as a tuple, a union element (the mixed
+  // `indexed_collection<number | tuple<…>>` arm) arm by arm.
+  if (t.kind === 'list' || t.kind === 'indexed_collection')
+    return { ...t, elements: scaleTupleComponents(t.elements, scalarTypes) };
+  if (t.kind !== 'tuple')
+    return factsOf(t).belowNumber
+      ? (widen(
+          stripNumericRanges(t),
+          ...scalarTypes.map((x) => stripNumericRanges(x))
+        ) as Type)
+      : (t as Type);
   // Range decorations are stripped on BOTH sides of the join: a scaled
   // component does not lie in the union of the component's and the
   // factors' ranges (see `stripNumericRanges`).
@@ -1114,12 +1170,22 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
           pointListElementTypeOf(x.type) !== undefined
       )
     )
+      // Only the TUPLE arms of a point operand reach the cell: a
+      // point-or-point-list operand (`tuple<…> | list<tuple<…>>`) beside a
+      // list of points sums to a list of points whichever arm it holds, and
+      // widening its whole union into the cell nested the list arm
+      // (`list<list<tuple<…>> | tuple<…>>`). A mixed collection arm
+      // (`indexed_collection<number | tuple<…>>`) lands in the sibling's
+      // cells like every other arm — the reading a scalar-or-list union
+      // beside a definite collection already has — so only its tuple shape
+      // reaches the cell; a number it may hold sums with a point to an
+      // error the value path reports per cell, which no static type spells.
       return broadcastResultType(
         widen(
           ...args.map((x) =>
             stripNumericRanges(
               typeCouldBeNumericTuple(x.type)
-                ? x.type
+                ? numericTupleArms(x.type)
                 : pointListElementTypeOf(x.type)!
             )
           )
@@ -3743,13 +3809,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           isTensorOperand(x) && numericTensorElementType(x.type) !== undefined;
         const scalesPoint = (x: OperandDescriptor) =>
           isBroadcastCollectionTypeOf(x.type) || isNumericTensorOperand(x);
+        // The collection factor and the point factor must be DIFFERENT
+        // operands: a point-or-point-list operand (`tuple<…> | list<tuple<…>>`)
+        // answers both predicates by itself, and taking this arm for it
+        // claimed a definite `list<…>` of the whole union for a value that
+        // may be a single point. Such an operand scaled by scalars is typed
+        // by the single-tuple branch below, arm by arm.
         if (
           !ops.some((x) => isTensorOperand(x) && !isNumericTensorOperand(x)) &&
-          ops.some(scalesPoint) &&
+          ops.some((x) => scalesPoint(x) && !couldBeTuple(x)) &&
           ops.some(couldBeTuple)
         ) {
+          // Only the TUPLE arms of a point operand reach the cell: a
+          // point-or-point-list operand (`tuple<…> | list<tuple<…>>`) beside
+          // a list factor gives a list of scaled points whichever arm it
+          // holds, and the broadcast wrapper re-adds the operand's own list
+          // branch. Widening the whole union into the cell nested it
+          // (`list<list<tuple<…>> | tuple<…>>`).
           const tupleType = widen(
-            ...ops.filter(couldBeTuple).map((x) => resolveTypeAlias(x.type))
+            ...ops.filter(couldBeTuple).map((x) => numericTupleArms(x.type))
           );
           // Each element of the collection scales the point's COMPONENTS, so
           // the collection's element type widens them exactly as a declared

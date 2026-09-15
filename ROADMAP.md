@@ -333,6 +333,52 @@ the substituted body (`isComplexValuedUserCall`); extending that reading to the
 ascription-wrapped case, and making the substitution accept it, is the remaining
 work.
 
+Measured again 2026-09-15 in a CE-only replica of the document (every helper
+declared with the signature the Tycho manager derives, then assigned its
+lambda; `x` and `y` declared `number`; the field macro `U` written out as
+`(x, y)`): the row `P((x, y), 0.47, …) = 0` declines at this same `Add` under
+BOTH point-parameter declarations — the three-arm union with the
+`indexed_collection<number | tuple<…>>` arm and the two-arm
+`tuple<…> | list<tuple<…>>`. Every helper compiles when its point argument is
+written out at the call (`r((x, y), 1)`, `l(r((x, y), 1) - (x, y))`,
+`d_iv(r((x, y), 1) - C(1, 2), A(0.5))`); only `P_0((x, y), …)` and
+`P_1((x, y), …)` decline, inside their bodies. So the earlier statement to
+Tycho that the two-arm parameter declaration makes these rows compile was a
+prediction from the decline reason, not a measurement, and it was wrong: the
+parameter union is not what blocks this document. The arithmetic type of a
+point-or-point-list operand (`P / 2` typed a nested list of the union) was a
+separate defect and is fixed (`point-union-arithmetic-type.test.ts`); the
+replica still declines after that fix.
+
+### A tuple-or-number-list union nests through the broadcast type wrapper (OPEN — found 2026-09-15)
+
+A symbol declared `tuple<number, number> | list<number>` and left valueless
+types `2V` as `list<list<number> | tuple<…>> | list<number> | tuple<…>`, a
+nested union no value has: the broadcast type wrapper re-wraps the handler's
+union answer around the operand's list arm. The same defect for a
+POINT-or-point-list union (`tuple<…> | list<tuple<…>>`) is fixed
+(`point-union-arithmetic-type.test.ts`), by returning the handler's answer when
+every collection arm on both sides holds points. That scoping is deliberate: a
+union with a list of numbers beside a tuple cannot be told apart, at the
+wrapper, from a declared per-element result that merely mentions a number list
+(`tuple<…> | list<number>` as the cell of a lifted operator), which must be
+wrapped. Fixing this case needs the wrapper to know that the handler already
+computed the lift (an explicit exemption label on `Divide`, which does not
+carry `collection-result` today, or a per-handler signal). No document in the
+audited corpus declares such a union.
+
+### A product of two point-or-point-list operands claims a number (OPEN — found 2026-09-15)
+
+With `P` and `Q` declared `tuple<number, number> | list<tuple<number, number>>`
+and left valueless, `P \cdot Q` types `list<number> | number`, while the same
+product of two plain `tuple<number, number>` symbols types `error` (a point
+has no product with a point). The `Multiply` type handler's point branches
+skip the case (two could-be-tuple operands and no separate scalar or
+collection factor), so the scalar tiers below claim a number for a value the
+evaluator refuses. The honest claim is the same `error` the tuple pair
+receives, or `never`. Low blast radius: no document in the audited corpus
+multiplies two point-shaped operands.
+
 ### Codegen audit follow-ups (CE 0.128.9)
 
 The CORE audit `ce-0.128.9.json` pairs all 784 records with

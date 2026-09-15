@@ -47,6 +47,7 @@ import {
   dimensionlessIndexedElement,
   isTupleShapedType,
   loneUnionBroadcastResultType,
+  scalarOrCollectionUnionBranches,
   typeCouldBeCollection,
 } from '../collection-utils.js';
 
@@ -326,6 +327,23 @@ export function pointListArityOfTypes(
 
 /** Whether a type is a tuple, or a union with a tuple branch (an alias is
  * unfolded first). */
+/**
+ * A scalar-or-collection union whose scalar side holds a tuple and whose
+ * every dimensionless collection branch holds tuple-shaped elements — the
+ * type of a valueless point-or-point-list symbol
+ * (`tuple<…> | list<tuple<…>>`, with or without a mixed
+ * `indexed_collection<number | tuple<…>>` arm).
+ */
+function isPointOrPointListUnion(t: Type): boolean {
+  if (!hasTupleBranch(t)) return false;
+  const branches = scalarOrCollectionUnionBranches(t);
+  if (branches === undefined) return false;
+  return branches.every((b) => {
+    const element = dimensionlessIndexedElement(b);
+    return element !== undefined && hasTupleBranch(element);
+  });
+}
+
 function hasTupleBranch(t: Type): boolean {
   t = resolveTypeAlias(t);
   return (
@@ -430,6 +448,33 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   );
   if (broadcasting.length > 0) {
     const types = broadcasting.map((v) => v.type);
+    // A point-or-point-list operand (a symbol declared
+    // `tuple<number, number> | list<tuple<number, number>>` and left
+    // valueless) is a lone scalar-or-collection union whose scalar branch is
+    // a TUPLE. The arithmetic handlers type such an operand branch by branch
+    // — `Add` widens the operands' unions, `Divide` maps the quotient over
+    // each arm, `Negate` echoes the operand — so their answer already
+    // carries the operand's list branch. Re-wrapping that answer around the
+    // list branch below would nest it: `P / 2` typed
+    // `list<list<tuple<…>> | tuple<…>> | tuple<…>`, and every further
+    // operator added a rank (`P - Q` nested twice), a type no evaluated
+    // value has. When every trigger is such a union and the handler answered
+    // a union holding both a tuple branch and a collection branch, the
+    // handler's answer IS the result, arms kept as the handler spelled them
+    // (a declared three-arm union stays three arms, not the widest arm that
+    // absorbs the others). The test is on the SHAPE of both sides: every
+    // collection branch of the operands and of the answer holds points, so
+    // the answer's list branch can only be the operand's list branch carried
+    // through. A declared per-element result that merely has a tuple branch
+    // beside a list of numbers (`tuple<…> | list<number>` applied to a
+    // `number | list<number>` operand) is a cell like any other and still
+    // takes the wrap below, as does a handler that answered a plain cell
+    // (`number`, a tuple, a definite `list<E>`).
+    if (
+      isPointOrPointListUnion(sigResult) &&
+      types.every((t) => isPointOrPointListUnion(t))
+    )
+      return resolveTypeAlias(sigResult);
     // Every trigger a LONE scalar-or-collection union (a valueless
     // `u: number | list<number>`): the result carries the union through
     // instead of claiming the definite `list<E>` that `u := 5` contradicts.
