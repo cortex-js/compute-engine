@@ -1733,32 +1733,6 @@ effect in a case, no write outside the cases at the statement position). No
 document of the code-generation audit has the shape; the entry records the
 reachable decline.
 
-### `When` over a list-shaped condition zips a POINT value where `Which` lifts it whole (OPEN, ruling — found 2026-09-12 in the full-corpus code-generation audit, `njncrg9fkv`)
-
-`Which([True, False, False], (1, 2))` evaluates to `[(1, 2), NaN, NaN]`: the
-point is one value, lifted whole to the position that selects it. The masking
-form of the same selection, `When((1, 2), [True, False, False])` — what
-`p{cond}` parses to — evaluates to `[1, Missing]`: the point is read as a
-two-element collection and zipped against the three-element condition, which
-stops at the shorter operand. The two heads disagree on whether a point under a
-list condition is a value or a collection; the Tycho document writes
-`p := (u, v, …); p{0.08u + PointZ(p) + |v(1..3)/3| + 1 < …}` and expects the
-point at the positions where the condition holds. The compile route declines the
-statement (`assertScalarCondition`: "a branch condition is a collection-valued
-expression"), so no compiled value is wrong; the interpreter's value is the one
-to rule on.
-
-Options: (1) `When` lifts a point value whole, like `Which` — the answer is
-`[(1, 2), Missing, Missing]`, and the compile route can then lower the statement
-through the run-time selection (`_SYS.select` with the point arm wrapped,
-`_SYS.wholeArm`, landed 2026-09-12 for `Which`); (2) the zip is the intended
-reading, and the document's row is a user error to report. If nothing is decided
-the interpreter keeps zipping and the compile route keeps declining.
-Recommendation: (1) — the type system already treats a union of tuple element
-types as POINTS everywhere (Tycho items 287 and 288), and the zip answers a list
-of one coordinate and one `Missing`, which no consumer can read as a masked
-point.
-
 ### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
 
 The extension's navigation/rename features (go-to-definition, references,

@@ -9270,6 +9270,31 @@ const SYS_HELPERS = {
   select,
   // A point arm of such a selection, lifted whole rather than indexed.
   wholeArm: (value: unknown): WholeArm => new WholeArm(value),
+  // The restriction `value\{conditions\}` (`When`) over a LIST of conditions:
+  // one masked value per condition, `absent` (the target's absence value,
+  // `NaN` or its complex form) where the condition is not true. A list
+  // value (`zip`) is aligned with the conditions element by element and
+  // truncated to the shorter of the two, exactly as the interpreter aligns
+  // them; any other value — a number, a point — is one value, repeated at
+  // every position. A condition that is not an array at run time is one
+  // scalar condition.
+  restrict: (
+    conds: unknown,
+    value: unknown,
+    zip: boolean,
+    absent: unknown
+  ): unknown => {
+    if (!Array.isArray(conds)) return conds === true ? value : absent;
+    if (zip) {
+      if (!Array.isArray(value)) return absent;
+      const n = Math.min(conds.length, value.length);
+      const out = new Array<unknown>(n);
+      for (let i = 0; i < n; i++)
+        out[i] = conds[i] === true ? value[i] : absent;
+      return out;
+    }
+    return conds.map((c) => (c === true ? value : absent));
+  },
   // NaN propagates (Contract B `propagate` default, ratified 2026-08-27):
   // without the leading arm both comparisons are false for NaN and the
   // kernel answered the final arm's `1` — a fail-closed violation.

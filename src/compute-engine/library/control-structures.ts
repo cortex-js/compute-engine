@@ -448,8 +448,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           // is held exactly like an undecided `boolean` one; gating on
           // `boolean` alone left `x{h(x) ≤ [1,2,3]}` un-broadcast as
           // `When(x, [h(x) ≤ 1, …])`.
+          // An EMPTY list of conditions masks nothing: the answer is the
+          // empty list, as the element-wise `Which` answers it. (Before, the
+          // empty list fell through to the branch below and distributed the
+          // value into held restrictions, `[10{[]}, 20{[]}, …]`.)
           if (
-            conds.length > 0 &&
             conds.every(
               (ci) =>
                 ci.type.matches('boolean') ||
@@ -459,9 +462,18 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             // If `expr` itself evaluates to a finite indexed collection, zip
             // elementwise (expr_i masked by c_i); otherwise mask the scalar
             // `expr` by each c_i. Different lengths truncate to the shorter,
-            // matching `At`'s mask alignment.
+            // matching `At`'s mask alignment. A tuple is ONE value — a point
+            // restricted by a list of conditions is that point at every true
+            // position, as `Which` answers — so it is never zipped: with the
+            // zip, `(1, 2){[1, 2, 3] < 2}` answered `[1, Missing]`, the
+            // point's coordinates masked cell by cell. A string is one value
+            // too (the lattice reads it as a collection of its characters).
             const ev = expr.evaluate(options);
-            const zip = ev.isCollection && ev.isFiniteCollection;
+            const zip =
+              ev.isCollection &&
+              ev.isFiniteCollection &&
+              !isTuple(ev) &&
+              !isString(ev);
             const elems = zip ? (Array.from(ev.each()) as Expression[]) : [];
             const n = zip ? Math.min(conds.length, elems.length) : conds.length;
             const result: Expression[] = [];

@@ -7739,6 +7739,77 @@ export class BaseCompiler {
       if (isSymbol(args[1], 'True'))
         return `(${BaseCompiler.compileOp(node, 0, target, 0, args[0])})`;
       if (isSymbol(args[1], 'False')) return nan;
+      // A list of conditions restricts element by element: `u\{[1, 2, 3] v <
+      // 2\}` is `[u, Missing, Missing]` in the interpreter, one masked value
+      // per condition; a list value is aligned with the conditions and
+      // truncated to the shorter (`[10, 20]\{[v, 2v, 3v] < 2\}` is
+      // `[10, Missing]`), and a point is one value, lifted whole at every
+      // position. The run-time helper `_SYS.restrict` does exactly that; the
+      // scalar guard below would refuse the collection-valued condition.
+      // Whether the value is aligned or repeated is decided from its type:
+      // a point (tuple-shaped) or a scalar is repeated, a list is aligned,
+      // and a value that may be either at run time — a point-or-point-list
+      // union, whose flat array could be a point or a list — fails closed.
+      // Measured on the Tycho corpus (2026-09-15): 11 restriction rows in
+      // four documents declined here.
+      if (args[1].type.matches('collection<any>')) {
+        const valueType = args[0].type;
+        // A point is one value; so is a string, which the lattice reads as
+        // an indexed collection of its characters but the restriction never
+        // aligns with the conditions.
+        const point =
+          isTupleShapedType(valueType.type) || isProvablyStringOperand(args[0]);
+        // A union with a point arm beside a list arm is neither: a tuple is
+        // an indexed collection in the lattice, so `indexed_collection<any>`
+        // alone would read such a union as a list.
+        const hasPointArm = (t: Type): boolean =>
+          typeof t !== 'string' && t.kind === 'union'
+            ? t.types.some(hasPointArm)
+            : isTupleShapedType(t);
+        const list =
+          !point &&
+          !hasPointArm(valueType.type) &&
+          (valueType.matches('list<any>') ||
+            valueType.matches('indexed_collection<any>'));
+        // A scalar is repeated. Anything else — a value whose type is wide
+        // (`unknown`, `broadcastable<number>`, a point-or-point-list union)
+        // may hold a list or a point at run time, and a flat array cannot
+        // tell the two apart — fails closed rather than guessing.
+        const scalar =
+          !point &&
+          !list &&
+          (valueType.matches('number') || valueType.matches('boolean'));
+        if (!point && !list && !scalar)
+          throw new Error(
+            `When: cannot compile a restriction by a list of conditions over ` +
+              `a value that may be a list or a point at run time (type ` +
+              `'${valueType.toString()}'): a list is aligned with the ` +
+              `conditions and a point is repeated, and a flat array cannot ` +
+              `tell the two apart. Fail closed (D6).`
+          );
+        const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
+        const conds = BaseCompiler.compile(args[1], target);
+        // The absence at each position is decided from what one position
+        // holds — a list element, or the whole value — not from the node's
+        // own type, the list of results. A missing POINT is the numeric
+        // absence, as the element-wise `Which` answers it (its selection
+        // helper masks a point position with `NaN`), so the two forms of
+        // the same selection agree; a missing string is the object null.
+        const held: Type = list
+          ? (collectionElementType(valueType.type) ?? 'unknown')
+          : isTupleShapedType(valueType.type)
+            ? 'number'
+            : valueType.type;
+        const nullLiteral = target.absence?.object?.nullLiteral;
+        const absent =
+          coerce !== undefined
+            ? '({ re: NaN, im: NaN })'
+            : nullLiteral !== undefined &&
+                BaseCompiler.absenceKind([held], target) === 'object'
+              ? nullLiteral
+              : 'NaN';
+        return `_SYS.restrict(${conds}, ${val}, ${list}, ${absent})`;
+      }
       // The VALUE is the conditional position here (the single condition is
       // eager) — see the `When` entry of the lazy-operand inventory.
       const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);

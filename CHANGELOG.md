@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A restriction with a list of conditions compiles on the JavaScript target,
+  and a point under it is one value.** `u\{[1, 2, 3] v < 2\}` — the Desmos
+  restriction `When(u, [1, 2, 3] v < 2)` — restricts element by element in the
+  interpreter (`[u, Missing, Missing]` for `v = 1`), but the JavaScript compile
+  target refused every list-valued condition ("a branch condition is a
+  collection-valued expression … Fail closed (D6)") although the one-clause
+  `Which(condition, u)`, the same selection, already compiled element-wise. The
+  restriction now lowers as that selection (`[u, NaN, NaN]`, the masking rule's
+  `NaN`). In the interpreter a POINT under a list of conditions was zipped like
+  a list — `(1, 2)\{[1, 2, 3] < 2\}` answered `[1, Missing]`, the coordinates
+  masked cell by cell — and is now lifted whole at every position,
+  `[(1, 2), Missing, Missing]`, as `Which` answers; a string is one value too. A
+  list value keeps the interpreter's alignment on the compiled route (truncated
+  to the shorter of the two lists), and a value that may be a list or a point at
+  run time fails closed. The open question was recorded in the roadmap on
+  2026-09-12 and decided on 2026-09-15. Corpus witness: eleven restriction rows
+  in four Tycho documents. The shader and interval targets still fail closed on
+  a list-valued condition.
+
 ## 0.128.12 _2026-09-15_
 
 ### Resolved Issues
