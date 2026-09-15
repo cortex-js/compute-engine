@@ -1475,7 +1475,11 @@ export interface IComputeEngine {
    * current eval context, then the parent lexical context.
    *
    * @internal */
-  _pushEvalContext(scope: Scope, name?: string): void;
+  _pushEvalContext(
+    scope: Scope,
+    name?: string,
+    options?: { ambient?: boolean }
+  ): void;
 
   /** @internal */
   _popEvalContext(): void;

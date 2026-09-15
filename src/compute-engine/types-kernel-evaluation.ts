@@ -518,4 +518,11 @@ export type EvalContext<
   _semanticVersionAtPush?: number;
   /** See `_anyVersionAtPush` — the `world` half of the same stamp. */
   _worldVersionAtPush?: number;
+  /**
+   * The parent link of `lexicalScope` as it was before this frame chained
+   * the scope onto the ambient scope (`pushEvalContext` with `ambient`),
+   * restored when the frame is discarded. Absent when the frame changed
+   * nothing.
+   */
+  _restoreParentOnPop?: Scope<Binding> | null;
 };

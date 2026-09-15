@@ -207,15 +207,22 @@ describe('NESTED LAMBDAS', () => {
         'lc3_f',
         ce.expr([
           'Function',
-          ['Function',
+          [
+            'Function',
             ['Function', ['Add', 'lc3_x', 'lc3_a', 'lc3_b'], 'lc3_x'],
-            'lc3_b'],
+            'lc3_b',
+          ],
           'lc3_a',
         ])
       );
-      const g = ce.function('Apply', [ce.expr('lc3_f'), ce.number(1)]).evaluate();
+      const g = ce
+        .function('Apply', [ce.expr('lc3_f'), ce.number(1)])
+        .evaluate();
       const h = ce.function('Apply', [g, ce.number(2)]).evaluate();
-      const result = ce.function('Apply', [h, ce.number(3)]).evaluate().valueOf();
+      const result = ce
+        .function('Apply', [h, ce.number(3)])
+        .evaluate()
+        .valueOf();
       expect(result).toEqual(6); // 3 + 1 + 2 = 6
     } finally {
       ce.popScope();
@@ -284,10 +291,12 @@ describe('LAMBDAS INSIDE BigOps', () => {
     expect(result).toMatchInlineSnapshot(`66`); // correct: Sum was defined in scope where lc_c4=20
   });
 
-  test('Sum canonicalized before scope change uses defining scope', () => {
+  test('Sum canonicalized before scope change reads the scope it is evaluated in', () => {
     // Sum is boxed in the OUTER scope (lc_c4=10), then evaluated inside a
-    // scope that shadows lc_c4=20. Lexical scoping gives 36 (the defining scope).
-    // (1+10) + (2+10) + (3+10) = 36
+    // scope that shadows lc_c4=20. A directly evaluated expression reads the
+    // environment it is evaluated in (ruled 2026-09-15, Tycho item 295), so
+    // the shadow is read: (1+20) + (2+20) + (3+20) = 66. A stored FUNCTION
+    // value is a closure and keeps its defining scope (the tests above).
     const sumExpr = ce.expr([
       'Sum',
       ['Add', 'lc_k4d', 'lc_c4'],
@@ -301,7 +310,7 @@ describe('LAMBDAS INSIDE BigOps', () => {
     } finally {
       ce.popScope();
     }
-    expect(result).toMatchInlineSnapshot(`36`); // correct: lexical scoping uses defining scope's lc_c4=10
+    expect(result).toMatchInlineSnapshot(`66`); // the shadowing scope's lc_c4=20
   });
 });
 
@@ -366,7 +375,7 @@ describe('MUTABLE CLOSURE', () => {
     // Previously (dynamic scoping) fromInner mutated the inner lc_counter → fromInner = 101,
     // outerAfter = 0.
     expect(fromInner).toMatchInlineSnapshot(`1`); // correct: lexical scoping mutates outer lc_counter
-    expect(outerAfter).toMatchInlineSnapshot(`1`);  // correct: outer lc_counter was mutated
+    expect(outerAfter).toMatchInlineSnapshot(`1`); // correct: outer lc_counter was mutated
   });
 });
 
@@ -385,7 +394,12 @@ describe('CURRYING', () => {
   afterAll(() => ce.popScope());
 
   test('full application of two-param function', () => {
-    const f = ce.expr(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
+    const f = ce.expr([
+      'Function',
+      ['Add', 'lc_p6', 'lc_q6'],
+      'lc_p6',
+      'lc_q6',
+    ]);
     expect(
       ce
         .function('Apply', [f, ce.number(3), ce.number(4)])
@@ -395,7 +409,12 @@ describe('CURRYING', () => {
   });
 
   test('partial application produces curried function', () => {
-    const f = ce.expr(['Function', ['Add', 'lc_p6', 'lc_q6'], 'lc_p6', 'lc_q6']);
+    const f = ce.expr([
+      'Function',
+      ['Add', 'lc_p6', 'lc_q6'],
+      'lc_p6',
+      'lc_q6',
+    ]);
     // Apply to one arg → curried function expecting one more arg
     const curried = ce.function('Apply', [f, ce.number(3)]).evaluate();
     // Apply curried to second arg → 3 + 4 = 7
@@ -536,11 +555,7 @@ describe('RECURSIVE CLOSURE CAPTURE', () => {
         'Function',
         [
           'Block',
-          [
-            'Tuple',
-            'rc_y',
-            ['Function', ['Block', ['Multiply', 'rc_y', 2]]],
-          ],
+          ['Tuple', 'rc_y', ['Function', ['Block', ['Multiply', 'rc_y', 2]]]],
         ],
         'rc_y',
       ]);
@@ -579,11 +594,7 @@ describe('CURRYING WITH SCOPED BODIES', () => {
         'Function',
         [
           'Block',
-          [
-            'Add',
-            ['Sum', 'cur_k', ['Tuple', 'cur_k', 1, 'cur_x']],
-            'cur_y',
-          ],
+          ['Add', ['Sum', 'cur_k', ['Tuple', 'cur_k', 1, 'cur_x']], 'cur_y'],
         ],
         'cur_x',
         'cur_y',

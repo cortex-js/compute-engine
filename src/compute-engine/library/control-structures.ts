@@ -2504,7 +2504,7 @@ function* comprehensionStream(
     // over 1, 2, 3. Substituting the index values into the element is a
     // no-op for a body that already resolved them.
     let subs: Record<string, Expression> | undefined;
-    if (scope) ce._pushEvalContext(scope);
+    if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
     frame.install();
     try {
       r = inner.next();
@@ -2568,7 +2568,7 @@ function comprehensionEnumeratedCount(expr: Expression): number | undefined {
     scope,
     comprehensionIndexNames(elements)
   );
-  if (scope) ce._pushEvalContext(scope);
+  if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
   frame.install();
   try {
     let n = 0;
@@ -2611,7 +2611,8 @@ function scanIndependentClauses(
   const ce = expr.engine;
   const clauses = expr.ops.slice(1);
   const scoped = expr.isScoped && expr.localScope !== undefined;
-  if (scoped) ce._pushEvalContext(expr.localScope!);
+  if (scoped)
+    ce._pushEvalContext(expr.localScope!, undefined, { ambient: true });
   try {
     let empty = false;
     let unknown = false;

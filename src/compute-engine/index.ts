@@ -2448,8 +2448,12 @@ export class ComputeEngine implements IComputeEngine {
   _narrowingSink: NarrowingSink | undefined = undefined;
 
   /** @internal */
-  _pushEvalContext(scope: Scope, name?: string): void {
-    pushEvalContextImpl(this, scope, name);
+  _pushEvalContext(
+    scope: Scope,
+    name?: string,
+    options?: { ambient?: boolean }
+  ): void {
+    pushEvalContextImpl(this, scope, name, options);
   }
 
   /** @internal */

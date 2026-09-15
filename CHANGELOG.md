@@ -2,6 +2,22 @@
 
 ### Resolved Issues
 
+- **A comprehension or a sum evaluated in a child scope reads that scope's
+  declarations, like a plain symbol does.** With `n` declared but unassigned in
+  the root scope, `[k/n for k in 1..n]` and `\sum_{k=1}^{n} k` evaluated in a
+  child scope where `n = 4` stayed unevaluated (`count` undefined, `each()`
+  empty, the sum symbolic) while `90n` beside them answered 360: a node that
+  owns a local scope pushes that scope again on every evaluation, and its parent
+  link is the scope it was canonicalized in, so the child scope was never on the
+  chain. The re-pushed scope is now chained onto the ambient scope for the life
+  of the evaluation, when the ambient chain descends from the scope's own parent
+  — an unrelated scope captures nothing, and a stored function value stays a
+  closure over its own environment (`f(2)` with `f = x ↦ x n` still answers `2n`
+  there). The collection memos (element count, lazy value) snapshot and re-check
+  their dependencies through the same chain, so a count computed under one scope
+  is not served under another. Reported by Tycho (item 295) for a colour list
+  built by a comprehension over a document variable in its style lane.
+
 - **A point argument with a complex-valued coordinate no longer computes `NaN`
   inside an emitted definition (JavaScript target).** An emitted user-function
   definition reads a point parameter's coordinates as plain numbers. A point

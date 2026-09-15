@@ -70,12 +70,15 @@ describe('Comprehension element memo', () => {
     expect(c).toBe(20); // cold refill under the new binding
   });
 
-  it('is NOT invalidated by a caller-scope shadow it cannot see', () => {
-    // A scoped comprehension walks under its own captured chain, so a
-    // shadowing declaration in the CALLER's scope is invisible to it. The
-    // memo's resolution axis must resolve through the instance's own chain
-    // (`depResolutionScope`) — an ambient-chain check here would refill
-    // spuriously, re-drawing an impure body with no semantic mutation.
+  it('is invalidated by a caller-scope shadow, which the walk now reads', () => {
+    // A scoped comprehension evaluated in a child scope that shadows one of
+    // its free names reads the child's binding (ruled 2026-09-15, Tycho item
+    // 295: a directly evaluated expression reads the environment it is
+    // evaluated in — `binder-scope-ambient-shadow.test.ts`). The memo's
+    // resolution axis resolves through the same chain the walk reads
+    // (`withAmbientChain`), so the entry filled under the root binding is
+    // refilled under the shadow, and refilled again outside it: the memo
+    // holds one entry, and each environment change is a semantic one.
     ce.assign('kshadow', 2);
     ce.assign(
       'gshadow',
@@ -92,12 +95,13 @@ describe('Comprehension element memo', () => {
     ce.pushScope();
     ce.declare('kshadow', { value: 99 });
     const [v2, c2] = counting(() => walkSum('gshadow'));
-    expect(v2).toBe(2 * 10); // captured chain: the shadow is invisible
-    expect(c2).toBe(0); // …so the memo stays warm
+    expect(v2).toBe(99 * 10); // the shadow is read
+    expect(c2).toBe(4); // …so the memo refills under it
     ce.popScope();
 
-    const [, c3] = counting(() => walkSum('gshadow'));
-    expect(c3).toBe(0); // and warm again outside the shadow
+    const [v3, c3] = counting(() => walkSum('gshadow'));
+    expect(v3).toBe(2 * 10); // the root binding again
+    expect(c3).toBe(4); // refilled once more outside the shadow
   });
 
   it('is invalidated by a transitive dependency (helper body)', () => {
@@ -151,9 +155,9 @@ describe('Comprehension element memo', () => {
     // `def.operator.signature = newType` exit of the operator-def branch.
     const changed = (s as any)._infer(() => '(number) -> number', 'narrow');
     expect(changed).toBe(true);
-    expect((ce.box('opmemo') as any)._def?.operator?.signature?.toString()).toBe(
-      '(number) -> number'
-    );
+    expect(
+      (ce.box('opmemo') as any)._def?.operator?.signature?.toString()
+    ).toBe('(number) -> number');
     expect(ce._semanticVersion).toBeGreaterThan(before);
   });
 

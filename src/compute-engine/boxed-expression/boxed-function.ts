@@ -4868,7 +4868,9 @@ export class BoxedFunction
       const isScoped = this._localScope !== undefined;
 
       if (isScoped) {
-        this.engine._pushEvalContext(this._localScope!);
+        this.engine._pushEvalContext(this._localScope!, undefined, {
+          ambient: true,
+        });
       }
 
       //
@@ -5609,7 +5611,9 @@ export class BoxedFunction
       // propagation across every await in the async path, not just this one.
       // Until then: one engine per concurrent evaluation.
       if (isScoped) {
-        this.engine._pushEvalContext(this._localScope!);
+        this.engine._pushEvalContext(this._localScope!, undefined, {
+          ambient: true,
+        });
       }
       const localContext = isScoped ? this.engine.context : undefined;
 

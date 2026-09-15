@@ -20,6 +20,7 @@ import {
   reviveBindings,
   tombstoneBinding,
 } from './boxed-expression/binding-tombstone.js';
+import { ambientChainParent } from './boxed-expression/ambient-chain.js';
 
 export function pushScope(
   ce: IComputeEngine,
@@ -43,13 +44,41 @@ export function popScope(ce: IComputeEngine): void {
 export function pushEvalContext(
   ce: IComputeEngine,
   scope: Scope,
-  name?: string
+  name?: string,
+  options?: {
+    /**
+     * Chain `scope` onto the ambient scope for the life of the frame, so a
+     * node evaluated in a child scope reads that scope's declarations —
+     * when and why in `ambientChainParent` (`boxed-expression/ambient-
+     * chain.ts`). A call frame is never chained.
+     */
+    ambient?: boolean;
+  }
 ): void {
   if (!name) {
     const l = ce._evalContextStack.length;
     if (l === 0) name = 'system';
     if (l === 1) name = 'global';
     name ??= `anonymous_${l - 1}`;
+  }
+
+  let restoreParentOnPop: Scope | null | undefined;
+  if (options?.ambient === true) {
+    const parent = ambientChainParent(ce.context?.lexicalScope, scope);
+    if (parent !== undefined) {
+      // The same scope object can be live in another frame that already
+      // chained it — two evaluations of one node interleaved on the async
+      // path, where a suspended frame is not the top of the stack. The
+      // parent link to restore is then the ORIGINAL one that frame saved,
+      // not the link this frame found (already re-pointed); and only the
+      // last such frame to be discarded restores it (`discardEvalContext`).
+      const other = ce._evalContextStack.find(
+        (f) => f.lexicalScope === scope && f._restoreParentOnPop !== undefined
+      );
+      restoreParentOnPop =
+        other !== undefined ? other._restoreParentOnPop : scope.parent;
+      scope.parent = parent;
+    }
   }
 
   // A scope object outlives its frame by design (a canonicalized `Sum` pushes
@@ -71,6 +100,9 @@ export function pushEvalContext(
     _anyVersionAtPush: ce._anyVersion,
     _semanticVersionAtPush: ce._semanticVersion,
     _worldVersionAtPush: ce._worldVersion,
+    ...(restoreParentOnPop !== undefined
+      ? { _restoreParentOnPop: restoreParentOnPop }
+      : {}),
   });
 }
 
@@ -104,6 +136,22 @@ function discardEvalContext(
   ce: IComputeEngine,
   context: EvalContext | undefined
 ): void {
+  // A scope chained onto the ambient scope for this frame gets its own
+  // parent link back: the chaining lasts exactly as long as the frame —
+  // unless another live frame still chains the same scope object (an
+  // interleaved evaluation of the same node on the async path), which then
+  // restores the original link when it is discarded itself.
+  if (
+    context !== undefined &&
+    context._restoreParentOnPop !== undefined &&
+    !ce._evalContextStack.some(
+      (f) =>
+        f !== context &&
+        f.lexicalScope === context.lexicalScope &&
+        f._restoreParentOnPop !== undefined
+    )
+  )
+    context.lexicalScope.parent = context._restoreParentOnPop;
   // A checkpoint standing on this frame has no world left to restore once
   // the frame's bindings are disposed below — retire it, folding its journal
   // window downward so older checkpoints still unwind this scope's writes

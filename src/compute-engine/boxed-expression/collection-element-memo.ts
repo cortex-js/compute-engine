@@ -10,6 +10,7 @@ import type {
 import { isDictionary, isFunction, isObject, isSymbol } from './type-guards';
 import { isValueDef, isOperatorDef } from './definition-guards';
 import { bindingInContext } from './binders';
+import { withAmbientChain } from './ambient-chain';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats';
 import {
   accumulateObjectDeps,
@@ -96,6 +97,16 @@ interface ElementMemoDep {
    * refill re-draws an impure body); an unscoped instance (`Map`) resolves
    * through the ambient chain at walk time. See `depResolutionScope`. */
   resolved: BoxedDefinition | undefined;
+  /**
+   * This entry tracks the binding the walk's resolution chain resolves
+   * `name` to, which is NOT the occurrence's own binding — a declaration in
+   * a scope the instance is evaluated in that shadows the occurrence's
+   * binding with a value of its own. The walk reads the shadow, so its write
+   * version and stored value are dependencies too. Validated by resolution:
+   * the chain must still resolve the name to this binding, and the binding
+   * must be unwritten since.
+   */
+  shadow?: true;
   /** Set on an OPERATOR dependency — a walked user-lambda head, or a
    * FORWARD REFERENCE (the occurrence's pinned binding is a valueless
    * auto-declared value definition because the name was used before it was
@@ -256,6 +267,22 @@ function depResolutionScope(expr: Expression): Scope | undefined {
   return isFunction(expr) && expr.isScoped ? expr.localScope : undefined;
 }
 
+/**
+ * Run `fn` with a scoped instance's `localScope` chained onto the ambient
+ * scope the way its walk chains it (`withAmbientChain`): a comprehension
+ * evaluated in a child scope that shadows one of its free names reads the
+ * child's binding, so its dependencies must be snapshotted and re-checked
+ * through that same chain, or a count computed under one scope is served
+ * under another.
+ */
+function underWalkChain<T>(expr: Expression, fn: () => T): T {
+  return withAmbientChain(
+    expr.engine.context?.lexicalScope,
+    depResolutionScope(expr),
+    fn
+  );
+}
+
 /** The binding `scope`'s chain — or, when `scope` is `undefined`, the
  * engine's CURRENT chain — resolves `name` to; the same resolution
  * `_getSymbolValue` performs for a non-constant symbol's value. Inline
@@ -296,6 +323,12 @@ function resolveDepBinding(
  * ambient context at walk time, which a per-instance cache cannot track.
  */
 function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
+  return underWalkChain(expr, () => snapshotDepsUnderChain(expr));
+}
+
+function snapshotDepsUnderChain(
+  expr: Expression
+): ElementMemoDep[] | undefined {
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
   const excluded = new Set<BoxedValueDefinition>();
@@ -367,7 +400,10 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
    * (a symbol operand, or an application whose head is value-bound). */
   const visitValueDef = (
     occurrence: Expression,
-    valueDef: BoxedValueDefinition
+    valueDef: BoxedValueDefinition,
+    /** `valueDef` is the binding the walk chain resolves the occurrence's
+     * name to, not the occurrence's own (see `ElementMemoDep.shadow`). */
+    viaChain = false
   ): void => {
     const name = isSymbol(occurrence) ? occurrence.symbol : occurrence.operator;
     // A valueless, non-constant binding needs the resolution chain's
@@ -485,18 +521,32 @@ function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
       }
     }
     seen.add(valueDef);
+    const chainResolved = resolveDepBinding(
+      ce,
+      depScope,
+      name,
+      isSymbol(occurrence) ? valueDef : undefined
+    );
     deps.push({
       occurrence,
       name,
       valueDef,
       version: valueDef._writeVersion,
-      resolved: resolveDepBinding(
-        ce,
-        depScope,
-        name,
-        isSymbol(occurrence) ? valueDef : undefined
-      ),
+      resolved: chainResolved,
+      ...(viaChain ? { shadow: true as const } : {}),
     });
+    // The chain resolves the name to a DIFFERENT value binding than the
+    // occurrence's own — a shadowing declaration in the scope the instance
+    // is evaluated in (`withAmbientChain`). The walk reads that binding, so
+    // it is a dependency of its own: its write version, and the free
+    // symbols of its stored value.
+    if (
+      !viaChain &&
+      isValueDef(chainResolved) &&
+      chainResolved.value !== valueDef &&
+      !seen.has(chainResolved.value)
+    )
+      visitValueDef(occurrence, chainResolved.value, true);
     // TRANSITIVE dependencies: a symbol bound by reference to a stored
     // value (a helper function literal, a bound list) pulls that value's
     // own free symbols into the instance's meaning — `Map(f, xs)` with
@@ -658,9 +708,29 @@ export type MemoDeps = ElementMemoDep[];
  * function's job.
  */
 export function memoDepsStillValid(expr: Expression, deps: MemoDeps): boolean {
+  return underWalkChain(expr, () => memoDepsStillValidUnderChain(expr, deps));
+}
+
+function memoDepsStillValidUnderChain(
+  expr: Expression,
+  deps: MemoDeps
+): boolean {
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
   for (const d of deps) {
+    if (d.shadow === true && d.valueDef !== undefined) {
+      // The binding the chain resolved to must be unwritten, and the chain
+      // must still resolve the name to it.
+      if (d.valueDef._writeVersion !== d.version) return false;
+      const r = resolveDepBinding(
+        ce,
+        depScope,
+        d.name,
+        isSymbol(d.occurrence) ? d.occurrence.valueDefinition : undefined
+      );
+      if (!isValueDef(r) || r.value !== d.valueDef) return false;
+      continue;
+    }
     // An OPERATOR-ONLY dependency (no `valueDef`) has no pinned value
     // binding to compare or version to read; its validity is the resolution
     // re-check below.
@@ -878,6 +948,13 @@ export function* elementMemoRecordingStream(
   let overflow = false;
   let suspendedWrite = false;
   let suspendedEpochChange = false;
+  /** The consumer changed the ambient scope while the generator was
+   * suspended (a scope popped or pushed between two pulls). A scoped
+   * instance reads a shadowing declaration of that scope
+   * (`withAmbientChain`), so the elements pulled before and after the
+   * change may come from two environments; such a buffer is never
+   * committed. Neither engine version moves for an ordinary scope change. */
+  let suspendedScopeChange = false;
   let drained = false;
   // Dependencies are static in the tree, so a pre-walk snapshot is valid; it
   // is the baseline the end-of-walk snapshot is diffed against.
@@ -904,6 +981,7 @@ export function* elementMemoRecordingStream(
   // with the post-mutation state (the second reviewer-round catch).
   let gen = ce._semanticVersion;
   let epoch = ce._worldVersion;
+  let ambient = ce.context?.lexicalScope;
   try {
     let result = pull();
     // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
@@ -913,6 +991,7 @@ export function* elementMemoRecordingStream(
     // these flags.
     gen = ce._semanticVersion;
     epoch = ce._worldVersion;
+    ambient = ce.context?.lexicalScope;
     while (!result.done) {
       if (buffer.length < ELEMENT_MEMO_CAP) buffer.push(result.value);
       else overflow = true;
@@ -921,9 +1000,11 @@ export function* elementMemoRecordingStream(
       // consumer, not the element body.
       if (ce._semanticVersion !== gen) suspendedWrite = true;
       if (ce._worldVersion !== epoch) suspendedEpochChange = true;
+      if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
       result = pull();
       gen = ce._semanticVersion;
       epoch = ce._worldVersion;
+      ambient = ce.context?.lexicalScope;
     }
     drained = true;
   } finally {
@@ -933,6 +1014,7 @@ export function* elementMemoRecordingStream(
     // declining that prefix loses nothing of value.
     if (ce._semanticVersion !== gen) suspendedWrite = true;
     if (ce._worldVersion !== epoch) suspendedEpochChange = true;
+    if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
     // Forward early abandonment (`break`, `Take`, `.return()`) to the
     // wrapped iterator so a future handler with cleanup semantics is closed
     // deterministically rather than left suspended until GC.
@@ -945,7 +1027,7 @@ export function* elementMemoRecordingStream(
       buffer,
       startDeps,
       suspendedWrite,
-      suspendedEpochChange,
+      suspendedEpochChange || suspendedScopeChange,
       drained && !overflow,
       objectDeps
     );

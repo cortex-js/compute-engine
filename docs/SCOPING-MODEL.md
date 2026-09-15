@@ -26,6 +26,19 @@ handler re-evaluates it. Ordinary shadowing declarations deliberately keep
 re-pointing earlier-bound occurrences (ruled 2026-08-22): the re-pushed-scope
 reading and the compile fallback runner rely on it.
 
+A node that owns a local scope — a comprehension, a sum, a block — pushes that
+scope again on every evaluation. Its parent link is the scope it was
+canonicalized in, so a declaration made later in a scope pushed on top of that
+one (a child scope that shadows `n` with a value) would not be on the chain.
+Ruled 2026-09-15: a directly evaluated expression reads the environment it is
+evaluated in, so the re-pushed scope is chained onto the ambient scope for the
+life of the frame — only when the ambient chain descends from the scope's own
+parent, so an unrelated chain captures nothing, and never onto the scope
+itself (`ambientChainParent`, `boxed-expression/ambient-chain.ts`). A call
+frame is never chained: a stored function value is a closure and evaluates in
+its own environment, as the rule above states. The collection memos resolve a
+scoped instance's dependencies through the same chain (`withAmbientChain`).
+
 ## Binders
 
 Binder operators declare their binding sites through the shared binding-site
