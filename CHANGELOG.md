@@ -1,11 +1,11 @@
-## [Unreleased]
+## 0.128.10 _2026-09-14_
 
 ### Resolved Issues
 
-- **List-building self-recursion can evaluate iteratively while preserving
-  the stored function and its termination conditions.** Piecewise functions
-  whose recursive arms prepend a list to a direct self-call now accumulate
-  their output without growing the JavaScript stack or repeatedly copying the
+- **List-building self-recursion can evaluate iteratively while preserving the
+  stored function and its termination conditions.** Piecewise functions whose
+  recursive arms prepend a list to a direct self-call now accumulate their
+  output without growing the JavaScript stack or repeatedly copying the
   accumulated list. Execution supports multiple numeric parameters, multiple
   guarded clauses, different base lists and prefixes, and arbitrary next
   arguments, including descending, non-unit, and exact rational steps. The
@@ -14,40 +14,35 @@
   unchanged for serialization and compilation. Iterative execution honors
   `ce.iterationLimit`: unreachable base cases, including starts past the bound,
   throw `CancellationError` with cause `iteration-limit-exceeded` instead of
-  producing an empty list. Raise the iteration limit for larger builds, such
-  as a 10,000-point list.
+  producing an empty list. Raise the iteration limit for larger builds, such as
+  a 10,000-point list.
 
 - **A postfix list-method call parses as the prefix call with the receiver
   first.** `L.\operatorname{join}\left(M\right)` now parses as `Join(L, M)`
-  (Desmos list-method semantics: the receiver becomes the first argument),
-  with any number of arguments (`[1].join(2, 3)` is `Join([1], 2, 3)`).
-  Previously a postfix method carrying arguments did not parse, and inside a
-  piecewise it poisoned the whole row. The no-argument member accessors
-  (`.x`, `.total`, `.max`, …) are unchanged and still leave a following
-  `(...)` for implicit multiplication (`L.total (x+1)` is `Sum(L)·(x+1)`).
-  `join` is the only method the document corpus spells with arguments, so it
-  is the only one mapped; other Desmos list methods can be added as needed.
+  (Desmos list-method semantics: the receiver becomes the first argument), with
+  any number of arguments (`[1].join(2, 3)` is `Join([1], 2, 3)`). Previously a
+  postfix method carrying arguments did not parse, and inside a piecewise it
+  poisoned the whole row. The no-argument member accessors (`.x`, `.total`,
+  `.max`, …) are unchanged and still leave a following `(...)` for implicit
+  multiplication (`L.total (x+1)` is `Sum(L)·(x+1)`). `join` is the only method
+  the document corpus spells with arguments, so it is the only one mapped; other
+  Desmos list methods can be added as needed.
 
-## 0.128.10 _2026-09-14_
-
-### Resolved Issues
-
-- **`Map` over a tuple now yields an ordered list, value and type, whichever
-  way the callback is written.** `Map` over a tuple was inconsistent three
-  ways. The result type depended on whether the callback's result type could be
-  derived: a callback held in a symbol echoed the source type
-  (`tuple<integer, …>`, and — worse — the source's element types, so a mapped
-  predicate reported `tuple<integer, …>` while its value held booleans), while
-  an inline callback widened to the abstract `collection` top. The materialized
-  container followed the type: an indexed type rebuilt a `List`, a `collection`
-  type rebuilt a `Set` — and the set rebuild deduplicated, so `Map(x ↦ 0, (1,
-  2))` collapsed to a single element, a wrong count. `Map` over a tuple now
-  types `list<R>` (`R` the callback's result type) and materializes an ordered
-  list, matching `Reverse`/`Take`/`Drop`/`Filter`, which already demote a tuple
-  to a list. This also lets arithmetic on the result compile on the JavaScript
-  target, where the abstract `collection` top failed closed. A list source is
-  unchanged, and a keyed source (`dictionary`/`record`) still yields a plain
-  collection.
+- **`Map` over a tuple now yields an ordered list, value and type, whichever way
+  the callback is written.** `Map` over a tuple was inconsistent three ways. The
+  result type depended on whether the callback's result type could be derived: a
+  callback held in a symbol echoed the source type (`tuple<integer, …>`, and —
+  worse — the source's element types, so a mapped predicate reported
+  `tuple<integer, …>` while its value held booleans), while an inline callback
+  widened to the abstract `collection` top. The materialized container followed
+  the type: an indexed type rebuilt a `List`, a `collection` type rebuilt a
+  `Set` — and the set rebuild deduplicated, so `Map(x ↦ 0, (1, 2))` collapsed to
+  a single element, a wrong count. `Map` over a tuple now types `list<R>` (`R`
+  the callback's result type) and materializes an ordered list, matching
+  `Reverse`/`Take`/`Drop`/`Filter`, which already demote a tuple to a list. This
+  also lets arithmetic on the result compile on the JavaScript target, where the
+  abstract `collection` top failed closed. A list source is unchanged, and a
+  keyed source (`dictionary`/`record`) still yields a plain collection.
 
 - **A coordinate accessor over a point-or-point-list union now has the precise
   result type.** `PointX`/`PointY`/`PointZ` over an operand typed
@@ -55,308 +50,306 @@
   from a helper — previously widened its result to `collection<number>`, the
   abstract collection top. That top is not provably array-shaped, so any
   arithmetic on the coordinate failed to compile on the JavaScript target. The
-  accessor now distributes over the union arms and yields `number |
-  list<number>` (a scalar from a single point, a list of coordinates from a
-  list of points), which compiles through element-wise broadcast. A single
-  point still yields `number` and a point list still yields `list<number>`,
-  unchanged. A union arm whose element type is itself `number | tuple` — a
-  collection that could be one point spelled flat or a list of points — states
-  nothing definite and is left as `collection<number>`, still failing closed.
-  Audit witness: `neyret/wgxnrn87sx`, a hue built as `360·PointX(P) + 0.5`.
+  accessor now distributes over the union arms and yields
+  `number | list<number>` (a scalar from a single point, a list of coordinates
+  from a list of points), which compiles through element-wise broadcast. A
+  single point still yields `number` and a point list still yields
+  `list<number>`, unchanged. A union arm whose element type is itself
+  `number | tuple` — a collection that could be one point spelled flat or a list
+  of points — states nothing definite and is left as `collection<number>`, still
+  failing closed. Audit witness: `neyret/wgxnrn87sx`, a hue built as
+  `360·PointX(P) + 0.5`.
 
 - **A point scaled by a list-bound `indexed_collection<number>` symbol now
   compiles on the JavaScript target.** Multiplying a point by a symbol whose
-  declared type is `indexed_collection<number>` failed closed, because a
-  `tuple` inhabits that type, so the declaration alone could not prove the
-  symbol holds a list of scalars rather than a single point. The compiler now
-  reads the symbol's binding: a value whose own type is a list of scalars — a
-  `Range`, or the broadcast arithmetic over one that a plot uses to build a
-  list of sample points, which types `list<number>` — is never a point, so the
-  point is scaled at every element and the result is a list of points, exactly
-  what the interpreter answers. A symbol with no binding, or one bound to a
-  point or to a list of points, still fails closed. Audit witness:
-  `neyret/xkusqcyzsx`, `R × (cos t, sin t) + (D_c + X, Y)` with `R` a
-  `Range`-derived list.
+  declared type is `indexed_collection<number>` failed closed, because a `tuple`
+  inhabits that type, so the declaration alone could not prove the symbol holds
+  a list of scalars rather than a single point. The compiler now reads the
+  symbol's binding: a value whose own type is a list of scalars — a `Range`, or
+  the broadcast arithmetic over one that a plot uses to build a list of sample
+  points, which types `list<number>` — is never a point, so the point is scaled
+  at every element and the result is a list of points, exactly what the
+  interpreter answers. A symbol with no binding, or one bound to a point or to a
+  list of points, still fails closed. Audit witness: `neyret/xkusqcyzsx`,
+  `R × (cos t, sin t) + (D_c + X, Y)` with `R` a `Range`-derived list.
 
-- **A shader conditional whose arm repeats a subexpression is emitted in
-  the statement form so the subexpression is bound once.** A `Which`/`If`/
-  `When` on the GLSL or WGSL target now takes the `if … else …` statement
-  form not only when an arm needs statements (a loop-form `Sum`, a
-  `Block`), but also when an arm repeats a subexpression a ternary would
-  write out at every occurrence — a `Max(e, e)` tower shared many ways. The
-  statement form's branch is a statement position where the
-  common-subexpression pass binds the shared node once, so an arm that a
-  ternary expanded into hundreds of kilobytes (a depth-16 shared tower)
-  now emits a few hundred bytes. A conditional whose arms share nothing, or
-  a conditional with no reachable statement position (nested inside another
-  branch, or the right side of an `&&`/`||`), keeps the ternary form
-  unchanged.
+- **A shader conditional whose arm repeats a subexpression is emitted in the
+  statement form so the subexpression is bound once.** A `Which`/`If`/ `When` on
+  the GLSL or WGSL target now takes the `if … else …` statement form not only
+  when an arm needs statements (a loop-form `Sum`, a `Block`), but also when an
+  arm repeats a subexpression a ternary would write out at every occurrence — a
+  `Max(e, e)` tower shared many ways. The statement form's branch is a statement
+  position where the common-subexpression pass binds the shared node once, so an
+  arm that a ternary expanded into hundreds of kilobytes (a depth-16 shared
+  tower) now emits a few hundred bytes. A conditional whose arms share nothing,
+  or a conditional with no reachable statement position (nested inside another
+  branch, or the right side of an `&&`/`||`), keeps the ternary form unchanged.
 
-- **A subexpression shared inside a shader conditional's statement-form
-  arm is bound once.** When a `Which`/`If`/`When` arm takes the statement
-  form on the GLSL or WGSL target, its captured branch is a statement
-  position of its own, so a subexpression the arm repeats is declared once
-  in that branch instead of written out at every occurrence. An expression
-  that shares a subtree many ways — `Max(e, e)` nested deep — no longer
-  unfolds into megabytes of arm text. Each branch declares its own copy,
-  inside its braces, so a declaration never escapes to a branch that did
-  not run. An arm that stays a ternary is unchanged, and so is a lazy
-  operand nested inside a branch (the right side of an `&&`/`||`), which is
-  a ternary of its own.
-- **A shader conditional whose arm needs statements is emitted as a
-  statement.** A GLSL ternary and a WGSL `select` are expressions, so an
-  arm has no statement position: a loop-form `Sum` (a bound the compiler
-  cannot unroll) in an arm could only be hoisted ahead of the conditional,
-  where it would run whichever branch is selected — and shift every later
-  draw of the shader's random stream — so such arms failed closed. The
-  Tycho code-generation audit document `yac5cxfjm1` declined 14 records on
-  exactly that shape, `f(x, N) := Which(1 ≤ N, Σ_{n=1}^{⌊N⌋} cos(…)/√N_m,
-  True, 0)`. `Which`, `If` and `When` on the GLSL and WGSL targets now emit
-  `if … else …` storing the selected value in a temporary declared ahead of
-  it, each clause's statements captured into its own branch and a later
-  condition's statements inside the `else` of the clause before it, so the
-  loop runs only when its clause is taken. The same form serves a `Block`
-  used as an arm. A selection with an effect the rest of the expression can
-  observe — a draw from the random stream, a write to an enclosing binding,
-  directly or inside a called function — keeps the ternary form and
-  declines as before: hoisted as a statement, the effect would run ahead of
-  an operand written before the selection (the ordering every hoisted
-  statement has, recorded in `ROADMAP.md`). For the same reason a selection
-  keeps the ternary form when anything else at its statement position
+- **A subexpression shared inside a shader conditional's statement-form arm is
+  bound once.** When a `Which`/`If`/`When` arm takes the statement form on the
+  GLSL or WGSL target, its captured branch is a statement position of its own,
+  so a subexpression the arm repeats is declared once in that branch instead of
+  written out at every occurrence. An expression that shares a subtree many ways
+  — `Max(e, e)` nested deep — no longer unfolds into megabytes of arm text. Each
+  branch declares its own copy, inside its braces, so a declaration never
+  escapes to a branch that did not run. An arm that stays a ternary is
+  unchanged, and so is a lazy operand nested inside a branch (the right side of
+  an `&&`/`||`), which is a ternary of its own.
+
+- **A shader conditional whose arm needs statements is emitted as a statement.**
+  A GLSL ternary and a WGSL `select` are expressions, so an arm has no statement
+  position: a loop-form `Sum` (a bound the compiler cannot unroll) in an arm
+  could only be hoisted ahead of the conditional, where it would run whichever
+  branch is selected — and shift every later draw of the shader's random stream
+  — so such arms failed closed. The Tycho code-generation audit document
+  `yac5cxfjm1` declined 14 records on exactly that shape,
+  `f(x, N) := Which(1 ≤ N, Σ_{n=1}^{⌊N⌋} cos(…)/√N_m, True, 0)`. `Which`, `If`
+  and `When` on the GLSL and WGSL targets now emit `if … else …` storing the
+  selected value in a temporary declared ahead of it, each clause's statements
+  captured into its own branch and a later condition's statements inside the
+  `else` of the clause before it, so the loop runs only when its clause is
+  taken. The same form serves a `Block` used as an arm. A selection with an
+  effect the rest of the expression can observe — a draw from the random stream,
+  a write to an enclosing binding, directly or inside a called function — keeps
+  the ternary form and declines as before: hoisted as a statement, the effect
+  would run ahead of an operand written before the selection (the ordering every
+  hoisted statement has, recorded in `ROADMAP.md`). For the same reason a
+  selection keeps the ternary form when anything else at its statement position
   writes a binding — an assignment outside the selection, as `k := 1` in
-  `(k := 1, If(k > 0, Σ…, 0))`, or a called function that writes one:
-  hoisted, the selection could read the binding before that write,
-  directly, through a symbol whose value is inlined, or inside a function
-  it calls. A
-  conditional with plain arms
-  keeps its ternary, and a ternary nested inside a captured branch keeps
-  its own guard. The emitted shaders were compiled by a WebGL2 and a WebGPU
-  implementation.
-- **A list of numbers at an untyped parameter gets a specialized helper on
-  the JavaScript target.** The document `njncrg9fkv` of the code-generation
-  audit scales a cube's points with `W(p, x, y, z) := PointList(x·PointX(p),
-  y·PointY(p), z·PointZ(p))`, `p` declared "a point or a list of points" and
-  the scales untyped, called as `W(C(u, v), [0.8, 0.2, 0.8, 0.2], [0.2, 0.8,
-  0.2, 0.8], 0.6)`. The target specialized a call on scalar and point
-  arguments only; a list argument fell to the generic definition, where the
-  broad `p` reads its coordinate as a collection of numbers and the
-  `PointList` built from it had no list source to zip — the call declined.
-  A real-number list beside a point argument is now admitted, and bound as
-  the interpreter binds it: WHOLE, with its own type in a helper of its own
-  (`W` declares its point parameter, so `W(…, [0.8, 0.2, 0.8, 0.2], …)` is
-  four points), or BROADCAST at the call boundary with the point held when
-  the definition declares no point or collection parameter (the untyped
-  `f(p, x) := 42` over a two-element list is `[42, 42]`). A list alone,
-  with no point beside it, keeps the generic definition (the same
-  broadcast, plus the last-call memo).
-- **A value that may be a point or a list of points, added to a list of
-  points, is decided at run time — or fails closed.** Once such a call
-  compiled, the static point-list plan of `Add` kept the union-typed value
-  atomic and added it whole to every point of the list, which answered NaN
-  at every element behind `success: true` when the value was a list of
-  four points (measured on the same document's `W(…) + PointList(…)`).
-  `Add` now binds both operands once and decides by the value's shape when
-  the declaration allows it (`list<tuple<…>> | tuple<…>`): a list of points
-  is zipped against the list (unequal lengths are the interpreter's
-  dimension error, NaN), a point is added to every point of the list (a
-  point of another arity is NaN), and a number is the per-element type
-  error, NaN at every position — in either operand order, with the
-  interpreter's values. A declaration under which a flat array of numbers
-  is also a legal value (`indexed_collection<number | tuple<…>>`, what
-  the document declares for `W`) cannot be decided by shape and fails
-  closed with a message naming the declaration to tighten.
+  `(k := 1, If(k > 0, Σ…, 0))`, or a called function that writes one: hoisted,
+  the selection could read the binding before that write, directly, through a
+  symbol whose value is inlined, or inside a function it calls. A conditional
+  with plain arms keeps its ternary, and a ternary nested inside a captured
+  branch keeps its own guard. The emitted shaders were compiled by a WebGL2 and
+  a WebGPU implementation.
 
-- **The cross product of two points is a point.** `Cross((1, 2, 3), (4, 5,
-  6))` answered the list `[-3, 6, -3]`, so adding a point to it broadcast
-  the point into each element: `Cross(A, B) + P` was three type errors in
-  the interpreter and a decline ("scalar arithmetic over a list-valued
-  operand") on the JavaScript target. The Frenet-frame document
-  `frthw0ihk5` of the code-generation audit draws `sin(θ)·(F_1 × F_0) +
-  cos(θ)·F_1 − f` at every point of a space curve and could not be drawn.
-  Two point operands (tuples, or `PointList` rows) now answer a point typed
-  `tuple<number, number, number>`, on the interpreter and on every compile
-  target; a list beside a point, or two lists, still answer a list.
-  (User-ruled 2026-09-13.)
+- **A list of numbers at an untyped parameter gets a specialized helper on the
+  JavaScript target.** The document `njncrg9fkv` of the code-generation audit
+  scales a cube's points with
+  `W(p, x, y, z) := PointList(x·PointX(p), y·PointY(p), z·PointZ(p))`, `p`
+  declared "a point or a list of points" and the scales untyped, called as
+  `W(C(u, v), [0.8, 0.2, 0.8, 0.2], [0.2, 0.8, 0.2, 0.8], 0.6)`. The target
+  specialized a call on scalar and point arguments only; a list argument fell to
+  the generic definition, where the broad `p` reads its coordinate as a
+  collection of numbers and the `PointList` built from it had no list source to
+  zip — the call declined. A real-number list beside a point argument is now
+  admitted, and bound as the interpreter binds it: WHOLE, with its own type in a
+  helper of its own (`W` declares its point parameter, so
+  `W(…, [0.8, 0.2, 0.8, 0.2], …)` is four points), or BROADCAST at the call
+  boundary with the point held when the definition declares no point or
+  collection parameter (the untyped `f(p, x) := 42` over a two-element list is
+  `[42, 42]`). A list alone, with no point beside it, keeps the generic
+  definition (the same broadcast, plus the last-call memo).
+
+- **A value that may be a point or a list of points, added to a list of points,
+  is decided at run time — or fails closed.** Once such a call compiled, the
+  static point-list plan of `Add` kept the union-typed value atomic and added it
+  whole to every point of the list, which answered NaN at every element behind
+  `success: true` when the value was a list of four points (measured on the same
+  document's `W(…) + PointList(…)`). `Add` now binds both operands once and
+  decides by the value's shape when the declaration allows it
+  (`list<tuple<…>> | tuple<…>`): a list of points is zipped against the list
+  (unequal lengths are the interpreter's dimension error, NaN), a point is added
+  to every point of the list (a point of another arity is NaN), and a number is
+  the per-element type error, NaN at every position — in either operand order,
+  with the interpreter's values. A declaration under which a flat array of
+  numbers is also a legal value (`indexed_collection<number | tuple<…>>`, what
+  the document declares for `W`) cannot be decided by shape and fails closed
+  with a message naming the declaration to tighten.
+
+- **The cross product of two points is a point.** `Cross((1, 2, 3), (4, 5, 6))`
+  answered the list `[-3, 6, -3]`, so adding a point to it broadcast the point
+  into each element: `Cross(A, B) + P` was three type errors in the interpreter
+  and a decline ("scalar arithmetic over a list-valued operand") on the
+  JavaScript target. The Frenet-frame document `frthw0ihk5` of the
+  code-generation audit draws `sin(θ)·(F_1 × F_0) + cos(θ)·F_1 − f` at every
+  point of a space curve and could not be drawn. Two point operands (tuples, or
+  `PointList` rows) now answer a point typed `tuple<number, number, number>`, on
+  the interpreter and on every compile target; a list beside a point, or two
+  lists, still answer a list. (User-ruled 2026-09-13.)
 
 - **The numeric derivative of a point-valued function has a value on both
-  routes.** The Frenet-frame document `frthw0ihk5` of the Tycho
-  code-generation audit defines a space curve `f(t) = PointList(x(t), y(t),
-  z(t))`, its unit tangent `F_0(t) = f'(t)/|f'(t)|`, and reads `F_0'(t)`.
-  The symbolic differentiator has no rule for the derivative of the norm of
-  a point-valued function, so the closed form of `F_0'` was INCOMPLETE — a
-  `D(|f'(t)|, t)` residue inside an otherwise differentiated body — and
-  `N()` returned that residue: no numeric value. The compiled JavaScript
-  target, which already took the numeric stencil for the whole application,
-  answered `NaN`: its stencil helper read the point the function returns as
-  a non-number. The `Derivative` handler now treats an incomplete closed
-  form as no closed form (the node stays inert, and `evaluate()` keeps the
-  exactness contract), so `N()` of the application takes the same stencil
-  fallback as the compiled route, and both stencils — the interpreter's
-  `numericDerivativeOfApply` and the compiled `_SYS.nd` — differentiate a
-  point- or list-valued function component by component; the value has the
-  kind of the function's value (a point for a space curve). `ND` follows:
-  it was scalar-only, answered `NaN` for a function NAME bound to a literal
-  (the compiled name answers nothing for a positional argument), and typed
-  `number` whatever the function returns; it now resolves the name to its
-  literal, differentiates component by component, and types by the
-  literal's codomain.
+  routes.** The Frenet-frame document `frthw0ihk5` of the Tycho code-generation
+  audit defines a space curve `f(t) = PointList(x(t), y(t), z(t))`, its unit
+  tangent `F_0(t) = f'(t)/|f'(t)|`, and reads `F_0'(t)`. The symbolic
+  differentiator has no rule for the derivative of the norm of a point-valued
+  function, so the closed form of `F_0'` was INCOMPLETE — a `D(|f'(t)|, t)`
+  residue inside an otherwise differentiated body — and `N()` returned that
+  residue: no numeric value. The compiled JavaScript target, which already took
+  the numeric stencil for the whole application, answered `NaN`: its stencil
+  helper read the point the function returns as a non-number. The `Derivative`
+  handler now treats an incomplete closed form as no closed form (the node stays
+  inert, and `evaluate()` keeps the exactness contract), so `N()` of the
+  application takes the same stencil fallback as the compiled route, and both
+  stencils — the interpreter's `numericDerivativeOfApply` and the compiled
+  `_SYS.nd` — differentiate a point- or list-valued function component by
+  component; the value has the kind of the function's value (a point for a space
+  curve). `ND` follows: it was scalar-only, answered `NaN` for a function NAME
+  bound to a literal (the compiled name answers nothing for a positional
+  argument), and typed `number` whatever the function returns; it now resolves
+  the name to its literal, differentiates component by component, and types by
+  the literal's codomain.
 
-- **A literal index reaches through an element-wise selection, the
-  relations, `Mod`, and a literal range.** The Tycho code-generation audit
-  document `ccoc40kfhj` writes a colour channel as
+- **A literal index reaches through an element-wise selection, the relations,
+  `Mod`, and a literal range.** The Tycho code-generation audit document
+  `ccoc40kfhj` writes a colour channel as
   `Which(|6((x + [3, 2, 1]/3) mod 1) − 3| − 1 < 0, 0, …)[1]`: a `Which`
   broadcast over a three-element list, read back at one index. The interval
-  target has no element-wise selection and the shader targets have no
-  run-time list to index, so 24 records declined. The pre-pass now pushes
-  the index through a `Which`/`If` whose first condition is a list (a later
-  scalar condition and a scalar or point arm are repeated at every
-  position, as the interpreter lifts them), through the ordering relations
-  (`Equal`/`NotEqual` only against a scalar: two lists compare as whole
-  values), through `Mod` and the other element-wise heads, and through a
-  literal `Range` (read at the index, never enumerated). The row is one
-  scalar selection on every target, with the interpreter's values. A
-  selection with no default clause and a point arm is left alone: a position
-  no clause selects is `NaN` element-wise but `Missing` for a scalar
-  selection, which lowers differently for a point.
+  target has no element-wise selection and the shader targets have no run-time
+  list to index, so 24 records declined. The pre-pass now pushes the index
+  through a `Which`/`If` whose first condition is a list (a later scalar
+  condition and a scalar or point arm are repeated at every position, as the
+  interpreter lifts them), through the ordering relations (`Equal`/`NotEqual`
+  only against a scalar: two lists compare as whole values), through `Mod` and
+  the other element-wise heads, and through a literal `Range` (read at the
+  index, never enumerated). The row is one scalar selection on every target,
+  with the interpreter's values. A selection with no default clause and a point
+  arm is left alone: a position no clause selects is `NaN` element-wise but
+  `Missing` for a scalar selection, which lowers differently for a point.
+
 - **A `Which`/`If` over a wide list-shaped condition is written out per
   position.** With the first condition a list of five or more elements built
   from non-constant lists, the selection is now the literal list of its
   per-position scalar selections (rule 7 of the pre-pass, capped at 64
-  positions). The JavaScript target emitted one thunk per clause and an
-  array per condition through the run-time helper `_SYS.select`; the shader
-  targets lowered a condition of vector width two to four only; the interval
-  target none. `Mod` joins the element-wise heads the pre-pass fans out.
-- **A point arm of the JavaScript run-time selection is lifted whole.** A
-  point and a list are both arrays at the JavaScript ABI, so
-  `Which([T, F, F], (1, 2))` read the point as a list arm of the wrong
-  length and answered `NaN` where the interpreter answers
-  `[(1, 2), NaN, NaN]`. An arm whose type is a point is now wrapped
-  (`_SYS.wholeArm`) and the helper lifts it to every position that selects
-  it.
+  positions). The JavaScript target emitted one thunk per clause and an array
+  per condition through the run-time helper `_SYS.select`; the shader targets
+  lowered a condition of vector width two to four only; the interval target
+  none. `Mod` joins the element-wise heads the pre-pass fans out.
+
+- **A point arm of the JavaScript run-time selection is lifted whole.** A point
+  and a list are both arrays at the JavaScript ABI, so
+  `Which([T, F, F], (1, 2))` read the point as a list arm of the wrong length
+  and answered `NaN` where the interpreter answers `[(1, 2), NaN, NaN]`. An arm
+  whose type is a point is now wrapped (`_SYS.wholeArm`) and the helper lifts it
+  to every position that selects it.
 
 - **Nested run-time broadcasts fuse into one loop on the JavaScript target.**
-  Scalar arithmetic over a list whose width the compiler cannot see (a
-  declared `list<number>` input) lowered to one `_SYS.bcast` call per head,
-  each building an intermediate array and running its own element loop: the
-  implicit-surface rows of the 3-D art document `art/khpocp8io0` in the
-  code-generation audit nested twelve such calls over a 225-element list, at
-  21 µs a sample. The emitter now absorbs an operand that is itself a plain
-  broadcast into the enclosing closure — its element parameters join the
-  outer ones, its operand sources join the call, and its result is a `const`
-  binding inside the closure — so the row runs one loop with no intermediate
-  array (3.6 µs a sample, the same values). A repeated list source is passed
-  once. A value the common-subexpression pass bound is still computed once,
-  a user-function dispatch keeps its own call, and every operand source is
-  still evaluated once as a call argument.
+  Scalar arithmetic over a list whose width the compiler cannot see (a declared
+  `list<number>` input) lowered to one `_SYS.bcast` call per head, each building
+  an intermediate array and running its own element loop: the implicit-surface
+  rows of the 3-D art document `art/khpocp8io0` in the code-generation audit
+  nested twelve such calls over a 225-element list, at 21 µs a sample. The
+  emitter now absorbs an operand that is itself a plain broadcast into the
+  enclosing closure — its element parameters join the outer ones, its operand
+  sources join the call, and its result is a `const` binding inside the closure
+  — so the row runs one loop with no intermediate array (3.6 µs a sample, the
+  same values). A repeated list source is passed once. A value the
+  common-subexpression pass bound is still computed once, a user-function
+  dispatch keeps its own call, and every operand source is still evaluated once
+  as a call argument.
+
 - **A literal index reaches through list arithmetic and through a point list
-  zipped from columns.** `(0.1·[a, b, c] + 0.4)[2]` compiled the whole list
-  and read one element back, and `PointList([a₁, a₂], [b₁, b₂], 5)[2]` had no
-  shader lowering at all: the pre-pass folded a literal index only into a
-  written-out `List`. The index is now pushed through element-wise arithmetic
-  over lists of provable width and through the columns of a `PointList`, so
-  the element — `0.1·b + 0.4`, the point `(a₂, b₂, 5)` — is computed alone.
-  The three point-table rows of the 3-D art document `art/n7uhaaoq1q` that
-  index a zipped point list inside a comprehension compile on GLSL and WGSL
-  to a fixed-size array of vectors; a fresh run of the code-generation audit
-  against this source records no GLSL decline in that document. A point list
-  of ONE point (every component a scalar) is left alone: an index into it is
-  a coordinate, a different value. Alongside, a sum of two all-scalar points
-  whose component types cross (`(a, b, 2) + (0, 0, 0.8)`) typed as the union
-  of the two tuple types, a type no value has, and the shader targets read no
-  component count from it; it now types component-wise
-  (`tuple<real, real, real>`).
-- **A helper whose value is a list is substituted at the shader root, and
-  under a sum or a comprehension too.** The interval entry already
-  substituted such a helper's body at the root call site so the fixed-width
-  pre-pass could see the list; the shader entries now do the same for a
-  list-valued helper (a shader function cannot return a run-time list, and a
-  point-valued helper keeps its own shared `vecN` definition), so the audit
-  rows written by reference compile to the same array of vectors as written
-  out. The substitution — at a root and inside an emitted definition body
-  alike — now descends into a node that binds names, a `Sum` or a
-  comprehension, with the bound names guarding against capture: a helper
-  whose body reads a global one of them would shadow stays a call. The
-  JavaScript target keeps its retained helpers, which carry a static-width
-  analysis of their own.
-- **A comprehension over literal domains compiles on the shader targets.**
-  GLSL and WGSL have no dynamic arrays, and a `Comprehension` declined whole
-  on both — the four point-table rows of the 3-D art document
-  `art/n7uhaaoq1q` in the 0.128.9 code-generation audit, `[PointList(…) for
-  y = 1..4, x = 1..3]`. The target-independent pre-pass now writes a
-  comprehension out as the literal list of its substituted bodies, in the
-  interpreter's order, when every domain is a literal range or list and the
-  total is at most 64 elements, on the targets that ask for it; the shader
-  targets lower a list of points of one arity as an array of vectors
-  (`vec3[12](…)`, `array<vec3f, 12>(…)`), and a literal index into a literal
-  range folds to the number. The emitted GLSL and WGSL compile and link
-  under headless Chromium. Where such an array reaches a position the shader
-  languages have no form for — a local declaration, arithmetic, a selection
-  between two of them — the compilation fails closed instead of emitting
-  source no driver accepts. A symbolic bound, a dependent domain, a body with
-  an effect, or a larger comprehension still declines with the same message;
-  the JavaScript target keeps its loop.
+  zipped from columns.** `(0.1·[a, b, c] + 0.4)[2]` compiled the whole list and
+  read one element back, and `PointList([a₁, a₂], [b₁, b₂], 5)[2]` had no shader
+  lowering at all: the pre-pass folded a literal index only into a written-out
+  `List`. The index is now pushed through element-wise arithmetic over lists of
+  provable width and through the columns of a `PointList`, so the element —
+  `0.1·b + 0.4`, the point `(a₂, b₂, 5)` — is computed alone. The three
+  point-table rows of the 3-D art document `art/n7uhaaoq1q` that index a zipped
+  point list inside a comprehension compile on GLSL and WGSL to a fixed-size
+  array of vectors; a fresh run of the code-generation audit against this source
+  records no GLSL decline in that document. A point list of ONE point (every
+  component a scalar) is left alone: an index into it is a coordinate, a
+  different value. Alongside, a sum of two all-scalar points whose component
+  types cross (`(a, b, 2) + (0, 0, 0.8)`) typed as the union of the two tuple
+  types, a type no value has, and the shader targets read no component count
+  from it; it now types component-wise (`tuple<real, real, real>`).
+
+- **A helper whose value is a list is substituted at the shader root, and under
+  a sum or a comprehension too.** The interval entry already substituted such a
+  helper's body at the root call site so the fixed-width pre-pass could see the
+  list; the shader entries now do the same for a list-valued helper (a shader
+  function cannot return a run-time list, and a point-valued helper keeps its
+  own shared `vecN` definition), so the audit rows written by reference compile
+  to the same array of vectors as written out. The substitution — at a root and
+  inside an emitted definition body alike — now descends into a node that binds
+  names, a `Sum` or a comprehension, with the bound names guarding against
+  capture: a helper whose body reads a global one of them would shadow stays a
+  call. The JavaScript target keeps its retained helpers, which carry a
+  static-width analysis of their own.
+- **A comprehension over literal domains compiles on the shader targets.** GLSL
+  and WGSL have no dynamic arrays, and a `Comprehension` declined whole on both
+  — the four point-table rows of the 3-D art document `art/n7uhaaoq1q` in the
+  0.128.9 code-generation audit, `[PointList(…) for y = 1..4, x = 1..3]`. The
+  target-independent pre-pass now writes a comprehension out as the literal list
+  of its substituted bodies, in the interpreter's order, when every domain is a
+  literal range or list and the total is at most 64 elements, on the targets
+  that ask for it; the shader targets lower a list of points of one arity as an
+  array of vectors (`vec3[12](…)`, `array<vec3f, 12>(…)`), and a literal index
+  into a literal range folds to the number. The emitted GLSL and WGSL compile
+  and link under headless Chromium. Where such an array reaches a position the
+  shader languages have no form for — a local declaration, arithmetic, a
+  selection between two of them — the compilation fails closed instead of
+  emitting source no driver accepts. A symbolic bound, a dependent domain, a
+  body with an effect, or a larger comprehension still declines with the same
+  message; the JavaScript target keeps its loop.
+
 - **A list of static width compiles on the interval target.** The interval
   target has no lowering for a `List` — its values are one interval each — and
-  every list-valued subexpression declined, while the fixed-width pre-pass
-  wrote a list out into scalar code only from five elements up. The interval
-  target now asks the pass to write out a list of any width, a list of number
-  literals included, and inlines a helper whose value is a list at the root
-  call site first, so `F(x, y)[1]` becomes an element of a written-out list
-  and `Total(f(x + 1, y) + f(x − 1, y))` a sum of scalars. The seven
-  `interval-js` declines of the 0.128.9 code-generation audit that named
-  `List` (`1dee4lkte2`, `oeupgr064p`) compile, with enclosures a few ulps
-  wide around the interpreter's value. On every target, a literal index into
-  a literal list, `[a, b][1]`, now compiles to the element itself.
+  every list-valued subexpression declined, while the fixed-width pre-pass wrote
+  a list out into scalar code only from five elements up. The interval target
+  now asks the pass to write out a list of any width, a list of number literals
+  included, and inlines a helper whose value is a list at the root call site
+  first, so `F(x, y)[1]` becomes an element of a written-out list and
+  `Total(f(x + 1, y) + f(x − 1, y))` a sum of scalars. The seven `interval-js`
+  declines of the 0.128.9 code-generation audit that named `List` (`1dee4lkte2`,
+  `oeupgr064p`) compile, with enclosures a few ulps wide around the
+  interpreter's value. On every target, a literal index into a literal list,
+  `[a, b][1]`, now compiles to the element itself.
+
 - **The shader targets reuse a helper's invariant calculations too.** The
-  invariant-prefix variant of a user function — the private copy that
-  receives, as an extra parameter, a value the body computes from a subset of
-  its parameters — was confined to the JavaScript and interval-js targets.
-  GLSL and WGSL now emit it as well: the variant's signature carries the
-  hoisted value as an extra parameter typed as that value, the repetition
-  site binds the value once and passes it as a held argument, and a base
-  definition no call references any more is dropped from the preamble on
-  every target. The exoplanet transit kernel of the 0.128.9 code-generation
-  audit (record 183) evaluates `m(t)` once per fragment instead of forty
-  times; the emitted GLSL and WGSL compile and link under headless Chromium.
+  invariant-prefix variant of a user function — the private copy that receives,
+  as an extra parameter, a value the body computes from a subset of its
+  parameters — was confined to the JavaScript and interval-js targets. GLSL and
+  WGSL now emit it as well: the variant's signature carries the hoisted value as
+  an extra parameter typed as that value, the repetition site binds the value
+  once and passes it as a held argument, and a base definition no call
+  references any more is dropped from the preamble on every target. The
+  exoplanet transit kernel of the 0.128.9 code-generation audit (record 183)
+  evaluates `m(t)` once per fragment instead of forty times; the emitted GLSL
+  and WGSL compile and link under headless Chromium.
+
 - **A coordinate of a point list built from columns is the column.**
   `PointX(PointList([x₁, x₂, x₃], [y₁, y₂, y₃], [z₁, z₂, z₃]))` compiled by
-  zipping the three columns into three points and mapping the first
-  coordinate back out of each; a row of the 0.128.9 code-generation audit
-  (`art/n7uhaaoq1q`, records 683–748) built the same three-point list once
-  per table and projected it three times. The target-independent pre-pass
-  now folds such an accessor to the column itself when every column is
-  provably the same width, no discarded column has an effect, and the column
-  fits the iteration budget, so no point is built on any target. A shape
-  the fold leaves alone — columns of different widths, a scalar slot at the
-  read position, a wider column under a budget — still zips as before. On
-  GLSL a lone five-element column beside a scalar slot compiles to the
-  column where it used to decline.
+  zipping the three columns into three points and mapping the first coordinate
+  back out of each; a row of the 0.128.9 code-generation audit
+  (`art/n7uhaaoq1q`, records 683–748) built the same three-point list once per
+  table and projected it three times. The target-independent pre-pass now folds
+  such an accessor to the column itself when every column is provably the same
+  width, no discarded column has an effect, and the column fits the iteration
+  budget, so no point is built on any target. A shape the fold leaves alone —
+  columns of different widths, a scalar slot at the read position, a wider
+  column under a budget — still zips as before. On GLSL a lone five-element
+  column beside a scalar slot compiles to the column where it used to decline.
+
 - **The interval target binds small repeated operations.** The
-  common-subexpression harvest admitted a repeated subexpression by its
-  syntax size, a measure of a JavaScript expression's cost: a size-3 `1/n` is
-  one division there and a temporary saves nothing. On the interval target
-  every operation is a library call that allocates its result, so a compile
-  target can now declare its own admission thresholds (`cseMinSize`,
-  `cseMinScore`) and the interval target binds a node of two or three nodes
-  at three occurrences. A Voronoi cell distance from the 0.128.9
-  code-generation audit (record 584) computed `_IA.div(_k1, _.n)` 48 times
-  across its two helper bodies; a five-offset reduction of it now computes the
-  reciprocal once per call and runs 10% faster, with the enclosure unchanged
-  endpoint for endpoint. The JavaScript target keeps its defaults.
+  common-subexpression harvest admitted a repeated subexpression by its syntax
+  size, a measure of a JavaScript expression's cost: a size-3 `1/n` is one
+  division there and a temporary saves nothing. On the interval target every
+  operation is a library call that allocates its result, so a compile target can
+  now declare its own admission thresholds (`cseMinSize`, `cseMinScore`) and the
+  interval target binds a node of two or three nodes at three occurrences. A
+  Voronoi cell distance from the 0.128.9 code-generation audit (record 584)
+  computed `_IA.div(_k1, _.n)` 48 times across its two helper bodies; a
+  five-offset reduction of it now computes the reciprocal once per call and runs
+  10% faster, with the enclosure unchanged endpoint for endpoint. The JavaScript
+  target keeps its defaults.
+
 - **A helper's invariant calculations are reused across the calls of a
-  repetition site.** A user function called from every term of a `Sum` with
-  the same argument at some parameter recomputed, on every call, the parts of
-  its body that read only that parameter. The JavaScript and interval-js
-  targets now evaluate each such invariant prefix once, before the terms, and
-  call a private variant of the helper that receives the value as an extra
-  parameter; a prefix is an expensive subexpression (a user-function call or
-  a transcendental) that reads a strict subset of the parameters, is pure, and
-  is evaluated on every call. The exoplanet transit kernel of the 0.128.9
-  code-generation audit (`S(r_i, t)` at forty radii, each call recomputing
-  `m(t)`) now runs within 5% of its hand-hoisted form, which had measured 2.6
-  times faster than the emitted code. A hoisted value is bound behind a
-  loop's empty-range guard, an argument that varies with the term or has an
-  effect is never hoisted, and the shader targets are unchanged.
+  repetition site.** A user function called from every term of a `Sum` with the
+  same argument at some parameter recomputed, on every call, the parts of its
+  body that read only that parameter. The JavaScript and interval-js targets now
+  evaluate each such invariant prefix once, before the terms, and call a private
+  variant of the helper that receives the value as an extra parameter; a prefix
+  is an expensive subexpression (a user-function call or a transcendental) that
+  reads a strict subset of the parameters, is pure, and is evaluated on every
+  call. The exoplanet transit kernel of the 0.128.9 code-generation audit
+  (`S(r_i, t)` at forty radii, each call recomputing `m(t)`) now runs within 5%
+  of its hand-hoisted form, which had measured 2.6 times faster than the emitted
+  code. A hoisted value is bound behind a loop's empty-range guard, an argument
+  that varies with the term or has an effect is never hoisted, and the shader
+  targets are unchanged.
+
 - **Support block-valued terms and operands on the shader targets.** A
   multi-statement block used as a value — a `with` clause as the term of a `Sum`
   or `Product`, or as one operand of an addition — now compiles on GLSL and
@@ -368,32 +361,35 @@
   still declines. The Tycho noise kernel (`art/hyvhlz4chj`), whose fractional
   Brownian motion term binds three locals from the loop index, compiles and
   links on both targets.
+
 - **The norm of a point with an empty list coordinate is the empty list.**
   `Norm(([], 3))`, `Abs(([], 3))` and `Hypot(([], 3), 4)` evaluate to `[]`, one
   norm per point of no points, the answer an empty list of points gets. They
   answered `√10` and the malformed `√(16 + []²)`: `Abs([])` evaluates to the
   erasure marker, which the sum and product folds erased, leaving the empty
   product for the missing component.
+
 - **A compiled norm of a point with a list coordinate answers one norm per
   element.** On JavaScript, `Norm`, `Abs` and `Hypot` of an unwritten point
   whose coordinate type admits a list — a parameter typed `unknown` or
-  `tuple<broadcastable<number>, …>`, a symbol declared `tuple<list<number>,
-  number>`, a union of point types — now spread the coordinates into the
-  run-time broadcast, so `|([1, 2], 3) − (4, 0)|` answers `[4.24, 3.61]` as
-  the interpreter does. `_SYS.norm` used to flatten the nested array into one
-  number behind a success, and the provably-list shapes declined. Each
-  coordinate is read by its static type: a nested point joins the vector
-  whole, a list coordinate broadcasts, and an open-typed coordinate is read
-  as a list, the way the compiled arithmetic reads every nested array. `Abs`
-  over a union whose every arm is a point is a norm, not a component-wise
-  `abs`.
+  `tuple<broadcastable<number>, …>`, a symbol declared
+  `tuple<list<number>, number>`, a union of point types — now spread the
+  coordinates into the run-time broadcast, so `|([1, 2], 3) − (4, 0)|` answers
+  `[4.24, 3.61]` as the interpreter does. `_SYS.norm` used to flatten the nested
+  array into one number behind a success, and the provably-list shapes declined.
+  Each coordinate is read by its static type: a nested point joins the vector
+  whole, a list coordinate broadcasts, and an open-typed coordinate is read as a
+  list, the way the compiled arithmetic reads every nested array. `Abs` over a
+  union whose every arm is a point is a norm, not a component-wise `abs`.
+
 - **A written point passed to a parameter that admits no list coordinate
   specializes again.** For `P: list<number> | tuple<number, number>`, the
-  JavaScript compilation of `k((x, y))` builds the point helper and computes
-  the norm directly, as it did before 0.128.8. The interpreter rejects a list
+  JavaScript compilation of `k((x, y))` builds the point helper and computes the
+  norm directly, as it did before 0.128.8. The interpreter rejects a list
   coordinate under such a declaration, so the scalar rebuild is exact; a
   parameter typed `unknown` or with `broadcastable` coordinates keeps the
   run-time shape dispatch.
+
 - **Fixed a silent shader miscompile of a reduction assigned to a block local.**
   On GLSL and WGSL a loop-form `Sum` or `Product` on the right of a block-local
   assignment (`a := Σ…` inside a function body or a `Loop` body) had nowhere to
@@ -403,9 +399,11 @@
   inside the block's scope. The same sink makes a reduction as the final
   statement of a function body and a nested reduction inside a `Loop` body
   compile.
+
 - **Keep visible color results in shader vector storage.** Helpers returning a
   color constructor or conversion retain three-channel return types when an
   intermediate local's type still permits broadcasting.
+
 - **Generate valid shader helper names.** Names derived from user functions and
   point specializations avoid reserved consecutive underscores and dollar signs,
   while remaining distinct when normalization produces a collision.
@@ -414,49 +412,62 @@
 
 #### Numeric performance (200-digit precision)
 
-Median time per call, in **microseconds — lower is better**. `—` means the tool returned no usable result at that precision.
+Median time per call, in **microseconds — lower is better**. `—` means the tool
+returned no usable result at that precision.
 
-| Expression | CE (current) | CE 0.128.9 | SymPy | math.js | Mathematica |
-| --- | --: | --: | --: | --: | --: |
-| $\pi^2$ | 11 | 13 | 179 | 143 | 3.9 |
-| $\sin 1$ | 23 | 23 | 221 | 449 | 5.1 |
-| $\cos 1$ | 22 | 23 | 223 | 513 | 6.8 |
-| $\ln 2$ | 18 | 18 | 357 | 4,460 | 3.7 |
-| $e^{\pi}$ | 17 | 17 | 216 | 4,948 | 4.6 |
-| $\zeta(3)$ | 1,584 | 1,588 | 281 | — | 50 |
-| $\Gamma(\tfrac13)$ | 841 | 848 | 368 | — | 204 |
-| $\psi(\tfrac13)$ | 740 | 739 | 2,810 | — | 164 |
+| Expression         | CE (current) | CE 0.128.9 | SymPy | math.js | Mathematica |
+| ------------------ | -----------: | ---------: | ----: | ------: | ----------: |
+| $\pi^2$            |           11 |         13 |   179 |     143 |         3.9 |
+| $\sin 1$           |           23 |         23 |   221 |     449 |         5.1 |
+| $\cos 1$           |           22 |         23 |   223 |     513 |         6.8 |
+| $\ln 2$            |           18 |         18 |   357 |   4,460 |         3.7 |
+| $e^{\pi}$          |           17 |         17 |   216 |   4,948 |         4.6 |
+| $\zeta(3)$         |        1,584 |      1,588 |   281 |       — |          50 |
+| $\Gamma(\tfrac13)$ |          841 |        848 |   368 |       — |         204 |
+| $\psi(\tfrac13)$   |          740 |        739 | 2,810 |       — |         164 |
 
 #### Symbolic capability & performance
 
-Each cell is **how many times faster than Mathematica** that engine is on the case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is `1×`). `—` means the engine can't do the case; `✓` means it solves a case Mathematica can't. Compare the **CE (current)** and **CE 0.128.9** columns to see what is *new this release* (a `—` under `0.128.9` next to a number under the current build). The **CE + R/F** column is the current build with the opt-in Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` / `loadIdentities`), on the same minified bundle.
+Each cell is **how many times faster than Mathematica** that engine is on the
+case (`Mathematica ÷ engine`, so **higher is better**; Mathematica itself is
+`1×`). `—` means the engine can't do the case; `✓` means it solves a case
+Mathematica can't. Compare the **CE (current)** and **CE 0.128.9** columns to
+see what is _new this release_ (a `—` under `0.128.9` next to a number under the
+current build). The **CE + R/F** column is the current build with the opt-in
+Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
+`loadIdentities`), on the same minified bundle.
 
-| Operation | CE (current) | CE + R/F | CE 0.128.9 | SymPy | math.js | Mathematica |
-| --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| **Antiderivatives** |  |  |  |  |  |  |
-| $\int\frac{1}{\sqrt x}\,dx$ | 2.7× | 1.7× | 2.1× | 0.5× | — | 1× |
-| $\int\frac{x}{\sqrt{1-x^2}}\,dx$ | 5.8× | 1.0× | 4.3× | 0.09× | — | 1× |
-| $\int\frac{1}{x^3+1}\,dx$ | 3.1× | 0.6× | 2.4× | 0.3× | — | 1× |
-| $\int\frac{\sqrt x}{1+x}\,dx$ | — | 1.2× | — | 0.1× | — | 1× |
-| $\int\frac{x}{(1+x)^{1/3}}\,dx$ | — | 0.7× | — | 0.009× | — | 1× |
-| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$ | — | 0.7× | — | 0.007× | — | 1× |
-| **Derivatives** |  |  |  |  |  |  |
-| $\tfrac{d}{dx}\sqrt{1-x^2}$ | 0.02× | 0.02× | 0.02× | 0.001× | 0.004× | 1× |
-| **Simplification** |  |  |  |  |  |  |
-| $\sqrt{3+2\sqrt2}$ | 37× | 28× | 24× | — | — | 1× |
-| $\sqrt6\,x+\sqrt2\,x$ | 57× | 54× | 36× | 3.2× | 17× | 1× |
-| **Evaluation** |  |  |  |  |  |  |
-| $\lim_{x\to0}\tfrac{\sin x}{x}$ | 27× | 12× | 24× | 3.2× | — | 1× |
-| $\lim_{x\to\infty}(1+\tfrac1x)^x$ | 3.3× | 3.0× | 3.1× | 2.1× | — | 1× |
-| $\int_1^2\tfrac1x\,dx$ | 2125× | 2561× | 1563× | 91× | — | 1× |
-| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ | 173× | 70× | 146× | 2.5× | — | 1× |
-| **Solving** |  |  |  |  |  |  |
-| $x^4+x^2-1=0$ | 0.1× | 0.2× | 0.1× | 0.06× | — | 1× |
-| $x^3-x-1=0$ | 1.3× | 1.3× | 1.1× | 0.04× | — | 1× |
+| Operation                              | CE (current) | CE + R/F | CE 0.128.9 | SymPy  | math.js | Mathematica |
+| -------------------------------------- | :----------: | :------: | :--------: | :----: | :-----: | :---------: |
+| **Antiderivatives**                    |              |          |            |        |         |             |
+| $\int\frac{1}{\sqrt x}\,dx$            |     2.7×     |   1.7×   |    2.1×    |  0.5×  |    —    |     1×      |
+| $\int\frac{x}{\sqrt{1-x^2}}\,dx$       |     5.8×     |   1.0×   |    4.3×    | 0.09×  |    —    |     1×      |
+| $\int\frac{1}{x^3+1}\,dx$              |     3.1×     |   0.6×   |    2.4×    |  0.3×  |    —    |     1×      |
+| $\int\frac{\sqrt x}{1+x}\,dx$          |      —       |   1.2×   |     —      |  0.1×  |    —    |     1×      |
+| $\int\frac{x}{(1+x)^{1/3}}\,dx$        |      —       |   0.7×   |     —      | 0.009× |    —    |     1×      |
+| $\int\frac{x^2}{(1+x)^{1/3}}\,dx$      |      —       |   0.7×   |     —      | 0.007× |    —    |     1×      |
+| **Derivatives**                        |              |          |            |        |         |             |
+| $\tfrac{d}{dx}\sqrt{1-x^2}$            |    0.02×     |  0.02×   |   0.02×    | 0.001× | 0.004×  |     1×      |
+| **Simplification**                     |              |          |            |        |         |             |
+| $\sqrt{3+2\sqrt2}$                     |     37×      |   28×    |    24×     |   —    |    —    |     1×      |
+| $\sqrt6\,x+\sqrt2\,x$                  |     57×      |   54×    |    36×     |  3.2×  |   17×   |     1×      |
+| **Evaluation**                         |              |          |            |        |         |             |
+| $\lim_{x\to0}\tfrac{\sin x}{x}$        |     27×      |   12×    |    24×     |  3.2×  |    —    |     1×      |
+| $\lim_{x\to\infty}(1+\tfrac1x)^x$      |     3.3×     |   3.0×   |    3.1×    |  2.1×  |    —    |     1×      |
+| $\int_1^2\tfrac1x\,dx$                 |    2125×     |  2561×   |   1563×    |  91×   |    —    |     1×      |
+| $\int_{-\infty}^{\infty} e^{-x^2}\,dx$ |     173×     |   70×    |    146×    |  2.5×  |    —    |     1×      |
+| **Solving**                            |              |          |            |        |         |             |
+| $x^4+x^2-1=0$                          |     0.1×     |   0.2×   |    0.1×    | 0.06×  |    —    |     1×      |
+| $x^3-x-1=0$                            |     1.3×     |   1.3×   |    1.1×    | 0.04×  |    —    |     1×      |
 
-Across the cases both solve, Compute Engine is a **median 3.1× faster than Mathematica** (up to 2125×) — in the browser, not a proprietary kernel.
+Across the cases both solve, Compute Engine is a **median 3.1× faster than
+Mathematica** (up to 2125×) — in the browser, not a proprietary kernel.
 
-<sub>Measured 2026-09-15 · Compute Engine `0.128.10` @ `bf918be0` (current build) · published `0.128.9` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica `15.0.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically against an independent `mpmath` reference, never another tool. Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
+<sub>Measured 2026-09-15 · Compute Engine `0.128.10` @ `bf918be0` (current
+build) · published `0.128.9` · SymPy `1.14.0` · math.js `15.2.0` · Mathematica
+`15.0.0 for Mac OS X ARM` · Node `v22.13.1`. Correctness is verified numerically
+against an independent `mpmath` reference, never another tool. Reproduce with
+`npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.
 </sub>
 
 ## 0.128.9 _2026-09-11_
