@@ -10202,6 +10202,11 @@ type LazyStreamSysHelpers = {
     it: Iterable<unknown>,
     p: (x: unknown) => unknown
   ) => unknown[];
+  listRecursion: (
+    op: string,
+    args: unknown[],
+    step: (...args: unknown[]) => unknown
+  ) => unknown;
 };
 
 type SysHelpers = typeof SYS_HELPERS & RandomSysHelpers & LazyStreamSysHelpers;
@@ -10489,6 +10494,37 @@ function makeLazyStreamHelpers(ce: ComputeEngine): LazyStreamSysHelpers {
         out.push(x);
       }
       return out;
+    },
+    // The run-time loop behind a list-building user-defined recursion
+    // (`BaseCompiler.emitFunctionLiteralDefinition` emits the call). `step` is
+    // the function's own `Which` with each arm rewritten to report what it
+    // does instead of doing it: `[0, list]` for an arm that returns a list,
+    // `[1, list, nextArgs]` for an arm that prepends a list to a direct
+    // self-call. Prefix lists are collected and concatenated once at the
+    // end, so neither the JavaScript call stack nor the amount of copying
+    // grows with the length of the result — the natively recursive form
+    // overflows the stack near 5,000 levels. The interpreter runs the same
+    // loop (`evaluateListRecursion`, `boxed-expression/recursive-list-
+    // builder.ts`) under the same cap, so a definition with no reachable base
+    // case reports the iteration-limit error on both routes instead of
+    // spinning. When no arm matches, `step` returns `undefined` like the
+    // original `Which`; at depth zero that is the result, and deeper the
+    // spread throws the same `TypeError` the original nested spread threw.
+    listRecursion: (op, args, step) => {
+      const chunks: unknown[][] = [];
+      let current = args;
+      let iterations = 0;
+      for (;;) {
+        if (++iterations > ce.iterationLimit) throw exceeded(op);
+        const result = step(...current) as unknown[] | undefined;
+        if (!Array.isArray(result)) {
+          if (chunks.length === 0) return result;
+          return [...chunks.flat(1), ...(result as unknown as unknown[])];
+        }
+        chunks.push(result[1] as unknown[]);
+        if (result[0] === 0) return chunks.flat(1);
+        current = result[2] as unknown[];
+      }
     },
   };
 }

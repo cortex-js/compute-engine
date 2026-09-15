@@ -1,3 +1,29 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A list-building self-recursion compiles to a loop on the JavaScript
+  target.** A piecewise function whose recursive arms prepend a list to a direct
+  self-call (`F(n) = \{n = D - 1: [P(n)], [P(n)].join(F(n + 1))\}`, the shape
+  the interpreter already evaluates iteratively) was compiled as a natively
+  recursive JavaScript function, so `compile(F(0))` overflowed the JavaScript
+  call stack near 5,000 levels with a `RangeError`. The compiler now emits the
+  same definition as a loop over the recursion's step (`_SYS.listRecursion`):
+  the prefix lists are collected and concatenated once, so neither the stack
+  depth nor the amount of copying grows with the length of the result. A
+  10,000-point list builds in about 35 ms and a 100,000-point one in about 90
+  ms. The loop reads `ce.iterationLimit` when it runs, exactly as the
+  interpreter's iterative evaluation and the compiled `Filter`/`TakeWhile`
+  streams do, so a definition with no reachable base case reports
+  `Iteration limit of N exceeded while evaluating F()` instead of a stack
+  overflow, and a build longer than the limit (default 1024) needs the limit
+  raised on both routes. Recursions that are not list-building
+  (`n \cdot F(n - 1)`), or whose self-call sits inside a guard or an element,
+  keep the recursive form, and so do a definition with a complex-declared
+  parameter, one whose guard is a list of booleans (an elementwise selection),
+  and a compilation whose caller overrides `Which`, `Tuple`, `Join` or `List`;
+  the shader targets still fail closed on a recursive definition.
+
 ## 0.128.10 _2026-09-14_
 
 ### Resolved Issues

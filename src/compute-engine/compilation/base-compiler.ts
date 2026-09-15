@@ -111,6 +111,7 @@ import {
   isRestParameter,
 } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
+import { listRecursionPlan } from '../boxed-expression/recursive-list-builder.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { FunctionClause } from '../multi-clause.js';
 import {
@@ -22293,6 +22294,22 @@ export class BaseCompiler {
               BaseCompiler._codeOverrides.delete(node);
           }
         }
+        // A list-building recursion is emitted as a loop over its step
+        // instead of the natively recursive arrow below, when the target and
+        // the definition allow it (`emitListRecursionLoop`). A definition the
+        // loop form declines takes the ordinary arrow.
+        if (lowering === undefined && specialization === undefined) {
+          const loop = BaseCompiler.emitListRecursionLoop(
+            h,
+            name,
+            literal,
+            target,
+            registry,
+            prefixed !== undefined
+          );
+          if (loop === 'declined-variant') return undefined;
+          if (loop !== undefined) return loop;
+        }
         // Each emitted definition body gets its OWN nested harvest scope in
         // the same session (§5.4): its own regions and candidates — the body
         // is not part of the root tree — but the same naming counter, so temp
@@ -22585,6 +22602,126 @@ export class BaseCompiler {
         unrollComprehensions: target.unrollComprehensions,
       }
     );
+  }
+
+  /**
+   * Emit `h` as a LOOP over the step of its list-building recursion, when
+   * `listRecursionPlan` recognizes the definition — `F(n) = Which(n = K,
+   * [g(n)], True, Join([g(n)], F(n + 1)))` and its relatives (any step,
+   * several numeric parameters, several guards, different base lists) — and
+   * return the emitted name. The natively recursive arrow overflows the
+   * JavaScript call stack near 5,000 levels (a catchable `RangeError`); the
+   * loop builds a 10,000-element list in milliseconds. The interpreter runs
+   * the same plan (`evaluateListRecursion`, `boxed-expression/recursive-
+   * list-builder.ts`), and the run-time loop (`_SYS.listRecursion`) caps its
+   * iterations at `engine.iterationLimit` exactly as the interpreter does,
+   * so a definition with no reachable base case reports the iteration-limit
+   * error on both routes.
+   *
+   * The step is the same `Which` with each arm returning `Tuple(0, list)`
+   * or `Tuple(1, prefix, Tuple(nextArgs))` and no self-call. It compiles as
+   * the body of a synthetic literal over the ORIGINAL parameters through the
+   * ordinary definition-body preparation, so every lowering the recursive
+   * body would have received (nested call inlining, angular-unit rewrite,
+   * parameter binding and renaming) applies to it unchanged. The synthetic
+   * literal is built with `_fn`, not `engine.function`: its pieces are the
+   * literal's own canonical nodes, bound in the literal's scope, and a
+   * canonicalization would rebind the parameter symbols in a fresh scope.
+   * The compiler binds parameters from the parameter list
+   * (`prepareUserFunctionBody`), never from the block's scope, and the plan
+   * admits no statement that declares a local, so the missing block scope
+   * is never read.
+   *
+   * Returns `undefined`, and the caller emits the ordinary recursive arrow,
+   * when:
+   *  - the target is not plain JavaScript (the shader targets forbid
+   *    recursion and fail closed; Python has no definition lowering);
+   *  - the caller overrides `Which`, `Tuple`, `Join` or `List`
+   *    (`target.unrollSkipHeads`): the step is built from `Tuple` control
+   *    records and drops the body's `Join`, so an override of those heads
+   *    would replace the records or lose the caller's implementation;
+   *  - a parameter is declared complex: a call site coerces a complex
+   *    argument to its `{re, im}` object, and the loop hands the next
+   *    arguments to the step without a call site in between;
+   *  - a guard is not a scalar boolean: a collection-typed guard selects
+   *    elementwise (`_SYS.select`), whose result is an array of control
+   *    records the loop cannot read as one.
+   *
+   * Returns `'declined-variant'` when the requested emission is an
+   * invariant-prefix VARIANT of a recognized recursion: no variant is
+   * emitted, so the call site falls back to the ordinary call and reaches
+   * the loop definition. The prefix is then computed once per step inside
+   * the loop, which is what the loop does anyway; the recursive arrow the
+   * variant would have carried is the form that overflows.
+   */
+  private static emitListRecursionLoop(
+    h: string,
+    name: string,
+    literal: Expression & FunctionInterface,
+    target: CompileTarget<Expression>,
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    variant: boolean
+  ): string | 'declined-variant' | undefined {
+    if (target.language !== 'javascript') return undefined;
+    const overridden = target.unrollSkipHeads;
+    if (
+      overridden !== undefined &&
+      ['Which', 'Tuple', 'Join', 'List'].some((head) => overridden.has(head))
+    )
+      return undefined;
+    const plan = listRecursionPlan(literal);
+    if (plan === undefined) return undefined;
+    if (variant) return 'declined-variant';
+    const frames = {
+      complex: new Map<string, boolean>(),
+      vector: new Map<string, number>(),
+    };
+    BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
+    if (frames.complex.size > 0) return undefined;
+    const step = plan.step;
+    if (!isFunction(step, 'Which')) return undefined;
+    for (let i = 0; i < step.nops; i += 2)
+      if (!step.ops[i].type.matches('boolean')) return undefined;
+    const engine = literal.engine as unknown as ComputeEngine;
+    const stepLiteral = engine._fn('Function', [
+      engine._fn('Block', [step]),
+      ...literal.ops.slice(1),
+    ]);
+    if (!isFunction(stepLiteral, 'Function') || !stepLiteral.isValid)
+      return undefined;
+    const prepared = BaseCompiler.prepareUserFunctionBody(
+      stepLiteral,
+      target,
+      registry,
+      h
+    );
+    BaseCompiler.recordScalarParams(h, literal, prepared.bodyTarget);
+    const stepBody = BaseCompiler.withLocalShapeFrame(
+      frames.complex,
+      frames.vector,
+      () =>
+        BaseCompiler.withEnforcedParams(literal, () =>
+          BaseCompiler.withNestedCseHarvest(
+            prepared.bodyExpr,
+            prepared.bodyTarget,
+            prepared.params,
+            () => BaseCompiler.compile(prepared.bodyExpr, prepared.bodyTarget)
+          )
+        ),
+      true
+    );
+    const statements = javascriptStatements(prepared.bodyTarget);
+    const params = prepared.params.join(', ');
+    const stepArrow = statements?.has(stepBody)
+      ? `(${params}) => { ${statements.functionBody(stepBody)} }`
+      : `(${params}) => ${stepBody}`;
+    (registry.literals ??= new Map()).set(name, literal);
+    registry.defs.set(
+      name,
+      `const ${name} = (${params}) => _SYS.listRecursion(` +
+        `${JSON.stringify(h)}, [${params}], ${stepArrow});`
+    );
+    return name;
   }
 
   private static prepareUserFunctionBody(
