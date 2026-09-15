@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-06.
+**Last updated:** 2026-09-15.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -1536,6 +1536,43 @@ interpreter answers `[1, 2]` for the first (a `Nothing` operand leaves a sum)
 and an `incompatible-dimensions` error for the second, so neither compiled form
 was faithful; whoever settles this ruling settles it for the fused form
 (`compile-broadcast-fusion.test.ts` pins the current answers).
+
+### Collection values on the interval target: what stays open after the 2026-09-15 round (OPEN — the round itself is in `CHANGELOG.md`, design record in `docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md`)
+
+The interval target now maps scalar kernels over provable lists of numbers,
+carries arrays across user-function boundaries, builds a range at run time and
+reduces over it. Four things were left out of that round on purpose:
+
+- **A reduction over a bound that is not constant over the cell answers
+  `entire`.** The indexed `Sum`/`Product` loop (a bound whose endpoints floor to
+  different integers) and the run-time range (`_IA.range`, a bound that is not a
+  point interval) both give up instead of enclosing. The sound refinement is the
+  hull over the integer bound pairs: for `Σ_{k=a}^{b} f(k)` with `a ∈ A`,
+  `b ∈ B`, the union of the sums over every `(⌊a'⌋, ⌊b'⌋)` pair, computed from
+  prefix sums under a pair budget. A plotter's cells refine until the bound is
+  constant, so the cost of `entire` is plotting time, not soundness; do the
+  refinement when a corpus document shows the cost.
+- **`D` (a derivative) on the interval target has no lowering beyond the closed
+  form.** `d/dx L(x)` compiles when the derivative of the body has a closed form
+  (the shared `compileDerivative`), which is what the census's witnesses lacked
+  (16 declines, 8 documents: a body with a sum over a symbolic bound, an
+  integral, a piecewise). The JavaScript target's numeric fallback is a
+  finite-difference stencil, which is not an enclosure of the derivative over a
+  cell and must not be ported. The sound route is forward-mode automatic
+  differentiation in interval arithmetic — a jet lane over the interval kernels,
+  the interval counterpart of `jet-derivative.ts`. Design work; demand-gated.
+- **An absent position typed `broadcastable<number> | missing` declines (9
+  census rows).** `absentDomainIsObject` reads `broadcastable<number>` as an
+  object domain, and the interval target declares no object absence axis. A
+  value that is a number or a list of numbers could use the numeric axis on this
+  target — its absence marker is a whole-NaN interval, which the element-wise
+  broadcast passes through as a scalar — but the reading is the shared
+  compiler's, so the change needs a target-side override of the axis choice. Not
+  done; measure the rows first.
+- **A relation over a provable list (`L < 1`) keeps the scalar-operand gate.**
+  Its element-wise value is a list of tri-state verdicts, which the result
+  contract (`IntervalValue`) does not admit. Tycho compiles the UNMASKED body of
+  an implicit member, never the relation, so no corpus row needs it.
 
 ### Static broadcast unroll for the compile route — elementwise `Which` over statically-sized collections at `glsl`/`interval-js` (OPEN, demand-gated — opened 2026-08-19 from Tycho item 206)
 

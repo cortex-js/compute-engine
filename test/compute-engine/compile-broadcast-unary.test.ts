@@ -324,11 +324,27 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
     });
   });
 
-  describe('interval-js — declines, as before', () => {
-    it('reports a clean failure, not invalid source', () => {
+  describe('interval-js — maps element-wise through its own runtime', () => {
+    it('emits the interval broadcast, never a JavaScript `.map` arrow', () => {
+      // The target's `broadcastUnary` hook spells the literal as an array of
+      // point intervals and maps the kernel with `_IA.bcast`
+      // (`compile-interval-collections.test.ts`); a list with no interval
+      // reading still reports a clean failure.
       const r = intervalJs.compile(ce.box(['Sin', ['List', 1, 2, 3, 4]]));
-      expect(r.success).toBe(false);
-      expect(r.code ?? '').not.toContain('.map(');
+      expect(r.success).toBe(true);
+      expect(r.code).not.toContain('.map(');
+      const out = r.run!({}) as any[];
+      // Each element is an enclosure of the sine, a few ulps wide.
+      out.forEach((v, i) => {
+        expect(v.value.lo).toBeLessThanOrEqual(Math.sin(i + 1));
+        expect(v.value.hi).toBeGreaterThanOrEqual(Math.sin(i + 1));
+        expect(v.value.hi - v.value.lo).toBeLessThan(1e-12);
+      });
+      const declined = intervalJs.compile(
+        ce.box(['Sin', ['List', "'a'", "'b'"]])
+      );
+      expect(declined.success).toBe(false);
+      expect(declined.code ?? '').not.toContain('.map(');
     });
   });
 });

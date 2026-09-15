@@ -34,6 +34,23 @@ import {
 } from './util.js';
 
 /**
+ * The band-less interval result a NON-ARRAY collection operand may be — the
+ * `entire` a run-time `range` answers for a wide bound, a `singular` pole, an
+ * `empty` — which every accessor must PROPAGATE rather than read as "not a
+ * collection": the value exists (a range with a wide bound has some length),
+ * it just could not be bounded, and answering the absence marker there would
+ * let a plotter exclude a region that has a value. Answers `undefined` for
+ * anything else (a plain number, a bare interval, a record), which the
+ * accessors then treat as an operand that is not a collection at run time.
+ */
+function propagatedNonCollection(coll: unknown): IntervalResult | undefined {
+  if (coll === null || typeof coll !== 'object' || !('kind' in coll))
+    return undefined;
+  const result = coll as IntervalResult;
+  return getValue(result) === undefined ? result : undefined;
+}
+
+/**
  * A fresh copy of the target's numeric absence marker.
  *
  * Fresh rather than shared: the value flows into caller code that may treat an
@@ -98,7 +115,7 @@ function atRaw(
   coll: unknown,
   index: Interval | IntervalResult
 ): Interval | IntervalResult {
-  if (!Array.isArray(coll)) return absent();
+  if (!Array.isArray(coll)) return propagatedNonCollection(coll) ?? absent();
 
   const unwrapped = unwrapOrPropagate(index);
   // An `empty`/`entire`/`singular` index says nothing about which element is
@@ -157,10 +174,11 @@ function atRaw(
  * The element count of a collection, as a point interval.
  *
  * A non-array operand is not a collection at run time and answers the numeric
- * absence marker rather than a fabricated count.
+ * absence marker rather than a fabricated count — unless it is a band-less
+ * interval result (`propagatedNonCollection`), which is passed through.
  */
 export function length(coll: unknown): Interval | IntervalResult {
-  if (!Array.isArray(coll)) return absent();
+  if (!Array.isArray(coll)) return propagatedNonCollection(coll) ?? absent();
   return ok(point(coll.length));
 }
 
@@ -175,7 +193,7 @@ export function length(coll: unknown): Interval | IntervalResult {
  * single interval band, so it answers `entire`.
  */
 export function component(coll: unknown, k: number): Interval | IntervalResult {
-  if (!Array.isArray(coll)) return absent();
+  if (!Array.isArray(coll)) return propagatedNonCollection(coll) ?? absent();
   if (!Number.isInteger(k) || k < 0 || k >= coll.length) return absent();
   const element = normalizeElement(coll[k]);
   if (element === undefined) return { kind: 'entire' };
@@ -186,3 +204,175 @@ export function component(coll: unknown, k: number): Interval | IntervalResult {
 // jump in an operand (a `singular` result carrying a `value`) is re-tagged
 // on the result instead of being forgotten — see `liftJump` in `util.ts`.
 export const at = liftJump(atRaw);
+
+/**
+ * One collection ELEMENT as an interval operand for a kernel: a raw number
+ * becomes the degenerate interval `[n, n]`, an interval or interval result is
+ * passed as it stands, a nested array stays an array (the broadcast descends
+ * into it), and a hole (`undefined`, a sparse array) is the absence marker.
+ */
+function elementOperand(element: unknown): unknown {
+  if (typeof element === 'number') return point(element);
+  if (element === undefined || element === null) return absent();
+  return element;
+}
+
+/**
+ * The element count the run-time collection builders accept. A collection
+ * wider than this has no array representation here: `range` answers
+ * `entire` ("cannot bound this") instead of allocating it.
+ */
+const MAX_RUNTIME_COLLECTION_LENGTH = 1_000_000;
+
+/**
+ * Element-wise application of a scalar kernel over collection operands — the
+ * interval counterpart of the JavaScript target's `_SYS.bcast`.
+ *
+ * `f` is the kernel over SCALAR intervals. Each argument is either a scalar
+ * (an interval, an interval result, a raw number) or a run-time collection (a
+ * JavaScript array). With no array among the arguments the kernel is applied
+ * once. Otherwise every array must have one length, and the result is the
+ * array of the kernel applied position by position, a scalar argument being
+ * reused at every position; a nested array at a position recurses, so a list
+ * of lists broadcasts to its leaves. This is the interpreter's element-wise
+ * rule for a broadcastable operator (`sin([1, 2])` is `[sin 1, sin 2]`, and
+ * `[1, 2] + [10, 20]` is `[11, 22]`).
+ *
+ * Two shapes have no element-wise value, and the answer for both is the
+ * numeric ABSENCE marker rather than an enclosure:
+ *
+ * - arrays of different lengths, which the interpreter reports as the
+ *   `incompatible-dimensions` error at every point of the plane (the lengths
+ *   do not depend on the evaluation point), so "no value" is exact, and it is
+ *   what the JavaScript target answers there (`NaN`);
+ * - an EMPTY array, which the interpreter answers with `Nothing` for an
+ *   operator position (`sin([])` evaluates to `Nothing`, not to `[]`).
+ *
+ * The compiler emits a call to this function only when every collection
+ * argument's static type proves a list of numbers (`tryIntervalBroadcast`
+ * in `compilation/interval-javascript-target.ts`); a wider operand keeps the
+ * scalar-kernel gate, so a value that is not a list of intervals never
+ * reaches here from compiled code.
+ */
+export function bcast(
+  f: (...operands: unknown[]) => unknown,
+  ...args: unknown[]
+): unknown {
+  return bcastWith(false, f, args);
+}
+
+/**
+ * `bcast` for the application of a USER FUNCTION to its arguments (`f(L)`
+ * with `f(x) := x²`): the same element-wise rule, except that an EMPTY list
+ * argument answers the empty list — the interpreter zips zero elements into
+ * `[]` there, where an operator over an empty list answers `Nothing`.
+ */
+export function bcastFn(
+  f: (...operands: unknown[]) => unknown,
+  ...args: unknown[]
+): unknown {
+  return bcastWith(true, f, args);
+}
+
+/** Shared implementation of `bcast` and `bcastFn`; `emptyIsList` selects
+ *  what an empty position answers, and is carried into nested positions. */
+function bcastWith(
+  emptyIsList: boolean,
+  f: (...operands: unknown[]) => unknown,
+  args: unknown[]
+): unknown {
+  let n = -1;
+  for (const a of args) {
+    if (!Array.isArray(a)) continue;
+    if (n < 0) n = a.length;
+    else if (a.length !== n) return absent();
+  }
+  if (n < 0) return f(...args);
+  if (n === 0) return emptyIsList ? [] : absent();
+  const out: unknown[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let nested = false;
+    const cell = args.map((a) => {
+      const x = Array.isArray(a) ? elementOperand(a[i]) : a;
+      if (Array.isArray(x)) nested = true;
+      return x;
+    });
+    out[i] = nested ? bcastWith(emptyIsList, f, cell) : f(...cell);
+  }
+  return out;
+}
+
+/**
+ * `Map(f, collection)` at run time: the array of `f` applied to each element
+ * (a raw number element is lifted to a point interval first). A non-array
+ * operand is not a collection at run time and answers the numeric absence
+ * marker, as the accessors do — unless it is a band-less interval result
+ * (`propagatedNonCollection`), which is passed through.
+ */
+export function map(f: (element: unknown) => unknown, coll: unknown): unknown {
+  if (!Array.isArray(coll)) return propagatedNonCollection(coll) ?? absent();
+  return coll.map((element) => f(elementOperand(element)));
+}
+
+/**
+ * The scalar a run-time BOUND of a range stands for, or `undefined` when the
+ * bound is not one number: a bound is an interval (bare, or wrapped in an
+ * interval result), and only a POINT interval names one element count. A
+ * wide bound would make the range's length depend on where in the bound the
+ * true value lies, and a list of varying length has no array representation
+ * on this target.
+ */
+function pointBound(bound: unknown): number | undefined {
+  if (typeof bound === 'number')
+    return Number.isFinite(bound) ? bound : undefined;
+  const normalized = normalizeElement(bound);
+  if (normalized === undefined) return undefined;
+  const iv = getValue(normalized);
+  if (iv === undefined) return undefined;
+  if (!Number.isFinite(iv.lo) || iv.lo !== iv.hi) return undefined;
+  return iv.lo;
+}
+
+/**
+ * `Range(lo, hi, step)` at run time, as an array of point intervals — the
+ * interpreter's contract, mirrored from `literalRange` (`library/
+ * collections.ts`): `Range(hi)` counts from 1 in steps of 1; a two-operand
+ * range infers step ±1 from the order of its bounds; the elements are
+ * `lo + i·step` for `i` below the count `max(0, floor((hi − lo) / step) + 1)`
+ * (a zero step is the empty range).
+ *
+ * Every bound must be a POINT interval at run time (`pointBound`): a wide
+ * bound gives a range of varying length, which no array can hold, and the
+ * answer is then `entire` — "cannot bound this" — never a range of some
+ * length chosen from inside the bound. The same answer for a count past
+ * `MAX_RUNTIME_COLLECTION_LENGTH`.
+ */
+export function range(
+  first: unknown,
+  second?: unknown,
+  third?: unknown
+): unknown {
+  const a = pointBound(first);
+  if (a === undefined) return { kind: 'entire' };
+  let lo: number;
+  let hi: number;
+  let step: number;
+  if (second === undefined) [lo, hi, step] = [1, a, 1];
+  else {
+    const b = pointBound(second);
+    if (b === undefined) return { kind: 'entire' };
+    if (third === undefined) [lo, hi, step] = [a, b, b >= a ? 1 : -1];
+    else {
+      const s = pointBound(third);
+      if (s === undefined) return { kind: 'entire' };
+      [lo, hi, step] = [a, b, s];
+    }
+  }
+  if (step === 0) return [];
+  const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+  if (!Number.isFinite(count) || count > MAX_RUNTIME_COLLECTION_LENGTH)
+    return { kind: 'entire' };
+  const out: Interval[] = new Array(count);
+  for (let i = 0; i < count; i++) out[i] = point(lo + i * step);
+  return out;
+}

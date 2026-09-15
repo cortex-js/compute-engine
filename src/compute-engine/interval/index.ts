@@ -128,6 +128,10 @@ import {
   at as _at,
   length as _length,
   component as _component,
+  bcast as _bcast,
+  bcastFn as _bcastFn,
+  map as _map,
+  range as _range,
 } from './collections.js';
 
 // Types
@@ -258,8 +262,17 @@ export {
   INTERVAL_QUADRATURE_GUARD_SUBDIVISIONS,
 } from './integrate.js';
 
-// Collection access (`At`, `Length`, point coordinates)
-export { at, length, component } from './collections.js';
+// Collection access (`At`, `Length`, point coordinates) and the run-time
+// collection values (element-wise broadcast, `Map`, `Range`)
+export {
+  at,
+  length,
+  component,
+  bcast,
+  bcastFn,
+  map,
+  range,
+} from './collections.js';
 
 /**
  * The complete interval arithmetic library object.
@@ -336,6 +349,10 @@ export const IntervalArithmetic = {
   at: _at,
   length: _length,
   component: _component,
+  bcast: _bcast,
+  bcastFn: _bcastFn,
+  map: _map,
+  range: _range,
 
   // Trigonometric
   sin: _sin,

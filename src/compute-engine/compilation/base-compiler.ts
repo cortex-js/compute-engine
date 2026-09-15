@@ -1443,6 +1443,41 @@ function isBoundPossiblyCollectionTyped(
 }
 
 /**
+ * Is `e` PROVABLY a flat list of numbers — the one collection shape the
+ * interval target broadcasts a scalar kernel over, and the only argument
+ * shape it maps a scalar-parameter user function over?
+ *
+ * The evidence is the static type: an indexed collection (`list<number>`,
+ * `vector<3>`, a `Range`, `indexed_collection<integer>`) whose element type
+ * is a subtype of `number`. Three indexed shapes are refused although they
+ * match the collection tops: a TUPLE is one point, which the interval target
+ * consumes whole (`Norm`, the coordinate accessors) and which the
+ * interpreter excludes from broadcasting; a STRING is an indexed collection
+ * of its grapheme clusters in the type lattice but has no numeric elements;
+ * and a nested list (`list<list<number>>`) has an element type that is not a
+ * number. A wide type — `unknown`, a `broadcastable<number>` application, a
+ * union with a scalar arm — is not evidence: only a proof admits the
+ * element-wise lowering, so a value that is not a list of intervals can never
+ * reach the run-time broadcast from compiled code.
+ *
+ * Exported for the interval target, which must not import
+ * `collection-utils` directly (see `pointHasBroadcastComponent`).
+ */
+export function isProvablyNumericListOperand(e: Expression): boolean {
+  if (isProvablyStringOperand(e)) return false;
+  const t = compilationType(e);
+  if (isTupleShapedType(t)) return false;
+  if (
+    !e.type.matches('list<any>') &&
+    !e.type.matches('indexed_collection<any>')
+  )
+    return false;
+  const element = collectionElementType(t);
+  if (element === undefined) return false;
+  return isSubtype(element, 'number');
+}
+
+/**
  * A `Tuple` or `List` literal with a broadcasting component — a shape whose
  * norm does NOT reduce to one scalar, so `Norm`/`Abs` compile handlers use
  * this to fail closed (D6) and let the interpreter broadcast. Exported for
@@ -19442,9 +19477,71 @@ export class BaseCompiler {
   ): TargetSource {
     const provablyScalarArg = BaseCompiler.provablyScalarArg;
 
-    const compiledArgs = args.map((a) =>
-      BaseCompiler.compileValueOperand(a, target)
+    // On a target that spells collection values only in consuming positions
+    // (`CompileTarget.compileCollectionValue`), an argument is one when the
+    // callee binds it WHOLE (a collection-typed parameter: `d(a, b) :=
+    // a[1]·b[1] + a[2]·b[2]` infers both parameters as collections) — and
+    // when the callee's parameters are scalar but the argument is provably a
+    // list of numbers, which the element-wise call below maps the callee
+    // over. An argument the spelling does not cover compiles as before.
+    const spellCollection = (a: Expression): TargetSource | undefined => {
+      if (target.compileCollectionValue === undefined) return undefined;
+      if (paramsAreScalar && !isProvablyNumericListOperand(a)) return undefined;
+      return target.compileCollectionValue(a, target);
+    };
+    const compiledArgs = args.map(
+      (a) => spellCollection(a) ?? BaseCompiler.compileValueOperand(a, target)
     );
+    // The interval target's call-boundary broadcast. The interpreter maps a
+    // scalar-parameter callee over a list argument (`f(x) := x²` applied to
+    // `[1, 2]` answers `[1, 4]`), and the emitted callee is scalar interval
+    // code, so a bare `_fn_f([…])` would read `.lo`/`.hi` off an array and
+    // answer nonsense behind `success: true` (measured before this branch:
+    // `{ lo: -5e-324, hi: null }`). The JavaScript target's runtime dispatch
+    // (`_SYS.bcastFn`, below) does not exist on this target — its `_SYS` is
+    // reserved but never emitted — so the decision is static: an argument
+    // PROVABLY a list of numbers is mapped through `_IA.bcast` with every
+    // other argument reused at each position, which requires those others to
+    // be provably numbers; any other collection-shaped argument beside a
+    // scalar parameter fails closed. An argument whose collection-ness is not
+    // provable keeps the direct call, exactly as before — scalar curve and
+    // implicit plotting ride this target on such arguments.
+    if (
+      target.language === 'interval-javascript' &&
+      paramsAreScalar &&
+      args.length > 0
+    ) {
+      const lists = args.map(isProvablyNumericListOperand);
+      if (lists.some((x) => x)) {
+        const offending = args.find(
+          (a, i) => !lists[i] && !a.type.matches('number')
+        );
+        if (offending !== undefined)
+          throw new Error(
+            `${name}: cannot compile — the call maps over a list argument, ` +
+              `and the argument \`${offending.toString()}\` (type ` +
+              `\`${offending.type.toString()}\`) is not provably a number to ` +
+              `reuse at every position. Fail closed (D6).`
+          );
+        const params = args.map(() => BaseCompiler.tempVar(target));
+        return (
+          `_IA.bcastFn((${params.join(', ')}) => ` +
+          `${name}(${[...params, ...held].join(', ')}), ` +
+          `${compiledArgs.join(', ')})`
+        );
+      }
+      const collection = args.find(
+        (a) => a.isCollection || a.type.matches('collection<any>')
+      );
+      if (collection !== undefined && !isTuple(collection))
+        throw new Error(
+          `${name}: cannot compile — the argument ` +
+            `\`${collection.toString()}\` is a collection (type ` +
+            `\`${collection.type.toString()}\`) handed to a scalar parameter. ` +
+            `The interpreter maps the call over it, and this target maps only ` +
+            `over a provable list of numbers. Fail closed (D6).`
+        );
+    }
     // Deliver a `{ re, im }` to a declared-complex parameter, in whichever of
     // three forms the argument's static shape already settles:
     //
@@ -22552,7 +22649,10 @@ export class BaseCompiler {
                   bodyTarget,
                   params,
                   () => {
-                    const code = BaseCompiler.compile(bodyExpr, bodyTarget);
+                    const code = BaseCompiler.compileDefinitionBody(
+                      bodyExpr,
+                      bodyTarget
+                    );
                     complexShaped =
                       BaseCompiler.complexShapedEmission(bodyExpr);
                     return code;
@@ -23224,7 +23324,7 @@ export class BaseCompiler {
         // call runs, since every def executes in the preamble first.
         const compiled = BaseCompiler.withEnforcedParams(plans[i].literal, () =>
           BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
-            BaseCompiler.compile(bodyExpr, bodyTarget)
+            BaseCompiler.compileDefinitionBody(bodyExpr, bodyTarget)
           )
         );
         const body = coerce ? coerce(bodyExpr, compiled) : compiled;
@@ -23456,6 +23556,38 @@ export class BaseCompiler {
    * `target.userFunctions` (see `tryCompileUserFunction`) into a preamble
    * fragment, in dependency order. Empty string when there are none.
    */
+  /**
+   * Compile the body of an emitted user-function definition (the arrow form
+   * every non-shader target uses).
+   *
+   * A target that spells collection values only in consuming positions
+   * (`CompileTarget.compileCollectionValue`) gets the body offered to that
+   * spelling first: the body ROOT of a helper is such a position, since the
+   * helper's value is what its callers consume whole — `H(x, y) := [x + y,
+   * x − y]` returns an array, which `d(H(x, y), …)` indexes. The offer is
+   * withheld from a declaration CONTRADICTED by its body
+   * (`isContradictedScalarFunctionBody`): a helper declared `-> boolean`
+   * whose body is a list would otherwise return an array into every scalar
+   * position that trusts the declaration, which is the 2026-08-12 ruling
+   * this compiler enforces at the consuming positions. A body the target
+   * does not spell — a scalar, a list the target cannot represent — compiles
+   * through the ordinary lowering, as before.
+   */
+  private static compileDefinitionBody(
+    bodyExpr: Expression,
+    bodyTarget: CompileTarget<Expression>
+  ): TargetSource {
+    const spell = bodyTarget.compileCollectionValue;
+    if (
+      spell !== undefined &&
+      !BaseCompiler.isContradictedScalarFunctionBody(bodyExpr)
+    ) {
+      const code = spell(bodyExpr, bodyTarget);
+      if (code !== undefined) return code;
+    }
+    return BaseCompiler.compile(bodyExpr, bodyTarget);
+  }
+
   static userFunctionsPreamble(target: CompileTarget<Expression>): string {
     const defs = target.userFunctions?.defs;
     if (!defs || defs.size === 0) return '';
@@ -23992,7 +24124,7 @@ export class BaseCompiler {
           BaseCompiler.prepareUserFunctionBody(literals[i], target, registry);
         const compiled = BaseCompiler.withEnforcedParams(literals[i], () =>
           BaseCompiler.withNestedCseHarvest(bodyExpr, bodyTarget, params, () =>
-            BaseCompiler.compile(bodyExpr, bodyTarget)
+            BaseCompiler.compileDefinitionBody(bodyExpr, bodyTarget)
           )
         );
         const body = coerceResult ? coerceResult(bodyExpr, compiled) : compiled;

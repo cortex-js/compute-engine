@@ -37,9 +37,12 @@ import {
   BaseCompiler,
   compilationType,
   exactRationalDivisor,
+  isProvablyNumericListOperand,
   isProvablyStringOperand,
   pointHasBroadcastComponent,
 } from './base-compiler.js';
+import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isRelationalOperator } from '../latex-syntax/utils.js';
 import type { LoopInvariantBinding } from './base-compiler.js';
 import {
   couldBeIndexedCollectionOperand,
@@ -168,10 +171,11 @@ function assignedLiteral(
 }
 
 /** The operands of a literal `List`/`Tuple` node — written inline or held as
- *  a symbol's assigned value (`assignedLiteral`) — or `undefined` for any
- *  other operand. A literal collection's length and elements are known at
- *  compile time, which lets `Length` and `At` fold instead of emitting a
- *  runtime array. */
+ *  a symbol's assigned value (`assignedLiteral`) — or the elements of a
+ *  `Range` with number-literal bounds and at most `INTERVAL_UNROLL_LIMIT`
+ *  elements, or `undefined` for any other operand. A literal collection's
+ *  length and elements are known at compile time, which lets `Length` and
+ *  `At` fold instead of emitting a runtime array. */
 function literalCollectionOps(
   e: Expression,
   target: CompileTarget<Expression>
@@ -179,7 +183,45 @@ function literalCollectionOps(
   const literal = assignedLiteral(e, target) ?? e;
   if (isFunction(literal, 'List') || isFunction(literal, 'Tuple'))
     return literal.ops;
+  if (isFunction(literal, 'Range'))
+    return literalRangeElements(literal, INTERVAL_UNROLL_LIMIT);
   return undefined;
+}
+
+/**
+ * The elements of a `Range` whose bounds (and step) are finite real number
+ * literals, as number literals, or `undefined` for a range with a symbolic
+ * bound or with more than `budget` elements.
+ *
+ * The interpreter's contract, mirrored from `literalRange` and the Range
+ * collection handlers (`library/collections.ts`): `Range(hi)` counts from 1;
+ * a two-operand range infers step ±1 from the bounds' order; real bounds and
+ * steps are legal; the element count is `max(0, floor((hi - lo) / step) + 1)`
+ * (a zero step is empty). Iteration is COUNT-driven with `lo + i·step`
+ * elements — an endpoint-driven `k += step` loop can fail to make progress
+ * past 2^53 and hang the compilation.
+ */
+function literalRangeElements(
+  node: Expression & { ops: ReadonlyArray<Expression> },
+  budget: number
+): ReadonlyArray<Expression> | undefined {
+  const ce = node.engine;
+  const nums = node.ops.map((op) =>
+    isNumber(op) && op.im === 0 && Number.isFinite(op.re) ? op.re : undefined
+  );
+  if (nums.some((n) => n === undefined)) return undefined;
+  let lo: number, hi: number, step: number;
+  if (nums.length === 1) [lo, hi, step] = [1, nums[0]!, 1];
+  else if (nums.length === 2)
+    [lo, hi, step] = [nums[0]!, nums[1]!, nums[1]! >= nums[0]! ? 1 : -1];
+  else if (nums.length === 3) [lo, hi, step] = [nums[0]!, nums[1]!, nums[2]!];
+  else return undefined;
+  if (step === 0) return [];
+  const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
+  if (!Number.isFinite(count) || count > budget) return undefined;
+  const elements: Expression[] = [];
+  for (let i = 0; i < count; i++) elements.push(ce.number(lo + i * step));
+  return elements;
 }
 
 /**
@@ -207,9 +249,147 @@ function compileIntervalCollectionOperand(
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  const ops = literalCollectionOps(e, target);
-  if (ops !== undefined) return `[${ops.map((x) => compile(x)).join(', ')}]`;
-  return compile(e);
+  return compileIntervalCollectionValue(e, target) ?? compile(e);
+}
+
+/**
+ * The heads whose node is spelled as a run-time collection value by
+ * `compileIntervalCollectionValue`. `Tuple` is among them for the accessor
+ * operand position only (`At((1, 2), k)`); a tuple at the ROOT is a point
+ * and takes `literalRootPointOps` first.
+ */
+const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
+  'List',
+  'Tuple',
+  'Range',
+  'Map',
+]);
+
+/**
+ * Spell `e` as this target's run-time collection value — a JavaScript array
+ * of intervals — or answer `undefined` for an expression this target does not
+ * spell that way (its callers then compile it through the ordinary lowering,
+ * which yields the array of a comprehension, a user-function call whose body
+ * returns one, or a list-typed input, and declines a `List` that reaches a
+ * scalar kernel).
+ *
+ * This is the one place the array spelling of a collection-BUILDING head is
+ * emitted, and it is reached only from the positions that consume a
+ * collection value whole: the compilation root, the body root of an emitted
+ * helper and a whole-bound call argument (both through
+ * `CompileTarget.compileCollectionValue`), the operand of an accessor or a
+ * reducer, a `Map` source, and an operand of the element-wise broadcast
+ * (`tryIntervalBroadcast`). There is deliberately no `List`/`Range`/`Map`
+ * entry in `INTERVAL_JAVASCRIPT_FUNCTIONS` — see
+ * `compileIntervalCollectionOperand` for the reason.
+ *
+ * Four forms are spelled:
+ *
+ * - a literal `List`/`Tuple` (written inline or held as a symbol's assigned
+ *   value, `assignedLiteral`) whose every element is provably a number or is
+ *   itself spelled here (a list of lists nests);
+ * - a `Range` with number-literal bounds and at most `INTERVAL_UNROLL_LIMIT`
+ *   elements, written out as point intervals, or with symbolic bounds, built
+ *   at run time by `_IA.range` — whose bounds must then be POINT intervals,
+ *   since a wide bound gives a range of varying length, which no array holds
+ *   (it answers `entire`);
+ * - `Map(f, collection)` with `f` a one-parameter function literal, as
+ *   `_IA.map` over the spelled (or ordinarily compiled) source.
+ *
+ * A `List` with an element that is not provably a number — a boolean, a
+ * string — is NOT spelled (it answers `undefined`), so a helper such as
+ * `b(t) := [t < 1, t < 2]` keeps declining as it always has: its elements
+ * have no interval reading. A head the caller overrode
+ * (`CompileTarget.unrollSkipHeads`) keeps its ordinary dispatch.
+ */
+/**
+ * Does `x` have an interval reading — is it a number by its type, a provable
+ * list of numbers (its own array), or a symbol with no type evidence at all
+ * (the free plot variable in `[x + 1, x − 1]`, which every scalar position on
+ * this target already reads as an interval)? An expression PROVABLY of
+ * another sort — a boolean, a string, a point — has none.
+ */
+function hasIntervalReading(x: Expression): boolean {
+  if (x.type.matches('number') || isProvablyNumericListOperand(x)) return true;
+  const t = compilationType(x);
+  return t === 'unknown' || t === 'any';
+}
+
+function compileIntervalCollectionValue(
+  e: Expression,
+  target: CompileTarget<Expression>
+): string | undefined {
+  const literal = assignedLiteral(e, target) ?? e;
+  if (!isFunction(literal)) return undefined;
+  // The canonical body of a function literal is a one-statement `Block`
+  // around the value; the body ROOT is that value.
+  if (literal.operator === 'Block' && literal.ops.length === 1)
+    return compileIntervalCollectionValue(literal.ops[0], target);
+  const head = literal.operator;
+  if (!COLLECTION_VALUE_HEADS.has(head)) return undefined;
+  if (target.unrollSkipHeads?.has(head) === true) return undefined;
+  // An element has an interval reading when it is a number by its type, a
+  // nested collection spelled here or a provable list of numbers (compiled
+  // to its own array), or a symbol with no type evidence at all — the free
+  // plot variable in `[x + 1, x − 1]`, which every scalar position on this
+  // target already reads as an interval. An element PROVABLY of another
+  // sort (a boolean, a string, a point) has none, and the list is not
+  // spelled: `[t < 1, t < 2]` keeps declining.
+  const element = (x: Expression): string | undefined => {
+    const nested = compileIntervalCollectionValue(x, target);
+    if (nested !== undefined) return nested;
+    if (!hasIntervalReading(x)) return undefined;
+    return BaseCompiler.compileValueOperand(x, target);
+  };
+  if (head === 'List' || head === 'Tuple') {
+    // A tuple is one point, and a point with a BROADCASTING component is
+    // not one point at all: `([1, 2], 3)` zips into the list of points
+    // `[(1, 3), (2, 3)]` in the interpreter, which a nested array `[[1, 2],
+    // 3]` does not spell. A list holds a list as an element, so only the
+    // tuple is held to scalar coordinates.
+    if (head === 'Tuple' && pointHasBroadcastComponent(literal))
+      return undefined;
+    const elements: string[] = [];
+    for (const op of literal.ops) {
+      const code = element(op);
+      if (code === undefined) return undefined;
+      elements.push(code);
+    }
+    return `[${elements.join(', ')}]`;
+  }
+  if (head === 'Range') {
+    const ops = literalRangeElements(literal, INTERVAL_UNROLL_LIMIT);
+    if (ops !== undefined)
+      return `[${ops
+        .map((x) => BaseCompiler.compileValueOperand(x, target))
+        .join(', ')}]`;
+    if (literal.ops.length < 1 || literal.ops.length > 3) return undefined;
+    if (!literal.ops.every((op) => op.type.matches('number'))) return undefined;
+    return `_IA.range(${literal.ops
+      .map((x) => BaseCompiler.compileValueOperand(x, target))
+      .join(', ')})`;
+  }
+  // `Map(f, collection)`. The function literal compiles through the
+  // ordinary `Function` lowering to an arrow over its parameter, the same
+  // arrow `Apply` calls; `_IA.map` lifts a raw numeric element to a point
+  // interval before handing it to that arrow.
+  if (literal.ops.length !== 2) return undefined;
+  const fn = literal.ops[0];
+  if (!isFunction(fn, 'Function') || fn.ops.length !== 2) return undefined;
+  // The mapped value must have an interval reading: a predicate body
+  // (`k ↦ k < 0`) would map to a list of verdicts, which is not a value of
+  // this target (`IntervalValue`).
+  if (!hasIntervalReading(fn.ops[0])) return undefined;
+  const source = literal.ops[1];
+  if (
+    !isProvablyNumericListOperand(source) &&
+    literalCollectionOps(source, target) === undefined
+  )
+    return undefined;
+  const coll =
+    compileIntervalCollectionValue(source, target) ??
+    BaseCompiler.compileValueOperand(source, target);
+  return `_IA.map(${BaseCompiler.compileValueOperand(fn, target)}, ${coll})`;
 }
 
 /**
@@ -453,7 +633,8 @@ function intervalVarsAccess(id: string): string {
  * operand back to one interval; `Norm`, whose operand is a point; and the
  * binders `Sum`/`Product`/`Integrate`, whose handlers judge their own body and
  * limits with more specific diagnostics (`assertScalarBigOpBody`,
- * `compileIntervalIntegrate`).
+ * `compileIntervalIntegrate`); and `Max`/`Min`, whose one-collection form is
+ * a reduction and whose scalar fold runs the gate itself.
  */
 const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
   'At',
@@ -464,6 +645,8 @@ const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
   'Norm',
   'Sum',
   'Product',
+  'Max',
+  'Min',
   'Integrate',
 ]);
 
@@ -528,6 +711,14 @@ function guardedIntervalFunction(
   let wrapped = GUARDED_INTERVAL_FUNCTIONS.get(id);
   if (wrapped === undefined) {
     wrapped = (args, compile, target) => {
+      const broadcast = tryIntervalBroadcast(
+        id,
+        handler,
+        args,
+        compile,
+        target
+      );
+      if (broadcast !== undefined) return broadcast;
       const code = handler(args, compile, target);
       assertScalarIntervalOperands(id, args);
       return code;
@@ -536,6 +727,95 @@ function guardedIntervalFunction(
   }
   return wrapped;
 }
+
+/**
+ * The element-wise lowering of a scalar kernel over list operands: `sin(L)`
+ * with `L` a list of numbers is the list of the sines, and `L + M` zips the
+ * two lists — the interpreter's rule for a `broadcastable` operator, which
+ * the run-time `_IA.bcast` reproduces over arrays of intervals
+ * (`interval/collections.ts`). Answers `undefined` when the head or the
+ * operands do not qualify; the caller then runs the scalar handler and the
+ * scalar-operand gate as before.
+ *
+ * The head must be a built-in `broadcastable` operator that returns a
+ * NUMBER: the relations and the connectives broadcast in the interpreter
+ * too, but their element-wise value is a list of tri-state verdicts, which
+ * is not a value this target's result contract (`IntervalValue`) admits, so
+ * they keep the gate. At least one operand must be PROVABLY a list of
+ * numbers (`isProvablyNumericListOperand` — a static type such as
+ * `list<number>` or `vector<2>`; a wide `unknown`, a `broadcastable<number>`
+ * application or a point-or-point-list union is not evidence and keeps the
+ * gate, so the 2026-08-22 decision stands for everything the type does not
+ * prove), and every other operand must be provably a number, since it is
+ * reused at every position.
+ *
+ * The closure body is the head's OWN scalar handler applied to the closure's
+ * parameters — fresh symbols the inner target resolves to their names — so
+ * every kernel convention (the rational-divisor rewrite of `Multiply`, the
+ * subtraction form of `Add`, the constant fold) is the scalar lane's. Each
+ * operand is compiled ONCE, outside the closure, as an argument of the
+ * broadcast: a list operand through `compileIntervalCollectionValue` (a
+ * literal list, a range, a `Map`) or its ordinary lowering (a list-typed
+ * input, a helper returning a list), a scalar operand through `compile`.
+ */
+function tryIntervalBroadcast(
+  id: string,
+  handler: (
+    args: ReadonlyArray<Expression>,
+    compile: (expr: Expression) => string,
+    target: CompileTarget<Expression>
+  ) => string,
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (args.length === 0) return undefined;
+  const lists = args.map((a) => isProvablyNumericListOperand(a));
+  if (!lists.some((x) => x)) return undefined;
+  const engine = args[0].engine;
+  const def = engine.lookupDefinition(id);
+  if (!isOperatorDef(def) || def.operator.broadcastable !== true)
+    return undefined;
+  if (isRelationalOperator(id) || INTERVAL_CONNECTIVE_HEADS.has(id))
+    return undefined;
+  if (!args.every((a, i) => lists[i] || a.type.matches('number')))
+    return undefined;
+  const params = args.map(() => BaseCompiler.tempVar(target));
+  // Common-subexpression elimination is OFF for the closure body: the
+  // parameter symbols share no node with the enclosing expression's harvest,
+  // and a temporary hoisted outside the closure could not read a parameter.
+  // (Today's handlers only compile the bare parameter symbols, so no
+  // candidate would be registered either way; the rule is kept explicit, as
+  // in `compileIntervalDynamicRangeReduce`.)
+  const inner: CompileTarget<Expression> = {
+    ...target,
+    cse: undefined,
+    var: (name) => {
+      const i = params.indexOf(name);
+      return i >= 0 ? params[i] : target.var(name);
+    },
+    boundVars: BaseCompiler.withBoundNames(target, params),
+  };
+  const body = handler(
+    params.map((p) => engine.expr(p)),
+    (expr) => BaseCompiler.compileValueOperand(expr, inner),
+    inner
+  );
+  const sources = args.map((a, i) =>
+    lists[i]
+      ? (compileIntervalCollectionValue(a, target) ?? compile(a))
+      : compile(a)
+  );
+  return `_IA.bcast((${params.join(', ')}) => ${body}, ${sources.join(', ')})`;
+}
+
+/** The logical connectives of the interval table, which `tryIntervalBroadcast`
+ *  leaves to the scalar-operand gate (see there). */
+const INTERVAL_CONNECTIVE_HEADS: ReadonlySet<string> = new Set([
+  'And',
+  'Or',
+  'Not',
+]);
 
 /**
  * The inlined spelling of a mathematical constant this target emits.
@@ -1060,7 +1340,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // A literal collection's length is a compile-time constant.
     const ops = literalCollectionOps(arg, target);
     if (ops !== undefined) return `_IA.point(${ops.length})`;
-    return `_IA.length(${compile(arg)})`;
+    return `_IA.length(${compileIntervalCollectionOperand(arg, compile, target)})`;
   },
 
   // Positional access. CE `At` is 1-based and a negative index counts from the
@@ -1181,8 +1461,18 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_IA.div(_IA.ln(${compile(args[0])}), _IA.ln(${compile(args[1])}))`;
   },
   Lb: (args, compile) => `_IA.log2(${compile(args[0])})`,
-  Max: (args, compile) => {
+  // `Max`/`Min` over ONE collection operand is the interpreter's reduction
+  // over its elements (`Max([1, 2, 3])` is `3`; it flattens, it does not
+  // broadcast) — see `compileIntervalCollectionReduce`. Every other form is
+  // the scalar fold; a collection operand beside a scalar one fails closed
+  // at the scalar-operand gate.
+  // The two heads are in `COLLECTION_AWARE_HEADS` for the reduce form, so
+  // the scalar fold gates its own operands (`assertScalarIntervalOperands`).
+  Max: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(-Infinity)';
+    if (args.length === 1 && isCollectionReduceOperand(args[0], target))
+      return compileIntervalCollectionReduce('Max', args[0], target);
+    assertScalarIntervalOperands('Max', args);
     if (args.length === 1) return compile(args[0]);
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
@@ -1190,8 +1480,11 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return result;
   },
-  Min: (args, compile) => {
+  Min: (args, compile, target) => {
     if (args.length === 0) return '_IA.point(Infinity)';
+    if (args.length === 1 && isCollectionReduceOperand(args[0], target))
+      return compileIntervalCollectionReduce('Min', args[0], target);
+    assertScalarIntervalOperands('Min', args);
     if (args.length === 1) return compile(args[0]);
     let result = compile(args[0]);
     for (let i = 1; i < args.length; i++) {
@@ -1563,6 +1856,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 /**
  * Maximum number of terms to unroll in an interval Sum/Product.
  */
+// The fixed-width pass writes a literal range out under its own, smaller cap
+// (`MAX_UNROLLED_RANGE_WIDTH` in `fixed-width-unroll.ts`, 64 elements); a
+// literal range between the two caps reaches this target still as a `Range`
+// and is written out here.
 const INTERVAL_UNROLL_LIMIT = 100;
 
 /**
@@ -1639,11 +1936,26 @@ function compileIntervalBound(
 ): string {
   if (numVal !== undefined) return String(numVal);
   // Compile the bound expression (produces an interval or an IntervalResult
-  // wrapper at runtime), then extract the scalar upper bound for the loop
-  // counter. Reading `.hi` directly off an IntervalResult is `undefined`
-  // (→ NaN → the loop never runs), so unwrap `.value` when present.
+  // wrapper at runtime), then extract the scalar loop bound. Reading `.hi`
+  // directly off an IntervalResult is `undefined` (→ NaN → the loop never
+  // runs), so unwrap `.value` when present.
+  //
+  // The bound is an INTERVAL at run time, and the loop needs one integer.
+  // The interpreter floors a bound (`Σ_{k=1.5}^{3.7}` runs k = 1, 2, 3), so
+  // a bound whose two endpoints floor to the same integer names that one
+  // count. A bound whose endpoints floor to DIFFERENT integers — `Σ_{k=1}^{x}`
+  // over the cell `x ∈ [2.5, 3.5]` — names several counts, and the sum is
+  // then a SET of values (3 for x below 3, 6 above); reading the upper
+  // endpoint alone answered the point `[6, 6]` there, which is not an
+  // enclosure. Such a bound answers NaN, which the loop templates turn into
+  // `entire` ("cannot bound this") at loop entry. A plotter's cells refine
+  // until the bound is constant over the cell, where the loop runs.
   const compiled = BaseCompiler.compile(expr, target);
-  return `Math.floor(((_b) => (_b && _b.value ? _b.value.hi : _b.hi))(${compiled}))`;
+  return (
+    `((_b) => { const _v = _b && _b.value ? _b.value : _b; ` +
+    `const _f = Math.floor(_v.hi); ` +
+    `return Math.floor(_v.lo) === _f ? _f : NaN; })(${compiled})`
+  );
 }
 
 /**
@@ -1707,32 +2019,9 @@ function intervalCollectionElements(
   if (!isFunction(node)) return undefined;
   const ce = node.engine;
 
-  if (node.operator === 'Range') {
-    // The interpreter's contract, mirrored from `literalRange` and the
-    // Range collection handlers (`library/collections.ts`): `Range(hi)`
-    // counts from 1; a two-operand range infers step ±1 from the bounds'
-    // order; real bounds and steps are legal; the element count is
-    // `max(0, floor((hi - lo) / step) + 1)` (a zero step is empty).
-    // Iteration is COUNT-driven with `lo + i·step` elements — an
-    // endpoint-driven `k += step` loop can fail to make progress past
-    // 2^53 and hang the compilation.
-    const nums = node.ops.map((op) =>
-      isNumber(op) && op.im === 0 && Number.isFinite(op.re) ? op.re : undefined
-    );
-    if (nums.some((n) => n === undefined)) return undefined;
-    let lo: number, hi: number, step: number;
-    if (nums.length === 1) [lo, hi, step] = [1, nums[0]!, 1];
-    else if (nums.length === 2)
-      [lo, hi, step] = [nums[0]!, nums[1]!, nums[1]! >= nums[0]! ? 1 : -1];
-    else if (nums.length === 3) [lo, hi, step] = [nums[0]!, nums[1]!, nums[2]!];
-    else return undefined;
-    if (step === 0) return [];
-    const count = Math.max(0, Math.floor((hi - lo) / step) + 1);
-    if (!Number.isFinite(count) || count > budget) return undefined;
-    const elements: Expression[] = [];
-    for (let i = 0; i < count; i++) elements.push(ce.number(lo + i * step));
-    return elements;
-  }
+  // A literal `Range` is handled by `literalCollectionOps` above; one with a
+  // symbolic bound has no static decomposition.
+  if (node.operator === 'Range') return undefined;
 
   if (node.operator === 'Map' && node.ops.length === 2) {
     const inner = intervalCollectionElements(node.ops[1], target, budget);
@@ -1778,13 +2067,52 @@ function intervalCollectionElements(
  * runtime scalar returns itself (the interpreter's `Sum(scalar) = scalar`).
  * Anything else fails closed (D6).
  */
+/**
+ * Is `e` the single operand of a `Max`/`Min` that the interpreter REDUCES
+ * over — a collection by value or by static type, or a `Range`? A scalar
+ * operand (the common `Max(x)` after canonicalization) keeps the scalar
+ * fold; an operand whose collection-ness is unprovable keeps it too, and
+ * the scalar-operand gate then decides.
+ */
+function isCollectionReduceOperand(
+  e: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  const resolved = assignedLiteral(e, target) ?? e;
+  return (
+    resolved.isCollection ||
+    isFunction(resolved, 'Range') ||
+    resolved.type.matches('collection<any>')
+  );
+}
+
+/** The interval kernel, the fold seed and the empty-collection answer of
+ *  each reduction. `Max`/`Min` of an empty collection is `NaN` in the
+ *  interpreter, which this target spells as the numeric absence marker. */
+const INTERVAL_REDUCTIONS: Record<
+  'Sum' | 'Product' | 'Max' | 'Min',
+  { readonly op: string; readonly identity: string; readonly empty: string }
+> = {
+  Sum: { op: '_IA.add', identity: '_IA.point(0)', empty: '_IA.point(0)' },
+  Product: { op: '_IA.mul', identity: '_IA.point(1)', empty: '_IA.point(1)' },
+  Max: {
+    op: '_IA.max',
+    identity: '_IA.point(-Infinity)',
+    empty: INTERVAL_ABSENCE,
+  },
+  Min: {
+    op: '_IA.min',
+    identity: '_IA.point(Infinity)',
+    empty: INTERVAL_ABSENCE,
+  },
+};
+
 function compileIntervalCollectionReduce(
-  kind: 'Sum' | 'Product',
+  kind: 'Sum' | 'Product' | 'Max' | 'Min',
   operand: Expression,
   target: CompileTarget<Expression>
 ): string {
-  const iaOp = kind === 'Sum' ? '_IA.add' : '_IA.mul';
-  const identity = kind === 'Sum' ? '_IA.point(0)' : '_IA.point(1)';
+  const { op: iaOp, identity, empty } = INTERVAL_REDUCTIONS[kind];
   const elements = intervalCollectionElements(
     operand,
     target,
@@ -1809,11 +2137,15 @@ function compileIntervalCollectionReduce(
             `numeric (type \`${t.toString()}\`). Fail closed (D6).`
         );
     }
-    if (elements.length === 0) return identity;
+    if (elements.length === 0) return empty;
     return elements
       .map((el) => BaseCompiler.compile(el, target))
       .reduce((acc, cur) => `${iaOp}(${acc}, ${cur})`);
   }
+  // A `Range` with a SYMBOLIC bound, alone or under element-wise heads or a
+  // `Map`, is reduced by a run-time loop over the range's elements.
+  const dynamic = compileIntervalDynamicRangeReduce(kind, operand, target);
+  if (dynamic !== undefined) return dynamic;
   // The runtime-array fold below hands each element to `_IA.add`/`_IA.mul`,
   // so it requires elements PROVABLY numeric — the bare shape test
   // (`isIndexedCollectionOperand`) admits `list<any>`, whose elements are
@@ -1849,11 +2181,127 @@ function compileIntervalCollectionReduce(
         `collection of numbers. Fail closed (D6).`
     );
   }
-  const code = BaseCompiler.compile(operand, target);
+  const code =
+    compileIntervalCollectionValue(operand, target) ??
+    BaseCompiler.compile(operand, target);
+  // An empty run-time array answers the reduction's empty case (`Max([])`
+  // is the absence marker, `Sum([])` the identity); a non-array is the
+  // interpreter's `Sum(scalar) = scalar`.
   return (
-    `((_c) => Array.isArray(_c) ? _c.reduce((_a, _b) => ` +
-    `${iaOp}(_a, typeof _b === 'number' ? _IA.point(_b) : _b), ${identity})` +
+    `((_c) => Array.isArray(_c) ? (_c.length === 0 ? ${empty} : ` +
+    `_c.reduce((_a, _b) => ` +
+    `${iaOp}(_a, typeof _b === 'number' ? _IA.point(_b) : _b), ${identity}))` +
     ` : _c)(${code})`
+  );
+}
+
+/**
+ * The shape `compileIntervalDynamicRangeReduce` loops over: a `Range` node
+ * with a symbolic bound, and the function that rebuilds the reduced
+ * expression over ONE element of that range — `Map(f, R)` becomes
+ * `Apply(f, k)`, and an element-wise head with `R` as its one collection
+ * operand (`2^(−R)`, `R · x`) is rebuilt with `k` in the range's place, the
+ * decomposition `intervalCollectionElements` performs statically for a
+ * literal range.
+ */
+function dynamicRangeTerm(
+  e: Expression,
+  target: CompileTarget<Expression>
+): { range: Expression; term: (k: Expression) => Expression } | undefined {
+  const node = assignedLiteral(e, target) ?? e;
+  if (!isFunction(node)) return undefined;
+  const ce = node.engine;
+  if (node.operator === 'Range') {
+    if (node.ops.length < 1 || node.ops.length > 3) return undefined;
+    if (!node.ops.every((op) => op.type.matches('number'))) return undefined;
+    return { range: node, term: (k) => k };
+  }
+  if (node.operator === 'Map' && node.ops.length === 2) {
+    const inner = dynamicRangeTerm(node.ops[1], target);
+    if (inner === undefined) return undefined;
+    const fn = node.ops[0];
+    if (!isFunction(fn, 'Function') || fn.ops.length !== 2) return undefined;
+    // A predicate body has no interval reading; the reduction's kernel would
+    // read `.lo`/`.hi` off a verdict.
+    if (!hasIntervalReading(fn.ops[0])) return undefined;
+    return {
+      range: inner.range,
+      term: (k) => ce.function('Apply', [fn, inner.term(k)]),
+    };
+  }
+  if (ELEMENTWISE_INTERVAL_HEADS.has(node.operator)) {
+    let collectionAt = -1;
+    let inner: ReturnType<typeof dynamicRangeTerm> = undefined;
+    for (let i = 0; i < node.ops.length; i++) {
+      const op = node.ops[i];
+      if (op.type.matches('number')) continue;
+      if (collectionAt !== -1) return undefined;
+      inner = dynamicRangeTerm(op, target);
+      if (inner === undefined) return undefined;
+      collectionAt = i;
+    }
+    if (collectionAt === -1 || inner === undefined) return undefined;
+    const at = collectionAt;
+    const innerTerm = inner.term;
+    return {
+      range: inner.range,
+      term: (k) =>
+        ce.function(
+          node.operator,
+          node.ops.map((op, i) => (i === at ? innerTerm(k) : op))
+        ),
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Reduce an expression over a `Range` with a SYMBOLIC bound — the Desmos
+ * `total(2^(−(⌊lb(max(x, 1))⌋..0)))`, whose element count depends on the
+ * point — with a run-time loop, when the operand is a range or one
+ * element-wise expression over a range (`dynamicRangeTerm`); `undefined`
+ * otherwise.
+ *
+ * The range's elements come from `_IA.range` (`interval/collections.ts`),
+ * which requires each bound to be a POINT interval at run time and answers
+ * `entire` for a wide one: a wide bound names several element counts, and
+ * a sum over them is a set of values no single loop computes. A plotter's
+ * cells refine until the bound is constant over the cell. The reduction
+ * folds the term over the elements in the range's own order, which is
+ * immaterial for these commutative kernels, and the empty range answers
+ * the reduction's empty case.
+ *
+ * The term is compiled inside the fold's closure with the range element
+ * bound to a fresh name, and with common-subexpression elimination OFF for
+ * that compile: the rebuilt term shares no node with the enclosing
+ * expression's harvest, and a temporary hoisted outside the closure could
+ * not read the element.
+ */
+function compileIntervalDynamicRangeReduce(
+  kind: 'Sum' | 'Product' | 'Max' | 'Min',
+  operand: Expression,
+  target: CompileTarget<Expression>
+): string | undefined {
+  const shape = dynamicRangeTerm(operand, target);
+  if (shape === undefined) return undefined;
+  const { op: iaOp, identity, empty } = INTERVAL_REDUCTIONS[kind];
+  const ce = operand.engine;
+  const index = BaseCompiler.tempVar(target);
+  const acc = BaseCompiler.tempVar(target);
+  const inner: CompileTarget<Expression> = {
+    ...target,
+    cse: undefined,
+    var: (id) => (id === index ? index : target.var(id)),
+    boundVars: BaseCompiler.withBoundNames(target, [index]),
+  };
+  const term = shape.term(ce.expr(index));
+  const termCode = BaseCompiler.compileValueOperand(term, inner);
+  const range = compileIntervalCollectionValue(shape.range, target);
+  if (range === undefined) return undefined;
+  return (
+    `((_r) => !Array.isArray(_r) ? _r : _r.length === 0 ? ${empty} : ` +
+    `_r.reduce((${acc}, ${index}) => ${iaOp}(${acc}, ${termCode}), ` +
+    `${identity}))(${range})`
   );
 }
 
@@ -3250,6 +3698,22 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       var: (id) => {
         return INTERVAL_JAVASCRIPT_CONSTANTS[id];
       },
+      // The array spelling of a collection-building expression, for the
+      // consuming positions the shared compiler owns (a helper's body root,
+      // a whole-bound call argument). See `compileIntervalCollectionValue`.
+      compileCollectionValue: (e, t) => compileIntervalCollectionValue(e, t),
+      // A unary `broadcastable` head over a LITERAL collection
+      // (`sin(3..5)`, `−[1, 2, 3]`) reaches this hook from the shared
+      // compiler before the head's handler runs; it is the same element-wise
+      // map `tryIntervalBroadcast` emits for a typed operand, over the
+      // literal spelled as an array. A literal the spelling declines (a list
+      // with a non-numeric element) declines here.
+      broadcastUnary: (_head, operand, lowering, t) => {
+        const coll = compileIntervalCollectionValue(operand, t);
+        if (coll === undefined) return undefined;
+        const param = BaseCompiler.tempVar(t);
+        return `_IA.bcast((${param}) => ${lowering.element(param)}, ${coll})`;
+      },
       string: (str) => JSON.stringify(str),
       number: (n) => `_IA.point(${n})`,
       // A literal the engine holds exactly but no double does — `1/49`,
@@ -3617,10 +4081,19 @@ function compileToIntervalTarget(
     // spelling is confined to this position. Every other root, a point in an
     // operand position included, compiles through its ordinary lowering.
     const point = literalRootPointOps(expr, target);
+    // A collection-BUILDING root (a list of numbers, a range, a `Map`) is the
+    // other collection-shaped root this function spells itself, through the
+    // same spelling every consuming position uses
+    // (`compileIntervalCollectionValue`); a root that spelling declines — a
+    // list of booleans — compiles the ordinary way, which refuses it.
+    const collectionRoot =
+      point === undefined &&
+      COLLECTION_VALUE_HEADS.has(
+        (assignedLiteral(expr, target) ?? expr).operator
+      );
     js =
-      point === undefined
-        ? BaseCompiler.compileCseRoot(expr, target)
-        : BaseCompiler.compileCseRoot(
+      point !== undefined
+        ? BaseCompiler.compileCseRoot(
             expr,
             target,
             0,
@@ -3628,7 +4101,17 @@ function compileToIntervalTarget(
               `[${point
                 .map((c) => BaseCompiler.compileValueOperand(c, target))
                 .join(', ')}]`
-          );
+          )
+        : collectionRoot
+          ? BaseCompiler.compileCseRoot(
+              expr,
+              target,
+              0,
+              () =>
+                compileIntervalCollectionValue(expr, target) ??
+                BaseCompiler.compile(expr, target)
+            )
+          : BaseCompiler.compileCseRoot(expr, target);
   } catch (e) {
     // Expression contains operators/functions not supported by the interval
     // target. Report failure so the caller can fall back to another target,

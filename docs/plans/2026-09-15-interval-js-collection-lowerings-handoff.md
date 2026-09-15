@@ -1,6 +1,7 @@
 # Handoff — collection values on the interval-js compile target
 
-Date: 2026-09-15. Status: DRAFT for the next session; no decision taken yet.
+Date: 2026-09-15. Status: EXECUTED 2026-09-15 (see §8 for the decisions taken
+and what landed); sections 1–7 are the handoff as written before the work.
 Source of the numbers: the all-states code-generation census of the Tycho corpus
 on CE 0.128.12 (18,713 records, 684 documents), regenerated with the recipe in
 §7.
@@ -170,3 +171,83 @@ About nine minutes at moderate load. The CORE-only records
 are kept per version in the Tycho corpus folder; `ce-0.128.11.json` is the
 last one written. Tally by target and message with a short node script over
 `records[]` (`target`, `success`, `error`, `doc`, `row`, `input`).
+
+## 8. Decisions taken and what landed (2026-09-15)
+
+One statement of §4 is wrong and was measured so: two arrays of different
+lengths are NOT zipped "shorter wins" in the interpreter — `[1, 2, 3] + [10,
+20]` evaluates to the `incompatible-dimensions` error. The run-time broadcast
+answers the absence marker for a mismatch (the JavaScript target's `bcast`
+convention).
+
+The session that executed this plan ran without the user available, so the
+three questions of §5 were answered by the session, as follows. Each answer is
+reversible; the user can overrule it.
+
+1. **A over B.** A list-valued implicit body is served on the interval route
+   as an array of intervals, one per element (candidate A). If the user
+   prefers B — Tycho splits such a member into per-element members and the
+   interval route stays scalar — the element-wise broadcast, the run-time
+   `Map`/`Range` values and the user-function boundary work below are unused
+   by Tycho but harmless.
+2. **The 2026-08-22 decision is kept as stated.** There is still no
+   `List`/`Tuple`/`Range`/`Map` entry in the interval function table. The
+   array spelling is emitted by one function (`compileIntervalCollectionValue`
+   in `compilation/interval-javascript-target.ts`) and reached only from the
+   positions that consume a collection whole: the compilation root, the body
+   root of an emitted helper and a whole-bound call argument (both through the
+   new `CompileTarget.compileCollectionValue` hook the shared compiler
+   consults), an accessor or reducer operand, a `Map` source, and an operand
+   of the element-wise broadcast. A list whose elements have no interval
+   reading (booleans, strings) is not spelled anywhere, and a scalar
+   declaration contradicted by a list body is refused at its consuming
+   positions and gets no body-root spelling — the `Which(b(u), 1, True, 2)`
+   pin holds.
+3. **`D` needs no code.** The closed-form route (`compileDerivative`, shared
+   with every target) already lowers `d/dx L(x)` on the interval target when
+   the derivative has a closed form. The 16 census declines are bodies without
+   one, for which the JavaScript target falls back to a finite-difference
+   stencil — not an enclosure over a cell, so it must not be ported. The
+   sound route (interval forward-mode automatic differentiation) is recorded
+   in `ROADMAP.md`.
+
+What landed (tests: `test/compute-engine/compile-interval-collections.test.ts`;
+the pins in `compile-interval-js.test.ts` that encoded "a provable list
+declines" now assert the broadcast, and "a bare List root declines" now asserts
+that a NUMERIC list root is an array while a boolean or string one declines):
+
+- `interval/collections.ts`: `bcast` (element-wise application of a scalar
+  kernel over arrays, scalars reused, equal lengths required, mismatch and
+  empty → the absence marker), `bcastFn` (the same for a user-function call,
+  empty → `[]`), `map`, `range` (point bounds only; a wide bound → `entire`).
+- Candidate A: `tryIntervalBroadcast` in `guardedIntervalFunction` — a
+  built-in `broadcastable` head returning a number, at least one operand
+  provably a list of numbers (`isProvablyNumericListOperand`, exported from
+  `base-compiler.ts`: an indexed collection whose element type is a subtype
+  of `number`; never a tuple, a string, a nested list, a wide type), every
+  other operand provably a number. The closure body is the head's own scalar
+  handler over fresh parameter symbols.
+- User-function boundary (`base-compiler.ts`): `compileDefinitionBody` offers
+  a helper's body root to the hook unless the declaration is contradicted;
+  `emitUserFunctionCall` spells a whole-bound argument through the hook, and
+  on the interval target maps a scalar-parameter callee over a provable list
+  argument with `_IA.bcastFn` — the bare `_fn_f([…])` it emitted before
+  answered `{ lo: -5e-324, hi: null }` behind `success: true` — and fails
+  closed on any other collection handed to a scalar parameter.
+- Candidate C, narrowed: `Sum`/`Product`/`Max`/`Min` over a range with a
+  symbolic bound (alone, under element-wise heads, or under a `Map`) reduce
+  with a run-time loop over `_IA.range`; `Max`/`Min` gained the one-collection
+  reduce form; the run-time-array reduce answers the empty case (`Max([])` is
+  the absence marker). A wide bound answers `entire` (the hull refinement is
+  in `ROADMAP.md`).
+- Literal `Range`: an accessor operand (`(1..4)[y]`), `Length`, and the
+  fixed-width pass fans an element-wise head out over a literal range of at
+  most 64 elements on a target that asks for constant lists (only the interval
+  target does).
+- Discovered and fixed: the indexed `Sum`/`Product` loop with a symbolic
+  bound read `.hi` of the bound's interval; `Σ_{k=1}^{x} k` over
+  `x ∈ [2.5, 3.5]` answered `[6, 6]` (hull `[3, 6]`). A bound whose endpoints
+  floor apart now answers `entire`.
+- Not done, recorded in `ROADMAP.md`: the wide-bound hull refinement, `D` by
+  interval automatic differentiation, the `broadcastable<number> | missing`
+  absence rows, relations over a provable list.

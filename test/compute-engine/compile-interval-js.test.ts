@@ -518,9 +518,9 @@ describe('INTERVAL JS SINGULARITY DETECTION', () => {
     const r = fn.run!({ x: { lo: -0.3, hi: 0.3 }, y: { lo: 0, hi: 1 } });
     expect(r.kind).toBe('partial');
     expect(r.value.hi).toBe(Infinity);
-    expect(fn.run!({ x: { lo: 0.11, hi: 0.3 }, y: { lo: 0, hi: 1 } }).kind).toBe(
-      'interval'
-    );
+    expect(
+      fn.run!({ x: { lo: 0.11, hi: 0.3 }, y: { lo: 0, hi: 1 } }).kind
+    ).toBe('interval');
   });
 
   test('tan near PI/2 is singular', () => {
@@ -1278,17 +1278,28 @@ describe('INTERVAL JS - collections decline where the value model has no room', 
   ceNo.declare('PL', 'list<tuple<number, number>>');
   ceNo.declare('S', 'string');
 
-  test('a bare List root declines', () => {
-    // A general collection is not this target's RESULT. That is enforced
-    // structurally: there is no `List`/`Tuple` lowering in the function table,
-    // because the array spelling exists only in the operand position of an
-    // accessor that immediately projects it back to one interval (see
-    // `compileIntervalCollectionOperand`). A bare `List` at the root therefore
-    // declines as an unlowered head. A single POINT at the root is the
-    // exception, and it is built by the root lowering rather than by a table
-    // entry — see the "a single point at the ROOT" tests below.
+  test('a List root is an array of intervals only for numeric elements', () => {
+    // There is no `List`/`Tuple` lowering in the function table: the array
+    // spelling exists only below a position that consumes a collection value
+    // whole (`compileIntervalCollectionValue`), and the ROOT is one — its
+    // array goes straight to the caller of `run`, the same contract a
+    // comprehension root has (`IntervalValue`). The spelling covers elements
+    // with an interval reading only, so a list of numbers is an array and a
+    // list of booleans or strings declines as before.
     const fn = compile(ceNo.box(['List', 1, 2, 3]), { to: 'interval-js' });
-    expect(fn.success).toBe(false);
+    expect(fn.success).toBe(true);
+    expect(fn.run!({})).toEqual([
+      { lo: 1, hi: 1 },
+      { lo: 2, hi: 2 },
+      { lo: 3, hi: 3 },
+    ]);
+    for (const root of [
+      ceNo.box(['List', ['Less', 'x', 1], ['Less', 'x', 2]]),
+      ceNo.box(['List', "'a'", "'b'"]),
+    ]) {
+      const declined = compile(root, { to: 'interval-js' });
+      expect(declined.success).toBe(false);
+    }
   });
 
   test('PointX over a LIST of points declines', () => {
@@ -1503,23 +1514,38 @@ describe('INTERVAL JS - At/Length OVER A TUPLE BASE', () => {
 
 describe('INTERVAL JS - COLLECTIONS: kernels fail closed, roots and fallbacks are arrays', () => {
   // One interval per quantity: a scalar kernel handed a collection operand
-  // declines with a reason (it used to answer NaN bounds or `'maybe'` behind
-  // `success: true`); a collection-valued RESULT is an array of interval
-  // values (`IntervalValue`), on the compiled path and on the interpreter
-  // fallback alike.
+  // whose type does not PROVE a list of numbers declines with a reason (it
+  // used to answer NaN bounds or `'maybe'` behind `success: true`); an
+  // operand PROVABLY a list of numbers is mapped element-wise instead
+  // (`_IA.bcast`, `compile-interval-collections.test.ts`); a
+  // collection-valued RESULT is an array of interval values
+  // (`IntervalValue`), on the compiled path and on the interpreter fallback
+  // alike.
   const ceC = new ComputeEngine();
   ceC.declare('Lc', 'list<number>');
+  // A collection whose elements are not provably numbers: no element-wise
+  // lowering, the kernel gate stands.
+  ceC.declare('Lu', 'list<unknown>');
 
-  test('Add over a list operand declines', () => {
+  test('Add over a provable numeric list broadcasts; over a wider list it declines', () => {
     const fn = compile(ceC.box(['Add', 'Lc', 1]), { to: 'interval-js' });
-    expect(fn.success).toBe(false);
-    expect(fn.error).toContain('is a collection');
+    expect(fn.success).toBe(true);
+    expect(fn.run!({ Lc: [1, 2] })).toEqual([
+      { kind: 'interval', value: { lo: 2, hi: 2 } },
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
+    ]);
+    const wide = compile(ceC.box(['Add', 'Lu', 1]), { to: 'interval-js' });
+    expect(wide.success).toBe(false);
+    expect(wide.error).toContain('is a collection');
   });
 
-  test('Sin over a list operand declines', () => {
+  test('Sin over a provable numeric list broadcasts; over a wider list it declines', () => {
     const fn = compile(ceC.box(['Sin', 'Lc']), { to: 'interval-js' });
-    expect(fn.success).toBe(false);
-    expect(fn.error).toContain('is a collection');
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.bcast((_tv1) => _IA.sin(_tv1), _.Lc)');
+    const wide = compile(ceC.box(['Sin', 'Lu']), { to: 'interval-js' });
+    expect(wide.success).toBe(false);
+    expect(wide.error).toContain('is a collection');
   });
 
   test('an If with a collection-valued arm declines', () => {

@@ -1157,6 +1157,28 @@ export interface CompileTarget<Expr = unknown> {
   unrollConstantLists?: boolean;
 
   /**
+   * Spell a collection-valued expression as this target's run-time
+   * collection value — a JavaScript array on the interval target — or answer
+   * `undefined` for an expression the target does not spell that way, which
+   * then compiles through the ordinary lowering.
+   *
+   * The shared compiler consults it only in the positions that CONSUME a
+   * collection value whole: the body of an emitted user-function definition
+   * (a helper that returns a list), and an argument of a call whose callee
+   * binds its parameters whole (`userFunctionParamsAreScalar` is false). A
+   * target that declares it has no ordinary lowering for a collection
+   * literal — the interval target keeps its `List` out of the function table
+   * on purpose (see `compileIntervalCollectionOperand`) — so the array
+   * spelling exists only below such a position, and the target's own
+   * consumers (its root, its accessors, its reducers, its element-wise
+   * broadcast) call the same function directly.
+   */
+  compileCollectionValue?: (
+    expr: Expr,
+    target: CompileTarget<Expr>
+  ) => TargetSource | undefined;
+
+  /**
    * Write a comprehension over literal domains out as a literal list
    * (`UnrollOptions.unrollComprehensions`). The shader targets set it: they
    * have no loop lowering for a comprehension, and a small one is a

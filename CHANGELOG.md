@@ -2,6 +2,58 @@
 
 ### Resolved Issues
 
+- **Collection values on the `interval-js` compile target.** The interval
+  target's value model is one interval per quantity, and a collection is that
+  many quantities — a JavaScript array of intervals, which the result contract
+  (`IntervalValue`) has admitted since 2026-08-22. Until now the array spelling
+  existed only at a comprehension root and in the operand position of an
+  accessor, so a list anywhere else declined ("`List`: no lowering"): the
+  code-generation census of the Tycho corpus on 0.128.12 counted 233 interval
+  declines, 43 of them a `List`, 23 a `Range`, 7 a `Map`. The target now:
+  - maps a scalar kernel element-wise over an operand whose type PROVES a list
+    of numbers (`sin(L)`, `L + 1`, `sin(L) · M`), with the run-time `_IA.bcast`
+    — a scalar sibling reused at every position, two lists zipped, a length
+    mismatch answering the absence marker (the interpreter's
+    `incompatible-dimensions` error) and an empty list answering it too, the
+    JavaScript target's `bcast` convention (the interpreter answers `Nothing`
+    for a unary head over `[]` but `[]` for `[] + 1`; that split is an open
+    roadmap entry); an operand whose type does not prove a numeric list
+    (`unknown`, `broadcastable<number>`, a scalar-or-list union, a point) keeps
+    the scalar-operand gate, so the 2026-08-22 decision stands for everything
+    the type does not prove;
+  - carries a collection across a user-function boundary: a helper whose body is
+    a list returns an array, a callee that binds a parameter whole receives an
+    array argument (`d(H(x, y), [x, y])` with `d(a, b) := a[1]b[1] + a[2]b[2]`,
+    the census witness `0et6fx01id`), and a scalar-parameter helper is mapped
+    over a provable list argument (`f([1, 2, 3])` with `f(x) := x²`, which the
+    interpreter broadcasts) — that call used to compile to a bare `_fn_f([…])`
+    and answer `{ lo: -5e-324, hi: null }` behind `success: true`; it now maps,
+    and a collection of any other shape handed to a scalar parameter fails
+    closed;
+  - spells a literal `Range` as its elements (`(1..4)[y]`, `length(1..4)`, and
+    `x − (3..9)` written out by the fixed-width pass) and builds a range with a
+    symbolic bound at run time (`_IA.range`, whose bounds must be point
+    intervals — a wide bound gives a range of varying length, which no array
+    holds, and answers `entire`);
+  - reduces `Sum`/`Product`/`Max`/`Min` over a run-time array (a helper
+    returning a `Map`, a list-typed input) and over a range with a symbolic
+    bound (`total(2^(−(⌊lb(max(x, 1))⌋..0)))`, the census witness `mavxszbvzk`)
+    with a run-time loop; `Max`/`Min` of one collection is the interpreter's
+    reduction (`max([1, 2, 3])` is `3`), the empty collection answering the
+    absence marker as the interpreter answers `NaN`;
+  - spells a list of numbers, a range or a `Map` at the ROOT as an array, the
+    contract a comprehension root already had; a list of booleans or strings at
+    the root, a contradicted scalar declaration in a scalar position
+    (`Which(b(u), …)` with `b(t) := [t < 1, t < 2]`) and a point with a
+    broadcasting component keep declining.
+
+  Fixed on the way: the indexed `Sum`/`Product` loop with a symbolic bound read
+  the UPPER endpoint of the bound's interval alone, so `Σ_{k=1}^{x} k` over the
+  cell `x ∈ [2.5, 3.5]` answered the point `[6, 6]` where the sum is 3 below
+  `x = 3` — not an enclosure. A bound whose endpoints floor to different
+  integers now answers `entire`; a bound constant over the cell runs the loop as
+  before (see the roadmap for the hull refinement).
+
 - **A restriction with a list of conditions compiles on the JavaScript target,
   and a point under it is one value.** `u\{[1, 2, 3] v < 2\}` — the Desmos
   restriction `When(u, [1, 2, 3] v < 2)` — restricts element by element in the

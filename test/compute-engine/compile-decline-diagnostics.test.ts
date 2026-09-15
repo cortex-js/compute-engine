@@ -108,7 +108,12 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
     });
 
     it('interval-js: List reports the target gap in `error`', () => {
-      const r = new IntervalJavaScriptTarget().compile(ce.box(['List', 1, 2]));
+      // A list of NUMBERS at the root is an array of intervals since
+      // 2026-09-15; a list whose elements have no interval reading (strings)
+      // still reaches the head with no lowering.
+      const r = new IntervalJavaScriptTarget().compile(
+        ce.box(['List', "'a'", "'b'"])
+      );
       expect(r.success).toBe(false);
       expect(r.error).toMatch(
         /List: cannot compile — the operator is known to the engine/

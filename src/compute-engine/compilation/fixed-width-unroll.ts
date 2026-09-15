@@ -965,7 +965,7 @@ function distributeOverList(
   const listOps = ops.map((op) =>
     isUnrollableList(op, options) && op.ops.every(isProvablyScalar)
       ? op.ops
-      : undefined
+      : unrollableRangeElements(op, options)
   );
   const width = listOps.find((l) => l !== undefined)?.length;
   if (width === undefined) return undefined;
@@ -1407,6 +1407,42 @@ function distributeSelection(
     elements.push(element);
   }
   return ce.function('List', elements);
+}
+
+/**
+ * The most elements a literal `Range` operand is written out into by
+ * `distributeOverList` on a target that asks for constant lists
+ * (`UnrollOptions.unrollConstantLists`). Smaller than the interval target's
+ * own cap for writing a literal range out in an accessor or reducer position
+ * (`INTERVAL_UNROLL_LIMIT`, 100): this pass repeats the element-wise head
+ * once per element, and a range wider than this is left to the target, which
+ * builds it at run time.
+ */
+const MAX_UNROLLED_RANGE_WIDTH = 64;
+
+/**
+ * The elements of a literal `Range` operand that `distributeOverList` fans
+ * an element-wise head out over, or `undefined`.
+ *
+ * A range is a constant, so — like a list of number literals — it is only
+ * written out for a target that asks for constant lists
+ * (`UnrollOptions.unrollConstantLists`: the interval target, which has no
+ * `Range` lowering of its own and whose values are one interval each). The
+ * width must reach `UnrollOptions.minWidth` and stay within
+ * `MAX_UNROLLED_RANGE_WIDTH`; a wider range is left to the target, which
+ * builds it at run time. `x − (3..9)` on the interval target thus becomes
+ * the list `[x − 3, …, x − 9]`, which that target spells as an array.
+ */
+function unrollableRangeElements(
+  e: Expression,
+  options: UnrollOptions
+): ReadonlyArray<Expression> | undefined {
+  if (options.unrollConstantLists !== true) return undefined;
+  if (options.skipHeads?.has('Range') === true) return undefined;
+  const count = literalRangeCount(e);
+  if (count === undefined || count > MAX_UNROLLED_RANGE_WIDTH) return undefined;
+  if (count < (options.minWidth ?? MIN_UNROLLED_WIDTH)) return undefined;
+  return literalDomainElements(e);
 }
 
 /**
