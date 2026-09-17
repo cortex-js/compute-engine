@@ -618,51 +618,6 @@ the work that remains.
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
 
-### A lazily held chain of list-valued helpers is re-evaluated once per element at every level, and a compile-time constant fold pays that cost (OPEN, evaluation — found 2026-09-16 while running the all-states code-generation census on CE 0.128.13)
-
-Witness: the Tycho corpus document `art/nxlddeh5zv` (a terrain). Its height map
-is `h = d(s(u(d(s(u(d(s(u(d(s(u(b)))))))))))) − a` with `u`, `s`, `d`
-list-valued helpers whose comprehension bodies read their list parameter `l`
-several times (`l[i]`, `l[i + …]`, `Length(l)`), assigned WITHOUT evaluation
-(the document manager stores the cell's expression; `ce.assign` keeps a lazy
-`Add` value). Evaluating `h` then costs 22 ms, 250 ms and 15.8 s at one, two and
-three levels for lists of 4, 16 and 64 elements (a replica at size 8, in
-`test/compute-engine/…` there is no pin yet — the probe is in the memory record
-`project_interval_collection_values_0915`): the growth factor at each level is
-the length of that level's list, so the argument `l` of each helper is
-re-evaluated once per element of the result instead of once per call. The
-document's four levels at size 64 do not finish.
-
-The JavaScript compile target reaches this through its constant fold: a closed
-subtree is folded with `.N()`, which runs the interpreter. With every slider of
-the document typed `number` (Tycho commit `cddb1b683`, 2026-09-15),
-`PointZ(t_errainPointA)` — the point list is a comprehension whose third
-coordinate reads `h[⌈i/2⌉]` — becomes a closed subtree, and the compile of the
-row's colour mask runs the interpreter over the whole terrain: 48 s at three
-levels and size 8 (6 ms with `constantFold: false`), out of memory at four
-levels and size 64, which is what stopped the census on Tycho HEAD. With the
-slider typed `unknown` (Tycho `5ce55d2bd`) the subtree is not closed, nothing
-folds, and the document compiles in 21 s. The fold-size guard of the compiler
-(`MAX_FOLD_EXPANDED_NODES`) bounds the size of a value BAKED into the code; it
-does not bound the time the `.N()` fold spends computing one.
-
-Two things to do, either of which unblocks the census:
-
-- **Evaluation:** bind a helper's collection argument to its VALUE once per
-  application (call by value for a collection-typed or comprehension-valued
-  argument), or memoize the lazy argument's evaluation within one application,
-  so `u(l)` evaluates `l` once however many times its body reads it. Measure
-  with the three-level replica: the target is a few hundred milliseconds.
-- **Compilation:** give the `.N()` constant fold a cost bound — a wall-clock or
-  step budget per fold, on the model of `closedFormIntegral`'s budget — so a
-  fold that does not return promptly is skipped and the subtree compiles
-  structurally, as it does with `constantFold: false`.
-
-The inliner of collection-bodied helpers (`inlineCollectionValuedCalls`) was
-suspected first because it substitutes each argument once per parameter
-occurrence, bottom-up; a size guard on that substitution was tried and changed
-nothing, and the timings above are the interpreter's alone.
-
 ### The interpreted growing-list loop stays quadratic (OPEN, no urgency — recorded 2026-09-04)
 
 `let xs = []; for k in 1..n { xs = Join(xs, [k]) }` costs about 0.5 µs per
@@ -1580,6 +1535,22 @@ interpreter answers `[1, 2]` for the first (a `Nothing` operand leaves a sum)
 and an `incompatible-dimensions` error for the second, so neither compiled form
 was faithful; whoever settles this ruling settles it for the fused form
 (`compile-broadcast-fusion.test.ts` pins the current answers).
+
+### Code-generation census on CE 0.128.13: ranked candidates (OPEN — measured 2026-09-16, data and table in `docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md` §9)
+
+Declines per target on the all-states Tycho corpus (684 documents): javascript
+112 in 38 documents, glsl 148 in 55, interval-js 188 in 66 (down from 233 on
+0.128.12). In order of value: (1) ~~the interpreter's re-evaluation of a lazy
+list argument~~ — landed 2026-09-16 (the element memo's geometric prefix fill
+and the stored-value memo of a symbol, `CHANGELOG.md`); what remains of that
+document is the compile-time constant fold's cost, recorded in the handoff
+document §9; (2) absent positions on the point-accessor and
+`broadcastable<number>` unions, 34 interval rows; (3) JavaScript scalar
+arithmetic over a list-valued operand, 33 rows (the triaged list-arithmetic
+entry); (4) GLSL `At` over a run-time indexed collection, 32 rows, and GLSL
+`Integrate`, 15 rows; (5) the nine remaining interval `List` rows, to triage
+with Tycho's declarations. `D`, `PointList` and the complex rows on the interval
+target are design boundaries, not candidates.
 
 ### Collection values on the interval target: what stays open after the 2026-09-15 round (OPEN — the round itself is in `CHANGELOG.md`, design record in `docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md`)
 

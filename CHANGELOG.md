@@ -2,6 +2,38 @@
 
 ### Resolved Issues
 
+- **A lazily held chain of list helpers no longer costs quadratic time per
+  level, and a symbol's stored expression is evaluated once across reads.** The
+  Tycho corpus document `art/nxlddeh5zv` (a terrain) holds its height map as the
+  unevaluated chain `d(s(u(d(s(u(d(s(u(d(s(u(b)))))))))))) − a` of list-valued
+  helpers, and reads it from an 8,192-point comprehension; compiling one of its
+  rows ran the process out of memory once the compile's constant fold evaluated
+  that subtree. Two causes, both in the interpreter:
+  - the element memo of a lazy comprehension filled its prefix exactly to the
+    asked index and could not resume the stream, so the idiom
+    `[l[i] for i = 1…Length(l)]` over a lazy `l` re-ran the body from the first
+    element at every step — 1 + 2 + … + n runs, 2,186 for 64 elements — at every
+    level of the chain. The fill now grows the prefix geometrically, so a scan
+    of `n` elements costs fewer than `2n` body runs (171 for the same 64) while
+    a lone read of the first element still computes one element;
+  - a symbol assigned an unevaluated expression (the way a consumer's document
+    manager stores every cell) re-ran that expression on every dereference, and
+    the lazy-collection memo could not serve it: the value may be a written-out
+    list, which that memo excludes, and its entry is keyed on a write generation
+    that every loop-index assignment advances. The dereference now remembers the
+    evaluated value, validated by the same dependency snapshot an element memo
+    uses (the bindings and helper definitions the expression reads, each at the
+    version read), so a comprehension's own index writes leave it valid while a
+    reassignment of a dependency, a call frame shadowing one, or a redefinition
+    of a helper invalidates it; an impure expression (`Random`) is never
+    remembered.
+
+  Measured on a replica of the document at size 8: evaluating the three-level
+  chain went from 16.7 s to 0.24 s, and the four-level chain reads its elements
+  at a constant cost instead of re-running the chain per read. The CE 0.128.13
+  all-states census on the Tycho corpus, which this document had stopped on
+  Tycho's current declarations, can run again.
+
 - **A symbol holding a lazy `Map` or `Range` value compiles on the interval
   target.** `R = mod(10⁴ sin(10⁴ · [0...100]), 1)` evaluates to a `Map` over the
   range rather than to a written-out list, and `R[k]`, `length(R)` and a helper

@@ -81,10 +81,28 @@ import {
 import { matchesSymbol } from '../../math-json/utils.js';
 import { getSignFromAssumptions } from '../assume.js';
 import { getFactIndex, hasAssumptions } from './constraint-subject.js';
-import { isNumber, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import {
+  memoDepsStillValid,
+  snapshotMemoDeps,
+  type MemoDeps,
+} from './collection-element-memo.js';
+import {
+  beginObjectDeps,
+  endObjectDeps,
+  mergeObjectDeps,
+  objectDepsValid,
+  type ObjectDeps,
+} from './object-deps.js';
+import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
-import { evaluateInOwnBindings, valueDefinitionInContext } from './binders.js';
+import {
+  evaluateInOwnBindings,
+  ownBindingRewriteCount,
+  valueDefinitionInContext,
+} from './binders.js';
+import { containsObject } from './object-walk.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
   CYCLE_DETECTED,
@@ -94,6 +112,7 @@ import {
   enterCycleQuery,
   exitCycleDepthQuery,
   exitCycleQuery,
+  cycleDetectionCount,
 } from './cycle-guard.js';
 
 /**
@@ -137,6 +156,80 @@ let _dereferenceDepth = 0;
  * the symbol is not bound to a definition or if the value is not known.
  *
  */
+/**
+ * The remembered result of evaluating a symbol's stored EXPRESSION value
+ * (see `BoxedSymbol._dereferenceMemoized`), keyed by the stored expression
+ * object — one entry for a plain `evaluate()`, one for
+ * `evaluate({ numericApproximation: true })`. Weakly held: a reassignment
+ * stores a new expression, and the old one's entry goes with it.
+ */
+interface StoredValueMemo {
+  readonly worldVersion: number;
+  readonly factsHidden: boolean;
+  readonly deps: MemoDeps;
+  readonly objectDeps: ObjectDeps | undefined;
+  readonly result: Expression;
+}
+/** The three computations a stored value is read by, each with its own
+ *  entry: `evaluate()`, `evaluate({ numericApproximation: true })` — both the
+ *  own-binding dereference — and the `N()` read of `_N`, which resolves
+ *  through the ambient chain and so may answer differently under a shadow. */
+type StoredValueRoute = 0 | 1 | 2;
+const STORED_VALUE_MEMOS = new WeakMap<
+  Expression,
+  [
+    StoredValueMemo | undefined,
+    StoredValueMemo | undefined,
+    StoredValueMemo | undefined,
+  ]
+>();
+
+/**
+ * Is `value` pure THROUGH the stored values and helper bodies it reads?
+ * `isPure` judges the expression's own heads: `r + 1` is pure even when `r`
+ * holds `Random()`, and caching its evaluation would freeze the draw. So the
+ * walk follows every symbol with a stored function value and every applied
+ * user operator with a lambda body, once each, and answers `false` at the
+ * first impure node it meets. Conservative on purpose: a name it cannot
+ * resolve is assumed pure only because it then has no stored value to read.
+ */
+function storedValueIsTransitivelyPure(
+  value: Expression,
+  visited: Set<string> = new Set()
+): boolean {
+  if (value.isPure !== true) return false;
+  if (!isFunction(value)) return true;
+  const engine = value.engine;
+  for (const name of value.symbols) {
+    if (visited.has(name)) continue;
+    visited.add(name);
+    const stored = engine._getSymbolValue(name);
+    if (stored !== undefined && isFunction(stored)) {
+      if (!storedValueIsTransitivelyPure(stored, visited)) return false;
+    }
+  }
+  const stack: Expression[] = [value];
+  const seenNodes = new Set<Expression>();
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (!isFunction(node) || seenNodes.has(node)) continue;
+    seenNodes.add(node);
+    const head = node.operator;
+    const key = `operator:${head}`;
+    if (!visited.has(key)) {
+      visited.add(key);
+      const lambda = node.operatorDefinition?.lambda;
+      if (
+        lambda !== undefined &&
+        !storedValueIsTransitivelyPure(lambda.body, visited)
+      )
+        return false;
+    }
+    for (const op of node.ops) stack.push(op);
+  }
+  return true;
+}
+
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override readonly _kind = 'symbol';
 
@@ -1331,10 +1424,154 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         if (expr === undefined) return this;
         if (expr.operator === 'Unevaluated')
           return expr.evaluate(options) ?? this;
-        return this._dereference(expr, options);
+        return this._dereferenceMemoized(expr, options);
       }
     }
     return this;
+  }
+
+  /**
+   * `_dereference`, with the result of evaluating a stored EXPRESSION value
+   * remembered across reads.
+   *
+   * A symbol assigned an unevaluated expression — the document manager of a
+   * consumer stores each cell that way, so `h = d(s(u(d(s(u(b))))))` holds
+   * that call chain — used to re-run the whole expression on every read: a
+   * comprehension `[h[i] for i = 1…n]` evaluated the chain `n` times, and a
+   * terrain of 8,192 points paid it 8,192 times. The lazy-collection memo of
+   * `BoxedFunction` (`_memoizedLazyCollectionValue`) does not cover this: the
+   * value may evaluate to a written-out list, which that memo excludes, and
+   * its entry is keyed on the engine's write generation, which every loop
+   * index assignment advances, so a read from inside a comprehension never
+   * hit it.
+   *
+   * The entry here is keyed by the stored expression object (a reassignment
+   * stores a new one) and validated the way an element memo is: the world
+   * epoch and the fact-suppression stamp, the DEPENDENCY snapshot of the
+   * expression — every value binding and every user-lambda head it reads,
+   * transitively, each with the version it was read at
+   * (`snapshotMemoDeps`/`memoDepsStillValid`, `collection-element-memo.ts`)
+   * — and the mutable-object fields the evaluation read. A loop index the
+   * expression never mentions does not appear in the snapshot, so a
+   * comprehension's own index writes leave the entry valid; a write to a name
+   * the expression reads, a call frame shadowing one, or a redefinition of a
+   * helper it calls invalidates it. An expression whose dependencies cannot
+   * be snapshotted (a name with no binding at all) and an IMPURE expression
+   * (a `Random` draw must re-draw) take the uncached dereference, and so does
+   * a dereference cut short by a cycle, whose result is provisional.
+   *
+   * Only the two option sets the evaluator uses are cached (a plain
+   * `evaluate()` and `evaluate({ numericApproximation: true })`), as separate
+   * entries — and the `N()` read of `_N` as a third, since it resolves the
+   * value's names through the ambient chain where this route reads the
+   * value's own bindings; any other option set goes uncached.
+   */
+  private _dereferenceMemoized(
+    value: Expression,
+    options?: Partial<EvaluateOptions>
+  ): Expression {
+    const numeric = options?.numericApproximation === true;
+    if (
+      options !== undefined &&
+      Object.keys(options).some((k) => k !== 'numericApproximation' || !numeric)
+    )
+      return this._dereference(value, options);
+    return this._memoizedStoredValue(value, numeric ? 1 : 0, () =>
+      this._dereference(value, options)
+    );
+  }
+
+  /** The memo of {@link _dereferenceMemoized}, over any computation of the
+   *  stored value `value` — the `evaluate` dereference, or the `N()` read of
+   *  `_N`, which computes the value the same way but without the own-binding
+   *  re-pointing of `_dereference`. */
+  private _memoizedStoredValue(
+    value: Expression,
+    route: StoredValueRoute,
+    compute: () => Expression
+  ): Expression {
+    if (!isFunction(value) || value.isPure !== true) return compute();
+    // A written-out list or tuple is its own value: evaluating it is one
+    // pass over its elements, so remembering it buys nothing — and the walks
+    // below would READ its elements, which a store-backed numeric list
+    // (`ce.list`) keeps unboxed until something asks for them.
+    if (value.operator === 'List' || value.operator === 'Tuple')
+      return compute();
+    const ce = this.engine;
+    const memos = STORED_VALUE_MEMOS.get(value);
+    const entry = memos?.[route];
+    if (
+      entry !== undefined &&
+      entry.worldVersion === ce._worldVersion &&
+      entry.factsHidden === ce._factsHidden() &&
+      memoDepsStillValid(value, entry.deps) &&
+      objectDepsValid(entry.objectDeps)
+    ) {
+      // A hit reads nothing, so an enclosing cache-backed computation is
+      // handed this entry's (just validated) object dependencies, as the
+      // element memo does on a hit.
+      mergeObjectDeps(entry.objectDeps);
+      if (CACHE_STATS) recordCache('storedValue', 'hit');
+      return entry.result;
+    }
+    if (CACHE_STATS)
+      recordCache(
+        'storedValue',
+        entry === undefined ? 'missCold' : 'missDependency'
+      );
+
+    const cyclesBefore = cycleDetectionCount();
+    const rewritesBefore = ownBindingRewriteCount();
+    beginObjectDeps();
+    let objectDeps: ObjectDeps | undefined;
+    let result: Expression;
+    try {
+      result = compute();
+    } finally {
+      objectDeps = endObjectDeps();
+    }
+    // Settled only: a dereference a cycle cut short answered a provisional
+    // value, which must not be frozen.
+    if (cycleDetectionCount() !== cyclesBefore || result === this) {
+      if (CACHE_STATS) recordCache('storedValue', 'declineCycle');
+      return result;
+    }
+    // The dependency snapshot resolves the value's free names through the
+    // AMBIENT chain. An evaluation that re-pointed a name to the value's own
+    // binding past an ordinary shadow (`evaluateInOwnBindings`) read a
+    // binding the snapshot would not record, so a write to it would never
+    // invalidate the entry: such a result is not stored. (An entry stored
+    // without a shadow is safe to read under one: the re-resolution then
+    // finds the shadow's binding, which is not the recorded one, and misses.)
+    // Nor is a value that is impure THROUGH what it reads (`r + 1` over
+    // `r = Random()`), a value whose result holds a mutable object (the
+    // entry would keep the object alive, and its contents are outside what
+    // the stamps validate — the rule every memo of this engine applies), or
+    // a value whose dependencies cannot be snapshotted.
+    if (
+      ownBindingRewriteCount() !== rewritesBefore ||
+      !storedValueIsTransitivelyPure(value) ||
+      containsObject(result)
+    ) {
+      if (CACHE_STATS) recordCache('storedValue', 'declineStore');
+      return result;
+    }
+    const deps = snapshotMemoDeps(value);
+    if (deps === undefined) {
+      if (CACHE_STATS) recordCache('storedValue', 'declineStore');
+      return result;
+    }
+    const fresh: StoredValueMemo = {
+      worldVersion: ce._worldVersion,
+      factsHidden: ce._factsHidden(),
+      deps,
+      objectDeps,
+      result,
+    };
+    const slot = memos ?? [undefined, undefined, undefined];
+    slot[route] = fresh;
+    STORED_VALUE_MEMOS.set(value, slot);
+    return result;
   }
 
   /**
@@ -1508,7 +1745,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // bound, so the guard would never fire.
       if (isNumber(contextValue)) return contextValue.N();
       if (contextValue.symbols.includes(this._id)) return contextValue;
-      return contextValue.N();
+      return this._memoizedStoredValue(contextValue, 2, () => contextValue.N());
     }
     return def?.value?.N() ?? this;
   }

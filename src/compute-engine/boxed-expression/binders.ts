@@ -534,6 +534,23 @@ export function rebindToBindings(
  * `BoxedSymbol._dereference`, which aborts the whole chain rather than the
  * re-entered step.
  */
+/**
+ * How many times `evaluateInOwnBindings` has re-pointed a stored value's free
+ * symbol to its own binding past an ordinary shadow, since the module loaded.
+ *
+ * A memo of a stored value's evaluation validates its entry by re-resolving
+ * the value's free names through the AMBIENT chain (the element memo's
+ * dependency snapshot, `collection-element-memo.ts`), and that chain is
+ * exactly what the re-pointing bypasses: an entry computed under a shadow
+ * would be validated against the shadow's binding and never see a write to
+ * the own binding it actually read. The memo compares this count before and
+ * after the evaluation and does not store when it moved.
+ */
+let _ownBindingRewrites = 0;
+export function ownBindingRewriteCount(): number {
+  return _ownBindingRewrites;
+}
+
 export function evaluateInOwnBindings(
   ce: ComputeEngine,
   value: Expression,
@@ -604,6 +621,11 @@ export function evaluateInOwnBindings(
 
   if (env === undefined) return evaluated();
 
+  // A re-pointing is about to happen: the value reads a binding the ambient
+  // chain does not resolve to. The stored-value memo of `BoxedSymbol` reads
+  // this count to keep such an evaluation out of its cache (see
+  // `ownBindingRewriteCount`).
+  _ownBindingRewrites += 1;
   // The entries carry the occurrences' OWN value definitions, so the value
   // resolves the very bindings it references — and an assignment performed
   // during the evaluation reaches the real definition.

@@ -25,6 +25,7 @@ const CACHE_CLASSES = [
   'type', // BoxedFunction._type — same key, plus the _typeGeneration fast path
   'effects', // BoxedFunction._effects — generation key, cycle-safe bespoke
   'lazyValue', // the lazy-collection evaluate memo — epoch + generation + scope
+  'storedValue', // BoxedSymbol._memoizedStoredValue — epoch + per-dependency versions
   'elementMemo', // collection-element-memo — epoch + per-dependency versions
   'collectionFacet', // count/isEmpty/isFinite facet memo — epoch + per-dependency versions
   'typeParse', // common/type/parse TYPE_CACHE — bounded, clear-all on overflow
@@ -41,7 +42,7 @@ const CACHE_EVENTS = [
   'missEpoch', // `_worldVersion` moved
   'missScope', // ambient lexical-scope identity changed (lazyValue only)
   'missKeyShape', // entry key kind (constant vs generation) changed
-  'missDependency', // a tracked dependency moved (elementMemo only)
+  'missDependency', // a tracked dependency moved (elementMemo, storedValue)
   'declineCycle', // re-entrant/provisional read served uncached
   'declineStore', // settled-only or purity gate suppressed the write
   'evictClear', // bounded cache overflowed and dropped ALL entries (typeParse only)

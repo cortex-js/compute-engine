@@ -251,3 +251,59 @@ that a NUMERIC list root is an array while a boolean or string one declines):
 - Not done, recorded in `ROADMAP.md`: the wide-bound hull refinement, `D` by
   interval automatic differentiation, the `broadcastable<number> | missing`
   absence rows, relations over a provable list.
+
+## 9. Census on 0.128.13 and the ranked candidates for the next rounds (2026-09-16)
+
+Run on Tycho commit `5ce55d2bd` (the last one before Tycho's pass-0 slider
+declaration and its two-arm point-parameter union, so the delta below isolates
+the CE round) with CE 0.128.13: 684 documents, 18,697 records, seven minutes.
+The census is cheap enough to run after every release. Data:
+
+- full arm with emitted code:
+  `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/ce-0.128.13-all-tycho5ce55d2bd.json`
+  (gitignored corpus folder), digest beside it (`…-digest.json`);
+- the CORE arm Tycho-POC ran at adoption: `~/dev/tycho/tests/fixtures/ce-codegen/ce-0.128.13.json` (tracked).
+
+| target | ok | declined | documents with a decline |
+|---|---:|---:|---:|
+| javascript | 8,934 | 112 | 38 |
+| glsl | 4,844 | 148 | 55 |
+| interval-js | 4,471 | 188 | 66 |
+
+Interval-js by class, against the 0.128.12 table of §3: `List` 43 → 9,
+`Range` 23 → 3, `Map` 7 → 7 (six rows are one document whose list is held as a
+lazy `Map` value — fixed on 2026-09-16, CHANGELOG [Unreleased]), `D` 16 → 16
+(no closed form, by design), absent position 34 → 34, `PointList` 25 → 26,
+complex family 19 → 19 (`complex` 11, `Real` 5, `Imaginary` 3), `Unknown
+operator` 8 → 8, `invalid expression` 12 (documents that do not bind or
+type-check in Tycho), plus a long tail of one-offs. Total 233 → 188.
+
+A HEAD census (Tycho `26f38f705`) does not complete: the document
+`art/nxlddeh5zv` runs the compile out of memory through a CE interpreter
+defect — a lazily held chain of list helpers is re-evaluated once per element
+at every level, and the compile's constant fold pays that cost once a slider
+typed `number` makes the subtree closed. ROADMAP entry: "A lazily held chain of
+list-valued helpers is re-evaluated once per element at every level…".
+
+Ranked candidates, by value to the corpus:
+
+1. **The interpreter's re-evaluation of a lazy list argument** (the entry
+   above). Correctness-adjacent, blocks the HEAD census, hits any document
+   that layers list helpers. Either fix named in the entry.
+2. **Absent positions on the point-accessor and `broadcastable<number>`
+   unions** — 34 interval rows, 11 documents, the largest remaining interval
+   class. A whole-NaN interval could represent both; the change is the shared
+   absence-axis choice (ROADMAP: "Collection values on the interval target:
+   what stays open…", third bullet).
+3. **JavaScript scalar arithmetic over a list-valued operand** — 33 rows, 9
+   documents, the largest JavaScript class (ROADMAP: "JavaScript
+   list-arithmetic declines, triaged (2026-09-14…)").
+4. **GLSL `At` over a run-time indexed collection** (32 rows, 5 documents)
+   and **GLSL `Integrate`** (15 rows, 3 documents).
+5. **The nine remaining interval `List` rows** — one relation over a list
+   (declined by design), one recursive helper (document limitation), four rows
+   of one parametric document with list-valued helpers, three to triage with
+   Tycho's declarations.
+
+Not worth more work on the interval target: `D`, `PointList`, the complex
+rows — the census confirms them as design boundaries.

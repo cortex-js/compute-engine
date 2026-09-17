@@ -1039,9 +1039,22 @@ export function* elementMemoRecordingStream(
  * whole collection, if shorter) and return the prefix. The fill path for
  * operators with NO random access of their own (`Comprehension`): without a
  * prefix cache, `at(i)` called for i = 1…n costs O(n²) walks (Tycho item
- * 23.1). The stream is not resumable, so extending a valid-but-short prefix
- * restarts from scratch — fine for the reported pattern (repeated reads at
- * stable indices).
+ * 23.1).
+ *
+ * The stream is not resumable, so extending a valid-but-short prefix
+ * restarts from scratch. A fill that stopped exactly at `n` therefore made a
+ * SEQUENTIAL scan quadratic all the same: `[l[i] for i = 1…Length(l)]` over a
+ * lazy `l` asked for prefixes of length 1, 2, 3, … and each ask re-ran the
+ * body from the first element, 1 + 2 + … + n runs in all. A chain of such
+ * helpers (a Desmos terrain: `d(s(u(d(s(u(b))))))`, each level four times
+ * longer than the one below) paid that at every level — 10, 139 and 2186
+ * body runs for lists of 4, 16 and 64 elements, and the four-level document
+ * never finished. So the fill is GEOMETRIC: it takes the prefix to at least
+ * twice the length it already holds, which makes the refills 1, 2, 4, 8, …
+ * and a scan of `n` elements cost fewer than `2n` body runs, while a lone
+ * `at(1)` on a long lazy collection still computes one element. A stream
+ * shorter than the target simply completes, so nothing past the collection's
+ * end is ever asked for.
  *
  * Fills at most `ELEMENT_MEMO_CAP` elements; a caller asking beyond the cap
  * should stream directly instead. The drain is synchronous (no yields), so
@@ -1052,7 +1065,7 @@ export function* elementMemoRecordingStream(
  *
  * Coverage never shrinks: the early return above already keeps a valid entry
  * that is complete or at least `n` long, and any entry we do replace was
- * shorter than the `n` elements this fill produces (or was invalid).
+ * shorter than the elements this fill produces (or was invalid).
  */
 export function elementMemoFillTo(
   expr: Expression,
@@ -1063,7 +1076,10 @@ export function elementMemoFillTo(
   if (cached && (cached.complete || cached.elements.length >= n))
     return cached.elements;
 
-  const limit = Math.min(n, ELEMENT_MEMO_CAP);
+  const limit = Math.min(
+    Math.max(n, 2 * (cached?.elements.length ?? 0)),
+    ELEMENT_MEMO_CAP
+  );
   const elements: Expression[] = [];
   let complete = false;
   const iter = makeStream();
