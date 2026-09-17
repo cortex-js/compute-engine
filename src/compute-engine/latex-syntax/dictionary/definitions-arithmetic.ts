@@ -1458,12 +1458,18 @@ function serializePower(
     serializer.serialize(exp)
   );
 }
+
 /**
  * Parse degrees-minutes-seconds (DMS) angle notation.
- * Handles: 9°, 9°30', 9°30'15"
  *
- * Only interprets ' and " as arcmin/arcsec when immediately following
- * a degree symbol, avoiding conflict with Prime (derivative) notation.
+ * Degree markers: °, \degree, ^{\circ}, ^\circ
+ * Minute markers: ', \prime, \minute, ^{\prime}, ^\prime
+ * Second markers: ", \doubleprime, \prime\prime, \second,
+ *                 ^{\doubleprime}, ^{\prime\prime}, ^\doubleprime
+ *
+ * A minute marker is recognized only after a degree marker, and a second
+ * marker only after a recognized minute component. This context avoids
+ * confusing arc markers with Prime (derivative) notation.
  *
  * When all components are numeric, returns exact rational degrees
  * (3600·d + 60·m + s) / 3600 so downstream exact arithmetic works
@@ -1479,7 +1485,14 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
   let minNum: number | null = null;
   let secNum: number | null = null;
 
-  if (minExpr !== null && (parser.match("'") || parser.match('\\prime'))) {
+  if (
+    minExpr !== null &&
+    (parser.match("'") ||
+      parser.match('\\prime') ||
+      parser.match('\\minute') ||
+      parser.matchAll(['^', '<{>', '\\prime', '<}>']) ||
+      parser.matchAll(['^', '\\prime']))
+  ) {
     // Found arc-minutes
     minNum = machineValue(minExpr);
     parser.skipSpace();
@@ -1490,7 +1503,13 @@ function parseDMS(parser: Parser, lhs: MathJsonExpression): MathJsonExpression {
 
     if (
       secExpr !== null &&
-      (parser.match('"') || parser.match('\\doubleprime'))
+      (parser.match('"') ||
+        parser.matchAll(['\\prime', '\\prime']) ||
+        parser.match('\\doubleprime') ||
+        parser.match('\\second') ||
+        parser.matchAll(['^', '<{>', '\\doubleprime', '<}>']) ||
+        parser.matchAll(['^', '<{>', '\\prime', '\\prime', '<}>']) ||
+        parser.matchAll(['^', '\\doubleprime']))
     ) {
       secNum = machineValue(secExpr);
     } else {
@@ -1567,7 +1586,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\degree'],
     kind: 'postfix',
     precedence: 880,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
+    parse: parseDMS,
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const options = serializer.options;
       const arg = operand(expr, 1);
@@ -1601,31 +1620,22 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return joinLatex([serializer.serialize(arg), '\\degree']);
     },
   },
-  {
-    latexTrigger: ['\\degree'],
-    kind: 'postfix',
-    precedence: 880,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
-  },
-  // No `precedence` on these entries: the dictionary validator
-  // (definitions.ts:947-968) rejects `precedence` on entries whose
-  // `latexTrigger` starts with `^` or `_`, since their binding is
-  // governed by LaTeX grouping rules, not operator precedence.
+  // Superscript triggers omit precedence because grouping controls their binding.
   {
     latexTrigger: ['^', '<{>', '\\circ', '<}>'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
+    parse: parseDMS,
   },
   {
     latexTrigger: ['^', '\\circ'],
     kind: 'postfix',
-    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
+    parse: parseDMS,
   },
   {
     latexTrigger: ['°'],
     kind: 'postfix',
     precedence: 880,
-    parse: (parser: Parser, lhs: MathJsonExpression) => parseDMS(parser, lhs),
+    parse: parseDMS,
   },
 
   {
