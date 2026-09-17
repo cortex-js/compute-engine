@@ -1192,13 +1192,16 @@ describe('INTERVAL JS - collection access', () => {
     expectAbsent(fn.run!({}));
   });
 
-  test('At over a literal list with a symbolic index emits the array', () => {
+  test('At over a literal list with a symbolic index reads the array from the constant table', () => {
     const fn = compile(ceColl.box(['At', ['List', 10, 20, 30], 'k']), {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toContain('[_k1, _k2, _k3]');
+    // The array is a constant of the artifact, built once when the runner
+    // is built, not on every call at the read site.
+    expect(fn.code).toBe('_IA.at(_k4, _.k)');
     expect(fn.preamble).toContain('const _k1 = _IA.point(10);');
+    expect(fn.preamble).toContain('const _k4 = [_k1, _k2, _k3];');
     expect(fn.run!({ k: 3 })).toEqual({
       kind: 'interval',
       value: { lo: 30, hi: 30 },
@@ -1441,10 +1444,11 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
     expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
   });
 
-  test('At over an assigned list with a run-time index emits the array', () => {
+  test('At over an assigned list with a run-time index reads the array from the constant table', () => {
     const fn = compile(ceA.box(['At', 'La', 'n']), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.at([_k1, _k2, _k3], _.n)');
+    expect(fn.code).toBe('_IA.at(_k4, _.n)');
+    expect(fn.preamble).toContain('const _k4 = [_k1, _k2, _k3];');
     const r = fn.run!({ n: { lo: 2, hi: 3 } }) as {
       kind: string;
       value: { lo: number; hi: number };
@@ -1614,3 +1618,123 @@ describe('INTERVAL JS - a root point keeps a caller-supplied lowering', () => {
     expect(r.code).toBe('myPoint(_.a, _.b)');
   });
 });
+
+describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
+  // A list value the emitter spells at each read site built one array per
+  // read per call — inside a loop-form sum once per iteration (a 400-element
+  // assigned list read 400 times per evaluation, Tycho corpus document
+  // `vwbagbcerj`). The constant table (`hoistIntervalConstants`) now binds an
+  // array of bound constants once, after its elements, and an unrolled term
+  // whose index folds to a constant integer selects its element at compile
+  // time and never reads the array at all.
+  const ce = new ComputeEngine();
+  const h = Array.from({ length: 120 }, (_, i) => (i + 1) / 8);
+  ce.assign('h', ce.box(['List', ...h]));
+
+  test('an unrolled sum over an assigned list selects each element statically', () => {
+    // The index of the unrolled term is `i + 1` with `i` substituted, an
+    // unfolded sum the constant fold answers — not a number literal.
+    const expr = ce.parse('\\sum_{i=0}^{3} h[i+1] x');
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).not.toContain('_IA.at(');
+    expect(emitted(fn)).not.toContain('[_k');
+    const v = fn.run!({ x: { lo: 2, hi: 2 } }) as { value: { lo: number; hi: number } };
+    const exact = 2 * (h[0] + h[1] + h[2] + h[3]);
+    expect(v.value.lo).toBeCloseTo(exact, 12);
+    expect(v.value.hi).toBeCloseTo(exact, 12);
+  });
+
+  test('a loop-form sum over an assigned list reads one array bound in the table', () => {
+    // 120 terms: above the unroll limit, so the sum is a loop and the index
+    // is the loop variable.
+    const expr = ce.parse('\\sum_{i=1}^{120} h[i] x');
+    const fn = compile(expr, { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toMatch(/_IA\.at\(_k\d+, _IA\.point\(i\)\)/);
+    expect(fn.code).not.toContain('[_k');
+    expect(fn.preamble).toMatch(/const _k\d+ = \[_k\d+(?:, _k\d+){119}\];/);
+    const v = fn.run!({ x: { lo: 2, hi: 2 } }) as { value: { lo: number; hi: number } };
+    const exact = 2 * h.reduce((a, b) => a + b, 0);
+    expect(v.value.lo).toBeLessThanOrEqual(exact);
+    expect(v.value.hi).toBeGreaterThanOrEqual(exact);
+    expect(v.value.hi - v.value.lo).toBeLessThan(1e-9);
+  });
+
+  test('a nested list is bound from the inside out', () => {
+    const fn = compile(ce.box(['List', ['List', 1, 2], ['List', 3, 4]]), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    // The inner arrays are bound on the first round, the outer one on the
+    // next, so the root reads a single name.
+    expect(fn.code).toBe('_k7');
+    expect(fn.preamble).toContain(
+      'const _k5 = [_k1, _k2];\nconst _k6 = [_k3, _k4];\nconst _k7 = [_k5, _k6];'
+    );
+    // Answered at the root, the constant is copied at every level, so a
+    // caller who writes to the result cannot change what the next call
+    // answers.
+    const a = fn.run!({}) as unknown[][];
+    const b = fn.run!({}) as unknown[][];
+    expect(a).toEqual([
+      [{ lo: 1, hi: 1 }, { lo: 2, hi: 2 }],
+      [{ lo: 3, hi: 3 }, { lo: 4, hi: 4 }],
+    ]);
+    expect(a).not.toBe(b);
+    expect(a[0]).not.toBe(b[0]);
+    expect(a[0][0]).not.toBe(b[0][0]);
+  });
+
+  test('an array with a run-time element stays where it is', () => {
+    const fn = compile(ce.box(['At', ['List', 'x', 2, 3], 'k']), {
+      to: 'interval-js',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.at([_.x, _k1, _k2], _.k)');
+  });
+
+  test('an array element the caller spelled as a `_k` name is not a constant of the table', () => {
+    // A `vars` entry mapped to live source can be spelled `_k99`, declared in
+    // the caller's own per-call preamble. The table is evaluated outside that
+    // preamble, so the array must stay where the name is in scope.
+    const fn = compile(ce.box(['At', ['List', 'x', 2, 3], 'k']), {
+      to: 'interval-js',
+      vars: { x: '_k99' },
+      preamble: 'const _k99 = _IA.point(1);',
+    });
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.at([_k99, _k1, _k2], _.k)');
+    expect(fn.run!({ k: 3 })).toEqual({ kind: 'interval', value: { lo: 3, hi: 3 } });
+  });
+
+  test('a static selection keeps the list when a discarded element is caller code', () => {
+    // The interpreter evaluates every element of the list, so an element the
+    // caller supplies as live source must still run: the read stays a
+    // run-time `_IA.at` over the whole list. With an ordinary free symbol in
+    // that position the element is selected statically.
+    const live = compile(ce.box(['At', ['List', 'x', 2], ['Add', 1, 1]]), {
+      to: 'interval-js',
+      vars: { x: '_IA.point(_.count++)' },
+    });
+    expect(live.success).toBe(true);
+    expect(live.code).toContain('_IA.at(');
+    const plain = compile(ce.box(['At', ['List', 'x', 2], ['Add', 1, 1]]), {
+      to: 'interval-js',
+    });
+    expect(plain.success).toBe(true);
+    expect(plain.code).toBe('_k1');
+    expect(plain.preamble).toContain('const _k1 = _IA.point(2);');
+  });
+
+  test('a constant array answered at the root is a fresh copy on every call', () => {
+    const fn = compile(ce.box(['List', 1, 2]), { to: 'interval-js' });
+    expect(fn.success).toBe(true);
+    const a = fn.run!({}) as unknown[];
+    const b = fn.run!({}) as unknown[];
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
+    expect(a[0]).not.toBe(b[0]);
+  });
+});
+

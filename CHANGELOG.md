@@ -1,3 +1,28 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The interval target binds a constant list once per artifact and selects a
+  statically known element without reading the list.** A list value the emitter
+  spelled at each read site built one array per read on every call —
+  `_IA.at([_k3, …, _k402], _IA.point(i))` for `h[i]` over a 400-element assigned
+  list, inside a loop-form sum once per iteration: 400 arrays of 400 slots per
+  evaluation (Tycho corpus document `vwbagbcerj`). The constant table
+  (`hoistIntervalConstants`) now binds an array whose elements are bound
+  constants once, after its elements, and a nested list from the inside out; the
+  read becomes `_IA.at(_k403, _IA.point(i))`. An unrolled term whose index
+  compiles to a constant integer point — `h[i+1]` with `i` substituted, an
+  unfolded sum the constant fold answers — now selects its element at compile
+  time, as a literal-number index already did, so the 11-term unrolled sum of
+  the same document no longer reads the list at all (its emitted code went from
+  30,708 to 800 characters). Sharing an array between reads is as safe as
+  sharing an interval: no `_IA` routine writes to an array operand, and an array
+  answered at the root is copied at every level on the way out. Measured on the
+  two rows of that document, best of seven runs of 100 calls, old against new
+  interleaved: the unrolled sum 44–52 µs → 6–11 µs per call, the 400-term loop
+  539–600 µs → 409–422 µs per call (the loop body's cosine and power now
+  dominate it).
+
 ## 0.129.2 _2026-09-17_
 
 ### Resolved Issues

@@ -506,11 +506,6 @@ the work that remains.
   `toString` through `formatFloat` (`0.00015625001105945557`); the shortest
   float32 round-trip spelling would be about 9 digits and shrink shaders
   further. `formatFloat` is shared by every GPU emission.
-- **Interval preamble constants are per call, not per compile.** The interval-js
-  wrapper builds one function whose body is `preamble; return expression`, so a
-  hoisted constant is allocated once per call (40 → 21 on a 20-term sum), not
-  once per compiled artifact. Once-ever needs an outer closure around the
-  wrapper (`toString`, the Proxy and the arity all read the wrapper).
 - **Audit item J6a (the 200-character index lambda, 211 sites) is Tycho's.** The
   lambda is emitted by Tycho's own `At` override
   (`~/dev/tycho/src/graph-paper/graph/at-index-semantics.ts`, `atDef.compile`),

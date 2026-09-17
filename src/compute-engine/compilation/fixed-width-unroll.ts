@@ -414,7 +414,10 @@ function projectPointListColumn(
  * may count its own calls or draw a number, so the rules that DISCARD a
  * subexpression refuse one that answers `true`.
  */
-function readsCallerSource(e: Expression, options: UnrollOptions): boolean {
+export function readsCallerSource(
+  e: Expression,
+  options: UnrollOptions
+): boolean {
   if (isSymbol(e)) return options.readsLiveSource?.(e.symbol) === true;
   if (!isFunction(e)) return false;
   if (options.skipHeads?.has(e.operator) === true) return true;

@@ -53,6 +53,7 @@ import {
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
   overriddenCompilationHeads,
+  readsCallerSource,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import type {
@@ -1447,19 +1448,70 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // applying the interpreter's 1-based / negative-from-the-end convention at
     // compile time.
     const ops = literalCollectionOps(coll, target);
+    // The element the interpreter's 1-based, negative-from-the-end
+    // convention selects, or the absence marker when the index selects
+    // nothing. Every DISCARDED element must be pure and free of code the
+    // caller supplied (a symbol mapped to live source, a head the caller
+    // overrode): the interpreter evaluates the whole list, so dropping an
+    // element with an effect would change how many times that effect runs.
+    // The same rule guards the JavaScript unroll of a literal-index read
+    // (`fixed-width-unroll.ts`). When it refuses, the read stays a run-time
+    // `_IA.at` over the whole list.
+    const select = (
+      elements: ReadonlyArray<Expression>,
+      i: number
+    ): string | undefined => {
+      const k = i > 0 ? i - 1 : elements.length + i;
+      const selected = i === 0 || k < 0 || k >= elements.length ? -1 : k;
+      const callerOptions = {
+        skipHeads: target.unrollSkipHeads,
+        readsLiveSource: target.cse?.harvestOptions?.isStringVar,
+      };
+      if (
+        elements.some(
+          (el, j) =>
+            j !== selected &&
+            (el.isPure !== true || readsCallerSource(el, callerOptions))
+        )
+      )
+        return undefined;
+      return selected < 0 ? INTERVAL_ABSENCE : compile(elements[selected]);
+    };
     if (ops !== undefined && isNumber(index) && index.im === 0) {
       const i = index.re;
       if (Number.isInteger(i)) {
-        const k = i > 0 ? i - 1 : ops.length + i;
-        if (i === 0 || k < 0 || k >= ops.length) return INTERVAL_ABSENCE;
-        return compile(ops[k]);
+        const selected = select(ops, i);
+        if (selected !== undefined) return selected;
+      }
+    }
+    const indexCode = compile(index);
+    // The index is not a literal but its CODE is a constant integer point —
+    // the unrolled term of a sum reads `h[i+1]` with `i` substituted, and
+    // `i+1` reaches here as an unfolded sum that the constant fold answers.
+    // Selecting the element here is what keeps the whole list out of the
+    // emitted term: an unrolled 11-term sum over a 400-element assigned list
+    // spelled the list eleven times (Tycho corpus document `vwbagbcerj`).
+    if (ops !== undefined) {
+      const constant =
+        foldConstantIntervalCode(
+          indexCode,
+          false,
+          intervalSpliceSources(target)
+        ) ?? indexCode;
+      const endpoints = constantIntervalEndpoints(constant);
+      if (endpoints !== undefined && endpoints[0] === endpoints[1]) {
+        const i = Number(endpoints[0]);
+        if (Number.isInteger(i)) {
+          const selected = select(ops, i);
+          if (selected !== undefined) return selected;
+        }
       }
     }
     return `_IA.at(${compileIntervalCollectionOperand(
       coll,
       compile,
       target
-    )}, ${compile(index)})`;
+    )}, ${indexCode})`;
   },
 
   // Point coordinates. The operand must be a SINGLE point — see
@@ -3317,6 +3369,11 @@ function foldRationalConstantFactors(
 const HOISTABLE_INTERVAL_CONSTANT =
   /\{ kind: 'interval', value: \{ lo: ([^,{}]+), hi: ([^,{}]+) \} \}|\{ lo: ([^,{}]+), hi: ([^,{}]+) \}|_IA\.point\(([^(),]*)\)/g;
 
+/** An array literal whose every element is a name the constant table bound
+ * (`hoistIntervalConstants`): the spelling of a constant list after the
+ * scalar pass, with the emitter's own `, ` separator. */
+const HOISTABLE_INTERVAL_ARRAY = /\[_k\d+(?:, _k\d+)*\]/g;
+
 /** A numeric endpoint as the emitters spell one, plus the named constants
  * they inline. Anything else in the same syntactic position is a variable,
  * a bound index or a length read, and is not a constant. */
@@ -3434,22 +3491,22 @@ function hoistIntervalConstants(
   const names = new Map<string, string>();
   const declarations: string[] = [];
   let counter = 0;
-  for (const { text } of matches) {
-    if (names.has(text)) continue;
-    let name: string;
-    do {
-      name = `_k${++counter}`;
-    } while (used?.has(name) === true);
-    used?.add(name);
-    names.set(text, name);
-    declarations.push(`const ${name} = ${text};`);
-  }
-  if (names.size === 0) return { declarations: '', definitions, expression };
-
-  const rewritten = sources.map((source, s) => {
+  const bind = (matched: readonly Match[]): void => {
+    for (const { text } of matched) {
+      if (names.has(text)) continue;
+      let name: string;
+      do {
+        name = `_k${++counter}`;
+      } while (used?.has(name) === true);
+      used?.add(name);
+      names.set(text, name);
+      declarations.push(`const ${name} = ${text};`);
+    }
+  };
+  const rewrite = (source: string, s: number, matched: readonly Match[]) => {
     let out = '';
     let at = 0;
-    for (const match of matches) {
+    for (const match of matched) {
       if (match.source !== s) continue;
       const name = names.get(match.text);
       if (name === undefined) continue;
@@ -3457,7 +3514,59 @@ function hoistIntervalConstants(
       at = match.end;
     }
     return out + source.slice(at);
-  });
+  };
+  bind(matches);
+  if (names.size === 0) return { declarations: '', definitions, expression };
+  let rewritten = sources.map((source, s) => rewrite(source, s, matches));
+
+  // Arrays whose every element is a constant bound above are constants too,
+  // and they are the expensive ones: a list value the emitter spells at each
+  // read site — `_IA.at([_k3, …, _k402], _IA.point(i))` for `h[i]` over a
+  // 400-element assigned list — built one array of 400 slots per read, per
+  // call, and inside a loop-form sum once per iteration (Tycho corpus
+  // document `vwbagbcerj`, 2026-09-16: 160,000 element placements per
+  // evaluation). Each distinct array is bound once, after its elements. A
+  // nested list becomes constant from the inside out, so the search repeats
+  // until it finds nothing new: an inner `[_k1, _k2]` is bound to a name on
+  // one round and the outer array reads that name on the next. An array
+  // with any other element (a loop index, a variable, a call) is not a
+  // constant and stays where it is.
+  //
+  // Sharing an array between reads is as safe as sharing an interval: no
+  // `_IA` routine writes to an array operand (`interval/collections.ts`), and
+  // an array a call answers at the root is copied elementwise on the way out
+  // (`freshIntervalValue`).
+  //
+  // Only a name THIS pass bound counts as a constant element. A caller can
+  // spell `_k99` too — a `vars` entry mapped to that text, declared in the
+  // caller's own per-call preamble — and the table is evaluated outside that
+  // preamble, so an array that read such a name from the table would throw
+  // when the runner is built.
+  const bound = new Set<string>();
+  for (;;) {
+    for (const name of names.values()) bound.add(name);
+    const arrays: Match[] = [];
+    for (let s = 0; s < rewritten.length; s++) {
+      const source = rewritten[s];
+      const masked = maskStringLiterals(source);
+      HOISTABLE_INTERVAL_ARRAY.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = HOISTABLE_INTERVAL_ARRAY.exec(source)) !== null) {
+        if (masked[m.index] !== source[m.index]) continue;
+        const elements = m[0].slice(1, -1).split(', ');
+        if (!elements.every((name) => bound.has(name))) continue;
+        arrays.push({
+          source: s,
+          start: m.index,
+          end: m.index + m[0].length,
+          text: m[0],
+        });
+      }
+    }
+    if (arrays.length === 0) break;
+    bind(arrays);
+    rewritten = rewritten.map((source, s) => rewrite(source, s, arrays));
+  }
   return {
     declarations: declarations.join('\n'),
     definitions: rewritten[0],
