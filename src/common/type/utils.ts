@@ -14,7 +14,7 @@ export { isValidType };
 
 // Re-export widen/narrow from subtype (moved there to break the
 // subtype ↔ utils cycle; they depend on isSubtype)
-export { widen, narrow } from './subtype.js';
+export { widen, widenAll, narrow } from './subtype.js';
 
 import type {
   EffectSet,

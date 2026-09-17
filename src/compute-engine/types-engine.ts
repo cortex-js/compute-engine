@@ -1190,6 +1190,43 @@ export interface IComputeEngine {
   ): Expression;
 
   /**
+   * Rebuild `expr` as if `ce.expr(expr.json, { form, scope })` had been
+   * called — every symbol resolves afresh in `scope` (or the current scope)
+   * — without serializing `expr` to MathJSON.
+   *
+   * `ce.expr(expr, { scope })` on an already-boxed expression keeps the
+   * bindings the expression was boxed with; it never re-resolves a symbol.
+   * This is the operation that does. Use it when an expression built under
+   * one set of declarations must be read under another: a body boxed in a
+   * shadow scope, a row re-classified after a declaration changed.
+   *
+   * The cost is one walk over the DISTINCT nodes of `expr` — a shared
+   * sub-expression is copied once — where `expr.json` writes a tree, one
+   * copy of a shared node per path. The canonical form is then built from
+   * the copy exactly as it is from MathJSON, so canonicalization itself
+   * still visits every path.
+   *
+   * - `form`: `'canonical'` (default), `'structural'` or `'raw'`. A partial
+   *   form (`['Flatten', 'Order']`) is not rebuilt in place: it takes the
+   *   MathJSON route.
+   * - `scope`: the lexical scope the rebuild resolves and declares in.
+   *
+   * Every leaf is rebuilt from its own MathJSON, a constant-size read (a
+   * mutable object as its record snapshot, as the MathJSON route boxes it).
+   * A held operand (`Hold`) is copied the way `boxHold` boxes MathJSON. An
+   * expression from another engine is rebuilt from its MathJSON. Verbatim
+   * LaTeX and source positions are dropped, as the MathJSON route drops
+   * them.
+   */
+  rebind(
+    expr: Expression,
+    options?: {
+      form?: FormOption;
+      scope?: Scope;
+    }
+  ): Expression;
+
+  /**
    * Parse a LaTeX string and return a boxed expression.
    *
    * This is a convenience method equivalent to `ce.expr(parse(latex))`,

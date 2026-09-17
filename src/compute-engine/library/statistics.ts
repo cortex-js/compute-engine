@@ -179,8 +179,15 @@ function computeBinning(
     };
   if (data.length === 0) return undefined;
 
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+  // A loop, not `Math.min(...data)`: a spread passes every element as a
+  // call argument, and a data list of a few hundred thousand values
+  // overflows the call stack that way.
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of data) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
 
   let binEdges: number[];
   if (binsArg.isCollection) {

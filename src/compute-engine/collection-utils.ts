@@ -1,6 +1,7 @@
 import { factsOf } from '../common/type/facts.js';
 import {
   widen,
+  widenAll,
   broadcastElementType,
   collectionElementType,
   resolveTypeForCompilation as resolveType,
@@ -1748,7 +1749,7 @@ export function broadcastableResultTypeOf(
   });
   // Strip range/sign decorations before the join: an arithmetic result
   // does not lie in the union of its operands' ranges (`stripNumericRanges`).
-  let element = widen(...contributions.map((t) => stripNumericRanges(t)));
+  let element = widenAll(contributions.map((t) => stripNumericRanges(t)));
   if (element === 'imaginary') element = 'complex';
   return { kind: 'broadcastable', elements: element };
 }
@@ -3028,10 +3029,10 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
         // collected once (`numericStoreTiers`) instead of boxing a literal
         // per element.
         if (store.length === 1) return expr.engine.number(store[0]).type.type;
-        return widen(...numericStoreTiers(store));
+        return widenAll(numericStoreTiers(store));
       }
       if (expr.nops === 1) return expr.ops[0].type.type;
-      return widen(...expr.ops.map((op) => op.type.type));
+      return widenAll(expr.ops.map((op) => op.type.type));
     },
   };
 }

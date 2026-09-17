@@ -96,6 +96,7 @@ import {
   stripMissingFromType,
   typeContainsMissing,
   widen,
+  widenAll,
 } from '../../common/type/utils.js';
 import {
   arityProvablyIncapable,
@@ -1860,7 +1861,7 @@ function componentResultTypeD(xs: OperandDescriptor, position: number): Type {
     const n = t.elements.length;
     const i = position < 0 ? n + position + 1 : position;
     if (i >= 1 && i <= n) return t.elements[i - 1].type;
-    return markerType(widen(...t.elements.map((x) => x.type)) as Type);
+    return markerType(widenAll(t.elements.map((x) => x.type)) as Type);
   }
   return withMarker(componentTypeD(xs, position));
 }
@@ -2038,7 +2039,7 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
     eltTypes.push(elt);
   }
   if (eltTypes.length === 0) return 'list';
-  return { kind: 'list', elements: widen(...eltTypes) };
+  return { kind: 'list', elements: widenAll(eltTypes) };
 }
 
 /** Descriptor twin of {@link appendResultType}. */
@@ -2589,7 +2590,7 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   const { dims, cells } = analysis;
   if (cells.length === 0) return null;
 
-  const widened = widen(...cells);
+  const widened = widenAll(cells);
 
   if (
     typeof widened !== 'string' &&
@@ -3758,7 +3759,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         shapedListTypeD(ops) ??
           internType({
             kind: 'list',
-            elements: widen(...ops.map((op) => storedComponentTypeD(op))),
+            elements: widenAll(ops.map((op) => storedComponentTypeD(op))),
           }),
         context.engine._typeResolver
       ),
@@ -3854,7 +3855,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return BoxedType.forResult(
         internType({
           kind: 'set',
-          elements: widen(...ops.map((op) => storedComponentTypeD(op))),
+          elements: widenAll(ops.map((op) => storedComponentTypeD(op))),
         }),
         context.engine._typeResolver
       );

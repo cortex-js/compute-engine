@@ -2404,6 +2404,18 @@ export function narrow(...types: Readonly<Type>[]): Type {
  *  that encompasses the possible values of the input types.
  */
 export function widen(...types: Readonly<Type>[]): Readonly<Type> {
+  return widenAll(types);
+}
+
+/**
+ * `widen` over a list of types. Use this form for a list whose length the
+ * source does not bound — the operands of a flattened sum or product, the
+ * elements of a literal collection: spreading such a list into `widen(...)`
+ * passes every element as a call argument, and a few hundred thousand
+ * arguments overflow the call stack (a DAG-shared value written out as a
+ * tree reaches that size).
+ */
+export function widenAll(types: ReadonlyArray<Readonly<Type>>): Readonly<Type> {
   assertGroundInputs('widen', types);
   // The join of NO types is the bottom type — the element type of an EMPTY
   // collection, whose elements are drawn from the empty set. This is what

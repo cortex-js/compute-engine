@@ -45,7 +45,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
         isFunction(x) &&
         (x.operator === operator || x.operator === 'Sequence')
       )
-        ys.push(...flatten(x.ops, operator, canonicalize));
+        for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
       else ys.push(x);
     }
     return ys as T;
@@ -62,7 +62,7 @@ export function flatten<T extends ReadonlyArray<Expression> | Expression[]>(
 
     // If the operator matches, flatten the expression
     if (isFunction(x, 'Sequence'))
-      ys.push(...flatten(x.ops, operator, canonicalize));
+      for (const y of flatten(x.ops, operator, canonicalize)) ys.push(y);
     else ys.push(x);
   }
   return ys as T;
@@ -101,7 +101,8 @@ export function flattenHoldingBarriers<
     if (isSymbol(x, 'Nothing')) continue;
     // Lift the requested operator and `Sequence`, still holding barriers back
     if (isFunction(x) && (x.operator === operator || x.operator === 'Sequence'))
-      ys.push(...flattenHoldingBarriers(x.ops, operator, canonicalize));
+      for (const y of flattenHoldingBarriers(x.ops, operator, canonicalize))
+        ys.push(y);
     else ys.push(x);
   }
   return ys as T;
@@ -122,7 +123,7 @@ export function flattenSequence(
         const seq = isFunction(x.op1) ? x.op1.ops : [];
         // If this is an empty delimiter, i.e. `()`, preserve it as a tuple, don't flatten it.
         if (seq.length === 0) ys.push(x.engine.expr(['Tuple']));
-        else ys.push(...flattenSequence(seq));
+        else for (const y of flattenSequence(seq)) ys.push(y);
       } else ys.push(x.op1);
     } else if (isFunction(x, 'Sequence')) {
       ys.push(...x.ops);

@@ -132,6 +132,7 @@ import {
   box,
   boxFunction,
   optionsToInternal,
+  rebind,
 } from './boxed-expression/box.js';
 import type { FormOption } from './types-serialization.js';
 import { boxRules } from './boxed-expression/rules.js';
@@ -2937,6 +2938,15 @@ export class ComputeEngine implements IComputeEngine {
     }
   ): Expression {
     return this.expr(expr, options);
+  }
+
+  rebind(
+    expr: Expression,
+    options?: { form?: FormOption; scope?: Scope | undefined }
+  ): Expression {
+    return inHarvestScope(this, options?.scope, () =>
+      rebind(this, expr, options)
+    );
   }
 
   /** @internal LatexSyntax instance for parse/serialize. */

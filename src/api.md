@@ -705,6 +705,58 @@ Use `expr()` instead.
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~rebind()~~ {#rebind-1}
+
+```ts
+rebind(expr, options?): Expression
+```
+
+Rebuild `expr` as if `ce.expr(expr.json, { form, scope })` had been
+called — every symbol resolves afresh in `scope` (or the current scope)
+— without serializing `expr` to MathJSON.
+
+`ce.expr(expr, { scope })` on an already-boxed expression keeps the
+bindings the expression was boxed with; it never re-resolves a symbol.
+This is the operation that does. Use it when an expression built under
+one set of declarations must be read under another: a body boxed in a
+shadow scope, a row re-classified after a declaration changed.
+
+The cost is one walk over the DISTINCT nodes of `expr` — a shared
+sub-expression is copied once — where `expr.json` writes a tree, one
+copy of a shared node per path. The canonical form is then built from
+the copy exactly as it is from MathJSON, so canonicalization itself
+still visits every path.
+
+- `form`: `'canonical'` (default), `'structural'` or `'raw'`. A partial
+  form (`['Flatten', 'Order']`) is not rebuilt in place: it takes the
+  MathJSON route.
+- `scope`: the lexical scope the rebuild resolves and declares in.
+
+Every leaf is rebuilt from its own MathJSON, a constant-size read (a
+mutable object as its record snapshot, as the MathJSON route boxes it).
+A held operand (`Hold`) is copied the way `boxHold` boxes MathJSON. An
+expression from another engine is rebuilt from its MathJSON. Verbatim
+LaTeX and source positions are dropped, as the MathJSON route drops
+them.
+
+####### expr
+
+[`Expression`](#expression-5)
+
+####### options?
+
+####### form?
+
+[`FormOption`](#formoption)
+
+####### scope?
+
+`Scope`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~parse()~~ {#parse-2}
 
 ###### parse(latex, options)
@@ -10093,6 +10145,58 @@ box(expr, options?): Expression
 ###### Deprecated
 
 Use `expr()` instead.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.rebind() {#rebind}
+
+```ts
+rebind(expr, options?): Expression
+```
+
+Rebuild `expr` as if `ce.expr(expr.json, { form, scope })` had been
+called — every symbol resolves afresh in `scope` (or the current scope)
+— without serializing `expr` to MathJSON.
+
+`ce.expr(expr, { scope })` on an already-boxed expression keeps the
+bindings the expression was boxed with; it never re-resolves a symbol.
+This is the operation that does. Use it when an expression built under
+one set of declarations must be read under another: a body boxed in a
+shadow scope, a row re-classified after a declaration changed.
+
+The cost is one walk over the DISTINCT nodes of `expr` — a shared
+sub-expression is copied once — where `expr.json` writes a tree, one
+copy of a shared node per path. The canonical form is then built from
+the copy exactly as it is from MathJSON, so canonicalization itself
+still visits every path.
+
+- `form`: `'canonical'` (default), `'structural'` or `'raw'`. A partial
+  form (`['Flatten', 'Order']`) is not rebuilt in place: it takes the
+  MathJSON route.
+- `scope`: the lexical scope the rebuild resolves and declares in.
+
+Every leaf is rebuilt from its own MathJSON, a constant-size read (a
+mutable object as its record snapshot, as the MathJSON route boxes it).
+A held operand (`Hold`) is copied the way `boxHold` boxes MathJSON. An
+expression from another engine is rebuilt from its MathJSON. Verbatim
+LaTeX and source positions are dropped, as the MathJSON route drops
+them.
+
+####### expr
+
+[`Expression`](#expression-5)
+
+####### options?
+
+####### form?
+
+[`FormOption`](#formoption)
+
+####### scope?
+
+`Scope`
 
 </MemberCard>
 

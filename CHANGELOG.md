@@ -1,6 +1,44 @@
 ## [Unreleased]
 
+### New Features
+
+- **`ce.rebind(expr, { form, scope })` rebuilds a boxed expression as if it
+  had been boxed from its MathJSON, without producing the MathJSON.**
+  `ce.expr(expr, { scope })` on an already-boxed expression keeps the
+  bindings the expression was boxed with: it never re-resolves a symbol. A
+  consumer that needs an expression read under other declarations — a body
+  boxed in a shadow scope, a row re-classified after a declaration changed
+  — therefore serialized it and boxed the result, and `.json` writes a
+  tree: a sub-expression shared by many parents is written once per path,
+  which on a DAG-shared value (Tycho's terrain height map, 236,663 distinct
+  nodes, 25 billion as a tree) exhausts memory before any boxing starts.
+  `rebind` copies each distinct node once, from the same operands `.json`
+  would have written (the structural form's, minus a `Function` literal's
+  inference-written annotations), and constructs the result the way
+  MathJSON is constructed, so the canonical, structural and raw forms match
+  the MathJSON route — a held operand included, and every leaf rebuilt from
+  its own MathJSON (a mutable object as its record snapshot, as the MathJSON
+  route boxes it; no verbatim LaTeX survives, as none does on that route). A
+  partial form and an expression from another engine take the MathJSON
+  route inside `rebind`. See `doc/05b-guide-structural-tier.md`, "Rebinding
+  a Boxed Expression in Another Scope".
+
 ### Resolved Issues
+
+- **A sum, a product or a literal collection with a few hundred thousand
+  operands no longer overflows the call stack.** Canonicalizing a flattened
+  `Add` spread its operand list into `push(...)`, and the `Add`, `Multiply`,
+  `List` and `Set` type handlers spread their operand types into
+  `widen(...)`; a spread passes every element as a call argument, and past
+  roughly 125,000 of them V8 throws `RangeError: Maximum call stack size
+  exceeded`. A DAG-shared value written out as a tree reaches that size
+  (a 10-level chain in which each level reads the one below four times is
+  262,144 terms when flattened), so re-boxing such a value in another scope
+  failed where boxing it the first time had not. The flatten helpers and
+  `canonicalAdd` now push in a loop, the type handlers join their operand
+  types through the new `widenAll(list)` (`widen` itself is unchanged), and
+  the histogram's min/max scan no longer spreads its data. Pinned in
+  `test/compute-engine/large-operand-lists.test.ts`.
 
 - **The reference analysis of a compiled result no longer expands a shared
   value as a tree, and no longer runs a caller's `compile` handler inside a

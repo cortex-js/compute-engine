@@ -117,6 +117,7 @@ import {
   isSymbol,
   adoptsForeignEngineObject,
 } from './type-guards.js';
+import { isInferredTypedParameter } from './inferred-annotations.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import { rebindToBindings } from './binders.js';
@@ -900,6 +901,151 @@ export function box(
   } finally {
     endInferenceTransaction(ce);
   }
+}
+
+/**
+ * Rebuild `expr` as if `ce.expr(expr.json, { form, scope })` had been called,
+ * without producing MathJSON: every symbol resolves afresh in `scope` (or
+ * the current scope) and every function node is constructed again, from a
+ * copy that visits each DISTINCT node of `expr` once.
+ *
+ * Why this exists: `box()` on an already-boxed expression keeps the
+ * bindings the expression was boxed with (`canonicalForm` never re-resolves
+ * a symbol), so a consumer that needs an expression read under different
+ * declarations has had to serialize it and box the MathJSON. `.json` writes
+ * a TREE — a sub-expression shared by many parents is written once per path
+ * — and on a DAG-shared value that serialization alone can exhaust memory.
+ * This walk copies a shared node once. The copy is then canonicalized the
+ * way MathJSON is (`makeCanonicalFunction` over raw operands), so
+ * canonicalization itself still visits every path; what is removed is the
+ * serialization.
+ *
+ * The copy mirrors what `get json()` would have written: the operands come
+ * from the node's STRUCTURAL form (the parse vocabulary a canonical node was
+ * built from), and a parameter annotation that inference wrote on a
+ * `Function` literal is left out. Every leaf is rebuilt from its own
+ * MathJSON, which is a constant-size read, never reused: a number literal,
+ * because an exact rational or radical serializes as a compound
+ * (`["Rational", 1, 2]`) that the raw and structural forms keep as a
+ * function node; a mutable object, because the MathJSON route boxes its
+ * record SNAPSHOT as data, never the object itself; a string or character,
+ * because a reused literal would carry verbatim LaTeX and a source position
+ * the MathJSON route never writes; a dictionary, for its values.
+ *
+ * A held operand (`Hold`) is copied the way `boxHold` boxes MathJSON: its
+ * symbols take the ROOT form's options (a canonical rebind declares them),
+ * and its function nodes stay non-canonical — the MathJSON route hands a
+ * held operand to `boxHold`, which binds symbols and constructs nothing
+ * canonical, and `boxHold` returns an already-boxed operand unchanged.
+ *
+ * Two inputs take the MathJSON route instead, so the result still matches
+ * the contract: a PARTIAL form (`['Flatten', 'Order']`), because that route
+ * applies the forms at every level and a rebuilt child handed to
+ * `boxFunction` would be formed twice; and an expression from ANOTHER
+ * engine, whose literal leaves are bound to that engine.
+ */
+export function rebind(
+  ce: ComputeEngine,
+  expr: Expression,
+  options?: { form?: FormOption; scope?: Scope }
+): Expression {
+  const { canonical, structural } = optionsToInternal(options);
+  const scope = options?.scope;
+  if ((canonical !== true && canonical !== false) || expr.engine !== ce)
+    return box(ce, expr.json, { canonical, structural, scope });
+
+  // The raw copy of an operand. On the canonical route the operands are
+  // handed RAW to the root's canonical construction, exactly as MathJSON
+  // operands are (`makeCanonicalFunction` binds them, binder scopes
+  // included). On the structural route each node is bound structurally as
+  // it is built, bottom-up, as the MathJSON route does before it constructs
+  // the parent.
+  const operandOptions: BoxFunctionOptions = structural
+    ? { canonical: false, structural: true, scope }
+    : { canonical: false, structural: false };
+  // What `boxHold` receives for a symbol inside a held operand: the options
+  // of the `Hold` node itself, which on the canonical route are canonical.
+  const heldSymbolOptions: BoxFunctionOptions =
+    canonical === true
+      ? { canonical: true, structural: false }
+      : operandOptions;
+  const copies = new Map<Expression, ExpressionInput>();
+  const heldCopies = new Map<Expression, Expression>();
+  // Every leaf is rebuilt from its own MathJSON, a constant-size read: a
+  // reused literal would carry its verbatim LaTeX and source position, which
+  // the MathJSON route never writes.
+  const copyLeaf = (node: Expression): ExpressionInput => node.json;
+  // A held operand, as `boxHold` would have built it from MathJSON: a
+  // function node stays non-canonical, everything else is boxed by `boxHold`
+  // itself from its constant-size MathJSON, with the options the `Hold`
+  // node would have passed down.
+  const copyHeld = (node: Expression): Expression => {
+    const seen = heldCopies.get(node);
+    if (seen !== undefined) return seen;
+    const out: Expression = isFunction(node)
+      ? new BoxedFunction(
+          ce,
+          node.operator,
+          serializedOperands(node).map(copyHeld),
+          { canonical: false }
+        )
+      : boxHold(ce, node.json, heldSymbolOptions);
+    heldCopies.set(node, out);
+    return out;
+  };
+  // The copied operands of a function node — a held one through `copyHeld`.
+  const copiedOperands = (
+    node: Expression & {
+      readonly operator: string;
+      readonly ops: ReadonlyArray<Expression>;
+    }
+  ): ExpressionInput[] => {
+    const ops = serializedOperands(node);
+    return node.operator === 'Hold' && ops.length === 1
+      ? [copyHeld(ops[0])]
+      : ops.map(copy);
+  };
+  const copy = (node: Expression): ExpressionInput => {
+    const seen = copies.get(node);
+    if (seen !== undefined) return seen;
+    let out: ExpressionInput;
+    if (isSymbol(node)) out = node.json;
+    else if (isFunction(node))
+      out = boxFunction(
+        ce,
+        node.operator,
+        copiedOperands(node),
+        operandOptions
+      );
+    else out = copyLeaf(node);
+    copies.set(node, out);
+    return out;
+  };
+
+  if (isFunction(expr) && canonical === true)
+    return box(ce, [expr.operator, ...copiedOperands(expr)], {
+      canonical: true,
+      structural: false,
+      scope,
+    });
+  return box(ce, copy(expr), { canonical, structural, scope });
+}
+
+/** The operands `get json()` serializes for a function node: those of its
+ *  structural form, minus a `Function` literal's inference-written parameter
+ *  annotations (see `BoxedFunction.json`). */
+function serializedOperands(
+  node: Expression & {
+    readonly operator: string;
+    readonly ops: ReadonlyArray<Expression>;
+  }
+): ReadonlyArray<Expression> {
+  const s = node.structural;
+  const ops = isFunction(s) ? s.ops : node.ops;
+  if (node.operator !== 'Function') return ops;
+  return ops.map((x, i) =>
+    i > 0 && isInferredTypedParameter(x) && isFunction(x) ? x.op1 : x
+  );
 }
 
 function boxInternal(

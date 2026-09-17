@@ -278,8 +278,11 @@ export function canonicalAdd(
       else if (imSum !== 0)
         xs.push(ce.number(ce._numericValue({ re: 0, im: imSum })));
     } else {
-      // No imaginary terms — nothing to combine
-      xs.push(...ops);
+      // No imaginary terms — nothing to combine. A loop, not `push(...ops)`:
+      // a spread passes every operand as a call argument, and a flattened
+      // sum of a few hundred thousand terms (a DAG-shared value written out
+      // as a tree) overflows the call stack that way.
+      for (const op of ops) xs.push(op);
     }
   }
 

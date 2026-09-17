@@ -148,6 +148,7 @@ import {
   resolveTypeAlias,
   stripNumericRanges,
   widen,
+  widenAll,
 } from '../../common/type/utils.js';
 import {
   couldMatch,
@@ -1001,7 +1002,7 @@ function broadcastableResultTypeOfOperands(
     if (t === 'unknown' || t === 'any' || t === 'value') return 'number';
     return broadcastElementType(t);
   });
-  let element = widen(...contributions.map((t) => stripNumericRanges(t)));
+  let element = widenAll(contributions.map((t) => stripNumericRanges(t)));
   if (element === 'imaginary') element = 'complex';
   return { kind: 'broadcastable', elements: element };
 }
@@ -1181,8 +1182,8 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
       // reaches the cell; a number it may hold sums with a point to an
       // error the value path reports per cell, which no static type spells.
       return broadcastResultType(
-        widen(
-          ...args.map((x) =>
+        widenAll(
+          args.map((x) =>
             stripNumericRanges(
               typeCouldBeNumericTuple(x.type)
                 ? numericTupleArms(x.type)
@@ -1205,7 +1206,7 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
     // tuple sum takes this branch; `tupleComponentwiseAddType` says why.
     const componentwise = tupleComponentwiseAddType(args);
     if (componentwise !== undefined) return componentwise;
-    return widen(...args.map((x) => stripNumericRanges(x.type)));
+    return widenAll(args.map((x) => stripNumericRanges(x.type)));
   }
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps
   // the tensor's shape/type.
@@ -1236,8 +1237,8 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
       shaped.length > 0 &&
       args.every((x) => isBroadcastShaped(x) || factsOf(x.type).belowNumber)
     ) {
-      const collected = widen(
-        ...shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type)))
+      const collected = widenAll(
+        shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type)))
       );
       const scalars = args.filter((x) => !isBroadcastShaped(x));
       return absorbScalarsIntoCells(
@@ -1245,7 +1246,7 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
         scalars.map((x) => x.type)
       );
     }
-    return widen(...args.map((x) => stripNumericRanges(x.type)));
+    return widenAll(args.map((x) => stripNumericRanges(x.type)));
   }
   // An operand whose collection-ness is not statically visible makes the sum
   // `broadcastable<T>`. Handled before the NaN/finiteness early-returns for
@@ -1268,7 +1269,7 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
   // Ranges and sign exclusions are stripped from the join inputs: a sum does
   // not lie in the union of its terms' ranges. The SOUND bound is recomputed
   // below by interval arithmetic over the operands.
-  const t = widen(...args.map((x) => stripNumericRanges(x.type)));
+  const t = widenAll(args.map((x) => stripNumericRanges(x.type)));
   // `imaginary + imaginary` is not closed under addition: the imaginary
   // parts can cancel to 0, which is real. `complex` covers both.
   if (t === 'imaginary') return 'complex';
