@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A symbol holding a lazy `Map` or `Range` value compiles on the interval
+  target.** `R = mod(10⁴ sin(10⁴ · [0...100]), 1)` evaluates to a `Map` over the
+  range rather than to a written-out list, and `R[k]`, `length(R)` and a helper
+  reading `R[n + x + 50]` (the census witness `lrpzqnemhy`, six rows) declined
+  with "`Map`: no lowering": the accessor's look-through of an assigned value
+  admitted only a literal `List`/`Tuple`/`PointList`. It now admits a `Map` or
+  `Range` value as well, which the collection spelling of 0.128.13 builds at run
+  time.
+
 ## 0.128.13 _2026-09-16_
 
 ### Resolved Issues

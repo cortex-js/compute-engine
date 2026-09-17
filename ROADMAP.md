@@ -334,18 +334,18 @@ ascription-wrapped case, and making the substitution accept it, is the remaining
 work.
 
 Measured again 2026-09-15 in a CE-only replica of the document (every helper
-declared with the signature the Tycho manager derives, then assigned its
-lambda; `x` and `y` declared `number`; the field macro `U` written out as
-`(x, y)`): the row `P((x, y), 0.47, …) = 0` declines at this same `Add` under
-BOTH point-parameter declarations — the three-arm union with the
+declared with the signature the Tycho manager derives, then assigned its lambda;
+`x` and `y` declared `number`; the field macro `U` written out as `(x, y)`): the
+row `P((x, y), 0.47, …) = 0` declines at this same `Add` under BOTH
+point-parameter declarations — the three-arm union with the
 `indexed_collection<number | tuple<…>>` arm and the two-arm
 `tuple<…> | list<tuple<…>>`. Every helper compiles when its point argument is
 written out at the call (`r((x, y), 1)`, `l(r((x, y), 1) - (x, y))`,
 `d_iv(r((x, y), 1) - C(1, 2), A(0.5))`); only `P_0((x, y), …)` and
-`P_1((x, y), …)` decline, inside their bodies. So the earlier statement to
-Tycho that the two-arm parameter declaration makes these rows compile was a
-prediction from the decline reason, not a measurement, and it was wrong: the
-parameter union is not what blocks this document. The arithmetic type of a
+`P_1((x, y), …)` decline, inside their bodies. So the earlier statement to Tycho
+that the two-arm parameter declaration makes these rows compile was a prediction
+from the decline reason, not a measurement, and it was wrong: the parameter
+union is not what blocks this document. The arithmetic type of a
 point-or-point-list operand (`P / 2` typed a nested list of the union) was a
 separate defect and is fixed (`point-union-arithmetic-type.test.ts`); the
 replica still declines after that fix.
@@ -363,21 +363,20 @@ union with a list of numbers beside a tuple cannot be told apart, at the
 wrapper, from a declared per-element result that merely mentions a number list
 (`tuple<…> | list<number>` as the cell of a lifted operator), which must be
 wrapped. Fixing this case needs the wrapper to know that the handler already
-computed the lift (an explicit exemption label on `Divide`, which does not
-carry `collection-result` today, or a per-handler signal). No document in the
-audited corpus declares such a union.
+computed the lift (an explicit exemption label on `Divide`, which does not carry
+`collection-result` today, or a per-handler signal). No document in the audited
+corpus declares such a union.
 
 ### A product of two point-or-point-list operands claims a number (OPEN — found 2026-09-15)
 
 With `P` and `Q` declared `tuple<number, number> | list<tuple<number, number>>`
 and left valueless, `P \cdot Q` types `list<number> | number`, while the same
-product of two plain `tuple<number, number>` symbols types `error` (a point
-has no product with a point). The `Multiply` type handler's point branches
-skip the case (two could-be-tuple operands and no separate scalar or
-collection factor), so the scalar tiers below claim a number for a value the
-evaluator refuses. The honest claim is the same `error` the tuple pair
-receives, or `never`. Low blast radius: no document in the audited corpus
-multiplies two point-shaped operands.
+product of two plain `tuple<number, number>` symbols types `error` (a point has
+no product with a point). The `Multiply` type handler's point branches skip the
+case (two could-be-tuple operands and no separate scalar or collection factor),
+so the scalar tiers below claim a number for a value the evaluator refuses. The
+honest claim is the same `error` the tuple pair receives, or `never`. Low blast
+radius: no document in the audited corpus multiplies two point-shaped operands.
 
 ### Codegen audit follow-ups (CE 0.128.9)
 
@@ -618,6 +617,51 @@ the work that remains.
   documented compiled spelling for "no value" (the compiled `If`/`Which`
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
+
+### A lazily held chain of list-valued helpers is re-evaluated once per element at every level, and a compile-time constant fold pays that cost (OPEN, evaluation — found 2026-09-16 while running the all-states code-generation census on CE 0.128.13)
+
+Witness: the Tycho corpus document `art/nxlddeh5zv` (a terrain). Its height map
+is `h = d(s(u(d(s(u(d(s(u(d(s(u(b)))))))))))) − a` with `u`, `s`, `d`
+list-valued helpers whose comprehension bodies read their list parameter `l`
+several times (`l[i]`, `l[i + …]`, `Length(l)`), assigned WITHOUT evaluation
+(the document manager stores the cell's expression; `ce.assign` keeps a lazy
+`Add` value). Evaluating `h` then costs 22 ms, 250 ms and 15.8 s at one, two and
+three levels for lists of 4, 16 and 64 elements (a replica at size 8, in
+`test/compute-engine/…` there is no pin yet — the probe is in the memory record
+`project_interval_collection_values_0915`): the growth factor at each level is
+the length of that level's list, so the argument `l` of each helper is
+re-evaluated once per element of the result instead of once per call. The
+document's four levels at size 64 do not finish.
+
+The JavaScript compile target reaches this through its constant fold: a closed
+subtree is folded with `.N()`, which runs the interpreter. With every slider of
+the document typed `number` (Tycho commit `cddb1b683`, 2026-09-15),
+`PointZ(t_errainPointA)` — the point list is a comprehension whose third
+coordinate reads `h[⌈i/2⌉]` — becomes a closed subtree, and the compile of the
+row's colour mask runs the interpreter over the whole terrain: 48 s at three
+levels and size 8 (6 ms with `constantFold: false`), out of memory at four
+levels and size 64, which is what stopped the census on Tycho HEAD. With the
+slider typed `unknown` (Tycho `5ce55d2bd`) the subtree is not closed, nothing
+folds, and the document compiles in 21 s. The fold-size guard of the compiler
+(`MAX_FOLD_EXPANDED_NODES`) bounds the size of a value BAKED into the code; it
+does not bound the time the `.N()` fold spends computing one.
+
+Two things to do, either of which unblocks the census:
+
+- **Evaluation:** bind a helper's collection argument to its VALUE once per
+  application (call by value for a collection-typed or comprehension-valued
+  argument), or memoize the lazy argument's evaluation within one application,
+  so `u(l)` evaluates `l` once however many times its body reads it. Measure
+  with the three-level replica: the target is a few hundred milliseconds.
+- **Compilation:** give the `.N()` constant fold a cost bound — a wall-clock or
+  step budget per fold, on the model of `closedFormIntegral`'s budget — so a
+  fold that does not return promptly is skipped and the subtree compiles
+  structurally, as it does with `constantFold: false`.
+
+The inliner of collection-bodied helpers (`inlineCollectionValuedCalls`) was
+suspected first because it substitutes each argument once per parameter
+occurrence, bottom-up; a size guard on that substitution was tried and changed
+nothing, and the timings above are the interpreter's alone.
 
 ### The interpreted growing-list loop stays quadratic (OPEN, no urgency — recorded 2026-09-04)
 

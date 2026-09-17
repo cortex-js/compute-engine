@@ -139,8 +139,12 @@ function compileIntervalPointNorm(
 
 /**
  * The assigned value of a SYMBOL operand when that value is a literal
- * `List`/`Tuple`/`PointList` an accessor can read at compile time; `undefined`
- * for any other operand.
+ * `List`/`Tuple`/`PointList`, or a `Map`/`Range` whose elements the collection
+ * spelling can enumerate — at compile time when the range's bounds are
+ * literal (`Range` never collapses to a `List` on evaluation: it is lazy by
+ * definition, so `[0...100]` stays a `Range` node), at run time through
+ * `_IA.range`/`_IA.map` when a bound is symbolic; `undefined` for any other
+ * operand.
  *
  * Everywhere else an assigned symbol folds through
  * `BaseCompiler.tryFoldKnownSymbol`, which compiles the VALUE — and this target
@@ -165,7 +169,26 @@ function assignedLiteral(
   const value = e.engine._getSymbolValue(id);
   if (value === undefined || !isFunction(value)) return undefined;
   const h = value.operator;
-  if (h !== 'List' && h !== 'Tuple' && h !== 'PointList') return undefined;
+  // `Map` and `Range` are the collection values a symbol holds after an
+  // evaluation that does not write the list out — `R = mod(10⁴ sin(10⁴ ·
+  // [0...100]), 1)` evaluates to a `Map` over the range. Every consumer of
+  // this look-through knows both: `literalCollectionOps` enumerates a
+  // literal-bounded range, and `compileIntervalCollectionValue` spells the
+  // rest; without them here the symbol's value went through the ordinary
+  // fold and declined with "Map: no lowering".
+  if (
+    h !== 'List' &&
+    h !== 'Tuple' &&
+    h !== 'PointList' &&
+    h !== 'Map' &&
+    h !== 'Range'
+  )
+    return undefined;
+  // A head the caller overrode (the `functions` compilation option) keeps
+  // its ordinary dispatch, which reaches the caller's implementation: the
+  // accessor folds this look-through feeds (`Length(R)` to a count, `At(R,
+  // 2)` to an element) would otherwise bypass that implementation.
+  if (target.unrollSkipHeads?.has(h) === true) return undefined;
   target.symbolDeps?.add(id);
   return value;
 }

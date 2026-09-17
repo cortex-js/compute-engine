@@ -318,6 +318,72 @@ describe('Interval target — literal and symbolic ranges', () => {
   });
 });
 
+describe('Interval target — a symbol holding a lazy Map or Range value', () => {
+  test('a list built by evaluating arithmetic over a range (audit lrpzqnemhy)', () => {
+    // `R = mod(10⁴ sin(10⁴ · [0...100]), 1)` evaluates to a lazy `Map` over
+    // the range, not to a written-out list; the accessor, the length and a
+    // helper reading `R[…]` must reach it through the collection spelling.
+    const ce = engine();
+    ce.assign(
+      'R',
+      ce
+        .parse(
+          '\\operatorname{mod}(10^4 \\cdot \\sin(10^4 \\cdot [0...100]), 1)'
+        )
+        .evaluate()
+    );
+    expect(ce.box('R').value?.operator).toBe('Map');
+    const want = (k: number) => (((1e4 * Math.sin(1e4 * (k - 1))) % 1) + 1) % 1;
+    expectEncloses(run(ce, 'R[3]', {}).out, want(3), 1e-6);
+    expectEncloses(run(ce, '\\operatorname{length}(R)', {}).out, 101);
+    ce.parse(
+      'S(x, k) := \\sum_{n=-k}^{k} \\frac{\\sin(\\pi(x \\bmod 1 - n)) R[n + x + 50]}{\\pi(x \\bmod 1 - n)}'
+    ).evaluate();
+    const r = compile(ce.parse('S(5x, 3)'), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_fn_S(');
+    // The row itself is `NaN` in the interpreter at every point (the `n = 0`
+    // term is `sin(0)/0` for an integer `5x`, and the index `n + 5x + 50` is
+    // not an integer otherwise), so only the run is checked, not its value.
+    const got: any = r.run!({ x: pt(0.2) });
+    expect(got === undefined).toBe(false);
+  });
+
+  test('a symbol holding an evaluated symbolic range', () => {
+    const ce = engine();
+    ce.assign('I', ce.parse('1..n').evaluate());
+    expect(ce.box('I').value?.operator).toBe('Range');
+    expectEncloses(run(ce, '\\operatorname{length}(I)', { n: pt(4) }).out, 4);
+    expectEncloses(run(ce, '\\operatorname{total}(I)', { n: pt(4) }).out, 10);
+    // The bare symbol at the ROOT is the array of the range.
+    expectEncloses(run(ce, 'I', { n: pt(3) }).out, [1, 2, 3]);
+  });
+
+  test('a symbol holding a lazy Map at the root, and an overridden head', () => {
+    const ce = engine();
+    ce.assign('M', ce.parse('\\sin(10^4 \\cdot [1...3])').evaluate());
+    const head = ce.box('M').value?.operator;
+    expect(head === 'Map' || head === 'List').toBe(true);
+    expectEncloses(
+      run(ce, 'M', {}).out,
+      [1, 2, 3].map((k) => Math.sin(1e4 * k)),
+      1e-9
+    );
+    // A caller who overrode `Range` keeps that implementation: the
+    // look-through must not fold `Length(I)` past it.
+    ce.assign('I', ce.parse('1..n').evaluate());
+    const r = compile(ce.parse('\\operatorname{length}(I)'), {
+      to: 'interval-js',
+      fallback: false,
+      functions: { Range: '_IA.range' },
+    });
+    expect(r.success ? r.code : '').not.toBe('_IA.point(3)');
+  });
+});
+
 describe('Interval target — reductions over collection values', () => {
   test('Max/Min over a literal, a run-time array and the empty collection', () => {
     const ce = engine();
