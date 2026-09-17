@@ -83,7 +83,22 @@ describe('rebind: parity with the MathJSON route', () => {
     expect(rebound.isSame(viaJson)).toBe(true);
   });
 
-  test('a partial form takes the MathJSON route and matches it', () => {
+  test('raw and structural forms keep a shared sub-expression SHARED in the output', () => {
+    // Boxing the MathJSON allocates one boxed node per PATH. These two forms
+    // canonicalize nothing, so each distinct node is rebuilt once and every
+    // parent reads the same rebuilt object.
+    const shared = ce.parse('x + 1', { form: 'structural' });
+    const e = ce.function('Tuple', [shared, shared], { form: 'structural' });
+    for (const form of ['raw', 'structural'] as const) {
+      const rebound = ce.rebind(e, { form });
+      expect(json(rebound)).toBe(json(ce.expr(e.json, { form })));
+      if (!isFunction(rebound)) throw new Error('shape');
+      expect(rebound.op1).toBe(rebound.op2);
+      expect(rebound.op1).not.toBe(shared);
+    }
+  });
+
+  test('a partial form matches the MathJSON route', () => {
     const e = ce.parse('c + b + a', { form: 'raw' });
     const form = ['Flatten', 'Order'] as const;
     const viaJson = ce.expr(e.json, { form: [...form] });
@@ -99,11 +114,51 @@ describe('rebind: parity with the MathJSON route', () => {
     expect(json(rebound)).toBe(json(ce.expr(e.json)));
   });
 
+  test('an expression from another engine, under the raw and structural forms', () => {
+    const other = new ComputeEngine();
+    const e = other.parse('\\frac{1}{2}x + \\sin(y)');
+    for (const form of ['raw', 'structural'] as const) {
+      const rebound = ce.rebind(e, { form });
+      expect(rebound.engine).toBe(ce);
+      expect(json(rebound)).toBe(json(ce.expr(e.json, { form })));
+      // Nothing of the other engine is retained, at any depth.
+      const foreign = (x: Expression): boolean =>
+        x.engine !== ce || (isFunction(x) && x.ops.some(foreign));
+      expect(foreign(rebound)).toBe(false);
+    }
+  });
+
   test('a dictionary is rebuilt from its MathJSON', () => {
     const e = ce.box({ dict: { a: 1, b: ['Add', 'x', 1] } });
     const viaJson = ce.expr(e.json);
     const rebound = ce.rebind(e);
     expect(json(rebound)).toBe(json(viaJson));
+  });
+
+  test('a subtree that already holds an Error is still canonicalized below the error', () => {
+    // `S` is a function used as a number, so the first operand is invalid.
+    // `PointX(u)` inside that invalid operand must still be re-read under
+    // the new declaration of `u`, as the MathJSON route re-reads it: a boxed
+    // invalid node's `.canonical` returns the node unchanged, so a rebuild
+    // made of boxed copies would leave everything below it as it was.
+    const outer = ce.createScope({ u: 'unknown', S: 'function' });
+    const inner = ce.createScope({ u: 'real', S: 'function' });
+    const e = ce.box(
+      ['Tuple', ['Multiply', 'S', ['PointX', 'u']], ['PointX', 'u']],
+      { scope: outer }
+    );
+    expect(e.isValid).toBe(false);
+    const viaJson = ce.expr(e.json, { scope: inner });
+    const rebound = ce.rebind(e, { scope: inner });
+    expect(json(rebound)).toBe(json(viaJson));
+    // Both occurrences of `PointX(u)` report the type error, not only the
+    // one outside the invalid operand.
+    expect(json(rebound).match(/'collection'/g)?.length).toBe(2);
+    // The raw and structural forms canonicalize nothing; they match too.
+    for (const form of ['raw', 'structural'] as const)
+      expect(json(ce.rebind(e, { form, scope: inner }))).toBe(
+        json(ce.expr(e.json, { form, scope: inner }))
+      );
   });
 
   test('a held operand: symbols bind as boxHold binds them, nothing is canonicalized', () => {

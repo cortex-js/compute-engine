@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`ce.rebind` now matches `ce.expr(expr.json, …)` on an expression that
+  already holds an `Error` node.** `rebind` (new in 0.129.0) rebuilt an
+  expression from BOXED copies of its nodes and canonicalized the root. A
+  boxed node that is invalid answers its own `.canonical` with itself, so
+  inside an operand that already held an error nothing below it was
+  canonicalized again: with `S` a function used as a number,
+  `rebind(Tuple(S·PointX(u), PointX(u)), { scope })` under a scope declaring
+  `u: real` reported the `PointX(u)` type error for the second operand only,
+  where the MathJSON route reports it for both. Found by Tycho's all-states
+  code-generation census, as a changed decline message on one row of
+  `art/2ki2hjsouf`. For the canonical and partial forms `rebind` now builds
+  the MathJSON as a DAG — one array per distinct node, shared by every parent
+  that reads it, so still no tree-sized serialization — and boxes it by the
+  ordinary route, which makes the match with the MathJSON route hold by
+  construction. The raw and structural forms canonicalize nothing, were not
+  affected, and keep rebuilding each distinct node once, so a shared
+  sub-expression stays shared in their result. Pinned in
+  `test/compute-engine/rebind.test.ts`.
+
 ## 0.129.0 _2026-09-17_
 
 ### New Features

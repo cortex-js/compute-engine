@@ -1200,23 +1200,24 @@ export interface IComputeEngine {
    * one set of declarations must be read under another: a body boxed in a
    * shadow scope, a row re-classified after a declaration changed.
    *
-   * The cost is one walk over the DISTINCT nodes of `expr` — a shared
-   * sub-expression is copied once — where `expr.json` writes a tree, one
-   * copy of a shared node per path. The canonical form is then built from
-   * the copy exactly as it is from MathJSON, so canonicalization itself
-   * still visits every path.
+   * For the canonical and partial forms the MathJSON is built as a DAG — one
+   * array per DISTINCT function node, shared by every parent that reads it
+   * (a leaf contributes its own constant-size MathJSON) — where
+   * `expr.json` writes a tree, one copy of a shared node per path. That
+   * MathJSON is then boxed by the ordinary route, so the result matches
+   * `ce.expr(expr.json, …)` by construction, including for an expression
+   * that already holds an `Error` node. Canonical boxing still visits every
+   * path, as it does for any MathJSON. The raw and structural forms
+   * canonicalize nothing, so each distinct node is rebuilt once and a shared
+   * sub-expression stays shared in the result as well.
    *
-   * - `form`: `'canonical'` (default), `'structural'` or `'raw'`. A partial
-   *   form (`['Flatten', 'Order']`) is not rebuilt in place: it takes the
-   *   MathJSON route.
+   * - `form`: `'canonical'` (default), `'structural'`, `'raw'`, or a
+   *   partial form such as `['Flatten', 'Order']`.
    * - `scope`: the lexical scope the rebuild resolves and declares in.
    *
-   * Every leaf is rebuilt from its own MathJSON, a constant-size read (a
-   * mutable object as its record snapshot, as the MathJSON route boxes it).
-   * A held operand (`Hold`) is copied the way `boxHold` boxes MathJSON. An
-   * expression from another engine is rebuilt from its MathJSON. Verbatim
-   * LaTeX and source positions are dropped, as the MathJSON route drops
-   * them.
+   * Verbatim LaTeX and source positions are dropped, as the MathJSON route
+   * drops them. A mutable object is rebuilt as its record snapshot, as that
+   * route boxes it.
    */
   rebind(
     expr: Expression,
