@@ -151,7 +151,10 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       const ce = new ComputeEngine();
       ce.parse('h(x) := x^2').evaluate(); // global `h`
       // f(h) := Map(h, [1,2,3]) — `h` here is f's (function-valued) parameter.
-      ce.assign('f', ce.box(['Function', ['Map', 'h', ['List', 1, 2, 3]], 'h']));
+      ce.assign(
+        'f',
+        ce.box(['Function', ['Map', 'h', ['List', 1, 2, 3]], 'h'])
+      );
       const r = ce
         ._getCompilationTarget('javascript')!
         .compile(ce.box(['f', ['Function', ['Add', 'y', 10], 'y']]));
@@ -256,9 +259,15 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
   describe('a constant the target inlines is not a free symbol', () => {
     const booleanShapes: [string, unknown][] = [
       ['bare', 'True'],
-      ['Which fallback condition', ['Which', ['Greater', 'x', 0], 1, 'True', 2]],
+      [
+        'Which fallback condition',
+        ['Which', ['Greater', 'x', 0], 1, 'True', 2],
+      ],
       ['conjunct', ['And', ['Greater', 'x', 0], 'True']],
-      ['mask element', ['At', ['List', 10, 20, 30], ['List', 'False', 'True', 'True']]],
+      [
+        'mask element',
+        ['At', ['List', 10, 20, 30], ['List', 'False', 'True', 'True']],
+      ],
     ];
 
     // Every target spells the boolean literals — `true` in JavaScript and both
@@ -303,9 +312,159 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
 
     it('leaves ordinary free symbols alone', () => {
       const ce = new ComputeEngine();
-      expect(compile(ce.parse('x + y')).freeSymbols!.sort()).toEqual(['x', 'y']);
+      expect(compile(ce.parse('x + y')).freeSymbols!.sort()).toEqual([
+        'x',
+        'y',
+      ]);
       // `Pi` has an engine value, so it is folded rather than filtered here.
       expect(compile(ce.parse('\\pi x')).freeSymbols).toEqual(['x']);
     });
+  });
+});
+
+describe('the reference analysis probes a caller compile handler without compiling its operands', () => {
+  // A caller-mapped head (Tycho overrides `At`) is probed by
+  // `analyzeReferences` to learn whether the handler claims the shape. The
+  // probe used to hand the handler the real operand compiler, so every
+  // operand of every such node was compiled twice — once for the probe,
+  // once for the emission — and a folded value holding thousands of nested
+  // `At` reads ran the process out of memory. The probe now hands the
+  // handler a placeholder compiler.
+  test('the handler sees the real operand code exactly once per node', () => {
+    const ce = new ComputeEngine();
+    // `Which` is a head the analysis probes on the JavaScript target (`At`
+    // is not: the target maps it, so its handler is consulted by the compile
+    // path alone).
+    const def = ce.lookupDefinition('Which') as any;
+    const saved = def.operator.compile;
+    const realConditionCodes: string[] = [];
+    def.operator.compile = (
+      args: any[],
+      compile: (e: any) => string,
+      context: { language: string }
+    ) => {
+      if (context.language !== 'javascript') return undefined;
+      const condition = compile(args[0]);
+      if (condition !== '0') realConditionCodes.push(condition);
+      return `((${condition})?(${compile(args[1])}):(${compile(args[3])}))`;
+    };
+    try {
+      const r = compile(
+        ce.box([
+          'Add',
+          ['Which', ['Greater', 'x', 0], 1, 'True', 2],
+          ['Which', ['Greater', 'y', 0], 3, 'True', 4],
+        ]),
+        { to: 'javascript' }
+      );
+      expect(r.success).toBe(true);
+      expect(r.code).toContain('?(');
+      // Two `Which` nodes, two real compiles of their conditions — not four.
+      expect(realConditionCodes).toHaveLength(2);
+      expect(r.freeSymbols!.sort()).toEqual(['x', 'y']);
+      expect(r.unsupported ?? []).toEqual([]);
+    } finally {
+      def.operator.compile = saved;
+    }
+  });
+
+  // A value can be a DAG: the same sub-expression object as an operand of
+  // many parents. A caller that substitutes helper bodies into a published
+  // value builds one (Tycho's terrain height map: 236,663 distinct nodes,
+  // 2.5e10 as a tree). The analysis must walk each node once per binding
+  // frame, or the walk expands the DAG as a tree and never finishes.
+  test('a shared-node value is walked once per node, not once per path', () => {
+    const ce = new ComputeEngine();
+    // A caller's handler may read an operand's MathJSON, which serializes
+    // the shared value as a tree. The compile never reaches a node of a
+    // value it refuses to bake in, so the analysis must not run the handler
+    // on one either.
+    const def = ce.lookupDefinition('Which') as any;
+    const saved = def.operator.compile;
+    let serialized = 0;
+    def.operator.compile = (
+      args: any[],
+      compile: (e: any) => string,
+      context: { language: string }
+    ) => {
+      if (context.language !== 'javascript') return undefined;
+      // Tycho's `Which` handler does this on its conditions.
+      void args[0].json;
+      serialized++;
+      return `((${compile(args[0])})?(${compile(args[1])}):(${compile(args[3])}))`;
+    };
+    try {
+      // 36 levels of `Sin(p) + {p > 0: p, 1}` over the same `p`: about 2^37
+      // nodes as a tree, 5 distinct nodes per level. Walked as a tree this
+      // never returns, and one `.json` of the top level never finishes
+      // either.
+      let node = ce.box(['Multiply', 'x', 2]);
+      for (let i = 0; i < 36; i++)
+        node = ce.function('Add', [
+          ce.function('Sin', [node]),
+          ce.function('Which', [
+            ce.function('Greater', [node, 0]),
+            node,
+            ce.True,
+            1,
+          ]),
+        ]);
+      ce.assign('H', node);
+      const r = compile(ce.parse('H + 1'), { to: 'javascript' });
+      // The fold-size guard refuses to bake the value in (its text would be
+      // exponential); the reference analysis still reports what it reads.
+      expect(r.success).toBe(false);
+      expect(r.error).toContain('above the fold-size limit');
+      expect(r.freeSymbols).toEqual(['x']);
+      // The handler is probed with operands it cannot read; it reads one and
+      // is taken as claiming the shape.
+      expect(r.unsupported ?? []).toEqual([]);
+      expect(serialized).toBe(0);
+    } finally {
+      def.operator.compile = saved;
+    }
+  });
+
+  test('inside an oversized value, a handler that declines on the language is honored', () => {
+    const ce = new ComputeEngine();
+    // Only a handler lowers this head, and only on JavaScript (`Which` is
+    // lowered by the glsl target itself, so it cannot witness this).
+    ce.declare('Clamp01', {
+      signature: '(number) -> number',
+      compile: (args, c, { language }) =>
+        language === 'javascript'
+          ? `Math.min(1, Math.max(0, ${c(args[0])}))`
+          : undefined,
+    });
+    let node = ce.box(['Multiply', 'x', 2]);
+    for (let i = 0; i < 36; i++)
+      node = ce.function('Add', [
+        ce.function('Sin', [node]),
+        ce.function('Clamp01', [node]),
+      ]);
+    ce.assign('H', node);
+    const js = compile(ce.parse('H + 1'), { to: 'javascript' });
+    expect(js.success).toBe(false);
+    expect(js.error).toContain('above the fold-size limit');
+    expect(js.unsupported ?? []).toEqual([]);
+    const g = compile(ce.parse('H + 1'), { to: 'glsl' });
+    expect(g.success).toBe(false);
+    expect(g.unsupported).toEqual(['Clamp01']);
+  });
+
+  // A handler may compile a SYNTHESIZED expression rather than its operands:
+  // the derivative handler compiles the closed form it computed and declines
+  // when the target cannot lower it. The probe must compile such an
+  // expression for real, or the decline never reaches the report.
+  test('a handler that compiles a synthesized expression still declines', () => {
+    const ce = new ComputeEngine();
+    // `d/dx Γ(x) = Γ(x)ψ(x)`: a closed form, but glsl has no `Digamma`.
+    const expr = ce.box(['D', ['Gamma', 'x'], 'x']);
+    const js = compile(expr, { to: 'javascript' });
+    expect(js.success).toBe(true);
+    expect(js.unsupported ?? []).toEqual([]);
+    const g = compile(expr, { to: 'glsl' });
+    expect(g.success).toBe(false);
+    expect(g.unsupported).toEqual(['D']);
   });
 });

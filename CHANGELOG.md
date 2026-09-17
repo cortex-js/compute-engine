@@ -2,6 +2,31 @@
 
 ### Resolved Issues
 
+- **The reference analysis of a compiled result no longer expands a shared
+  value as a tree, and no longer runs a caller's `compile` handler inside a
+  value the compile refuses to bake in.** An expression is a DAG: one
+  sub-expression object can be an operand of many parents. A consumer that
+  substitutes helper bodies into a published value builds exactly that —
+  Tycho's terrain document (`art/nxlddeh5zv`) holds its height map as a
+  four-level chain of list helpers whose bodies each read their parameter a
+  dozen times, so the value has 236,663 distinct nodes but 25 billion when
+  walked as a tree. The compile itself refused to bake the value in (the
+  fold-size guard sizes the expansion with sharing), but the reference
+  analysis that every result carries (`freeSymbols`, `unsupported`) then ran
+  the process out of memory on that value in two ways, at any terrain size —
+  the failure that stopped the code-generation census on that document.
+  First, the walk visited the value as a tree; it now remembers, per node, the
+  binding frames it was visited under and skips a repeat. Second, at every
+  head with a caller-supplied `compile` handler it probed that handler with
+  the real operands to learn whether the handler claims the shape, and a
+  handler is free to read an operand's MathJSON (Tycho's `Which` handler reads
+  its conditions), which serializes a shared sub-value as a tree. Inside a
+  value the fold-size guard would refuse, the walk now takes a head that has
+  a handler as lowerable without asking — the compile never reaches such a
+  node either. The probe elsewhere also hands the handler a placeholder
+  operand compiler instead of the real one, which compiled every operand of
+  every such node once for the probe and once for the emission.
+
 - **A lazily held chain of list helpers no longer costs quadratic time per
   level, and a symbol's stored expression is evaluated once across reads.** The
   Tycho corpus document `art/nxlddeh5zv` (a terrain) holds its height map as the

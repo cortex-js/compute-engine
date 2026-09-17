@@ -618,6 +618,29 @@ the work that remains.
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
 
+### An index that is provably not an integer leaves `At` inert, and a chain of such reads grows exponentially (OPEN, evaluation — found 2026-09-16 while replicating the terrain document)
+
+`L[5 + √17]` evaluates to the inert `At(L, 5 + √17)`: the index is a constant,
+its value is not an integer, and the interpreter's answer for a non-integer
+index is `Nothing` (`L[2.5]` answers it), but an EXACT irrational constant is
+not recognized as one. The inert node embeds the collection operand whole, so a
+helper whose comprehension body reads `l[i + {…}·√Length(l)]` with a length that
+is not a perfect square produces elements that each hold three inert reads of
+the level below, each holding the level below's lazy comprehension; four levels
+of that is a tree that never finishes evaluating (the replica with lengths 2·4ᵏ
+hung at 512 elements while the same helpers over perfect-square lengths took 1.3
+s). The Desmos document itself has perfect-square lengths
+(`random((64/16)², seed)` has 16 elements), so it does not take this path — the
+replica did, by adding one element to the base list.
+
+The fix is in `At`: a constant index whose numeric value is finite and not an
+integer — an exact radical, a rational that is not an integer, a sum of those —
+answers `Nothing`, as a machine-float non-integer already does. The test must be
+a proof, not a float check alone: a constant such as `√4` or
+`(1 + √5)/2 · (1 + √5)/2 − (1 + √5)/2` IS an integer, so decide from the exact
+value (`isInteger` on the canonical constant) and fall back to inert only when
+the exact form cannot say.
+
 ### The interpreted growing-list loop stays quadratic (OPEN, no urgency — recorded 2026-09-04)
 
 `let xs = []; for k in 1..n { xs = Join(xs, [k]) }` costs about 0.5 µs per
@@ -1373,6 +1396,22 @@ pipeline now binds document functions as by-reference lambdas, and the item-225
 witness (`art/nxlddeh5zv`) no longer OOMs, though its interpreted member sweep
 still exceeds 300 s on the fallback.
 
+The preamble binding is per SYMBOL, so it does not reach sharing INSIDE one
+symbol's value. Tycho now publishes that document's height map with the helper
+bodies substituted (measured 2026-09-16 on Tycho `03ebe4fc8`): the value of
+`h_eightMap` is one expression of 236,663 distinct nodes in which each level's
+argument is shared by the dozen reads of the level above, 25 billion nodes as
+text, and `b_ase` holds no value at all. On the JavaScript target the four
+terrain triangle rows therefore decline at the guard (census 2026-09-16; they
+compiled on Tycho `5ce55d2bd`, where the sliders were untyped and the value
+open). Evaluating the closed value first would not help either: at size 64 the
+literal is 8,192 points, above the guard on its own. The lever is the one the
+consumer prefers, a runtime-binding channel for a symbol value, or a per-node
+binding of each sub-expression that has several parents. The reference
+analysis that a declined result carries walks such a value once per node and
+no longer runs a caller's `compile` handler inside it (CHANGELOG
+[Unreleased]).
+
 ### Fixed-width collection chains: residue after the 2026-09-08 and 2026-09-09 rounds (OPEN, compile performance — consult with Tycho, Desmos state 62urmx2dcm)
 
 Landed 2026-09-08 (commits 71d91afa and a9cf103c): a loop-invariant hoist over
@@ -1542,15 +1581,18 @@ Declines per target on the all-states Tycho corpus (684 documents): javascript
 112 in 38 documents, glsl 148 in 55, interval-js 188 in 66 (down from 233 on
 0.128.12). In order of value: (1) ~~the interpreter's re-evaluation of a lazy
 list argument~~ — landed 2026-09-16 (the element memo's geometric prefix fill
-and the stored-value memo of a symbol, `CHANGELOG.md`); what remains of that
-document is the compile-time constant fold's cost, recorded in the handoff
-document §9; (2) absent positions on the point-accessor and
-`broadcastable<number>` unions, 34 interval rows; (3) JavaScript scalar
-arithmetic over a list-valued operand, 33 rows (the triaged list-arithmetic
-entry); (4) GLSL `At` over a run-time indexed collection, 32 rows, and GLSL
-`Integrate`, 15 rows; (5) the nine remaining interval `List` rows, to triage
-with Tycho's declarations. `D`, `PointList` and the complex rows on the interval
-target are design boundaries, not candidates.
+and the stored-value memo of a symbol, plus the compile-side cause that actually
+stopped the census on that document: the reference analysis walked the
+consumer's substituted height-map value, a DAG of 236,663 distinct nodes, as a
+tree of 25 billion, and probed the consumer's `Which` handler at every `Which`
+node of it, which serialized a sub-DAG as a tree; `CHANGELOG.md`); (2) absent
+positions on
+the point-accessor and `broadcastable<number>` unions, 34 interval rows; (3)
+JavaScript scalar arithmetic over a list-valued operand, 33 rows (the triaged
+list-arithmetic entry); (4) GLSL `At` over a run-time indexed collection, 32
+rows, and GLSL `Integrate`, 15 rows; (5) the nine remaining interval `List`
+rows, to triage with Tycho's declarations. `D`, `PointList` and the complex rows
+on the interval target are design boundaries, not candidates.
 
 ### Collection values on the interval target: what stays open after the 2026-09-15 round (OPEN — the round itself is in `CHANGELOG.md`, design record in `docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md`)
 

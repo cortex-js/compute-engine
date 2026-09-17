@@ -1608,6 +1608,35 @@ export type LoopInvariantBinding = [
 /**
  * Base compiler class containing language-agnostic compilation logic
  */
+/**
+ * Thrown by every observable operation on `UNREADABLE_OPERAND`, so the
+ * reference analysis can tell a handler that read its operands from one that
+ * declined without looking at them.
+ */
+const OPERAND_READ = new Error('operand read during a reference-analysis probe');
+
+/** An operand a caller's `compile` handler cannot read: every property access,
+ * `in` test, key listing or prototype read throws `OPERAND_READ`. Handed to a
+ * handler by the reference analysis inside a value the compile refuses to bake
+ * in — see the probe in `analyzeReferences`. */
+const UNREADABLE_OPERAND: object = new Proxy(Object.create(null), {
+  get: () => {
+    throw OPERAND_READ;
+  },
+  has: () => {
+    throw OPERAND_READ;
+  },
+  ownKeys: () => {
+    throw OPERAND_READ;
+  },
+  getPrototypeOf: () => {
+    throw OPERAND_READ;
+  },
+  getOwnPropertyDescriptor: () => {
+    throw OPERAND_READ;
+  },
+});
+
 export class BaseCompiler {
   /**
    * Precedence used when compiling a folded symbol value. Higher than any
@@ -24256,6 +24285,68 @@ export class BaseCompiler {
     let declaredTypes: Readonly<Record<string, Type>> | undefined =
       target.declaredVarTypes;
 
+    // An expression is a DAG, not a tree: one sub-expression object can be an
+    // operand of many parents. A caller that substitutes helper bodies into a
+    // published value builds exactly that — Tycho's terrain document holds a
+    // height map as a four-level chain of list helpers whose bodies each read
+    // their parameter a dozen times, so every level shares its argument a
+    // dozen times and the value has 236,663 distinct nodes but 2.5e10 nodes
+    // when walked as a tree (corpus document `nxlddeh5zv`, 2026-09-16; the
+    // walk ran the process out of memory at every terrain size).
+    //
+    // What the walk contributes for a node depends only on the node, on the
+    // names bound around it and on the declared-type frame, and it only ever
+    // ADDS to `free`, `unsupported` and the seen sets. So a second visit of
+    // the same node under the same frame adds nothing, and the walk can skip
+    // it. Each node remembers the frames it was visited under; a frame key is
+    // the sorted bound names plus the identity of the declared-type frame
+    // (the frame is replaced, never mutated, so identity is a sound key).
+    const visitedFrames = new Map<Expression, Set<string>>();
+    const boundKeys = new WeakMap<ReadonlySet<string>, string>();
+    // Greater than zero while the walk is inside a symbol value the compile
+    // refuses to bake in (`assertFoldableSize`). The compile never reaches a
+    // node of such a value, so the walk must not run a caller's `compile`
+    // handler on one either: a handler is free to read an operand's `.json`
+    // (Tycho's `Which` handler does), and on a shared value that serializes
+    // a sub-DAG as a tree — the height map above serialized to more than
+    // the heap at every terrain size. Inside such a value a head that has a
+    // handler is taken as lowerable without asking.
+    let oversizedValueDepth = 0;
+    const declaredFrameIds = new WeakMap<object, number>();
+    let nextDeclaredFrameId = 1;
+    const frameKey = (bound: ReadonlySet<string>): string => {
+      let key = boundKeys.get(bound);
+      if (key === undefined) {
+        key = [...bound].sort().join(',');
+        boundKeys.set(bound, key);
+      }
+      let frameId = 0;
+      if (declaredTypes !== undefined) {
+        frameId = declaredFrameIds.get(declaredTypes) ?? 0;
+        if (frameId === 0) {
+          frameId = nextDeclaredFrameId++;
+          declaredFrameIds.set(declaredTypes, frameId);
+        }
+      }
+      // The probe suppression inside an oversized value is part of the frame:
+      // a node met there is taken as lowerable without a probe, so meeting the
+      // same node again outside such a value must probe it.
+      return `${oversizedValueDepth > 0 ? 'o' : ''}${frameId}|${key}`;
+    };
+    /** True when `e` was already walked under the current frame; records the
+     * visit otherwise. */
+    const alreadyVisited = (e: Expression, bound: ReadonlySet<string>) => {
+      const key = frameKey(bound);
+      let frames = visitedFrames.get(e);
+      if (frames === undefined) {
+        frames = new Set();
+        visitedFrames.set(e, frames);
+      }
+      if (frames.has(key)) return true;
+      frames.add(key);
+      return false;
+    };
+
     /** Visit a function literal's body with its parameters bound and its
      * declared-type frame installed. */
     const visitLiteralBody = (
@@ -24316,6 +24407,9 @@ export class BaseCompiler {
     };
 
     const visit = (e: Expression, bound: ReadonlySet<string>): void => {
+      // Symbols are not memoized: a symbol is cheap to visit, and every
+      // repeated symbol visit hangs off a repeated function node, which is.
+      if (isFunction(e) && alreadyVisited(e, bound)) return;
       if (isSymbol(e)) {
         const s = e.symbol;
         if (bound.has(s)) return;
@@ -24360,7 +24454,18 @@ export class BaseCompiler {
         if (value !== undefined) {
           if (!foldedSeen.has(s)) {
             foldedSeen.add(s);
-            visit(value, bound);
+            // Sized with sharing, as the fold guard sizes it, so the check
+            // itself stays linear in the value's distinct nodes.
+            const oversized =
+              isFunction(value) &&
+              BaseCompiler.expandedFoldSize(engine, value, target) >
+                BaseCompiler.MAX_FOLD_EXPANDED_NODES;
+            if (oversized) oversizedValueDepth++;
+            try {
+              visit(value, bound);
+            } finally {
+              if (oversized) oversizedValueDepth--;
+            }
           }
           return;
         }
@@ -24546,27 +24651,73 @@ export class BaseCompiler {
           isOperatorDef(customCompileDef) &&
           typeof customCompileDef.operator.compile === 'function'
         ) {
-          try {
-            const probe = customCompileDef.operator.compile(
-              // The declared-type receiver fallback the compile path applies
-              // (see `fieldArgsWithDeclaredReceiver`), with the analysis
-              // walk's own frame standing in for the target's map.
-              BaseCompiler.fieldArgsWithDeclaredReceiver(
-                engine,
-                h,
-                ops,
-                declaredTypes
-              ) ?? ops,
-              (e) => BaseCompiler.compileValueOperand(e, target),
-              {
-                language: target.language ?? 'javascript',
-                typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
-              }
-            );
-            hasCustomCompile =
-              probe !== undefined && probe !== null && probe !== '';
-          } catch {
-            hasCustomCompile = false;
+          const handler = customCompileDef.operator.compile;
+          const context = {
+            language: target.language ?? 'javascript',
+            typeOf: (x: Expression) =>
+              BaseCompiler.operandTypeInContext(x, target),
+          };
+          const claims = (probe: unknown): boolean =>
+            probe !== undefined && probe !== null && probe !== '';
+          if (oversizedValueDepth > 0) {
+            // Inside a value the compile refuses to bake in, the handler
+            // gets operands it cannot read: every access throws a private
+            // marker. A handler that declines before reading them (a
+            // language check, the usual first line) is honored; one that
+            // reads them is taken as claiming the shape, since the compile
+            // never reaches this node and reading the real operands is what
+            // serialized a sub-DAG as a tree.
+            try {
+              hasCustomCompile = claims(
+                handler(
+                  ops.map(() => UNREADABLE_OPERAND as unknown as Expression),
+                  () => '0',
+                  context
+                )
+              );
+            } catch (e) {
+              hasCustomCompile = e === OPERAND_READ;
+            }
+          } else {
+            try {
+              // The probe asks one question — does the handler CLAIM this
+              // shape? A handler answers it by returning a string into
+              // which it splices its operands' code, so a placeholder
+              // stands for each of the node's OWN operands here: the probe
+              // used to hand the handler the real operand compiler, which
+              // compiled every operand in full, once per node of the tree
+              // that carries such a handler, for an answer that was then
+              // discarded (on a document whose `Which` head the caller maps
+              // and whose height-map value holds thousands of them, this
+              // analysis alone ran the process out of memory). Anything
+              // else the handler asks to compile is a synthesized
+              // expression — the derivative handler compiles the closed
+              // form it computed, and declines when that fails — and is
+              // compiled for real, exactly as the compile path would, so
+              // that decline still reaches the report. The operands' own
+              // references and unsupported heads are collected by the
+              // visit below, exactly as for every other head.
+              const probeArgs =
+                // The declared-type receiver fallback the compile path
+                // applies (see `fieldArgsWithDeclaredReceiver`), with the
+                // analysis walk's own frame standing in for the target's
+                // map.
+                BaseCompiler.fieldArgsWithDeclaredReceiver(
+                  engine,
+                  h,
+                  ops,
+                  declaredTypes
+                ) ?? ops;
+              const compileOperand = (e: Expression): TargetSource =>
+                probeArgs.includes(e) || ops.includes(e)
+                  ? '0'
+                  : BaseCompiler.compileValueOperand(e, target);
+              hasCustomCompile = claims(
+                handler(probeArgs, compileOperand, context)
+              );
+            } catch {
+              hasCustomCompile = false;
+            }
           }
         }
       }

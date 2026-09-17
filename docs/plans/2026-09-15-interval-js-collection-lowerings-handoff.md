@@ -278,18 +278,73 @@ complex family 19 → 19 (`complex` 11, `Real` 5, `Imaginary` 3), `Unknown
 operator` 8 → 8, `invalid expression` 12 (documents that do not bind or
 type-check in Tycho), plus a long tail of one-offs. Total 233 → 188.
 
-A HEAD census (Tycho `26f38f705`) does not complete: the document
-`art/nxlddeh5zv` runs the compile out of memory through a CE interpreter
-defect — a lazily held chain of list helpers is re-evaluated once per element
-at every level, and the compile's constant fold pays that cost once a slider
-typed `number` makes the subtree closed. ROADMAP entry: "A lazily held chain of
-list-valued helpers is re-evaluated once per element at every level…".
+A HEAD census (Tycho `26f38f705`) did not complete at first: the document
+`art/nxlddeh5zv` ran the compile out of memory. The causes and the fixes are
+in candidate 1 below. With them (CE `b4b604cc` plus the uncommitted reference
+analysis fixes of 2026-09-16), the census on Tycho HEAD `03ebe4fc8` completes
+in nine minutes: 684 documents, 18,697 records per side, matched to the
+table above by document, row, target and input text (13 row inputs changed
+with Tycho's own commits).
+Against that table: javascript 112 → 113 declines (two rows now compile,
+`njncrg9fkv` and `woeywky0kj`; the four terrain triangle rows of
+`art/nxlddeh5zv` now decline at the fold-size guard — on HEAD every slider is
+typed `number`, so `t_errainPointA` is a closed value, and Tycho publishes
+its height map with the helper bodies substituted, a value of 236,663
+distinct nodes that expands to 25 billion once written as text; ROADMAP
+"Compiling a DAG-shared symbol value on the inline targets still refuses…"),
+glsl 148 → 148, interval-js 188 → 182 (the six `lrpzqnemhy` rows whose list
+is a lazy `Map` value). Slowest row: 3.9 s, one of those terrain declines.
+Data: `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/ce-unreleased-0916-all-tycho03ebe4fc8{,-digest}.json`,
+from the build before the review round's changes to the probe. A second run
+with the staged build, on a box whose load average was above 12, completed
+too: the same declines on every shared row, one more row declined with the
+harness's own "Timeout exceeded", and Tycho's own processing changed the row
+inputs of six documents between the runs. On that document the value Tycho
+publishes for the height map is not the same from run to run: sometimes the
+substituted DAG (the rows then decline at the fold-size guard, 4 s each on a
+quiet box), sometimes the unsubstituted helper chain (the rows then decline at
+`Length` inside a helper body in under 70 ms). Both shapes complete.
 
 Ranked candidates, by value to the corpus:
 
-1. **The interpreter's re-evaluation of a lazy list argument** (the entry
-   above). Correctness-adjacent, blocks the HEAD census, hits any document
-   that layers list helpers. Either fix named in the entry.
+1. **The interpreter's re-evaluation of a lazy list argument** — landed
+   2026-09-16 (commit `b4b604cc`; CHANGELOG [Unreleased]). The mechanism was
+   not the one guessed above: the element memo of a lazy comprehension
+   refilled its prefix from the first element at every `at(i)` past the
+   cached length (a sequential scan cost 1 + 2 + … + n body runs per level),
+   and a symbol holding an unevaluated expression re-ran it on every read.
+   Both are fixed in the interpreter; the compile's constant fold inherits
+   the gain. Replica at size 8: the three-level chain 16.7 s → 0.24 s; the
+   depth-4 mask compile 0.77 s. A replica detail to know when re-measuring:
+   the document's base list has 16 elements (`random((64/16)², seed)`), so
+   every level's length is a perfect square; a replica that adds one element
+   makes `√Length(l)` an exact irrational and takes an unrelated slow path
+   (ROADMAP: "An index that is provably not an integer leaves `At` inert…").
+   The census on Tycho HEAD then still overflowed at the same compile, at
+   any size, and an instrumented run of the real crash named the last cause.
+   Tycho publishes `h_eightMap` with the helper bodies already substituted:
+   the engine holds an `Add` DAG of 236,663 distinct nodes (each level's
+   argument is shared by the dozen reads in the level above), 25 billion
+   nodes as a tree. The compile refused to bake it in (the fold-size guard
+   measures the expansion with sharing), but the reference analysis that a
+   result carries (`analyzeReferences`) walked the value as a tree: 544
+   million visits before the heap ran out. The walk now skips a node it has
+   already visited under the same binding frame. With that in place the
+   run still overflowed: a heap snapshot near the limit was 3.8 million
+   nested arrays, MathJSON. The walk probes a caller's `compile` handler at
+   every head that has one, and Tycho's `Which` handler reads
+   `args[i].json` on its conditions; at a `Which` node inside the height
+   map that serializes the sub-DAG below it as a tree. The walk no longer
+   probes inside a value the fold-size guard refuses (the compile never
+   reaches such a node), and the probe elsewhere hands the handler a
+   placeholder operand compiler instead of the real one (CHANGELOG
+   [Unreleased]). With both, the document's 200 compiles finish in 81 s at
+   size 64; the terrain rows decline at the fold-size guard in about 4 s
+   each. Lesson for the next round: instrument or profile the real crash
+   first (`node --prof` survives an out-of-memory abort; `--cpu-prof` does
+   not; `--heapsnapshot-near-heap-limit=1` names what fills the heap),
+   replicate second — the replica never had the DAG, because it let the
+   engine hold the helper calls unsubstituted.
 2. **Absent positions on the point-accessor and `broadcastable<number>`
    unions** — 34 interval rows, 11 documents, the largest remaining interval
    class. A whole-NaN interval could represent both; the change is the shared
