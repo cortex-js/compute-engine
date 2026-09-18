@@ -1392,12 +1392,25 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     ]);
   });
 
-  test('a point in an OPERAND position still declines', () => {
-    const fn = compile(cePt.box(['Multiply', ['Tuple', 'a', 'b'], 2]), {
+  test('a point in an OPERAND position: arithmetic maps, the rest declines', () => {
+    // Point ARITHMETIC is coordinate-wise, and lowers through the
+    // element-wise broadcast — the kernel is handed one coordinate at a
+    // time, never the array (pinned in full in
+    // `compile-interval-collections.test.ts`).
+    const scaled = compile(cePt.box(['Multiply', ['Tuple', 'a', 'b'], 2]), {
       to: 'interval-js',
     });
+    expect(scaled.success).toBe(true);
+    expect(scaled.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
+      { kind: 'interval', value: { lo: 2, hi: 4 } },
+      { kind: 'interval', value: { lo: 6, hi: 6 } },
+    ]);
+    // Every other kernel still declines over a point operand.
+    const ceDeclared = new ComputeEngine();
+    ceDeclared.declare('Pt', 'tuple<number, number>');
+    const fn = compile(ceDeclared.box(['Sin', 'Pt']), { to: 'interval-js' });
     expect(fn.success).toBe(false);
-    expect(fn.error).toContain('no lowering');
+    expect(fn.error).toContain('is a collection');
     // The same in a `Which` value position.
     const fw = compile(
       cePt.box(['Which', ['Less', 'a', 1], ['Tuple', 'a', 'b'], 'True', 0]),

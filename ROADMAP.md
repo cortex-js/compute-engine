@@ -138,36 +138,37 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   walk and treats an operand too large for a `number` as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
-### Interval target: the point-coordinate accessor rows of the Tycho census now stop at point arithmetic and at a list of points built in a body (OPEN — measured 2026-09-17 after the accessor lowering)
+### Interval target: what the point rows of the Tycho census still stop at (OPEN — measured 2026-09-18 after point arithmetic landed)
 
-The 16 interval-lane rows of the Tycho census that declined at
-"`PointX`: the operand is not a single point" (documents `hpr2q4kles` ×9,
-`mqm2eamst1` ×4, `jgcclk1njk` ×2, `mk7duulwxf`) no longer decline there: the
-accessor over a point-or-point-list operand broadcasts at the value
-(`_IA.pointComponent`, `compileIntervalPointComponent`). None of the 16
-compiles yet; each reaches the next lowering the target lacks:
+Point arithmetic (`_IA.bcastPoint`) and the point-coordinate accessor over a
+list of points (`_IA.pointComponent`) took 30 interval-lane rows of the Tycho
+census from a decline to a compile (documents `hpr2q4kles`, `mqm2eamst1`,
+`lhjmsl5pbq`, `czpf52khpc`, `0vlrmhen37`), each value-checked against the
+JavaScript lane. What the same 17 documents still decline at:
 
-- **Point arithmetic in a helper body (13 rows).** `hpr2q4kles` and
-  `mqm2eamst1` build points with `PointList` arithmetic — a scalar times a
-  point (`(D+d)/2 · (cos T, sin T)`), a point minus a point
-  (`r(M_0, −a) − C(D, d)`), a rotation helper over a point — and the interval
-  target has no lowering for a `PointList` in an operand position of a kernel
-  ("`PointList`: no lowering for operand types (`real`, `real`)"). The value
-  model admits a point at a consuming position (an array of two intervals,
-  `compileIntervalCollectionValue`), so the missing piece is the element-wise
-  kernel over a point operand beside a scalar or another point — the
-  interpreter's point arithmetic. `hpr2q4kles` also carries the complex
-  coordinate decline and the `P_0`/`P_1` `Add` decline recorded above.
-- **A list of points built from list components (1 row).** `mk7duulwxf`
-  writes `P = (random(N), random(N)) + (cos a, sin a)/N`: a `PointList` whose
-  components are lists is a LIST of points (the interpreter zips them), and no
-  lowering of this target spells that list ("`PointList`: no lowering for
-  operand types (`list<real>`, `list<real>`)"). The array of the zipped points
-  is representable; the lowering is the zip itself.
-- **A matrix operand of a kernel (2 rows).** `jgcclk1njk` hands a helper a
+- **A `PointList` with list components (7 rows: `n7uhaaoq1q` ×5,
+  `mk7duulwxf`, `0vlrmhen37`).** `P = (random(N), random(N)) + (cos a, sin a)/N`
+  and the 3-D point lists of `n7uhaaoq1q` (`vector<3>` components) are LISTS
+  of points — the interpreter zips the components — and no lowering of this
+  target spells that list ("`PointList`: no lowering for operand types
+  (`list<real>`, `list<real>`)"). The array of the zipped points is
+  representable, and `_IA.bcastPoint` already consumes one; the missing
+  lowering is the zip itself.
+- **A matrix operand of a kernel (2 rows, `jgcclk1njk`).** A helper is handed a
   `matrix`-typed argument and reads it with `Add` inside the body ("the
   operand is a collection (type `matrix`)"); a matrix has no interval reading
   on this target.
+- **An elementary function over a DECLARED point.** `Sin(P)` with
+  `P: tuple<number, number>` declines ("the operand is a collection") while
+  `Sin((a, b))` over a literal point of untyped symbols maps over the
+  coordinates, as the interpreter does for both. The 2026-09-15 pin "a point
+  is consumed whole, never mapped over" keeps the declared case declining;
+  point arithmetic admits only `Add`, `Subtract`, `Negate`, `Multiply` and
+  `Divide`. `Abs` and `Hypot` read a point whole (its norm) and must stay out
+  of any widening.
+- **`List` in an operand position (11 rows), `GeometricVector` (6), `At` over a
+  tuple with a component that is not a number (3).** Not point arithmetic;
+  listed so the next measurement starts from the same numbers.
 
 ### Colour handling residue (audit of 2026-09-08; the five colour rulings — a tuple is 0–1 sRGB, `ColorFromColorspace` answers the route's canonical components, a well-formed spelling that packs to zero is transparent black, a list is not a colour, `ContrastingColor` answers the candidate — landed 2026-09-09)
 
@@ -1847,34 +1848,6 @@ become the conditions and the case bodies the arms, under the same gate (no
 effect in a case, no write outside the cases at the statement position). No
 document of the code-generation audit has the shape; the entry records the
 reachable decline.
-
-### LSP navigation: two tracked gaps in the occurrence resolver (OPEN, vscode-epsil — opened 2026-08-19)
-
-The extension's navigation/rename features (go-to-definition, references,
-highlights, outline, rename — served by `src/epsil/occurrences.ts` over the raw
-AST's `sourceOffsets`) ship with two deliberate, refusal-guarded gaps:
-
-1. **Type names are not navigable from their USES.** A use of a declared type
-   lives inside a type-annotation STRING (`let p: Point` parses `Point` as
-   `{"str": "Point"}`), which the resolver does not enter, so go-to-definition
-   on the annotation returns nothing and references from a `type` declaration
-   list only the declaration. Rename of a type/protocol name is REFUSED for the
-   same reason (pinned by `vscode-epsil/test/lsp.test.mjs`, "rename refusals"),
-   so nothing corrupts — but read-only navigation would need a type-string
-   sub-lexer that maps identifier spans inside the annotation back to document
-   offsets (the annotation node's `sourceOffsets` give the string's own span to
-   anchor from).
-2. **Named-argument labels are not tracked as parameter occurrences.** A call
-   `f(x: 3)` binds by the parameter's NAME
-   (`["NamedArgument", {"str": "x"}, …]`, label a string with a real span), so
-   renaming the parameter must rewrite the label too. Until labels are resolved
-   to their callee's parameter group (needs call-to-function resolution plus a
-   function-group → parameter-groups map in the resolver), renaming a parameter
-   whose name appears as ANY label in the document is REFUSED (`renameRefusal`
-   in `vscode-epsil/src/server.ts`, pinned by the "rename capture by the library
-   and by labels" scenario). Lifting the refusal means recording label spans as
-   occurrences of the resolved parameter and keeping the refusal only for
-   unresolvable callees.
 
 ### Compatibility gate for USER-DECLARED lazy operators (OPEN, demand-gated — opened 2026-08-19)
 

@@ -36,6 +36,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -911,5 +912,354 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     // A POINT-or-point-list union is not a list of numbers: a point has no
     // interval reading (the 2026-08-22 decision).
     declines(ce, ['Add', 'c', 1]);
+  });
+});
+
+// Point ARITHMETIC. A point is the array of its coordinate intervals, and the
+// interpreter's arithmetic over points is coordinate-wise: point ± point,
+// scalar × point, point / scalar, the negation of a point. A point beside a
+// LIST is not a zip — the interpreter answers one point per element of the
+// list — and the run-time value cannot tell a point from a list of two
+// numbers, so the lowering is `_IA.bcastPoint`, which is told which arguments
+// are point-valued (`'p'`) and which are number-valued (`'s'`). The heads
+// that read a point whole (`Abs`, the norm) and the elementary functions keep
+// the scalar gate.
+describe('Interval target — point arithmetic', () => {
+  function pointEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'tuple<number, number>');
+    ce.declare('Q', 'tuple<number, number>');
+    ce.declare('s', 'number');
+    ce.declare('V', 'list<number>');
+    ce.declare('w', 'broadcastable<number>');
+    ce.declare('LP', 'list<tuple<number, number>>');
+    ce.declare('c', 'tuple<number, number> | list<tuple<number, number>>');
+    return ce;
+  }
+  const INPUTS = {
+    P: [1, 2],
+    Q: [10, 20],
+    s: pt(4),
+    V: [1, 2, 3],
+    w: pt(2),
+    LP: [
+      [1, 2],
+      [3, 4],
+    ],
+    c: [5, 6],
+  };
+  function value(ce: ComputeEngine, expr: any, vars: Record<string, any>) {
+    const r = compile(ce.box(expr), { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(true);
+    return { code: r.code, out: bands(r.run!(vars)) };
+  }
+
+  test('point ± point, scalar × point, point / scalar, negation', () => {
+    const ce = pointEngine();
+    const sum = value(ce, ['Add', 'P', 'Q'], INPUTS);
+    expect(sum.code).toBe(
+      "_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'pp', _.P, _.Q)"
+    );
+    expect(sum.out).toEqual([
+      [11, 11],
+      [22, 22],
+    ]);
+    expect(value(ce, ['Subtract', 'P', 'Q'], INPUTS).out).toEqual([
+      [-9, -9],
+      [-18, -18],
+    ]);
+    expect(value(ce, ['Multiply', 's', 'P'], INPUTS).out).toEqual([
+      [4, 4],
+      [8, 8],
+    ]);
+    // A number literal stays in the closure body.
+    const doubled = value(ce, ['Multiply', 2, 'P'], INPUTS);
+    expect(doubled.code).toBe(
+      "_IA.bcastPoint((_tv1) => _IA.scale(_k1, _tv1), 'p', _.P)"
+    );
+    expect(doubled.out).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+    expect(value(ce, ['Divide', 'P', 's'], INPUTS).out).toEqual([
+      [0.25, 0.25],
+      [0.5, 0.5],
+    ]);
+    expect(value(ce, ['Negate', 'P'], INPUTS).out).toEqual([
+      [-1, -1],
+      [-2, -2],
+    ]);
+  });
+
+  test('a literal point operand, and a coordinate read back', () => {
+    const ce = pointEngine();
+    const shifted = value(ce, ['Add', 'P', ['Tuple', 'x', 'y']], {
+      ...INPUTS,
+      x: { lo: 0, hi: 1 },
+      y: pt(5),
+    });
+    expect(shifted.code).toBe(
+      "_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'pp', _.P, [_.x, _.y])"
+    );
+    expect(shifted.out).toEqual([
+      [1, 2],
+      [7, 7],
+    ]);
+    const x = value(ce, ['PointX', ['Add', 'P', 'Q']], INPUTS);
+    expect(x.code).toBe(
+      "_IA.component(_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'pp', _.P, _.Q), 0)"
+    );
+    expect(x.out).toEqual([11, 11]);
+  });
+
+  test('a list of numbers times a point is one point per element', () => {
+    const ce = pointEngine();
+    // The interpreter: `[1, 2]·(10, 20)` is `[(10, 20), (20, 40)]` — for a
+    // two-element list too, which a plain zip would read as one point.
+    expect(
+      ce.box(['Multiply', ['List', 1, 2], ['Tuple', 10, 20]]).evaluate().json
+    ).toEqual(['List', ['Tuple', 10, 20], ['Tuple', 20, 40]]);
+    const scaled = value(ce, ['Multiply', 'V', 'Q'], { ...INPUTS, V: [1, 2] });
+    expect(scaled.code).toBe(
+      "_IA.bcastPoint((_tv1, _tv2) => _IA.mul(_tv1, _tv2), 'ps', _.Q, _.V)"
+    );
+    expect(scaled.out).toEqual([
+      [
+        [10, 10],
+        [20, 20],
+      ],
+      [
+        [20, 20],
+        [40, 40],
+      ],
+    ]);
+    // A `broadcastable<number>` beside a point is decided at the value.
+    expect(value(ce, ['Multiply', 'w', 'P'], INPUTS).out).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+    expect(
+      value(ce, ['Multiply', 'w', 'P'], { ...INPUTS, w: [1, 3] }).out
+    ).toEqual([
+      [
+        [1, 1],
+        [2, 2],
+      ],
+      [
+        [3, 3],
+        [6, 6],
+      ],
+    ]);
+  });
+
+  test('a list of points, and a point-or-point-list union, are point-valued', () => {
+    const ce = pointEngine();
+    // The interpreter: a list of points plus a point adds the point to every
+    // element; two lists of points zip; a list of numbers times a list of
+    // points zips too.
+    expect(
+      ce
+        .box([
+          'Add',
+          ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+          ['Tuple', 1, 2],
+        ])
+        .evaluate().json
+    ).toEqual(['List', ['Tuple', 2, 4], ['Tuple', 4, 6]]);
+    expect(value(ce, ['Add', 'LP', 'P'], INPUTS).out).toEqual([
+      [
+        [2, 2],
+        [4, 4],
+      ],
+      [
+        [4, 4],
+        [6, 6],
+      ],
+    ]);
+    expect(value(ce, ['Add', 'LP', 'LP'], INPUTS).out).toEqual([
+      [
+        [2, 2],
+        [4, 4],
+      ],
+      [
+        [6, 6],
+        [8, 8],
+      ],
+    ]);
+    expect(
+      value(ce, ['Multiply', 'V', 'LP'], { ...INPUTS, V: [1, 2] }).out
+    ).toEqual([
+      [
+        [1, 1],
+        [2, 2],
+      ],
+      [
+        [6, 6],
+        [8, 8],
+      ],
+    ]);
+    // The union is one point or a list of them, decided at the value.
+    expect(value(ce, ['Add', 'c', 'P'], INPUTS).out).toEqual([
+      [6, 6],
+      [8, 8],
+    ]);
+    expect(
+      value(ce, ['Add', 'c', 'P'], {
+        ...INPUTS,
+        c: [
+          [5, 6],
+          [7, 8],
+        ],
+      }).out
+    ).toEqual([
+      [
+        [6, 6],
+        [8, 8],
+      ],
+      [
+        [8, 8],
+        [10, 10],
+      ],
+    ]);
+    // A list of LISTS of points descends level by level, and the point keeps
+    // its identity at every level.
+    ce.declare('M', 'list<list<tuple<number, number>>>');
+    expect(
+      value(ce, ['Add', 'M', 'P'], {
+        ...INPUTS,
+        M: [
+          [
+            [1, 2],
+            [3, 4],
+          ],
+        ],
+        P: [10, 20],
+      }).out
+    ).toEqual([
+      [
+        [
+          [11, 11],
+          [22, 22],
+        ],
+        [
+          [13, 13],
+          [24, 24],
+        ],
+      ],
+    ]);
+    // Zero points are the empty list, not one point with no coordinates.
+    const none = value(ce, ['Add', 'LP', 'P'], { ...INPUTS, LP: [] });
+    expect(none.code).toBe(
+      "_IA.bcastPoint((_tv1, _tv2) => _IA.add(_tv1, _tv2), 'qp', _.LP, _.P)"
+    );
+    expect(none.out).toEqual([]);
+    // Lists of different lengths have no value.
+    const absent = compile(ce.box(['Multiply', 'V', 'LP']), {
+      to: 'interval-js',
+      fallback: false,
+    }).run!(INPUTS) as { lo: number };
+    expect(Number.isNaN(absent.lo)).toBe(true);
+    // The coordinates of the result are read back as a list.
+    expect(value(ce, ['PointX', ['Add', 'LP', 'P']], INPUTS).out).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+  });
+
+  test('the run-time kinds: one point, a point or a list of points, a number', () => {
+    const add = (a: unknown, b: unknown) =>
+      IntervalArithmetic.add(a as never, b as never);
+    // `'p'` is exactly one point and is never inspected: a coordinate that is
+    // itself an array (the value of a `broadcastable<number>` coordinate) is
+    // zipped like any nested array, and the point is not read as a list.
+    expect(
+      bands(
+        IntervalArithmetic.bcastPoint(add, 'pp', [[1, 2], pt(5)], [pt(1), pt(2)])
+      )
+    ).toEqual([
+      [
+        [2, 2],
+        [3, 3],
+      ],
+      [7, 7],
+    ]);
+    // `'q'` is decided at the value; an empty list beside a non-empty one has
+    // no value.
+    const absent = IntervalArithmetic.bcastPoint(add, 'qq', [], [[1, 2]]) as {
+      lo: number;
+    };
+    expect(Number.isNaN(absent.lo)).toBe(true);
+  });
+
+  test('the heads that are not point arithmetic keep the gate', () => {
+    const ce = pointEngine();
+    // The elementary functions: the 2026-09-15 decision "a point is consumed
+    // whole, never mapped over" stands for them.
+    declines(ce, ['Sin', 'P'], /Sin: cannot compile/);
+    declines(ce, ['Power', 'P', 2], /Power: cannot compile/);
+    // `Abs` of a point is its norm, not a coordinate-wise absolute value.
+    declines(ce, ['Abs', 'P']);
+    // A point whose coordinate is proved not to be a number is no operand.
+    ce.declare('S', 'tuple<string, number>');
+    declines(ce, ['Negate', 'S']);
+  });
+
+  test('a point-valued helper with a DECLARED return type', () => {
+    const ce = pointEngine();
+    // A document host declares every function before assigning it, so the
+    // call of a point-valued helper inlines to its body under a return-type
+    // ascription, `Typed((p, q), 'tuple<number, number>')`. The ascription is
+    // transparent: the point under it is spelled as the array of its
+    // coordinates wherever a point is consumed.
+    ce.declare('U', { signature: '(any, any) -> tuple<number, number>' });
+    ce.assign('U', ce.parse('(p, q) \\mapsto (p, q)'));
+    ce.parse('l(V) := \\sqrt{V.x^2 + V.y^2}').evaluate();
+    for (const [latex, want] of [
+      ['\\operatorname{PointY}(U(x, y))', 0.2],
+      ['l(U(x, y))', Math.hypot(0.3, 0.2)],
+      ['l(U(x, y) - (1, 2))', Math.hypot(0.7, 1.8)],
+    ] as const) {
+      const r = compile(ce.parse(latex), {
+        to: 'interval-js',
+        fallback: false,
+      });
+      expect(r.success).toBe(true);
+      expectEncloses(bands(r.run!({ x: pt(0.3), y: pt(0.2) })), want);
+    }
+    // A CONTRADICTED scalar declaration is not read through: its list body
+    // keeps declining (the 2026-08-22 decision).
+    ce.declare('g', '(number) -> number');
+    ce.assign(
+      'g',
+      ce.box(['Function', ['List', 't', ['Multiply', 2, 't']], 't'])
+    );
+    declines(ce, ['g', 'u'], /List/);
+  });
+
+  test('a helper chain that rotates, translates and measures a point', () => {
+    const ce = pointEngine();
+    // The shape of the Tycho census documents `hpr2q4kles` and `mqm2eamst1`:
+    // helpers that build points with arithmetic and read them back by
+    // coordinate, under a scalar root.
+    for (const d of [
+      'U(x, y) := (x, y)',
+      'C(D, d) := (\\frac{D-d}{2}, 0)',
+      'r(V, a) := V.x\\cdot(\\cos(a), \\sin(a)) + V.y\\cdot(-\\sin(a), \\cos(a))',
+      'l(V) := \\sqrt{V.x^2 + V.y^2}',
+      'K(a) := \\frac{(a.x, -a.y)}{a.x^2 + a.y^2}',
+      'M(a, b) := (a.x\\cdot b.x - a.y\\cdot b.y, a.x\\cdot b.y + a.y\\cdot b.x)',
+    ])
+      ce.parse(d).evaluate();
+    for (const latex of [
+      'l(r(U(x, y), 0.7) - C(3, 1))',
+      'l(M(U(1, 2), K(U(x, y)))) - 1',
+    ]) {
+      const e = ce.parse(latex);
+      const r = compile(e, { to: 'interval-js', fallback: false });
+      expect(r.success).toBe(true);
+      const want = e.subs({ x: 0.3, y: 0.2 }).N().re;
+      expect(Number.isFinite(want)).toBe(true);
+      expectEncloses(bands(r.run!({ x: pt(0.3), y: pt(0.2) })), want);
+    }
   });
 });

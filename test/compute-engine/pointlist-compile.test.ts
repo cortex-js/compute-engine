@@ -103,15 +103,18 @@ describe('PointList compile — interval-js parity', () => {
     expect(pointList.code).toBe(tuple.code);
   });
 
-  it('a scalar Tuple and PointList both fail closed in an OPERAND position', () => {
-    // The array spelling is confined to the root: the scalar kernels read
-    // `.lo`/`.hi` off whatever they are handed.
+  it('a scalar Tuple and PointList are the same point in an OPERAND position', () => {
+    // The scalar kernels read `.lo`/`.hi` off whatever they are handed, so a
+    // point never reaches one: point ARITHMETIC lowers through the
+    // element-wise broadcast, which hands the kernel one coordinate at a
+    // time.
     const tuple = iv.compile(ce.box(['Multiply', ['Tuple', 'x', 'y'], 2]));
     const pointList = iv.compile(
       ce.box(['Multiply', ['PointList', 'x', 'y'], 2])
     );
-    expect(tuple.success).toBe(false);
-    expect(pointList.success).toBe(false);
+    expect(tuple.success).toBe(true);
+    expect(pointList.success).toBe(true);
+    expect(pointList.code).toBe(tuple.code);
   });
 });
 

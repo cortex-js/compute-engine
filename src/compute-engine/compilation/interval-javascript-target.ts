@@ -19,7 +19,11 @@
  * spelling exists: at the ROOT it compiles to the array of its coordinate
  * intervals (`literalRootPointOps`). The array spelling of a LITERAL
  * `List`/`Tuple` is emitted only in those positions, never as an ordinary
- * lowering: see `compileIntervalCollectionOperand` for why.
+ * lowering: see `compileIntervalCollectionOperand` for why. Point ARITHMETIC
+ * (point ± point, scalar × point, point / scalar) is the one kernel position
+ * a point operand compiles in: it lowers through the element-wise broadcast,
+ * which hands the kernel one coordinate at a time (`tryIntervalBroadcast`,
+ * `_IA.bcastPoint`).
  *
  * @module compilation/interval-javascript-target
  */
@@ -367,6 +371,22 @@ function compileIntervalCollectionValue(
   // around the value; the body ROOT is that value.
   if (literal.operator === 'Block' && literal.ops.length === 1)
     return compileIntervalCollectionValue(literal.ops[0], target);
+  // `Typed(value, type)` is a transparent ascription: the call of a helper
+  // DECLARED with a return type (`U: (any, any) -> tuple<number, number>`,
+  // how a document host registers every function) inlines to its body under
+  // one, and a point-valued body is then `Typed((p, q), …)`. It is read
+  // through only when the ascribed type is itself a point or a collection: a
+  // CONTRADICTED scalar declaration (`-> number` over a list body) keeps
+  // declining, in this position as in every other.
+  if (literal.operator === 'Typed' && literal.ops.length >= 1) {
+    const ascribed = compilationType(literal);
+    const collectionTyped =
+      (typeof ascribed !== 'string' && ascribed.kind === 'tuple') ||
+      literal.type.matches('collection<any>');
+    return collectionTyped
+      ? compileIntervalCollectionValue(literal.ops[0], target)
+      : undefined;
+  }
   const head = literal.operator;
   if (!COLLECTION_VALUE_HEADS.has(head)) return undefined;
   if (target.unrollSkipHeads?.has(head) === true) return undefined;
@@ -610,8 +630,13 @@ function compileIntervalPointComponent(
           `target's value is a numeric interval. Fail closed (D6).`
       );
   }
+  // A literal point that `literalPointOps` does not fold — a `PointList`
+  // whose coordinates are untyped symbols, substituted for a helper's
+  // parameter — is spelled as the array of its coordinates
+  // (`compileIntervalCollectionOperand`); there is no free-standing
+  // `PointList` lowering to compile it through.
   if (typeof t !== 'string' && t.kind === 'tuple')
-    return `_IA.component(${compile(arg)}, ${k})`;
+    return `_IA.component(${compileIntervalCollectionOperand(arg, compile, target)}, ${k})`;
   // The type PROVES a list of points, so the reading is stated to the helper
   // (its fourth argument): a point whose other coordinates are not numbers
   // (`list<tuple<string, number>>`) would otherwise fail the helper's own
@@ -925,6 +950,30 @@ function guardedIntervalFunction(
  * type does not spell out. Every other operand must be provably a number,
  * since it is reused at every position.
  *
+ * A POINT-VALUED operand is admitted for the arithmetic heads
+ * (`INTERVAL_POINT_ARITHMETIC_HEADS`): a point is the array of its coordinate
+ * intervals, and the interpreter's point arithmetic is coordinate-wise —
+ * point ± point, scalar × point, point / scalar, the negation of a point. The
+ * shapes the interpreter refuses (point × point, point + scalar, a division
+ * BY a point) are errors at canonicalization and never arrive here. Every
+ * other head keeps the scalar gate over a point: `Abs` and `Hypot` read a
+ * point WHOLE (its norm), and the 2026-09-15 decision "a point is consumed
+ * whole, never mapped over" stands for the elementary functions.
+ *
+ * The run-time value cannot tell a point from a list of two numbers, and the
+ * two do not broadcast alike: the interpreter answers one point per element
+ * of a list beside a point (`[1, 2]·(10, 20)` is `[(10, 20), (20, 40)]`), so
+ * a plain zip is wrong there. With a point-valued operand present the
+ * lowering is therefore `_IA.bcastPoint`, which is told the kind of every
+ * argument: `'p'`, exactly one point; `'q'`, a point or a list of points,
+ * decided at the value (an array of arrays is a list of points); `'s'`,
+ * number-valued (an array is a list of numbers).
+ * "Point-valued" covers a list of points and a point-or-point-list union too
+ * (`isIntervalPointValuedOperand`): a document host that declares a helper's
+ * point parameter loosely types `V.y·(−sin a, cos a)` as
+ * `list<tuple<number, number>>` although the value is one point, and the
+ * run-time helper reads both.
+ *
  * The closure body is the head's OWN scalar handler applied to the closure's
  * parameters — fresh symbols the inner target resolves to their names — so
  * every kernel convention (the rational-divisor rewrite of `Multiply`, the
@@ -952,17 +1001,42 @@ function tryIntervalBroadcast(
   target: CompileTarget<Expression>
 ): string | undefined {
   if (args.length === 0) return undefined;
-  const lists = args.map(
-    (a) => isProvablyNumericListOperand(a) || isPossiblyNumericListOperand(a)
+  const points = args.map(
+    (a) =>
+      INTERVAL_POINT_ARITHMETIC_HEADS.has(id) &&
+      isIntervalPointValuedOperand(a, target)
   );
-  if (!lists.some((x) => x)) return undefined;
+  const lists = args.map(
+    (a, i) =>
+      !points[i] &&
+      (isProvablyNumericListOperand(a) || isPossiblyNumericListOperand(a))
+  );
+  const hasPoint = points.some((x) => x);
+  if (!hasPoint && !lists.some((x) => x)) return undefined;
+  // The operand shapes the interpreter defines over points. A precise type
+  // makes every other shape an error at canonicalization, but a union operand
+  // (a point-or-point-list parameter beside the literal `1`) type-checks
+  // through its list arm, and lowering it would answer a value where the
+  // interpreter answers `incompatible-type`.
+  if (hasPoint) {
+    const count = points.filter((x) => x).length;
+    const shapeOk =
+      id === 'Add' || id === 'Subtract'
+        ? count === args.length
+        : id === 'Multiply'
+          ? count === 1
+          : id === 'Divide'
+            ? count === 1 && points[0]
+            : id === 'Negate';
+    if (!shapeOk) return undefined;
+  }
   const engine = args[0].engine;
   if (!intervalBroadcastHead(id, engine)) return undefined;
-  if (!args.every((a, i) => lists[i] || a.type.matches('number')))
+  if (!args.every((a, i) => points[i] || lists[i] || a.type.matches('number')))
     return undefined;
   // A number literal stays in the closure body (see above); every other
   // operand becomes a closure parameter and a broadcast argument.
-  const literal = args.map((a, i) => !lists[i] && isNumber(a));
+  const literal = args.map((a, i) => !points[i] && !lists[i] && isNumber(a));
   const params = args.map((a, i) =>
     literal[i] ? undefined : BaseCompiler.tempVar(target)
   );
@@ -984,12 +1058,111 @@ function tryIntervalBroadcast(
     (expr) => BaseCompiler.compileValueOperand(expr, inner),
     inner
   );
-  const sources = args.flatMap((a, i) => {
-    if (literal[i]) return [];
-    if (lists[i]) return [compileIntervalCollectionValue(a, target) ?? compile(a)];
-    return [compile(a)];
+  const source = (a: Expression, i: number): string =>
+    lists[i] || points[i]
+      ? (compileIntervalCollectionValue(a, target) ?? compile(a))
+      : compile(a);
+  const kept = args.flatMap((_, i) => (literal[i] ? [] : [i]));
+  const sources = kept.map((i) => source(args[i], i)).join(', ');
+  if (!hasPoint) return `_IA.bcast((${names.join(', ')}) => ${body}, ${sources})`;
+  // `'p'`: the type or the literal proves exactly one point. `'q'`: a list
+  // of points or a point-or-point-list union, which the helper decides at
+  // the value. `'s'`: a number or a list of numbers.
+  const kinds = kept
+    .map((i) =>
+      !points[i] ? 's' : isIntervalPointOperand(args[i], target) ? 'p' : 'q'
+    )
+    .join('');
+  return `_IA.bcastPoint((${names.join(', ')}) => ${body}, '${kinds}', ${sources})`;
+}
+
+/**
+ * The heads whose element-wise lowering admits a POINT operand
+ * (`tryIntervalBroadcast` says why only these): the arithmetic the
+ * interpreter defines coordinate-wise over points. `Subtract` is listed for
+ * completeness; the canonical form is `Add` of a `Negate`.
+ */
+const INTERVAL_POINT_ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+]);
+
+/**
+ * Is `e` a single POINT whose coordinates have an interval reading — so that
+ * its run-time value is the array of its coordinate intervals?
+ *
+ * Two shapes qualify. A LITERAL point — a `Tuple`, an all-scalar `PointList`,
+ * or a symbol assigned one — with no broadcasting component (a list
+ * coordinate makes it a list of points) and coordinates that each have an
+ * interval reading (`hasIntervalReading`). And an operand whose STATIC TYPE
+ * is a parameterized tuple whose components are each a number, a
+ * `broadcastable<number>` (the component type of a point a helper builds
+ * from the coordinates of a wide parameter,
+ * `C_mul(a, b) := (a.x·b.x − a.y·b.y, …)`), or `unknown` (the component type
+ * of `U(x, y) := (x, y)` over untyped parameters, which every scalar position
+ * of this target already reads as an interval). A component proved to be
+ * anything else — text, a boolean, a nested point — has no interval reading,
+ * and the operand keeps the scalar gate.
+ */
+function isIntervalPointOperand(
+  e: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  const ops = literalPointOps(e, target);
+  if (ops !== undefined) {
+    const literal = assignedLiteral(e, target) ?? e;
+    return (
+      ops.length > 0 &&
+      !pointHasBroadcastComponent(literal) &&
+      ops.every((op) => hasIntervalReading(op) && !op.isCollection)
+    );
+  }
+  return isIntervalPointType(compilationType(e));
+}
+
+/** Is `t` a parameterized tuple whose components each have an interval
+ *  reading: a number, a `broadcastable<number>`, or `unknown`? See
+ *  `isIntervalPointOperand` for why those three. */
+function isIntervalPointType(t: Type): boolean {
+  if (typeof t === 'string' || t.kind !== 'tuple' || t.elements.length === 0)
+    return false;
+  return t.elements.every(({ type }) => {
+    if (type === 'unknown') return true;
+    if (typeof type !== 'string' && type.kind === 'broadcastable')
+      return isSubtype(type.elements, 'number');
+    return isSubtype(type, 'number');
   });
-  return `_IA.bcast((${names.join(', ')}) => ${body}, ${sources.join(', ')})`;
+}
+
+/**
+ * Is `e` POINT-VALUED: a single point (`isIntervalPointOperand`), a list of
+ * points, or a union of the two — by its static type, an indexed collection
+ * whose elements are points with an interval reading
+ * (`list<tuple<number, number>>`), or a union whose every arm is such a point
+ * or such a list? The run-time `_IA.bcastPoint` tells one point from a list of
+ * points by the value, so the three are one class for the arithmetic heads.
+ * An arm that states no coordinates (a bare `tuple`, a `collection<any>`)
+ * proves nothing and keeps the scalar gate.
+ */
+function isIntervalPointValuedOperand(
+  e: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (isIntervalPointOperand(e, target)) return true;
+  if (isProvablyStringOperand(e)) return false;
+  const pointValued = (t: Type): boolean => {
+    if (typeof t === 'string') return false;
+    if (t.kind === 'union')
+      return t.types.length > 0 && t.types.every((arm) => pointValued(arm));
+    if (t.kind === 'tuple') return isIntervalPointType(t);
+    if (!isSubtype(t, 'indexed_collection<any>')) return false;
+    const element = collectionElementType(t);
+    return element !== undefined && pointValued(element);
+  };
+  return pointValued(compilationType(e));
 }
 
 /**

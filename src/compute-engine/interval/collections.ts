@@ -370,6 +370,73 @@ function bcastWith(
 }
 
 /**
+ * Element-wise application of a scalar kernel over operands of which some are
+ * POINTS — the interval counterpart of the interpreter's point arithmetic
+ * (point ± point, scalar × point, point / scalar, the negation of a point,
+ * each coordinate-wise), and of its rule for a list beside a point: one point
+ * per element of the list.
+ *
+ * `kinds` has one letter per argument, stated by the compiler from the static
+ * types, because the run-time value cannot tell a point from a list of two
+ * numbers:
+ *
+ * - `'p'`, an argument that is exactly ONE point: the array of its
+ *   coordinates, never inspected further (a coordinate may itself be an
+ *   array, the value of a `broadcastable<number>` coordinate, and is then
+ *   zipped like any nested array);
+ * - `'q'`, an argument that is a point OR a list of points (a
+ *   `list<tuple<…>>`, a point-or-point-list union): an array whose first
+ *   element is an array is a LIST of points, an empty array is the list of
+ *   zero points, and any other array is one point. A single point whose first
+ *   coordinate is an array reads as a list here; the compiler states `'q'`
+ *   only where the type does not prove one point;
+ * - `'s'`, a number-valued argument: an array is a LIST of numbers, anything
+ *   else is one number.
+ *
+ * With no list among the arguments, the result is one point: `bcast` over the
+ * arguments, which zips the coordinates of the points and reuses a number at
+ * every coordinate. Otherwise every list must have one length `n`, and the
+ * result is the list of `n` values obtained by taking element `i` of every
+ * list and the whole of every other argument, and applying this same rule to
+ * them — so a list of lists of points descends level by level and the point
+ * keeps its identity at every level. `[1, 2]·(10, 20)` is
+ * `[(10, 20), (20, 40)]`, which a plain zip of the two arrays would read as
+ * the single point `(10, 40)`. Lists of different lengths have no value (the
+ * interpreter's `incompatible-dimensions` error) and answer the absence
+ * marker; zero points are the empty list, as the interpreter answers for
+ * `[]·(10, 20)`.
+ */
+export function bcastPoint(
+  f: (...operands: unknown[]) => unknown,
+  kinds: string,
+  ...args: unknown[]
+): unknown {
+  const isList = args.map((a, i) => {
+    if (!Array.isArray(a) || kinds[i] === 'p') return false;
+    if (kinds[i] === 'q') return a.length === 0 || Array.isArray(a[0]);
+    return true;
+  });
+  let n = -1;
+  for (let i = 0; i < args.length; i++) {
+    if (!isList[i]) continue;
+    const length = (args[i] as unknown[]).length;
+    if (n < 0) n = length;
+    else if (length !== n) return absent();
+  }
+  if (n < 0) return bcast(f, ...args);
+  const out: unknown[] = new Array(n);
+  for (let i = 0; i < n; i++)
+    out[i] = bcastPoint(
+      f,
+      kinds,
+      ...args.map((a, j) =>
+        isList[j] ? elementOperand((a as unknown[])[i]) : a
+      )
+    );
+  return out;
+}
+
+/**
  * `Map(f, collection)` at run time: the array of `f` applied to each element
  * (a raw number element is lifted to a point interval first). A non-array
  * operand is not a collection at run time and answers the numeric absence

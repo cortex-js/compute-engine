@@ -2,6 +2,31 @@
 
 ### Epsil
 
+- **The VS Code extension navigates and renames type names, and renames a
+  parameter together with its named-argument labels.** A use of a declared
+  type sits inside type text (`let p: point`, `(point) -> list<point>`, another
+  type's declaration, a protocol member's signature, a `where` constraint),
+  which the parser keeps as an opaque string, so Go to Definition on an
+  annotation found nothing, Find All References on a `type` listed only the
+  declaration, and renaming a type was refused. The occurrence resolver
+  (`src/epsil/occurrences.ts`) now lexes the source of that text and records
+  each use of a type this file declares. Types and values stay separate
+  namespaces (`(point: point) => point` has one use of the type), and field
+  labels, sum-type variant names, type variables and builtin type names are
+  not uses. A label such as the `a` of `g(a: 2)` is now an occurrence of the
+  parameter it names when the callee is bound to exactly one function literal,
+  so renaming the parameter rewrites the label too and Go to Definition on a
+  label reaches the parameter. Both renames still fail closed: a type is
+  refused while some spelling of its name resolves to no binding, and a
+  parameter is refused while a label of that name belongs to a callee whose
+  parameters are not certain (several clauses, a reassigned name, a library
+  or undeclared function). A parameter rename also rewrites the name its
+  declaration's signature annotation spells
+  (`const f: (a: number) -> number = (a) => a`), which the parser requires to
+  agree with the literal's. The new name of a type must be a plain identifier
+  that the type grammar does not reserve, that is not a builtin type, and
+  that no generic parameter in the file already spells.
+
 - **`epsil check` reports a call whose argument cannot satisfy the parameter
   annotation of a function literal bound with `let`, `const` or `:=`.**
   `let k = (n: integer) => n + 1` followed by `k(1.5)` produced no static
@@ -144,6 +169,37 @@
   that declined at the accessor, none compiles yet: 14 now reach a `PointList`
   with a broadcasting component (a list of points built in a body, which no
   lowering of this target spells), 2 an `Add` over a matrix. Pinned in
+  `test/compute-engine/compile-interval-collections.test.ts`.
+
+- **The interval target compiles point arithmetic.** A helper chain that
+  builds points with arithmetic and reads them back by coordinate —
+  `r(V, a) := V.x·(cos a, sin a) + V.y·(−sin a, cos a)`, `r(M, −a) − C(D, d)`,
+  `(a.x, −a.y) / (a.x² + a.y²)` — declined at "`PointList`: no lowering",
+  because a point in the operand position of a kernel had none. A point is the
+  array of its coordinate intervals, and the interpreter's arithmetic over
+  points is coordinate-wise (point ± point, scalar × point, point / scalar,
+  the negation of a point), so `Add`, `Subtract`, `Negate`, `Multiply` and
+  `Divide` over a point-valued operand now lower through the run-time
+  `_IA.bcastPoint`, which hands the kernel one coordinate at a time. The
+  helper is told which arguments are point-valued, because the value cannot
+  tell a point from a list of two numbers and the two broadcast differently:
+  the interpreter answers one point per element of a list beside a point
+  (`[1, 2]·(10, 20)` is `[(10, 20), (20, 40)]`), and a list of points plus a
+  point adds the point to every element. "Point-valued" covers a declared
+  tuple, a literal point, a list of points and a point-or-point-list union —
+  a document host that declares a helper's point parameter loosely types
+  `V.y·(−sin a, cos a)` as a list of points although the value is one point.
+  The operand shapes the interpreter refuses (point + number, point × point,
+  a division by a point) keep declining, as do `Abs` (the norm of a point)
+  and the elementary functions over a declared point. Two positions that
+  swallowed a point were opened with it: a point-valued helper DECLARED with a
+  return type inlines to its body under a `Typed` ascription, which is now
+  read through where a point is consumed (a contradicted scalar declaration
+  still declines), and a literal `PointList` of untyped coordinates under a
+  coordinate accessor is spelled as the array of its coordinates. On 17 Tycho
+  census documents, 30 interval-lane rows go from a decline to a compile, with
+  no regression and no change on the other lanes; each new row encloses the
+  JavaScript lane's value at sample points. Pinned in
   `test/compute-engine/compile-interval-collections.test.ts`.
 
 ## 0.130.0 _2026-09-17_

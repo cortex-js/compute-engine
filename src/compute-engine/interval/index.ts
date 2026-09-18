@@ -134,6 +134,7 @@ import {
   pointComponent as _pointComponent,
   bcast as _bcast,
   bcastFn as _bcastFn,
+  bcastPoint as _bcastPoint,
   map as _map,
   range as _range,
 } from './collections.js';
@@ -280,6 +281,7 @@ export {
   pointComponent,
   bcast,
   bcastFn,
+  bcastPoint,
   map,
   range,
 } from './collections.js';
@@ -362,6 +364,7 @@ export const IntervalArithmetic = {
   pointComponent: _pointComponent,
   bcast: _bcast,
   bcastFn: _bcastFn,
+  bcastPoint: _bcastPoint,
   map: _map,
   range: _range,
 

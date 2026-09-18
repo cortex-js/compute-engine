@@ -1,5 +1,11 @@
 import type { MathJsonExpression } from '../math-json/types.js';
-import { operand, operands, operator, symbol } from '../math-json/utils.js';
+import {
+  operand,
+  operands,
+  operator,
+  stringValue,
+  symbol,
+} from '../math-json/utils.js';
 import { tokenize } from './lexer.js';
 
 //
@@ -77,6 +83,19 @@ type Scope = {
   parent: Scope | undefined;
 };
 
+/**
+ * A stretch of source text that is written in the TYPE grammar, recorded
+ * during the walk and resolved after it (see `resolveTypeRegions`). The raw
+ * AST holds a type as an opaque STRING (`let p: point` carries
+ * `{"str": "point"}`), so the uses of a declared type name inside it are
+ * found by lexing the source text the string was read from.
+ *
+ * `sum` marks the right-hand side of a sum-type declaration
+ * (`type shape = circle(point) | square`), where the first name of each
+ * alternative is a VARIANT name, not a type.
+ */
+type TypeRegion = { span: [number, number]; scope: Scope; sum: boolean };
+
 /** Sort order for same-span duplicates: the strongest role survives dedup. */
 const ROLE_RANK: Record<OccurrenceRole, number> = {
   definition: 0,
@@ -102,12 +121,20 @@ const ROLE_RANK: Record<OccurrenceRole, number> = {
  * - `for` loops (`Loop` whose iterator operand is `Element`) bind the loop
  *   pattern in the loop's scope; `Match` arms bind their pattern variables
  *   (spelled `_name` by the parser, at the span of `name`) in the arm.
- * - `DeclareType` / `DeclareProtocol` bind a type-tier name. Their USES live
- *   inside type-annotation STRINGS, which this resolver deliberately does not
- *   enter — which is why the server refuses to rename a type: the definition
- *   is the only occurrence it could edit.
- * - Dictionary keys and named-argument labels are not symbol uses; neither
- *   is the wildcard `_`.
+ * - `DeclareType` / `DeclareProtocol` bind a type-tier name, visible in its
+ *   whole scope. Its USES live in type text — annotations, other type
+ *   declarations, protocol member signatures — which the raw AST holds as
+ *   opaque strings; they are found by lexing the source that text was read
+ *   from, after the walk (`resolveTypeRegions`). A name inside type text
+ *   resolves to a TYPE binding only: `(point: point) => point` has one use
+ *   of the type, its annotation. The converse does not hold — a nominal
+ *   type's constructor function shares the type's name and its group, so a
+ *   constructor call `point(1, 2)` is an occurrence of the type.
+ * - A named-argument label (`g(a: 2)`) is an occurrence of the parameter it
+ *   names when the callee is bound to exactly one function literal
+ *   (`resolveLabels`); any other label is left out, and reported by
+ *   {@link unresolvedLabels}.
+ * - Dictionary keys are not symbol uses; neither is the wildcard `_`.
  */
 export function documentBindings(
   ast: MathJsonExpression | null,
@@ -133,6 +160,20 @@ export function documentBindings(
 ): BindingGroup[] {
   const groups: BindingGroup[] = [];
   const freeGroups = new Map<string, BindingGroup>();
+  const typeRegions: TypeRegion[] = [];
+  // Named-argument labels (`f(x: 3)`), resolved after the walk — see
+  // `resolveLabels`. `parametersOf` holds, per function LITERAL node, the
+  // bindings of its parameters; `literalsOf` holds, per binding, the
+  // literals the document gives it (a `function` definition's clauses, the
+  // literal a `let` or an assignment binds).
+  const parametersOf = new Map<MathJsonExpression, Map<string, BindingGroup>>();
+  const literalsOf = new Map<BindingGroup, MathJsonExpression[]>();
+  const labels: {
+    callee: string;
+    name: string;
+    span: [number, number];
+    scope: Scope;
+  }[] = [];
   const root: Scope = {
     span: [0, text.length],
     bindings: new Map(),
@@ -170,6 +211,15 @@ export function documentBindings(
       (tokens[0].type === 'SYMBOL' || tokens[0].type === 'VERBATIM_SYMBOL') &&
       (tokens[0].value ?? tokens[0].text) === name
     );
+  }
+
+  /** Record the source text of a type STRING node (an annotation, a type
+   * declaration's right-hand side) for `resolveTypeRegions`. A node that is
+   * not a string, or that carries no span, records nothing. */
+  function typeText(node: MathJsonExpression | null, scope: Scope): void {
+    if (node === null || stringValue(node) === null) return;
+    const span = spanOf(node);
+    if (span !== undefined) typeRegions.push({ span, scope, sum: false });
   }
 
   function childScope(
@@ -250,7 +300,8 @@ export function documentBindings(
 
   /**
    * Bind a declaration-position pattern into `scope`: a plain name, a
-   * `Typed(name, "type")` annotation (the type is a string, not entered), or
+   * `Typed(name, "type")` annotation (the type string is recorded as type
+   * text, see `resolveTypeRegions`), or
    * a `Tuple` destructuring of either, nested. Anything else in target
    * position (it happens on recovered parses) is walked as ordinary uses.
    */
@@ -281,6 +332,7 @@ export function documentBindings(
     }
     if (head === 'Typed') {
       bindPattern(operand(node, 1), scope, kind, declaration, visibleFrom);
+      typeText(operand(node, 2), scope);
       return;
     }
     if (head === 'Tuple') {
@@ -307,6 +359,7 @@ export function documentBindings(
     if (head !== '') {
       if (head === 'Typed') {
         bindMatchPattern(operand(node, 1), scope);
+        typeText(operand(node, 2), scope);
         return;
       }
       for (const op of operands(node)) bindMatchPattern(op, scope);
@@ -391,9 +444,50 @@ export function documentBindings(
     statements: readonly (MathJsonExpression | null)[],
     scope: Scope
   ): void {
+    // Type-tier names first. A nominal type and its constructor function
+    // share one name, and so one group (`ensureBinding` joins a same-scope
+    // name); the group's kind is the FIRST binder's. Binding the type first
+    // makes that group a `type` whatever the statement order, which is what
+    // lets the uses inside type text join it — a `function` group would be
+    // passed over by `resolveTypeRegions`, and a rename would leave every
+    // annotation behind.
+    for (const statement of statements) {
+      if (statement === null) continue;
+      const head = operator(statement);
+      if (
+        head === 'DeclareType' ||
+        head === 'DeclareSumType' ||
+        head === 'DeclareProtocol'
+      )
+        bindTypeName(statement, scope, false);
+    }
     for (const statement of statements)
       if (statement !== null && operator(statement) === 'DefineFunction')
         bindFunctionName(statement, scope, false);
+  }
+
+  /** Bind the name a `type` or `protocol` statement declares into `scope`,
+   * visible scope-wide. */
+  function bindTypeName(
+    node: MathJsonExpression,
+    scope: Scope,
+    withOccurrence: boolean
+  ): void {
+    const written = writtenSymbol(operand(node, 1));
+    if (written === undefined) return;
+    const group = ensureBinding(
+      scope,
+      written.name,
+      'type',
+      spanOf(node) ?? written.span,
+      scope.span[0]
+    );
+    if (withOccurrence)
+      group.occurrences.push({
+        start: written.span[0],
+        end: written.span[1],
+        role: 'definition',
+      });
   }
 
   /** A function literal: parameters bind in the function's own scope; the
@@ -404,7 +498,90 @@ export function documentBindings(
     const ops = [...operands(node)];
     for (let i = 1; i < ops.length; i++)
       bindPattern(ops[i], scope, 'parameter', undefined, scope.span[0]);
+    // Copied before the body is walked: a body that is not a block can
+    // declare into this scope, and those names are not parameters.
+    parametersOf.set(node, new Map(scope.bindings));
     walk(ops[0] ?? null, scope);
+  }
+
+  /** Note that the document binds the function literal `literal` to `name`
+   * (as visible at `offset`), for `resolveLabels`. */
+  function bindsLiteral(
+    name: MathJsonExpression | null,
+    literal: MathJsonExpression | null,
+    scope: Scope,
+    offset: number
+  ): void {
+    const written = writtenSymbol(name);
+    if (written === undefined || literal === null) return;
+    if (operator(literal) !== 'Function') return;
+    const group = visibleBinding(scope, written.name, offset);
+    if (group === undefined) return;
+    const literals = literalsOf.get(group);
+    if (literals === undefined) literalsOf.set(group, [literal]);
+    else literals.push(literal);
+  }
+
+  /**
+   * The parameter names a declaration's SIGNATURE annotation spells are
+   * occurrences of the initializer's parameters:
+   * `const f: (a: number) -> number = (a) => a` names `a` twice, the parser
+   * requires the two spellings to agree (`parameter-name-mismatch`), and a
+   * rename that rewrote only the literal's would break the declaration. The
+   * names are the labels of the annotation's FIRST parameter list, at its
+   * own depth — a label deeper in (`(f: (a: number) -> number) -> …`) names
+   * a parameter of a callback type, not of this literal.
+   */
+  function signatureParameterNames(
+    annotation: MathJsonExpression | null,
+    literal: MathJsonExpression | null
+  ): void {
+    if (annotation === null || stringValue(annotation) === null) return;
+    const parameters = literal === null ? undefined : parametersOf.get(literal);
+    const span = spanOf(annotation);
+    if (parameters === undefined || span === undefined) return;
+    const tokens = tokenize(text.slice(span[0], span[1])).filter(
+      (t) => t.type !== 'EOF'
+    );
+    let depth = 0;
+    let listSeen = false;
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const token = tokens[i];
+      if (token.type === 'OPEN_PAREN') {
+        depth += 1;
+        if (depth === 1 && listSeen) return;
+        listSeen = true;
+      } else if (token.type === 'CLOSE_PAREN') {
+        depth -= 1;
+        if (depth === 0) return;
+      } else if (
+        depth === 1 &&
+        (token.type === 'SYMBOL' || token.type === 'VERBATIM_SYMBOL') &&
+        tokens[i + 1].type === 'OPERATOR' &&
+        tokens[i + 1].text === ':'
+      )
+        parameters.get(token.value ?? token.text)?.occurrences.push({
+          start: span[0] + token.start,
+          end: span[0] + token.end,
+          role: 'read',
+        });
+    }
+  }
+
+  /** The initializer of a `let`/`const`: the parser puts it in the trailing
+   * attributes dictionary, under the key `value`. */
+  function initializerOf(node: MathJsonExpression): MathJsonExpression | null {
+    const ops = [...operands(node)];
+    const attributes = ops[ops.length - 1] ?? null;
+    if (attributes === null || operator(attributes) !== 'Dictionary')
+      return null;
+    for (const entry of operands(attributes))
+      if (
+        operator(entry) === 'KeyValuePair' &&
+        symbol(operand(entry, 1) ?? 'Nothing') === 'value'
+      )
+        return operand(entry, 2);
+    return null;
   }
 
   function walk(node: MathJsonExpression | null, scope: Scope): void {
@@ -429,7 +606,13 @@ export function documentBindings(
       case 'Declare': {
         // The initializer first: `let x = x + 1` reads the OUTER `x`.
         const ops = [...operands(node)];
-        for (let i = 1; i < ops.length; i++) walk(ops[i], scope);
+        for (let i = 1; i < ops.length; i++) {
+          // A direct STRING operand is the type annotation: the parser puts
+          // the initializer — a string literal included — inside the
+          // trailing attributes dictionary, never here.
+          typeText(ops[i], scope);
+          walk(ops[i], scope);
+        }
         const statementSpan = spanOf(node);
         bindPattern(
           ops[0] ?? null,
@@ -438,21 +621,63 @@ export function documentBindings(
           statementSpan,
           statementSpan?.[1] ?? scope.span[0]
         );
+        bindsLiteral(
+          ops[0] ?? null,
+          initializerOf(node),
+          scope,
+          statementSpan?.[1] ?? scope.span[0]
+        );
+        for (let i = 1; i < ops.length; i++)
+          signatureParameterNames(ops[i], initializerOf(node));
         return;
       }
 
       case 'Assign': {
         const ops = [...operands(node)];
         for (let i = 1; i < ops.length; i++) walk(ops[i], scope);
-        assignTarget(ops[0] ?? null, scope, spanOf(node));
+        const statementSpan = spanOf(node);
+        assignTarget(ops[0] ?? null, scope, statementSpan);
+        bindsLiteral(
+          ops[0] ?? null,
+          ops[1] ?? null,
+          scope,
+          statementSpan?.[1] ?? scope.span[0]
+        );
         return;
       }
 
       case 'DefineFunction': {
         bindFunctionName(node, scope, true);
         const fn = operand(node, 2);
+        // The header — everything between the function's name and its body
+        // — is written in the type grammar wherever it is not a parameter
+        // name: parameter annotations, the result type, a generic clause
+        // (`<T>`) and a `where T is Comparable` constraint, which no string
+        // node of the AST spans. Parameter names are told apart in
+        // `resolveTypeRegions`.
+        const nameSpan = spanOf(operand(node, 1));
+        const bodySpan =
+          fn !== null && operator(fn) === 'Function'
+            ? spanOf(operand(fn, 1))
+            : undefined;
+        if (
+          nameSpan !== undefined &&
+          bodySpan !== undefined &&
+          nameSpan[1] < bodySpan[0]
+        )
+          typeRegions.push({
+            span: [nameSpan[1], bodySpan[0]],
+            scope,
+            sum: false,
+          });
         if (fn !== null && operator(fn) === 'Function') walkFunction(fn, scope);
         else walk(fn, scope);
+        bindsLiteral(
+          operand(node, 1),
+          fn,
+          scope,
+          nameSpan?.[0] ?? scope.span[0]
+        );
         // The attributes operand (doc comment, …) holds no written symbols,
         // but walking it is harmless: dictionary keys are skipped below and
         // its values are strings.
@@ -505,22 +730,51 @@ export function documentBindings(
       case 'DeclareType':
       case 'DeclareSumType':
       case 'DeclareProtocol': {
-        // The declared name is a symbol; every USE of it lives inside type
-        // strings (annotations, member signatures) that this resolver does
-        // not enter — so the remaining operands are not walked.
-        const written = writtenSymbol(operand(node, 1));
-        if (written !== undefined)
-          ensureBinding(
-            scope,
-            written.name,
-            'type',
-            spanOf(node) ?? written.span,
-            scope.span[0]
-          ).occurrences.push({
-            start: written.span[0],
-            end: written.span[1],
-            role: 'definition',
-          });
+        // The declared name is a symbol; every USE of a type name lives
+        // inside type text — annotations, the declaration's own right-hand
+        // side, member signatures — resolved by `resolveTypeRegions`. The
+        // remaining operands hold no written symbols and are not walked.
+        bindTypeName(node, scope, true);
+        const statementSpan = spanOf(node);
+        const declaredName = spanOf(operand(node, 1));
+        if (head !== 'DeclareProtocol') {
+          // The region runs from the end of the declared name to the end of
+          // the statement, so that it takes in a generic clause
+          // (`type box<T> = tuple<T, T>`) as well as the right-hand side. A
+          // sum type's variant payload strings borrow the whole statement's
+          // span, so its region cannot be built from them anyway.
+          if (
+            statementSpan !== undefined &&
+            declaredName !== undefined &&
+            declaredName[1] < statementSpan[1]
+          )
+            typeRegions.push({
+              span: [declaredName[1], statementSpan[1]],
+              scope,
+              sum: head === 'DeclareSumType',
+            });
+        } else
+          // A protocol's members: `name: Pair("function", "⟨signature⟩")`.
+          for (const member of operands(operand(node, 2) ?? 'Nothing'))
+            if (operator(member) === 'KeyValuePair')
+              typeText(operand(operand(member, 2), 2), scope);
+        return;
+      }
+
+      case 'DeclareConformance': {
+        // `type point is Comparable { … }`: the conforming type is a type
+        // STRING; the protocols are symbols and the implementations are
+        // function literals, walked as usual.
+        typeText(operand(node, 1), scope);
+        const ops = [...operands(node)];
+        for (let i = 1; i < ops.length; i++) walk(ops[i], scope);
+        return;
+      }
+
+      case 'TypeFrom': {
+        // The type operand of a type test (`v is point`, a typed `match`
+        // pattern).
+        typeText(operand(node, 1), scope);
         return;
       }
 
@@ -534,9 +788,10 @@ export function documentBindings(
       }
 
       case 'Typed': {
-        // The annotation (operand 2) is a STRING naming a type; only the
-        // annotated expression is walked.
+        // The annotation (operand 2) is a STRING naming a type: the
+        // annotated expression is walked, the annotation is type text.
         walk(operand(node, 1), scope);
+        typeText(operand(node, 2), scope);
         return;
       }
 
@@ -547,8 +802,21 @@ export function documentBindings(
         // there. Structural heads (`Add` for `x + y`, `If` for `if …`) never
         // spell their span's start and contribute nothing. A head can also
         // be an EXPRESSION (`(f)(x)`), which is walked like any operand.
-        if (typeof head === 'string') useHead(node, head, scope);
-        else walk(head as MathJsonExpression, scope);
+        if (typeof head === 'string') {
+          useHead(node, head, scope);
+          for (const op of operands(node)) {
+            if (operator(op) !== 'NamedArgument') continue;
+            const label = operand(op, 1);
+            const name = label === null ? null : stringValue(label);
+            const labelSpan = spanOf(label);
+            if (
+              name !== null &&
+              labelSpan !== undefined &&
+              spelled(name, labelSpan)
+            )
+              labels.push({ callee: head, name, span: labelSpan, scope });
+          }
+        } else walk(head as MathJsonExpression, scope);
         // A binder call (`integrate(x^2, x)`) binds its variables for the
         // whole call, in a scope of its own — but only when the callee is not
         // a name this program binds: a user function that happens to share
@@ -642,6 +910,7 @@ export function documentBindings(
     }
     if (head === 'Typed') {
       assignTarget(operand(target, 1), scope, statementSpan);
+      typeText(operand(target, 2), scope);
       return;
     }
     const written = writtenSymbol(target);
@@ -675,6 +944,208 @@ export function documentBindings(
     return undefined;
   }
 
+  /**
+   * Record the uses of declared type names inside the type text collected
+   * during the walk. Each region's SOURCE text is lexed with the language's
+   * own lexer — the type grammar shares its tokens — and a name token is a
+   * use of a type when:
+   *
+   * - it is not a LABEL: a name followed by `:` names a tuple field, a
+   *   record key or a signature parameter (`tuple<x: number>`,
+   *   `(self: Self) -> …`, the `p` of a typed pattern `p: point`);
+   * - in a sum-type declaration, it is not a VARIANT name: the first name of
+   *   each `|` alternative, outside any bracket;
+   * - its span is not already a symbol occurrence (a function header region
+   *   contains the parameter names, which the walk bound);
+   * - it is not a TYPE VARIABLE of the region: a region that opens with a
+   *   generic clause (`<T>(xs: list<T>) -> T`, `<T> = tuple<T, T>`) declares
+   *   the names in the clause, and a declared type that happens to share one
+   *   of them is a different thing;
+   * - it resolves to a `type` binding of this document. Types and values
+   *   are separate namespaces, so a same-named VALUE binding on the way out
+   *   (the parameter of `(point: point) => …`) does not end the search. A
+   *   builtin type name (`number`, `list`) and the words `where` and `is`
+   *   resolve to none and are left alone — they never become free groups,
+   *   since nothing in this file could be renamed with them.
+   *
+   * Runs after the walk so that every binding exists and every symbol
+   * occurrence is known.
+   */
+  function resolveTypeRegions(): void {
+    /** How a token changes the bracket depth of type text: `()`, `[]`, `{}`
+     * and the angle brackets of a type application all nest. The lexer may
+     * glue a closing angle bracket to what follows it (`>>`, `>^`, `>?`), so
+     * the angle brackets are counted inside the operator's text — except in
+     * the arrows `->` and `=>`, whose `>` is not a bracket. */
+    const nesting = (token: { type: string; text: string }): number => {
+      switch (token.type) {
+        case 'OPEN_PAREN':
+        case 'OPEN_BRACKET':
+        case 'OPEN_BRACE':
+          return 1;
+        case 'CLOSE_PAREN':
+        case 'CLOSE_BRACKET':
+        case 'CLOSE_BRACE':
+          return -1;
+        case 'OPERATOR': {
+          if (token.text === '->' || token.text === '=>') return 0;
+          let delta = 0;
+          for (const c of token.text)
+            if (c === '<') delta += 1;
+            else if (c === '>') delta -= 1;
+          return delta;
+        }
+        default:
+          return 0;
+      }
+    };
+
+    const occupied = new Set<number>();
+    for (const group of groups)
+      for (const o of group.occurrences) occupied.add(o.start);
+
+    for (const region of typeRegions) {
+      const [from, to] = region.span;
+      if (from < 0 || to > text.length || from >= to) continue;
+      const tokens = tokenize(text.slice(from, to)).filter(
+        (t) => t.type !== 'EOF'
+      );
+      // The region's type variables. A leading generic clause declares the
+      // name that OPENS each of its comma-separated entries
+      // (`<T: point, U>` declares `T` and `U`; the bound `point` is a use of
+      // a type); a `where` clause declares the name each of its constraints
+      // opens with (`where T is Located, U is Comparable`), which is the
+      // only place a function written without a generic clause declares
+      // them. Brackets nest, so the `>` that ends the clause is the one that
+      // returns to depth zero, not the first one (`<T: list<point>, U>`).
+      const typeVariables = new Set<string>();
+      const isName = (t: (typeof tokens)[number] | undefined): boolean =>
+        t?.type === 'SYMBOL' || t?.type === 'VERBATIM_SYMBOL';
+      if (tokens[0]?.type === 'OPERATOR' && tokens[0].text === '<') {
+        let clauseDepth = 0;
+        for (let i = 0; i < tokens.length; i++) {
+          const before = clauseDepth;
+          clauseDepth += nesting(tokens[i]);
+          if (i > 0 && clauseDepth <= 0) break;
+          const opensEntry =
+            i > 0 &&
+            before === 1 &&
+            (i === 1 || tokens[i - 1].type === 'COMMA') &&
+            isName(tokens[i]);
+          if (opensEntry) typeVariables.add(tokens[i].value ?? tokens[i].text);
+        }
+      }
+      const where = tokens.findIndex(
+        (t) => t.type === 'SYMBOL' && t.text === 'where'
+      );
+      if (where >= 0)
+        for (let i = where; i < tokens.length - 1; i++)
+          if (
+            (i === where || tokens[i].type === 'COMMA') &&
+            isName(tokens[i + 1])
+          )
+            typeVariables.add(tokens[i + 1].value ?? tokens[i + 1].text);
+      // In a sum declaration the first name after the `=` is the first
+      // alternative's variant name.
+      let started = !region.sum;
+      let variantNext = region.sum;
+      let depth = 0;
+      tokens.forEach((token, i) => {
+        depth += nesting(token);
+        if (token.type === 'OPERATOR') {
+          if (!started) started = token.text === '=';
+          else if (region.sum && depth === 0 && token.text === '|')
+            variantNext = true;
+          return;
+        }
+        if (token.type !== 'SYMBOL' && token.type !== 'VERBATIM_SYMBOL') return;
+        if (!started) return;
+        if (variantNext && depth === 0) {
+          variantNext = false;
+          return;
+        }
+        const next = tokens[i + 1];
+        if (next?.type === 'OPERATOR' && next.text === ':') return;
+        const start = from + token.start;
+        if (occupied.has(start)) return;
+        const name = token.value ?? token.text;
+        if (typeVariables.has(name)) return;
+        for (
+          let s: Scope | undefined = region.scope;
+          s !== undefined;
+          s = s.parent
+        ) {
+          const binding = s.bindings.get(name);
+          if (binding === undefined || binding.kind !== 'type') continue;
+          binding.occurrences.push({
+            start,
+            end: from + token.end,
+            role: 'read',
+          });
+          occupied.add(start);
+          break;
+        }
+      });
+    }
+  }
+
+  /**
+   * Record each named-argument label as an occurrence of the parameter it
+   * names, so that renaming the parameter rewrites the label with it:
+   * `g(a: 2)` binds by the parameter's NAME, and a rename that left the label
+   * behind would break the call.
+   *
+   * A label is resolved only when what it names is certain: the callee is a
+   * name this document binds, to exactly ONE function literal, and never
+   * writes again — a `function` definition with a single clause, or a
+   * `let`/`const`/first assignment of a literal. A multi-clause definition
+   * has one parameter list per clause and a reassigned name may hold another
+   * function by the time of the call, so their labels stay unresolved, as
+   * do the labels of a library or undeclared callee. The language server
+   * refuses to rename a parameter while an unresolved label spells its
+   * name (`unresolvedLabels`).
+   *
+   * Runs after the walk: a call may precede the definition of its callee.
+   */
+  function resolveLabels(): void {
+    const candidates = new Map<number, readonly BindingGroup[] | 'any'>();
+    for (const label of labels) {
+      const callee = visibleBinding(label.scope, label.callee, label.span[0]);
+      // A callee this document does not bind (a library or undeclared
+      // function) has no parameter here for the label to name.
+      if (callee === undefined) {
+        candidates.set(label.span[0], []);
+        continue;
+      }
+      const literals = literalsOf.get(callee) ?? [];
+      const bindingWrites = callee.occurrences.filter(
+        (o) => o.role !== 'read'
+      ).length;
+      const named = literals.flatMap((literal) => {
+        const parameter = parametersOf.get(literal)?.get(label.name);
+        return parameter === undefined ? [] : [parameter];
+      });
+      if (literals.length === 1 && bindingWrites === 1) {
+        if (named.length === 1)
+          named[0].occurrences.push({
+            start: label.span[0],
+            end: label.span[1],
+            role: 'read',
+          });
+        else candidates.set(label.span[0], []);
+        continue;
+      }
+      // Several literals: the label names a parameter of one of them. A
+      // binding with a write that is not a literal (an alias `f = h`, a
+      // parameter that receives a function) may hold any function.
+      candidates.set(
+        label.span[0],
+        literals.length > 0 && bindingWrites === literals.length ? named : 'any'
+      );
+    }
+    LABEL_CANDIDATES.set(groups, candidates);
+  }
+
   if (ast !== null) {
     if (operator(ast) === 'Block') {
       const statements = [...operands(ast)];
@@ -684,6 +1155,8 @@ export function documentBindings(
       hoistFunctions([ast], root);
       walk(ast, root);
     }
+    resolveLabels();
+    resolveTypeRegions();
   }
 
   for (const group of groups) {
@@ -745,4 +1218,71 @@ export function isNameVisibleAt(
       offset >= group.scope[0] &&
       offset < group.scope[1]
   );
+}
+
+/** For the groups array a {@link documentBindings} call returned: per
+ * unresolved label (keyed by its start offset), the parameters it could
+ * name. Read by {@link unresolvedLabels}. */
+const LABEL_CANDIDATES = new WeakMap<
+  readonly BindingGroup[],
+  Map<number, readonly BindingGroup[] | 'any'>
+>();
+
+/** A named-argument label that was not resolved to one parameter, with the
+ * parameters it COULD name: those of the same spelling among the callee's
+ * function literals, or `'any'` when the callee may hold a function this
+ * analysis cannot see (an alias, a parameter, a callee that is not a plain
+ * name). An empty list means the label names no parameter of this document
+ * (a library or undeclared callee). */
+export type UnresolvedLabel = {
+  name: string;
+  start: number;
+  end: number;
+  candidates: readonly BindingGroup[] | 'any';
+};
+
+/**
+ * The named-argument labels in `ast` (`f(x: 3)` has one, at `x`) that
+ * {@link documentBindings} — which must have produced `groups` — did NOT
+ * resolve to a parameter. A rename of a parameter must be refused while one
+ * of them could name it: the label would not be rewritten. The AST is walked
+ * here, independently of the resolver, so that a label the resolver never
+ * saw is still reported — as one that could name any parameter.
+ */
+export function unresolvedLabels(
+  ast: MathJsonExpression | null,
+  groups: readonly BindingGroup[]
+): UnresolvedLabel[] {
+  const resolved = new Set<number>();
+  for (const group of groups)
+    if (group.kind === 'parameter')
+      for (const o of group.occurrences) resolved.add(o.start);
+  const candidates = LABEL_CANDIDATES.get(groups);
+
+  const result: UnresolvedLabel[] = [];
+  const visit = (node: MathJsonExpression | null): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (operator(node) === 'NamedArgument') {
+      const label = operand(node, 1);
+      const name = label === null ? null : stringValue(label);
+      const span =
+        label !== null && typeof label === 'object' && !Array.isArray(label)
+          ? (label as { sourceOffsets?: [number, number] }).sourceOffsets
+          : undefined;
+      if (name !== null && (span === undefined || !resolved.has(span[0])))
+        result.push({
+          name,
+          start: span?.[0] ?? -1,
+          end: span?.[1] ?? -1,
+          candidates:
+            (span === undefined ? undefined : candidates?.get(span[0])) ??
+            'any',
+        });
+    }
+    const head = operator(node);
+    if (typeof head === 'object') visit(head as MathJsonExpression);
+    for (const op of operands(node)) visit(op);
+  };
+  visit(ast);
+  return result;
 }

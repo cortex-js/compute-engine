@@ -38,13 +38,10 @@ import {
 import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
 import { ComputeEngine } from '../../src/epsil.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
-import {
-  operand,
-  operator,
-  operands,
-  stringValue,
-  symbol,
-} from '../../src/math-json/utils.js';
+import { operator, operands, symbol } from '../../src/math-json/utils.js';
+import { parseType } from '../../src/common/type/parse.js';
+import { isValidTypeName } from '../../src/common/type/utils.js';
+import { isReservedTypeName } from '../../src/common/type/instantiate.js';
 import {
   definitionSitesByOffset,
   type DefinitionSite,
@@ -53,6 +50,7 @@ import {
   documentBindings,
   isNameVisibleAt,
   occurrenceAt,
+  unresolvedLabels,
   type BindingGroup,
   type Occurrence,
 } from '../../src/epsil/occurrences.js';
@@ -994,29 +992,6 @@ connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInforma
 //
 // ─── Rename ─────────────────────────────────────────────────────────────────
 
-/**
- * Every name used as a named-argument label anywhere in the document
- * (`f(x: 3)`). A label names the callee's PARAMETER; which callee a call
- * reaches is not resolved statically here, so a parameter whose name appears
- * as ANY label is refused a rename rather than renamed incompletely — a
- * left-behind label would change which parameter the argument binds to.
- */
-function namedArgumentLabels(text: string): Set<string> {
-  const labels = new Set<string>();
-  const visit = (node: MathJsonExpression | null): void => {
-    if (node === null || typeof node !== 'object') return;
-    if (operator(node) === 'NamedArgument') {
-      const label = stringValue(operand(node, 1));
-      if (label !== null) labels.add(label);
-    }
-    const head = operator(node);
-    if (typeof head === 'object') visit(head);
-    for (const op of operands(node)) visit(op);
-  };
-  visit(parseOf(text).ast);
-  return labels;
-}
-
 /** Names referenced by embedded LaTeX. Those MathJSON nodes lack individual
  * Epsil offsets, so rename cannot edit them; collecting their names lets an
  * unrelated rename proceed while a potentially incomplete one fails closed. */
@@ -1070,11 +1045,22 @@ function renameRefusal(group: BindingGroup, text: string): string | undefined {
       `Cannot rename \`${group.name}\`: it is referenced inside a LaTeX ` +
       'island, whose source spelling is not tracked by rename.'
     );
-  if (group.kind === 'type')
-    return (
-      'Cannot rename a type: uses of a type name inside type annotations ' +
-      'are not tracked, so they would not be renamed with it.'
-    );
+  if (group.kind === 'type') {
+    // The uses of a type name live in type TEXT (annotations, declarations,
+    // member signatures), which the resolver finds by lexing the source. A
+    // rename is safe only when that search accounted for every spelling of
+    // the name, so it is checked against the token stream: a name token the
+    // resolver gave to NO binding — a position in the type grammar it does
+    // not know, a sum-type variant spelled like the type — refuses the
+    // rename rather than leaving that spelling behind.
+    const stray = unaccountedSpelling(group.name, text);
+    if (stray !== undefined)
+      return (
+        `Cannot rename the type \`${group.name}\`: the use of that name on ` +
+        `line ${lineNumberAt(text, stray)} could not be resolved, so it might ` +
+        'not be renamed with it.'
+      );
+  }
   if (group.kind === 'free') {
     // An undeclared name CAN be renamed (all its free uses rename together),
     // but a library builtin cannot — its definition is not in this file.
@@ -1082,12 +1068,46 @@ function renameRefusal(group: BindingGroup, text: string): string | undefined {
     if (describeName(hoverEngine, group.name) !== undefined)
       return `Cannot rename \`${group.name}\`: it is defined by the library, not by this file.`;
   }
-  if (group.kind === 'parameter' && namedArgumentLabels(text).has(group.name))
+  // A named-argument label the resolver tied to its parameter is one of the
+  // group's occurrences and is renamed with it. A label it could NOT tie to
+  // one parameter records the parameters it could name (those of a
+  // multi-clause or reassigned callee's literals, or any parameter when the
+  // callee is an alias); the rename is refused when this parameter is among
+  // them. A label of a library or undeclared callee names nothing here.
+  if (
+    group.kind === 'parameter' &&
+    unresolvedLabels(parseOf(text).ast, bindingsOf(text)).some(
+      (label) =>
+        label.name === group.name &&
+        (label.candidates === 'any' || label.candidates.includes(group))
+    )
+  )
     return (
-      `Cannot rename the parameter \`${group.name}\`: a call site passes it ` +
-      `by name (\`${group.name}: …\`), and named-argument labels are not ` +
-      'tracked by rename yet.'
+      `Cannot rename the parameter \`${group.name}\`: a call site passes an ` +
+      `argument by that name (\`${group.name}: …\`) to a function whose ` +
+      'parameters could not be resolved, so the label might not be renamed ' +
+      'with it.'
     );
+  return undefined;
+}
+
+/** The offset of a token spelling `name` that no binding group owns, or
+ * `undefined` when every spelling is accounted for. A name followed by `:`
+ * is skipped: it is a label — a tuple field, a record key, a named argument
+ * — and never a use of a type. */
+function unaccountedSpelling(name: string, text: string): number | undefined {
+  const owned = new Set<number>();
+  for (const group of bindingsOf(text))
+    for (const o of group.occurrences) owned.add(o.start);
+  const tokens = tokensOf(text);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.type !== 'SYMBOL' && token.type !== 'VERBATIM_SYMBOL') continue;
+    if ((token.value ?? token.text) !== name || owned.has(token.start)) continue;
+    const next = tokens[i + 1];
+    if (next?.type === 'OPERATOR' && next.text === ':') continue;
+    return token.start;
+  }
   return undefined;
 }
 
@@ -1166,6 +1186,39 @@ connection.onRenameRequest(({ textDocument, position, newName }): WorkspaceEdit 
       `\`${cooked}\` is a reserved word. The verbatim form \`\`${cooked}\`\` can spell it.`
     );
   if (cooked === at.group.name) return null;
+
+  // A TYPE name obeys the type grammar, which is narrower than the symbol
+  // grammar: a plain ASCII identifier, not one of the words the grammar
+  // reserves (`where`, `Self`), and not the name of a builtin type — the
+  // declaration would be refused when the program runs. It must also not be
+  // spelled already by a name no binding owns — a generic parameter
+  // (`function f<T>(x: Point)` would become `x: T`), or a builtin type name
+  // in an annotation — since the renamed uses would be captured by it, and
+  // the capture check below only knows the names that have a binding group.
+  if (at.group.kind === 'type') {
+    const refuseType = (why: string): never => {
+      throw new ResponseError(
+        LSPErrorCodes.RequestFailed,
+        `\`${spelling}\` cannot name a type: ${why}.`
+      );
+    };
+    if (token.type !== 'SYMBOL' || !isValidTypeName(cooked))
+      refuseType('a type name is a plain identifier (letters, digits and `_`)');
+    if (isReservedTypeName(cooked))
+      refuseType('the type grammar reserves that word');
+    let builtin = true;
+    try {
+      parseType(cooked);
+    } catch {
+      builtin = false;
+    }
+    if (builtin) refuseType('it is the name of a builtin type');
+    if (unaccountedSpelling(cooked, at.text) !== undefined)
+      refuseType(
+        'this file already uses that name as a type parameter or a type, ' +
+          'and the renamed uses would refer to it'
+      );
+  }
 
   // Renaming a FREE name to a library name would silently rebind every use
   // to the library's meaning (`x` → `Pi` turns `x + 1` into π + 1). A BOUND

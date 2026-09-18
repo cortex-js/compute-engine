@@ -3,6 +3,7 @@ import {
   documentBindings,
   isNameVisibleAt,
   occurrenceAt,
+  unresolvedLabels,
   type BindingGroup,
 } from '../../src/epsil/occurrences';
 
@@ -30,6 +31,13 @@ function at(source: string, needle: string, n = 0): number {
     if (offset < 0) throw new Error(`"${needle}" #${n} not in source`);
   }
   return offset;
+}
+
+/** A group's occurrences as `spelling@offset`, in source order. */
+function spans(source: string, group: BindingGroup): string[] {
+  return group.occurrences.map(
+    (o) => `${source.slice(o.start, o.end)}@${o.start}`
+  );
 }
 
 /** The group owning the occurrence at `offset`, which must exist. */
@@ -251,7 +259,9 @@ describe('EPSIL OCCURRENCES — spelling guard and special forms', () => {
     const groups = groupsOf(src);
     const res = groupAt(groups, at(src, 'res'));
     expect(res.kind).toBe('type');
-    expect(res.occurrences).toHaveLength(1);
+    // The declaration, and the recursive use inside the `ok` payload. The
+    // variant names `ok` and `err` and the field label `v` are not uses.
+    expect(spans(src, res)).toEqual(['res@5', 'res@17']);
   });
 
   test('a multi-clause declaration span covers every clause', () => {
@@ -263,15 +273,260 @@ describe('EPSIL OCCURRENCES — spelling guard and special forms', () => {
     expect(fib.declaration).toEqual([0, at(src, 'fib(9)') - 1]);
   });
 
-  test('a type declaration is a type-kind group; its string uses are not tracked', () => {
+  test('a type declaration is a type-kind group that owns its annotation uses', () => {
     const src = 'type Point = tuple<number, number>\nlet p: Point = (1, 2)';
     const groups = groupsOf(src);
     const point = groupAt(groups, at(src, 'Point'));
     expect(point.kind).toBe('type');
-    // The annotation `: Point` lives in a STRING — deliberately not an
-    // occurrence (which is why the server refuses to rename a type).
-    expect(point.occurrences).toHaveLength(1);
-    // And the annotation's `number`s never resolve as symbol uses either.
+    // The annotation `: Point` is a STRING in the raw AST; its use of the
+    // name is found by lexing the source text the string was read from.
+    expect(spans(src, point)).toEqual(['Point@5', 'Point@42']);
+    expect(groupAt(groups, at(src, 'Point', 1))).toBe(point);
+    // And the annotation's `number`s never resolve as symbol uses.
     expect(groups.some((g) => g.name === 'number')).toBe(false);
+  });
+});
+
+describe('EPSIL OCCURRENCES — type names inside type text', () => {
+  // A type is an opaque string in the raw AST, so a use of a declared type
+  // name is found by lexing the source the string was read from. What a
+  // rename needs is completeness: EVERY spelling of the name that denotes
+  // the type, and nothing else.
+
+  /** The offset of every word of `source` spelling `name` that the type
+   * group of that name does not own — what a rename of the type would
+   * leave behind. */
+  function leftBehind(source: string, name: string): number[] {
+    // A statement the parser rejects is dropped from the tree, and its uses
+    // with it: the census is meaningful only on a clean parse.
+    expect(parseEpsil(source)[1]).toEqual([]);
+    const groups = groupsOf(source);
+    const type = groups.find((g) => g.kind === 'type' && g.name === name);
+    const owned = new Set(type?.occurrences.map((o) => o.start));
+    const offsets: number[] = [];
+    for (const m of source.matchAll(new RegExp(`\\b${name}\\b`, 'g')))
+      if (!owned.has(m.index)) offsets.push(m.index);
+    return offsets;
+  }
+
+  test('annotations of declarations, parameters, results and literals', () => {
+    const src = [
+      'type point = tuple<number, number>',
+      'let p: point = (1, 2)',
+      'let q: list<list<point>> = []',
+      'const h : (point) -> point = (x) => x',
+      'f(a: point) -> point = a',
+      'function g(a: point, n: integer) -> list<point> { [a] }',
+      'let k = (b: point) => b',
+    ].join('\n');
+    expect(leftBehind(src, 'point')).toEqual([]);
+  });
+
+  test('other type declarations, a generic clause, and a type test', () => {
+    const src = [
+      'type point = tuple<number, number>',
+      'type alias pair = tuple<point, point>',
+      'type box<T> = tuple<T, T>',
+      'type shape = circle(point) | square(box<point>) | empty',
+      'if (v is point) { 1 } else { 2 }',
+    ].join('\n');
+    expect(leftBehind(src, 'point')).toEqual([]);
+    expect(leftBehind(src, 'box')).toEqual([]);
+  });
+
+  test('protocols: member signatures, conformances, a `where` constraint', () => {
+    const src = [
+      'type point = tuple<number, number>',
+      'protocol Located {',
+      '  readonly position: point',
+      '  function move(self: Self, to: point) -> Self',
+      '}',
+      'type point is Located {',
+      '  get position(self) { self }',
+      '  function move(self: point, to: point) -> point { to }',
+      '}',
+      'function nearest(xs: list<T>) -> T where T is Located { xs[1] }',
+    ].join('\n');
+    expect(leftBehind(src, 'point')).toEqual([]);
+    expect(leftBehind(src, 'Located')).toEqual([]);
+  });
+
+  test('a generic bound is a use; only the declared parameters are type variables', () => {
+    const src = [
+      'type point = integer',
+      'type U = integer',
+      'function f<T: point>(x: T, y: point) -> T { x }',
+      'function g<T: list<point>, U>(x: T, y: U) -> U { y }',
+    ].join('\n');
+    expect(leftBehind(src, 'point')).toEqual([]);
+    // `U` is a type variable of `g`, declared after a NESTED bound: the
+    // clause ends at the `>` that returns to depth zero, not the first one.
+    const groups = groupsOf(src);
+    expect(groupAt(groups, at(src, 'U')).occurrences).toHaveLength(1);
+  });
+
+  test('types and values are separate namespaces', () => {
+    // The parameter `point` and the type `point` are two bindings: the
+    // annotation belongs to the type, the body's use to the parameter.
+    const src =
+      'type point = tuple<number, number>\nlet g = (point: point) => point';
+    const groups = groupsOf(src);
+    const type = groupAt(groups, at(src, 'point'));
+    const parameter = groupAt(groups, at(src, 'point', 1));
+    expect(type.kind).toBe('type');
+    expect(spans(src, type)).toEqual(['point@5', 'point@51']);
+    expect(parameter.kind).toBe('parameter');
+    expect(spans(src, parameter)).toEqual(['point@44', 'point@61']);
+  });
+
+  test('a type and its constructor function are one group, in either order', () => {
+    // The constructor shares the type's name, so a rename must take the
+    // definition, the declaration, the annotation and the call together —
+    // also when the function is written above the type.
+    for (const src of [
+      'type point = tuple<number, number>\npoint(x: number) = (x, x)\nlet q: point = point(1)',
+      'point(x: number) = (x, x)\ntype point = tuple<number, number>\nlet q: point = point(1)',
+    ]) {
+      expect(parseEpsil(src)[1]).toEqual([]);
+      const groups = groupsOf(src);
+      const point = groupAt(groups, at(src, 'point'));
+      expect(point.kind).toBe('type');
+      expect(point.occurrences).toHaveLength(4);
+      expect(leftBehind(src, 'point')).toEqual([]);
+    }
+  });
+
+  test('a bare parameter spelled like a type is a parameter', () => {
+    const src =
+      'type point = tuple<number, number>\nfunction g(point, n: integer) -> point { point }';
+    const groups = groupsOf(src);
+    const type = groupAt(groups, at(src, 'point'));
+    expect(spans(src, type)).toEqual([
+      'point@5',
+      `point@${at(src, '-> point') + 3}`,
+    ]);
+    expect(groupAt(groups, at(src, 'point', 1)).kind).toBe('parameter');
+  });
+
+  test('labels, sum variants, type variables and builtin names are not uses', () => {
+    const src = [
+      'type T = integer',
+      'type box<T> = tuple<T, T>',
+      'function first<T>(xs: list<T>) -> T { xs[1] }',
+      'function last(xs: list<T>) -> T where T is Showable { xs[1] }',
+      'type point = tuple<point: number, y: number>',
+      'type shape = point(number) | other',
+      'let t: T = 1',
+    ].join('\n');
+    const groups = groupsOf(src);
+    // `T`: its declaration and the one annotation outside a generic clause.
+    expect(spans(src, groupAt(groups, at(src, 'T')))).toEqual([
+      'T@5',
+      `T@${src.lastIndexOf('T =')}`,
+    ]);
+    // `point`: the field label and the variant of the same spelling are not
+    // uses of the type.
+    const declared = at(src, 'type point') + 5;
+    expect(spans(src, groupAt(groups, declared))).toEqual([
+      `point@${declared}`,
+    ]);
+    // A builtin type name never becomes a group.
+    expect(groups.find((g) => g.name === 'integer')).toBeUndefined();
+    expect(groups.find((g) => g.name === 'number')).toBeUndefined();
+  });
+
+  test('a value named like a builtin type is not tied to annotations', () => {
+    const src = 'let number = 3\nlet x: number = number';
+    const groups = groupsOf(src);
+    expect(spans(src, groupAt(groups, at(src, 'number')))).toEqual([
+      'number@4',
+      'number@31',
+    ]);
+  });
+});
+
+describe('EPSIL OCCURRENCES — named-argument labels', () => {
+  // `g(a: 2)` binds by the parameter's NAME, so the label is an occurrence
+  // of the parameter — when the callee's parameters are certain.
+
+  test('a label names the parameter of a single-clause function', () => {
+    const src = 'g(a: 2)\ng(a) = a + 1';
+    const groups = groupsOf(src);
+    const a = groupAt(groups, at(src, 'a', 1));
+    expect(a.kind).toBe('parameter');
+    // The call precedes the definition: labels resolve after the walk.
+    expect(spans(src, a)).toEqual(['a@2', 'a@10', 'a@15']);
+    expect(unresolvedLabels(parseEpsil(src)[0], groups)).toEqual([]);
+  });
+
+  test('labels of a `function` statement and of a `let`-bound literal', () => {
+    const src = [
+      'function area(w: number, h: number) -> number { w * h }',
+      'area(h: 2, w: 3) + area(1, h: 4)',
+      'let f = (x: number) => x',
+      'f(x: 1)',
+    ].join('\n');
+    const groups = groupsOf(src);
+    expect(unresolvedLabels(parseEpsil(src)[0], groups)).toEqual([]);
+    // Definition, body use, and two labels.
+    expect(groupAt(groups, at(src, 'h: number')).occurrences).toHaveLength(4);
+    // Definition, body use, and one label.
+    expect(groupAt(groups, at(src, 'x: number')).occurrences).toHaveLength(3);
+  });
+
+  test('an uncertain callee leaves its labels unresolved, with the parameters they could name', () => {
+    const src = [
+      'g(a) = a + 1',
+      'g(a, b) = a * b',
+      'g(a: 2)', // two clauses: one parameter list per clause
+      'q(a) = a',
+      'h(a: 2)', // an undeclared callee
+      'let w = (z) => z(a: 1)', // the callee is a parameter
+      'let f = (x: number) => x',
+      'f = (x: number) => x + 1',
+      'f(x: 1)', // reassigned: the name may hold either literal
+    ].join('\n');
+    const groups = groupsOf(src);
+    const unresolved = unresolvedLabels(parseEpsil(src)[0], groups);
+    const owned = groups
+      .filter((g) => g.kind === 'parameter')
+      .flatMap((g) => g.occurrences.map((o) => o.start));
+    for (const label of unresolved) expect(owned).not.toContain(label.start);
+
+    const describe = (label: (typeof unresolved)[number]): string =>
+      label.candidates === 'any'
+        ? 'any'
+        : label.candidates.map((c) => c.occurrences[0].start).join(',');
+    expect(unresolved.map((l) => `${l.name}:${describe(l)}`)).toEqual([
+      // The `a` of either clause of `g` — but not `q`'s `a`.
+      `a:${at(src, 'a')},${at(src, 'g(a, b)') + 2}`,
+      // No parameter of this document.
+      'a:',
+      // Whatever function `z` receives.
+      'a:any',
+      // The `x` of either literal.
+      `x:${at(src, 'x: number')},${at(src, 'x: number', 1)}`,
+    ]);
+  });
+
+  test('the parameter names of a signature annotation join the parameter', () => {
+    // The parser requires the annotation's names and the literal's to
+    // agree, so a rename must take both.
+    const src = 'const f: (a: number) -> number = (a) => a\nf(a: 1)';
+    expect(parseEpsil(src)[1]).toEqual([]);
+    const groups = groupsOf(src);
+    const a = groupAt(groups, at(src, '(a) =>') + 1);
+    expect(spans(src, a)).toEqual(['a@10', 'a@34', 'a@40', 'a@44']);
+
+    // A label deeper in the annotation names a parameter of a CALLBACK type.
+    const nested =
+      'const c: (k: (a: number) -> number, a: integer) -> number = (k, a) => k(a)';
+    expect(parseEpsil(nested)[1]).toEqual([]);
+    const outer = groupAt(groupsOf(nested), at(nested, '(k, a)') + 4);
+    expect(spans(nested, outer)).toEqual([
+      `a@${at(nested, 'a: integer')}`,
+      `a@${at(nested, '(k, a)') + 4}`,
+      `a@${at(nested, 'k(a)') + 2}`,
+    ]);
   });
 });

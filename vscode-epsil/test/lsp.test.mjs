@@ -673,15 +673,6 @@ await scenario('rename refusals', undefined, async (c) => {
     ['type Point = tuple<number, number>', 'let z = Pi + 1', 'w = z'].join('\n')
   );
 
-  const type = await c.requestRaw('textDocument/prepareRename', {
-    textDocument: { uri: URI },
-    position: { line: 0, character: 5 },
-  });
-  check(
-    'a type cannot be renamed — its annotation uses live in strings',
-    type.error?.message.includes('Cannot rename a type') === true,
-    JSON.stringify(type)
-  );
 
   const library = await c.requestRaw('textDocument/prepareRename', {
     textDocument: { uri: URI },
@@ -785,15 +776,169 @@ await scenario('rename capture by the library and by labels', undefined, async (
     JSON.stringify(intoLibrary)
   );
 
+  // A label is renamed with its parameter when the callee's parameters are
+  // certain: a name bound to exactly one function literal.
   await c.open(URI, 'g(a) = a + 1\ng(a: 2)');
-  const labeled = await c.requestRaw('textDocument/prepareRename', {
+  const labeled = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 2 },
+    newName: 'n',
+  });
+  const labelEdits = labeled?.changes?.[URI];
+  check(
+    'renaming a parameter rewrites the named-argument label with it',
+    labelEdits?.length === 3 &&
+      labelEdits.every((e) => e.newText === 'n') &&
+      labelEdits.some(
+        (e) => e.range.start.line === 1 && e.range.start.character === 2
+      ),
+    JSON.stringify(labeled)
+  );
+
+  const fromLabel = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 2 },
+  });
+  check(
+    'go-to-definition on a label reaches the parameter',
+    fromLabel?.range.start.line === 0 && fromLabel.range.start.character === 2,
+    JSON.stringify(fromLabel)
+  );
+
+  // Two clauses have one parameter list each, so the label names no single
+  // parameter and the rename is refused rather than done by halves.
+  await c.open(URI, 'g(a) = a + 1\ng(a, b) = a * b\ng(a: 2)');
+  const ambiguous = await c.requestRaw('textDocument/prepareRename', {
     textDocument: { uri: URI },
     position: { line: 0, character: 2 },
   });
   check(
-    'a parameter passed by name at a call site refuses rename',
-    labeled.error?.message.includes('passes it by name') === true,
-    JSON.stringify(labeled)
+    'a label whose callee cannot be resolved refuses the parameter rename',
+    ambiguous.error?.message.includes('could not be resolved') === true,
+    JSON.stringify(ambiguous)
+  );
+});
+
+await scenario('rename and navigate a type', undefined, async (c) => {
+  await c.open(
+    URI,
+    [
+      'type Point = tuple<number, number>',
+      'let p: Point = (1, 2)',
+      'f(a: Point) -> list<Point> = [a]',
+    ].join('\n')
+  );
+
+  const definition = await c.request('textDocument/definition', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 8 },
+  });
+  check(
+    'go-to-definition on a type annotation reaches the type declaration',
+    definition?.range.start.line === 0 &&
+      definition.range.start.character === 5,
+    JSON.stringify(definition)
+  );
+
+  const references = await c.request('textDocument/references', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 5 },
+    context: { includeDeclaration: true },
+  });
+  check(
+    'references of a type list its declaration and every annotation use',
+    references?.length === 4,
+    JSON.stringify(references)
+  );
+
+  const rename = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 5 },
+    newName: 'Vec',
+  });
+  const edits = rename?.changes?.[URI];
+  check(
+    'renaming a type rewrites its annotation uses',
+    edits?.length === 4 &&
+      edits.every((e) => e.newText === 'Vec') &&
+      edits.filter((e) => e.range.start.line === 2).length === 2,
+    JSON.stringify(rename)
+  );
+
+  // The new name of a type obeys the type grammar, and must not be a name
+  // the renamed uses would be captured by.
+  for (const [newName, why] of [
+    ['Self', 'reserves'],
+    ['number', 'builtin'],
+    ['`my type`', 'plain identifier'],
+  ]) {
+    const refused = await c.requestRaw('textDocument/rename', {
+      textDocument: { uri: URI },
+      position: { line: 0, character: 5 },
+      newName,
+    });
+    check(
+      `a type cannot be renamed to ${newName}`,
+      refused.error?.message.includes(why) === true,
+      JSON.stringify(refused)
+    );
+  }
+
+  await c.open(
+    URI,
+    ['type Point = integer', 'function f<T>(x: Point, y: T) -> T { y }'].join('\n')
+  );
+  const captured = await c.requestRaw('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 5 },
+    newName: 'T',
+  });
+  check(
+    'a type cannot be renamed to a generic parameter that would capture its uses',
+    captured.error?.message.includes('type parameter') === true,
+    JSON.stringify(captured)
+  );
+
+  await c.open(URI, 'const f: (a: number) -> number = (a) => a\nf(a: 1)');
+  const annotated = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 34 },
+    newName: 'n',
+  });
+  check(
+    'renaming a parameter rewrites the name its signature annotation spells',
+    annotated?.changes?.[URI]?.length === 4 &&
+      annotated.changes[URI].some((e) => e.range.start.character === 10),
+    JSON.stringify(annotated)
+  );
+
+  // An unresolved label refuses only the parameters it could name.
+  await c.open(URI, 'g(a) = a + 1\ng(a, b) = a * b\ng(a: 2)\nq(a) = a');
+  const unrelated = await c.request('textDocument/rename', {
+    textDocument: { uri: URI },
+    position: { line: 3, character: 2 },
+    newName: 'n',
+  });
+  check(
+    'a label of another function does not refuse an unrelated parameter',
+    unrelated?.changes?.[URI]?.length === 2,
+    JSON.stringify(unrelated)
+  );
+
+  // A sum-type variant spelled like the type is a spelling the resolver
+  // gives to no binding, so the rename fails closed.
+  await c.open(
+    URI,
+    ['type Point = tuple<number, number>', 'type shape = Point(number) | other'].join('\n')
+  );
+  const stray = await c.requestRaw('textDocument/prepareRename', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 5 },
+  });
+  check(
+    'a spelling of the type name that resolves to nothing refuses the rename',
+    stray.error?.message.includes('could not be resolved') === true,
+    JSON.stringify(stray)
   );
 });
 
