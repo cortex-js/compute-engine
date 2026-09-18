@@ -51,6 +51,51 @@
   replicating Tycho's terrain document). Pinned in
   `test/compute-engine/at-non-integer-index.test.ts`.
 
+- **The interval target broadcasts a point-coordinate accessor over a list of
+  points.** `PointX`/`PointY`/`PointZ` over a declared list of points, a list
+  of numeric coordinate rows, or a point-or-point-list union (the parameter a
+  helper reads with `PointY(v)`, called with one point or a list of them)
+  declined with "the operand is not a single point". The interpreter and the
+  JavaScript target broadcast the coordinate over the list, and so does the
+  interval target now: the run-time `_IA.pointComponent` reads the coordinate
+  of every point of the array, decides a union at the value (an array of
+  coordinate cells is one point, an array of such arrays is a list of them),
+  answers the empty list for zero points, and answers one absence marker for
+  a third coordinate over two-component points, as the interpreter errors the
+  whole application there. The array of coordinates is a collection value
+  like a comprehension's, so it feeds an accessor (`Length`, `At`), a
+  reduction (`Sum`, `Max`), and the element-wise broadcast of a kernel
+  (`PointY(c) + x`, `sin(PointX(L))`); a coordinate the type proves is not a
+  number declines. With it, a value that is POSSIBLY a list of numbers —
+  a `list<number> | number` union (what the accessor over a union answers)
+  and a `broadcastable<number>` (a kernel over an operand of unsettled
+  collection-ness; the return type of a helper that reads a coordinate of a
+  wide parameter, `f(P) := a·P.x² + b·P.y²`) — is admitted by the element-wise
+  broadcast, the collection reductions, `Length` and `At`, which all dispatch
+  on the run-time value; a kernel handed such an operand directly (`U + 1`,
+  `Max(U)`, `f(L) + 1` over a list of points) had read the array as NaN
+  bounds behind `success: true`, and a kernel the broadcast does not admit
+  now fails closed on it — a relation over such a union too (`U < 3`
+  answered one `'maybe'` for an array), while a relation over a
+  `broadcastable<number>` helper result keeps its scalar lowering (the
+  implicit plot `P(x, y) < 0`). A number literal beside a broadcast operand
+  stays in the closure body, so the literal-dependent kernels are kept:
+  `w^(2/3)` over a broadcastable `w` lowers to `powRational`, which encloses
+  a negative base where the symbolic-exponent kernel answered `empty`. A
+  point-or-point-list union itself keeps the scalar gate: a point has no
+  interval reading. A helper reading a
+  coordinate of its parameter now compiles as a shared definition on this
+  target, called by reference with a point or a list of points (it used to
+  compile only inlined at a call whose argument was one literal point), and
+  a helper whose body is a single point (`U = (x, y)`, a `PointList` of
+  scalars) spells its body as the array of its coordinates, so
+  `PointY(U(x, y))` reads one back and `U(L, 1)` over a list maps the call.
+  On the 16 Tycho census rows that declined at the accessor, none compiles
+  yet: 14 now reach a `PointList` with a broadcasting component (a list of
+  points built in a body, which no lowering of this target spells), 2 an
+  `Add` over a matrix. Pinned in
+  `test/compute-engine/compile-interval-collections.test.ts`.
+
 ## 0.130.0 _2026-09-17_
 
 ### New Features

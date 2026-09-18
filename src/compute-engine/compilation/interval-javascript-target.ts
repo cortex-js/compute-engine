@@ -12,7 +12,9 @@
  * intervals (`IntervalValue`), and a collection may appear as the OPERAND of
  * an accessor — `At`, `Length`, `PointX`/`PointY`/`PointZ` — where it is the
  * same array at run time and the accessor projects it back down to a single
- * interval (see `interval/collections.ts`). A literal single point — a `Tuple`
+ * interval (see `interval/collections.ts`); a coordinate accessor over a LIST
+ * of points broadcasts instead and answers the array of the coordinates
+ * (`_IA.pointComponent`). A literal single point — a `Tuple`
  * of scalars, or an all-scalar `PointList` — is the third place an array
  * spelling exists: at the ROOT it compiles to the array of its coordinate
  * intervals (`literalRootPointOps`). The array spelling of a LITERAL
@@ -22,7 +24,10 @@
  * @module compilation/interval-javascript-target
  */
 
-import type { Expression } from '../global-types.js';
+import type {
+  Expression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entrySource } from './function-purity.js';
 import {
@@ -31,7 +36,11 @@ import {
   isFunction,
   isString,
 } from '../boxed-expression/type-guards.js';
-import { collectionElementType } from '../../common/type/utils.js';
+import {
+  collectionElementType,
+  stripMissingFromType,
+} from '../../common/type/utils.js';
+import type { Type } from '../../common/type/types.js';
 
 import {
   BaseCompiler,
@@ -47,8 +56,14 @@ import type { LoopInvariantBinding } from './base-compiler.js';
 import {
   couldBeIndexedCollectionOperand,
   couldBeStringOperand,
+  elementTypeBroadcastsWhenEmpty,
+  isCoordinateRowListOperand,
+  isEmptyCollectionOperand,
   isIndexedCollectionOperand,
   isNumericIndexOperand,
+  isPointListOperand,
+  mayBePointList,
+  tupleElementType,
 } from './javascript-target.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
@@ -80,7 +95,7 @@ import {
   INTERVAL_QUADRATURE_BUDGET,
   INTERVAL_QUADRATURE_SUBDIVISIONS,
 } from '../interval/integrate.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   callerSpliceSources,
   preservesMappedSplices,
@@ -278,13 +293,16 @@ function compileIntervalCollectionOperand(
 
 /**
  * The heads whose node is spelled as a run-time collection value by
- * `compileIntervalCollectionValue`. `Tuple` is among them for the accessor
- * operand position only (`At((1, 2), k)`); a tuple at the ROOT is a point
- * and takes `literalRootPointOps` first.
+ * `compileIntervalCollectionValue`. `Tuple` and `PointList` are among them
+ * for the positions that consume a point whole — the accessor operand
+ * position (`At((1, 2), k)`) and the body root of a point-valued helper
+ * (`U(x, y) := (x, y)`, read by `PointY(U(x, y))`); a point at the
+ * compilation ROOT takes `literalRootPointOps` first.
  */
 const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
   'List',
   'Tuple',
+  'PointList',
   'Range',
   'Map',
 ]);
@@ -365,13 +383,15 @@ function compileIntervalCollectionValue(
     if (!hasIntervalReading(x)) return undefined;
     return BaseCompiler.compileValueOperand(x, target);
   };
-  if (head === 'List' || head === 'Tuple') {
-    // A tuple is one point, and a point with a BROADCASTING component is
-    // not one point at all: `([1, 2], 3)` zips into the list of points
-    // `[(1, 3), (2, 3)]` in the interpreter, which a nested array `[[1, 2],
-    // 3]` does not spell. A list holds a list as an element, so only the
-    // tuple is held to scalar coordinates.
-    if (head === 'Tuple' && pointHasBroadcastComponent(literal))
+  if (head === 'List' || head === 'Tuple' || head === 'PointList') {
+    // A tuple is one point, and so is an all-scalar `PointList` (component
+    // k is operand k, the equivalence `literalPointOps` relies on). A point
+    // with a BROADCASTING component is not one point at all: `([1, 2], 3)`
+    // zips into the list of points `[(1, 3), (2, 3)]` in the interpreter,
+    // which a nested array `[[1, 2], 3]` does not spell. A list holds a
+    // list as an element, so only the point spellings are held to scalar
+    // coordinates.
+    if (head !== 'List' && pointHasBroadcastComponent(literal))
       return undefined;
     const elements: string[] = [];
     for (const op of literal.ops) {
@@ -505,20 +525,64 @@ function literalRootPointOps(
 const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
 
 /**
+ * The type of the coordinate `k` (0-based) that a point accessor reads out of
+ * an operand of type `t`, collected across the readings the type admits: the
+ * coordinate of a tuple, and the coordinate of a collection's tuple element
+ * (a list of points). A union contributes each arm's answer; the absence
+ * marker arm (`missing`) is not a point and contributes nothing. An arm whose
+ * coordinate the type does not state (a bare `tuple`, a `list<any>`, an
+ * unparameterized element) contributes nothing either.
+ */
+function pointCoordinateTypes(t: Type, k: number): Type[] {
+  const stripped = stripMissingFromType(t);
+  if (typeof stripped === 'string') return [];
+  if (stripped.kind === 'union')
+    return stripped.types.flatMap((arm) => pointCoordinateTypes(arm, k));
+  if (stripped.kind === 'tuple') {
+    const coord = tupleElementType(stripped, k);
+    return coord === undefined ? [] : [coord];
+  }
+  const element = collectionElementType(stripped);
+  if (element === undefined || typeof element === 'string') return [];
+  return pointCoordinateTypes(element, k);
+}
+
+/**
  * Compile a point coordinate accessor (`PointX`/`PointY`/`PointZ`), where `k`
  * is the 0-based coordinate.
  *
- * The operand must be a SINGLE point: a literal `Tuple` (whose coordinate is
- * selected at compile time) or an operand whose static type is a tuple. A LIST
- * of points is refused here: the interpreter and the JavaScript target
- * broadcast the coordinate over the list, and this target has no lowering
- * that projects one coordinate out of each element of a runtime array. A
- * collection-valued result is representable on this target (an array of
- * intervals, see `IntervalValue`), but only where a lowering builds it, such
- * as a comprehension root. A WIDE literal list of points never reaches this
- * function: the fixed-width unroll pass (`compilation/fixed-width-unroll.ts`)
- * rewrites the accessor over it into a literal list of scalar coordinates
- * before any target runs.
+ * The operand takes one of these lowerings, in this order:
+ *
+ * - a literal SINGLE point (a `Tuple`, an all-scalar `PointList`, or a symbol
+ *   assigned one): the coordinate is selected at compile time;
+ * - an operand whose static type is a tuple: `_IA.component` reads the
+ *   coordinate off the run-time array;
+ * - a LIST of points — a declared `list<tuple<…>>`, a list of numeric
+ *   coordinate rows, or a provably empty collection: the interpreter and the
+ *   JavaScript target broadcast the coordinate over the list, and so does this
+ *   target, with `_IA.pointComponent` reading the coordinate of every point of
+ *   the run-time array. The result is a collection value (an array of
+ *   intervals, `IntervalValue`), consumed the way a comprehension root or a
+ *   list-typed input is: by an accessor, a reducer, the element-wise broadcast
+ *   of a kernel (`tryIntervalBroadcast`), or the caller of `run` at the root;
+ * - an operand whose static type settles NEITHER reading — a
+ *   `tuple | list<tuple>` union (the parameter a helper reads with `PointX(v)`
+ *   and is called with one point or a list of them), an untyped operand:
+ *   `_IA.pointComponent` decides at the value, as the interpreter's
+ *   `pointComponentAt` does. An EMPTY array is the one value both readings
+ *   spell alike, so the declared element type's answer is carried into the
+ *   call (`elementTypeBroadcastsWhenEmpty`: broadcast, or element-index);
+ * - any other indexed collection (a `list<number>`, one point spelled flat):
+ *   `_IA.component` element-indexes it.
+ *
+ * A coordinate the static type proves is not a number (`PointX` over a
+ * `tuple<string, number>`, or a list of such points) has no interval reading,
+ * so the accessor declines rather than hand a text value to a kernel behind
+ * `success: true`.
+ *
+ * A WIDE literal list of points never reaches this function: the fixed-width
+ * unroll pass (`compilation/fixed-width-unroll.ts`) rewrites the accessor over
+ * it into a literal list of scalar coordinates before any target runs.
  */
 function compileIntervalPointComponent(
   name: string,
@@ -538,14 +602,34 @@ function compileIntervalPointComponent(
     return compile(coordinate);
   }
   const t = compilationType(arg);
-  if (typeof t === 'string' || t.kind !== 'tuple')
-    throw new Error(
-      `${name}: cannot compile — the operand is not a single point (its type ` +
-        `is \`${arg.type.toString()}\`, not a tuple). A list of points would ` +
-        `give one coordinate per element, and this target has no lowering ` +
-        `that projects a coordinate out of each element of a runtime array. ` +
-        `Fail closed (D6).`
-    );
+  for (const coord of pointCoordinateTypes(t, k)) {
+    if (!couldMatch(coord, 'number'))
+      throw new Error(
+        `${name}: cannot compile — the coordinate is not a number (the ` +
+          `operand's type is \`${arg.type.toString()}\`), and the interval ` +
+          `target's value is a numeric interval. Fail closed (D6).`
+      );
+  }
+  if (typeof t !== 'string' && t.kind === 'tuple')
+    return `_IA.component(${compile(arg)}, ${k})`;
+  // The type PROVES a list of points, so the reading is stated to the helper
+  // (its fourth argument): a point whose other coordinates are not numbers
+  // (`list<tuple<string, number>>`) would otherwise fail the helper's own
+  // row test, which requires every cell of the first point to be a number.
+  if (
+    isPointListOperand(arg) ||
+    isCoordinateRowListOperand(arg) ||
+    isEmptyCollectionOperand(arg)
+  )
+    return `_IA.pointComponent(${compileIntervalCollectionOperand(arg, compile, target)}, ${k}, true, true)`;
+  if (mayBePointList(t)) {
+    const emptyReading = elementTypeBroadcastsWhenEmpty(
+      collectionElementType(stripMissingFromType(t))
+    )
+      ? ''
+      : ', false';
+    return `_IA.pointComponent(${compileIntervalCollectionOperand(arg, compile, target)}, ${k}${emptyReading})`;
+  }
   return `_IA.component(${compile(arg)}, ${k})`;
 }
 
@@ -710,6 +794,63 @@ function assertScalarIntervalOperands(
           `compile a scalar per-element function. Fail closed (D6).`
       );
   }
+  // An operand that is POSSIBLY a list of numbers — a `list<number> | number`
+  // union (what a coordinate accessor over a point-or-point-list operand
+  // answers), a `broadcastable<number>`, or a coordinate accessor whose
+  // operand may be a list of points (`isPossiblyNumericListOperand`) — may
+  // be an array at run time, which a kernel would read as NaN bounds (or a
+  // relation as the verdict `'maybe'`) behind `success: true`. For a head
+  // that BROADCASTS on this target the element-wise lowering
+  // (`tryIntervalBroadcast`) takes such an operand when every other operand
+  // has an interval reading, so one that reaches the kernel did not qualify,
+  // and the kernel fails closed on it. A head that does not broadcast here —
+  // a relation, a connective — fails closed on the union and accessor shapes
+  // too (a list of verdicts is not a value of this target, see
+  // `tryIntervalBroadcast`), with one exception: a `broadcastable<number>`
+  // keeps the scalar lowering it always had there. `P(x, y) < 0` over a
+  // helper whose body reads wide parameters is the ordinary implicit plot,
+  // its value at run time is a scalar, and declining it would take every
+  // such plot with it; an array there is the caller's.
+  const broadcasts = intervalBroadcastHead(head, args[0]?.engine);
+  for (const arg of args) {
+    if (!broadcasts && isBroadcastableNumberOperand(arg)) continue;
+    if (couldBeIndexedCollectionOperand(arg) || isPossiblyNumericListOperand(arg))
+      throw new Error(
+        `${head}: cannot compile — the operand \`${arg.toString()}\` may be ` +
+          `a collection at run time (type \`${arg.type.toString()}\`), and ` +
+          `the interval target's kernels take one interval per operand. ` +
+          `Fail closed (D6).`
+      );
+  }
+}
+
+/** Is `e` typed `broadcastable<number>` (a number or a collection of numbers,
+ *  the result type of a kernel over an operand of unsettled collection-ness
+ *  and of a helper whose body reads wide parameters)? */
+function isBroadcastableNumberOperand(e: Expression): boolean {
+  const t = stripMissingFromType(compilationType(e));
+  return (
+    typeof t !== 'string' &&
+    t.kind === 'broadcastable' &&
+    isSubtype(t.elements, 'number')
+  );
+}
+
+/**
+ * Does `id` name a head the element-wise lowering (`tryIntervalBroadcast`)
+ * applies to: a built-in `broadcastable` operator that returns a NUMBER —
+ * not a relation, not a connective (their element-wise value would be a
+ * list of verdicts, which this target's result contract does not admit)?
+ */
+function intervalBroadcastHead(
+  id: string,
+  engine: ComputeEngine | undefined
+): boolean {
+  if (engine === undefined) return false;
+  const def = engine.lookupDefinition(id);
+  if (!isOperatorDef(def) || def.operator.broadcastable !== true)
+    return false;
+  return !isRelationalOperator(id) && !INTERVAL_CONNECTIVE_HEADS.has(id);
 }
 
 /** Gate-wrapped handlers, built once per head (`guardedIntervalFunction`). */
@@ -771,22 +912,33 @@ function guardedIntervalFunction(
  * NUMBER: the relations and the connectives broadcast in the interpreter
  * too, but their element-wise value is a list of tri-state verdicts, which
  * is not a value this target's result contract (`IntervalValue`) admits, so
- * they keep the gate. At least one operand must be PROVABLY a list of
- * numbers (`isProvablyNumericListOperand` — a static type such as
- * `list<number>` or `vector<2>`; a wide `unknown`, a `broadcastable<number>`
- * application or a point-or-point-list union is not evidence and keeps the
- * gate, so the 2026-08-22 decision stands for everything the type does not
- * prove), and every other operand must be provably a number, since it is
- * reused at every position.
+ * they keep the gate. At least one operand must be a list of numbers by its
+ * static type — PROVABLY (`isProvablyNumericListOperand`: `list<number>`,
+ * `vector<2>`) or POSSIBLY (`isPossiblyNumericListOperand`: a union whose
+ * every arm is a number or a list of numbers, such as the
+ * `list<number> | number` a coordinate accessor over a point-or-point-list
+ * operand answers, or a `broadcastable<number>`; the run-time `_IA.bcast`
+ * applies the kernel once when no array is present, so the admission costs
+ * nothing at run time for a scalar). A wide `unknown` or a
+ * POINT-or-point-list union is not evidence and keeps the gate — a point has
+ * no interval reading — so the 2026-08-22 decision stands for everything the
+ * type does not spell out. Every other operand must be provably a number,
+ * since it is reused at every position.
  *
  * The closure body is the head's OWN scalar handler applied to the closure's
  * parameters — fresh symbols the inner target resolves to their names — so
  * every kernel convention (the rational-divisor rewrite of `Multiply`, the
- * subtraction form of `Add`, the constant fold) is the scalar lane's. Each
- * operand is compiled ONCE, outside the closure, as an argument of the
- * broadcast: a list operand through `compileIntervalCollectionValue` (a
- * literal list, a range, a `Map`) or its ordinary lowering (a list-typed
- * input, a helper returning a list), a scalar operand through `compile`.
+ * subtraction form of `Add`, the constant fold) is the scalar lane's. A
+ * NUMBER LITERAL operand is handed to the handler as itself, not as a
+ * parameter: the handler reads a literal to pick a specialized kernel — the
+ * exponent `2/3` selects `powRational`, which encloses a negative base, where
+ * a symbolic exponent selects `powInterval`, which answers `empty` there; a
+ * literal `Round` precision is required outright — and a literal has no
+ * run-time cost to repeat inside the closure. Every other operand is
+ * compiled ONCE, outside the closure, as an argument of the broadcast: a
+ * list operand through `compileIntervalCollectionValue` (a literal list, a
+ * range, a `Map`) or its ordinary lowering (a list-typed input, a helper
+ * returning a list), a scalar operand through `compile`.
  */
 function tryIntervalBroadcast(
   id: string,
@@ -800,17 +952,21 @@ function tryIntervalBroadcast(
   target: CompileTarget<Expression>
 ): string | undefined {
   if (args.length === 0) return undefined;
-  const lists = args.map((a) => isProvablyNumericListOperand(a));
+  const lists = args.map(
+    (a) => isProvablyNumericListOperand(a) || isPossiblyNumericListOperand(a)
+  );
   if (!lists.some((x) => x)) return undefined;
   const engine = args[0].engine;
-  const def = engine.lookupDefinition(id);
-  if (!isOperatorDef(def) || def.operator.broadcastable !== true)
-    return undefined;
-  if (isRelationalOperator(id) || INTERVAL_CONNECTIVE_HEADS.has(id))
-    return undefined;
+  if (!intervalBroadcastHead(id, engine)) return undefined;
   if (!args.every((a, i) => lists[i] || a.type.matches('number')))
     return undefined;
-  const params = args.map(() => BaseCompiler.tempVar(target));
+  // A number literal stays in the closure body (see above); every other
+  // operand becomes a closure parameter and a broadcast argument.
+  const literal = args.map((a, i) => !lists[i] && isNumber(a));
+  const params = args.map((a, i) =>
+    literal[i] ? undefined : BaseCompiler.tempVar(target)
+  );
+  const names = params.filter((p): p is string => p !== undefined);
   // Common-subexpression elimination is OFF for the closure body: the
   // parameter symbols share no node with the enclosing expression's harvest,
   // and a temporary hoisted outside the closure could not read a parameter.
@@ -820,23 +976,94 @@ function tryIntervalBroadcast(
   const inner: CompileTarget<Expression> = {
     ...target,
     cse: undefined,
-    var: (name) => {
-      const i = params.indexOf(name);
-      return i >= 0 ? params[i] : target.var(name);
-    },
-    boundVars: BaseCompiler.withBoundNames(target, params),
+    var: (name) => (names.includes(name) ? name : target.var(name)),
+    boundVars: BaseCompiler.withBoundNames(target, names),
   };
   const body = handler(
-    params.map((p) => engine.expr(p)),
+    args.map((a, i) => (literal[i] ? a : engine.expr(params[i]!))),
     (expr) => BaseCompiler.compileValueOperand(expr, inner),
     inner
   );
-  const sources = args.map((a, i) =>
-    lists[i]
-      ? (compileIntervalCollectionValue(a, target) ?? compile(a))
-      : compile(a)
-  );
-  return `_IA.bcast((${params.join(', ')}) => ${body}, ${sources.join(', ')})`;
+  const sources = args.flatMap((a, i) => {
+    if (literal[i]) return [];
+    if (lists[i]) return [compileIntervalCollectionValue(a, target) ?? compile(a)];
+    return [compile(a)];
+  });
+  return `_IA.bcast((${names.join(', ')}) => ${body}, ${sources.join(', ')})`;
+}
+
+/**
+ * Is `e` POSSIBLY a list of numbers, every alternative having an interval
+ * reading? Three shapes qualify:
+ *
+ * - by static type, a union (the absence marker arm set aside) whose arms
+ *   are each a number or an indexed collection of numbers, with at least one
+ *   collection arm: `list<number> | number` and
+ *   `list<number> | missing | number` — what a coordinate accessor answers
+ *   over a point-or-point-list operand, or a restricted value over a
+ *   broadcastable helper. A union with a POINT arm (a parameterized tuple)
+ *   does not: a point has no interval reading, so the operand keeps the
+ *   scalar gate, as does a union with a string, boolean or nested-collection
+ *   arm. A type that PROVES a list is not a union and answers false here; it
+ *   is `isProvablyNumericListOperand`'s;
+ * - by static type, a `broadcastable<number>`: a number or a collection of
+ *   numbers, the result type of a kernel over an operand whose
+ *   collection-ness the type does not settle, and the return type of a
+ *   helper whose body reads a coordinate of a wide parameter
+ *   (`f(P) := a·P.x² + b·P.y²` types `(collection<any> | tuple) ->
+ *   broadcastable<number>`). Every value it stands for has an interval
+ *   reading, and on this target such a value is an interval or an array —
+ *   no lowering builds a collection that is not an array. Before the
+ *   coordinate accessor broadcast over a list of points, nothing produced an
+ *   array under this type, so it kept the scalar gate as "not evidence";
+ *   now `f(L)` over a list of points returns one, and the kernel above it
+ *   (`_IA.mul(a, f(L))`) read the array as NaN bounds behind
+ *   `success: true`;
+ * - by structure, a coordinate accessor (`PointX`/`PointY`/`PointZ`) whose
+ *   operand may be a list of points while the accessor's own type says
+ *   nothing (`unknown`): the parameter a helper reads with `PointX(v)` types
+ *   `collection<any> | tuple`, which the accessor's type handler cannot
+ *   distribute, yet its lowering decides at the value
+ *   (`compileIntervalPointComponent`, `_IA.pointComponent`) and answers an
+ *   array for a list. Read from the type alone, `PointX(v) + 1` reached the
+ *   scalar kernel and answered NaN bounds for a list behind `success: true`.
+ *
+ * Such an operand is an interval or an array at run time, and the consumers
+ * that admit it — the element-wise broadcast (`tryIntervalBroadcast`,
+ * `_IA.bcast`) and the collection reductions
+ * (`compileIntervalCollectionReduce`) — both dispatch on the value; the
+ * scalar-operand gate (`assertScalarIntervalOperands`) refuses it.
+ */
+function isPossiblyNumericListOperand(e: Expression): boolean {
+  if (isProvablyStringOperand(e)) return false;
+  if (
+    (isFunction(e, 'PointX') ||
+      isFunction(e, 'PointY') ||
+      isFunction(e, 'PointZ')) &&
+    e.type.isUnknown &&
+    e.op1 !== undefined
+  ) {
+    const operandType = compilationType(e.op1);
+    if (
+      (typeof operandType === 'string' || operandType.kind !== 'tuple') &&
+      mayBePointList(operandType)
+    )
+      return true;
+  }
+  const t = stripMissingFromType(compilationType(e));
+  if (typeof t === 'string') return false;
+  if (t.kind === 'broadcastable') return isSubtype(t.elements, 'number');
+  if (t.kind !== 'union') return false;
+  let list = false;
+  for (const arm of t.types) {
+    if (isSubtype(arm, 'number')) continue;
+    if (typeof arm !== 'string' && arm.kind === 'tuple') return false;
+    if (!isSubtype(arm, 'indexed_collection<any>')) return false;
+    const element = collectionElementType(arm);
+    if (element === undefined || !isSubtype(element, 'number')) return false;
+    list = true;
+  }
+  return list;
 }
 
 /** The logical connectives of the interval table, which `tryIntervalBroadcast`
@@ -1362,7 +1589,11 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `the interval target's domain is numeric (one interval per ` +
           `quantity) with no text model. Fail closed (D6).`
       );
-    if (!isIndexedCollectionOperand(arg))
+    // A value that is POSSIBLY a list of numbers (`isPossiblyNumericListOperand`:
+    // a `list<number> | number` union, a `broadcastable<number>` helper
+    // result) is admitted: `_IA.length` answers the absence marker for a
+    // scalar at run time, the interpreter's "no value" for a non-collection.
+    if (!isIndexedCollectionOperand(arg) && !isPossiblyNumericListOperand(arg))
       throw new Error(
         `Length: cannot compile — operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
@@ -1403,7 +1634,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `with no text model. Fail closed (D6).`
       );
     const provablyIndexed = isIndexedCollectionOperand(coll);
-    if (!provablyIndexed && !couldBeIndexedCollectionOperand(coll))
+    // A base that is POSSIBLY a list of numbers (a `list<number> | number`
+    // union, a `broadcastable<number>` helper result) is admitted with the
+    // "could be" bases: `_IA.at` answers the absence marker for a scalar base
+    // at run time, and the numeric-index requirement below applies.
+    if (
+      !provablyIndexed &&
+      !couldBeIndexedCollectionOperand(coll) &&
+      !isPossiblyNumericListOperand(coll)
+    )
       throw new Error(
         `At: cannot compile — first operand is not an indexed collection ` +
           `(list/vector/range). Fail closed (D6).`
@@ -2169,10 +2408,12 @@ function intervalCollectionElements(
  */
 /**
  * Is `e` the single operand of a `Max`/`Min` that the interpreter REDUCES
- * over — a collection by value or by static type, or a `Range`? A scalar
- * operand (the common `Max(x)` after canonicalization) keeps the scalar
- * fold; an operand whose collection-ness is unprovable keeps it too, and
- * the scalar-operand gate then decides.
+ * over — a collection by value or by static type, a `Range`, or a value
+ * that is POSSIBLY a list of numbers (`isPossiblyNumericListOperand`, whose
+ * run-time fold hands a scalar back as it stands)? A scalar operand (the
+ * common `Max(x)` after canonicalization) keeps the scalar fold; an operand
+ * whose collection-ness is unprovable keeps it too, and the scalar-operand
+ * gate then decides.
  */
 function isCollectionReduceOperand(
   e: Expression,
@@ -2182,7 +2423,8 @@ function isCollectionReduceOperand(
   return (
     resolved.isCollection ||
     isFunction(resolved, 'Range') ||
-    resolved.type.matches('collection<any>')
+    resolved.type.matches('collection<any>') ||
+    isPossiblyNumericListOperand(resolved)
   );
 }
 
@@ -2269,7 +2511,13 @@ function compileIntervalCollectionReduce(
   const elementsProvablyNumeric =
     elementType !== undefined &&
     operand.engine.type(elementType).matches('number');
-  if (!isIndexedCollectionOperand(operand) || !elementsProvablyNumeric) {
+  // A union of a number and a list of numbers is admitted too: the fold
+  // below dispatches on the run-time value and hands a scalar back as it
+  // stands, which is the interpreter's `Sum(scalar) = scalar`.
+  if (
+    (!isIndexedCollectionOperand(operand) || !elementsProvablyNumeric) &&
+    !isPossiblyNumericListOperand(operand)
+  ) {
     // Name the OPERATION in the diagnostic, not the operand's head: a
     // `Range` that did not decompose (symbolic bounds, or past the unroll
     // budget) has no lowering of its own on this target, and the generic

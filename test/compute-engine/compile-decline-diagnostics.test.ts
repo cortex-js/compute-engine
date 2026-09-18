@@ -78,11 +78,14 @@ describe('compile decline diagnostics (Tycho item 109a)', () => {
   });
 
   describe('a handler with no lowering for the TARGET says so', () => {
-    // `PointList` has no interval lowering at all (the interval domain is
-    // scalar) — a different cause from the operand-shape decline above.
+    // A `PointList` with a list COMPONENT is a list of points (the components
+    // zip), and the interval target has no lowering that builds one — a
+    // different cause from the operand-shape decline above. (An all-scalar
+    // `PointList` is one point, which the interval target spells as the array
+    // of its coordinates, so it no longer witnesses this decline.)
     it('interval-js: success:false with a specific `error`', () => {
       const r = new IntervalJavaScriptTarget().compile(
-        ce.box(['PointList', 'x', 'y'])
+        ce.box(['PointList', ['List', 1, 2, 3], 'x'] as any)
       );
       expect(r.success).toBe(false);
       expect(r.error).toMatch(

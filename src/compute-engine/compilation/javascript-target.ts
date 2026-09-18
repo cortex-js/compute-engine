@@ -2063,7 +2063,7 @@ const NON_COORDINATE_TYPE = 'boolean | character | string';
  * `list<list<any>>` broadcasts when it holds numeric rows but element-indexes
  * when it is empty.
  */
-function mayBePointList(t: Type): boolean {
+export function mayBePointList(t: Type): boolean {
   if (t === 'unknown' || t === 'any') return true;
   if (!couldMatch(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
   const elt = collectionElementType(t);
@@ -2102,7 +2102,7 @@ function mayBePointList(t: Type): boolean {
 
 /** The type of a tuple's `idx`-th element, or `undefined` when `t` is not a
  *  parameterized tuple or the index is out of range. */
-function tupleElementType(t: Type, idx: number): Type | undefined {
+export function tupleElementType(t: Type, idx: number): Type | undefined {
   if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
   return t.elements[idx]?.type;
 }
@@ -2131,7 +2131,7 @@ function pointComponentAbsence(coord: Type | undefined): string {
  * predicate (rather than importing from `collections.ts`) to avoid the
  * module-init reordering hazard noted on `isIndexedCollectionOperand`.
  */
-function isPointListOperand(e: Expression): boolean {
+export function isPointListOperand(e: Expression): boolean {
   const elt = collectionElementType(jsType(e));
   // `'tuple'` (the bare, unparameterized type name) is a plain string, not a
   // `{ kind: 'tuple' }` node — and it is what a `list<tuple>` DECLARATION
@@ -2178,7 +2178,7 @@ function isPointListOperand(e: Expression): boolean {
  * the interpreter refuses it: the accessors element-INDEX a string
  * (`PointX("abc")` is `"a"`).
  */
-function isEmptyCollectionOperand(e: Expression): boolean {
+export function isEmptyCollectionOperand(e: Expression): boolean {
   if (e.isFiniteCollection !== true || e.count !== 0) return false;
   if (e.type.matches('string')) return false;
   return elementTypeBroadcastsWhenEmpty(collectionElementType(jsType(e)));
@@ -2214,7 +2214,7 @@ function isEmptyCollectionOperand(e: Expression): boolean {
  * the run-time dispatch AND carries this answer into it — see the third
  * argument of `_SYS.pointComponent`.
  */
-function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
+export function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
   if (elt === undefined) return true;
   if (elt === 'never' || elt === 'unknown' || elt === 'any') return true;
   // Both tuple spellings, and a union of them, are point elements; see
@@ -2234,7 +2234,7 @@ function elementTypeBroadcastsWhenEmpty(elt: Type | undefined): boolean {
  * point-ONLY accessors (`PointX`/`PointY`/`PointZ`), which have no competing
  * matrix meaning: `Norm`/`Abs` keep reading the same value as a matrix.
  */
-function isCoordinateRowListOperand(e: Expression): boolean {
+export function isCoordinateRowListOperand(e: Expression): boolean {
   const t = jsType(e);
   // A rank ≥ 2 numeric tensor (`matrix<number^(3x2)>`) is a list of rows: its
   // `elements` is the SCALAR type, so the dimensions carry the shape.

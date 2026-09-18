@@ -1305,12 +1305,23 @@ describe('INTERVAL JS - collections decline where the value model has no room', 
     }
   });
 
-  test('PointX over a LIST of points declines', () => {
+  test('PointX over a LIST of points broadcasts the coordinate', () => {
+    // The coordinates are a collection value (an array of intervals), which
+    // an accessor projects back to one interval. The full lowering is pinned
+    // in `compile-interval-collections.test.ts`.
     const fn = compile(ceNo.box(['Length', ['PointX', 'PL']]), {
       to: 'interval-js',
     });
-    expect(fn.success).toBe(false);
-    expect(fn.error).toContain('not a single point');
+    expect(fn.success).toBe(true);
+    expect(fn.code).toBe('_IA.length(_IA.pointComponent(_.PL, 0, true, true))');
+    expect(
+      fn.run!({
+        PL: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual({ kind: 'interval', value: { lo: 2, hi: 2 } });
   });
 
   test('Length of a string declines (no text model)', () => {

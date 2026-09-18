@@ -200,6 +200,73 @@ export function component(coll: unknown, k: number): Interval | IntervalResult {
   return element;
 }
 
+/**
+ * Is `cell` a single coordinate — a raw number, a bare interval or an
+ * interval result — as opposed to a nested array (a point) or anything else?
+ * The run-time counterpart of the JavaScript target's `isCoordinate` cell
+ * test, for the value model of this target.
+ */
+function isCoordinateCell(cell: unknown): boolean {
+  return normalizeElement(cell) !== undefined;
+}
+
+/**
+ * The `k`-th coordinate (0-based) of a point OR of every point of a list of
+ * points, decided from the run-time value — the interval counterpart of the
+ * JavaScript target's `_SYS.pointComponent`, and of the interpreter's
+ * `pointComponentAt` (`library/collections.ts`).
+ *
+ * The compiler emits this where the operand is a list of points, or where its
+ * static type admits a list of points beside a single point (a
+ * `tuple | list<tuple>` union, an untyped operand): both readings are arrays
+ * at run time, and only the value tells them apart.
+ *
+ * - A non-array is not a collection and answers the absence marker — unless
+ *   it is a band-less interval result (`propagatedNonCollection`), which is
+ *   passed through.
+ * - An EMPTY array is the one shape both readings spell the same way. The
+ *   caller settles it from the declared element type and states the answer
+ *   in `emptyBroadcasts`: the coordinate of zero points is the empty list
+ *   (the interpreter's `PointX([])`), while an element-INDEXING operand has
+ *   no coordinate there and answers the absence marker.
+ * - An array whose first element is an array of coordinate cells is a list
+ *   of points, and the coordinate is taken from every point: the array of
+ *   `component(p, k)`, an element that is not a point answering the absence
+ *   marker at its position. A row that holds a non-coordinate cell is not a
+ *   point (the interpreter's `isPointLike` requires every cell to be a
+ *   number), so the array is read as one point and element-indexes — unless
+ *   the compiler PROVED a list of points from the static type and says so
+ *   in `rows` (`list<tuple<string, number>>`: every element is a point by
+ *   its type, whatever its other coordinates hold).
+ * - The third coordinate of a two-component point, or of a list whose points
+ *   have two components, is the interpreter's `incompatible-dimensions`
+ *   error for the WHOLE application, projected to a single absence marker —
+ *   never one marker per point.
+ * - Otherwise the array is one point, and this is `component(coll, k)`.
+ *
+ * A nested array holds intervals or interval results, and `component`
+ * answers each as it stands (an `IntervalResult` keeps its kind), so the
+ * result is an `IntervalValue` array as a comprehension root builds one.
+ */
+export function pointComponent(
+  coll: unknown,
+  k: number,
+  emptyBroadcasts = true,
+  rows?: boolean
+): unknown {
+  if (!Array.isArray(coll)) return propagatedNonCollection(coll) ?? absent();
+  if (coll.length === 0) return emptyBroadcasts ? [] : absent();
+  const first: unknown = coll[0];
+  rows ??= Array.isArray(first) && first.every(isCoordinateCell);
+  const arity = rows && Array.isArray(first) ? first.length : coll.length;
+  if (k === 2 && arity < 3) return absent();
+  if (rows)
+    return coll.map((p: unknown) =>
+      Array.isArray(p) ? component(p, k) : absent()
+    );
+  return component(coll, k);
+}
+
 // Every operation above is exported through `liftJump` so that a finite
 // jump in an operand (a `singular` result carrying a `value`) is re-tagged
 // on the result instead of being forgotten — see `liftJump` in `util.ts`.

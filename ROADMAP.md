@@ -138,6 +138,37 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   walk and treats an operand too large for a `number` as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
+### Interval target: the point-coordinate accessor rows of the Tycho census now stop at point arithmetic and at a list of points built in a body (OPEN — measured 2026-09-17 after the accessor lowering)
+
+The 16 interval-lane rows of the Tycho census that declined at
+"`PointX`: the operand is not a single point" (documents `hpr2q4kles` ×9,
+`mqm2eamst1` ×4, `jgcclk1njk` ×2, `mk7duulwxf`) no longer decline there: the
+accessor over a point-or-point-list operand broadcasts at the value
+(`_IA.pointComponent`, `compileIntervalPointComponent`). None of the 16
+compiles yet; each reaches the next lowering the target lacks:
+
+- **Point arithmetic in a helper body (13 rows).** `hpr2q4kles` and
+  `mqm2eamst1` build points with `PointList` arithmetic — a scalar times a
+  point (`(D+d)/2 · (cos T, sin T)`), a point minus a point
+  (`r(M_0, −a) − C(D, d)`), a rotation helper over a point — and the interval
+  target has no lowering for a `PointList` in an operand position of a kernel
+  ("`PointList`: no lowering for operand types (`real`, `real`)"). The value
+  model admits a point at a consuming position (an array of two intervals,
+  `compileIntervalCollectionValue`), so the missing piece is the element-wise
+  kernel over a point operand beside a scalar or another point — the
+  interpreter's point arithmetic. `hpr2q4kles` also carries the complex
+  coordinate decline and the `P_0`/`P_1` `Add` decline recorded above.
+- **A list of points built from list components (1 row).** `mk7duulwxf`
+  writes `P = (random(N), random(N)) + (cos a, sin a)/N`: a `PointList` whose
+  components are lists is a LIST of points (the interpreter zips them), and no
+  lowering of this target spells that list ("`PointList`: no lowering for
+  operand types (`list<real>`, `list<real>`)"). The array of the zipped points
+  is representable; the lowering is the zip itself.
+- **A matrix operand of a kernel (2 rows).** `jgcclk1njk` hands a helper a
+  `matrix`-typed argument and reads it with `Add` inside the body ("the
+  operand is a collection (type `matrix`)"); a matrix has no interval reading
+  on this target.
+
 ### Colour handling residue (audit of 2026-09-08; the five colour rulings — a tuple is 0–1 sRGB, `ColorFromColorspace` answers the route's canonical components, a well-formed spelling that packs to zero is transparent black, a list is not a colour, `ContrastingColor` answers the candidate — landed 2026-09-09)
 
 - `doc/86-reference-colors.md` says `Color` returns a `Tuple`; it returns an

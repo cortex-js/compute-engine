@@ -20649,9 +20649,11 @@ export class BaseCompiler {
    *
    * A definition is emitted once, with PARAMETER types: a shader target needs
    * a static type for every parameter, and a point-typed one
-   * (`f(P) := a·P.x² + b·P.y²`, whose `P` is a `tuple`) has none; the
-   * interval target has no lowering for `PointX`/`PointY` over an opaque
-   * parameter. The CALL, however, binds `P` to a concrete point `(x, y)`,
+   * (`f(P) := a·P.x² + b·P.y²`, whose `P` is a `tuple`) has none. (The
+   * interval target had no lowering for `PointX`/`PointY` over an opaque
+   * parameter either, and took this route; it now reads the coordinate at
+   * the value and emits the definition.) The CALL, however, binds `P` to a
+   * concrete point `(x, y)`,
    * and the body over it — `a·x² + b·y²` once the coordinate accessors of
    * the literal point are folded — is ordinary scalar code both targets
    * compile. A chained definition (`F(x) := g(x / 3.6)`) inlines to a call

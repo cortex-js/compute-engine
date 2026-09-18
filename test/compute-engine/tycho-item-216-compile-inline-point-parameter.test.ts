@@ -8,18 +8,20 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * A user function is emitted once as a definition, with PARAMETER types: a
  * shader needs a static type for every parameter, and a point-typed one
  * (`f(P) := a·P.x² + b·P.y²`) has none (`parameter "P" has no static GLSL
- * type`); the interval target has no lowering for `PointX`/`PointY` over an
- * opaque parameter. The CALL binds `P` to a literal point `(x, y)`, and the
- * body with that substitution — the coordinate accessors of the literal
- * point folded — is scalar code both targets compile. Such a call is now
- * compiled inlined when the definition cannot be emitted
+ * type`). The CALL binds `P` to a literal point `(x, y)`, and the body with
+ * that substitution — the coordinate accessors of the literal point folded —
+ * is scalar code the shader targets compile. Such a call is compiled inlined
+ * when the definition cannot be emitted
  * (`BaseCompiler.tryInlineUserFunctionCall`); the body is SUBSTITUTED, never
  * evaluated, and the inlining is declined for an impure, generic, recursive
  * or collection-argument call, where the definition's own decline stands.
  *
- * A SYMBOL whose declared type is a tuple is a single point too, and is
- * substituted the same way: the body then reads the coordinates of that
- * symbol (`P.x`, `_IA.component(P, 0)`), which both targets lower.
+ * The interval target took the same inlining while it had no lowering for
+ * `PointX`/`PointY` over an opaque parameter. It now lowers the accessor over
+ * a point-or-point-list operand at the value (`_IA.pointComponent`), so it
+ * emits the definition and calls it by reference — with a literal point, a
+ * tuple-typed symbol, or a list of points — and the inlining is reserved for
+ * a body it cannot emit (a head with no interval lowering).
  */
 
 function engine(): ComputeEngine {
@@ -66,12 +68,17 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
 
   test('point-typed parameter, interval-js', () => {
     const ce = engine();
+    // The definition is emitted and the call goes by reference; the body
+    // reads the coordinates of its parameter at run time.
     expect(code(ce, String.raw`f((x,y))`, 'interval-js')).toBe(
-      '_IA.add(_IA.mul(_.a, _IA.square(_.x)), _IA.mul(_.b, _IA.square(_.y)))'
+      '_fn_f([_.x, _.y])'
     );
     expect(code(ce, String.raw`d((x,y))`, 'interval-js')).toBe(
-      '_IA.sqrt(_IA.add(_IA.square(_.x), _IA.square(_.y)))'
+      '_fn_d([_.x, _.y])'
     );
+    const r = compile(ce.parse(String.raw`d((x,y))`), { to: 'interval-js' });
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain('_IA.pointComponent(P, 0)');
   });
 
   test('two point parameters, one of them a numeric literal point', () => {
@@ -87,7 +94,7 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
       expect.stringMatching(/^_fn_e_2_.*\(vec2\(x, y\)\)$/)
     );
     expect(code(ce, String.raw`e_2((x,y))`, 'interval-js')).toBe(
-      '_IA.add(_IA.sqrt(_IA.add(_IA.square(_.x), _IA.square(_.y))), _k1)'
+      '_fn_e_2([_.x, _.y])'
     );
   });
 
@@ -125,10 +132,7 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     expect(code(ce, String.raw`f(P)`, 'glsl')).toEqual(
       expect.stringMatching(/^_fn_f_.*\(P\)$/)
     );
-    expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe(
-      '_IA.add(_IA.mul(_.a, _IA.square(_IA.component(_.P, 0))), ' +
-        '_IA.mul(_.b, _IA.square(_IA.component(_.P, 1))))'
-    );
+    expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe('_fn_f(_.P)');
     const point = (v: number) => ({ lo: v, hi: v });
     const r = compile(ce.parse(String.raw`f(P)`), { to: 'interval-js' });
     const out = r.run({ a: point(2), b: point(3), P: [point(1), point(2)] });
@@ -139,8 +143,11 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
   test('unsupported interval bodies, list arguments and recursive shaders still decline', () => {
     const ce = engine();
     ce.declare('L', 'list<number>');
+    // `Zeta` has no interval lowering, and the call is not inlined either:
+    // inlining does not remove the head.
+    ce.parse(String.raw`z(P) := \zeta(P.x)`).evaluate();
     for (const [latex, to] of [
-      [String.raw`h((x,y))`, 'interval-js'],
+      [String.raw`z((x,y))`, 'interval-js'],
       [String.raw`f(L)`, 'glsl'],
       [String.raw`\operatorname{rec}(3)`, 'glsl'],
     ] as const) {

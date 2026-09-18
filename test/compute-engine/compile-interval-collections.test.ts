@@ -104,7 +104,7 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
   test('a list-typed input beside a scalar', () => {
     const { code, out } = run(engine(), 'V + 1', { V: [1, 2, 3] });
     expect(code).toBe(
-      '_IA.bcast((_tv1, _tv2) => _IA.add(_tv1, _tv2), _.V, _k1)'
+      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.V)'
     );
     expectEncloses(out, [2, 3, 4]);
   });
@@ -159,15 +159,59 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
 
   test('an operand whose type does not prove a list keeps the gate', () => {
     const ce = engine();
-    // A scalar-or-list union and a `broadcastable<number>` beside a list: a
-    // sibling is reused at every position only when provably a number, and
-    // neither is — nor is either a provable list.
-    ce.declare('u', 'number | list<number>');
+    // A `broadcastable<number>` — a number or a collection of numbers — is
+    // admitted beside a list: every value it stands for has an interval
+    // reading, and the run-time broadcast zips an array or reuses a scalar.
     ce.declare('w', 'broadcastable<number>');
-    declines(ce, 'V + u', /Add: cannot compile/);
-    declines(ce, 'V + w', /Add: cannot compile/);
-    // Alone, each keeps the scalar lowering a wide operand always had.
-    expect(run(ce, '\\sin(w)', { w: pt(1) }).code).toBe('_IA.sin(_.w)');
+    expect(run(ce, 'V + w', { V: [1, 2], w: pt(10) }).out).toEqual([
+      [11, 11],
+      [12, 12],
+    ]);
+    expect(run(ce, 'V + w', { V: [1, 2], w: [10, 20] }).out).toEqual([
+      [11, 11],
+      [22, 22],
+    ]);
+    // Alone, it broadcasts too: an array at run time is mapped, a scalar is
+    // applied to directly.
+    expect(run(ce, '\\sin(w)', { w: pt(1) }).code).toBe(
+      '_IA.bcast((_tv1) => _IA.sin(_tv1), _.w)'
+    );
+    expectEncloses(run(ce, '\\sin(w)', { w: [1, 2] }).out, [
+      Math.sin(1),
+      Math.sin(2),
+    ]);
+    // A number literal beside such an operand stays in the closure body, so
+    // the handler keeps its literal-dependent kernel: the exponent `2/3`
+    // selects `powRational`, which encloses a negative base (`powInterval`
+    // over a symbolic exponent answers `empty` there), and a literal `Round`
+    // precision is accepted.
+    const cbrt = compile(ce.box(['Power', 'w', ['Rational', 2, 3]]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(cbrt.success).toBe(true);
+    expect(cbrt.code).toBe(
+      '_IA.bcast((_tv1) => _IA.powRational(_tv1, 2, 3), _.w)'
+    );
+    expect(bands(cbrt.run!({ w: pt(-8) }))).toEqual([4, 4]);
+    expect(bands(cbrt.run!({ w: [pt(-8), pt(8)] }))).toEqual([
+      [4, 4],
+      [4, 4],
+    ]);
+    expect(
+      compile(ce.box(['Round', 'w', 2]), { to: 'interval-js', fallback: false })
+        .success
+    ).toBe(true);
+    // A number-or-list union is admitted the same way.
+    ce.declare('u', 'number | list<number>');
+    expect(run(ce, 'V + u', { V: [1, 2], u: pt(10) }).out).toEqual([
+      [11, 11],
+      [12, 12],
+    ]);
+    expect(run(ce, 'V + u', { V: [1, 2], u: [10, 20] }).out).toEqual([
+      [11, 11],
+      [22, 22],
+    ]);
     // A point is consumed whole, never mapped over.
     ce.declare('p', 'tuple<number, number>');
     declines(ce, '\\sin(p)', /Sin: cannot compile/);
@@ -193,7 +237,10 @@ describe('Interval target — collection values across a user-function boundary'
     // literal [x, y] is an array argument. sin(P(x, y)) is a scalar.
     const ce = engine();
     const { code, out } = run(ce, '\\sin(P(x, y))', { x: pt(0.3), y: pt(0.7) });
-    expect(code).toBe('_IA.sin(_fn_P(_.x, _.y))');
+    // The call returns `broadcastable<number>` (its body reads wide
+    // parameters), so the kernel over it broadcasts: the scalar the call
+    // answers at run time is applied to directly.
+    expect(code).toBe('_IA.bcast((_tv1) => _IA.sin(_tv1), _fn_P(_.x, _.y))');
     const want = ce.parse('\\sin(P(x, y))').subs({ x: 0.3, y: 0.7 }).N().re;
     expectEncloses(out, want);
   });
@@ -492,5 +539,377 @@ describe('Interval target — the indexed Sum loop over a wide bound', () => {
     // A bound whose endpoints floor to one integer runs the loop.
     expectEncloses(bands(r.run!({ x: { lo: 3, hi: 3.9 } })), 6);
     expectEncloses(bands(r.run!({ x: pt(3) })), 6);
+  });
+});
+
+// A coordinate accessor (`PointX`/`PointY`/`PointZ`) over a LIST of points
+// broadcasts the coordinate over the list, as the interpreter and the
+// JavaScript target do, and answers a collection value: the array of the
+// coordinates. Over a point-OR-point-list union (the parameter a helper reads
+// with `PointX(v)`), the run-time `_IA.pointComponent` decides at the value.
+// The result feeds the same consumers as any collection value: an accessor,
+// a reduction, the element-wise broadcast of a kernel, the root.
+describe('Interval target — a coordinate accessor over a list of points', () => {
+  const POINTS = [
+    [1, 2],
+    [3, 4],
+  ];
+  function pointEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('PL', 'list<tuple<number, number>>');
+    ce.declare('c', 'tuple<number, number> | list<tuple<number, number>>');
+    ce.declare('R', 'list<list<number>>');
+    ce.declare('k', 'integer');
+    ce.declare('U', 'list<number> | number');
+    return ce;
+  }
+
+  test('a declared list of points answers the array of coordinates', () => {
+    const ce = pointEngine();
+    const r = compile(ce.box(['PointY', 'PL']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_IA.pointComponent(_.PL, 1, true, true)');
+    expect(bands(r.run!({ PL: POINTS }))).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+    // An interval-valued coordinate keeps its band.
+    expect(
+      bands(r.run!({ PL: [[1, { lo: 0, hi: 1 }], [3, 4]] }))
+    ).toEqual([
+      [0, 1],
+      [4, 4],
+    ]);
+    // Zero points have zero coordinates.
+    expect(r.run!({ PL: [] })).toEqual([]);
+    // A list of numeric coordinate ROWS is a list of points too.
+    expect(
+      bands(compile(ce.box(['PointX', 'R']), { to: 'interval-js' }).run!({
+        R: POINTS,
+      }))
+    ).toEqual([
+      [1, 1],
+      [3, 3],
+    ]);
+  });
+
+  test('a point-or-point-list union is decided at the value', () => {
+    const ce = pointEngine();
+    const r = compile(ce.box(['PointY', 'c']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_IA.pointComponent(_.c, 1)');
+    expect(bands(r.run!({ c: POINTS }))).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+    expect(bands(r.run!({ c: [1, 2] }))).toEqual([2, 2]);
+    expect(r.run!({ c: [] })).toEqual([]);
+    // A value that is not a point at all answers the absence marker.
+    const absent = r.run!({ c: pt(1) }) as { lo: number };
+    expect(Number.isNaN(absent.lo)).toBe(true);
+  });
+
+  test('a third coordinate over two-component points is absent as a whole', () => {
+    const ce = pointEngine();
+    // The canonical `PointZ` rejects a DECLARED 2-D list; a union whose arity
+    // the type does not settle reaches the run-time helper, which answers the
+    // interpreter's whole-application error as one absence marker, never one
+    // marker per point.
+    const r = compile(ce.box(['PointZ', 'c']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    const absent = r.run!({ c: POINTS }) as { lo: number };
+    expect(Array.isArray(absent)).toBe(false);
+    expect(Number.isNaN(absent.lo)).toBe(true);
+    expect(
+      bands(
+        r.run!({
+          c: [
+            [1, 2, 3],
+            [4, 5, 6],
+          ],
+        })
+      )
+    ).toEqual([
+      [3, 3],
+      [6, 6],
+    ]);
+  });
+
+  test('a coordinate the type proves is not a number declines', () => {
+    const ce = pointEngine();
+    ce.declare('S', 'list<tuple<string, number>>');
+    ce.declare('T', 'tuple<string, number>');
+    declines(ce, ['PointX', 'S'], /coordinate is not a number/);
+    // The single point is refused one step earlier, by the object-domain
+    // absence gate: the accessor's own type is `missing | string`.
+    declines(ce, ['PointX', 'T'], /object-domain absent/);
+    // The numeric coordinate of the same points compiles, and the proven
+    // list-of-points reading is stated to the helper: a point whose first
+    // coordinate is text would otherwise fail its row test at run time.
+    const numeric = compile(ce.box(['PointY', 'S']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(numeric.success).toBe(true);
+    expect(numeric.code).toBe('_IA.pointComponent(_.S, 1, true, true)');
+    expect(
+      bands(
+        numeric.run!({
+          S: [
+            ['a', 2],
+            ['b', 4],
+          ],
+        })
+      )
+    ).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+  });
+
+  test('the coordinates feed an accessor, a reduction and a kernel', () => {
+    const ce = pointEngine();
+    const at = compile(ce.box(['At', ['PointY', 'PL'], 'k']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(at.success).toBe(true);
+    expect(at.code).toBe('_IA.at(_IA.pointComponent(_.PL, 1, true, true), _.k)');
+    expect(bands(at.run!({ PL: POINTS, k: pt(2) }))).toEqual([4, 4]);
+
+    const length = compile(ce.box(['Length', ['PointX', 'PL']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(length.success).toBe(true);
+    expect(bands(length.run!({ PL: POINTS }))).toEqual([2, 2]);
+
+    const sum = compile(ce.box(['Sum', ['PointY', 'PL']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(sum.success).toBe(true);
+    expectEncloses(bands(sum.run!({ PL: POINTS })), 6);
+
+    // A kernel over the coordinates is the element-wise broadcast.
+    const plus = compile(ce.box(['Add', ['PointY', 'PL'], 1]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(plus.success).toBe(true);
+    expect(plus.code).toBe(
+      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(_.PL, 1, true, true))'
+    );
+    expect(bands(plus.run!({ PL: POINTS }))).toEqual([
+      [3, 3],
+      [5, 5],
+    ]);
+    const sine = compile(ce.box(['Sin', ['PointX', 'PL']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(sine.success).toBe(true);
+    expectEncloses(bands(sine.run!({ PL: POINTS })), [
+      Math.sin(1),
+      Math.sin(3),
+    ]);
+  });
+
+  test('a number-or-number-list union broadcasts and reduces at the value', () => {
+    const ce = pointEngine();
+    // `PointY(c)` over the union types `list<number> | missing | number`, and
+    // so does a declared `U`. Before this lowering the kernel was emitted on
+    // the union directly (`_IA.add(_.U, …)`), which answered NaN bounds for
+    // an array behind `success: true`.
+    const plus = compile(ce.parse('U + 1'), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(plus.success).toBe(true);
+    expect(plus.code).toBe(
+      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _.U)'
+    );
+    expect(bands(plus.run!({ U: [1, 2] }))).toEqual([
+      [2, 2],
+      [3, 3],
+    ]);
+    expect(bands(plus.run!({ U: pt(1) }))).toEqual([2, 2]);
+
+    const shifted = compile(ce.parse('\\operatorname{PointY}(c) + x'), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(shifted.success).toBe(true);
+    expect(bands(shifted.run!({ c: POINTS, x: { lo: 0, hi: 1 } }))).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+    expect(bands(shifted.run!({ c: [1, 2], x: { lo: 0, hi: 1 } }))).toEqual([
+      2, 3,
+    ]);
+
+    const max = compile(ce.box(['Max', ['PointY', 'c']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(max.success).toBe(true);
+    expect(bands(max.run!({ c: POINTS }))).toEqual([4, 4]);
+    expect(bands(max.run!({ c: [1, 2] }))).toEqual([2, 2]);
+    const sum = compile(ce.box(['Sum', 'U']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(sum.success).toBe(true);
+    expectEncloses(bands(sum.run!({ U: [1, 2] })), 3);
+    expectEncloses(bands(sum.run!({ U: pt(5) })), 5);
+  });
+
+  test('a helper reading a coordinate of its parameter maps over a list', () => {
+    const ce = pointEngine();
+    // The parameter a helper reads with `PointY(v)` types
+    // `collection<any> | tuple`, and the accessor over it types `unknown`;
+    // the lowering decides at the value and the kernel broadcasts over it.
+    ce.parse('g(v) := \\operatorname{PointY}(v) + 1').evaluate();
+    const r = compile(ce.box(['g', 'PL']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.preamble).toContain(
+      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(v, 1))'
+    );
+    expect(bands(r.run!({ PL: POINTS }))).toEqual([
+      [3, 3],
+      [5, 5],
+    ]);
+    const single = compile(ce.box(['g', ['Tuple', 1, 2]]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(single.success).toBe(true);
+    expect(bands(single.run!({}))).toEqual([3, 3]);
+
+    // The call returns `broadcastable<number>`: a number or a collection of
+    // numbers. A kernel over it broadcasts, an accessor and a reduction read
+    // it at the value; each used to read the array as a scalar (NaN bounds
+    // behind `success: true`) or decline.
+    const above = compile(ce.box(['Add', ['g', 'PL'], 1]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(above.success).toBe(true);
+    expect(bands(above.run!({ PL: POINTS }))).toEqual([
+      [4, 4],
+      [6, 6],
+    ]);
+    const second = compile(ce.box(['At', ['g', 'PL'], 2]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(second.success).toBe(true);
+    expect(bands(second.run!({ PL: POINTS }))).toEqual([5, 5]);
+    const count = compile(ce.box(['Length', ['g', 'PL']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(count.success).toBe(true);
+    expect(bands(count.run!({ PL: POINTS }))).toEqual([2, 2]);
+    const largest = compile(ce.box(['Max', ['g', 'PL']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(largest.success).toBe(true);
+    expect(bands(largest.run!({ PL: POINTS }))).toEqual([5, 5]);
+
+    // A helper whose body squares a coordinate, called with a list of points:
+    // the kernels inside the body broadcast over the coordinate arrays.
+    ce.declare('a', 'real');
+    ce.parse('f(P) := a P.x^2 + P.y^2').evaluate();
+    const quad = compile(ce.box(['f', 'PL']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(quad.success).toBe(true);
+    expectEncloses(bands(quad.run!({ a: pt(2), PL: POINTS })), [6, 34]);
+    expectEncloses(bands(quad.run!({ a: pt(2), PL: [1, 2] })), 6);
+  });
+
+  test('a point-valued helper is read by the accessor', () => {
+    const ce = pointEngine();
+    // A helper whose body is a `PointList` of scalars (`U = (x, y)` in a
+    // document) is one point; its body root is spelled as the array of its
+    // coordinates, and the accessor reads one back. With a list argument the
+    // call is mapped (`_IA.bcastFn`) and the accessor broadcasts.
+    ce.parse('U(x, y) := \\operatorname{PointList}(x^2 - y^2, 2 x y)').evaluate();
+    const r = compile(ce.parse('\\operatorname{PointY}(U(x, y))'), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_IA.component(_fn_U(_.x, _.y), 1)');
+    expect(r.preamble).toContain(
+      'const _fn_U = (x, y) => [_IA.sub(_IA.square(x), _IA.square(y)), _IA.mul(_IA.scale(_k1, x), y)]'
+    );
+    expect(bands(r.run!({ x: pt(2), y: pt(3) }))).toEqual([12, 12]);
+    ce.declare('L', 'list<number>');
+    const mapped = compile(ce.box(['PointY', ['U', 'L', 1]]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(mapped.success).toBe(true);
+    expect(mapped.code).toBe(
+      '_IA.pointComponent(_IA.bcastFn((_tv1, _tv2) => _fn_U(_tv1, _tv2), _.L, _k2), 1, true, true)'
+    );
+    expect(bands(mapped.run!({ L: [1, 2] }))).toEqual([
+      [2, 2],
+      [4, 4],
+    ]);
+    // A `PointList` with a broadcasting component is a LIST of points, which
+    // no lowering of this target builds.
+    declines(ce, ['PointY', ['PointList', 'L', 1]], /PointList/);
+  });
+
+  test('a union that the broadcast does not admit fails closed at the kernel', () => {
+    const ce = pointEngine();
+    ce.declare('w', 'value');
+    // The other operand is not provably a number, so the element-wise
+    // lowering does not apply, and the kernel must not read a possible array.
+    declines(ce, ['Add', 'U', 'w'], /may be a collection at run time/);
+    ce.declare('v', 'collection<any> | tuple');
+    declines(ce, ['Add', ['PointY', 'v'], 'w'], /may be a collection at run time/);
+    // A union with an indexed-collection arm that is not a list of numbers
+    // (`list<list<number>> | number`) is refused by the same gate.
+    ce.declare('N', 'list<list<number>> | number');
+    declines(ce, ['Add', 'N', 1], /may be a collection at run time/);
+    // A relation over the union or accessor shapes fails closed too: a list
+    // of verdicts is not a value of this target, and a scalar kernel would
+    // answer one `'maybe'` for an array.
+    declines(ce, ['Less', 'U', 3], /may be a collection at run time/);
+    declines(ce, ['Less', ['PointY', 'v'], 3], /may be a collection at run time/);
+    // A head that does not broadcast on this target — a relation — keeps its
+    // scalar lowering over a `broadcastable<number>` operand: the implicit
+    // plot of a helper returning that type is a scalar comparison at run time.
+    ce.parse('d(a, b) := a[1] b[1] + a[2] b[2]').evaluate();
+    ce.parse('P(x, y) := d([x, y], [x, y])').evaluate();
+    expect(ce.box('P').type.toString()).toContain('broadcastable<number>');
+    const plot = compile(ce.parse('P(x, y) < 1'), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(plot.success).toBe(true);
+    expect(plot.code).toBe('_IA.less(_fn_P(_.x, _.y), _k1)');
+    expect(plot.run!({ x: pt(0.5), y: pt(0.5) })).toBe('true');
+    // A POINT-or-point-list union is not a list of numbers: a point has no
+    // interval reading (the 2026-08-22 decision).
+    declines(ce, ['Add', 'c', 1]);
   });
 });
