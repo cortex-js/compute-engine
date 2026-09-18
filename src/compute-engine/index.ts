@@ -172,6 +172,7 @@ import {
   type RandomSubstream,
 } from './numerics/random.js';
 import {
+  CapabilityDeniedError,
   DEFAULT_EFFECT_HANDLERS,
   deriveEffectHandlers,
 } from './effects-registry.js';
@@ -1940,9 +1941,16 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Inside a `WithRandomSeed` frame the draw is the counter-based
    * `hash(seed, n)` of the innermost frame, and the frame's counter advances
-   * (u32, wrapping). Outside any frame the draw is LIVE (`Math.random()`):
-   * there is no ambient seed to set, so an unframed draw is
-   * non-deterministic by construction.
+   * (u32, wrapping). Outside any frame the draw is LIVE: there is no ambient
+   * seed to set, so an unframed draw is non-deterministic by construction. It
+   * comes from the `entropy` handler of the host capability registry — the
+   * registry of the running evaluation, or the installed one when no
+   * evaluation is running. This is the one place where an operator that
+   * declares `random` (not `entropy`) reaches the `entropy` handler: the
+   * stated exception to the coupling rule of `docs/EFFECTS-MODEL.md`, ruled
+   * 2026-09-18. A denied handler (`null`) throws `CapabilityDeniedError`,
+   * which the evaluation driver turns into the operator's
+   * `Error("capability-denied", "entropy")` value.
    */
   _random(): number {
     const frame = this._runtimeState.randomFrame;
@@ -1951,7 +1959,21 @@ export class ComputeEngine implements IComputeEngine {
       frame.next = (frame.next + 1) >>> 0;
       return frameDraw(frame.seedLo, frame.seedHi, n);
     }
-    return Math.random();
+    return this._liveRandom();
+  }
+
+  /** @internal A live uniform in [0, 1) from the `entropy` handler of the
+   * host capability registry — the registry of the running evaluation, or the
+   * installed one when no evaluation is running — with no regard to any
+   * `WithRandomSeed` frame. `_random()` uses it outside a frame; compiled
+   * integrals use it inside a frame too, because a compiled integral samples
+   * live by ruling (`docs/RANDOMNESS-MODEL.md`, "Compiled integrals are a
+   * ruled exception"). A denied handler throws `CapabilityDeniedError`.
+   */
+  _liveRandom(): number {
+    const entropy = (this._evaluationEffects ?? this._effects).entropy;
+    if (entropy === null) throw new CapabilityDeniedError('entropy');
+    return entropy.random();
   }
 
   /** @internal A private stream derived from the ambient `WithRandomSeed`
@@ -1966,10 +1988,14 @@ export class ComputeEngine implements IComputeEngine {
    *
    * `tag` selects which sub-stream — pass a structural hash (`expr.hash`) so
    * the same expression samples the same points wherever it appears in the
-   * frame. Outside a frame the result is `Math.random` (live).
+   * frame. Outside a frame the result is live: each draw comes from the
+   * `entropy` handler, through `_random()`, so a mocked or denied handler
+   * applies to the estimators too.
    */
   _substream(tag: number): RandomSubstream {
-    return deriveSubstream(this._runtimeState.randomFrame, tag);
+    const frame = this._runtimeState.randomFrame;
+    if (frame === undefined) return () => this._random();
+    return deriveSubstream(frame, tag);
   }
 
   /** Replace a number that is close to 0 with the exact integer 0.

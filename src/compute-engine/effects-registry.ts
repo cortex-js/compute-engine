@@ -2,6 +2,7 @@ import type {
   ConsoleHandler,
   EffectHandlerOverrides,
   EffectHandlers,
+  EntropyHandler,
 } from './types-effects.js';
 
 // The host capability registry — the value behind `ce.effects`
@@ -13,7 +14,10 @@ import type {
 /** The capability names a registry holds. A derived registry rejects any
  * other key: a misspelled capability would otherwise be accepted and then
  * ignored. */
-const CAPABILITY_NAMES: ReadonlyArray<keyof EffectHandlers> = ['console'];
+const CAPABILITY_NAMES: ReadonlyArray<keyof EffectHandlers> = [
+  'console',
+  'entropy',
+];
 
 /**
  * The default `console` handler: the real console of the host.
@@ -37,11 +41,33 @@ const DEFAULT_CONSOLE_HANDLER: ConsoleHandler = Object.freeze({
   readLine: hostReadLine,
 });
 
+/** The default `entropy` handler: the host's `Math.random`. */
+const DEFAULT_ENTROPY_HANDLER: EntropyHandler = Object.freeze({
+  random: (): number => Math.random(),
+});
+
 /** The registry of a new engine: every capability with a default has its
  * default handler. */
 export const DEFAULT_EFFECT_HANDLERS: EffectHandlers = Object.freeze({
   console: DEFAULT_CONSOLE_HANDLER,
+  entropy: DEFAULT_ENTROPY_HANDLER,
 });
+
+/**
+ * Thrown by engine code that draws from a host capability on behalf of an
+ * operator and finds the handler denied (`null`), where the code returns a
+ * plain value and cannot return an error expression — `ce._random()` returns
+ * a number. The evaluation driver converts it to the
+ * `Error("capability-denied", capability)` value of the operator being
+ * evaluated (`handlerThrowToErrorValue`, `boxed-function.ts`). It escapes
+ * only from compiled code, which has no error-value channel.
+ */
+export class CapabilityDeniedError extends Error {
+  constructor(readonly capability: keyof EffectHandlers) {
+    super(`The host denies the "${capability}" capability`);
+    this.name = 'CapabilityDeniedError';
+  }
+}
 
 /**
  * Return the registry that results from applying `overrides` to `current`.
@@ -78,9 +104,17 @@ export function deriveEffectHandlers(
         'The "console" effect handler must have a `log` method and a `readLine` method'
       );
   }
+  const entropy = overrides.entropy;
+  if (entropy !== undefined && entropy !== null) {
+    if (typeof entropy.random !== 'function')
+      throw new TypeError(
+        'The "entropy" effect handler must have a `random` method'
+      );
+  }
 
   return Object.freeze({
     console: console_ === undefined ? current.console : console_,
+    entropy: entropy === undefined ? current.entropy : entropy,
   });
 }
 

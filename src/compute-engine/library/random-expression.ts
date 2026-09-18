@@ -1,38 +1,61 @@
 import type { MathJsonExpression, MathJsonSymbol } from '../../math-json.js';
 
-function oneOf<T = MathJsonExpression>(xs: T[]): T {
-  return xs[Math.floor(Math.random() * xs.length)];
+/** A source of uniform numbers in `[0, 1)`: the `entropy` handler of the
+ * host capability registry, supplied by the `RandomExpression` operator. */
+type Draw = () => number;
+
+function oneOf<T = MathJsonExpression>(draw: Draw, xs: T[]): T {
+  return xs[Math.floor(draw() * xs.length)];
 }
 
+/**
+ * The most nested application a generated expression can hold. The grammar
+ * levels below do not bound the depth by themselves: level 2 can return to
+ * level 1, so a source of numbers that keeps answering the same value (a
+ * constant `entropy` handler in a test) would recurse without end. Past this
+ * depth every position is a leaf.
+ */
+const MAX_DEPTH = 24;
+
 function randomExpressionWithHead(
+  draw: Draw,
   operator: MathJsonSymbol,
-  level: number
+  level: number,
+  depth: number
 ): MathJsonExpression {
   if (operator === 'Add' || operator === 'Multiply') {
     const ops: MathJsonExpression[] = [];
-    let count = 1 + Math.floor(Math.random() * 12);
+    let count = 1 + Math.floor(draw() * 12);
     while (count > 0) {
-      ops.push(randomExpression(level + 1));
+      ops.push(randomExpression(draw, level + 1, depth + 1));
       count -= 1;
     }
     return [operator, ...ops];
   }
   if (operator === 'Divide' || operator === 'Power') {
-    return [operator, randomExpression(level + 1), randomExpression(level + 1)];
+    return [
+      operator,
+      randomExpression(draw, level + 1, depth + 1),
+      randomExpression(draw, level + 1, depth + 1),
+    ];
   }
   if (operator === 'Root') {
-    return [operator, randomExpression(level + 1), randomExpression(10)];
+    return [
+      operator,
+      randomExpression(draw, level + 1, depth + 1),
+      randomExpression(draw, 10, depth + 1),
+    ];
   }
 
-  if (operator === 'trig') return randomTrig();
+  if (operator === 'trig') return randomTrig(draw);
 
-  return [operator, randomExpression(level + 1)];
+  return [operator, randomExpression(draw, level + 1, depth + 1)];
 }
 
-function randomTrig(): MathJsonExpression {
+function randomTrig(draw: Draw): MathJsonExpression {
   return [
-    oneOf(['Cos', 'Sin', 'Tan', 'Sinh', 'Arccos', 'Arsinh']),
-    oneOf([
+    oneOf(draw, ['Cos', 'Sin', 'Tan', 'Sinh', 'Arccos', 'Arsinh']),
+    oneOf(draw, [
       'Pi',
       '-1',
       '0',
@@ -51,10 +74,15 @@ function randomTrig(): MathJsonExpression {
   ];
 }
 
-export function randomExpression(level?: number): MathJsonExpression {
+export function randomExpression(
+  draw: Draw,
+  level?: number,
+  depth = 0
+): MathJsonExpression {
   level ??= 1;
+  if (depth > MAX_DEPTH) return leaf(draw);
   if (level === 1) {
-    const h: MathJsonExpression = oneOf([
+    const h: MathJsonExpression = oneOf(draw, [
       [
         'Sqrt',
         [
@@ -86,14 +114,15 @@ export function randomExpression(level?: number): MathJsonExpression {
       'Negate',
       'trig',
     ]);
-    if (typeof h === 'string') return randomExpressionWithHead(h, 1);
+    if (typeof h === 'string')
+      return randomExpressionWithHead(draw, h, 1, depth);
     return h as MathJsonExpression;
   }
   if (level === 2) {
-    const r = Math.random();
-    if (r > 0.75) return randomExpression(1);
-    if (r > 0.5) return randomExpression(3);
-    const h = oneOf([
+    const r = draw();
+    if (r > 0.75) return randomExpression(draw, 1, depth + 1);
+    if (r > 0.5) return randomExpression(draw, 3, depth + 1);
+    const h = oneOf(draw, [
       'Multiply',
       'Multiply',
       'Add',
@@ -102,10 +131,15 @@ export function randomExpression(level?: number): MathJsonExpression {
       'Ln',
       'Exp',
     ]);
-    return randomExpressionWithHead(h, 2);
+    return randomExpressionWithHead(draw, h, 2, depth);
   }
 
-  return oneOf([
+  return leaf(draw);
+}
+
+/** A terminal: a number, a symbol, or a constant. */
+function leaf(draw: Draw): MathJsonExpression {
+  return oneOf(draw, [
     -0.000012345,
     -2,
     -2,

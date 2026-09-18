@@ -439,8 +439,12 @@ describe('deriveSubstream — pinned streams (DO NOT REGENERATE)', () => {
     expect(advanced.next).toBe(37);
   });
 
-  it('is live outside a frame', () => {
-    expect(deriveSubstream(undefined, 1)).toBe(Math.random);
+  it('is live outside a frame, drawn from the entropy handler', () => {
+    // The unframed case belongs to the engine: `ce._substream` returns a
+    // stream over `ce._random()`, which reads the `entropy` handler.
+    const ce = new ComputeEngine();
+    ce.effects = { entropy: { random: () => 0.125 } };
+    expect(ce._substream(1)()).toBe(0.125);
   });
 
   it('distinct tags give distinct streams', () => {

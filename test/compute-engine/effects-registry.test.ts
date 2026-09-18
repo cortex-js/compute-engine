@@ -2,8 +2,10 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type {
   ConsoleHandler,
+  EffectHandlers,
   Expression,
 } from '../../src/compute-engine/global-types';
 
@@ -502,6 +504,141 @@ describe('an evaluation keeps the registry it started with', () => {
   });
 });
 
+describe('entropy', () => {
+  const denied = (expr: Expression, operator?: string): boolean =>
+    JSON.stringify(expr.json) ===
+    JSON.stringify([
+      'Error',
+      ['ErrorCode', "'capability-denied'", "'entropy'"],
+      ...(operator === undefined ? [] : [`'${operator}'`]),
+    ]);
+
+  test('a new engine has the default entropy handler', () => {
+    const ce = new ComputeEngine();
+    const u = ce.effects.entropy!.random();
+    expect(u).toBeGreaterThanOrEqual(0);
+    expect(u).toBeLessThan(1);
+  });
+
+  test('the unframed draws of the random operators come from the handler', () => {
+    const ce = new ComputeEngine();
+    ce.effects = { entropy: { random: () => 0.25 } };
+    expect(ce.box(['Random']).evaluate().re).toBe(0.25);
+    expect(ce.box(['Random', ['Range', 1, 8]]).evaluate().re).toBe(3);
+    expect(
+      ce.box(['RandomShuffle', ['List', 1, 2, 3]]).evaluate().json
+    ).toEqual(ce.box(['RandomShuffle', ['List', 1, 2, 3]]).evaluate().json);
+  });
+
+  test('RandomExpression draws from the handler', () => {
+    const ce = new ComputeEngine();
+    // A constant source gives the same expression every time.
+    ce.effects = { entropy: { random: () => 0.5 } };
+    const first = ce.box(['RandomExpression']).evaluate();
+    const second = ce.box(['RandomExpression']).evaluate();
+    expect(first.json).toEqual(second.json);
+  });
+
+  test('RandomExpression ends for every constant source', () => {
+    // The generator's level 2 can return to level 1, so a source that keeps
+    // answering the same value could recurse without end (0.8 did: `Sqrt`
+    // at level 1, then back to level 1 from level 2, for ever). A depth
+    // budget makes every position a leaf past a fixed nesting.
+    const ce = new ComputeEngine();
+    for (const u of [0, 0.1, 0.3, 0.5, 0.6, 0.76, 0.8, 0.9, 0.999]) {
+      ce.effects = { entropy: { random: () => u } };
+      const result = ce.box(['RandomExpression']).evaluate();
+      expect([u, result.operator]).not.toEqual([u, 'Error']);
+    }
+  });
+
+  test('a compiled Monte-Carlo integral draws from the handler of the compiling engine', () => {
+    // `_SYS.integrate` / `_SYS.integrateMC` are static helpers; the engine
+    // binds its live draw into them, so compiled code follows a mock — and
+    // a denial, which THROWS out of the compiled function (compiled code has
+    // no error-value channel).
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.effects = {
+      entropy: {
+        random: () => {
+          calls += 1;
+          return 0.5;
+        },
+      },
+    };
+    const r = compile(ce.parse('\\int_0^1 e^{-k x^2}\\,dx'), {
+      quadrature: 'monte-carlo',
+      vars: { k: '_.k' },
+    });
+    expect(r.code).toContain('_SYS.integrateMC(');
+    // Every sample is x = 0.5, so the estimate is e^{-k/4} to the digits the
+    // runner keeps (about nine); a genuine sample would be off at the fourth.
+    expect(r.run!({ k: 1 })).toBeCloseTo(Math.exp(-0.25), 8);
+    expect(calls).toBeGreaterThan(0);
+    ce.effects = { entropy: null };
+    expect(() => r.run!({ k: 1 })).toThrow('denies the "entropy" capability');
+  }, 60000);
+
+  test('a seeded frame does not consult the handler', () => {
+    const ce = new ComputeEngine();
+    const framed = ce.box(['WithRandomSeed', 42, ['Random']]).evaluate().re;
+    let calls = 0;
+    ce.effects = {
+      entropy: {
+        random: () => {
+          calls += 1;
+          return 0.25;
+        },
+      },
+    };
+    expect(ce.box(['WithRandomSeed', 42, ['Random']]).evaluate().re).toBe(
+      framed
+    );
+    expect(calls).toBe(0);
+    ce.effects = { entropy: null };
+    expect(ce.box(['WithRandomSeed', 42, ['Random']]).evaluate().re).toBe(
+      framed
+    );
+  });
+
+  test('a denied handler makes each unframed random operator an error VALUE naming the operator', () => {
+    const ce = new ComputeEngine();
+    ce.effects = { entropy: null };
+    expect(denied(ce.box(['Random']).evaluate(), 'Random')).toBe(true);
+    expect(
+      denied(ce.box(['Random', ['Range', 1, 6]]).evaluate(), 'Random')
+    ).toBe(true);
+    expect(
+      denied(
+        ce.box(['RandomShuffle', ['List', 1, 2, 3]]).evaluate(),
+        'RandomShuffle'
+      )
+    ).toBe(true);
+    expect(denied(ce.box(['RandomPrime', 100]).evaluate(), 'RandomPrime')).toBe(
+      true
+    );
+    expect(denied(ce.box(['RandomExpression']).evaluate())).toBe(true);
+    // A stochastic estimator outside a frame draws from the handler too.
+    expect(
+      denied(
+        ce
+          .box(['NIntegrate', ['Function', ['Square', 'x'], 'x'], 0, 1])
+          .evaluate(),
+        'NIntegrate'
+      )
+    ).toBe(true);
+  });
+
+  test('the denial is an error value inside a program, not a throw', () => {
+    const ce = new ComputeEngine();
+    const result = ce.withEffects({ entropy: null }, () =>
+      ce.box(['Block', ['Assign', 'r', ['Random']], ['Add', 'r', 1]]).evaluate()
+    );
+    expect(JSON.stringify(result.json)).toContain('capability-denied');
+  });
+});
+
 //
 // The coupling rule (`docs/EFFECTS-MODEL.md`, "Host capabilities"): an operator
 // may use a capability handler only if it declares the matching effect label.
@@ -512,13 +649,21 @@ describe('an evaluation keeps the registry it started with', () => {
 describe('coupling rule audit', () => {
   const SRC = join(__dirname, '../../src/compute-engine');
 
-  /** Every file that reads `effects.console` (or destructures `effects` and
-   * reads `.console` from it), mapped to the operators whose handlers do it.
-   * `effects-registry.ts` defines the default handler and is not a consumer.
-   * A new entry here means a new operator reaches the console: check that its
-   * signature declares `console`, then add it. */
-  const CONSOLE_CONSUMERS: Record<string, string[]> = {
-    'library/core.ts': ['Print', 'Input'],
+  /** For each capability, every file that reads its handler off a registry
+   * (`effects.console`, `effects.entropy`, …), mapped to the operators whose
+   * handlers do it. `effects-registry.ts` defines the defaults and is not a
+   * consumer. A new entry here means a new operator reaches the host: check
+   * that its signature declares the label, then add it.
+   *
+   * `index.ts` reads the `entropy` handler in `ce._random()`, on behalf of
+   * every random operator evaluated outside a `WithRandomSeed` frame. Those
+   * operators declare `random`, not `entropy`: this is the one stated
+   * exception to the coupling rule (`docs/EFFECTS-MODEL.md`, "Host
+   * capabilities", ruled 2026-09-18), so the file is listed with no
+   * operators of its own. */
+  const CONSUMERS: Record<keyof EffectHandlers, Record<string, string[]>> = {
+    console: { 'library/core.ts': ['Print', 'Input'] },
+    entropy: { 'library/core.ts': ['RandomExpression'], 'index.ts': [] },
   };
 
   const sourceFiles = (dir: string): string[] =>
@@ -528,35 +673,50 @@ describe('coupling rule audit', () => {
       return path.endsWith('.ts') ? [path] : [];
     });
 
-  test('only the listed files read the console handler', () => {
-    const readers = sourceFiles(SRC)
-      .filter((path) =>
-        /effects\s*\.\s*console\b/.test(readFileSync(path, 'utf8'))
-      )
-      .map((path) => relative(SRC, path))
-      // Documentation comments in the type files mention the spelling.
-      .filter((path) => !path.startsWith('types-'))
-      .sort();
-    expect(readers).toEqual(Object.keys(CONSOLE_CONSUMERS).sort());
-  });
+  test.each(Object.keys(CONSUMERS) as (keyof EffectHandlers)[])(
+    'only the listed files read the `%s` handler',
+    (capability) => {
+      // A reading line names a registry (`effects`) and the member.
+      const reads = new RegExp(`effects[^\\n]*\\)?\\s*\\.\\s*${capability}\\b`);
+      const readers = sourceFiles(SRC)
+        .filter((path) =>
+          readFileSync(path, 'utf8')
+            .split('\n')
+            .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+            .some((line) => reads.test(line))
+        )
+        .map((path) => relative(SRC, path))
+        .filter((path) => path !== 'effects-registry.ts')
+        .sort();
+      expect(readers).toEqual(Object.keys(CONSUMERS[capability]).sort());
+    }
+  );
 
-  test('every listed operator declares the `console` effect', () => {
-    const ce = new ComputeEngine();
-    for (const operator of Object.values(CONSOLE_CONSUMERS).flat())
-      expect([operator, ce.box([operator]).effects]).toEqual([
-        operator,
-        expect.arrayContaining(['console']),
-      ]);
-  });
+  test.each(Object.keys(CONSUMERS) as (keyof EffectHandlers)[])(
+    'every listed operator declares the `%s` effect',
+    (capability) => {
+      const ce = new ComputeEngine();
+      for (const operator of Object.values(CONSUMERS[capability]).flat())
+        expect([operator, ce.box([operator]).effects]).toEqual([
+          operator,
+          expect.arrayContaining([capability]),
+        ]);
+    }
+  );
 
-  test('no operator handler reaches the host console or standard input directly', () => {
-    // Outside the default handler, library code must not name the host
-    // surfaces the `console` capability stands for.
+  test('no operator handler reaches the host console, standard input or Math.random directly', () => {
+    // Outside the default handlers, library code must not name the host
+    // surfaces the `console` and `entropy` capabilities stand for.
     const offenders = sourceFiles(join(SRC, 'library'))
       .filter((path) =>
-        /getBuiltinModule|globalThis\.console|\.prompt\(/.test(
-          readFileSync(path, 'utf8')
-        )
+        readFileSync(path, 'utf8')
+          .split('\n')
+          .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
+          .some((line) =>
+            /getBuiltinModule|globalThis\.console|\.prompt\(|Math\.random/.test(
+              line
+            )
+          )
       )
       .map((path) => relative(SRC, path));
     expect(offenders).toEqual([]);

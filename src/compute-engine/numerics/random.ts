@@ -159,7 +159,7 @@ export function frameDraw(seedLo: number, seedHi: number, n: number): number {
 
 /**
  * Successive uniforms in `[0, 1)`. Deterministic when derived from a frame,
- * live (`Math.random`) when derived outside one.
+ * live (the engine's `entropy` handler) when derived outside one.
  */
 export type RandomSubstream = () => number;
 
@@ -172,9 +172,11 @@ export type RandomSubstream = () => number;
  *   sub-streams derived with the same tag from the same frame are IDENTICAL
  *   regardless of how many draws the frame has taken. That is the
  *   reordering-insensitivity the design is for.
- * - **Unframed**: `Math.random`. There is no ambient seed to derive from, so
- *   an unframed estimator stays live — `RANDOMNESS-MODEL.md` §1, and the §8
- *   ruling that the unseeded arm is exempt from parity.
+ * - **Unframed** is not this function's case: there is no ambient seed to
+ *   derive from, so an unframed estimator stays live — `RANDOMNESS-MODEL.md`
+ *   §1, and the §8 ruling that the unseeded arm is exempt from parity. The
+ *   engine (`ce._substream`) answers a live stream drawn from its `entropy`
+ *   handler and calls this function only with a frame.
  *
  * `tag` identifies WHICH sub-stream: callers pass a structural hash of the
  * expression being estimated (`expr.hash`), so the same integral in the same
@@ -188,10 +190,9 @@ export type RandomSubstream = () => number;
  * that hardcodes what a seeded estimate evaluates to.
  */
 export function deriveSubstream(
-  frame: RandomSeedFrame | undefined,
+  frame: RandomSeedFrame,
   tag: number
 ): RandomSubstream {
-  if (frame === undefined) return Math.random;
   const [lo, hi] = pcg3dWords(frame.seedLo, frame.seedHi, tag >>> 0);
   let n = 0;
   return () => frameDraw(lo, hi, n++ >>> 0);

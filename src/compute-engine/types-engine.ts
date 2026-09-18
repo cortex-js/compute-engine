@@ -1212,13 +1212,21 @@ export interface IComputeEngine {
   tolerance: number;
 
   /** @internal Draw the next uniform in [0, 1) — from the innermost
-   *  `WithRandomSeed` frame when one is active, otherwise `Math.random()`. */
+   *  `WithRandomSeed` frame when one is active, otherwise from the `entropy`
+   *  handler of the host capability registry (`effects.entropy`; a denied
+   *  handler throws `CapabilityDeniedError`). */
   _random(): number;
+
+  /** @internal A live uniform in [0, 1) from the `entropy` handler, with no
+   *  regard to any `WithRandomSeed` frame (a denied handler throws
+   *  `CapabilityDeniedError`). For the compiled integrals, which sample live
+   *  inside a frame by ruling. */
+  _liveRandom(): number;
 
   /** @internal A private stream for the stochastic ESTIMATORS, derived from
    *  the ambient `WithRandomSeed` frame but consuming NO indices from it.
-   *  `tag` (a structural hash) selects which sub-stream. Live outside a frame.
-   *  See `docs/RANDOMNESS-MODEL.md`. */
+   *  `tag` (a structural hash) selects which sub-stream. Outside a frame each
+   *  draw comes from the `entropy` handler. See `docs/RANDOMNESS-MODEL.md`. */
   _substream(tag: number): RandomSubstream;
 
   angularUnit: AngularUnit;

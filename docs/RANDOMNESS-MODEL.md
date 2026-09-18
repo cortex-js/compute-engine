@@ -534,7 +534,9 @@ through the engine — one representation, not two kept in agreement.
 - `_SYS.drawNextRandomNumber()` delegates to `ce._random()` — the *same*
   primitive the interpreter uses. It resolves the engine's active frame **at call
   time**, advances that frame's counter, and returns `hash(seed, n)`; with no
-  frame it returns `Math.random()`.
+  frame it draws from the `entropy` handler of the host capability registry
+  (`ce.effects.entropy`, `Math.random` by default — `docs/EFFECTS-MODEL.md`,
+  "Host capabilities").
 - Compiled `WithRandomSeed` emits `_SYS.withRandomSeed(seed, () => body)`, which
   is literally `withRandomSeedFrame(ce, seed, …)` — the same push/`finally`-pop
   as the interpreter, on the same slot.

@@ -444,7 +444,10 @@ race-free; this is the documented sandboxing primitive.
 effect set (for `filesystem`, per method group: read methods require
 `fs_read`, write methods `fs_write`). This is mechanically auditable —
 grep handler-namespace usage against declared arrows — the same
-one-source-of-truth discipline as the flag migration.
+one-source-of-truth discipline as the flag migration. **One stated
+exception (ruled 2026-09-18):** the unframed draw of a `random` operator
+uses the `entropy` handler, through `ce._random()`; see "What is
+implemented" below. The audit test lists `index.ts` for that reason.
 
 **Defaults fail closed for the dangerous capabilities.** `network` and
 `filesystem` have **no default implementation**: evaluating an operator
@@ -452,7 +455,8 @@ that needs them without a host-granted handler yields an error value.
 `console` defaults to the real console; `time` to the real clock;
 `entropy` to `Math.random` (this is where `RandomExpression`'s raw
 `Math.random()` lands — ruling (b′) unchanged, now behind a mockable
-seam); `random` to the builtin PCG3D kernel (below). For `environment`
+seam — and, by the 2026-09-18 exception, where every unframed draw
+lands); `random` to the builtin PCG3D kernel (below). For `environment`
 *(v5, finding 12)*: the existing `#env()`/`#navigator()` **pragmas stay
 parse-time**, gated by `allowHostPragmas`, unchanged — the `environment`
 label and `ce.effects.environment` gate only **evaluation-time**
@@ -502,12 +506,13 @@ The registry shipped with its first capability operators, `Print` and
 `Input`. This subsection records what exists, where it differs from the
 sketch above, and the rules an operator author must follow.
 
-**Only `console` has a handler.** The registry type (`EffectHandlers`,
-`src/compute-engine/types-effects.ts`) has one member:
+**Only `console` and `entropy` have handlers.** The registry type
+(`EffectHandlers`, `src/compute-engine/types-effects.ts`) has two members:
 
 ```ts
 ce.effects.console   // { log(line: string): void;
                      //   readLine(prompt?: string): string | null | undefined } | null
+ce.effects.entropy   // { random(): number }  — a uniform in [0, 1); default Math.random
 ```
 
 `readLine` has three results: a string is the line; `null` is end of
@@ -517,16 +522,42 @@ The default handler (`src/compute-engine/effects-registry.ts`) is the real
 console, the terminal in a Node-compatible host, and the `prompt()`
 dialog in a browser.
 
-The handlers for `network`, `filesystem`, `time`, `environment`,
-`entropy` and `random` are **not** in the registry yet, on purpose: no
-library operator would read them, so a host could install an override
-and nothing would change. Each is added with the first operator that
-uses it. Two of them need a decision first: `entropy` (the unframed
-`Random()` draw reads `Math.random()` but its operator declares `random`,
-not `entropy`, so the coupling rule does not yet say which handler it
-may use) and `random` (the draw kernel, with the compile-time decline
-for a non-default kernel). The registry rejects an unknown capability
-name, so a host finds out immediately that a handler does not exist.
+**`entropy`, and the stated exception to the coupling rule (ruled
+2026-09-18).** `RandomExpression` (label `entropy`) draws from
+`options.effects.entropy`. The unframed draw of every `random` operator
+— `Random()` outside a `WithRandomSeed` frame, `RandomShuffle`,
+`RandomPrime`, the Monte-Carlo estimators' live sub-stream — is ALSO a
+use of `entropy`: `ce._random()` reads the handler when no frame is
+active (the registry of the running evaluation). Those operators declare
+`random`, not `entropy`. The user chose to keep it so, with this one
+exception to the coupling rule written down, in place of adding
+`entropy` to every random operator's signature: `random` keeps its one
+meaning, "replays under a frame", and inside a frame the handler is never
+consulted, so a denied `entropy` does not stop a seeded computation.
+`ce._random()` returns a number, so a denial there is a
+`CapabilityDeniedError` throw, which the evaluation driver converts to
+the operator's `Error("capability-denied", "entropy")` value before it
+reaches any caller (`handlerThrowToErrorValue`, checked by name, not
+`instanceof`, for the plugin-bundle boundary). Compiled code draws
+through the same primitive (`_SYS.drawNextRandomNumber`), and the
+compiled Monte-Carlo integrals through the engine-bound
+`ce._liveRandom()` (bound into `_SYS.integrate`/`integrateMC` by
+`makeSysHelpers`; live inside a frame too, by the compiled-integrals
+ruling of `docs/RANDOMNESS-MODEL.md`), so a mock applies to compiled
+code, but a denial throws out of the compiled function: it has no
+error-value channel. The dual review found the compiled integrals still
+on `Math.random`, and a constant injected source making
+`RandomExpression` recurse without end (a depth budget bounds it now).
+
+The handlers for `network`, `filesystem`, `time`, `environment` and
+`random` are **not** in the registry yet, on purpose: no library
+operator would read them, so a host could install an override and
+nothing would change. Each is added with the first operator that uses
+it; `random` is the draw kernel (with the compile-time decline for a
+non-default kernel) and, now that unframed draws are `entropy`, concerns
+only the generator beneath a frame. The registry rejects an unknown
+capability name, so a host finds out immediately that a handler does not
+exist.
 
 **Assignment is a complete description; `withEffects` is a change.**
 `ce.effects = {…}` derives the new registry from the **defaults** — a
@@ -2188,11 +2219,13 @@ Each stage is useful without the next; per-stage pinning tests named.
   `console`** (`Print`/`Input`): registry, `withEffects`, per-evaluation
   registry, `null` denial, coupling-rule audit — see "What is
   implemented" under "Host capabilities"; tests in
-  `test/compute-engine/effects-registry.test.ts`. **Still to do, each
-  with its first operator:** the `network`, `filesystem`, `time`,
-  `environment`, `entropy` and `random` handlers, and with them the
-  tests below that name them (mock `network`, mock `time`, `random`
-  kernel swap and the compile decline); `async` admission. Tests: handler mock round-trip (mock
+  `test/compute-engine/effects-registry.test.ts`. **`entropy` the same
+  day** (`RandomExpression` and every unframed draw, by the stated
+  exception). **Still to do, each with its first operator:** the
+  `network`, `filesystem`, `time`, `environment` and `random` handlers,
+  and with them the tests below that name them (mock `network`, mock
+  `time`, `random` kernel swap and the compile decline); `async`
+  admission. Tests: handler mock round-trip (mock
   `network` → predefined responses; mock `time` → frozen clock);
   coupling-rule audit (handler-namespace usage ⊆ declared labels);
   fail-closed defaults yield error values, not throws; snapshot

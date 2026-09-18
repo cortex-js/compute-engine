@@ -9962,7 +9962,13 @@ const SYS_HELPERS = {
     // outer panel node, so the starting count multiplies across levels and a
     // per-level default of 16 costs 16^depth before any refinement. Omitted for
     // a single integral, which keeps the quadrature default.
-    initialPanels?: number
+    initialPanels?: number,
+    // The source of the Monte-Carlo fallback's samples. `makeSysHelpers`
+    // binds the compiling engine's live draw — the `entropy` handler of its
+    // host capability registry — so a mocked or denied handler applies to
+    // compiled code as it does to the interpreter. Absent only when the
+    // static object is called directly, outside an engine.
+    draw?: () => number
   ) => {
     // Dynamic nesting is bounded by a shared evaluation budget — see
     // `NESTED_QUADRATURE_BUDGET`. A nested entry that finds it gone has no
@@ -9981,7 +9987,7 @@ const SYS_HELPERS = {
       // exhausted integrand.
       if (nestedEvalsLeft < 0) return NaN;
       if (r.converged || quadratureBeatsMonteCarlo(r, 10e6)) return r.estimate;
-      return monteCarloEstimate(f, a, b, 10e6).estimate;
+      return monteCarloEstimate(f, a, b, 10e6, undefined, draw).estimate;
     } finally {
       activeIntegrals--;
     }
@@ -9989,7 +9995,13 @@ const SYS_HELPERS = {
   // Definite integral via Monte-Carlo (1e7 uniform samples). STOCHASTIC and
   // approximate (~1e-4 typical error, ~200 ms/call). Emitted when
   // `quadrature: 'monte-carlo'` is requested — see `compileIntegrate`.
-  integrateMC: (fn: (x: number) => number, a: number, b: number) => {
+  integrateMC: (
+    fn: (x: number) => number,
+    a: number,
+    b: number,
+    // See `integrate`: the engine-bound live draw.
+    draw?: () => number
+  ) => {
     // Monte Carlo joins the same activation accounting as `integrate`, so that
     // an integral reached from inside THIS one's integrand is nested and pays
     // budget. Without the activation, every sample looked like an outermost
@@ -10004,7 +10016,14 @@ const SYS_HELPERS = {
     if (!enterIntegral()) return NaN;
     try {
       const f = budgetedIntegrand(realFn(fn));
-      const estimate = monteCarloEstimate(f, a, b, 10e6).estimate;
+      const estimate = monteCarloEstimate(
+        f,
+        a,
+        b,
+        10e6,
+        undefined,
+        draw
+      ).estimate;
       // The budget ran out below this level, so an unknown share of the samples
       // were refused rather than evaluated: the mean of what is left is not an
       // estimate of this integral.
@@ -10563,6 +10582,15 @@ function makeLazyStreamHelpers(ce: ComputeEngine): LazyStreamSysHelpers {
 function makeSysHelpers(ce: ComputeEngine): SysHelpers {
   const sys = Object.create(SYS_HELPERS) as SysHelpers;
   Object.assign(sys, makeRandomHelpers(ce), makeLazyStreamHelpers(ce));
+  // The integrals' Monte-Carlo samples come from THIS engine's `entropy`
+  // handler (`ce._liveRandom`), never from `Math.random` directly: a host that
+  // mocks or denies the handler must see compiled code follow. The draw is
+  // live inside a `WithRandomSeed` frame too — compiled integrals sample live
+  // by ruling (`docs/RANDOMNESS-MODEL.md`).
+  const draw = (): number => ce._liveRandom();
+  sys.integrate = (fn, a, b, initialPanels) =>
+    SYS_HELPERS.integrate(fn, a, b, initialPanels, draw);
+  sys.integrateMC = (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw);
   return sys;
 }
 
@@ -12815,7 +12843,12 @@ function hoistedCallbackLambda(
   // is the number of parameter OPERANDS, which is not the number of names
   // they bind: a destructuring pattern is ONE parameter that binds a name per
   // leaf of the pattern, and a `_` leaf binds no name at all.
-  return firstCallBoundLambda(lambda, callback.ops.length - 1, bindings, target);
+  return firstCallBoundLambda(
+    lambda,
+    callback.ops.length - 1,
+    bindings,
+    target
+  );
 }
 
 /**
@@ -14706,7 +14739,6 @@ function compileIntegrate(
   }
   return code;
 }
-
 
 /**
  * Check if function has a true name (not anonymous)

@@ -25,6 +25,20 @@ export interface ConsoleHandler {
 }
 
 /**
+ * The unseeded source of randomness of the host: the implementation behind
+ * the `entropy` effect label. `RandomExpression` draws from it, and so does
+ * every random operator (`Random`, `Shuffle`, `RandomChoice`, …) when it is
+ * evaluated OUTSIDE a `WithRandomSeed` frame — inside a frame the draws come
+ * from the seeded, deterministic stream and this handler is not consulted.
+ *
+ * @category Host Capabilities
+ */
+export interface EntropyHandler {
+  /** Return a uniformly distributed number in `[0, 1)`. */
+  random(): number;
+}
+
+/**
  * The host capabilities of an engine: one handler for each capability the
  * library operators can reach. This is the value of `ce.effects`.
  *
@@ -36,17 +50,18 @@ export interface ConsoleHandler {
  * assign `ce.effects`, or call `ce.withEffects()` for a change that lasts for
  * one callback.
  *
- * Only `console` has a handler today, because `Print` and `Input` are the only
- * library operators that reach a host capability. The other capability labels
- * of the effect system (`network`, `fs_read`, `fs_write`, `time`,
- * `environment`) get a handler when the first operator that needs one is
- * added: a handler that no operator reads would accept an override and
- * silently do nothing.
+ * Only `console` and `entropy` have a handler today, because the console
+ * operators and the random operators are the only library operators that
+ * reach a host capability. The other capability labels of the effect system
+ * (`network`, `fs_read`, `fs_write`, `time`, `environment`) get a handler when
+ * the first operator that needs one is added: a handler that no operator
+ * reads would accept an override and silently do nothing.
  *
  * @category Host Capabilities
  */
 export interface EffectHandlers {
   readonly console: ConsoleHandler | null;
+  readonly entropy: EntropyHandler | null;
 }
 
 /**

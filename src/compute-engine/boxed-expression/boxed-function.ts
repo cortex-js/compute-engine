@@ -7662,6 +7662,16 @@ function handlerThrowToErrorValue(
   def: BoxedOperatorDefinition,
   operator: string
 ): Expression {
+  // A denied host capability is a property of the program's environment, not
+  // an engine defect: it becomes the operator's `capability-denied` error
+  // value whatever the operator is (`lazy` and user-defined included). The
+  // check is by name, not `instanceof`: a plugin bundle re-bundles engine
+  // code, and a class identity does not survive that boundary.
+  if (e instanceof Error && e.name === 'CapabilityDeniedError')
+    return ce.error(
+      ['capability-denied', (e as { capability?: string }).capability ?? ''],
+      operator
+    );
   if (
     !(
       e instanceof TypeError ||

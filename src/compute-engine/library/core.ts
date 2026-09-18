@@ -7993,13 +7993,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // `isPure` — and therefore `isConstant` — is true for a generator that
       // returns something different on every call, making it a candidate for
       // common-subexpression elimination and for the `Map` lowering gate.
-      // The label is `entropy`, NOT `random`: it samples `Math.random()`
-      // directly rather than the `WithRandomSeed` frame, so it owes that frame
-      // nothing and nothing promises it replays (the three-shapes taxonomy of
+      // The label is `entropy`, NOT `random`: it samples the host's unseeded
+      // source (the `entropy` handler of the capability registry) rather than
+      // the `WithRandomSeed` frame, so it owes that frame nothing and nothing
+      // promises it replays (the three-shapes taxonomy of
       // `docs/EFFECTS-MODEL.md`). `entropy` is an impurity, so `pure` is still
       // false, but `drawsRandom` is false and the frame is never pinned.
       signature: '() entropy -> expression',
-      evaluate: (_ops, { engine }) => engine.expr(randomExpression()),
+      evaluate: (_ops, { engine, effects }) => {
+        const entropy = effects.entropy;
+        if (entropy === null) return capabilityDenied(engine, 'entropy');
+        return engine.expr(randomExpression(() => entropy.random()));
+      },
     },
   },
 

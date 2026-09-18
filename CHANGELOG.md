@@ -31,14 +31,27 @@
   const result = ce.withEffects({ console: null }, () => expr.evaluate());
   ```
 
+  The second handler is **`entropy`**, the unseeded source of randomness:
+  `{ random(): number }`, a uniform number in `[0, 1)`, `Math.random` by
+  default. `RandomExpression` draws from it, and so does every random
+  operator (`Random`, `RandomShuffle`, `RandomChoice`, `RandomPrime`, the
+  Monte-Carlo estimators, …) when evaluated OUTSIDE a `WithRandomSeed` frame;
+  inside a frame the draws come from the seeded stream and the handler is not
+  consulted. A constant handler makes unframed random operators reproducible
+  in tests; `entropy: null` makes each of them evaluate to
+  `Error("capability-denied", "entropy")` (naming the operator) — a compiled
+  function throws `CapabilityDeniedError` instead, since compiled code has no
+  error-value channel.
+
   Each evaluation uses the registry that was installed when it started. A
   change made while an evaluation runs, or made with `withEffects` for another
   asynchronous evaluation on the same engine, does not reach it. Operator
   handlers receive that registry as `options.effects`; a custom operator may
   use `options.effects.console` if its signature declares the `console`
-  effect. This is Stage 4 of `docs/EFFECTS-MODEL.md`, for the `console`
-  capability; the other capabilities of that document (`network`, `filesystem`,
-  `time`, …) get a handler with their first operator.
+  effect, and `options.effects.entropy` if it declares `entropy`. This is
+  Stage 4 of `docs/EFFECTS-MODEL.md`, for the `console` and `entropy`
+  capabilities; the other capabilities of that document (`network`,
+  `filesystem`, `time`, …) get a handler with their first operator.
 
   The type of the `options` argument of an `evaluate`/`evaluateAsync` handler,
   `EvaluateHandlerOptions`, has a new required member, `effects`. Code that
@@ -255,6 +268,35 @@
   no regression and no change on the other lanes; each new row encloses the
   JavaScript lane's value at sample points. Pinned in
   `test/compute-engine/compile-interval-collections.test.ts`.
+
+- **The interval target compiles a selection among list values, and the
+  absence marker survives every kernel.** A helper whose case arms answer a
+  list in one case and a number in another — `H(x, y) := {B(x, y) > 0: 0,
+  h(⌊x⌋, ⌊y⌋)·2 − 1}` in the Tycho document `sgtdqnj2ox`, read by a dot
+  product and a norm — declined on the interval target at "`List`: no
+  lowering": a list under a `Which` arm had no spelling. A `Which` at a
+  position that consumes its value whole (the body root of a helper, an
+  argument the callee binds whole, an accessor or reducer operand, the
+  compilation root) is now a selection among values: each arm takes the
+  collection spelling where it has one and compiles as an interval otherwise,
+  the conditions stay scalar, and an undecided condition answers the
+  element-wise hull of two lists or the absence marker for a list against a
+  number, since no one value encloses both. A scalar position is unchanged:
+  a kernel over such a selection broadcasts over whichever arm is taken
+  (`Which(x > 0: [x, 1], 1) + 1` is `[x + 1, 2]` or `2`), and a list of
+  verdicts under an arm, or a relation over the selection, keeps declining.
+  A point under a `Which` arm is a selection too. Reached through this, a
+  second defect: the kernels that branch on the sign of their input —
+  `sqrt`, `square`, `abs`, `ln`, `gamma`, `gammaln` — widened the numeric
+  absence marker (a whole-NaN interval, every comparison with which is
+  false) to an enclosure such as `[0, ∞)` through their "straddles zero"
+  arm, so `l(H(…))` over the scalar arm answered a present-looking value
+  where the interpreter has none. They now propagate a NaN input as the
+  step functions already did. On the census, the six interval-lane rows of
+  `sgtdqnj2ox` go from a decline to a compile and agree with the JavaScript
+  lane at every sample point. Pinned in
+  `test/compute-engine/compile-interval-collections.test.ts` and
+  `test/compute-engine/interval-arithmetic.test.ts`.
 
 ## 0.130.0 _2026-09-17_
 

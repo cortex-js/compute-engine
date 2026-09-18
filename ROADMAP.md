@@ -138,26 +138,45 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   walk and treats an operand too large for a `number` as too large. Pinned in
   `test/compute-engine/value-scaled-loop-backstops.test.ts`.
 
-### Interval target: what the point rows of the Tycho census still stop at (OPEN — measured 2026-09-18 after point arithmetic landed)
+### Interval target: the census rows that remain are not implicit curves (triaged 2026-09-18; the user chose not to build the zip; the list-valued case arm landed the same day)
 
 Point arithmetic (`_IA.bcastPoint`) and the point-coordinate accessor over a
 list of points (`_IA.pointComponent`) took 30 interval-lane rows of the Tycho
 census from a decline to a compile (documents `hpr2q4kles`, `mqm2eamst1`,
 `lhjmsl5pbq`, `czpf52khpc`, `0vlrmhen37`), each value-checked against the
-JavaScript lane. What the same 17 documents still decline at:
+JavaScript lane. The remaining declines in the same 17 documents were traced
+to their source rows, and the question asked of each was whether Tycho sends
+that row to the interval lane at all. Tycho uses the interval lane for line
+plots (break detection, with a JavaScript fallback) and for implicit curves
+(the CPU quadtree); parametric curves, surfaces and 3-D members never use it,
+although the census compiles every row on every target.
 
-- **A `PointList` with list components (7 rows: `n7uhaaoq1q` ×5,
-  `mk7duulwxf`, `0vlrmhen37`).** `P = (random(N), random(N)) + (cos a, sin a)/N`
-  and the 3-D point lists of `n7uhaaoq1q` (`vector<3>` components) are LISTS
-  of points — the interpreter zips the components — and no lowering of this
-  target spells that list ("`PointList`: no lowering for operand types
-  (`list<real>`, `list<real>`)"). The array of the zipped points is
-  representable, and `_IA.bcastPoint` already consumes one; the missing
-  lowering is the zip itself.
-- **A matrix operand of a kernel (2 rows, `jgcclk1njk`).** A helper is handed a
-  `matrix`-typed argument and reads it with `Add` inside the body ("the
-  operand is a collection (type `matrix`)"); a matrix has no interval reading
-  on this target.
+- **A `PointList` with list components (7 rows) — not built, by decision.**
+  Five rows (`n7uhaaoq1q`) are `[PointList(…) for …]` comprehensions, 3-D
+  parametric surfaces; one (`2ki2hjsouf`) is in a document the plan of
+  2026-09-15 already marks invalid; one (`mk7duulwxf`) is the restriction
+  `1 > 0 {|2C·√min(…) − (0..C)| ≤ 1}`, which past the zip stops again at a
+  relation over a `list<boolean>` (a list of verdicts is not a result of
+  this target — see the entry below). The zip would give Tycho no implicit
+  curve. If it is ever wanted: `_IA.bcastPoint` already consumes a list of
+  points, so the missing piece is only the zip that builds one from the
+  component lists (shortest length, a scalar component repeated), spelled
+  in `compileIntervalCollectionValue` under the `PointList` head when a
+  component is a list.
+- **`List` in an operand position (11 rows).** Seven rows are `sgtdqnj2ox`,
+  whose helper `H(x, y) := {B(x,y) > 0 : 0, h(⌊x⌋, ⌊y⌋)·2 − 1}` answers a
+  scalar in one case arm and a LIST in the other; that now compiles (a
+  `Which` at a consuming position is a selection among values, landed
+  2026-09-18), and the six interval-lane rows of the document agree with the
+  JavaScript lane. Two rows (`rwhqbsp4wq`) are `P(0.1x, 6000·[0, 0.1, …, 1])`,
+  an explicit list of ten line plots; the JavaScript lane compiles them, so
+  the cost is break detection on those lines, not the plot. Two rows
+  (`epq7yidtim`) are a 3-D `PointList` comprehension under a `distance`
+  restriction — a surface.
+- **A matrix operand of a kernel (2 rows, `jgcclk1njk`), `GeometricVector`
+  (6), `At` over a tuple with a component that is not a number (3).** Not
+  interval-lane members (vectors are drawing primitives; the matrix rows are
+  parametric), listed so the next measurement starts from the same numbers.
 - **An elementary function over a DECLARED point.** `Sin(P)` with
   `P: tuple<number, number>` declines ("the operand is a collection") while
   `Sin((a, b))` over a literal point of untyped symbols maps over the
@@ -165,10 +184,7 @@ JavaScript lane. What the same 17 documents still decline at:
   is consumed whole, never mapped over" keeps the declared case declining;
   point arithmetic admits only `Add`, `Subtract`, `Negate`, `Multiply` and
   `Divide`. `Abs` and `Hypot` read a point whole (its norm) and must stay out
-  of any widening.
-- **`List` in an operand position (11 rows), `GeometricVector` (6), `At` over a
-  tuple with a component that is not a number (3).** Not point arithmetic;
-  listed so the next measurement starts from the same numbers.
+  of any widening. No census row stops here.
 
 ### Colour handling residue (audit of 2026-09-08; the five colour rulings — a tuple is 0–1 sRGB, `ColorFromColorspace` answers the route's canonical components, a well-formed spelling that packs to zero is transparent black, a list is not a colour, `ContrastingColor` answers the candidate — landed 2026-09-09)
 
@@ -1924,33 +1940,32 @@ flagship must never conflict) and never reach an `_infer` write (no symbol
 narrowing, so the anchor pin holds). Full contribution with inference writes
 would need the `zs` KEEP pin re-ruled. Do not build ahead of demand.
 
-### The capability registry has a handler for `console` only (OPEN, effects, on demand — opened 2026-09-18)
+### The capability registry has handlers for `console` and `entropy` only (OPEN, effects, on demand — opened 2026-09-18)
 
 `ce.effects` (the host capability registry, Stage 4 of
-`docs/EFFECTS-MODEL.md`) shipped with `Print`/`Input`, and holds one handler,
-`console`. The specification names six more: `network`, `filesystem`, `time`,
-`environment`, `entropy` and `random`. They were left out deliberately — no
-library operator would read them, so a host could install an override and
-nothing would change — and each is to be added with the first operator that
-uses it. Two are reachable today and need a decision before they are built:
+`docs/EFFECTS-MODEL.md`) holds two handlers: `console` (`Print`/`Input`) and
+`entropy` (`RandomExpression`, and every random operator evaluated outside a
+`WithRandomSeed` frame — the stated exception to the coupling rule, ruled
+2026-09-18). The specification names four more: `network`, `filesystem`,
+`time`, `environment`, and the `random` draw kernel. They were left out
+deliberately — no library operator would read them, so a host could install an
+override and nothing would change — and each is to be added with the first
+operator that uses it.
 
-- **`entropy`.** `RandomExpression` (label `entropy`) calls `Math.random()`
-  directly (`library/random-expression.ts`), and so does an unframed
-  `Random()` draw (`ce._random()`, `numerics/random.ts` `deriveSubstream`).
-  A host cannot mock or deny either. `RandomExpression` can move to an
-  `entropy` handler as is. The unframed `Random()` cannot, under the coupling
-  rule as written: its operator declares `random`, not `entropy`, so the rule
-  does not allow it to use the `entropy` handler. The decision to make: either
-  the unframed draw is a use of `entropy` (then every `random` operator also
-  declares `entropy`, or the rule gets an exception for the unframed draw), or
-  it belongs to the `random` kernel.
 - **`random`.** The seeded draw kernel `draw(seed, n)`, captured at frame
   entry, with compile declining for an expression that carries `random` while
-  a non-default kernel is installed.
-
-`time`, `network`, `filesystem` and `environment` have no operator yet. The
-first `network` operator (`Fetch`) is also the first operator that returns a
-promise, and it starts the admission of the `async` label.
+  a non-default kernel is installed. Unframed draws are `entropy` now, so the
+  kernel is only about replacing PCG3D under a frame.
+- **`time`, `network`, `filesystem`, `environment`** have no operator yet. The
+  first `network` operator (`Fetch`) is also the first operator that returns a
+  promise, and it starts the admission of the `async` label.
+- **Compiled code** draws through `_SYS.drawNextRandomNumber()` →
+  `ce._random()` and, for the Monte-Carlo integrals, through the engine-bound
+  `ce._liveRandom()`, so a mocked `entropy` handler applies to it, but a
+  DENIED handler makes a compiled function THROW `CapabilityDeniedError` at run
+  time (compiled code has no error-value channel, `docs/ERROR-MODEL.md` §6). A
+  compile-time decline for a `random`-bearing expression under a denied
+  `entropy` handler would fail closed instead; not built until a host asks.
 
 ### A free `i` in a subscript index is the imaginary unit on one canonicalization path and a symbol on the other (OPEN, low priority — consumers have a complete workaround; engine fix explored and reverted 2026-08-21)
 
