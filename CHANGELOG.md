@@ -2,6 +2,36 @@
 
 ### Resolved Issues
 
+- **The interval target handles absence across its whole value model, and its
+  `IsMissing`/`Coalesce` answer in the target's own domains.** The target has
+  no object domain: every value it produces is an enclosure, an array of them
+  (a collection at a consuming position) or a tri-state verdict. Absence has a
+  spelling in each — the whole-NaN marker or the `empty` result for a value,
+  the marker for an absent list (every collection consumer propagates a
+  non-array operand), the verdict `'false'` for an absent condition, as the
+  JavaScript target's falsy absent condition reads — so the shared
+  object-domain absence gate now exempts a position whose type is in that
+  model (`absence.numeric.coversValueModel`): `list<number> | missing |
+  number` (a restricted value over a broadcastable helper), `boolean |
+  missing` (a restricted relation), `vector<3> | missing`. A type outside the
+  model (a string, a list of strings, an expression) keeps failing closed.
+  With it, a restriction over a list value passes the list where its
+  condition holds, is `empty` where it fails and clips element by element in
+  between; a restriction over a relation is the conjunction; a `Which` whose
+  arms are lists picks the arm or hulls element by element (both selection
+  forms are now exempt from the scalar-operand gate for their arms, their
+  conditions still checked scalar). The discharge primitives were wrong on
+  this target: `IsMissing` tested the lower endpoint and answered a JavaScript
+  `false` for every kinded result, the `empty` of a failed restriction
+  included, and `Coalesce` returned that result instead of its fallback.
+  `IsMissing` now answers a verdict (`'true'` for the marker and for `empty`,
+  `'maybe'` for a value present over part of the cell) and `Coalesce` hands
+  the fallback back for an absent value and the hull for a partial one. On
+  the 34 Tycho census rows that declined at the absence gate, 8 now compile
+  (value-checked against the JavaScript rows) and 26 decline at the next
+  lowering, a point-coordinate accessor over a point list for 15 of them.
+  Pinned in `test/compute-engine/compile-interval-absence.test.ts`.
+
 - **`At` with an index that is provably not an integer answers the absence
   marker instead of staying inert.** `L[2.5]`, `L[3/2]` and `L[5 + √17]`
   evaluated to the inert `At(L, …)`: the scalar path selected on a primitive

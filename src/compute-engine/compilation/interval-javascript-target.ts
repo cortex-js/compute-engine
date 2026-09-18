@@ -657,10 +657,16 @@ function intervalVarsAccess(id: string): string {
  * operand back to one interval; `Norm`, whose operand is a point; and the
  * binders `Sum`/`Product`/`Integrate`, whose handlers judge their own body and
  * limits with more specific diagnostics (`assertScalarBigOpBody`,
- * `compileIntervalIntegrate`); and `Max`/`Min`, whose one-collection form is
- * a reduction and whose scalar fold runs the gate itself.
+ * `compileIntervalIntegrate`); `Max`/`Min`, whose one-collection form is
+ * a reduction and whose scalar fold runs the gate itself; and the selection
+ * forms `Which`/`When`, whose ARMS may be collection values (a list handed
+ * whole to whichever arm is selected — the run-time `piecewise`, `restrict`
+ * and `hull` read an array arm in its own domain) while their conditions
+ * are held scalar by `assertScalarCondition`.
  */
 const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
+  'Which',
+  'When',
   'At',
   'Length',
   'PointX',
@@ -1782,11 +1788,27 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // where it doesn't. Must NOT fall through to the generic JS ternary: the
   // interval comparisons return the tri-state string 'true'|'false'|'maybe',
   // which is always truthy, so a ternary guard would never mask.
-  When: (args, compile) => {
+  When: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error('When: expected 2 arguments (value, condition)');
     // `When` is not a selection form: its condition must be a scalar boolean.
     BaseCompiler.assertScalarCondition(args[1]);
+    // A restricted RELATION (`y ≤ K(x) {K(x) > 0}` as one row) is a verdict:
+    // where the restriction fails the relation holds nowhere, where it is
+    // undecided the relation holds at most where it held — the conjunction.
+    // The JavaScript target reads the same way: its absent condition is
+    // falsy. The relation is evaluated only when the condition is not
+    // already `'false'`; evaluating it there would be sound — every
+    // primitive of this target computes a value with no side effect,
+    // `Random()` included, which lowers to its constant support — but the
+    // relation may be the expensive half of the row.
+    if (args[0].type.matches('boolean')) {
+      const c = intervalConditionVar(target);
+      return (
+        `((${c} = ${compile(args[1])}) === 'false' ? 'false' : ` +
+        `_IA.and(${c}, ${compile(args[0], 0)}))`
+      );
+    }
     // The VALUE is the conditional position (operand 0); the condition is
     // eager — matching the `When` entry of the lazy-operand inventory.
     return `_IA.restrict(${compile(args[1])}, () => ${compile(args[0], 0)})`;
@@ -1807,6 +1829,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (isSymbol(cond, 'True')) {
         return compile(val, i + 1);
       }
+      // The arms may be collection values; the conditions may not (the
+      // head is exempt from the scalar-operand gate for its arms' sake).
+      BaseCompiler.assertScalarCondition(cond);
       return compileIntervalConditional(
         i === 0 ? compile(cond) : compile(cond, i),
         compile(val, i + 1),
@@ -3915,13 +3940,24 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
           .map(([name, code]) => `const ${name} = ${code};`)
           .join(' ')} return ${body}; })()`,
       // Absence capability (§3.F): numeric absence is a whole-NaN interval
-      // (reusing the machinery already present for `NaN`); `isAbsent` tests the
-      // lower endpoint. No object axis. Consumers land in P3.
+      // (reusing the machinery already present for `NaN`). The runtime's
+      // `isAbsent` answers a tri-state verdict — `'true'` for the marker and
+      // for the `empty` result a failed restriction yields, `'maybe'` for a
+      // value that exists over part of the cell — so `IsMissing` composes
+      // with every other condition of this target; `coalesce` hands the
+      // fallback back for an absent value and the hull for a partial one.
+      // (A lower-endpoint test used to answer a JavaScript `false` for every
+      // kinded result, `empty` included.) This target has no object domain:
+      // an absent list is the marker too (every collection consumer
+      // propagates a non-array operand), an absent condition is the verdict
+      // `'false'` (`_IA.restrict` over a relation), so the object-domain
+      // gate does not apply (`coversValueModel`). No object axis.
       absence: {
         numeric: {
           make: () => '{ lo: NaN, hi: NaN }',
-          isAbsent: (x) => `Number.isNaN((${x}).lo)`,
-          coalesce: (x, d) => `((_c) => Number.isNaN(_c.lo) ? ${d} : _c)(${x})`,
+          isAbsent: (x) => `_IA.isAbsent(${x})`,
+          coalesce: (x, d) => `_IA.coalesce(${x}, () => ${d})`,
+          coversValueModel: true,
         },
       },
       indent: 0,

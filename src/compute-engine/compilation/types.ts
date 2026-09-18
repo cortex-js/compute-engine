@@ -1329,6 +1329,21 @@ export interface CompileTarget<Expr = unknown> {
       make: () => TargetSource;
       isAbsent?: (x: TargetSource) => TargetSource;
       coalesce?: (x: TargetSource, d: TargetSource) => TargetSource;
+      /**
+       * True when the target has NO object domain at all: every value it can
+       * produce is a number-like enclosure, an array of them, or a tri-state
+       * verdict, and absence has a spelling in each — the numeric marker for
+       * an absent value or an absent collection (every collection consumer
+       * answers the marker for a non-array operand), the verdict `'false'`
+       * for an absent condition (the JavaScript target reads its absent
+       * condition as falsy too). The object-domain absence gate is then
+       * skipped: a `missing`-carrying position of a type the target cannot
+       * value is refused by that type's own lowering, with its own reason.
+       * The interval target declares it. A target with fixed-shape values (a
+       * shader `vec3` has no NaN fill wider than four lanes) leaves it unset
+       * and keeps the gate.
+       */
+      coversValueModel?: boolean;
     };
     object?: {
       nullLiteral: TargetSource;

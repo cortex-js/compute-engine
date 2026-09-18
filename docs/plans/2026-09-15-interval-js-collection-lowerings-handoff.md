@@ -347,9 +347,24 @@ Ranked candidates, by value to the corpus:
    engine hold the helper calls unsubstituted.
 2. **Absent positions on the point-accessor and `broadcastable<number>`
    unions** — 34 interval rows, 11 documents, the largest remaining interval
-   class. A whole-NaN interval could represent both; the change is the shared
-   absence-axis choice (ROADMAP: "Collection values on the interval target:
-   what stays open…", third bullet).
+   class. Done 2026-09-18 as far as absence goes (CHANGELOG [Unreleased]):
+   the target has no object domain, so absence has a spelling in every
+   domain of its value model — the whole-NaN marker for a value or an absent
+   list (every collection consumer propagates a non-array operand), the
+   verdict `'false'` for an absent condition — and the object-domain gate
+   no longer refuses a position whose type is in that model. The discharge
+   primitives were also wrong on this target: `IsMissing` answered a
+   JavaScript `false` for the `empty` result of a failed restriction and
+   `Coalesce` returned that result instead of its fallback; both now answer
+   in the target's domains. Measured on the 34 rows (Tycho worktree at
+   `f9ed1474e`, released 0.130.0 against the build): 8 compile, value-checked
+   against the JavaScript rows at 12 sample points (enclosure or verdict
+   parity), 0 rows elsewhere flip; 26 decline at the next lowering — 15 at a
+   point-coordinate accessor over a point-or-point-list union, 7 at a bare
+   `List`, 3 at `At` over a tuple with a broadcastable component, 1 at an
+   `expression` position. So the "absent" class was the first blocker, not
+   a class; the accessor over a point list is the next lever (ROADMAP:
+   "Collection values on the interval target: what stays open…").
 3. **JavaScript scalar arithmetic over a list-valued operand** — 33 rows, 9
    documents, the largest JavaScript class (ROADMAP: "JavaScript
    list-arithmetic declines, triaged (2026-09-14…)").

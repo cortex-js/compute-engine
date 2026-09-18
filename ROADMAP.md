@@ -1557,9 +1557,13 @@ and the stored-value memo of a symbol, plus the compile-side cause that actually
 stopped the census on that document: the reference analysis walked the
 consumer's substituted height-map value, a DAG of 236,663 distinct nodes, as a
 tree of 25 billion, and probed the consumer's `Which` handler at every `Which`
-node of it, which serialized a sub-DAG as a tree; `CHANGELOG.md`); (2) absent
-positions on
-the point-accessor and `broadcastable<number>` unions, 34 interval rows; (3)
+node of it, which serialized a sub-DAG as a tree; `CHANGELOG.md`); (2) ~~absent
+positions on the point-accessor and `broadcastable<number>` unions, 34
+interval rows~~ — measured 2026-09-18: absence was the first blocker only;
+with it handled (`CHANGELOG.md`) 8 rows compile and the other 26 are the
+point-coordinate accessor over a point list (15), bare `List` (7), `At` over
+a tuple with a broadcastable component (3) and one `expression` row (the
+bullet above); (3)
 JavaScript scalar arithmetic over a list-valued operand, 33 rows (the triaged
 list-arithmetic entry); (4) GLSL `At` over a run-time indexed collection, 32
 rows, and GLSL `Integrate`, 15 rows; (5) the nine remaining interval `List`
@@ -1590,14 +1594,20 @@ reduces over it. Four things were left out of that round on purpose:
   cell and must not be ported. The sound route is forward-mode automatic
   differentiation in interval arithmetic — a jet lane over the interval kernels,
   the interval counterpart of `jet-derivative.ts`. Design work; demand-gated.
-- **An absent position typed `broadcastable<number> | missing` declines (9
-  census rows).** `absentDomainIsObject` reads `broadcastable<number>` as an
-  object domain, and the interval target declares no object absence axis. A
-  value that is a number or a list of numbers could use the numeric axis on this
-  target — its absence marker is a whole-NaN interval, which the element-wise
-  broadcast passes through as a scalar — but the reading is the shared
-  compiler's, so the change needs a target-side override of the axis choice. Not
-  done; measure the rows first.
+- **The "absent position" census class was a first blocker, not a class:
+  behind it sit the ordinary lowering gaps.** Measured 2026-09-18 on the 34
+  rows in 11 documents that declined with "an object-domain absent position
+  has no representation": with absence handled across the target's whole
+  value model (`absence.numeric.coversValueModel`, `CHANGELOG.md`), 8 rows
+  compile and 26 decline at the next lowering — 15 at a point-coordinate
+  accessor over a point-or-point-list union (`PointY(c)` with `c` a list of
+  points; the accessor lowers a single point only), 7 at a bare `List` that
+  is not at a consuming position, 3 at `At` over a tuple with a
+  `broadcastable` component, 1 at an `expression | missing` position (out of
+  the target's value model). The accessor over a point list is the next
+  lever: one coordinate per element is an array, which this target values
+  at a consuming position since 2026-09-15, so the lowering is a broadcast of
+  `_IA.component` over the array.
 - **A relation over a provable list (`L < 1`) keeps the scalar-operand gate.**
   Its element-wise value is a list of tri-state verdicts, which the result
   contract (`IntervalValue`) does not admit. Tycho compiles the UNMASKED body of

@@ -472,10 +472,14 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
     expect(t.absence.object.nullLiteral).toBe('undefined');
   });
 
-  test('interval target: numeric isAbsent = isnan(x.lo)', () => {
+  test('interval target: numeric isAbsent is the runtime tri-state test', () => {
     const it = (ce as any)._getCompilationTarget('interval-js');
     const t = it.createTarget();
-    expect(t.absence.numeric.isAbsent('v')).toBe('Number.isNaN((v).lo)');
+    // A verdict, not a JavaScript boolean: `'true'` for the whole-NaN marker
+    // and for the `empty` result a failed restriction yields, `'maybe'` for a
+    // value present over part of the cell.
+    expect(t.absence.numeric.isAbsent('v')).toBe('_IA.isAbsent(v)');
+    expect(t.absence.numeric.coversValueModel).toBe(true);
     expect(t.absence.object).toBeUndefined();
   });
 

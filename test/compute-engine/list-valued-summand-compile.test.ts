@@ -1429,8 +1429,11 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
 
     // `Which`, per the measured table: the same contradiction closes it on every
     // target, but on glsl/wgsl the DEFINITION backstop speaks first (their
-    // element-wise `Which` entry bypasses `assertScalarCondition`), and on
-    // interval-js the pre-existing no-`List`-lowering decline does.
+    // element-wise `Which` entry bypasses `assertScalarCondition`). The
+    // interval target checks each `Which` condition with
+    // `assertScalarCondition` too (its arms may be collection values, so the
+    // head is exempt from the scalar-operand gate), and so speaks the
+    // condition message like the JavaScript target.
     test.each(ALL_TARGETS)('%s declines `Which(b(u), 1, True, 2)`', (to) => {
       const r = compile(withBody(body).box(WHICH('b')), {
         to,
@@ -1440,8 +1443,6 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
       const error = (r as any).error as string;
       if (to === 'glsl' || to === 'wgsl')
         expect(error).toMatch(CONTRADICTED_DEFINITION);
-      else if (to === 'interval-js')
-        expect(error).toMatch(/no lowering for it/);
       else expect(error).toMatch(CONTRADICTED_CONDITION);
     });
 

@@ -1896,6 +1896,18 @@ export class BaseCompiler {
           `capability. Fail closed (§3.F).`
       );
     if (!BaseCompiler.absentDomainIsObject(t)) return target.absence.numeric;
+    // A target whose absence spellings cover its whole value model
+    // (`coversValueModel`) discharges a list or a verdict position on the
+    // numeric axis too: its `isAbsent`/`coalesce` read every domain of the
+    // model. The same predicate the gate applies, so a position that
+    // compiles can also be discharged.
+    if (
+      target.absence.numeric.coversValueModel === true &&
+      BaseCompiler.isNumericOrVerdictShaped(
+        resolveTypeForCompilation(stripMissingFromType(resolveTypeForCompilation(t)))
+      )
+    )
+      return target.absence.numeric;
     if (target.absence.object === undefined)
       throw new Error(
         `${opName}: an object-domain absent position has no representation on ` +
@@ -2230,13 +2242,27 @@ export class BaseCompiler {
           );
           return cell !== 'never' && isSubtype(cell, 'number');
         })();
+        // A target whose absence spellings cover its whole value model
+        // (`absence.numeric.coversValueModel`, the interval target) is exempt
+        // for every type IN that model: numbers, verdicts, and indexed
+        // collections of them at any depth — `list<number> | missing |
+        // number` (a restricted value over a broadcastable helper),
+        // `boolean | missing` (a restricted relation),
+        // `vector<3> | missing`. A type outside the model (a string, a list
+        // of strings, an expression) keeps failing closed here: the
+        // target's lowerings do not all check element domains, and one
+        // would hand a string back behind `success: true`.
+        const inValueModel =
+          target.absence.numeric.coversValueModel === true &&
+          BaseCompiler.isNumericOrVerdictShaped(stripped);
         if (
           stripped !== 'never' &&
           stripped !== 'unknown' &&
           stripped !== 'any' &&
           !isSubtype(stripped, 'number') &&
           !numericShaped &&
-          !numericCells
+          !numericCells &&
+          !inValueModel
         )
           throw new Error(
             `Cannot compile an object-domain absent ('missing') position ` +
@@ -16782,6 +16808,47 @@ export class BaseCompiler {
    * removing the `missing` arm collapsed the union down to a single
    * reference arm.
    */
+  /**
+   * Is `t` a number, a boolean, or an indexed collection (a list, a vector,
+   * a tuple) of such values at any depth — a union of these included? The
+   * value model of a target with no object domain (the interval target: an
+   * enclosure, a verdict, an array of either).
+   */
+  private static isNumericOrVerdictShaped(t: Readonly<Type>): boolean {
+    const r = resolveTypeForCompilation(t);
+    if (isSubtype(r, 'number') || isSubtype(r, 'boolean')) return true;
+    if (typeof r === 'string') return false;
+    if (r.kind === 'union')
+      return r.types.every((arm) => BaseCompiler.isNumericOrVerdictShaped(arm));
+    // `broadcastable<T>` is `T | list<T>`: in the model when `T` is.
+    if (r.kind === 'broadcastable') return BaseCompiler.isNumericShaped(r.elements);
+    if (r.kind === 'tuple')
+      return r.elements.every((el) => BaseCompiler.isNumericShaped(el.type));
+    if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+    const element = collectionElementType(r);
+    return element !== undefined && BaseCompiler.isNumericShaped(element);
+  }
+
+  /** The collection half of `isNumericOrVerdictShaped`: a number, or an
+   * indexed collection of numbers at any depth. A verdict is a value of the
+   * model only as a SCALAR — the collection consumers of the interval target
+   * read an element as a number, an enclosure or a kinded result, and a
+   * verdict element would read as `entire`, a wrong value behind
+   * `success: true`. */
+  private static isNumericShaped(t: Readonly<Type>): boolean {
+    const r = resolveTypeForCompilation(t);
+    if (isSubtype(r, 'number')) return true;
+    if (typeof r === 'string') return false;
+    if (r.kind === 'union')
+      return r.types.every((arm) => BaseCompiler.isNumericShaped(arm));
+    if (r.kind === 'broadcastable') return BaseCompiler.isNumericShaped(r.elements);
+    if (r.kind === 'tuple')
+      return r.elements.every((el) => BaseCompiler.isNumericShaped(el.type));
+    if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+    const element = collectionElementType(r);
+    return element !== undefined && BaseCompiler.isNumericShaped(element);
+  }
+
   private static absentDomainIsObject(t: Readonly<Type>): boolean {
     const stripped = resolveTypeForCompilation(
       stripMissingFromType(resolveTypeForCompilation(t))

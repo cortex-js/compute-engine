@@ -122,6 +122,9 @@ import {
   hull as _hull,
   asResult as _asResult,
   restrict as _restrict,
+  asValueResult as _asValueResult,
+  isAbsent as _isAbsent,
+  coalesce as _coalesce,
   clamp as _clamp,
 } from './comparison.js';
 import {
@@ -248,8 +251,13 @@ export {
   not,
   piecewise,
   hull,
+  hullValues,
+  type IntervalModelValue,
   asResult,
+  asValueResult,
   restrict,
+  isAbsent,
+  coalesce,
   clamp,
 } from './comparison.js';
 
@@ -396,8 +404,12 @@ export const IntervalArithmetic = {
   not: _not,
   piecewise: _piecewise,
   hull: _hull,
-  res: _asResult,
+  // `res` wraps an enclosure and passes an array or a verdict through: the
+  // compiled conditional spells it around an arm it did not build.
+  res: _asValueResult,
   restrict: _restrict,
+  isAbsent: _isAbsent,
+  coalesce: _coalesce,
   clamp: _clamp,
   integrate: _integrate,
   integrateClosed: _integrateClosed,
