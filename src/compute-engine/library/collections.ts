@@ -3849,9 +3849,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // element's effects happen in the same order as on the sync route.
     evaluateAsync: async (
       ops,
-      { engine, numericApproximation, materialization, signal }
+      { engine, numericApproximation, materialization, signal, effects }
     ) => {
-      const options = { numericApproximation, materialization, signal };
+      // `_effects` hands the host capability registry this evaluation
+      // captured to each element's evaluation.
+      const options = {
+        numericApproximation,
+        materialization,
+        signal,
+        _effects: effects,
+      };
       const evaluated = async (
         xs: ReadonlyArray<Expression>
       ): Promise<Expression[]> => {
@@ -3944,15 +3951,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // are awaited one at a time, in order.
     evaluateAsync: async (
       ops,
-      { engine: ce, numericApproximation, materialization, signal }
+      { engine: ce, numericApproximation, materialization, signal, effects }
     ) => {
+      // `_effects` hands the host capability registry this evaluation
+      // captured to each nested evaluation.
+      const options = {
+        numericApproximation,
+        materialization,
+        signal,
+        _effects: effects,
+      };
       const comp = parseSetComprehension(ops);
       if (comp !== null) {
-        const elements = await enumerateSetComprehensionAsync(comp, {
-          numericApproximation,
-          materialization,
-          signal,
-        });
+        const elements = await enumerateSetComprehensionAsync(comp, options);
         if (
           elements === undefined ||
           elements.length > MAX_SIZE_EAGER_COLLECTION
@@ -3960,7 +3971,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         return ce.function('Set', elements);
       }
-      const options = { numericApproximation, materialization, signal };
       const elements: Expression[] = [];
       for (const op of ops) elements.push(await op.evaluateAsync(options));
       return ce.function('Set', elements);

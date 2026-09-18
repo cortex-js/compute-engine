@@ -6,11 +6,17 @@ import { ComputeEngine } from '../../src/compute-engine';
 // by `resolveLibraryNames` before a program is boxed); the engine itself has
 // no `print`/`input` binding, which the tests below pin.
 //
-// `Input` is exercised through the browser `prompt()` path only: its Node
-// path does a BLOCKING synchronous read of stdin, which in a jest worker
-// (stdin is an open pipe that never delivers data) would deadlock the
-// worker. Each `Input` test removes `process.getBuiltinModule` for its
-// duration so `hostReadLine` falls through to the `prompt()` branch.
+// Both operators reach the host through the `console` handler of the
+// capability registry (`ce.effects`). This file exercises the DEFAULT
+// handler — the real `console.log`, the real input sources — which is why it
+// patches globals; `effects-registry.test.ts` covers replaced and denied
+// handlers.
+//
+// `Input` is exercised through the browser `prompt()` path only: the default
+// handler's Node path does a BLOCKING synchronous read of stdin, which in a
+// jest worker (stdin is an open pipe that never delivers data) would deadlock
+// the worker. Each `Input` test removes `process.getBuiltinModule` for its
+// duration so the default `readLine` falls through to the `prompt()` branch.
 //
 
 const ce = new ComputeEngine();

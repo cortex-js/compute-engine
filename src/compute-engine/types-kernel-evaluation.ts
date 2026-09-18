@@ -2,6 +2,7 @@ import type { MathJsonSymbol } from '../math-json.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { LatexString } from './latex-syntax/types.js';
 import type { BoxedSubstitution } from './types-kernel-serialization.js';
+import type { EffectHandlers } from './types-effects.js';
 
 /** @category Assumptions */
 export interface Assumption<Expr = unknown, CE = unknown> {
@@ -144,6 +145,19 @@ export type EvaluateOptions = {
 
   /** Cancellation signal for long-running evaluations. */
   signal: AbortSignal;
+
+  /**
+   * The host capability registry of the asynchronous evaluation these options
+   * belong to. `evaluateAsync()` sets it when the evaluation starts, and the
+   * options object then carries it to every nested `evaluateAsync()` call.
+   * It travels with the options, not in an engine field, because several
+   * asynchronous evaluations can be suspended on one engine at the same time
+   * and each must keep its own registry. Not an input: a value supplied by a
+   * caller is used as given, but the supported way to change the handlers is
+   * `ce.withEffects()`.
+   * @internal
+   */
+  _effects: EffectHandlers;
 };
 
 /**

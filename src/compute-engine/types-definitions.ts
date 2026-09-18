@@ -21,6 +21,7 @@ import type {
   BoxedRuleSet as KernelBoxedRuleSet,
   Scope as KernelScope,
 } from './types-kernel-evaluation.js';
+import type { EffectHandlers } from './types-effects.js';
 
 /**
  * Compute engine surface used by definition callbacks.
@@ -78,6 +79,20 @@ export type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
    * invoked outside the evaluation driver may not receive one).
    */
   expression?: Expression;
+
+  /**
+   * The host capabilities of THIS evaluation: the `ce.effects` registry as it
+   * was when the evaluation started. A handler that reaches a host capability
+   * reads it from here, never from `ce.effects`, so that a change of registry
+   * made while the evaluation runs — or made for a different, concurrent
+   * asynchronous evaluation — has no effect on it.
+   *
+   * A handler may use a capability only if its operator declares the
+   * corresponding effect label: `options.effects.console` requires `console`
+   * in the signature. A `null` handler is a denial: return
+   * `ce.error(['capability-denied', '<capability>'])`.
+   */
+  effects: EffectHandlers;
 };
 
 type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;

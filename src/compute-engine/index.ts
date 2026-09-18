@@ -171,6 +171,14 @@ import {
   type RandomSeedFrame,
   type RandomSubstream,
 } from './numerics/random.js';
+import {
+  DEFAULT_EFFECT_HANDLERS,
+  deriveEffectHandlers,
+} from './effects-registry.js';
+import type {
+  EffectHandlerOverrides,
+  EffectHandlers,
+} from './types-effects.js';
 import { isValidSymbol } from '../math-json/symbols.js';
 
 import { getFunctionProperties } from './function-properties/index.js';
@@ -1151,6 +1159,28 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _evaluationDepth = 0;
 
+  /** See `IComputeEngine._evaluationEffects`.
+   * @internal */
+  _evaluationEffects: EffectHandlers | undefined = undefined;
+
+  /** The registry assigned to `ce.effects`, before any `withEffects` change.
+   * @internal */
+  private _baseEffects: EffectHandlers = DEFAULT_EFFECT_HANDLERS;
+
+  /** The `withEffects` calls that are open now, oldest first. A synchronous
+   * call is removed when its callback returns; an asynchronous one when its
+   * promise settles. It is a list and not a saved-and-restored value because
+   * two asynchronous calls can overlap without nesting: if each one put back
+   * the value it saw when it started, the one that settles LAST would
+   * reinstall the overrides of the one that settled first, permanently.
+   * @internal */
+  private _effectOverrides: EffectHandlerOverrides[] = [];
+
+  /** The installed registry: `_baseEffects` with every open `withEffects`
+   * change applied, oldest first. Recomputed only when one of them changes.
+   * @internal */
+  private _effects: EffectHandlers = DEFAULT_EFFECT_HANDLERS;
+
   /** See `IComputeEngine._objectStoreEpoch`.
    * @internal */
   _objectStoreEpoch = 0;
@@ -1650,6 +1680,76 @@ export class ComputeEngine implements IComputeEngine {
     } finally {
       this._runtimeState.deadlineFrame = prevFrame;
     }
+  }
+
+  get effects(): EffectHandlers {
+    return this._effects;
+  }
+
+  set effects(handlers: EffectHandlerOverrides) {
+    // A complete description: derive from the DEFAULTS, not from the current
+    // registry, so a handler that is not mentioned returns to its default.
+    this._baseEffects = deriveEffectHandlers(DEFAULT_EFFECT_HANDLERS, handlers);
+    this._recomputeEffects();
+  }
+
+  /** @internal */
+  private _recomputeEffects(): void {
+    let effects = this._baseEffects;
+    for (const overrides of this._effectOverrides)
+      effects = deriveEffectHandlers(effects, overrides);
+    this._effects = effects;
+  }
+
+  withEffects<T>(overrides: EffectHandlerOverrides, fn: () => T): T {
+    // Validate before anything is installed: a bad override must not leave an
+    // entry in the list.
+    deriveEffectHandlers(this._effects, overrides);
+
+    // A private copy is the identity of THIS call in the list, so the same
+    // `overrides` object passed to two calls gives two distinct entries.
+    const entry = { ...overrides };
+    this._effectOverrides.push(entry);
+    this._recomputeEffects();
+
+    const close = () => {
+      const i = this._effectOverrides.indexOf(entry);
+      if (i >= 0) this._effectOverrides.splice(i, 1);
+      this._recomputeEffects();
+    };
+
+    // When `withEffects` is called by an operator handler, an evaluation is
+    // already running and has captured its registry. The evaluations `fn`
+    // starts are nested in it and would inherit that captured registry, so
+    // replace it for the synchronous part of `fn`. It is restored as soon as
+    // `fn` returns — not when a promise settles — because by then the
+    // enclosing evaluation continues, or has ended.
+    const enclosing = this._evaluationEffects;
+    if (enclosing !== undefined) this._evaluationEffects = this._effects;
+
+    // Everything that can throw synchronously — the callback, and the read
+    // of `then` that detects a promise (a getter can throw) — is inside the
+    // `try`, so a throw always removes this call from the list.
+    let result: T;
+    let settled: Promise<T> | undefined;
+    try {
+      result = fn();
+      if (
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        typeof (result as { then?: unknown }).then === 'function'
+      )
+        settled = Promise.resolve(result).finally(close);
+    } catch (e) {
+      close();
+      throw e;
+    } finally {
+      this._evaluationEffects = enclosing;
+    }
+
+    if (settled !== undefined) return settled as T;
+    close();
+    return result;
   }
 
   /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should

@@ -9,9 +9,12 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // definitions (not keywords), a user declaration of `print` shadows them by
 // scope like any other name.
 //
-// `input` is tested through the browser `prompt()` path only: its Node path
-// does a BLOCKING synchronous stdin read, which would deadlock a jest
-// worker. See test/compute-engine/print-input.test.ts for the mechanics.
+// `input` with the DEFAULT console handler is tested through the browser
+// `prompt()` path only: its Node path does a BLOCKING synchronous stdin read,
+// which would deadlock a jest worker. See
+// test/compute-engine/print-input.test.ts for the mechanics. The last block
+// replaces and denies the handler through the engine's capability registry
+// (`ce.effects`), which needs no global patching.
 //
 
 function run(source: string): ReturnType<typeof executeEpsil> {
@@ -88,5 +91,47 @@ describe('EPSIL input', () => {
     const { value, diagnostics } = run('input()');
     expect(diagnostics).toEqual([]);
     expect(value.symbol).toBe('Nothing');
+  });
+});
+
+describe('EPSIL print/input and the host capability registry', () => {
+  function runWith(
+    ce: ComputeEngine,
+    source: string
+  ): ReturnType<typeof executeEpsil> {
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    return executeEpsil(ce, source, { parseLatex });
+  }
+
+  test('a host-supplied console handler receives print and answers input', () => {
+    const ce = new ComputeEngine();
+    const lines: string[] = [];
+    ce.effects = {
+      console: {
+        log: (line) => {
+          lines.push(line);
+        },
+        readLine: () => 'Arno',
+      },
+    };
+    const result = runWith(
+      ce,
+      'let name = input("who? ")\nfor k in 1..3 { print("hi", name, k) }\n0'
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(lines).toEqual(['hi Arno 1', 'hi Arno 2', 'hi Arno 3']);
+  });
+
+  test('a denied console is a `capability-denied` runtime error, and the program continues', () => {
+    const ce = new ComputeEngine();
+    ce.effects = { console: null };
+    const result = runWith(ce, 'print("a")\n1 + 1');
+    expect(result.value?.re).toBe(2);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].severity).toBe('error');
+    expect(result.diagnostics[0].message).toEqual(
+      expect.arrayContaining(['runtime-error', 'capability-denied'])
+    );
   });
 });

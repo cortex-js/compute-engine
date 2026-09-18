@@ -25,6 +25,8 @@ import type {
   ExpressionInput,
   FunctionInterface,
 } from '../global-types.js';
+import type { EffectHandlers } from '../types-effects.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import {
   describe as describeOperand,
@@ -2499,6 +2501,14 @@ export class BoxedFunction
     // previous element's result there. Staleness is the memo's own stamps'
     // job (`function-utils.ts`, `validApplicationMemo`); its size is bounded
     // per literal (`MAX_APPLICATION_MEMO_RESULTS`).
+    // Host capabilities (`ce.effects`): the evaluation that is not nested in
+    // another one captures the installed registry, and every handler below it
+    // receives that same object — assigning `ce.effects` while the evaluation
+    // runs does not change it. The slot is already set when this evaluation is
+    // nested in a synchronous one, or when the asynchronous driver set it
+    // around a handler call; then it is inherited, and it is not cleared here.
+    const capturesEffects = engine._evaluationEffects === undefined;
+    if (capturesEffects) engine._evaluationEffects = engine.effects;
     engine._evaluationDepth += 1;
     try {
       // A deadline is armed only by an enclosing `withTimeLimit` span; work
@@ -2511,6 +2521,7 @@ export class BoxedFunction
       return this._computeValue(options)();
     } finally {
       engine._evaluationDepth -= 1;
+      if (capturesEffects) engine._evaluationEffects = undefined;
     }
   }
 
@@ -2848,10 +2859,32 @@ export class BoxedFunction
     // `restore()` refuse rather than rewind state an evaluation is still
     // standing on. Decremented in a `finally` on the promise, so a rejection
     // does not strand the count.
+    // Host capabilities (`ce.effects`): an asynchronous evaluation captures
+    // the registry when it starts and carries it in its options, which every
+    // nested `evaluateAsync(options)` call receives. An engine field cannot
+    // hold it: while this evaluation is suspended at an `await`, another one
+    // may run on the same engine with a different registry. A synchronous
+    // evaluation that is already running (this call comes from one of its
+    // handlers) passes its own registry on.
+    const effects =
+      options?._effects ??
+      this.engine._evaluationEffects ??
+      this.engine.effects;
+    if (options?._effects === undefined)
+      options = { ...options, _effects: effects };
     this.engine._inFlightAsyncEvaluations += 1;
     let promise: Promise<Expression>;
     try {
-      promise = this._evaluateAsyncUncounted(options);
+      // The driver runs synchronously up to its first `await`, and that
+      // part evaluates synchronously in places — the application of a
+      // user-defined function, the materialization of a collection. Publish
+      // the captured registry in the engine slot for that part, so those
+      // evaluations inherit it; the slot is restored when the driver first
+      // suspends (`runWithEvaluationEffects` returns when the promise is
+      // created, not when it settles).
+      promise = runWithEvaluationEffects(this.engine, effects, () =>
+        this._evaluateAsyncUncounted(options)
+      );
     } catch (error) {
       this.engine._inFlightAsyncEvaluations -= 1;
       throw error;
@@ -4911,6 +4944,9 @@ export class BoxedFunction
           // operands — `tail` has already been evaluated. See
           // `EvaluateHandlerOptions.expression`.
           expression: this,
+          // Set by the enclosing `evaluate()`; the fallback covers a caller
+          // that reaches this step without going through it.
+          effects: this.engine._evaluationEffects ?? this.engine.effects,
         });
       } catch (e) {
         evalResult = handlerThrowToErrorValue(
@@ -5646,20 +5682,27 @@ export class BoxedFunction
       // 5/ Call the `evaluate` handler
       //
       const engine = this.engine;
+      const effects =
+        options?._effects ?? engine._evaluationEffects ?? engine.effects;
 
       let value: Expression | undefined;
       try {
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
           expression: Expression;
+          effects: EffectHandlers;
         } = {
           numericApproximation,
           engine,
           signal: options?.signal,
+          // An `evaluateAsync` handler passes these options to the operands
+          // it awaits; the registry must go with them.
+          _effects: effects,
           materialization: options?.materialization,
           // See the matching comment (and `EvaluateHandlerOptions.expression`)
           // on the sync path.
           expression: this,
+          effects,
         };
         // AWAIT INSIDE THE `try`: an `evaluateAsync` handler returns at its
         // first suspension point, not at completion, so popping on the
@@ -5691,40 +5734,57 @@ export class BoxedFunction
           def.holdClass !== 'quote'
             ? await awaitAsyncOnlyDescendants(tail, options)
             : tail;
-        value = await (def.evaluateAsync?.(tail, opts) ??
-          def.evaluate?.(handlerOps, opts));
+        // The handler call itself is synchronous (an `evaluateAsync` handler
+        // returns its promise at its first `await`). For that synchronous
+        // part, publish this evaluation's registry in the engine slot, so
+        // that a handler which evaluates operands with the synchronous
+        // `evaluate()` — every `lazy` operator with a synchronous handler
+        // does — gives them this registry and not the one another,
+        // concurrent evaluation installed. Restored before the `await`.
+        value = await runWithEvaluationEffects(
+          engine,
+          effects,
+          () =>
+            def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(handlerOps, opts)
+        );
       } catch (e) {
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
       } finally {
         if (localContext) this.engine._removeEvalContext(localContext);
       }
 
-      // Handler-less scoped-operator no-operand-change identity: see the
-      // matching comment in the sync path (avoids re-canonicalizing a lazy
-      // scoped collection into a fresh, split-off local scope; every other
-      // operator keeps the load-bearing re-box).
-      const result =
-        value ??
-        (isScoped &&
-        def.evaluate === undefined &&
-        def.evaluateAsync === undefined &&
-        this.isCanonical &&
-        tail.every((x, i) => x === this._ops[i])
-          ? this
-          : engine.function(this._operator, tail));
+      // The rest runs after the `await` above, so the engine slot is empty
+      // again; the string-preservation check and the pole override evaluate
+      // synchronously and must see this evaluation's registry.
+      return runWithEvaluationEffects(engine, effects, () => {
+        // Handler-less scoped-operator no-operand-change identity: see the
+        // matching comment in the sync path (avoids re-canonicalizing a lazy
+        // scoped collection into a fresh, split-off local scope; every other
+        // operator keeps the load-bearing re-box).
+        const result =
+          value ??
+          (isScoped &&
+          def.evaluate === undefined &&
+          def.evaluateAsync === undefined &&
+          this.isCanonical &&
+          tail.every((x, i) => x === this._ops[i])
+            ? this
+            : engine.function(this._operator, tail));
 
-      // 5a/ String preservation, re-checked on the RESULT. The step that ran
-      // before evaluation could only see the node as authored, whose type may
-      // be a union that resolves to `string` only once the operands are
-      // evaluated (see `evaluateStringPreservingResult`). Declines leave
-      // `result` untouched. Twin of step 6a in the sync path.
-      const preservedResult = evaluateStringPreservingResult(result);
-      if (preservedResult !== result) return preservedResult;
+        // 5a/ String preservation, re-checked on the RESULT. The step that
+        // ran before evaluation could only see the node as authored, whose
+        // type may be a union that resolves to `string` only once the
+        // operands are evaluated (see `evaluateStringPreservingResult`).
+        // Declines leave `result` untouched. Twin of step 6a in the sync
+        // path.
+        const preservedResult = evaluateStringPreservingResult(result);
+        if (preservedResult !== result) return preservedResult;
 
-      // 5b/ Pole-aware numeric evaluation (see the sync path).
-      if (numericApproximation)
-        return applyPoleOverride(engine, this._operator, tail, result);
-      return result;
+        // 5b/ Pole-aware numeric evaluation (see the sync path).
+        if (numericApproximation)
+          return applyPoleOverride(engine, this._operator, tail, result);
+        return result;
+      });
     };
   }
 }

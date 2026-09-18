@@ -16,6 +16,7 @@ import type {
   TypeString,
 } from '../common/type/types.js';
 import type { ComputedEffects } from '../common/type/effects.js';
+import type { EffectHandlers } from './types-effects.js';
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { NumericValue } from './numeric-value/types.js';
 import type { BigNum } from './numerics/types.js';
@@ -475,6 +476,7 @@ interface BoxedOperatorDefinition
     options: Partial<EvaluateOptions> & {
       engine: ExpressionComputeEngine;
       expression?: Expression;
+      effects: EffectHandlers;
     }
   ) => Expression | undefined;
   evaluateAsync?: (
@@ -482,6 +484,7 @@ interface BoxedOperatorDefinition
     options: Partial<EvaluateOptions> & {
       engine: ExpressionComputeEngine;
       expression?: Expression;
+      effects: EffectHandlers;
     }
   ) => Promise<Expression | undefined>;
   evalDimension?: (

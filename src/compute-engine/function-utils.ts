@@ -23,6 +23,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
 } from './global-types.js';
+import type { EffectHandlers } from './types-effects.js';
 import {
   isSymbol,
   isFunction,
@@ -1853,13 +1854,16 @@ export function evaluateStatements(
 export async function evaluateStatementsAsync(
   ce: ComputeEngine,
   ops: Iterable<Expression>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  effects?: EffectHandlers
 ): Promise<Expression> {
   let result: Expression = ce.Nothing;
   for (const op of ops) {
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       debugStatementHook(op);
-    result = await op.evaluateAsync({ signal });
+    // `effects` is the host capability registry the enclosing asynchronous
+    // evaluation captured; each statement must run with the same one.
+    result = await op.evaluateAsync({ signal, _effects: effects });
     if (
       debugStatementResultHook !== undefined &&
       op.sourceOffsets !== undefined

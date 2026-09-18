@@ -17,7 +17,7 @@ import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
 import type { CliIo } from './io.js';
 import { makeEpsilSession } from './session.js';
-import type { McpOptions } from './types.js';
+import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
 
 /**
  * `epsil mcp` — a Model Context Protocol server over stdio or Streamable
@@ -162,39 +162,32 @@ function readOnlyAnnotations(): Record<string, boolean> {
 }
 
 /**
- * Run `fn` with the host's console-I/O surface captured. The stdio
+ * Evaluate an Epsil program with its console I/O captured. The stdio
  * transport carries JSON-RPC on standard output and input, so an evaluated
- * program's `Print` writing through `console.log` would corrupt the
- * outgoing protocol stream, and an `Input` reading standard input would
- * consume — or block on — protocol bytes. For the duration of `fn`:
- * `console.log` is swapped for a collector (the printed lines are returned
- * so the caller can report them in the tool result), and the two backends
- * `Input` probes — `process.getBuiltinModule` for the synchronous stdin
- * reader, and the browser-style `prompt` — are hidden, so `input()` stays
- * an unevaluated symbolic call. Everything is restored on exit, including
- * on a throw. Evaluation is synchronous, so the swap cannot leak across
- * concurrently handled requests.
+ * program's `print` writing to the real console would corrupt the outgoing
+ * protocol stream, and an `input` reading standard input would consume — or
+ * block on — protocol bytes. The session's engine therefore gets a `console`
+ * handler of its own (`ce.effects`, the host capability registry): `log`
+ * collects the printed lines, which are returned so the caller can report
+ * them in the tool result, and `readLine` answers `undefined` — "this host
+ * has no interactive input" — so `input()` stays an unevaluated symbolic
+ * call. The handler belongs to this one engine: nothing global is changed, so
+ * nothing needs to be restored and no other request can observe it.
  */
-function withHostIOCaptured<T>(fn: () => T): { result: T; output: string[] } {
+function evaluateWithConsoleCaptured(
+  session: EpsilSession,
+  source: string
+): { result: EvaluationResult; output: string[] } {
   const output: string[] = [];
-  const console_ = globalThis.console;
-  const savedLog = console_.log;
-  const proc = globalThis.process as unknown as Record<string, unknown>;
-  const savedGetBuiltin = proc.getBuiltinModule;
-  const g = globalThis as Record<string, unknown>;
-  const savedPrompt = g.prompt;
-  console_.log = (...items: unknown[]) => {
-    output.push(items.map((x) => String(x)).join(' '));
+  session.engine.effects = {
+    console: {
+      log: (line) => {
+        output.push(line);
+      },
+      readLine: () => undefined,
+    },
   };
-  delete proc.getBuiltinModule;
-  delete g.prompt;
-  try {
-    return { result: fn(), output };
-  } finally {
-    console_.log = savedLog;
-    if (savedGetBuiltin !== undefined) proc.getBuiltinModule = savedGetBuiltin;
-    if (savedPrompt !== undefined) g.prompt = savedPrompt;
-  }
+  return { result: session.evaluate(source), output };
 }
 
 /** A JSON-RPC protocol error (as opposed to a tool-execution failure,
@@ -545,8 +538,9 @@ class McpServer {
 
     const fancySymbols = optionalBoolean(args, 'fancySymbols');
 
-    const { result, output } = withHostIOCaptured(() =>
-      makeEpsilSession(timeLimit).evaluate(source)
+    const { result, output } = evaluateWithConsoleCaptured(
+      makeEpsilSession(timeLimit),
+      source
     );
     const json = formatValue(result, 'json');
     return toolResult({

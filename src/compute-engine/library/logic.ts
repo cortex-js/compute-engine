@@ -286,13 +286,14 @@ const decideImplies: Decider = (ce, v, i) =>
   i === 0 && sym(v) === 'False' ? ce.True : undefined;
 
 /** The `EvaluateOptions` to hand to an operand: everything the caller passed
- * (`numericApproximation`, `materialization`, the cancellation `signal`) minus
- * the handler-only fields (`engine`, `expression`). */
+ * (`numericApproximation`, `materialization`, the cancellation `signal`, and
+ * the host capability registry an asynchronous evaluation carries in
+ * `_effects`) minus the handler-only fields (`engine`, `expression`). */
 function evaluateOptionsOf(
   options: EvaluateHandlerOptions
 ): Partial<EvaluateOptions> {
-  const { numericApproximation, materialization, signal } = options;
-  return { numericApproximation, materialization, signal };
+  const { numericApproximation, materialization, signal, _effects } = options;
+  return { numericApproximation, materialization, signal, _effects };
 }
 
 /**

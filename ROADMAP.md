@@ -1321,7 +1321,9 @@ point-list arithmetic surfacing in color-heavy documents:
   accessor used to widen its result to the abstract `collection<number>`, which
   fails closed; it now distributes over the union arms to
   `number | list<number>`, which compiles. See the CHANGELOG entry.
-- `s8ishknvhe`: still declines. Its operand `C_c` carries a `number | tuple`
+- `s8ishknvhe`: still declines (re-confirmed by Tycho 2026-09-18 on `C_cf`:
+  `Abs: cannot compile a broadcastable head over a possibly list-valued
+  operand`). Its operand `C_c` carries a `number | tuple`
   ELEMENT arm (`indexed_collection<number | tuple<…>> | …`), an imprecise
   parameter-union artifact (Tycho D-229) that could be a point spelled flat OR a
   list of points. The accessor leaves that as `collection<number>` — it is
@@ -1743,9 +1745,27 @@ in place of `conj`).
      document functions `S`, `f` and `N` in place), and `evaluate()` computes
      each reference separately: one inner `Which` costs 130–190 ms at 500
      points. With the inner `Which` evaluated once and bound to a symbol, the
-     same result takes 0.2–0.3 s in place of 0.9–1.2 s. `expr.digest` is a
-     possible key to share the value of structurally identical sub-expressions
-     during one `evaluate()`.
+     same result takes 0.2–0.3 s in place of 0.9–1.2 s. Tycho addressed this
+     on its side (2026-09-18, `shared-subexpressions.ts` in `dev/tycho`):
+     each repeated function node that reads a collection is evaluated once and
+     bound in the resolver's child scope — 10 000 points 11.0 s → 1.8 s on a
+     quiet box, the production resolver answering in 2.6 s. Two facts from
+     that work matter here. (1) Calling `S`, `f`, `N` by reference in place of
+     expanding them is NOT value-safe: a named function with an untyped
+     parameter is mapped element-wise over a list argument (the declared
+     `broadcastable<T>` contract of item 157), so a function that reads its
+     list as a whole (`g(L) = L - mean(L)`) answers `[0, 0, 0, 0]` by reference
+     and `[-1.5, -0.5, 0.5, 1.5]` expanded; `Apply` of the same lambda, or a
+     `list<number>`-typed parameter, gives the whole-list value. The expansion
+     is what gives a whole-list function its value, so Tycho keeps it. (2) A
+     symbol ASSIGNED an unevaluated expression is re-evaluated on every read
+     (measured 2026-09-18: three reads of `W + 1` with `W := Abs(PointX(L)) +
+     Abs(PointY(L))` over 2 000 points, 430 ms; the same with the evaluated
+     value assigned, 67 ms). That is the definition semantics of an assigned
+     expression, not a defect; a caller that wants a value must assign the
+     evaluated value. Sharing the value of structurally identical
+     sub-expressions during one `evaluate()` (`expr.digest` as the key)
+     remains the engine-side option that would help every caller.
    - Each element of each broadcast operator is computed by boxing a new
      canonical function (`mapAtCell` and the drain iterator in
      `library/collections.ts`, through `computeBroadcastCell`): operator
@@ -1755,6 +1775,13 @@ in place of `conj`).
      comment on `evaluateElementwiseSelection` (`library/control-structures.ts`)
      quotes about 8 µs per element per condition for the lazy broadcast `Map`;
      that figure must be measured again on a built bundle.
+
+The compiled route does not take this body: Tycho's `javascript` compile of
+`C_cf` declines at `Abs` ("cannot compile a broadcastable head over a possibly
+list-valued operand", `base-compiler.ts`), because `C_c` carries a
+`number | tuple` element arm in its declared type. That decline is the
+`s8ishknvhe` bullet of "JavaScript list-arithmetic declines, triaged"; after the
+`conj` release the interpreted route serves `C_cf`.
 
 ### An element-wise ordering relation compares a NaN operand where the scalar branch treats it as undecided (OPEN — found 2026-09-12 by the Codex review of the selection index push-through)
 
@@ -1897,21 +1924,33 @@ flagship must never conflict) and never reach an `_infer` write (no symbol
 narrowing, so the anchor pin holds). Full contribution with inference writes
 would need the `zs` KEEP pin re-ruled. Do not build ahead of demand.
 
-### `Print`/`Input` should route through the Stage 4 capability registry (OPEN, effects — opened 2026-08-18)
+### The capability registry has a handler for `console` only (OPEN, effects, on demand — opened 2026-09-18)
 
-The console operators (`Print`, `Input`, Epsil `print`/`input`) declare the
-`console` effect label but reach the host directly — `console.log` via
-`globalThis`, stdin via `process.getBuiltinModule('node:fs')`, the browser
-`prompt()` dialog. `docs/EFFECTS-MODEL.md` (Stage 4, unbuilt) specifies the
-`ce.effects` handler registry as the seam these operators should consume —
-per-engine, mockable, deniable (`null` = capability denial, the sandboxing
-primitive). Until it exists, a host can redirect or deny console I/O only by
-patching globals; the Epsil MCP server does exactly that (`withHostIOCaptured`
-in `src/cli/mcp.ts` — its stdio transport carries JSON-RPC, so program output
-must not reach the real stdout, and interactive input must not consume protocol
-bytes). When Stage 4 lands: route both operators through `ce.effects.console`,
-replace the MCP global-patching with a registry override, and add
-denied/overridden-capability coverage.
+`ce.effects` (the host capability registry, Stage 4 of
+`docs/EFFECTS-MODEL.md`) shipped with `Print`/`Input`, and holds one handler,
+`console`. The specification names six more: `network`, `filesystem`, `time`,
+`environment`, `entropy` and `random`. They were left out deliberately — no
+library operator would read them, so a host could install an override and
+nothing would change — and each is to be added with the first operator that
+uses it. Two are reachable today and need a decision before they are built:
+
+- **`entropy`.** `RandomExpression` (label `entropy`) calls `Math.random()`
+  directly (`library/random-expression.ts`), and so does an unframed
+  `Random()` draw (`ce._random()`, `numerics/random.ts` `deriveSubstream`).
+  A host cannot mock or deny either. `RandomExpression` can move to an
+  `entropy` handler as is. The unframed `Random()` cannot, under the coupling
+  rule as written: its operator declares `random`, not `entropy`, so the rule
+  does not allow it to use the `entropy` handler. The decision to make: either
+  the unframed draw is a use of `entropy` (then every `random` operator also
+  declares `entropy`, or the rule gets an exception for the unframed draw), or
+  it belongs to the `random` kernel.
+- **`random`.** The seeded draw kernel `draw(seed, n)`, captured at frame
+  entry, with compile declining for an expression that carries `random` while
+  a non-default kernel is installed.
+
+`time`, `network`, `filesystem` and `environment` have no operator yet. The
+first `network` operator (`Fetch`) is also the first operator that returns a
+promise, and it starts the admission of the `async` label.
 
 ### A free `i` in a subscript index is the imaginary unit on one canonicalization path and a symbol on the other (OPEN, low priority — consumers have a complete workaround; engine fix explored and reverted 2026-08-21)
 

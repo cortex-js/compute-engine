@@ -27,6 +27,10 @@ import type {
 } from './numeric-value/types.js';
 import type { BigNum, Rational } from './numerics/types.js';
 import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
+import type {
+  EffectHandlerOverrides,
+  EffectHandlers,
+} from './types-effects.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { InferenceRollbackFrame } from './inference-rollback.js';
 import type { CheckpointWindow } from './checkpoint-journal.js';
@@ -567,6 +571,17 @@ export interface IComputeEngine {
    * refuses while this is nonzero.
    * @internal */
   _evaluationDepth: number;
+
+  /** The `ce.effects` registry captured by the synchronous evaluation that is
+   * running now, or `undefined` when none is running. It is set when a
+   * top-level `evaluate()` starts and cleared when it returns, so every
+   * operator handler inside one evaluation receives the same registry even if
+   * `ce.effects` is assigned while the evaluation runs. The asynchronous
+   * evaluation driver also sets it around each synchronous handler call, to
+   * the registry that asynchronous evaluation captured, so that nested
+   * synchronous evaluations inherit it.
+   * @internal */
+  _evaluationEffects: EffectHandlers | undefined;
 
   /**
    * Incremented on every mutable-object field store — the one engine write
@@ -1112,6 +1127,62 @@ export interface IComputeEngine {
     limit: number | { ms: number; label?: string },
     fn: () => T extends Promise<unknown> ? never : T
   ): T;
+
+  /**
+   * The host capabilities of this engine: the handlers the library operators
+   * use to reach the host. `Print` and `Input` use `effects.console`.
+   *
+   * The registry is an immutable object. Reading returns the registry that a
+   * new evaluation would use. Assigning installs a new registry: the assigned
+   * object is a COMPLETE description — a handler it does not mention returns
+   * to its default, so `ce.effects = {}` restores every default. A `null`
+   * handler denies the capability: an operator that needs it evaluates to an
+   * `Error("capability-denied", …)` value.
+   *
+   * ```ts
+   * const lines: string[] = [];
+   * ce.effects = {
+   *   console: { log: (line) => lines.push(line), readLine: () => undefined },
+   * };
+   * ```
+   *
+   * Each evaluation (`evaluate()`, `N()`, `evaluateAsync()`) uses the registry
+   * that was installed when it started. An assignment does not change the
+   * handlers of an evaluation that is already running.
+   *
+   * For a change that must last for one block of code only, use
+   * {@linkcode withEffects}.
+   */
+  get effects(): EffectHandlers;
+  set effects(handlers: EffectHandlerOverrides);
+
+  /**
+   * Run `fn` with some host capabilities replaced or denied, then put the
+   * previous ones back. Evaluations that START inside `fn` use the changed
+   * registry.
+   *
+   * `overrides` is applied on top of the registry in effect when
+   * `withEffects` is called, so calls nest: a capability an inner call does
+   * not mention keeps the handler of the outer call. A `null` value denies the
+   * capability, even if it has a default handler — this is how to evaluate an
+   * expression that is not trusted:
+   *
+   * ```ts
+   * const result = ce.withEffects({ console: null }, () => expr.evaluate());
+   * ```
+   *
+   * The previous registry is put back when `fn` returns or throws. If `fn`
+   * returns a promise, it is put back when that promise settles (fulfilled or
+   * rejected), and `withEffects` returns a promise that settles the same way.
+   *
+   * An asynchronous evaluation keeps the registry it started with, so an
+   * evaluation that started BEFORE `withEffects` was called is not changed by
+   * it. But while the promise of an asynchronous `fn` is pending, the changed
+   * registry is the installed one: an unrelated evaluation that starts during
+   * that time, from other code, also uses it. Start such evaluations before
+   * calling `withEffects`, or use a separate engine.
+   */
+  withEffects<T>(overrides: EffectHandlerOverrides, fn: () => T): T;
 
   iterationLimit: number;
 

@@ -1,6 +1,60 @@
 ## [Unreleased]
 
+### New Features
+
+- **Host capabilities: `ce.effects` and `ce.withEffects()`.** The engine now
+  reaches the host through a registry of handlers that the embedding
+  application can replace or deny, one engine at a time. The first handler is
+  `console`, used by `Print` and `Input` (Epsil `print` and `input`):
+
+  ```ts
+  const lines: string[] = [];
+  ce.effects = {
+    console: { log: (line) => lines.push(line), readLine: () => 'Ada' },
+  };
+  ```
+
+  `log(line)` receives each printed line. `readLine(prompt)` returns the line
+  read, `null` at end of input (`Input` evaluates to `Nothing`), or `undefined`
+  when the host has no interactive input (`Input` stays unevaluated). The
+  default handler is unchanged behavior: the real console, the terminal in
+  Node, the `prompt()` dialog in a browser. An assignment is a complete
+  description, so `ce.effects = {}` restores the defaults.
+
+  A handler set to **`null` denies the capability**: the operator evaluates to
+  an `Error("capability-denied", "console")` value and does not reach the host.
+  `ce.withEffects(overrides, fn)` makes a change that lasts for one callback —
+  including a callback that returns a promise — and is the way to evaluate an
+  expression that is not trusted:
+
+  ```ts
+  const result = ce.withEffects({ console: null }, () => expr.evaluate());
+  ```
+
+  Each evaluation uses the registry that was installed when it started. A
+  change made while an evaluation runs, or made with `withEffects` for another
+  asynchronous evaluation on the same engine, does not reach it. Operator
+  handlers receive that registry as `options.effects`; a custom operator may
+  use `options.effects.console` if its signature declares the `console`
+  effect. This is Stage 4 of `docs/EFFECTS-MODEL.md`, for the `console`
+  capability; the other capabilities of that document (`network`, `filesystem`,
+  `time`, …) get a handler with their first operator.
+
+  The type of the `options` argument of an `evaluate`/`evaluateAsync` handler,
+  `EvaluateHandlerOptions`, has a new required member, `effects`. Code that
+  calls a handler directly with an options object it builds itself must add
+  it; code that forwards the `options` it received needs no change.
+
 ### Epsil
+
+- **The MCP server no longer patches globals to capture `print` and to keep
+  `input` symbolic.** It used to replace `console.log` and hide
+  `process.getBuiltinModule` and `prompt` around each evaluation. It now gives
+  the session's engine a `console` handler (`ce.effects`). The `output` lines
+  of the `evaluate` tool and the unevaluated `input(…)` are unchanged.
+- **A denied `print` or `input` is a `capability-denied` runtime error**, with
+  an extended explanation (`epsil doc capability-denied`). The program
+  continues after it.
 
 - **The VS Code extension navigates and renames type names, and renames a
   parameter together with its named-argument labels.** A use of a declared

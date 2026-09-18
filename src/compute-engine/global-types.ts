@@ -6,9 +6,11 @@
 //   types-definitions.ts — symbol/operator definitions, collection handlers
 //   types-evaluation.ts  — rules, assumptions, scopes, evaluation
 //   types-engine.ts      — ComputeEngine interface
+//   types-effects.ts     — host capability handlers (`ce.effects`)
 
 export type * from './types-expression.js';
 export type * from './types-serialization.js';
+export type * from './types-effects.js';
 export type {
   ValueDefinition,
   SequenceDefinition,

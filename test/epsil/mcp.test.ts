@@ -250,8 +250,8 @@ describe('MCP server tools', () => {
 
   test('evaluate keeps input() symbolic instead of reading the transport stream', async () => {
     // Reading stdin would consume (or block on) protocol bytes, so the
-    // interactive-input backends are hidden during evaluation and the call
-    // stays unevaluated.
+    // server gives the engine a `console` handler whose `readLine` reports
+    // "no interactive input on this host", and the call stays unevaluated.
     const [response] = await runServer([
       callTool(1, 'evaluate', { source: 'input("Who? ")' }),
     ]);

@@ -265,6 +265,14 @@ Only the last statement's value is a program's result, so an error produced by a
 
 A program produces an error value of its own with `RuntimeError("code")` (or `RuntimeError(ErrorCode("code", details))`). Do not write `Error("code")` for that: a written `Error` is a STATIC diagnostic node and marks the expression around it as invalid, so a function whose body spells one is never defined.
 
+## `capability-denied`
+
+The program used a capability of the host — the quoted name, for example `console` for `print` and `input` — and the host that runs the program does not allow it. The call evaluates to this error value instead of reaching the host; nothing was printed or read.
+
+Which capabilities a program may use is a decision of the embedding application, not of the program: an application that runs programs it does not trust denies the capabilities they must not reach. There is nothing to fix in the program except to remove the call, or to run the program in a host that allows the capability.
+
+For the author of the host: capabilities are the handlers of `ce.effects`. A handler set to `null` is a denial; `ce.withEffects({ console: null }, () => …)` denies one for the duration of a callback.
+
 ## `static-type-error`
 
 This problem was detected before anything ran, when the program was canonicalized — the same analysis `epsil check` performs.

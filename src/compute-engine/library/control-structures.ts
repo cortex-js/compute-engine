@@ -4,6 +4,10 @@ import {
   evaluateStatementsAsync,
   resolveEscapingLambda,
 } from '../function-utils.js';
+import {
+  runWithEvaluationEffects,
+  withEvaluationEffects,
+} from '../effects-registry.js';
 import { checkConditions } from '../boxed-expression/rules.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
@@ -265,9 +269,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           ce._timeRemaining,
           ce._deadlineFrame
         ),
-      evaluateAsync: async (ops, { engine: ce, signal }) =>
+      evaluateAsync: async (ops, { engine: ce, signal, effects }) =>
         runAsync(
-          runLoop(ops[0], ops.slice(1), ce),
+          // The loop body is evaluated synchronously, and `runAsync` suspends
+          // this handler between time slices: every step must run with the
+          // host capability registry this evaluation captured.
+          withEvaluationEffects(ce, effects, runLoop(ops[0], ops.slice(1), ce)),
           ce._timeRemaining,
           signal,
           ce._deadlineFrame
@@ -1565,10 +1572,20 @@ async function evaluateIfAsync(
     numericApproximation: options.numericApproximation,
     materialization: options.materialization,
     signal: options.signal,
+    _effects: options._effects,
   };
   const evaluated =
     cond === undefined ? undefined : await cond.evaluateAsync(evalOptions);
-  if (evaluated === undefined) return evaluateIf(ops, options);
+  // The synchronous fallbacks below run after the `await` above, so the
+  // arms they evaluate must be given this evaluation's host capability
+  // registry explicitly (`runWithEvaluationEffects`).
+  const fallback = (ops: ReadonlyArray<Expression>) =>
+    options._effects === undefined
+      ? evaluateIf(ops, options)
+      : runWithEvaluationEffects(engine, options._effects, () =>
+          evaluateIf(ops, options)
+        );
+  if (evaluated === undefined) return fallback(ops);
   const { value, undecided } = evaluateCondition(evaluated);
   if (errorValue(value) === undefined && !undecided) {
     const decided = sym(value);
@@ -1581,7 +1598,7 @@ async function evaluateIfAsync(
         ? engine.Missing
         : ifFalse.evaluateAsync(evalOptions);
   }
-  return evaluateIf([evaluated, ...ops.slice(1)], options);
+  return fallback([evaluated, ...ops.slice(1)]);
 }
 
 /**
@@ -1600,29 +1617,33 @@ async function evaluateWhichAsync(
     numericApproximation: options.numericApproximation,
     materialization: options.materialization,
     signal: options.signal,
+    _effects: options._effects,
   };
+  // The synchronous fallbacks below run after an `await`, so the arms they
+  // evaluate must be given this evaluation's host capability registry
+  // explicitly (`runWithEvaluationEffects`).
+  const fallback = (args: ReadonlyArray<Expression>) =>
+    options._effects === undefined
+      ? evaluateWhich(args, options)
+      : runWithEvaluationEffects(engine, options._effects, () =>
+          evaluateWhich(args, options)
+        );
   let i = 0;
   while (i < args.length - 1) {
     const evaluated = await args[i].evaluateAsync(evalOptions);
     const { value, undecided } = evaluateCondition(evaluated);
     if (errorValue(value) !== undefined || undecided)
-      return evaluateWhich(
-        [...args.slice(0, i), evaluated, ...args.slice(i + 1)],
-        options
-      );
+      return fallback([...args.slice(0, i), evaluated, ...args.slice(i + 1)]);
     const guard = sym(value);
     if (guard === 'True') {
       if (!args[i + 1]) return engine.Missing;
       return args[i + 1].evaluateAsync(evalOptions);
     }
     if (guard !== 'False' && guard !== 'Undefined')
-      return evaluateWhich(
-        [...args.slice(0, i), evaluated, ...args.slice(i + 1)],
-        options
-      );
+      return fallback([...args.slice(0, i), evaluated, ...args.slice(i + 1)]);
     i += 2;
   }
-  return evaluateWhich(args, options);
+  return fallback(args);
 }
 
 function evaluateWhich(
@@ -1790,7 +1811,7 @@ async function evaluateBlockAsync(
   sweepCanonicalizationBindings(ce);
   return resolveEscapingLambda(
     ce,
-    await evaluateStatementsAsync(ce, ops, options.signal)
+    await evaluateStatementsAsync(ce, ops, options.signal, options._effects)
   );
 }
 

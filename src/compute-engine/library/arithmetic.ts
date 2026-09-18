@@ -21,6 +21,7 @@ import {
 } from '../boxed-expression/value-membership.js';
 import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
+import { withEvaluationEffects } from '../effects-registry.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
   asSmallInteger,
@@ -6649,6 +6650,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   ? term.evaluateAsync({
                       numericApproximation: numeric,
                       signal: options.signal,
+                      _effects: options.effects,
                     })
                   : term;
               if (asyncTerms) return undefined;
@@ -6685,19 +6687,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return productAccumulate(acc, xe, numeric);
         };
         const result = await runAsync(
-          reduceBigOp(
-            ops[0],
-            bounds,
-            (acc: Expression, x, bindings) =>
-              asyncTerms
-                ? evaluateBigOpTermAsync(
-                    x,
-                    bindings,
-                    numeric,
-                    options.signal
-                  ).then((xe) => accumulate(acc, xe))
-                : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
-            ce.One
+          // The terms are evaluated synchronously, and `runAsync`
+          // suspends this handler between time slices: every step must run
+          // with the host capability registry this evaluation captured.
+          withEvaluationEffects(
+            ce,
+            options.effects,
+            reduceBigOp(
+              ops[0],
+              bounds,
+              (acc: Expression, x, bindings) =>
+                asyncTerms
+                  ? evaluateBigOpTermAsync(
+                      x,
+                      bindings,
+                      numeric,
+                      options.signal,
+                      options.effects
+                    ).then((xe) => accumulate(acc, xe))
+                  : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
+              ce.One
+            )
           ),
           ce._timeRemaining,
           options.signal,
@@ -6853,7 +6863,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluateAsync: async (
         [first, ...rest],
-        { engine, signal, numericApproximation }
+        { engine, signal, numericApproximation, effects }
       ) => {
         // Arity-1 collection-reducer form: Sum(L). A literal collection
         // whose elements hold an asynchronous-only application is evaluated
@@ -6861,19 +6871,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // synchronous per-element evaluation below cannot.
         if (rest.length === 0 && first?.isCollection) {
           if (hasAsyncOnlyApplication(first))
-            first = await first.evaluateAsync({ numericApproximation, signal });
+            first = await first.evaluateAsync({
+              numericApproximation,
+              signal,
+              _effects: effects,
+            });
           if (first.isFiniteCollection !== true) return undefined;
           // Decline read off the fold's own walk — see the sync handler.
           let walked = 0;
           const result = await runAsync(
-            reduceCollection(first, engine.Zero, (acc, x) => {
-              walked += 1;
-              return sumAccumulate(
-                acc,
-                x.evaluate({ numericApproximation }),
-                numericApproximation
-              );
-            }),
+            // The elements are evaluated synchronously, and `runAsync`
+            // suspends this handler between time slices: every step must run
+            // with the host capability registry this evaluation captured.
+            withEvaluationEffects(
+              engine,
+              effects,
+              reduceCollection(first, engine.Zero, (acc, x) => {
+                walked += 1;
+                return sumAccumulate(
+                  acc,
+                  x.evaluate({ numericApproximation }),
+                  numericApproximation
+                );
+              })
+            ),
             engine._timeRemaining,
             signal,
             engine._deadlineFrame
@@ -6901,6 +6922,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   ? term.evaluateAsync({
                       numericApproximation: numeric,
                       signal,
+                      _effects: effects,
                     })
                   : term;
               if (asyncTerms) return undefined;
@@ -6937,16 +6959,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return sumAccumulate(acc, term, numeric);
         };
         const result = await runAsync(
-          reduceBigOp(
-            first,
-            rest,
-            (acc: Expression, x, bindings) =>
-              asyncTerms
-                ? evaluateBigOpTermAsync(x, bindings, numeric, signal).then(
-                    (term) => accumulate(acc, term)
-                  )
-                : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
-            engine.Zero
+          // The terms are evaluated synchronously, and `runAsync`
+          // suspends this handler between time slices: every step must run
+          // with the host capability registry this evaluation captured.
+          withEvaluationEffects(
+            engine,
+            effects,
+            reduceBigOp(
+              first,
+              rest,
+              (acc: Expression, x, bindings) =>
+                asyncTerms
+                  ? evaluateBigOpTermAsync(
+                      x,
+                      bindings,
+                      numeric,
+                      signal,
+                      effects
+                    ).then((term) => accumulate(acc, term))
+                  : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
+              engine.Zero
+            )
           ),
           engine._timeRemaining,
           signal,

@@ -608,7 +608,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).\n\nIf the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.\n\nOut-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position."
+      "description": "Access an element of an indexed collection.\n\nIf the index is negative, it is counted from the end.\n\nMultiple indices can be provided to access nested collections (e.g., matrices).\n\nIf the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).\n\nIf the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.\n\nOut-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.\n\nAn index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scalar or as an entry of an index list, selects no element and yields the same marker. An index that cannot be decided (an unknown, an exact constant within rounding of an integer) leaves `At` unevaluated."
     },
     {
       "name": "BaseForm",
@@ -1507,7 +1507,7 @@
       "name": "Cross",
       "category": "Linear Algebra",
       "arity": "2",
-      "signature": "(vector|tuple, vector|tuple) -> vector",
+      "signature": "(vector|tuple, vector|tuple) -> vector | tuple",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3133,7 +3133,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. The optional operand is a prompt string, displayed before reading. Evaluates to the line read, without the trailing newline; to `Nothing` at end-of-input (or a canceled dialog). On a host with no interactive input, stays unevaluated."
+      "description": "Read one line of text from the host: the terminal in a command-line host, the `prompt()` dialog in a browser. The optional operand is a prompt string, displayed before reading. Evaluates to the line read, without the trailing newline; to `Nothing` at end-of-input (or a canceled dialog). On a host with no interactive input, stays unevaluated. When the host denies console access, evaluates to a `capability-denied` error."
     },
     {
       "name": "Insert",
@@ -4463,7 +4463,7 @@
       "name": "ND",
       "category": "Calculus",
       "arity": "2",
-      "signature": "(function, at:number) -> number",
+      "signature": "(function, at:number) -> number | tuple | list<number>",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5622,7 +5622,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `Nothing`. On a host without a console, prints nothing."
+      "description": "Print the operands to the host console, separated by spaces and followed by a newline. String operands print their content (without quotes); other expressions print their text form. Evaluates to `Nothing`. On a host without a console, prints nothing. When the host denies console access, evaluates to a `capability-denied` error."
     },
     {
       "name": "Product",

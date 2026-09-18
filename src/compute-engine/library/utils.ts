@@ -4,6 +4,7 @@ import type {
   OperandDescriptor,
   Scope,
 } from '../global-types.js';
+import type { EffectHandlers } from '../types-effects.js';
 
 import {
   isNumber,
@@ -2393,9 +2394,16 @@ export async function evaluateBigOpTermAsync(
   body: Expression,
   bindings: BigOpIndexBindings | undefined,
   numericApproximation: boolean | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  effects?: EffectHandlers
 ): Promise<Expression | undefined> {
-  const term = await body.evaluateAsync({ numericApproximation, signal });
+  // `effects` is the host capability registry the enclosing asynchronous
+  // evaluation captured; the term and its repair must run with the same one.
+  const term = await body.evaluateAsync({
+    numericApproximation,
+    signal,
+    _effects: effects,
+  });
   if (bindings === undefined || bindings.length === 0) return term;
   const leaked = bindings.filter(([name]) => term.has(name));
   if (leaked.length === 0) return term;
@@ -2403,7 +2411,11 @@ export async function evaluateBigOpTermAsync(
   if (repaired === undefined) return undefined;
   return repaired === term
     ? term
-    : repaired.evaluateAsync({ numericApproximation, signal });
+    : repaired.evaluateAsync({
+        numericApproximation,
+        signal,
+        _effects: effects,
+      });
 }
 
 /**

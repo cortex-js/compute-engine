@@ -1,7 +1,11 @@
 # Effects Model — Effects in the Type System
 
-**Status**: DRAFT v5 (2026-07-31). Stages 0–2 implemented; Stages 3–4
-remain proposal (see "Migration and sequencing").
+**Status**: DRAFT v5 (2026-07-31). Stages 0–3 implemented. Stage 4 is
+implemented for the `console` capability (2026-09-18): the `ce.effects`
+registry, `ce.withEffects`, the per-evaluation registry and `null`
+denial exist, and `Print`/`Input` use them. The other capability
+handlers are added with their first operator (see "Host capabilities",
+"What is implemented", and "Migration and sequencing").
 v6 (2026-08-08) adds **no rulings and no roster change** — only one
 recorded disposition: **`mutable`** is examined and deferred (it collides
 with `scope` on all four metadata axes; the want it expresses is
@@ -491,6 +495,118 @@ interpreted-only until a target learns to thread them. Distinct
 interfaces for distinct labels: `ce.effects.entropy` is the *unseeded*
 source, `ce.effects.random` the *seeded, deterministic* kernel beneath
 the frame machinery.
+
+### What is implemented (2026-09-18)
+
+The registry shipped with its first capability operators, `Print` and
+`Input`. This subsection records what exists, where it differs from the
+sketch above, and the rules an operator author must follow.
+
+**Only `console` has a handler.** The registry type (`EffectHandlers`,
+`src/compute-engine/types-effects.ts`) has one member:
+
+```ts
+ce.effects.console   // { log(line: string): void;
+                     //   readLine(prompt?: string): string | null | undefined } | null
+```
+
+`readLine` has three results: a string is the line; `null` is end of
+input or a canceled dialog (`Input` evaluates to `Nothing`); `undefined`
+means "this host has no interactive input" (`Input` stays unevaluated).
+The default handler (`src/compute-engine/effects-registry.ts`) is the real
+console, the terminal in a Node-compatible host, and the `prompt()`
+dialog in a browser.
+
+The handlers for `network`, `filesystem`, `time`, `environment`,
+`entropy` and `random` are **not** in the registry yet, on purpose: no
+library operator would read them, so a host could install an override
+and nothing would change. Each is added with the first operator that
+uses it. Two of them need a decision first: `entropy` (the unframed
+`Random()` draw reads `Math.random()` but its operator declares `random`,
+not `entropy`, so the coupling rule does not yet say which handler it
+may use) and `random` (the draw kernel, with the compile-time decline
+for a non-default kernel). The registry rejects an unknown capability
+name, so a host finds out immediately that a handler does not exist.
+
+**Assignment is a complete description; `withEffects` is a change.**
+`ce.effects = {…}` derives the new registry from the **defaults** — a
+capability the object does not mention returns to its default, and
+`ce.effects = {}` restores every default. `ce.withEffects(overrides, fn)`
+derives from the registry **in effect at the call**, so calls nest and
+an inner call keeps the handlers it does not mention. In both, `null` is
+a denial and `undefined` means "no change".
+
+**Open `withEffects` calls are a list, not a saved value.** Two
+asynchronous `withEffects` calls can overlap without nesting. If each
+call put back the registry it saw when it started, the call that settles
+last would reinstall the overrides of the call that settled first, and
+they would stay installed. The engine therefore keeps the list of open
+calls and recomputes the installed registry (assigned registry, then
+each open call, oldest first) whenever one opens or closes. An
+assignment made inside a `withEffects` call is kept when the call ends.
+
+**How an evaluation keeps its registry.** Every operator handler
+receives the registry of its evaluation as `options.effects`, and reads
+capabilities from there — never from `ce.effects`.
+
+- *Synchronous evaluation.* The outermost `evaluate()` stores the
+  installed registry in an engine slot (`_evaluationEffects`) and clears
+  it when it returns; nested evaluations inherit it. Nothing can
+  interleave with a synchronous evaluation, so a slot is sufficient.
+  An assignment to `ce.effects` made by a handler during the evaluation
+  does not change that evaluation. `ce.withEffects` called by a handler
+  does change the slot for the synchronous duration of its callback:
+  those are "evaluations started within `fn`".
+- *Asynchronous evaluation.* A slot is not sufficient, because several
+  evaluations can be suspended on one engine. `evaluateAsync()` puts the
+  registry in its options (`_effects`, an internal field), and every
+  nested `evaluateAsync(options)` call receives it. The driver also puts
+  that registry in the slot around every synchronous segment it runs
+  itself: the synchronous start of each `evaluateAsync()` call (where a
+  function held by a value definition is applied, synchronously), each
+  synchronous handler call (so a handler which evaluates its operands
+  with the synchronous `evaluate()` gives them the same registry), and
+  the synchronous tail after the handler's result is awaited (string
+  preservation, the pole override). The dual review of the first
+  implementation found the first and third of these missing; the
+  regression pins are in the "asynchronous: a suspended evaluation"
+  test.
+
+**Rules for the author of an `evaluateAsync` handler.** (1) When the
+handler builds a new options object for a nested `evaluateAsync()` call,
+it copies the registry: `{ signal, _effects: options.effects }`. (2) When
+the handler drives a generator with `runAsync` and the generator's steps
+call the synchronous `evaluate()` (a loop body, the terms of a sum), it
+wraps the generator with `withEvaluationEffects(engine, options.effects,
+gen)` (`effects-registry.ts`): `runAsync` suspends the handler between
+time slices, and a step that runs after a suspension would otherwise
+capture whichever registry is installed at that moment. (3) When the
+handler calls a synchronous helper that evaluates, after one of its own
+`await`s — `If` and `Which` hand a non-boolean condition to their
+synchronous twins — it runs the call inside
+`runWithEvaluationEffects(engine, options.effects, () => …)`. The rules
+are applied in `Block`, `If`, `Which`, `Loop`, the short-circuit
+connectives, `List`, `Set`, `Sum` and `Product`; the first is checked
+mechanically by the "coupling rule audit" tests. A handler that breaks a rule does not
+fail: its nested evaluations use the installed registry, which is wrong
+only while another evaluation's `withEffects` call is open.
+
+**One limit of `withEffects` with an asynchronous callback.** The
+override stays installed until the callback's promise settles. An
+unrelated evaluation that STARTS during that time, from other code, also
+captures it. An evaluation that started before the call is not changed.
+This follows from "restoration happens after the promise settles" and is
+documented on `withEffects`.
+
+**Denial is an error value.** An operator whose handler is `null`
+evaluates to `Error(ErrorCode("capability-denied", "<capability>"))`. In
+an Epsil program it is reported as a runtime error with that code
+(`epsil doc capability-denied`) and the program continues.
+
+**The Epsil MCP server** used to replace `console.log` and hide
+`process.getBuiltinModule` and `prompt` around each evaluation. It now
+gives the session's engine a `console` handler that collects the printed
+lines and whose `readLine` answers `undefined` (`src/cli/mcp.ts`).
 
 **Sequencing.** The labels enter the grammar at Stage 1 — immediately
 useful, since an opaque *host-declared* function that fetches can state
@@ -2068,7 +2184,15 @@ Each stage is useful without the next; per-stage pinning tests named.
   (interfaces, fail-closed defaults, `ce.withEffects` scoped override),
   shipping with the first capability operator (`Fetch` / `Print` / file
   surfaces); `async` admission rides the first Promise-returning
-  operator per "Host capabilities". Tests: handler mock round-trip (mock
+  operator per "Host capabilities". **Implemented 2026-09-18 for
+  `console`** (`Print`/`Input`): registry, `withEffects`, per-evaluation
+  registry, `null` denial, coupling-rule audit — see "What is
+  implemented" under "Host capabilities"; tests in
+  `test/compute-engine/effects-registry.test.ts`. **Still to do, each
+  with its first operator:** the `network`, `filesystem`, `time`,
+  `environment`, `entropy` and `random` handlers, and with them the
+  tests below that name them (mock `network`, mock `time`, `random`
+  kernel swap and the compile decline); `async` admission. Tests: handler mock round-trip (mock
   `network` → predefined responses; mock `time` → frozen clock);
   coupling-rule audit (handler-namespace usage ⊆ declared labels);
   fail-closed defaults yield error values, not throws; snapshot
