@@ -515,13 +515,7 @@ function compileIntervalSelectionValue(
   for (let i = 1; i < reach; i += 2) if (spelled(i)) any = true;
   if (!any) return undefined;
   const compileArm = (i: number): string =>
-    BaseCompiler.compileOpValue(
-      which,
-      i,
-      target,
-      0,
-      args[i]
-    );
+    BaseCompiler.compileOpValue(which, i, target, 0, args[i]);
   const spellArm = (i: number): string =>
     BaseCompiler.withCseOperand(
       which,
@@ -538,9 +532,7 @@ function compileIntervalSelectionValue(
     if (isSymbol(cond, 'True')) return arm;
     BaseCompiler.assertScalarCondition(cond);
     return compileIntervalConditional(
-      i === 0
-        ? BaseCompiler.compileValueOperand(cond, target)
-        : compileArm(i),
+      i === 0 ? BaseCompiler.compileValueOperand(cond, target) : compileArm(i),
       arm,
       build(i + 2),
       target
@@ -932,7 +924,10 @@ function assertScalarIntervalOperands(
   const broadcasts = intervalBroadcastHead(head, args[0]?.engine);
   for (const arg of args) {
     if (!broadcasts && isBroadcastableNumberOperand(arg)) continue;
-    if (couldBeIndexedCollectionOperand(arg) || isPossiblyNumericListOperand(arg))
+    if (
+      couldBeIndexedCollectionOperand(arg) ||
+      isPossiblyNumericListOperand(arg)
+    )
       throw new Error(
         `${head}: cannot compile — the operand \`${arg.toString()}\` may be ` +
           `a collection at run time (type \`${arg.type.toString()}\`), and ` +
@@ -966,8 +961,7 @@ function intervalBroadcastHead(
 ): boolean {
   if (engine === undefined) return false;
   const def = engine.lookupDefinition(id);
-  if (!isOperatorDef(def) || def.operator.broadcastable !== true)
-    return false;
+  if (!isOperatorDef(def) || def.operator.broadcastable !== true) return false;
   return !isRelationalOperator(id) && !INTERVAL_CONNECTIVE_HEADS.has(id);
 }
 
@@ -1157,7 +1151,8 @@ function tryIntervalBroadcast(
       : compile(a);
   const kept = args.flatMap((_, i) => (literal[i] ? [] : [i]));
   const sources = kept.map((i) => source(args[i], i)).join(', ');
-  if (!hasPoint) return `_IA.bcast((${names.join(', ')}) => ${body}, ${sources})`;
+  if (!hasPoint)
+    return `_IA.bcast((${names.join(', ')}) => ${body}, ${sources})`;
   // `'p'`: the type or the literal proves exactly one point. `'q'`: a list
   // of points or a point-or-point-list union, which the helper decides at
   // the value. `'s'`: a number or a list of numbers.

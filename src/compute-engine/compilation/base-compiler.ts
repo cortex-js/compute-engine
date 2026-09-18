@@ -1613,7 +1613,9 @@ export type LoopInvariantBinding = [
  * reference analysis can tell a handler that read its operands from one that
  * declined without looking at them.
  */
-const OPERAND_READ = new Error('operand read during a reference-analysis probe');
+const OPERAND_READ = new Error(
+  'operand read during a reference-analysis probe'
+);
 
 /** An operand a caller's `compile` handler cannot read: every property access,
  * `in` test, key listing or prototype read throws `OPERAND_READ`. Handed to a
@@ -1904,7 +1906,9 @@ export class BaseCompiler {
     if (
       target.absence.numeric.coversValueModel === true &&
       BaseCompiler.isNumericOrVerdictShaped(
-        resolveTypeForCompilation(stripMissingFromType(resolveTypeForCompilation(t)))
+        resolveTypeForCompilation(
+          stripMissingFromType(resolveTypeForCompilation(t))
+        )
       )
     )
       return target.absence.numeric;
@@ -7379,7 +7383,8 @@ export class BaseCompiler {
               bodyNode,
               lambdaTarget,
               [...(lambdaTarget.boundVars ?? params)],
-              () => BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, bodyNode)
+              () =>
+                BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, bodyNode)
             );
       const arrow = `((${binding.emitted.join(', ')}) => ${
         framedComplex.size > 0
@@ -16821,7 +16826,8 @@ export class BaseCompiler {
     if (r.kind === 'union')
       return r.types.every((arm) => BaseCompiler.isNumericOrVerdictShaped(arm));
     // `broadcastable<T>` is `T | list<T>`: in the model when `T` is.
-    if (r.kind === 'broadcastable') return BaseCompiler.isNumericShaped(r.elements);
+    if (r.kind === 'broadcastable')
+      return BaseCompiler.isNumericShaped(r.elements);
     if (r.kind === 'tuple')
       return r.elements.every((el) => BaseCompiler.isNumericShaped(el.type));
     if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
@@ -16841,7 +16847,8 @@ export class BaseCompiler {
     if (typeof r === 'string') return false;
     if (r.kind === 'union')
       return r.types.every((arm) => BaseCompiler.isNumericShaped(arm));
-    if (r.kind === 'broadcastable') return BaseCompiler.isNumericShaped(r.elements);
+    if (r.kind === 'broadcastable')
+      return BaseCompiler.isNumericShaped(r.elements);
     if (r.kind === 'tuple')
       return r.elements.every((el) => BaseCompiler.isNumericShaped(el.type));
     if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;

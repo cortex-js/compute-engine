@@ -1,6 +1,5 @@
 import { factsOf } from '../common/type/facts.js';
 import {
-  widen,
   widenAll,
   broadcastElementType,
   collectionElementType,
