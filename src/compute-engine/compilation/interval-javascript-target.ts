@@ -2753,7 +2753,25 @@ function compileIntervalIntegrate(
     boundVars: BaseCompiler.withBoundNames(target, names),
   });
 
-  let code = BaseCompiler.compile(bodyExpr, scoped(lambdaVars));
+  // A subexpression of the integrand that mentions no integration variable
+  // is computed once, on the lambda's first call, not once per piece — the
+  // JavaScript lowering's rule (`compileIntegrate`, `javascript-target.ts`),
+  // which names the witness. The interval target hoists whole scalar
+  // invariants (`hoistScalarInvariants`), so `Γ(k/2)·√2^k` is one binding.
+  // A `Function` integrand's body is a one-statement `Block`, a scope the
+  // candidate pass never descends into; the statement is what is scanned.
+  const bodyTarget = scoped(lambdaVars);
+  const scanned =
+    isFunction(bodyExpr, 'Block') && bodyExpr.nops === 1
+      ? bodyExpr.ops[0]
+      : bodyExpr;
+  const { bindings, result: bodyCode } = BaseCompiler.hoistLoopInvariants(
+    scanned,
+    lambdaVars,
+    bodyTarget,
+    () => BaseCompiler.compile(bodyExpr, bodyTarget)
+  );
+  let code = bodyCode;
 
   // Multiple limits nest, innermost last (Mathematica iterator convention:
   // the FIRST limit is the OUTERMOST integral). A bound of limit d may
@@ -2766,7 +2784,28 @@ function compileIntervalIntegrate(
     const boundTarget = outer.length > 0 ? scoped(outer) : sized;
     const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
     const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
-    const f = `(${lambdaVars[d]}) => (${code})`;
+    // The innermost lambda carries the invariant bindings, declared next to
+    // it and assigned on its first call: an empty range asks for no piece,
+    // and the unhoisted integrand then evaluated nothing.
+    let f = `(${lambdaVars[d]}) => (${code})`;
+    if (d === limits.length - 1 && bindings.length > 0) {
+      const flag = BaseCompiler.tempVar(target);
+      const held = BaseCompiler.tempVar(target);
+      const arg = BaseCompiler.tempVar(target);
+      // A right-hand side is one expression: this target has no statement
+      // sink (`CompileTarget.hoist`), so no compiled code carries an embedded
+      // statement. A target that gains one must sequence the assignment the
+      // way the JavaScript lowering does (`firstCallBoundLambda`).
+      const assignments = bindings
+        .map(([name, rhs]) => `${name} = ${rhs};`)
+        .join(' ');
+      f =
+        `(() => { let ${flag} = false; let ${bindings
+          .map(([name]) => name)
+          .join(', ')}; const ${held} = ${f}; ` +
+        `return (${arg}) => { if (!${flag}) { ${flag} = true; ${assignments} } ` +
+        `return ${held}(${arg}); }; })()`;
+    }
     code =
       d === 0 && closedCode !== undefined
         ? `_IA.integrateClosed(() => ${closedCode}, ${f}, ${lo}, ${hi}, ${n})`

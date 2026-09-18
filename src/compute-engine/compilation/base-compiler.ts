@@ -7315,8 +7315,46 @@ export class BaseCompiler {
 
       // The body is a bindable region of its own (§5.1(a)); pushed under the
       // lambda's target, so its temporaries land inside the arrow function.
+      //
+      // That region exists only when the literal is part of the tree the
+      // harvest walked. A literal a handler SYNTHESIZES at emission time — the
+      // numeric derivative fallback builds `Function(body, x)` around its
+      // operand and compiles that (`compileNumericDerivativeFallback`,
+      // `library/calculus.ts`) — is not, so its body compiled with no
+      // candidates at all, and a subexpression repeated in the body was
+      // emitted, and evaluated, once per occurrence: the stencil callback of
+      // one corpus row spelled the same minimum of twenty squared distances
+      // twenty-one times (Tycho corpus document `lwuwgb9ic5`, 2026-09-16). Such
+      // a body gets its own nested harvest, with the parameters shadowed, the
+      // way an emitted definition body does. The enclosing instances'
+      // temporaries are out of its reach on purpose: a shared node that
+      // mentions a parameter denotes a different value inside the lambda.
+      // Every name bound around the literal is shadowed too, not only its own
+      // parameters: the harvest's admission lookups are engine-global, so a
+      // captured outer callback parameter `f` would otherwise be validated
+      // against a pure global `f` and two `Map(f, …)` reads merged, where the
+      // callback the caller passes may count its calls. (Today such a body
+      // computes in the complex lane, whose candidates the harvest refuses
+      // anyway; the shadow keeps the rule true when that changes.)
+      // One object for the harvest and the emission: `.canonical` builds a
+      // fresh expression when the operand is not canonical yet, and a harvest
+      // keyed on one object is invisible to the emission of another.
+      const bodyNode = ops[0].canonical;
+      const top = BaseCompiler.cseTop(target);
+      const harvested =
+        top === undefined ||
+        literal === undefined ||
+        descendantRegionAt(BaseCompiler.cseRegionOf(top), literal, 0) !==
+          undefined;
       const compileBody = () =>
-        BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, ops[0].canonical);
+        harvested
+          ? BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, bodyNode)
+          : BaseCompiler.withNestedCseHarvest(
+              bodyNode,
+              lambdaTarget,
+              [...(lambdaTarget.boundVars ?? params)],
+              () => BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, bodyNode)
+            );
       const arrow = `((${binding.emitted.join(', ')}) => ${
         framedComplex.size > 0
           ? // Owned by the node being lowered: the frame describes THIS

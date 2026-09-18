@@ -437,6 +437,7 @@ import {
   pointHasBroadcastComponent,
   unfaithfulComparisonAggregate,
   unionAdmitsIndexedCollection,
+  type LoopInvariantBinding,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
@@ -12803,21 +12804,39 @@ function hoistedCallbackLambda(
   );
   if (!named.test(lambda)) return lambda;
 
-  const statements = javascriptStatements(target);
-  const flag = BaseCompiler.tempVar(target);
-  const held = BaseCompiler.tempVar(target);
   // The shim forwards exactly the lambda's own parameter count: the native
   // callbacks pass `(x, index, array)`, and the extra arguments must not
   // reach the lambda (the interpreter passes exactly the element). The count
   // is the number of parameter OPERANDS, which is not the number of names
   // they bind: a destructuring pattern is ONE parameter that binds a name per
   // leaf of the pattern, and a `_` leaf binds no name at all.
-  const args = callback.ops.slice(1).map(() => BaseCompiler.tempVar(target));
+  return firstCallBoundLambda(lambda, callback.ops.length - 1, bindings, target);
+}
+
+/**
+ * Wrap the compiled lambda `lambda` so that the loop-invariant `bindings`
+ * its body reads are declared next to it and assigned on its FIRST call,
+ * behind a flag. The shim forwards `arity` arguments to the held lambda.
+ * `bindings` are in dependency order, as `hoistLoopInvariants` returns them:
+ * a later right-hand side may read an earlier name. Shared by the callback
+ * lowerings (`hoistedCallbackLambda`) and the quadrature lowering
+ * (`compileIntegrate`), which spells its lambda itself.
+ */
+function firstCallBoundLambda(
+  lambda: string,
+  arity: number,
+  bindings: ReadonlyArray<LoopInvariantBinding>,
+  target: CompileTarget<Expression>
+): string {
+  const statements = javascriptStatements(target);
+  const flag = BaseCompiler.tempVar(target);
+  const held = BaseCompiler.tempVar(target);
+  const args = Array.from({ length: arity }, () =>
+    BaseCompiler.tempVar(target)
+  );
   const declarations = `let ${flag} = false; let ${bindings
     .map(([name]) => name)
     .join(', ')}; `;
-  // In DEPENDENCY order, as `hoistLoopInvariants` returns them: a later
-  // right-hand side may read an earlier name.
   const assignments = bindings
     .map(
       ([name, code]) =>
@@ -14626,7 +14645,30 @@ function compileIntegrate(
     boundVars: BaseCompiler.withBoundNames(target, names),
   });
 
-  const f = BaseCompiler.compile(bodyExpr, scoped(lambdaVars));
+  // The integrand runs once per quadrature sample, so a subexpression of it
+  // that mentions none of the integration variables is a loop invariant:
+  // `Gamma(k/2)·√2^k` in the denominator of a chi-square tail was computed at
+  // every one of the 300 samples of one integral (Tycho corpus document
+  // `thpezd39zq`). Such subexpressions are bound once, next to the lambda,
+  // and assigned on its FIRST call — quadrature may request no sample at all
+  // (an empty range), and the unhoisted integrand then evaluated nothing.
+  //
+  // A `Function` integrand's body is a `Block`, a scope the candidate pass
+  // never descends into; a block of ONE statement declares nothing before it,
+  // so that statement is what is scanned (the same reading
+  // `hoistedCallbackLambda` takes). The block itself is still what compiles,
+  // and its statement is the very node the scan rewrote.
+  const bodyTarget = scoped(lambdaVars);
+  const scanned =
+    isFunction(bodyExpr, 'Block') && bodyExpr.nops === 1
+      ? bodyExpr.ops[0]
+      : bodyExpr;
+  const { bindings, result: f } = BaseCompiler.hoistLoopInvariants(
+    scanned,
+    lambdaVars,
+    bodyTarget,
+    () => BaseCompiler.compile(bodyExpr, bodyTarget)
+  );
 
   // Multiple limits nest, innermost last (Mathematica iterator convention:
   // the FIRST limit is the OUTERMOST integral). A bound of limit d may
@@ -14645,10 +14687,21 @@ function compileIntegrate(
     const boundTarget = outer.length > 0 ? scoped(outer) : sized;
     const lo = BaseCompiler.compile(limits[d].lowerExpr, boundTarget);
     const hi = BaseCompiler.compile(limits[d].upperExpr, boundTarget);
-    code = `${fn}((${lambdaVars[d]}) => (${code}), ${lo}, ${hi}${panelArg})`;
+    // The innermost lambda carries the invariant bindings. In a nest it sits
+    // inside the outer lambdas, where every name the body reads is in
+    // scope; the bindings mention no integration variable, so an outer
+    // sample recomputes them once, which is what the unhoisted body did per
+    // inner sample.
+    const plain = `(${lambdaVars[d]}) => (${code})`;
+    const lambda =
+      d === limits.length - 1 && bindings.length > 0
+        ? firstCallBoundLambda(plain, 1, bindings, target)
+        : plain;
+    code = `${fn}(${lambda}, ${lo}, ${hi}${panelArg})`;
   }
   return code;
 }
+
 
 /**
  * Check if function has a true name (not anonymous)
