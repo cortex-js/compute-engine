@@ -2,15 +2,17 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { OPENING_PARENTHESIS } from '../../src/compute-engine/latex-syntax/delimiter-tables';
 
 /**
- * A symbol with NO type information — undeclared, or declared with an unknown
- * type — followed by a parenthesized argument is an APPLICATION: `f(x)` is `f`
- * applied to `x`. It used to be the product `f·x` whenever the argument could
- * be a number, which is silent when wrong (`\operatorname{conj}(L)` over a
- * list was `conj·L`, and a piecewise over that condition could decide nothing).
+ * A symbol with NO type information — undeclared, or auto-declared by the
+ * engine from a bare use with its type still unknown — followed by a
+ * parenthesized argument is an APPLICATION: `f(x)` is `f` applied to `x`. It
+ * used to be the product `f·x` whenever the argument could be a number, which
+ * is silent when wrong (`\operatorname{conj}(L)` over a list was `conj·L`,
+ * and a piecewise over that condition could decide nothing).
  *
  * The product reading remains for a head that IS a value: declared with a
- * concrete type, assigned a value, a parameter of the literal being read, or
- * a head its own argument refers to (`q(2q)`).
+ * concrete type, declared `unknown` by the host (a value whose type is not
+ * known yet), assigned a value, a parameter of the literal being read, or a
+ * head its own argument refers to (`q(2q)`).
  */
 
 describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
@@ -59,9 +61,11 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       ]);
     });
 
-    test('a head declared with an unknown type', () => {
+    test('a head auto-declared from a bare use, still of unknown type', () => {
+      // `y = u` auto-declares `u` with an inferred unknown type: the engine's
+      // own placeholder, which carries no information.
       const ce = new ComputeEngine();
-      ce.declare('u', 'unknown');
+      ce.parse('y = u');
       expect(ce.parse('u(2)').json).toEqual(['u', 2]);
     });
 
@@ -107,6 +111,24 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
         'x',
         ['Add', 'x', 1],
       ]);
+    });
+
+    test('when the host declared the head `unknown`', () => {
+      // A document manager pre-declares its value heads `unknown` before
+      // their values are assigned (`k` before `k = 0.6`): the declaration
+      // says the name is a value, so `k(1-w)` stays the product it will be.
+      const ce = new ComputeEngine();
+      ce.declare('k', 'unknown');
+      expect(ce.parse('k(1-w)').json).toEqual([
+        'Multiply',
+        'k',
+        ['Add', ['Negate', 'w'], 1],
+      ]);
+      ce.assign('k', 0.6);
+      expect(ce.parse('k(1-w)').subs({ w: 0.5 }).evaluate().re).toBeCloseTo(
+        0.3,
+        12
+      );
     });
 
     test('when the head is declared with a concrete type', () => {
@@ -165,6 +187,129 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
     });
   });
 
+  describe('the `resolveSymbol` handler decides like a declaration', () => {
+    // A host that knows a name is a value before the scope does — a name a
+    // later pass will declare — answers through `resolveSymbol`. The parser
+    // consults it first; the canonicalization of the parse result must read
+    // the same answer for the product-or-application question.
+    const oracle = (answer: { type: string } | undefined) => {
+      const ce = new ComputeEngine();
+      ce.latexOptions = {
+        ...ce.latexOptions,
+        resolveSymbol: (id) =>
+          id === 's' || id === 'alpha' ? answer : undefined,
+      };
+      return ce;
+    };
+
+    test('a value type from the handler keeps the product', () => {
+      for (const type of ['number', 'real', 'value', 'unknown']) {
+        const ce = oracle({ type });
+        expect([type, ce.parse('s(x+1)').json]).toEqual([
+          type,
+          ['Multiply', 's', ['Add', 'x', 1]],
+        ]);
+        expect(ce.parse('s+1').isValid).toBe(true);
+      }
+    });
+
+    test('a value type from the handler multiplies a collection argument', () => {
+      // The non-numeric-argument route reads the head's scalability: the
+      // handler's answer stands for the declaration it would be.
+      const ce = oracle({ type: 'real' });
+      ce.declare('S', 'list');
+      expect(ce.parse('s(S)').json).toEqual(['Multiply', 'S', 's']);
+      const lists = oracle({ type: 'list<number>' });
+      expect(lists.parse('s(2)').json).toEqual(['Multiply', 2, 's']);
+    });
+
+    test('a function type from the handler is applied', () => {
+      const ce = oracle({ type: 'function' });
+      expect(ce.parse('s(x+1)').json).toEqual(['s', ['Add', 'x', 1]]);
+    });
+
+    test('a dictionary-trigger head reaches the handler too', () => {
+      // `\\alpha` is a dictionary trigger for the symbol `alpha`.
+      expect(oracle({ type: 'number' }).parse('\\alpha(x)').json).toEqual([
+        'Multiply',
+        'alpha',
+        'x',
+      ]);
+      expect(oracle(undefined).parse('\\alpha(x)').json).toEqual([
+        'alpha',
+        'x',
+      ]);
+    });
+
+    test('a per-call handler applies to that parse only', () => {
+      const ce = new ComputeEngine();
+      const resolveSymbol = (id: string) =>
+        id === 's' ? { type: 'real' } : undefined;
+      expect(ce.parse('s(x+1)', { resolveSymbol }).json).toEqual([
+        'Multiply',
+        's',
+        ['Add', 'x', 1],
+      ]);
+      expect(ce.parse('t(x+1)').json).toEqual(['t', ['Add', 'x', 1]]);
+    });
+
+    test('a result canonicalized after the parse reads the scope alone', () => {
+      // The handler is known for the duration of the `parse()` call; a
+      // structural result canonicalized later has no handler to consult.
+      const ce = oracle({ type: 'number' });
+      const structural = ce.parse('s(x+1)', { form: 'structural' });
+      expect(structural.json).toEqual([
+        'InvisibleOperator',
+        's',
+        ['Delimiter', ['Add', 'x', 1]],
+      ]);
+      expect(structural.canonical.json).toEqual(['s', ['Add', 'x', 1]]);
+    });
+
+    test('an invalid type string from the handler is reported as the parser reports it', () => {
+      const ce = oracle({ type: 'not a type' });
+      expect(() => ce.parse('s(x+1)')).toThrow(
+        /resolveSymbol\("s"\) returned invalid type string/
+      );
+    });
+
+    test('a parse made from inside a handler restores the outer handler', () => {
+      const ce = new ComputeEngine();
+      const inner = (id: string) => (id === 'u' ? { type: 'real' } : undefined);
+      const outer = (id: string) => {
+        if (id === 's') {
+          // A nested parse with its own handler, then back to this one.
+          ce.parse('u(x+1)', { resolveSymbol: inner });
+          return { type: 'real' };
+        }
+        return undefined;
+      };
+      expect(ce.parse('s(x+1)', { resolveSymbol: outer }).json).toEqual([
+        'Multiply',
+        's',
+        ['Add', 'x', 1],
+      ]);
+    });
+  });
+
+  describe('a speculative parse reads as a normal one', () => {
+    test('for a host-declared unknown head and for an inferred one', () => {
+      for (const src of ['k(2)', 'k(1-w)']) {
+        const ce = new ComputeEngine();
+        ce.declare('k', 'unknown');
+        expect([src, ce.parse(src, { speculative: true }).json]).toEqual([
+          src,
+          ce.parse(src).json,
+        ]);
+      }
+      const ce = new ComputeEngine();
+      ce.parse('y = u');
+      expect(ce.parse('u(2)', { speculative: true }).json).toEqual(
+        ce.parse('u(2)').json
+      );
+    });
+  });
+
   describe('definition order does not change the reading', () => {
     test('a call with closed arguments inside a literal binds the later definition', () => {
       // `a(2^i t)` has no symbol argument, so nothing else would re-derive
@@ -204,6 +349,18 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
         ce.assign('S', ce.box(['List', 1, 2]));
         expect(ce.parse('g(1)').evaluate().json).toEqual(['List', 5, 10]);
       }
+    });
+
+    test('a host-declared unknown head applied to a collection is tracked too', () => {
+      // `f(S)` with `f` declared `unknown` and `S` a list was always a call;
+      // it is noted so that `f := 5` re-reads it as a product.
+      const ce = new ComputeEngine();
+      ce.declare('f', 'unknown');
+      ce.declare('S', 'list');
+      ce.parse('g(t)\\coloneq f(S)').evaluate();
+      ce.assign('f', 5);
+      ce.assign('S', ce.box(['List', 1, 2]));
+      expect(ce.parse('g(1)').evaluate().json).toEqual(['List', 5, 10]);
     });
 
     test('a head that is later declared a number is re-read as a product', () => {

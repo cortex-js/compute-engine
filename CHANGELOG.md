@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **The `resolveSymbol` handler decides the product-or-application reading
+  as a declaration does.** The parser consults the handler first, but the
+  canonicalization that `ce.parse()` runs on its result read only the scope:
+  with a handler answering `{ type: "number" }` for `s`, `ce.parse("s(x+1)")`
+  was the application of `s`, which then typed `s` as a function and made
+  `s + 1` an error (Tycho ask 301). The handler of the parse in progress — the
+  call's own, else the engine-wide one — is now consulted for the head of a
+  juxtaposition: a value type keeps the product (`unknown` included, as for a
+  scope declaration), a function type is applied, and a head the handler does
+  not resolve falls through to the scope. A dictionary-trigger head
+  (`\alpha(x)`) reaches the handler too, and a head the handler resolves to a
+  number or a linear-algebra value multiplies a collection argument as a
+  declared one does (`s(S)` with `s` vouched `real` and `S` a list). A
+  speculative parse (`ce.parse(latex, { speculative: true })`) now reads a
+  host-declared `unknown` head as the normal parse does: the shadow it
+  declares carries the incumbent's own inferred flag.
+
+- **A head the host declared `unknown` keeps the product reading.** The
+  0.131.0 rule read `k(1 - w)` as an application whenever `k` was declared
+  with the type `unknown`. A document manager pre-declares its value heads so,
+  before their values are assigned (`k` is declared `unknown`, then
+  `k = 0.6` arrives), and every coefficient written before a parenthesis in
+  such a document became a call to an unknown function: the definition that
+  held it was never installed (Tycho's exoplanet-transit showcase, `I(w) = 1
+  - k(1 - \sqrt{1 - w^2})`, compiled to "Unknown operator `I`"). An explicit
+  `unknown` declaration says the name is a VALUE whose type is not known yet,
+  so it is type information: the product reading applies, as it does for a
+  declared number. Only an undeclared head, or one the engine auto-declared
+  from a bare use with a still-unknown inferred type, is applied.
+
+- **`ConjugateTranspose` over a vector of more than 100 elements evaluates.**
+  A broadcast over more than `MAX_SIZE_EAGER_COLLECTION` elements produces a
+  lazy collection, not a `List` literal, and the `ConjugateTranspose` handler
+  packed its operand as a tensor, which refuses a lazy collection: `z^\star`
+  over a 200-element vector stayed symbolic while `Conjugate` over the same
+  vector evaluated (a piecewise over such a condition was a symbolic `Which`
+  of 8 MB; Tycho ask 300). The handler now conjugates a vector of numbers
+  element-wise whatever form it arrives in, decided from the operand's type,
+  so a matrix arriving lazily is still transposed.
+
 ## 0.131.0 _2026-09-18_
 
 ### New Features

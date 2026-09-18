@@ -258,9 +258,10 @@ export function canonicalInvisibleOperator(
         !isWideValueType(lhsCanon) &&
         !isScalable(lhsCanon);
 
-      // A head with NO type information — undeclared, or declared with an
-      // unknown type — followed by a parenthesized argument is an
-      // application: `f(x)` is `f` applied to `x`, `\operatorname{foo}(z)` is
+      // A head with NO type information — undeclared, or auto-declared by
+      // the engine from a bare use with its type still unknown
+      // (`headHasNoTypeInformation`) — followed by a parenthesized argument
+      // is an application: `f(x)` is `f` applied to `x`, `\operatorname{foo}(z)` is
       // `foo` applied to `z`. This is what the spelling means, and a wrong
       // call stays visible (`f(x)` evaluates to itself), while a wrong
       // product is silent (`f·x` is a number). The one exception is an
@@ -303,7 +304,15 @@ export function canonicalInvisibleOperator(
       // instead of `k·\cos(S)`. Tycho item 173: same divergence with a
       // COLLECTION-typed head, `A(t-B)` with `A` and `B` lists — the reading
       // must not depend on the argument's type.)
-      if (def && !isOperatorDef(def) && def.value && isScalable(lhsCanon)) {
+      // The `resolveSymbol` handler's answer for the head counts as the
+      // declaration it stands for: a head it resolves to a number or a
+      // linear-algebra value multiplies a collection argument as a declared
+      // one does (`s(S)` with `s` vouched `real` and `S` a list).
+      const oracleType = oracleHeadType(ce, lhsCanon.symbol);
+      if (
+        (def && !isOperatorDef(def) && def.value && isScalable(lhsCanon)) ||
+        (oracleType !== undefined && typeIsScalable(oracleType))
+      ) {
         return ce.function('Multiply', [lhsCanon, ...args]);
       }
 
@@ -316,12 +325,16 @@ export function canonicalInvisibleOperator(
         !args.some((a) => a.has(lhsCanon.symbol))
       )
         return applyUndeclaredHead(ce, lhsCanon, args);
+      // A head the host declared `unknown` (a value whose type is not known
+      // yet) applied to a NON-numeric argument was always read as a call; it
+      // takes the same helper so the call is noted, and re-read as a product
+      // if the head later gains a value.
+      if (def !== undefined && !isOperatorDef(def) && def.value.type.isUnknown)
+        return applyUndeclaredHead(ce, lhsCanon, args);
       // Inferred (see above): a heuristic auto-declaration the user can
       // later widen/override.
       if (!def)
         ce.declare(lhsCanon.symbol, { type: 'function', inferred: true });
-      else if (!isOperatorDef(def) && def.value?.type?.isUnknown)
-        lhsCanon._infer(() => 'function');
       return ce.function(lhsCanon.symbol, args);
     }
 
@@ -847,7 +860,12 @@ function combineFunctionApplications(
 function isScalable(x: Expression): boolean {
   // Read through `typeIgnoringAbsence`: a `missing | T` head scales as a
   // `T` does (see the helper).
-  const t = typeIgnoringAbsence(x);
+  return typeIsScalable(typeIgnoringAbsence(x));
+}
+
+/** The type half of `isScalable`, shared with the `resolveSymbol` answer for
+ * a head (`oracleHeadType`), which is a type with no expression. */
+function typeIsScalable(t: BoxedType): boolean {
   return (
     t.matches('number') ||
     t.matches(MATRIX_TYPE) ||
@@ -880,10 +898,16 @@ function isWideValueType(x: Expression): boolean {
 }
 
 /**
- * Whether the head carries NO type information: it is undeclared, or it is
- * declared with an unknown type. A head declared with any concrete type — a
- * number, a collection, `value`, `any` — is settled by that type, and so is
- * a head that has a value or an operator definition.
+ * Whether the head carries NO type information: it is undeclared, or it was
+ * auto-declared by the engine from a bare use and its type is still unknown.
+ * A head declared with any concrete type — a number, a collection, `value`,
+ * `any` — is settled by that type, and so is a head that has a value or an
+ * operator definition. A head the HOST declared with the type `unknown` is
+ * settled too: that declaration says the name is a value whose type is not
+ * known yet (a document manager pre-declares its value heads so, `k` before
+ * `k = 0.6` is assigned), and `k(1 - w)` is then the product it is once the
+ * value arrives. Only an INFERRED unknown — the engine's own placeholder for
+ * a free symbol — carries no information.
  *
  * A PARAMETER of the function literal being canonicalized is declared by the
  * literal, whatever its type: `(x, N) \mapsto x(N+1)` is a product, as every
@@ -900,12 +924,58 @@ function headHasNoTypeInformation(
   def: ReturnType<ComputeEngine['lookupDefinition']>
 ): boolean {
   if (ce._isShadowedParameter(name)) return false;
+  // The `resolveSymbol` handler of the parse in progress supplements the
+  // scope: a host that knows `s` is a value before the scope does (a name a
+  // later pass will declare) answers with a type, and that answer settles the
+  // reading as a scope declaration would — a value keeps the product, a
+  // function is applied. A head the handler does not resolve falls through
+  // to the scope.
+  const resolved = oracleHeadType(ce, name);
+  if (resolved !== undefined) return !oracleTypeIsValue(resolved);
   if (def === undefined) return true;
   if (isOperatorDef(def)) return false;
   // A head that HOLDS a value is a value, whatever the value's type: after
   // `a := b` the symbol `a` stands for `b`, and `a(2)` is the product `2a`.
   if (def.value.value !== undefined) return false;
-  return def.value.type.isUnknown;
+  return def.value.type.isUnknown && def.value.inferredType;
+}
+
+/**
+ * The type the `resolveSymbol` handler of the parse in progress answers for
+ * `name`, boxed, or `undefined` when there is no handler or it does not
+ * resolve the name. A type string the handler returned is boxed here; the
+ * parser validates the same string on its own reads, so an invalid one has
+ * thrown before this point.
+ */
+function oracleHeadType(
+  ce: ComputeEngine,
+  name: string
+): BoxedType | undefined {
+  const resolved = ce._activeSymbolOracle?.(name);
+  if (resolved === undefined || resolved === null) return undefined;
+  const type = resolved.type;
+  if (typeof type !== 'string') return type;
+  try {
+    return new BoxedType(type);
+  } catch (error) {
+    // The parser reports the same invalid string with the same words
+    // (`Parser.resolveSymbol`); a head the parser did not read stays
+    // consistent with one it did.
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `ce.parse(): resolveSymbol("${name}") returned invalid type string "${type}". ${message}`
+    );
+  }
+}
+
+/**
+ * Whether a type a `resolveSymbol` handler answered says the symbol is a
+ * value — anything but a function. An `unknown` answer counts as a value:
+ * the handler declares the name, and a host uses `unknown` for a value whose
+ * type it does not know yet (see the scope rule in `headHasNoTypeInformation`).
+ */
+function oracleTypeIsValue(type: BoxedType): boolean {
+  return !type.matches(FUNCTION_TYPE);
 }
 
 /**
@@ -923,7 +993,8 @@ function applyUndeclaredHead(
   // an inferred function, on the same route the MathJSON application
   // `["f", "x"]` takes (`box.ts`), so the two spellings build the same
   // application with the same effects and the same argument narrowing. A
-  // head declared with an unknown type is inferred to `function` first. The
+  // head that is declared, with an unknown type, is inferred to `function`
+  // first. The
   // definition is looked up HERE, not taken from the caller: canonicalizing
   // the head symbol (`op.canonical` on the multi-operand route) auto-declares
   // an undeclared head with an unknown type, and a lookup made before that

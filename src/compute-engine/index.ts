@@ -76,6 +76,7 @@ import type {
 import type {
   LibraryCategory,
   ParseLatexOptions,
+  SymbolResolution,
   SerializeLatexOptions,
 } from './latex-syntax/types.js';
 import { validateStyleOptions } from './latex-syntax/style-options.js';
@@ -2627,6 +2628,13 @@ export class ComputeEngine implements IComputeEngine {
     return createBindingSymbolExpression(this, name, scope);
   }
 
+  /** The `resolveSymbol` handler of the `parse()` call in progress; see the
+   * interface. Saved and restored around each parse, so a parse made from
+   * inside a handler sees its own. @internal */
+  _activeSymbolOracle:
+    | ((symbol: MathJsonSymbol) => SymbolResolution | undefined)
+    | undefined = undefined;
+
   /** Stack of parameter-name sets active while canonicalizing function bodies.
    * Each frame optionally carries declared types for annotated parameters so
    * the auto-declaration of a parameter during body canonicalization can
@@ -3259,7 +3267,17 @@ export class ComputeEngine implements IComputeEngine {
               this.declare(
                 name,
                 {
-                  inferred: true,
+                  // The shadow carries the incumbent's own flag: a host's
+                  // explicit `unknown` declaration and the engine's inferred
+                  // placeholder read differently before a parenthesized
+                  // argument (`k(2)` is a product for the first, an
+                  // application for the second — `invisible-operator.ts`),
+                  // and a shadow marked inferred for a declared `unknown`
+                  // made the speculative parse diverge from the normal one.
+                  // Narrowing refines a declared `unknown` as it refines an
+                  // inferred type, so the flag is not what makes the shadow
+                  // narrowable.
+                  inferred: incumbent.value.inferredType,
                   type: incumbent.value.type.type,
                   // Parse-affecting metadata must survive onto the shadow, or
                   // the speculative parse diverges from a normal one: the
@@ -3343,6 +3361,8 @@ export class ComputeEngine implements IComputeEngine {
           userResolve(id) ?? this._resolveSymbolFromScope(id)
       : (id: MathJsonSymbol) => this._resolveSymbolFromScope(id);
 
+    const outerOracle = this._activeSymbolOracle;
+    this._activeSymbolOracle = userResolve;
     beginInferenceTransaction(this);
     try {
       const result = syntax.parse(latex, {
@@ -3424,6 +3444,7 @@ export class ComputeEngine implements IComputeEngine {
 
       return boxed;
     } finally {
+      this._activeSymbolOracle = outerOracle;
       endInferenceTransaction(this);
     }
   }

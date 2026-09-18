@@ -19,6 +19,7 @@ export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type {
   ParseLatexOptions,
   SerializeLatexOptions,
+  SymbolResolution,
 } from './latex-syntax/types.js';
 import type {
   ExactNumericValueData,
@@ -1693,6 +1694,21 @@ export interface IComputeEngine {
   _popShadowedParameters(): void;
   /** True while `_pushShadowedParameters` has registered `name`. @internal */
   _isShadowedParameter(name: string): boolean;
+  /**
+   * The `resolveSymbol` handler of the `ce.parse()` call in progress — the
+   * caller's per-call handler, else the engine-wide one — or `undefined`
+   * outside a parse or when the call has none. The handler supplements the
+   * scope for the parser; the canonicalization that `ce.parse()` runs on its
+   * result consults it here for the same question the scope answers, whether
+   * a symbol is a value (`invisible-operator.ts`, the reading of `s(x+1)`).
+   * The handler is known for the duration of the call only: a result parsed
+   * without canonicalization (`form: 'structural'`, `canonical: false`) and
+   * canonicalized later reads the scope alone at that later step.
+   * @internal
+   */
+  _activeSymbolOracle:
+    | ((symbol: MathJsonSymbol) => SymbolResolution | undefined)
+    | undefined;
   /** The declared type of an active shadowed parameter, if any. @internal */
   _shadowedParameterType(name: string): Type | undefined;
   /** The scope enclosing the construct that shadows `name` — the scope a

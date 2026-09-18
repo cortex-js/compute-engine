@@ -643,9 +643,10 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
       });
 
       test('a head with no type information is applied', () => {
-        // An undeclared head, or one declared with an unknown type, before a
-        // parenthesized argument is a call — unless the argument refers to
-        // the head, which makes it a product.
+        // An undeclared head before a parenthesized argument is a call —
+        // unless the argument refers to the head, which makes it a product.
+        // A head the host DECLARED `unknown` is a value whose type is not
+        // known yet, and keeps the product.
         {
           const ce = new ComputeEngine();
           expect(ce.parse('f(2)').json).toEqual(['f', 2]);
@@ -658,7 +659,7 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
         {
           const ce = new ComputeEngine();
           ce.declare('u', 'unknown');
-          expect(ce.parse('u(2)').json).toEqual(['u', 2]);
+          expect(ce.parse('u(2)').json).toEqual(['Multiply', 2, 'u']);
         }
         // …and a numeric head still multiplies, a function head still applies.
         {

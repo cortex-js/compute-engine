@@ -356,6 +356,29 @@ function lazyConstantMatrix(
  * type handler — unusable inside `Multiply` (`incompatible-type`), while the
  * directly-nested `Determinant(JacobianMatrix(…))` worked.
  */
+/**
+ * Is `x` a collection whose elements are numbers — a vector, in any form: a
+ * `List` literal, or the lazy `Map` a broadcast over more than
+ * `MAX_SIZE_EAGER_COLLECTION` elements produces? Decided from the TYPE, which
+ * a lazy collection carries without being materialized. A collection whose
+ * elements are collections (a matrix) is not one.
+ */
+function isVectorOfNumbers(x: Expression): boolean {
+  if (!x.isIndexedCollection) return false;
+  const t = x.type.type;
+  // An ascending integer range types `range`, a spelling with no parameter
+  // whose elements are known to be integers.
+  if (t === 'range') return true;
+  if (typeof t === 'string') return false;
+  // A lazy collection types `indexed_collection<T>`; a literal or a sized
+  // value types `list<T>` with dimensions, and a matrix is `list<number^m×n>`
+  // — its elements are numbers too, so the rank must be one.
+  if (t.kind === 'indexed_collection') return isSubtype(t.elements, 'number');
+  if (t.kind !== 'list') return false;
+  if (t.dimensions !== undefined && t.dimensions.length !== 1) return false;
+  return isSubtype(t.elements, 'number');
+}
+
 const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
   const m = ops[0];
   if (m === undefined)
@@ -1077,6 +1100,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Conjugate transpose of scalar is its conjugate
         if (op1.isNumber) return ce.expr(['Conjugate', op1]).evaluate();
+
+        // The conjugate transpose of a vector is its element-wise conjugate,
+        // whatever form the vector arrives in. A collection of more than
+        // `MAX_SIZE_EAGER_COLLECTION` elements arrives as a lazy `Map`, not a
+        // `List` literal, which `packStructural` below refuses; `Conjugate`
+        // broadcasts over any collection. Only a collection whose ELEMENTS
+        // are numbers takes this route: a matrix arriving lazily must still
+        // be transposed.
+        if (isVectorOfNumbers(op1))
+          return ce.expr(['Conjugate', op1]).evaluate();
 
         {
           // Structure-only operation — see `Transpose` (packStructural).
