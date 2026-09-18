@@ -511,12 +511,8 @@ describe('trigger-spelled names resolve through the supplied scope', () => {
     const scope = ce.createScope({ alpha_1: 'function' });
     expect(ce.parse('\\alpha_1(x)', { scope }).json).toEqual(['alpha_1', 'x']);
 
-    // Without the binding it stays an implicit multiplication.
+    // Without the binding the head is undeclared, so it is applied too.
     const bare = new ComputeEngine();
-    expect(bare.parse('\\alpha_1(x)').json).toEqual([
-      'Multiply',
-      'alpha_1',
-      'x',
-    ]);
+    expect(bare.parse('\\alpha_1(x)').json).toEqual(['alpha_1', 'x']);
   });
 });

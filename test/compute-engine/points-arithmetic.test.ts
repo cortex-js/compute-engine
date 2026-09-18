@@ -642,12 +642,13 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
         ).toBe('S');
       });
 
-      test('an ambiguous head keeps the product reading', () => {
-        // Undeclared, and unknown-typed, heads stay genuinely ambiguous: the
-        // scalar-argument branch's charitable product reading is unchanged.
+      test('a head with no type information is applied', () => {
+        // An undeclared head, or one declared with an unknown type, before a
+        // parenthesized argument is a call — unless the argument refers to
+        // the head, which makes it a product.
         {
           const ce = new ComputeEngine();
-          expect(ce.parse('f(2)').json).toEqual(['Multiply', 2, 'f']);
+          expect(ce.parse('f(2)').json).toEqual(['f', 2]);
           expect(ce.parse('x(x+1)').json).toEqual([
             'Multiply',
             'x',
@@ -657,7 +658,7 @@ describe('POINT/TUPLE ARITHMETIC — follow-up defects', () => {
         {
           const ce = new ComputeEngine();
           ce.declare('u', 'unknown');
-          expect(ce.parse('u(2)').json).toEqual(['Multiply', 2, 'u']);
+          expect(ce.parse('u(2)').json).toEqual(['u', 2]);
         }
         // …and a numeric head still multiplies, a function head still applies.
         {

@@ -48,6 +48,15 @@ export const DELIMITER_SHORTHAND: { [key: string]: LatexToken[] } = {
  * closing commands.
  */
 
+/**
+ * A LaTeX string that opens with a parenthesis, plain or sized: `(`,
+ * `\left(`, `\Bigl(`, … (the prefixes of `OPEN_DELIMITER_PREFIX`). The
+ * serializers test a juxtaposed operand against it: a symbol before such a
+ * group needs an explicit multiplication, because the juxtaposition
+ * re-parses as an application.
+ */
+export const OPENING_PARENTHESIS = /^(\\(left|bigl|Bigl|biggl|Biggl))?\(/;
+
 export const OPEN_DELIMITER_PREFIX: Record<string, string> = {
   '\\left': '\\right',
   '\\bigl': '\\bigr',

@@ -179,21 +179,28 @@ describe('EFFECTS PROVENANCE — the violation names its declaring site', () => 
 });
 
 describe('EFFECTS PROVENANCE — the re-derivation cascade (W2)', () => {
+  // `g(t) := 2a(t)` applies `a` before `a` has a definition: `g` is installed
+  // with the effects `any` of a call to an unknown function (one entry), and
+  // is re-derived when `a` gains a definition.
   test('a cascade that changes the inferred effects records the rebuilt literal as cause', () => {
     const ce = new ComputeEngine();
-    ce.parse('g(t)\\coloneq 2a(t)').evaluate(); // frozen as product, pure
-    ce.parse('a(t)\\coloneq \\operatorname{RandomInteger}(1, t)').evaluate();
+    ce.parse('g(t)\\coloneq 2a(t)').evaluate();
+    expect(effectsEntries(ce, 'g')).toHaveLength(1);
+    ce.parse('a(t)\\coloneq t^2').evaluate(); // any → pure
     const entries = effectsEntries(ce, 'g');
-    expect(entries).toHaveLength(1);
-    expect(entries[0][1]).toBe('inferred');
-    expect(entries[0][2]).toContain('2a(t)'); // the REBUILT literal, not an ambient cause
+    expect(entries).toHaveLength(2);
+    expect(entries[1][1]).toBe('inferred');
+    expect(entries[1][2]).toContain('2a(t)'); // the REBUILT literal, not an ambient cause
   });
 
   test('a cascade with no effects movement records nothing', () => {
     const ce = new ComputeEngine();
     ce.parse('g(t)\\coloneq 2a(t)').evaluate();
-    ce.parse('a(t)\\coloneq t^2').evaluate(); // pure → pure
-    expect(effectsEntries(ce, 'g')).toEqual([]);
+    const entries = effectsEntries(ce, 'g');
+    // A call to an unknown function already has the effects `any`, so a
+    // random `a` moves nothing.
+    ce.parse('a(t)\\coloneq \\operatorname{RandomInteger}(1, t)').evaluate(); // any → any
+    expect(effectsEntries(ce, 'g')).toEqual(entries);
   });
 
   test('an enclosing rollback frame leaves the pre-frame history byte-identical', () => {
@@ -202,10 +209,8 @@ describe('EFFECTS PROVENANCE — the re-derivation cascade (W2)', () => {
     const before = historyOf(ce, 'g');
     ce._withBoxingPassWindow(() =>
       ce._withRolledBackInference(() => {
-        ce.parse(
-          'a(t)\\coloneq \\operatorname{RandomInteger}(1, t)'
-        ).evaluate();
-        expect(effectsEntries(ce, 'g')).toHaveLength(1);
+        ce.parse('a(t)\\coloneq t^2').evaluate(); // any → pure
+        expect(effectsEntries(ce, 'g')).toHaveLength(2);
       })
     );
     expect(historyOf(ce, 'g')).toEqual(before);

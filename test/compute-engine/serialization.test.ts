@@ -638,11 +638,12 @@ describe('DISPLAY DIGITS', () => {
       ]);
     });
 
-    test('a single-expression group stays juxtaposed (re-parses as a product)', () => {
+    test('a symbol × single-expression group gets an explicit multiply (`s(x+1)` re-parses as a call)', () => {
       const t = ce.box(['Multiply', 's', ['Delimiter', ['Add', 'x', 1]]], {
         canonical: false,
       });
-      expect(t.latex).toEqual('s(x+1)');
+      expect(t.latex).toEqual('s\\times(x+1)');
+      expect(ce.parse(t.latex).operator).toEqual('Multiply');
     });
 
     test('a number × tuple stays juxtaposed (a number cannot head a call)', () => {
@@ -651,12 +652,12 @@ describe('DISPLAY DIGITS', () => {
     });
   });
 
-  // A single UPPERCASE-letter symbol juxtaposed with a parenthesized
-  // single-expression group re-parses as a function CALL (`K(2-0.1)` →
-  // `["K", …]`) regardless of what the symbol resolves to, because of the
-  // parser's predicate heuristic. A `Multiply`/`InvisibleOperator` must emit
-  // an explicit multiplication separator between them (Tycho item 71).
-  describe('uppercase symbol × parenthesized group keeps explicit multiply (Tycho item 71)', () => {
+  // A symbol juxtaposed with a parenthesized single-expression group
+  // re-parses as a function CALL: an undeclared head is applied, and a single
+  // UPPERCASE letter (`K(2-0.1)` → `["K", …]`) is a predicate application
+  // whatever it resolves to. A `Multiply`/`InvisibleOperator` must emit an
+  // explicit multiplication separator between them (Tycho item 71).
+  describe('symbol × parenthesized group keeps explicit multiply (Tycho item 71)', () => {
     test("consumer repro: Multiply(K, Subtract(…)) re-parses as a product, not K's application", () => {
       const t = ce.box(
         ['Multiply', 'K', ['Subtract', ['ElementMax', 1, 2], 0.1]],
@@ -679,21 +680,21 @@ describe('DISPLAY DIGITS', () => {
       ]);
     });
 
-    test('a lowercase symbol × single-expression group stays juxtaposed (already re-parses as a product)', () => {
+    test('a lowercase symbol × single-expression group gets an explicit multiply and round-trips', () => {
       const t = ce.box(['Multiply', 'x', ['Add', 'y', 'z']], {
         canonical: false,
       });
-      expect(t.toLatex()).toEqual('x(y+z)');
+      expect(t.toLatex()).toEqual('x\\times(y+z)');
       expect(ce.parse(t.toLatex(), { strict: false }).operator).toEqual(
         'Multiply'
       );
     });
 
-    test('a multi-letter symbol × single-expression group stays juxtaposed and round-trips', () => {
+    test('a multi-letter symbol × single-expression group gets an explicit multiply and round-trips', () => {
       const t = ce.box(['Multiply', 'abc', ['Add', 'x', 1]], {
         canonical: false,
       });
-      expect(t.toLatex()).toEqual('\\mathrm{abc}(x+1)');
+      expect(t.toLatex()).toEqual('\\mathrm{abc}\\times(x+1)');
       expect(ce.parse(t.toLatex(), { strict: false }).operator).toEqual(
         'Multiply'
       );
@@ -929,18 +930,20 @@ describe('Tycho item 145 — a non-canonical tree keeps its shape (prettify)', (
 // `canonicalDivide(numerator, 1)` for a product with no denominator. The
 // `never` early-out of `canonicalDivide` returned that `Divide(product, 1)`
 // unstripped, and the serializer rewrote the same product without end
-// (`RangeError: Maximum call stack size exceeded`). The corpus row makes `f`
-// type `never`: the left side reads `f(f(b))` as the product `b·f·f` while
-// `f'(c)` declares `f` a function.
+// (`RangeError: Maximum call stack size exceeded`). The corpus row used to
+// make `f` type `never`: its left side read `f(f(b))` as the product `b·f·f`
+// while `f'(c)` declared `f` a function. An undeclared `f` before a
+// parenthesized argument is now applied, so the row types `f` as a function
+// and the `never` case is pinned on a declared `never` symbol below.
 describe('a product with a `never`-typed factor serializes', () => {
   const CORPUS_ROW = "f(f(b)) - f(f(a)) = (f'(c))^2 (b - a)";
 
   test('the corpus row serializes and round-trips', () => {
     const ce = new ComputeEngine();
     const t = ce.parse(CORPUS_ROW);
-    expect(ce.symbol('f').type.toString()).toBe('never');
+    expect(ce.symbol('f').type.toString()).toBe('function');
     const latex = t.latex;
-    expect(latex).toBe('bff-aff=(b-a)f^{\\prime}(c)^2');
+    expect(latex).toBe('f(f(b))-f(f(a))=(b-a)f^{\\prime}(c)^2');
     expect(ce.parse(latex).isSame(t)).toBe(true);
   });
 

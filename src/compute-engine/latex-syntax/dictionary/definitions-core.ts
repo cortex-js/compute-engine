@@ -40,6 +40,7 @@ import {
   CLOSE_DELIMITER_PREFIX,
   DELIMITER_SHORTHAND,
   OPEN_DELIMITER_PREFIX,
+  OPENING_PARENTHESIS,
 } from '../delimiter-tables.js';
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
@@ -744,7 +745,12 @@ function rendersAsSolidus(
  * parenthesized group re-parses as a function CALL regardless of what the
  * symbol resolves to (the parser's predicate heuristic reads `K(…)` as an
  * application), so an explicit multiplication is forced between them (Tycho
- * item 71 — mirrors the guard in `serializeMultiply`).
+ * item 71). No other symbol gets one here: an `InvisibleOperator` is the
+ * juxtaposition as written, and `x(a+b)` parsed non-canonically must
+ * serialize back to `x(a+b)`, which re-parses to the same node. The canonical
+ * `Multiply` serializer is the one that must survive the call reading of
+ * `x(a+b)`, and it forces the separator for every symbol
+ * (`serializeMultiply`).
  */
 function serializeInvisibleOperator(
   serializer: Serializer,
@@ -771,7 +777,7 @@ function serializeInvisibleOperator(
     if (
       prevSym !== null &&
       /^[A-Z]$/.test(prevSym) &&
-      /^(\\left)?\(/.test(parts[i])
+      OPENING_PARENTHESIS.test(parts[i])
     )
       result = latexTemplate(serializer.options.multiply, result, parts[i]);
     else result = joinLatex([result, parts[i]]);

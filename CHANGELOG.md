@@ -129,6 +129,36 @@
   definition with `invalid-clause-definition`. Redefining a constant was never a
   documented feature; a binding meant to be replaced is a `let`.
 
+### Breaking Changes
+
+- **A symbol with no type information followed by a parenthesized argument
+  is an application.** `f(x)` with `f` undeclared, or declared with an unknown
+  type, now parses as `["f", "x"]`. It used to parse as the product `f·x`
+  whenever the argument could be a number, which is silent when wrong:
+  `\operatorname{conj}(L)` over a list was the product `conj·L`, and
+  `\int f(x) g(x) dx` pulled `g` out of the integral as a constant. A wrong
+  application stays visible instead — `f(2)` evaluates to itself — and the
+  declaration it makes is inferred, so a later value for `f` overrides it. The
+  same reading applies on the box route (`InvisibleOperator(f, Delimiter(…))`),
+  with a coefficient (`2f(x)` is `2·f(x)`), and through a power or a factorial
+  on the argument list (`f(3)^2` is `f(3)²`). The product reading remains for
+  a head that is a value: declared with a concrete type (`a: real`, `v: value`),
+  assigned a value, a constant (`\pi(x+1)`), a parameter of the function
+  literal being read (`(x, N) \mapsto x(N+1)`), or a head its own argument
+  refers to (`q(2q)`, `x(x+1)`). Definition order does not change the
+  reading: a function literal that applied a head before it had a definition
+  binds the definition made later (`A(t) := \sum h(i) a(2^i t)` before `a`
+  and `h` are defined), and is re-read as a product when the head instead
+  gains a value or a numeric declaration (`g(t) := 2x(t+1)` then `x := 5`
+  gives `g(3) = 40`). Because `s(x+1)` now re-parses as an application, the
+  serializer writes an explicit multiplication between a symbol and a
+  parenthesized group: `Multiply(s, x+1)` serializes as `s\times(x+1)`, as it
+  already did for a single uppercase letter (Tycho item 71). A non-canonical
+  `InvisibleOperator` still serializes as written. In non-strict mode
+  (`strict: false`) an unrecognized letter run before a parenthesis is still
+  split into letters, and the last letter is applied: `foo(x)` is
+  `f·o·o(x)`.
+
 ### Resolved Issues
 
 - **`\operatorname{conj}(z)` parses as `Conjugate(z)`.** `conj`, the spelling

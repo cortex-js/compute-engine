@@ -35,6 +35,22 @@ import {
   serializeListDomain,
 } from './definitions-sets.js';
 import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
+import { OPENING_PARENTHESIS } from '../delimiter-tables.js';
+
+/**
+ * Library constants that every engine declares with a numeric type. A
+ * juxtaposition of one of these with a parenthesized group re-parses as a
+ * product in any engine, so the serializer needs no explicit multiplication
+ * between them.
+ */
+const ALWAYS_DECLARED_CONSTANTS = new Set([
+  'Pi',
+  'ExponentialE',
+  'ImaginaryUnit',
+  'GoldenRatio',
+  'EulerGamma',
+  'CatalanConstant',
+]);
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
 
@@ -947,22 +963,22 @@ function serializeMultiply(
       else if (/^\d/.test(term)) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
-      // A bare symbol juxtaposed with a parenthesized group can re-parse as a
-      // function CALL rather than a product, silently turning the product into
-      // an application. Two cases force an explicit multiplication separator:
-      //
-      //  - Any symbol against a parenthesized COMMA-group re-parses as a call
-      //    (`s(1,2,3)` → `["s",1,2,3]`) — Tycho item 50.
-      //  - A single UPPERCASE-letter symbol against ANY parenthesized group
-      //    (comma or single-expression) re-parses as a call regardless of what
-      //    the symbol resolves to, because the parser's predicate heuristic
-      //    reads `K(…)` as an application (`K(2-0.1)` → `["K", …]`) — Tycho
-      //    item 71. Lowercase/multi-letter symbols against a single-expression
-      //    group (`s(x+1)`) re-parse as a product and stay juxtaposed.
+      // A bare symbol juxtaposed with a parenthesized group re-parses as a
+      // function CALL, not as a product: `s(x+1)` reads as `s` applied to
+      // `x+1` when `s` has no type information (`canonicalInvisibleOperator`),
+      // `s(1,2,3)` reads as a call whatever `s` is (Tycho item 50), and a
+      // single uppercase letter reads as a predicate application whatever it
+      // resolves to (Tycho item 71). The serialized form must re-parse as the
+      // product in ANY engine, including one where `s` is not declared, so
+      // every symbol before a parenthesized group gets an explicit
+      // multiplication separator. The group may open with a sized
+      // parenthesis (`\left(`, `\Bigl(`, … — `OPEN_DELIMITER_PREFIX`). A
+      // library constant (`\pi(x+1)`) is declared in every engine and always
+      // multiplies, so it keeps the juxtaposition.
       else if (
         prevSymbol !== null &&
-        (isCommaGroup(arg) ||
-          (/^[A-Z]$/.test(prevSymbol) && /^(\\left)?\(/.test(term)))
+        !ALWAYS_DECLARED_CONSTANTS.has(prevSymbol) &&
+        OPENING_PARENTHESIS.test(term)
       ) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
@@ -987,25 +1003,6 @@ function serializeMultiply(
   serializer.level += 1;
 
   return isNegative ? '-' + result : result;
-}
-
-/**
- * True for an operand that serializes as a parenthesized COMMA-group —
- * `(a, b, …)` — which, juxtaposed after a symbol, re-parses as a function
- * call rather than a product (Tycho item 50). A `Delimiter` with custom
- * fences only qualifies when it opens with a parenthesis.
- */
-function isCommaGroup(expr: MathJsonExpression | null): boolean {
-  if (expr === null) return false;
-  const h = operator(expr);
-  if (h === 'Tuple' || h === 'Pair' || h === 'Triple') return nops(expr) >= 2;
-  if (h === 'Delimiter') {
-    const inner = operand(expr, 1);
-    if (operator(inner) !== 'Sequence' || nops(inner) < 2) return false;
-    const delims = stringValue(operand(expr, 2));
-    return delims === null || delims === undefined || delims.startsWith('(');
-  }
-  return false;
 }
 
 /** Parse a single `\frac`/`\binom` argument. In TeX, each argument is

@@ -5,8 +5,8 @@ import type { Expression } from '../../src/compute-engine/global-types';
  * A canonical `Multiply` is FLAT: `Multiply` is associative, so no operand of
  * a canonical `Multiply` is itself a `Multiply`.
  *
- * The regression this file guards: `ce.parse('2f(ab)')` on a fresh engine
- * produced `Multiply(2, f, Multiply(a, b))` — the `InvisibleOperator`
+ * The regression this file guards: `ce.parse('2f(ab)')` with `f` declared a
+ * number produced `Multiply(2, f, Multiply(a, b))` — the `InvisibleOperator`
  * canonical handler calls `canonicalMultiply()` directly, bypassing the
  * flattening that `ce.function('Multiply', …)` does in `checkNumericArgs`.
  *
@@ -33,8 +33,11 @@ function expectFlatProduct(expr: Expression): void {
 
 describe('CANONICAL MULTIPLY IS FLAT', () => {
   describe('parse route', () => {
-    test('2f(ab) — undeclared call head, product argument (the repro)', () => {
+    test('2f(ab) — number-declared head, product argument (the repro)', () => {
+      // `f` is declared a number: an undeclared `f` before a parenthesized
+      // argument is an application, not a product.
       const ce = new ComputeEngine();
+      ce.declare('f', 'number');
       const expr = ce.parse('2f(ab)');
       expectFlatProduct(expr);
       expect(opStrings(expr)).toEqual(['2', 'a', 'b', 'f']);
@@ -42,6 +45,7 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
 
     test('2f(ab) matches the flat spelling 2abf operand for operand', () => {
       const ce = new ComputeEngine();
+      ce.declare('f', 'number');
       const a = ce.parse('2f(ab)');
       const b = ce.parse('2abf');
       expect(opStrings(a)).toEqual(opStrings(b));
@@ -59,6 +63,7 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
 
     test('a parenthesized product with more factors stays flat', () => {
       const ce = new ComputeEngine();
+      ce.declare('f', 'number');
       const expr = ce.parse('2f(ab)c');
       expectFlatProduct(expr);
       expect(opStrings(expr)).toEqual(['2', 'a', 'b', 'c', 'f']);
@@ -115,6 +120,7 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
 
     test('a nested InvisibleOperator with a product operand flattens', () => {
       const ce = new ComputeEngine();
+      ce.declare('f', 'number');
       const expr = ce.box([
         'InvisibleOperator',
         2,
@@ -315,6 +321,8 @@ describe('CANONICAL MULTIPLY IS FLAT', () => {
 
     test('an ordinary nested product still flattens on output', () => {
       const ce = new ComputeEngine();
+      ce.declare('a', 'number');
+      ce.declare('b', 'number');
       const expr = ce.parse('a\\left(b\\left(cd\\right)\\right)');
       expect(expr.json).toEqual(['Multiply', 'a', 'b', 'c', 'd']);
       expect(expr.latex).toBe('abcd');

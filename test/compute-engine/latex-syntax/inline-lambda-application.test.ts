@@ -108,11 +108,11 @@ describe('a parenthesized function symbol with a postfix on its argument list', 
     ]);
   });
 
-  test('a number or an undeclared symbol keeps the product', () => {
+  test('a number keeps the product; an undeclared symbol is applied', () => {
     const local = new ComputeEngine();
     local.assign('x', 5);
     expect(local.parse('(x)(3)^2').evaluate().toString()).toBe('45');
-    expect(local.parse('(g)(3)^2').json).toEqual(['Multiply', 9, 'g']);
+    expect(local.parse('(g)(3)^2').json).toEqual(['Power', ['g', 3], 2]);
   });
 });
 

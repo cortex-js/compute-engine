@@ -3,6 +3,7 @@ import { isImaginaryUnit, isOperatorDef } from './utils.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
+  SymbolInterface,
 } from '../global-types.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -10,7 +11,10 @@ import {
   typeCouldBeNumericTuple,
   typeIsLinearAlgebraCollection,
 } from '../collection-utils.js';
-import { noteProvisionalApplication } from './provisional-application.js';
+import {
+  noteProvisionalApplication,
+  noteProvisionalCall,
+} from './provisional-application.js';
 import {
   stripMissingFromType,
   typeContainsMissing,
@@ -139,14 +143,28 @@ export function canonicalInvisibleOperator(
     } else if (
       isSymbol(lhsCanon) &&
       !isFunction(rhs, 'Delimiter') &&
-      isPostfixOverArgumentList(rhs) &&
-      couldBecomeFunction(ce.lookupDefinition(lhsCanon.symbol))
+      isPostfixOverArgumentList(rhs)
     ) {
-      // The product reading below rests on the symbol having no function
-      // definition YET: record the application so the expression can be
-      // re-derived if the symbol later gains one (`provisional-application.ts`),
-      // as the bare-argument-list branch records its own.
-      noteProvisionalApplication(lhsCanon.symbol);
+      // A head with no type information applied through a power or a
+      // factorial: `f(3)^2` is `Power(f(3), 2)`, as it is for a declared
+      // function (the rule of the bare-argument-list branch below, which
+      // states why the application reading is preferred).
+      const def = ce.lookupDefinition(lhsCanon.symbol);
+      if (headHasNoTypeInformation(ce, lhsCanon.symbol, def)) {
+        const applied = applyThroughPostfix(ce, rhs, (args) => {
+          if (args.some((a) => a.has(lhsCanon.symbol))) return undefined;
+          return applyUndeclaredHead(ce, lhsCanon, args);
+        });
+        if (applied !== undefined) return applied;
+      }
+      if (couldBecomeFunction(def)) {
+        // The product reading below rests on the symbol having no function
+        // definition YET: record the application so the expression can be
+        // re-derived if the symbol later gains one
+        // (`provisional-application.ts`), as the bare-argument-list branch
+        // records its own.
+        noteProvisionalApplication(lhsCanon.symbol);
+      }
     }
 
     if (isSymbol(lhsCanon) && isFunction(rhs, 'Delimiter')) {
@@ -240,6 +258,25 @@ export function canonicalInvisibleOperator(
         !isWideValueType(lhsCanon) &&
         !isScalable(lhsCanon);
 
+      // A head with NO type information — undeclared, or declared with an
+      // unknown type — followed by a parenthesized argument is an
+      // application: `f(x)` is `f` applied to `x`, `\operatorname{foo}(z)` is
+      // `foo` applied to `z`. This is what the spelling means, and a wrong
+      // call stays visible (`f(x)` evaluates to itself), while a wrong
+      // product is silent (`f·x` is a number). The one exception is an
+      // argument that refers to the head: `q(2q)` is the product `2q²`,
+      // because a function is not an operand of its own argument. The
+      // declaration made here is INFERRED, so a later scalar use or assignment
+      // of the head widens it (`x(t+1)` then `x := 5`: the definition is
+      // re-derived as a product, see `provisional-application.ts`).
+      if (
+        allArgsNumeric &&
+        headHasNoTypeInformation(ce, lhsCanon.symbol, def) &&
+        !args.some((a) => a.has(lhsCanon.symbol))
+      ) {
+        return applyUndeclaredHead(ce, lhsCanon, args);
+      }
+
       if (allArgsNumeric && !headCannotMultiply) {
         // The product reading rests on `lhsCanon` having no function
         // definition *yet*: record it so a `Function` literal canonicalized now
@@ -270,7 +307,15 @@ export function canonicalInvisibleOperator(
         return ce.function('Multiply', [lhsCanon, ...args]);
       }
 
-      // Non-numeric args → treat as function call
+      // Non-numeric args → treat as function call. A head with no type
+      // information takes the same route as with a numeric argument, so the
+      // application is noted for re-derivation when the head gains a
+      // definition or a value (`f(S)` with `S` a list, `f` undeclared).
+      if (
+        headHasNoTypeInformation(ce, lhsCanon.symbol, def) &&
+        !args.some((a) => a.has(lhsCanon.symbol))
+      )
+        return applyUndeclaredHead(ce, lhsCanon, args);
       // Inferred (see above): a heuristic auto-declaration the user can
       // later widen/override.
       if (!def)
@@ -545,7 +590,7 @@ function isIndexDelimiter(delim: Expression): boolean {
 function applyThroughPostfix(
   ce: ComputeEngine,
   rhs: Expression,
-  build: (args: ReadonlyArray<Expression>) => Expression
+  build: (args: ReadonlyArray<Expression>) => Expression | undefined
 ): Expression | undefined {
   if (isFunction(rhs, 'Delimiter')) {
     if (isIndexDelimiter(rhs)) return undefined;
@@ -692,13 +737,31 @@ function combineFunctionApplications(
       i < ops.length - 1 &&
       isSymbol(op) &&
       !isFunction(ops[i + 1], 'Delimiter') &&
-      isPostfixOverArgumentList(ops[i + 1]) &&
-      couldBecomeFunction(ce.lookupDefinition(op.symbol))
+      isPostfixOverArgumentList(ops[i + 1])
     ) {
-      // The postfix pair stays two multiplication operands only because the
-      // symbol has no function definition YET — record it, as for a bare
-      // argument list below.
-      noteProvisionalApplication(op.symbol);
+      // A head with no type information applied through a power or a
+      // factorial (`2f(3)^2`): the application, as on the two-operand route.
+      const def = ce.lookupDefinition(op.symbol);
+      if (headHasNoTypeInformation(ce, op.symbol, def)) {
+        const head = op.canonical;
+        const applied = isSymbol(head)
+          ? applyThroughPostfix(ce, ops[i + 1], (args) => {
+              if (args.some((a) => a.has(head.symbol))) return undefined;
+              return applyUndeclaredHead(ce, head, args);
+            })
+          : undefined;
+        if (applied !== undefined) {
+          result.push(applied);
+          i += 2;
+          continue;
+        }
+      }
+      if (couldBecomeFunction(def)) {
+        // The postfix pair stays two multiplication operands only because
+        // the symbol has no function definition YET — record it, as for a
+        // bare argument list below.
+        noteProvisionalApplication(op.symbol);
+      }
     }
     if (
       i < ops.length - 1 &&
@@ -742,6 +805,21 @@ function combineFunctionApplications(
         }
       }
 
+      // A head with no type information before an argument list is an
+      // application here too: `2f(x)` is `2 · f(x)`. Same rule and same
+      // exception as the two-operand route (`x y(2y)` keeps `y(2y)` a
+      // product).
+      if (headHasNoTypeInformation(ce, symName, def) && delim.op1) {
+        const args = flatten(
+          isFunction(delim.op1, 'Sequence') ? delim.op1.ops : [delim.op1]
+        );
+        const head = op.canonical;
+        if (isSymbol(head) && !args.some((a) => a.has(symName))) {
+          result.push(applyUndeclaredHead(ce, head, args));
+          i += 2;
+          continue;
+        }
+      }
       // The pair stays two multiplication operands only because `symName` has
       // no function definition *yet* — record it (see the same note in
       // `canonicalInvisibleOperator`).
@@ -799,6 +877,70 @@ function isWideValueType(x: Expression): boolean {
   const bt = typeIgnoringAbsence(x);
   const t = bt.type;
   return bt.isUnknown || t === 'any' || t === 'expression' || t === 'value';
+}
+
+/**
+ * Whether the head carries NO type information: it is undeclared, or it is
+ * declared with an unknown type. A head declared with any concrete type — a
+ * number, a collection, `value`, `any` — is settled by that type, and so is
+ * a head that has a value or an operator definition.
+ *
+ * A PARAMETER of the function literal being canonicalized is declared by the
+ * literal, whatever its type: `(x, N) \mapsto x(N+1)` is a product, as every
+ * untyped parameter is a value (a function-valued parameter is annotated,
+ * `(f: function, x) \mapsto f(x)`). The literal registers its parameter names
+ * on the engine before its body is canonicalized (`_pushShadowedParameters`,
+ * `function-utils.ts`), which is what is consulted here: the parameter's own
+ * binding is auto-declared by its first use, so at that use it looks exactly
+ * like an undeclared name.
+ */
+function headHasNoTypeInformation(
+  ce: ComputeEngine,
+  name: string,
+  def: ReturnType<ComputeEngine['lookupDefinition']>
+): boolean {
+  if (ce._isShadowedParameter(name)) return false;
+  if (def === undefined) return true;
+  if (isOperatorDef(def)) return false;
+  // A head that HOLDS a value is a value, whatever the value's type: after
+  // `a := b` the symbol `a` stands for `b`, and `a(2)` is the product `2a`.
+  if (def.value.value !== undefined) return false;
+  return def.value.type.isUnknown;
+}
+
+/**
+ * The application of a head that has no type information to `args`. The head
+ * is declared as a function if it has no definition, or its unknown type is
+ * inferred to `function`. Both are INFERRED declarations, which a later
+ * scalar use or assignment of the head can widen or override.
+ */
+function applyUndeclaredHead(
+  ce: ComputeEngine,
+  head: Expression & SymbolInterface,
+  args: ReadonlyArray<Expression>
+): Expression {
+  // An undeclared head is NOT declared here: `ce.function` declares it, as
+  // an inferred function, on the same route the MathJSON application
+  // `["f", "x"]` takes (`box.ts`), so the two spellings build the same
+  // application with the same effects and the same argument narrowing. A
+  // head declared with an unknown type is inferred to `function` first. The
+  // definition is looked up HERE, not taken from the caller: canonicalizing
+  // the head symbol (`op.canonical` on the multi-operand route) auto-declares
+  // an undeclared head with an unknown type, and a lookup made before that
+  // step would answer "undeclared" for a head that now needs the inference.
+  if (ce.lookupDefinition(head.symbol) !== undefined)
+    head._infer(() => 'function');
+  const application = ce.function(head.symbol, args);
+  // Definition order must not change semantics. The head has no definition
+  // yet, so a `Function` literal canonicalized now is re-derived when the
+  // head gains one (`provisional-application.ts`): the call then binds to
+  // the real definition, and a head that instead gains a scalar value is
+  // re-read as a product. Noted unconditionally — with no definition, even a
+  // call with closed arguments binds to the placeholder `ce.function`
+  // declares, which a definition made later in an enclosing scope does not
+  // replace.
+  noteProvisionalCall(head.symbol);
+  return application;
 }
 
 /** Whether a later definition could turn a juxtaposition on this symbol into a

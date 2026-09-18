@@ -934,7 +934,7 @@ describe('Series — GammaLn Stirling asymptotics', () => {
   test('GammaLn(x) at +∞ = x ln x − x − ½ln x + ½ln(2π) + 1/(12x) − …', () => {
     // Cross-checked against SymPy sp.loggamma series at oo.
     expect(series('\\operatorname{GammaLn}(x)', '+\\infty').latex).toBe(
-      'x(\\ln(x)-1)-\\frac{\\ln(x)}{2}+\\frac{\\ln(2\\pi)}{2}' +
+      'x\\times(\\ln(x)-1)-\\frac{\\ln(x)}{2}+\\frac{\\ln(2\\pi)}{2}' +
         '+\\frac{1}{12x}-\\frac{1}{360x^3}+O\\left(\\frac{1}{x^5}\\right)'
     );
     const p = normal('\\operatorname{GammaLn}(x)', '+\\infty');

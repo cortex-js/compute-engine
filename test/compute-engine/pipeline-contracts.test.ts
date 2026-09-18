@@ -589,18 +589,19 @@ describe('CONTRACT 4: re-binding of a cached boxed expression', () => {
     expect(reboxed.evaluate().toString()).toBe('7');
   });
 
-  test('re-box REQUIRED: juxtaposition g(2) — multiplication vs application', () => {
+  test('no re-box needed: juxtaposition g(2) is an application that binds by name', () => {
     const ce = new ComputeEngine();
     const json = ['InvisibleOperator', 'g', ['Delimiter', 2]];
-    const cached = ce.box(json as any); // g unknown → Multiply(2,g) → "2g"
-    expect(cached.evaluate().toString()).toBe('2g');
+    // `g` is undeclared, so the juxtaposition is the application `g(2)`, which
+    // evaluates to itself until `g` has a body.
+    const cached = ce.box(json as any);
+    expect(J(cached.json)).toBe(J(['g', 2]));
+    expect(cached.evaluate().toString()).toBe('g(2)');
     ce.assign('g', ce.parse('x \\mapsto x + 100'));
-    // Cached stays the multiplication form.
-    expect(cached.evaluate().toString()).toBe('2g');
-    // Re-boxing resolves to function application g(2) = 102.
-    const reboxed = ce.box(json as any);
-    expect(J(reboxed.json)).toBe(J(['g', 2]));
-    expect(reboxed.evaluate().toString()).toBe('102');
+    // An application looks its operator up by name at evaluation, so the
+    // cached expression sees the new body without a re-box.
+    expect(cached.evaluate().toString()).toBe('102');
+    expect(ce.box(json as any).evaluate().toString()).toBe('102');
   });
 
   test('same-scope redeclare after forget throws', () => {

@@ -235,13 +235,22 @@ describe('definition order does not change semantics', () => {
   });
 
   //
-  // 5/ Non-regression: juxtaposition stays multiplication when the leading
-  //    symbol is not (and does not become) a function.
+  // 5/ Juxtaposition on a head with no type information is an application;
+  //    it becomes a multiplication when the head is, or becomes, a value.
   //
   describe('juxtaposition multiplication is preserved', () => {
-    test('a forever-undefined scalar stays a product', () => {
+    test('a forever-undefined head stays an application', () => {
       const ce = new ComputeEngine();
       ce.parse('g(t)\\coloneq 2x(t+1)').evaluate();
+      expect(ce.parse('g(3)').evaluate().toString()).toEqual('2x(4)');
+    });
+
+    test('a symbol declared numeric after the definition becomes a product', () => {
+      // The reverse repair: the body applied `x` while it had no definition,
+      // and is re-derived when `x` is declared a value.
+      const ce = new ComputeEngine();
+      ce.parse('g(t)\\coloneq 2x(t+1)').evaluate();
+      ce.declare('x', 'number');
       expect(ce.parse('g(3)').evaluate().toString()).toEqual('8x');
     });
 
@@ -262,14 +271,15 @@ describe('definition order does not change semantics', () => {
       expect(ce.parse('g(3)').evaluate().toString()).toEqual('40');
     });
 
-    test('a plain expression is not a definition and is not repaired', () => {
-      // Only `Function` literals freeze a reading; a standalone expression is
-      // whatever it was when it was parsed, and a fresh parse sees the new
-      // definition.
+    test('a plain expression applies the head, and the application binds by name', () => {
+      // A standalone expression is not repaired, but it does not need to be:
+      // the application `x(3)` looks `x` up by name at evaluation, so it sees
+      // the definition made after it was parsed.
       const ce = new ComputeEngine();
       const frozen = ce.parse('2x(3)');
+      expect(frozen.evaluate().toString()).toEqual('2x(3)');
       ce.parse('x(t)\\coloneq t+1').evaluate();
-      expect(frozen.evaluate().toString()).toEqual('6x');
+      expect(frozen.evaluate().toString()).toEqual('8');
       expect(ce.parse('2x(3)').evaluate().toString()).toEqual('8');
     });
   });
@@ -397,9 +407,16 @@ describe('definition order does not change semantics', () => {
       expect((ce.lookupDefinition('a') as any).operator).toBeDefined();
       expect(ce._anyVersion).toBeGreaterThan(generation);
 
-      // Each dependent kept its previous definition...
-      expect(ce.parse('g(3)').evaluate().toString()).toEqual('6a');
-      expect(ce.parse('h(3)').evaluate().toString()).toEqual('6a + 1');
+      // Each dependent kept its previous definition (the application of the
+      // placeholder `a`; evaluated now, that one-argument call to the
+      // two-parameter `a` reports the missing argument)...
+      const literal = (name: string) =>
+        (ce.lookupDefinition(name) as any).operator._lambdaLiteral.toString();
+      expect(literal('g')).toEqual('(t) => 2a(t)');
+      expect(literal('h')).toEqual('(t) => 2a(t) + 1');
+      expect(ce.parse('g(3)').evaluate().toString()).toEqual(
+        'Error("missing")'
+      );
       // ...and BOTH are still waiting, so a later redefinition can retry them.
       // The first failure used to abort the loop over a queue that had already
       // been drained, losing every dependent after it.

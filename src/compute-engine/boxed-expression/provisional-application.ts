@@ -317,6 +317,14 @@ export function _provisionalDependentCount(
   return DEPENDENTS.get(ce)?.get(name)?.size ?? 0;
 }
 
+/** Is at least one definition waiting on `name` in this engine? */
+export function hasProvisionalDependents(
+  ce: IComputeEngine,
+  name: string
+): boolean {
+  return DEPENDENTS.get(ce)?.has(name) === true;
+}
+
 export function takeProvisionalDependents(
   ce: IComputeEngine,
   name: string

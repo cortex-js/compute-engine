@@ -671,6 +671,11 @@ export function setSymbolValue(
       // `def.value` is what was just installed for `id`: a recursive literal
       // waits on its own name, and must not be re-derived against itself.
       repairProvisionalDependents(ce, id, def.value);
+    } else if (!def.value.type.isUnknown) {
+      // A value that is not a function: a body that APPLIED `id` while it had
+      // no definition is re-derived and reads the product instead (see the
+      // same step in `updateDef`). A no-op when nothing waits on `id`.
+      repairProvisionalDependents(ce, id, def.value);
     }
     return;
   }

@@ -256,10 +256,12 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       );
     });
 
-    test('Unknown function names are rejected', () => {
-      // 'foo' is not a recognized function, should parse as individual symbols
+    test('Unknown function names are split into letters', () => {
+      // 'foo' is not a recognized function: the letter run is segmented, and
+      // the last letter, undeclared before a parenthesized argument, is
+      // applied to it.
       expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", "f", "o", "o", "x"]`
+        `["Multiply", "f", "o", ["o", "x"]]`
       );
     });
   });
@@ -714,7 +716,7 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     // its letters and does not pick up `oo` → ∞.
     test('foo(x) stays letters (oo not matched mid-run)', () => {
       expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", "f", "o", "o", "x"]`
+        `["Multiply", "f", "o", ["o", "x"]]`
       );
     });
   });
@@ -942,7 +944,7 @@ describe('uppercase-before-paren: scope overrides the predicate heuristic', () =
     expect(ce.parse('K(2-0.1)').operator).toEqual('K');
   });
 
-  test('lowercase v: assigned / declared number / unknown → Multiply, declared fn → call', () => {
+  test('lowercase v: assigned / declared number → Multiply, undeclared / declared fn → call', () => {
     {
       const ce = new ComputeEngine();
       ce.assign('v', 0.5);
@@ -954,8 +956,9 @@ describe('uppercase-before-paren: scope overrides the predicate heuristic', () =
       expect(ce.parse('v(2-0.1)').operator).toEqual('Multiply');
     }
     {
+      // Undeclared: no type information, so the juxtaposition is a call.
       const ce = new ComputeEngine();
-      expect(ce.parse('v(2-0.1)').operator).toEqual('Multiply');
+      expect(ce.parse('v(2-0.1)').operator).toEqual('v');
     }
     {
       const ce = new ComputeEngine();

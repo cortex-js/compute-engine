@@ -272,14 +272,14 @@ describe('DELIMITERS PARSING', () => {
     expect(check('(a\\times(c\\times d))')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Multiply", "a", ["Delimiter", ["Multiply", "c", "d"]]]]
       canonical = ["Multiply", "a", "c", "d"]
-      box-latex = (a(cd))
+      box-latex = (a\\times(cd))
       latex     = acd
     `);
     expect(check('(a\\times(c+d))')).toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Multiply", "a", ["Delimiter", ["Add", "c", "d"]]]]
       canonical = ["Multiply", "a", ["Add", "c", "d"]]
-      box-latex = (a(c+d))
-      latex     = a(c+d)
+      box-latex = (a\\times(c+d))
+      latex     = a\\times(c+d)
     `);
     // Sequence with empty element. The empty slot parses as `Nothing`, an
     // ERASURE marker, so it is spliced out of the tuple literal: `(a,,b)` is

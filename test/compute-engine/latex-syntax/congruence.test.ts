@@ -288,7 +288,7 @@ describe('MathNet Tier-3 Task 5: divisibility', () => {
       '(A\\bmod2)(B\\bmod2)'
     );
     expect(ce.box(['Multiply', 'x', ['Mod', 'A', 2]]).latex).toBe(
-      'x(A\\bmod2)'
+      'x\\times(A\\bmod2)'
     );
     expect(ce.box(['Power', ['Mod', 'A', 2], 'x']).latex).toBe(
       '(A\\bmod2)^{x}'

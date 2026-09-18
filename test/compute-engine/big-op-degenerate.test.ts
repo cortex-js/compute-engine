@@ -139,8 +139,8 @@ describe('degenerate big operator: index UNUSED folds at canonicalization', () =
     const ce = new ComputeEngine();
     // The Desmos "identity wrapper" golf spelling.
     const expr = ce.parse('\\sum_{i=d}^{d} f(x)');
-    expect(expr.toString()).toBe('f * x');
-    expect(expr.evaluate().toString()).toBe('f * x');
+    expect(expr.toString()).toBe('f(x)');
+    expect(expr.evaluate().toString()).toBe('f(x)');
   });
 
   test('Sum, symbolic bound — box route', () => {

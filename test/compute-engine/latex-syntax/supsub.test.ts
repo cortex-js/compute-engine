@@ -593,7 +593,6 @@ describe('SUBSCRIPTED FUNCTION APPLICATION', () => {
     `);
     expect(ce.parse('g_{n}(x)').json).toMatchInlineSnapshot(`
       [
-        Multiply,
         g_n,
         x,
       ]

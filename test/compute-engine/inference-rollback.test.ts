@@ -133,10 +133,10 @@ describe('ROLLBACK FRAMES — family 4: declarations', () => {
 describe('ROLLBACK FRAMES — family 5 + cascade: provisional re-derivation', () => {
   test('a literal re-derived because a symbol became callable in-frame reverts, and the registry survives for a later real definition', () => {
     const ce = new ComputeEngine();
-    // g's body reads `a` before `a` is callable: frozen as the product 2·a·t
-    // and registered to be re-derived when `a` gains a definition.
+    // g's body applies `a` before `a` has a definition: frozen as the
+    // application 2·a(t) and registered to be re-derived when `a` gains one.
     ce.parse('g(t)\\coloneq 2a(t)').evaluate();
-    expect(ce.box(['g', 2]).evaluate().toString()).toBe('4a');
+    expect(ce.box(['g', 2]).evaluate().toString()).toBe('2a(2)');
 
     withFrame(ce, () => {
       // Defining `a` inside the frame triggers the repair cascade: g's
@@ -147,9 +147,9 @@ describe('ROLLBACK FRAMES — family 5 + cascade: provisional re-derivation', ()
       expect(ce.box(['g', 2]).evaluate().toString()).toBe('10');
     });
 
-    // Back to the pre-frame product reading; `a` is gone.
+    // Back to the pre-frame application; `a` is gone.
     expect(ce.lookupDefinition('a')).toBeUndefined();
-    expect(ce.box(['g', 2]).evaluate().toString()).toBe('4a');
+    expect(ce.box(['g', 2]).evaluate().toString()).toBe('2a(2)');
 
     // The forward-reference registry rolled back too: a REAL definition of
     // `a` after the rollback still re-derives g. (This is the one-shot

@@ -520,7 +520,9 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     // Symbolic b,c,n,p are required so the nested-power log stays opaque
     // (concrete positive numerics collapse (b·x^n)^p and bypass rule 3.3 #60).
     test('∫Log[c·(b·xⁿ)ᵖ]²/x⁴ dx (power-in-log, rule 3.3 #60 back-subst)', () => {
-      const latex = '\\frac{\\ln(c(b x^n)^p)^2}{x^4}';
+      // `c\cdot(…)`: an undeclared `c` before a parenthesized group is an
+      // application, and `c` is a coefficient here.
+      const latex = '\\frac{\\ln(c \\cdot (b x^n)^p)^2}{x^4}';
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
       expect(F.has('Integrate')).toBe(false); // a closed form, not inert

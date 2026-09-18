@@ -27,6 +27,7 @@ import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { functionLiteralParameterName } from './function-literal.js';
 import {
+  hasProvisionalDependents,
   registerProvisionalDependents,
   repairProvisionalDependents,
   unregisterProvisionalDependent,
@@ -1485,8 +1486,28 @@ export function updateDef(
 
   // `name` may now be callable: any definition body that read it as a
   // multiplication operand because it was not callable yet is re-derived here
-  // (`provisional-application.ts`).
-  if (mutableDef.operator !== undefined || callableValue) {
+  // (`provisional-application.ts`). The reverse holds too: a body that APPLIED
+  // `name` while it had no definition (`2x(t+1)` reads `x(t+1)` as a call)
+  // is re-derived when `name` gains a value that is not a function, and then
+  // reads the product. This arm is taken only when the installed value has
+  // a KNOWN non-function type and something waits on `name`. An
+  // `unknown`-typed placeholder declaration decides nothing, and consuming
+  // the waiting definitions on it would lose them before the real definition
+  // arrives (Epsil declares a function's name before it installs the body);
+  // an ordinary value declaration must not emit a repair event either (the
+  // event moves the callable generation).
+  const installedNonCallable =
+    !callableValue &&
+    mutableDef.operator === undefined &&
+    installedValue !== undefined &&
+    installedValue !== supersededValue &&
+    !installedValue.type.isUnknown &&
+    hasProvisionalDependents(ce, name);
+  if (
+    mutableDef.operator !== undefined ||
+    callableValue ||
+    installedNonCallable
+  ) {
     // The swap above is COMMITTED, and the repair below can throw. Bump the
     // generation here rather than relying on the callers' post-`updateDef`
     // bump (`declareSymbolOperator`), which such a throw would skip — leaving

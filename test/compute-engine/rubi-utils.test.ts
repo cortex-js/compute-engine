@@ -947,7 +947,9 @@ describe('R14 end-to-end Si/Ci-routing (shipped bundle)', () => {
     expect(F.toString().includes('SinIntegral')).toBe(true);
   });
   test('closes ∫sin(b·(c+d·x)²) → FresnelS (deg-2 composite)', () =>
-    expect(closesLatex('\\sin(b (c + d x)^2)', { b: 0.7, c: 0.4, d: 0.6 })).toBe(true));
+    // `b\cdot(…)`: an undeclared `b` before a parenthesized group is an
+    // application, and `b` is a coefficient here.
+    expect(closesLatex('\\sin(b \\cdot (c + d x)^2)', { b: 0.7, c: 0.4, d: 0.6 })).toBe(true));
 });
 
 // R9 end-to-end: the shipped bundle closes the poly·cos and nonlinear-argument

@@ -103,12 +103,12 @@ describe('INDEFINITE INTEGRATION', () => {
 
   test('sum', () =>
     expect(evaluate('\\int f(x) + g(x) dx')).toMatchInlineSnapshot(
-      `1/2 * g * x^2 + int(f(x) dx)`
+      `int(g(x) dx) + int(f(x) dx)`
     ));
 
   test('product', () =>
     expect(evaluate('\\int f(x) g(x) dx')).toMatchInlineSnapshot(
-      `g * int(x * f(x) dx)`
+      `int(g(x) * f(x) dx)`
     ));
 
   test('product with constants', () =>
