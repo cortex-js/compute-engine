@@ -63,6 +63,7 @@ import { match } from './match.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { clearClauseProvenance } from '../clause-identity.js';
 import {
+  digest128,
   hashCode,
   isOperatorDef,
   isValueDef,
@@ -234,6 +235,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override readonly _kind = 'symbol';
 
   private _hash: number | undefined;
+  private _digest: string | undefined;
 
   /** The name of the symbol */
   protected _id: MathJsonSymbol;
@@ -269,6 +271,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   get hash(): number {
     this._hash ??= hashCode(this._id);
     return this._hash;
+  }
+
+  get digest(): string {
+    // The name alone, as `.json` writes it: what the symbol is bound to
+    // never enters the digest (see the `digest` contract).
+    this._digest ??= digest128(`S\u001f${this._id}`);
+    return this._digest;
   }
 
   override _unshared(): BoxedSymbol {

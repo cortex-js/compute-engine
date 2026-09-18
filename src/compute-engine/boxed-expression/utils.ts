@@ -141,6 +141,64 @@ export function hashCode(s: string): number {
 }
 
 /**
+ * A 128-bit digest of `s`, as 32 lowercase hexadecimal characters: the
+ * cyrb128 string hash — four 32-bit lanes mixed per character and finalized
+ * against each other. It is a key where `hashCode` is a bucket: on the
+ * inputs this engine feeds it (its own serializations, never adversarial
+ * text) a collision between distinct inputs is not expected in practice,
+ * though no cryptographic bound is claimed. It backs `Expression.digest`;
+ * see that contract for what may be assumed of it. Not stable across
+ * releases.
+ */
+export function digest128(s: string): string {
+  let h1 = 1779033703;
+  let h2 = 3144134277;
+  let h3 = 1013904242;
+  let h4 = 2773480762;
+  for (let i = 0; i < s.length; i++) {
+    const k = s.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  h1 ^= h2 ^ h3 ^ h4;
+  h2 ^= h1;
+  h3 ^= h1;
+  h4 ^= h1;
+  return (
+    (h1 >>> 0).toString(16).padStart(8, '0') +
+    (h2 >>> 0).toString(16).padStart(8, '0') +
+    (h3 >>> 0).toString(16).padStart(8, '0') +
+    (h4 >>> 0).toString(16).padStart(8, '0')
+  );
+}
+
+/**
+ * The expressions whose digest must be read fresh on every access because
+ * it depends on a MUTABLE object somewhere below them: an object's digest
+ * is that of its record snapshot, and a parent that memoized a digest over
+ * it would answer the snapshot of the first read after every later store.
+ * An object registers itself; a function node or dictionary registers
+ * itself when any operand or value is registered. Membership is decided
+ * the first time a digest is computed, and a node's operands never change
+ * after construction, so it never has to be revisited.
+ */
+const VOLATILE_DIGEST = new WeakSet<object>();
+
+export function markVolatileDigest(expr: object): void {
+  VOLATILE_DIGEST.add(expr);
+}
+
+export function hasVolatileDigest(expr: object): boolean {
+  return VOLATILE_DIGEST.has(expr);
+}
+
+/**
  * The default unknown/variable for an operator whose variable argument was
  * omitted (`Solve(eq)`, `D(expr)`, `PolynomialDegree(poly)`, …): the single
  * free variable of the expression(s), or `x` when there are several free

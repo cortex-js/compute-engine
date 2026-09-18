@@ -28,7 +28,7 @@ import {
   isObject,
   isString,
 } from './type-guards.js';
-import { hashCode } from './utils.js';
+import { digest128, hashCode, markVolatileDigest } from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
@@ -227,6 +227,18 @@ export class BoxedObject extends _BoxedExpression implements ObjectInterface {
    */
   get hash(): number {
     return hashCode('Object' + this._serial);
+  }
+
+  get digest(): string {
+    // The record SNAPSHOT `.json` writes, computed fresh on every read as
+    // `.json` is: the value is mutable, so a memo would go stale at the
+    // next store, and a digest is a key of the serialized structure. (The
+    // `hash` reads identity instead — its serial restarts per engine, so
+    // it could not be a cross-engine key, and a key must be one.) Every
+    // node above this one must read fresh too; `markVolatileDigest` is how
+    // they learn it.
+    markVolatileDigest(this);
+    return digest128(`O\u001f${JSON.stringify(this.json)}`);
   }
 
   get type(): BoxedType {

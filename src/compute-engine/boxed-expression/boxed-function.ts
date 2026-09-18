@@ -159,7 +159,10 @@ import { activeRollbackFrame } from '../inference-rollback.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
+  digest128,
   hashCode,
+  hasVolatileDigest,
+  markVolatileDigest,
   isOperatorDef,
   isValueDef,
   normalizedUnknownsForSolve,
@@ -442,6 +445,7 @@ export class BoxedFunction
   private _isStructural: boolean;
 
   private _hash: number | undefined;
+  private _digest: string | undefined;
 
   /** The overload resolution this call was VALIDATED against, attached by
    * the construction site (`box.ts`) when the operator's signature is an
@@ -718,6 +722,27 @@ export class BoxedFunction
     h = (h ^ hashCode(this._operator)) | 0;
     this._hash = h;
     return h;
+  }
+
+  get digest(): string {
+    if (this._digest !== undefined) return this._digest;
+    // Memoized per node, so a sub-expression shared by many parents is
+    // digested once: the cost is linear in the DISTINCT nodes of the tree,
+    // where a serialization of the tree is linear in its paths. Not
+    // memoized when a mutable object sits below this node (see
+    // `markVolatileDigest`): its snapshot can change at the next store.
+    const store = this._numericStore;
+    const parts =
+      store !== undefined
+        ? Array.from(store, (v) => this.engine.number(v).digest)
+        : this._ops.map((op) => op.digest);
+    const d = digest128(
+      `F\u001f${this._operator}\u001f${parts.join('\u001f')}`
+    );
+    if (store === undefined && this._ops.some((op) => hasVolatileDigest(op)))
+      markVolatileDigest(this);
+    else this._digest = d;
+    return d;
   }
 
   /**

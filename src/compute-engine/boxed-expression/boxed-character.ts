@@ -8,7 +8,7 @@ import type {
 } from '../global-types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { hashCode, isExpression } from './utils.js';
+import { digest128, hashCode, isExpression } from './utils.js';
 import { isCharacter, isString } from './type-guards.js';
 import { toUnicodeScalarValues, toWellFormedString } from './boxed-string.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
@@ -96,6 +96,11 @@ export class BoxedCharacter
     // break every hash-keyed consumer (`Unique`, `Tally`, set membership,
     // the pattern matcher's anchor buckets).
     return hashCode('String' + this._string);
+  }
+
+  get digest(): string {
+    // The same input `BoxedString.digest` uses, for the reason `hash` gives.
+    return digest128(`T\u001f${this._string}`);
   }
 
   get operator(): string {

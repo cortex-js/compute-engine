@@ -1014,6 +1014,42 @@ export interface Expression {
   readonly hash: number;
 
   /**
+   * A 128-bit digest of this expression's **serialized structure** — the
+   * MathJSON `.json` writes — as 32 hexadecimal characters: an **in-memory
+   * cache key** that needs no compare on hit, computed without writing the
+   * MathJSON out.
+   *
+   * It replaces `JSON.stringify(expr.json)` as a key, and keys the same
+   * way: two expressions digest alike exactly when their MathJSON is the
+   * same tree (a collision between two distinct trees is not expected in
+   * practice — 128 bits from a non-cryptographic mixer, on the engine's own
+   * serializations), with two deliberate exceptions where the digest is
+   * coarser than the text — a dictionary's entry order does not enter it,
+   * and a character digests like the one-cluster string with the same
+   * content, as the two are the same value.
+   *
+   * It is therefore **not an `isSame` key**, in both directions, and
+   * `hash` remains the `isSame` companion:
+   * - two symbols of the same name digest alike whatever they are bound to
+   *   (a symbol serializes as its name), even when `isSame` — which reads
+   *   binding identity — says they differ;
+   * - the exact rational `1/2` and the float `0.5` are `isSame` but
+   *   serialize apart, and digest apart.
+   *
+   * - **Cost**: memoized per node, so it is linear in the DISTINCT nodes of
+   *   the expression — except at and above a mutable object, whose record
+   *   snapshot is read fresh like `.json`, so a store to it is seen by every
+   *   node that contains it. `JSON.stringify(expr.json)` is
+   *   linear in the PATHS, which on a value that shares its sub-expressions
+   *   is exponential in the depth.
+   * - **Stability**: deterministic within a release, across engine
+   *   instances and processes. **Not stable across releases** and not
+   *   cryptographic: never persist it, never use it to authenticate.
+   * - **Bound variables**: folds bound-variable names, as the MathJSON does.
+   */
+  readonly digest: string;
+
+  /**
    * The Compute Engine instance associated with this expression provides
    * a context in which to interpret it, such as definition of symbols
    * and functions.

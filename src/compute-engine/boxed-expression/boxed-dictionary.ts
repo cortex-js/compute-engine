@@ -10,7 +10,12 @@ import type {
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { cachedValue, type CachedValue } from './cache.js';
-import { hashCode } from './utils.js';
+import {
+  digest128,
+  hashCode,
+  hasVolatileDigest,
+  markVolatileDigest,
+} from './utils.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { DictionaryValue, MathJsonExpression } from '../../math-json/types.js';
@@ -70,6 +75,7 @@ export class BoxedDictionary
    * it were the stored value. Every read below must therefore avoid
    * prototype-derived methods too — see `has` and `match`. */
   private readonly _keyValues: Record<string, Expression> = Object.create(null);
+  private _digest: string | undefined;
   /** Memo for {@link type}, keyed on the composite cache generation
    * (`ce._cacheGeneration()`). A cell's type can be narrowed by an
    * assumption about a symbol it mentions — `{a: q}` with `q` assumed
@@ -313,6 +319,27 @@ export class BoxedDictionary
 
   get hash(): number {
     return hashCode('Dictionary' + JSON.stringify(this._keyValues));
+  }
+
+  get digest(): string {
+    // Memoized: a dictionary's entries are fixed at construction, and a
+    // value shared by several dictionaries is digested once. Keys are
+    // sorted, so entry order never enters the digest (the two `isSame`
+    // dictionaries `{a, b}` and `{b, a}` digest alike), and each key is
+    // LENGTH-PREFIXED: a key may contain any character, the separators
+    // included, and without the prefix a one-entry dictionary whose key
+    // spells another dictionary's entries would digest as that dictionary.
+    if (this._digest !== undefined) return this._digest;
+    const entries = this.keys
+      .sort()
+      .map((key) => `${key.length}:${key}\u001e${this._keyValues[key].digest}`);
+    const d = digest128(`D\u001f${entries.join('\u001f')}`);
+    // Not memoized when a value holds a mutable object below it (see
+    // `markVolatileDigest`).
+    if (this.keys.some((key) => hasVolatileDigest(this._keyValues[key])))
+      markVolatileDigest(this);
+    else this._digest = d;
+    return d;
   }
 
   get operator(): string {

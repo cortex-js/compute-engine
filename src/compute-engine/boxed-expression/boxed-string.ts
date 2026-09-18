@@ -8,7 +8,7 @@ import type {
 } from '../global-types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { hashCode, isExpression } from './utils.js';
+import { digest128, hashCode, isExpression } from './utils.js';
 import { isCharacter, isString } from './type-guards.js';
 import { isWildcard, wildcardName } from './pattern-utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -96,6 +96,10 @@ export class BoxedString extends _BoxedExpression implements StringInterface {
   }
   get hash(): number {
     return hashCode('String' + this._string);
+  }
+
+  get digest(): string {
+    return digest128(`T\u001f${this._string}`);
   }
   get operator(): string {
     return 'String';

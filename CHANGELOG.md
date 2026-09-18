@@ -1,6 +1,56 @@
 ## [Unreleased]
 
+### New Features
+
+- **`expr.digest` — a 128-bit digest of the expression's serialized
+  structure, an in-memory cache key that needs no compare on hit.**
+  `expr.hash` is a 32-bit bucket: a hit must be confirmed with `isSame()`.
+  Consumers that wanted a key instead have used `JSON.stringify(expr.json)`,
+  which writes the expression out as a tree — once per path for a shared
+  sub-expression, exponential in the depth of a value that shares its
+  operands. `digest` keys the same way that string does — two expressions
+  digest alike exactly when their MathJSON is the same tree, up to a
+  dictionary's entry order and with a character digesting like the
+  one-cluster string of the same content — at a cost linear in the DISTINCT
+  nodes, memoized per node: a 16-level chain in which each level reads the
+  one below four times (64 distinct nodes, a billion as a tree) digests in a
+  few milliseconds. It is not an `isSame` key: two symbols of the same name
+  digest alike whatever they are bound to, and `1/2` and `0.5` digest apart.
+  Deterministic within a release, never to be persisted, not cryptographic.
+  Thirty-two lowercase hexadecimal characters.
+
 ### Resolved Issues
+
+- **A callback a handler synthesizes at emission time shares its repeated
+  subexpressions, and an integrand computes its loop invariants once.** Two
+  callback lowerings recomputed work on every call. The numeric derivative
+  fallback wraps its operand in a `Function(body, x)` it builds itself, which
+  the CSE harvest never walked, so the body compiled with no candidates and a
+  subexpression repeated in it was emitted, and evaluated, once per
+  occurrence: the stencil callback of one corpus row spelled the same minimum
+  of twenty squared distances twenty-one times (Tycho corpus document
+  `lwuwgb9ic5`; 83,798 characters of code, 84 µs per call). A lambda the
+  harvest did not see now gets a nested harvest of its own, with its
+  parameters shadowed, the way an emitted definition body does: that row is
+  17,514 characters and 4 µs per call, same value. The quadrature lowerings
+  (`_SYS.integrate`, `_IA.integrate`) compiled the integrand directly, so a
+  subexpression that mentions no integration variable ran once per sample —
+  `Γ(k/2)·√2^k` in a chi-square tail, at every one of 300 samples (document
+  `thpezd39zq`). Both lowerings now bind such subexpressions next to the
+  lambda and assign them on its first call, so an empty range that asks for
+  no sample evaluates none of them: 40 → 31 µs per call on JavaScript and
+  561 → 287 µs on the interval target for that integral. Pinned in
+  `test/compute-engine/compile-callback-invariants.test.ts`.
+
+- **`expr.hash` now agrees with `isSame` on number literals.** The hash of
+  a number literal was computed from its spelling (`toString()`), so the
+  exact rational `1/2` and the float `0.5` — the same literal to `isSame`,
+  which compares number literals by exact numeric equality — hashed apart,
+  against the hash's own invariant (`isSame` implies equal hashes). Every
+  hash-keyed consumer that bucketed the two separately (`Unique`, `Tally`,
+  set membership, the pattern matcher's anchor buckets) could then miss the
+  match. The hash is now computed from the numeric value (its machine real
+  and imaginary parts). Found while adding `digest`.
 
 - **The interval target binds a constant list once per artifact and selects a
   statically known element without reading the list.** A list value the emitter

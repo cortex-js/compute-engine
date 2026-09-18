@@ -27,7 +27,7 @@ import { explainExpression } from './explain.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { inBroadcastCell } from './broadcast-cell-widening.js';
-import { hashCode } from './utils.js';
+import { digest128, hashCode } from './utils.js';
 import { match } from './match.js';
 import { same } from './compare.js';
 import { add } from './arithmetic-add.js';
@@ -250,6 +250,7 @@ export class BoxedNumber
   protected readonly _value: SmallInteger | NumericValue;
 
   private _hash: number | undefined;
+  private _digest: string | undefined;
 
   /** Memo for `_literalType` (`null` = computed, not eligible). The value
    * of a literal never changes, so the memo never invalidates. */
@@ -289,9 +290,26 @@ export class BoxedNumber
   }
 
   get hash(): number {
-    this._hash ??= hashCode(this._value.toString());
-    // console.info('hash BoxedNumber ', this._hash);
+    // A function of the numeric VALUE, never of its spelling: `isSame`
+    // compares two number literals by exact numeric equality, so the exact
+    // rational `1/2` and the float `0.5` are the same literal and must share
+    // a hash — `toString()` spells them `1/2` and `0.5`. The machine parts
+    // are equal whenever the exact values are (and coincide for some values
+    // that are not exactly equal, `1/3` and `0.333…`: a collision, which the
+    // hash contract allows). `-0` and `0` are `isSame` and spell alike here;
+    // every NaN spells `NaN`.
+    this._hash ??= hashCode(`${this.re}:${this.im}`);
     return this._hash;
+  }
+
+  get digest(): string {
+    // The lossless MathJSON of the value — every stored digit, no rounding
+    // to the working precision — so two literals digest alike exactly when
+    // they serialize alike (see the `digest` contract: a key of the
+    // serialized structure, so `1/2` and `0.5` digest apart even though
+    // they are `isSame`).
+    this._digest ??= digest128(`N\u001f${JSON.stringify(this.json)}`);
+    return this._digest;
   }
 
   override _unshared(): BoxedNumber {

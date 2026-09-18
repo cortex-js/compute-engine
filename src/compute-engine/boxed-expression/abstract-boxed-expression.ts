@@ -167,6 +167,7 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   abstract readonly hash: number;
+  abstract readonly digest: string;
   abstract readonly json: MathJsonExpression;
   abstract isCanonical: boolean;
 
