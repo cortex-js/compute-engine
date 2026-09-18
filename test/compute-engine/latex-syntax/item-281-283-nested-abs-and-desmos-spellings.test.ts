@@ -260,3 +260,95 @@ describe('283 Desmos spellings for the complex parts and error functions', () =>
     ).toBe(4);
   });
 });
+
+describe('Desmos spelling for the complex conjugate', () => {
+  test('`\\operatorname{conj}` parses as `Conjugate`', () => {
+    expect(ce.parse('\\operatorname{conj}(z)').json).toEqual([
+      'Conjugate',
+      'z',
+    ]);
+    expect(ce.parse('\\mathrm{conj}(z)').json).toEqual(['Conjugate', 'z']);
+  });
+
+  test('a power or a sign applies to the call, not to the argument', () => {
+    // Without the dictionary entry `conj` was an undeclared symbol and
+    // `\operatorname{conj}(z)^2` was the product `conj * z^2`.
+    expect(ce.parse('\\operatorname{conj}(z)^2').json).toEqual([
+      'Power',
+      ['Conjugate', 'z'],
+      2,
+    ]);
+    expect(ce.parse('-\\operatorname{conj}(z)').json).toEqual([
+      'Negate',
+      ['Conjugate', 'z'],
+    ]);
+    expect(ce.parse('2\\operatorname{conj}(z)').json).toEqual([
+      'Multiply',
+      2,
+      ['Conjugate', 'z'],
+    ]);
+  });
+
+  test('the alias is parse-only: serialization is unchanged', () => {
+    expect(ce.box(['Conjugate', 'z']).latex).toBe('z^\\star');
+  });
+
+  test('`conj` evaluates like `Conjugate`, and broadcasts over a list', () => {
+    const v = ce.parse('\\operatorname{conj}(3+4\\imaginaryI)').evaluate();
+    expect([v.re, v.im]).toEqual([3, -4]);
+    expect(
+      ce.parse('\\operatorname{conj}([1+\\imaginaryI, 2])').evaluate().json
+    ).toEqual(['List', ['Complex', 1, -1], 2]);
+  });
+
+  test('a piecewise over a list condition that holds `conj` selects per element', () => {
+    // With `conj` unknown, `conj(L)` stayed symbolic inside every cell of the
+    // condition, no cell could be decided, and the piecewise stayed a symbolic
+    // `Which` that held one copy of the list per element.
+    const engine = new ComputeEngine();
+    engine.declare('L', 'unknown');
+    engine.assign(
+      'L',
+      engine.box(['List', ['Complex', 1, 1], 0, ['Complex', 0, 2]])
+    );
+    const v = engine
+      .parse(
+        '\\begin{cases} 1 & |\\operatorname{conj}(L)| > 0 \\\\ 0 & \\text{otherwise} \\end{cases}'
+      )
+      .evaluate();
+    expect(v.json).toEqual(['List', 1, 0, 1]);
+  });
+});
+
+describe('A square of a base that ends with a superscript', () => {
+  test('the base is braced, so the LaTeX has no double superscript', () => {
+    expect(ce.parse('\\operatorname{conj}(z)^2').latex).toBe('{z^\\star}^2');
+    expect(ce.box(['Power', ['Transpose', 'A'], 2]).latex).toBe('{A^T}^2');
+    expect(ce.box(['Square', ['Prime', 'f']], { form: 'raw' }).latex).toBe(
+      '{f^{\\prime}}^2'
+    );
+  });
+
+  test('a superscript followed by a subscript is braced too', () => {
+    // The symbol `x__2_1` serializes as `x^2_1`: both scripts attach to `x`,
+    // so a second superscript after the subscript is still a double one.
+    expect(ce.box(['Power', 'x__2_1', 2]).latex).toBe('{x^2_1}^2');
+  });
+
+  test('a superscript inside a delimiter or a group adds no brace', () => {
+    expect(ce.parse('(x^2+1)^2').latex).toBe('(x^2+1)^2');
+    expect(
+      ce.box(['Square', ['Sqrt', ['Power', 'x', 3]]], { form: 'raw' }).latex
+    ).toBe('\\sqrt{x^3}^2');
+  });
+
+  test('a base with no superscript adds no brace', () => {
+    expect(ce.parse('(n!)^2').latex).toBe('n!^2');
+    expect(ce.parse('x_1^2').latex).toBe('x_1^2');
+  });
+
+  test('the braced form parses back to the same expression', () => {
+    const expr = ce.box(['Power', ['Transpose', 'A'], 2]);
+    expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+  });
+});

@@ -34,7 +34,7 @@ import {
   parseQuotientRingFraction,
   serializeListDomain,
 } from './definitions-sets.js';
-import { joinLatex, supsub } from '../tokenizer.js';
+import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
 import { normalizeAngle, formatDMS } from '../serialize-dms.js';
 import { roundMeasurementForDisplay } from '../../numerics/strings.js';
 
@@ -2888,6 +2888,9 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       const wrapped = base.startsWith('-')
         ? serializer.wrapString(base, 'normal')
         : base;
+      // A base that ends with a superscript (`A^T`, `z^\star`) is braced:
+      // `A^T^2` is a double-superscript error in TeX.
+      if (endsWithSuperscript(wrapped)) return `{${wrapped}}^2`;
       return wrapped + '^2';
     },
   },

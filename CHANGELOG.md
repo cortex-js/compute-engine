@@ -39,6 +39,24 @@
 
 ### Resolved Issues
 
+- **`\operatorname{conj}(z)` parses as `Conjugate(z)`.** `conj`, the spelling
+  Desmos writes for the complex conjugate, had no dictionary entry, so it lexed
+  as an undeclared symbol: `\operatorname{conj}(z)` was the product `conj·z`,
+  and `\operatorname{conj}(z)^2` was `conj·z²`. Over a list argument it was an
+  unknown function, which does not broadcast — a piecewise whose list condition
+  held `conj(L)` could decide no element, stayed a symbolic `Which`, and held
+  one copy of the list per element (41 MB of MathJSON for a 500-point list,
+  against a 50 KB list of 500 points once `conj` is recognized). The entry is
+  parse-only, like `\operatorname{real}` and `\operatorname{imag}`:
+  `Conjugate` keeps serializing as `z^\star`.
+
+- **A square of a base that ends with a superscript serializes with a braced
+  base.** `Power(Transpose(A), 2)` serialized as `A^T^2` and
+  `Power(Conjugate(z), 2)` as `z^\star^2`, which is a double-superscript error
+  in TeX. They now serialize as `{A^T}^2` and `{z^\star}^2`, as every other
+  exponent already did (`{A^T}^{k}`). A superscript inside a delimiter or a
+  group adds no brace: `(x^2+1)^2` and `n!^2` are unchanged.
+
 - **The interval target handles absence across its whole value model, and its
   `IsMissing`/`Coalesce` answer in the target's own domains.** The target has no
   object domain: every value it produces is an enclosure, an array of them (a

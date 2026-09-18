@@ -49,4 +49,15 @@ export const DEFINITIONS_COMPLEX: LatexDictionary = [
     latexTrigger: ['^', '\\star'],
     kind: 'postfix',
   },
+  // Function-style alias: `\operatorname{conj}(z)`, the spelling Desmos writes
+  // for the complex conjugate. Without it `conj` lexed as an undeclared symbol:
+  // `\operatorname{conj}(z)` was the product `conj·z`, and over a list argument
+  // it was an unknown function, which does not broadcast. Parse-only:
+  // `Conjugate` keeps serializing as `z^\star`.
+  {
+    symbolTrigger: 'conj',
+    kind: 'function',
+    parse: 'Conjugate',
+    arguments: 'implicit',
+  },
 ];

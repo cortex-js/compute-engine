@@ -1698,6 +1698,63 @@ working tree when measured, so this is "stop scoping", not "cause proven
 landed". The two cautions above about the `glsl` `Power`-of-vec hole and the
 vec-width cap remain accurate and remain unmotivated by any consumer.
 
+### A `Which` over a list condition: the time limit is exceeded by half at 10 000 elements, and a repeated sub-expression is evaluated once per reference (OPEN — Tycho ask 296, cause found 2026-09-18)
+
+Tycho ask 296 reports that `evaluate()` of a piecewise whose condition is a list
+returns a symbolic `Which` of 52 MB at 500 elements, and that at 10 000 elements
+the process exhausts its heap before `ce.withTimeLimit(5000, …)` throws. The
+ask said the engine has no elementwise selection. That was not the cause: the
+evaluator does select elementwise over a list condition (`Which([1,5,2] < 3,
+10, True, 20)` evaluates to `[10, 20, 10]`, and the same holds when the list is
+the value of a symbol, when the arms are lists, and when the arms are point
+lists).
+
+The cause was the function `conj` in the witness (`s8ishknvhe`, Desmos's complex
+conjugate). `conj` had no parse entry, so the boxed body held `conj(L)`, an
+unknown function applied to the complete list. An unknown function does not
+broadcast, so each element of the condition list held a copy of `conj(L)`, no
+element could be decided, and the `Which` stayed symbolic: N copies of an
+N-element list for each reference to `conj`. `\operatorname{conj}` now parses
+as `Conjugate` (`definitions-complex.ts`), and the body Tycho sends evaluates to
+a `List`. Instrument on the Tycho side:
+`scripts/repros/2026-09-15-list-conditioned-piecewise-probe.mts` in `dev/tycho`.
+
+Two defects remain. Neither depends on `conj`: any unknown function over the
+list inside the condition gives the same symbolic `Which` (measured with `foo`
+in place of `conj`).
+
+1. **On the undecidable body the time limit is exceeded by half at 10 000
+   elements.** Tycho's probe on the published 0.130.0, 2026-09-18, with
+   `ce.withTimeLimit(5000, …)`: 1 000 elements → returns a symbolic `Which`
+   after 4.4 s, heap 108 MB (the value shares its sub-expressions in memory,
+   but its MathJSON is 208 MB); 2 000 → throws at 5.0 s, heap 227 MB; 10 000 →
+   throws only at 7.4 s, heap 351 MB. Some step of the broadcast runs for more
+   than 2 s without a deadline check. The heap exhaustion that ask 296 reports
+   (926 MB at 1 000 elements, 3.3 GB at 2 000, out of memory at 10 000) was
+   measured on 0.128.11 and no longer reproduces: memory stays under 400 MB.
+   Tycho re-measured the ask at 500 elements only, so its row still carries the
+   0.128.11 readings.
+2. **The selection over a decidable list condition costs about 2 ms per element
+   for this body** (measured from source with `tsx`, which adds loader
+   overhead: 500 points → 0.9–1.2 s, 2 000 points → 4.2 s; at 10 000 points the
+   5 s limit refuses the evaluation). Two causes, measured 2026-09-18:
+   - The body holds the same inner `Which` six times (Tycho expands the
+     document functions `S`, `f` and `N` in place), and `evaluate()` computes
+     each reference separately: one inner `Which` costs 130–190 ms at 500
+     points. With the inner `Which` evaluated once and bound to a symbol, the
+     same result takes 0.2–0.3 s in place of 0.9–1.2 s. `expr.digest` is a
+     possible key to share the value of structurally identical sub-expressions
+     during one `evaluate()`.
+   - Each element of each broadcast operator is computed by boxing a new
+     canonical function (`mapAtCell` and the drain iterator in
+     `library/collections.ts`, through `computeBroadcastCell`): operator
+     lookup, type handler, operand descriptor, allocation. Measured: 30–40 µs
+     per element for `Abs(PointX(L))`, 60–80 µs for `PointX(L) + PointY(L)`,
+     140–190 µs for `Conjugate(PointZ(L) / (PointX(L) + i PointY(L)))`. The
+     comment on `evaluateElementwiseSelection` (`library/control-structures.ts`)
+     quotes about 8 µs per element per condition for the lazy broadcast `Map`;
+     that figure must be measured again on a built bundle.
+
 ### An element-wise ordering relation compares a NaN operand where the scalar branch treats it as undecided (OPEN — found 2026-09-12 by the Codex review of the selection index push-through)
 
 A scalar branch whose relation has a NaN operand is UNDECIDED: the interpreter
@@ -2477,9 +2534,13 @@ in `dev/tycho`; bare-engine repro `docs/scratch/d209-ce-asks-repro.mts` there.)
 
 ### Static argument-checking of user-defined callees — residue
 
-Tier 1 landed 2026-08-12; what remains is generic functions (below) and
-`let`/`const` bindings. The history is kept because it explains the shape of
-both.
+Tier 1 (`function` definitions) landed 2026-08-12. What remains is generic
+functions (below) and one `let`/`const` case: an ALIAS of a binding that holds
+a function literal (`let k = (n: integer) => n + 1`, `let g = k`, then
+`g(1.5)`) is not checked, because the pass pins a signature only from a
+function LITERAL (`registerPinnedSignature`, `src/epsil/static-diagnostics.ts`)
+and an alias's static type is an upper bound, not the signature the binding
+will hold. The history is kept because it explains the shape of both.
 
 `function foo(x: string, n: integer) { x }` followed by `foo("hello")` used to
 pass `epsil check` clean; only the run phase reported the missing argument.
@@ -2515,12 +2576,6 @@ own re-installation.
 which route OWNS the clause install, so the second one can recognise its own
 work rather than re-running it. Worth doing together with anything else that
 wants canonicalization and evaluation to share an installation step.
-
-**Tier 2 — `let`/`const` bindings.** `let g = (a: integer) => a` declares
-NOTHING at canonicalization, so this tier is a genuine gap rather than a
-loosened signature. It needs a decision on how much of an initializer the pass
-may believe: an explicit annotation is safe, an inferred type less so, and a
-binding that is reassigned or conditionally bound less so again.
 
 Why it mattered beyond the CLI: the VS Code extension's diagnostics come only
 from `checkSource()`, which is static-only by hard rule (it must never evaluate

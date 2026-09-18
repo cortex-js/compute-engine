@@ -494,6 +494,56 @@ export function supsub(c: '_' | '^', body: string, x: string): string {
   return `${body}${c}{${x}}`;
 }
 
+/** Is the character at `i` escaped, as the brace of `\{` is? It is when an
+ * odd number of backslashes precedes it. */
+function isEscaped(latex: string, i: number): boolean {
+  let n = 0;
+  while (i - 1 - n >= 0 && latex[i - 1 - n] === '\\') n += 1;
+  return n % 2 === 1;
+}
+
+/**
+ * The index where the last script argument of `latex.slice(0, end)` starts,
+ * or -1. A script argument is one brace group (nested groups are matched, and
+ * the literal braces `\{` and `\}` are not group delimiters), one command
+ * (`\star`, `\}`), or one character.
+ */
+function scriptArgumentStart(latex: string, end: number): number {
+  const last = end - 1;
+  if (last < 0) return -1;
+  if (latex[last] === '}' && !isEscaped(latex, last)) {
+    let depth = 0;
+    for (let i = last; i >= 0; i--) {
+      if (isEscaped(latex, i)) continue;
+      if (latex[i] === '}') depth += 1;
+      else if (latex[i] === '{' && --depth === 0) return i;
+    }
+    return -1;
+  }
+  const command = /\\[a-zA-Z]+\*?$/.exec(latex.slice(0, end));
+  if (command) return command.index;
+  return isEscaped(latex, last) ? last - 1 : last;
+}
+
+/**
+ * Does this LaTeX end with a superscript: `A^T`, `z^\star`, `f^{\prime}`,
+ * `e^{x^{2}}`, or a superscript followed by a subscript (`x^2_1`)?
+ *
+ * A second superscript written directly after such a string (`A^T^2`) is a
+ * "double superscript" error in TeX, so a serializer that appends one must
+ * brace the string first (`{A^T}^2`). A subscript after the superscript does
+ * not change that: both scripts attach to the same base. A superscript that
+ * is inside a group or a delimiter (`(x^2+1)`, `\frac{1}{x^2}`) does not end
+ * the string and needs no brace.
+ */
+export function endsWithSuperscript(latex: string): boolean {
+  let start = scriptArgumentStart(latex, latex.length);
+  // Step over one trailing subscript: `x^2_1` ends with `_1`, then `^2`.
+  if (start > 0 && latex[start - 1] === '_')
+    start = scriptArgumentStart(latex, start - 1);
+  return start > 0 && latex[start - 1] === '^';
+}
+
 export function tokensToString(
   tokens: Token | Token[] | [Token[] | Token][]
 ): string {
