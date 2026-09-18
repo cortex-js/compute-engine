@@ -613,29 +613,6 @@ the work that remains.
   ruling), so the lane degrades the error to `NaN` rather than refusing to
   compile a whole program for one bad order. Recorded, not planned.
 
-### An index that is provably not an integer leaves `At` inert, and a chain of such reads grows exponentially (OPEN, evaluation — found 2026-09-16 while replicating the terrain document)
-
-`L[5 + √17]` evaluates to the inert `At(L, 5 + √17)`: the index is a constant,
-its value is not an integer, and the interpreter's answer for a non-integer
-index is `Nothing` (`L[2.5]` answers it), but an EXACT irrational constant is
-not recognized as one. The inert node embeds the collection operand whole, so a
-helper whose comprehension body reads `l[i + {…}·√Length(l)]` with a length that
-is not a perfect square produces elements that each hold three inert reads of
-the level below, each holding the level below's lazy comprehension; four levels
-of that is a tree that never finishes evaluating (the replica with lengths 2·4ᵏ
-hung at 512 elements while the same helpers over perfect-square lengths took 1.3
-s). The Desmos document itself has perfect-square lengths
-(`random((64/16)², seed)` has 16 elements), so it does not take this path — the
-replica did, by adding one element to the base list.
-
-The fix is in `At`: a constant index whose numeric value is finite and not an
-integer — an exact radical, a rational that is not an integer, a sum of those —
-answers `Nothing`, as a machine-float non-integer already does. The test must be
-a proof, not a float check alone: a constant such as `√4` or
-`(1 + √5)/2 · (1 + √5)/2 − (1 + √5)/2` IS an integer, so decide from the exact
-value (`isInteger` on the canonical constant) and fall back to inert only when
-the exact form cannot say.
-
 ### The interpreted growing-list loop stays quadratic (OPEN, no urgency — recorded 2026-09-04)
 
 `let xs = []; for k in 1..n { xs = Join(xs, [k]) }` costs about 0.5 µs per

@@ -9832,10 +9832,11 @@ const SYS_HELPERS = {
   //    PRESERVING: an out-of-range entry contributes NaN in place (the
   //    interpreter's absence marker), so the result always has the same
   //    length as the index list.
-  // A non-integer entry makes the interpreter decline — `At` stays unevaluated
-  // and produces no value at all — so the WHOLE result is NaN (the projection
-  // of "no value" on a real target), not a per-slot NaN, which would invent an
-  // element the interpreter never produces.
+  // A FINITE non-integer entry selects no element: the interpreter puts the
+  // absence marker in its slot, as for an out-of-range entry, and so does
+  // this. A non-finite entry (`NaN`, an infinity) leaves the interpreter's
+  // `At` unevaluated — no value at all — so the WHOLE result is NaN, the
+  // projection of "no value" on a real target.
   at: (arr: unknown, i: number | unknown[]): number | unknown[] => {
     if (!Array.isArray(arr)) return NaN;
     const n = arr.length;
@@ -9855,7 +9856,11 @@ const SYS_HELPERS = {
       }
       for (const m of i) {
         const mv = indexValue(m);
-        if (!Number.isInteger(mv)) return NaN;
+        if (!Number.isInteger(mv)) {
+          if (!Number.isFinite(mv)) return NaN;
+          picked.push(NaN);
+          continue;
+        }
         const idx = mv > 0 ? mv - 1 : n + mv;
         // Out-of-range (or zero) index: keep the position, mark the absence
         // (POSITION-PRESERVING gather — matches the interpreter, whose
@@ -9866,9 +9871,9 @@ const SYS_HELPERS = {
       }
       return picked;
     }
-    // Scalar index. The interpreter's Case C reads the index's `.re` and
-    // accepts it only if that is an INTEGER, otherwise declining (`At` stays
-    // unevaluated, producing no value) — so anything else projects to NaN.
+    // Scalar index. The interpreter's Case C selects on an INTEGER `.re`,
+    // answers the absence marker for a finite non-integer, and leaves `At`
+    // unevaluated for anything else — so every non-integer projects to NaN.
     // Guard explicitly rather than falling into index arithmetic: JS coercion
     // would silently invent a value — `true` would index slot 0 (`true > 0`,
     // `true - 1 === 0`) and a fractional or NaN index would read a

@@ -10,9 +10,11 @@
  * restating one side's expectations.
  *
  * Projection convention: the interpreter's "no value" outcomes have no numeric
- * equivalent, so they compile to NaN — `Nothing` (scalar out-of-range index)
- * and a DECLINED `At` (a non-integer entry in a collection index leaves `At`
- * unevaluated) both project to a scalar NaN.
+ * equivalent, so they compile to NaN. The absence marker (an out-of-range or
+ * a provably non-integer index) projects to NaN in its own slot, so a gather
+ * keeps the index list's length; a DECLINED `At` (an entry the interpreter
+ * cannot decide — an unknown, a non-finite entry — leaves `At` unevaluated)
+ * projects to a scalar NaN for the whole result.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -109,20 +111,34 @@ describe('At with an empty index list', () => {
 });
 
 describe('At with a non-integer entry in the index', () => {
-  // The interpreter DECLINES (leaves `At` unevaluated, producing no value at
-  // all), so the compiled form returns a scalar NaN for the whole result —
-  // never a per-slot NaN, which would invent an element interpretation never
-  // produces.
+  // A provably non-integer entry selects no element: the interpreter puts the
+  // absence marker in its slot, as it does for an out-of-range entry, and
+  // the compiled form projects that slot to NaN. The result keeps the index
+  // list's length on both routes.
   test('a lone non-integer entry', () => {
     const expr = at(['List', 1.5]);
-    expect(expr.evaluate().operator).toBe('At');
-    expect(parity(expr)).toBeNaN();
+    expect(expr.evaluate().toString()).toBe('[NaN]');
+    expect(parity(expr)).toEqual([NaN]);
   });
 
   test('a non-integer entry mixed with integers', () => {
     const expr = at(['List', 1, 1.5]);
-    expect(expr.evaluate().operator).toBe('At');
-    expect(parity(expr)).toBeNaN();
+    expect(expr.evaluate().toString()).toBe('[10,NaN]');
+    expect(parity(expr)).toEqual([10, NaN]);
+  });
+
+  test('a RUN-TIME index list agrees: the slot, not the whole result', () => {
+    // The gather above folds at compile time; this one reaches `_SYS.at`.
+    const ce2 = new ComputeEngine();
+    ce2.declare('L', 'list<number>');
+    ce2.declare('J', 'list<number>');
+    const r = compile(ce2.box(['At', 'L', 'J']));
+    expect(r.success).toBe(true);
+    expect(r.run!({ L: [10, 20, 30], J: [1, 1.5] })).toEqual([10, NaN]);
+    expect(r.run!({ L: [10, 20, 30], J: [1, 7] })).toEqual([10, NaN]);
+    // A non-finite entry leaves the interpreter's `At` unevaluated, which
+    // projects to a whole-result NaN, as before.
+    expect(r.run!({ L: [10, 20, 30], J: [1, NaN] })).toBeNaN();
   });
 });
 
@@ -149,8 +165,9 @@ describe('At with a scalar index (regression — unchanged)', () => {
 });
 
 describe('At with a non-integer SCALAR index', () => {
-  // The interpreter's scalar path (Case C) accepts a primitive integer only.
-  // Anything else declines, so the compiled form must project a scalar NaN
+  // The interpreter's scalar path (Case C) selects on a primitive integer
+  // only. A boolean declines; a provably non-integer number answers the
+  // absence marker. Either way the compiled form must project a scalar NaN
   // rather than let JS index coercion invent a value: `true` would otherwise
   // read slot 0 (`true > 0`, `true - 1 === 0`) and a fractional index would
   // read a non-existent property and yield `undefined`.
@@ -160,9 +177,9 @@ describe('At with a non-integer SCALAR index', () => {
     expect(parity(expr)).toBeNaN();
   });
 
-  test('a fractional index declines on both routes', () => {
+  test('a fractional index answers the marker on both routes', () => {
     const expr = at(1.5);
-    expect(expr.evaluate().operator).toBe('At');
+    expect(expr.evaluate().toString()).toBe('NaN');
     expect(parity(expr)).toBeNaN();
   });
 });
@@ -430,11 +447,10 @@ describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
     tripleParity(at(4));
   });
 
-  // The interpreter leaves `At` UNEVALUATED here (no value at all). Parity is
-  // against the PROJECTION of that — NaN — on both targets, never against the
-  // unevaluated form.
+  // The interpreter answers the absence marker for a provably non-integer
+  // index; every target projects it to NaN.
   test('a non-integer scalar index agrees on the NaN projection', () => {
-    expect(at(1.5).evaluate().operator).toBe('At');
+    expect(at(1.5).evaluate().toString()).toBe('NaN');
     tripleParity(at(1.5));
   });
 

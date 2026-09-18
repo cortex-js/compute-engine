@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`At` with an index that is provably not an integer answers the absence
+  marker instead of staying inert.** `L[2.5]`, `L[3/2]` and `L[5 + √17]`
+  evaluated to the inert `At(L, …)`: the scalar path selected on a primitive
+  integer only and left every other index alone. The index selects no
+  element, so the read is out-of-band and now answers the marker the operator
+  already answers for an out-of-range integer (`NaN` over a numeric
+  collection, `Missing` otherwise); a non-integer entry of a gather
+  contributes the marker in its slot. The decision is numeric with a margin,
+  not a bare float test: an exact constant that IS an integer but whose
+  canonical form does not reduce to one stays inert, as does any index the
+  numeric reading cannot decide (a symbol with no value, an expression with
+  unknowns, an infinity). The compiled targets already projected such an
+  index to NaN, so the routes now agree. An inert `At` embeds its collection
+  whole, and a helper whose body reads `l[i + √Length(l)]` over a length that
+  is not a perfect square produced elements that each held an inert read of
+  the level below; four levels of that never finished evaluating (found while
+  replicating Tycho's terrain document). Pinned in
+  `test/compute-engine/at-non-integer-index.test.ts`.
+
 ## 0.130.0 _2026-09-17_
 
 ### New Features

@@ -3182,6 +3182,54 @@ function withMarker(t: Type): Type {
  * decides: `NaN` when a bounded prefix is all numbers (and non-empty),
  * `Missing` otherwise (§3.C value-directed runtime marker).
  */
+/**
+ * Is `index` a number that is provably NOT an integer — a non-integer
+ * machine float or rational, or an exact constant (`5 + √17`, `π`, `3/2`)
+ * whose numeric value is finite and stands clear of every integer?
+ *
+ * Such an index selects no element, so `At` answers the absence marker for
+ * it, as it does for an out-of-range integer, instead of staying inert. An
+ * inert `At` embeds its collection operand whole, and a helper whose body
+ * reads `l[i + √Length(l)]` over a length that is not a perfect square then
+ * produced elements that each held an inert read of the level below; four
+ * levels of that never finished evaluating.
+ *
+ * Two readings. A number LITERAL decides exactly: a non-integer machine
+ * float or rational is not an integer, however close to one. A symbolic
+ * constant is decided from its numeric approximation with a margin, never a
+ * bare float test: an exact constant that IS an integer
+ * (`(1 + √5)/2 · (1 + √5)/2 − (1 + √5)/2` is 1) approximates to a value
+ * within rounding of that integer, and stays inert here — the exact form
+ * cannot say, so the read is left alone. The margin is the engine's
+ * tolerance, relative to the value, so a coarser precision widens it.
+ * Anything that is not a finite real number (a symbol, an expression with
+ * unknowns, an infinity, a complex value) is not decided either.
+ */
+function isProvablyNonIntegerIndex(index: Expression): boolean {
+  // A number literal knows exactly: a non-integer machine float or rational
+  // is not an integer, however close to one (`1.0000000001`, `10⁹ + 1/2`).
+  // The margin below is for an exact SYMBOLIC constant only.
+  if (isNumber(index)) {
+    if (index.im !== 0 || !Number.isFinite(index.re)) return false;
+    return !index.isInteger;
+  }
+  const own = index.re;
+  let value = Number.isFinite(own) ? own : NaN;
+  if (Number.isNaN(value)) {
+    // A symbolic constant: read its numeric approximation. An expression
+    // with unknowns cannot approximate to a number, so it is refused before
+    // the approximation is attempted (the same guard `operandNumericValue`
+    // applies, for the same reason: no discarded numeric work).
+    if (index.unknowns.length > 0) return false;
+    const approx = index.N();
+    if (!isNumber(approx) || approx.im !== 0) return false;
+    value = approx.re;
+  }
+  if (!Number.isFinite(value) || Number.isInteger(value)) return false;
+  const margin = index.engine.tolerance * Math.max(1, Math.abs(value));
+  return Math.abs(value - Math.round(value)) > margin;
+}
+
 function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
   if (xs === undefined) return ce.Missing;
 
@@ -7961,6 +8009,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'If the index is a finite collection of booleans, returns the elements where the mask is True (a mask is a filter, and its length must match the collection length; otherwise it is an error).',
       'If the index is a finite collection of integers, returns the elements at those indices, preserving position: an out-of-range index yields the absence marker, it is not dropped.',
       'Out-of-band access (an out-of-range index, or a dictionary key that is not present) yields a POSITION-PRESERVING marker: `NaN` when the collection’s elements are numeric, `Missing` otherwise. It never yields `Nothing`, which would erase the position.',
+      'An index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scalar or as an entry of an index list, selects no element and yields the same marker. An index that cannot be decided (an unknown, an exact constant within rounding of an integer) leaves `At` unevaluated.',
     ],
     complexity: 8200,
     // The base is declared `any`: a base whose static type is no evidence of
@@ -8468,7 +8517,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             let marker: Expression | undefined;
             for (const m of indices) {
               const k = m.re;
-              if (!Number.isInteger(k)) return undefined;
+              if (!Number.isInteger(k)) {
+                // An entry that is provably not an integer selects nothing:
+                // the marker, in place, like an out-of-range entry.
+                if (!isProvablyNonIntegerIndex(m)) return undefined;
+                picked.push((marker ??= absenceMarker(ce, expr)));
+                continue;
+              }
               // Route through the dispatcher so negative indices normalize.
               const v = expr.at(k);
               picked.push(v ?? (marker ??= absenceMarker(ce, expr)));
@@ -8485,7 +8540,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // index yields the absence marker; if more indices remain it absorbs
         // into the final domain (chained short-circuit).
         const i = opAtIndex.re;
-        if (!Number.isInteger(i)) return undefined;
+        // A provably non-integer index (`2.5`, `3/2`, `5 + √17`) selects no
+        // element: out-of-band, so the marker, as for an out-of-range
+        // integer. An index the numeric reading cannot decide stays inert.
+        if (!Number.isInteger(i)) {
+          if (!isProvablyNonIntegerIndex(opAtIndex)) return undefined;
+          return index + 1 < ops.length
+            ? chainAbsorbMarker(ce, expr.type.type, ops, index)
+            : absenceMarker(ce, expr);
+        }
         const v = expr.at(i);
         if (v === undefined)
           return index + 1 < ops.length
