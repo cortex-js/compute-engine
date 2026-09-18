@@ -235,6 +235,8 @@ function assertQuiescent(ce: IComputeEngine, operation: string): void {
   if (ce._staticTypeCheckDepth !== 0) refuse('a static pre-pass is running');
   if (ce._staticAssignmentEvidence !== undefined)
     refuse('static assignment evidence is installed');
+  if (ce._staticPinnedCallees !== undefined)
+    refuse('static pinned callees are installed');
   if (ce._epsilDeclarationRoute) refuse('an Epsil declaration route is open');
   if (ce._epsilBatchId !== undefined) refuse('an Epsil batch is executing');
   if (ce._rollbackFrames.length !== 0)

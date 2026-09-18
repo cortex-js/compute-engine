@@ -535,6 +535,13 @@ export function staticDiagnostics(
   // evidence intact, mirroring `_epsilBatchId`.
   const enclosingEvidence = ce._staticAssignmentEvidence;
   ce._staticAssignmentEvidence = new Map();
+  // The value definitions this pass pinned from a FUNCTION LITERAL the
+  // program declares or assigns (`registerPinnedSignature`), so boxing
+  // validates the arguments of a later call against the literal's signature
+  // — the run time defers that refusal to the application itself. Restored
+  // for the same reason as the evidence map.
+  const enclosingPinnedCallees = ce._staticPinnedCallees;
+  ce._staticPinnedCallees = new Set();
   ce._factSuppressionDepth += 1;
   try {
     // One INFERENCE ROLLBACK FRAME spans the whole pass (phase 2b of
@@ -566,6 +573,7 @@ export function staticDiagnostics(
     );
   } finally {
     ce._staticAssignmentEvidence = enclosingEvidence;
+    ce._staticPinnedCallees = enclosingPinnedCallees;
     ce.popScope();
     ce._factSuppressionDepth -= 1;
     ce._staticTypeCheckDepth -= 1;
@@ -785,13 +793,14 @@ function canonicalizationDiagnostics(
   const defSites = definitionSites(ast);
 
   // The signatures this program's own statements pin (`f := ⟨annotated
-  // literal⟩`, `let f : ⟨arrow type⟩`), registered onto the definitions as
-  // the walk reaches them — see `registerPinnedSignature`. FIRST-wins per
-  // name, and kept here as well as on the definition because boxing a LATER
-  // `Assign` to the same name runs the recursion-knot retype (library/
-  // core.ts), which resets the target to the wildcard `function` type — the
-  // pass re-asserts the pinned signature from this map afterwards.
-  const pinned = new Map<string, Type>();
+  // literal⟩`, `let f : ⟨arrow type⟩`, `let f = ⟨annotated literal⟩`),
+  // registered onto the definitions as the walk reaches them — see
+  // `registerPinnedSignature`. Kept here as well as on the definition
+  // because boxing a LATER `Assign` to the same name runs the recursion-knot
+  // retype (library/core.ts), which resets the target to the wildcard
+  // `function` type — the pass re-asserts (or, for a `let`/`const` pin,
+  // replaces) the pinned signature from this map afterwards.
+  const pinned = new Map<string, PinnedSignature>();
 
   // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
   // where. A pass-local map, deliberately not the runtime batch stamp: the
@@ -1521,20 +1530,33 @@ function clauseRedefinitionDiagnostic(
 /**
  * Provisionally register the function signature a statement will PIN when it
  * evaluates, so the later statements of the same program check their calls —
- * named calls in particular — against it. Two spellings pin one:
+ * named calls, and the ARGUMENTS of a call to a function literal — against
+ * it. Three spellings pin one:
  *
  * - `f := (x: number, y: string) => …` — assignment of a function literal
  *   whose own (annotated) type is a signature carrying parameter names;
  * - `let/const f : (x: number, y: string) -> number [= …]` — a declaration
  *   whose type annotation is such a signature (with or without an
- *   initializer: the annotation alone pins it).
+ *   initializer: the annotation alone pins it);
+ * - `let/const f = (x: number, y: string) => …` — a declaration with no
+ *   annotation whose initializer is such a function literal.
  *
- * Both are evaluation-time effects this pass otherwise cannot see ("prior
+ * All are evaluation-time effects this pass otherwise cannot see ("prior
  * declarations are mostly not modeled" above), so before this carve-out a
  * named call to such a callee drew one false `argument-names-unavailable`
  * static diagnostic per argument for a program that runs fine. (`function
  * f(…) {…}` definitions never had the problem: `DefineFunction` installs its
  * clause at canonicalization.)
+ *
+ * A pin made from a function LITERAL (the first and third spellings) also
+ * registers the definition in `ce._staticPinnedCallees`, so boxing validates
+ * the arguments of a later call against the literal's signature exactly as
+ * it validates a call to a declared one. The run time never does: a value
+ * definition holding a literal stays INFERRED, and the literal refuses a
+ * wrong argument itself, when applied, with an error VALUE. So the linter is
+ * deliberately stricter than the engine here — `k(1.5)` after
+ * `let k = (n: integer) => n + 1` is reported, as it is after either
+ * annotated spelling of the same callee.
  *
  * Deliberately narrow, so every diagnostic the pass still emits stays
  * truthful:
@@ -1548,18 +1570,22 @@ function clauseRedefinitionDiagnostic(
  *   expression's static type is an upper bound, not the signature the
  *   assignment will pin, and permuting a call against a guessed signature
  *   could silently reorder arguments.
- * - Registration is FIRST-wins per name (the `pinned` map), mirroring the
- *   runtime: reassigning a pinned binding to an incompatible signature is a
- *   runtime error that leaves the original binding in force, and even a
- *   compatible reassignment leaves the binding's declared TYPE — where the
- *   parameter names live — unchanged. First-wins also keeps `_infer()`'s
- *   `narrow(old, new)` off the incompatible-signatures path, whose meet is
- *   `never`. The map is needed on top of the definition's own state because
- *   boxing a later `Assign` to the same name runs the recursion-knot retype
- *   (library/core.ts), resetting the target to the wildcard `function` type
- *   mid-pass — after such a statement the pinned signature is re-asserted
- *   from the map.
- * - Beyond first-wins, registration only fills a BLANK: an inferred `unknown`
+ * - A `:=` pin is FIRST-wins per name (`PinnedSignature.firstWins`),
+ *   mirroring the runtime: reassigning such a binding to an incompatible
+ *   signature is a runtime error that leaves the original binding in force,
+ *   and even a compatible reassignment leaves the binding's declared TYPE —
+ *   where the parameter names live — unchanged. First-wins also keeps
+ *   `_infer()`'s `narrow(old, new)` off the incompatible-signatures path,
+ *   whose meet is `never`. A `let`/`const` pin is the opposite, again
+ *   mirroring the runtime, where an assignment REPLACES such a binding: a
+ *   later assignment of a function literal re-pins the name with the new
+ *   literal's signature (`_infer` in `replace` mode), and an assignment of
+ *   anything else drops the pin. The map is needed on top of the
+ *   definition's own state because boxing a later `Assign` to the same name
+ *   runs the recursion-knot retype (library/core.ts), resetting the target
+ *   to the wildcard `function` type mid-pass — after such a statement the
+ *   pinned signature is re-asserted from the map.
+ * - Beyond that, registration only fills a BLANK: an inferred `unknown`
  *   or wildcard `function` type (the auto-declaration a forward reference
  *   creates). A pre-existing concrete type — a user declaration, an earlier
  *   cell's binding — wins for the same mirror-the-runtime reason.
@@ -1574,36 +1600,99 @@ function clauseRedefinitionDiagnostic(
 function registerPinnedSignature(
   ce: ComputeEngine,
   boxed: ReturnType<ComputeEngine['box']>,
-  pinned: Map<string, Type>
+  pinned: Map<string, PinnedSignature>
 ): void {
   let name: string | null = null;
   let type: Type | undefined = undefined;
+  // Whether a later assignment in this program KEEPS this signature (the
+  // `:=` spelling) or REPLACES the binding (a `let`/`const` declaration);
+  // see `PinnedSignature`.
+  let firstWins = true;
+  // A function LITERAL this statement binds to the name, when it does. Only
+  // such a pin asks boxing to validate the arguments of later calls (the
+  // `_staticPinnedCallees` registration below): an annotation pins a
+  // DECLARED type, whose calls boxing validates on its own.
+  let literalCallee = false;
   if (isFunction(boxed, 'Assign')) {
     const target = boxed.ops[0];
     name = isSymbol(target) ? target.symbol : null;
-    // ANY assignment to an already-pinned name may just have run the
-    // recursion-knot retype and blanked the definition — re-assert the
-    // first-registered signature (see the doc comment) whatever this
-    // statement's right-hand side is.
+    const rhs = boxed.ops[1];
     const already = name === null ? undefined : pinned.get(name);
     if (already !== undefined) {
-      ce.box(name!)._infer(() => already, 'narrow');
+      // ANY assignment to an already-pinned name may just have run the
+      // recursion-knot retype and blanked the definition. For a `:=` pin,
+      // re-assert the first-registered signature (see the doc comment)
+      // whatever this statement's right-hand side is.
+      if (already.firstWins) {
+        ce.box(name!)._infer(() => already.type, 'narrow');
+        return;
+      }
+      // A `let` binding is REPLACED by the assignment at run time. A
+      // function-literal right-hand side re-pins the name with the
+      // literal's own signature (see `replacePin`); anything else un-pins
+      // it, and the assignment's type effect (`applyAssignmentTypeEffect`)
+      // then owns the type. Either way the old signature must stop
+      // validating calls.
+      pinned.delete(name!);
+      const sym = ce.box(name!);
+      const def = sym.valueDefinition;
+      if (def !== undefined) ce._staticPinnedCallees?.delete(def);
+      if (rhs !== undefined && rhs.operator === 'Function')
+        replacePin(ce, name!, rhs.type.type, pinned);
       return;
     }
-    const rhs = boxed.ops[1];
-    if (rhs !== undefined && rhs.operator === 'Function') type = rhs.type.type;
+    if (rhs !== undefined && rhs.operator === 'Function') {
+      type = rhs.type.type;
+      literalCallee = true;
+      // The target may be an EARLIER evaluation's `let` binding that holds
+      // a function literal (a previous notebook cell's
+      // `let k = (n: integer) => n + 1`): an inferred value definition with
+      // a `Function` value. The run time REPLACES such a binding, so the pin
+      // replaces its signature too (see `replacePin`) — the fill-a-blank
+      // gate below would keep the old one, and the calls that follow would
+      // be checked against a signature the program just threw away.
+      if (name !== null) {
+        const def = ce.lookupDefinition(name);
+        if (
+          def !== undefined &&
+          isValueDef(def) &&
+          def.value.inferredType &&
+          def.value.value?.operator === 'Function'
+        ) {
+          replacePin(ce, name, type, pinned);
+          return;
+        }
+      }
+    }
   } else if (isFunction(boxed, 'Declare')) {
     // `["Declare", sym, "'type'", {dict}?]` — the annotation is positional
     // and optional (same shape `declaredTypeMismatch` reads).
+    const target = boxed.ops[0];
+    name = isSymbol(target) ? target.symbol : null;
     const typeOp = boxed.ops[1];
     if (isString(typeOp)) {
-      const target = boxed.ops[0];
-      name = isSymbol(target) ? target.symbol : null;
       try {
         type = ce.type(typeOp.string).type;
       } catch {
         // A malformed annotation is already a `type-annotation-error`.
         return;
+      }
+    } else {
+      // `let/const f = ⟨function literal⟩`, no annotation: the Epsil lowering
+      // carries the initializer in a trailing attributes dictionary under
+      // `value` (the shape `applyAssignmentTypeEffect` reads). The literal's
+      // own signature is what the declaration will pin.
+      const last = boxed.ops[boxed.ops.length - 1];
+      const init = isDictionary(last) ? last.get('value') : undefined;
+      if (init !== undefined && init.operator === 'Function') {
+        type = init.type.type;
+        // A `let` binding is replaced by a later assignment; a `const`
+        // binding refuses it (the assignment is a runtime error that leaves
+        // the binding in force), so its first signature keeps checking the
+        // calls that follow.
+        const constant = isDictionary(last) ? last.get('constant') : undefined;
+        firstWins = constant !== undefined && isSymbol(constant, 'True');
+        literalCallee = true;
       }
     }
   }
@@ -1628,8 +1717,54 @@ function registerPinnedSignature(
   // established (`type` is a reassignable local, which a closure widens back
   // to `Type | undefined`).
   const pinnedType = type;
-  if (ce.box(name)._infer(() => pinnedType, 'narrow'))
-    pinned.set(name, pinnedType);
+  const sym = ce.box(name);
+  if (!sym._infer(() => pinnedType, 'narrow')) return;
+  pinned.set(name, { type: pinnedType, firstWins });
+  // The pin came from a function literal: ask boxing to validate the
+  // arguments of the later calls against it, exactly as it validates a call
+  // to a DECLARED signature (the gate in `box.ts`, `staticallyPinnedCallee`).
+  // The run time defers that refusal to the application itself — the pinned
+  // definition stays INFERRED — so without this registration the pass boxed
+  // `k(1.5)` clean for `let k = (n: integer) => n + 1` while both annotated
+  // spellings of the same callee flagged the call.
+  const pinnedDef = sym.valueDefinition;
+  if (literalCallee && pinnedDef !== undefined)
+    ce._staticPinnedCallees?.add(pinnedDef);
+}
+
+/** A function signature the pass registered for a name (see
+ * `registerPinnedSignature`). `firstWins` mirrors what a LATER assignment to
+ * the name does at run time: a `:=`-pinned or `const` binding keeps its
+ * first signature (an incompatible reassignment is a runtime error that
+ * leaves the original binding in force), while a `let` declaration is
+ * REPLACED by the assignment, so its pin is replaced or dropped along with
+ * it — once. */
+type PinnedSignature = { type: Type; firstWins: boolean };
+
+/**
+ * Re-pin `name` with the signature of the function literal an assignment
+ * just gave it, mirroring the run time: assigning a function literal to a
+ * `let` binding that holds one converts the binding into an operator
+ * definition carrying the NEW literal's signature (`assignFn`,
+ * `engine-declarations.ts`), and from then on a further reassignment is
+ * checked against that signature and refused when incompatible — so the
+ * replacement pin is FIRST-wins. The literal's signature is taken whether or
+ * not it carries parameter names (an unannotated `(s) => s` replaces an
+ * annotated literal just the same, and its `unknown` parameters admit every
+ * argument), and the definition is registered for argument validation like
+ * any literal pin.
+ */
+function replacePin(
+  ce: ComputeEngine,
+  name: string,
+  signature: Type,
+  pinned: Map<string, PinnedSignature>
+): void {
+  const sym = ce.box(name);
+  if (!sym._infer(() => signature, 'replace')) return;
+  pinned.set(name, { type: signature, firstWins: true });
+  const def = sym.valueDefinition;
+  if (def !== undefined) ce._staticPinnedCallees?.add(def);
 }
 
 /** Is `t` a function signature declaring at least one parameter NAME — the

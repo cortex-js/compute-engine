@@ -1,117 +1,148 @@
 ## [Unreleased]
 
+### Epsil
+
+- **`epsil check` reports a call whose argument cannot satisfy the parameter
+  annotation of a function literal bound with `let`, `const` or `:=`.**
+  `let k = (n: integer) => n + 1` followed by `k(1.5)` produced no static
+  diagnostic, while both annotated spellings of the same callee
+  (`let k: (integer) -> integer = …` and `k(n: integer) = n + 1`) reported it.
+  The engine defers that refusal to the application itself — a binding that
+  holds a function literal keeps an inferred type, and an inferred signature
+  never refuses a value at boxing — so the static pre-pass now registers the
+  literal's signature for the statements that follow and has boxing validate the
+  later calls against it, exactly as it validates a call to a declared
+  signature: the same diagnostic, the same anchor on the offending argument, the
+  same signature notes. A symbol argument is checked against its assignment
+  evidence (`let x = 1.5` then `k(x)`), a list at a scalar parameter stays
+  threadable, and a parameter that shadows the callee name is not checked
+  against it. Reassignment mirrors the run time: a `let` or `const` binding
+  reassigned to another literal is checked against the new one, and a `:=`
+  binding keeps its first signature. A previous notebook cell's binding is
+  checked in the next cell too. The same registration removes a false
+  `argument-names-unavailable` that a named call to such a callee (`k(n: 2)`)
+  drew. The engine's own behavior is unchanged: outside the pass the call still
+  boxes clean and the literal refuses the argument when applied.
+
+- **A constant bound to a function literal can no longer be redefined.**
+  `const k = (n) => n + 1` followed by `k = (s) => s`, or by the clause
+  definition `k(x) = x * 2`, replaced `k` silently, while `const c = 5` then
+  `c = 6` was refused (`Cannot assign a value to the constant "c"`): the
+  function-literal branch of assignment and the clause installer converted the
+  definition without the constant check the value branch makes. On the host
+  route the omission reached the engine's own constants —
+  `ce.assign('Pi', (x) => 2x)` rewrote the system-scope `Pi` definition in
+  place, so `Pi(3)` answered `6` on that engine. Both routes now refuse a
+  constant target: assignment with the same error as the value route, a clause
+  definition with `invalid-clause-definition`. Redefining a constant was never a
+  documented feature; a binding meant to be replaced is a `let`.
+
 ### Resolved Issues
 
 - **The interval target handles absence across its whole value model, and its
-  `IsMissing`/`Coalesce` answer in the target's own domains.** The target has
-  no object domain: every value it produces is an enclosure, an array of them
-  (a collection at a consuming position) or a tri-state verdict. Absence has a
-  spelling in each — the whole-NaN marker or the `empty` result for a value,
-  the marker for an absent list (every collection consumer propagates a
-  non-array operand), the verdict `'false'` for an absent condition, as the
-  JavaScript target's falsy absent condition reads — so the shared
-  object-domain absence gate now exempts a position whose type is in that
-  model (`absence.numeric.coversValueModel`): `list<number> | missing |
-  number` (a restricted value over a broadcastable helper), `boolean |
-  missing` (a restricted relation), `vector<3> | missing`. A type outside the
-  model (a string, a list of strings, an expression) keeps failing closed.
-  With it, a restriction over a list value passes the list where its
-  condition holds, is `empty` where it fails and clips element by element in
-  between; a restriction over a relation is the conjunction; a `Which` whose
-  arms are lists picks the arm or hulls element by element (both selection
-  forms are now exempt from the scalar-operand gate for their arms, their
-  conditions still checked scalar). The discharge primitives were wrong on
-  this target: `IsMissing` tested the lower endpoint and answered a JavaScript
-  `false` for every kinded result, the `empty` of a failed restriction
-  included, and `Coalesce` returned that result instead of its fallback.
-  `IsMissing` now answers a verdict (`'true'` for the marker and for `empty`,
-  `'maybe'` for a value present over part of the cell) and `Coalesce` hands
-  the fallback back for an absent value and the hull for a partial one. On
-  the 34 Tycho census rows that declined at the absence gate, 8 now compile
-  (value-checked against the JavaScript rows) and 26 decline at the next
-  lowering, a point-coordinate accessor over a point list for 15 of them.
+  `IsMissing`/`Coalesce` answer in the target's own domains.** The target has no
+  object domain: every value it produces is an enclosure, an array of them (a
+  collection at a consuming position) or a tri-state verdict. Absence has a
+  spelling in each — the whole-NaN marker or the `empty` result for a value, the
+  marker for an absent list (every collection consumer propagates a non-array
+  operand), the verdict `'false'` for an absent condition, as the JavaScript
+  target's falsy absent condition reads — so the shared object-domain absence
+  gate now exempts a position whose type is in that model
+  (`absence.numeric.coversValueModel`): `list<number> | missing | number` (a
+  restricted value over a broadcastable helper), `boolean | missing` (a
+  restricted relation), `vector<3> | missing`. A type outside the model (a
+  string, a list of strings, an expression) keeps failing closed. With it, a
+  restriction over a list value passes the list where its condition holds, is
+  `empty` where it fails and clips element by element in between; a restriction
+  over a relation is the conjunction; a `Which` whose arms are lists picks the
+  arm or hulls element by element (both selection forms are now exempt from the
+  scalar-operand gate for their arms, their conditions still checked scalar).
+  The discharge primitives were wrong on this target: `IsMissing` tested the
+  lower endpoint and answered a JavaScript `false` for every kinded result, the
+  `empty` of a failed restriction included, and `Coalesce` returned that result
+  instead of its fallback. `IsMissing` now answers a verdict (`'true'` for the
+  marker and for `empty`, `'maybe'` for a value present over part of the cell)
+  and `Coalesce` hands the fallback back for an absent value and the hull for a
+  partial one. On the 34 Tycho census rows that declined at the absence gate, 8
+  now compile (value-checked against the JavaScript rows) and 26 decline at the
+  next lowering, a point-coordinate accessor over a point list for 15 of them.
   Pinned in `test/compute-engine/compile-interval-absence.test.ts`.
 
 - **`At` with an index that is provably not an integer answers the absence
   marker instead of staying inert.** `L[2.5]`, `L[3/2]` and `L[5 + √17]`
   evaluated to the inert `At(L, …)`: the scalar path selected on a primitive
-  integer only and left every other index alone. The index selects no
-  element, so the read is out-of-band and now answers the marker the operator
-  already answers for an out-of-range integer (`NaN` over a numeric
-  collection, `Missing` otherwise); a non-integer entry of a gather
-  contributes the marker in its slot. The decision is numeric with a margin,
-  not a bare float test: an exact constant that IS an integer but whose
-  canonical form does not reduce to one stays inert, as does any index the
-  numeric reading cannot decide (a symbol with no value, an expression with
-  unknowns, an infinity). The compiled targets already projected such an
-  index to NaN, so the routes now agree. An inert `At` embeds its collection
-  whole, and a helper whose body reads `l[i + √Length(l)]` over a length that
-  is not a perfect square produced elements that each held an inert read of
-  the level below; four levels of that never finished evaluating (found while
-  replicating Tycho's terrain document). Pinned in
+  integer only and left every other index alone. The index selects no element,
+  so the read is out-of-band and now answers the marker the operator already
+  answers for an out-of-range integer (`NaN` over a numeric collection,
+  `Missing` otherwise); a non-integer entry of a gather contributes the marker
+  in its slot. The decision is numeric with a margin, not a bare float test: an
+  exact constant that IS an integer but whose canonical form does not reduce to
+  one stays inert, as does any index the numeric reading cannot decide (a symbol
+  with no value, an expression with unknowns, an infinity). The compiled targets
+  already projected such an index to NaN, so the routes now agree. An inert `At`
+  embeds its collection whole, and a helper whose body reads `l[i + √Length(l)]`
+  over a length that is not a perfect square produced elements that each held an
+  inert read of the level below; four levels of that never finished evaluating
+  (found while replicating Tycho's terrain document). Pinned in
   `test/compute-engine/at-non-integer-index.test.ts`.
 
 - **The interval target broadcasts a point-coordinate accessor over a list of
-  points.** `PointX`/`PointY`/`PointZ` over a declared list of points, a list
-  of numeric coordinate rows, or a point-or-point-list union (the parameter a
+  points.** `PointX`/`PointY`/`PointZ` over a declared list of points, a list of
+  numeric coordinate rows, or a point-or-point-list union (the parameter a
   helper reads with `PointY(v)`, called with one point or a list of them)
   declined with "the operand is not a single point". The interpreter and the
   JavaScript target broadcast the coordinate over the list, and so does the
-  interval target now: the run-time `_IA.pointComponent` reads the coordinate
-  of every point of the array, decides a union at the value (an array of
-  coordinate cells is one point, an array of such arrays is a list of them),
-  answers the empty list for zero points, and answers one absence marker for
-  a third coordinate over two-component points, as the interpreter errors the
-  whole application there. The array of coordinates is a collection value
-  like a comprehension's, so it feeds an accessor (`Length`, `At`), a
-  reduction (`Sum`, `Max`), and the element-wise broadcast of a kernel
-  (`PointY(c) + x`, `sin(PointX(L))`); a coordinate the type proves is not a
-  number declines. With it, a value that is POSSIBLY a list of numbers —
-  a `list<number> | number` union (what the accessor over a union answers)
-  and a `broadcastable<number>` (a kernel over an operand of unsettled
-  collection-ness; the return type of a helper that reads a coordinate of a
-  wide parameter, `f(P) := a·P.x² + b·P.y²`) — is admitted by the element-wise
-  broadcast, the collection reductions, `Length` and `At`, which all dispatch
-  on the run-time value; a kernel handed such an operand directly (`U + 1`,
-  `Max(U)`, `f(L) + 1` over a list of points) had read the array as NaN
-  bounds behind `success: true`, and a kernel the broadcast does not admit
-  now fails closed on it — a relation over such a union too (`U < 3`
-  answered one `'maybe'` for an array), while a relation over a
-  `broadcastable<number>` helper result keeps its scalar lowering (the
-  implicit plot `P(x, y) < 0`). A number literal beside a broadcast operand
-  stays in the closure body, so the literal-dependent kernels are kept:
-  `w^(2/3)` over a broadcastable `w` lowers to `powRational`, which encloses
-  a negative base where the symbolic-exponent kernel answered `empty`. A
-  point-or-point-list union itself keeps the scalar gate: a point has no
-  interval reading. A helper reading a
-  coordinate of its parameter now compiles as a shared definition on this
-  target, called by reference with a point or a list of points (it used to
-  compile only inlined at a call whose argument was one literal point), and
-  a helper whose body is a single point (`U = (x, y)`, a `PointList` of
-  scalars) spells its body as the array of its coordinates, so
-  `PointY(U(x, y))` reads one back and `U(L, 1)` over a list maps the call.
-  On the 16 Tycho census rows that declined at the accessor, none compiles
-  yet: 14 now reach a `PointList` with a broadcasting component (a list of
-  points built in a body, which no lowering of this target spells), 2 an
-  `Add` over a matrix. Pinned in
+  interval target now: the run-time `_IA.pointComponent` reads the coordinate of
+  every point of the array, decides a union at the value (an array of coordinate
+  cells is one point, an array of such arrays is a list of them), answers the
+  empty list for zero points, and answers one absence marker for a third
+  coordinate over two-component points, as the interpreter errors the whole
+  application there. The array of coordinates is a collection value like a
+  comprehension's, so it feeds an accessor (`Length`, `At`), a reduction (`Sum`,
+  `Max`), and the element-wise broadcast of a kernel (`PointY(c) + x`,
+  `sin(PointX(L))`); a coordinate the type proves is not a number declines. With
+  it, a value that is POSSIBLY a list of numbers — a `list<number> | number`
+  union (what the accessor over a union answers) and a `broadcastable<number>`
+  (a kernel over an operand of unsettled collection-ness; the return type of a
+  helper that reads a coordinate of a wide parameter, `f(P) := a·P.x² + b·P.y²`)
+  — is admitted by the element-wise broadcast, the collection reductions,
+  `Length` and `At`, which all dispatch on the run-time value; a kernel handed
+  such an operand directly (`U + 1`, `Max(U)`, `f(L) + 1` over a list of points)
+  had read the array as NaN bounds behind `success: true`, and a kernel the
+  broadcast does not admit now fails closed on it — a relation over such a union
+  too (`U < 3` answered one `'maybe'` for an array), while a relation over a
+  `broadcastable<number>` helper result keeps its scalar lowering (the implicit
+  plot `P(x, y) < 0`). A number literal beside a broadcast operand stays in the
+  closure body, so the literal-dependent kernels are kept: `w^(2/3)` over a
+  broadcastable `w` lowers to `powRational`, which encloses a negative base
+  where the symbolic-exponent kernel answered `empty`. A point-or-point-list
+  union itself keeps the scalar gate: a point has no interval reading. A helper
+  reading a coordinate of its parameter now compiles as a shared definition on
+  this target, called by reference with a point or a list of points (it used to
+  compile only inlined at a call whose argument was one literal point), and a
+  helper whose body is a single point (`U = (x, y)`, a `PointList` of scalars)
+  spells its body as the array of its coordinates, so `PointY(U(x, y))` reads
+  one back and `U(L, 1)` over a list maps the call. On the 16 Tycho census rows
+  that declined at the accessor, none compiles yet: 14 now reach a `PointList`
+  with a broadcasting component (a list of points built in a body, which no
+  lowering of this target spells), 2 an `Add` over a matrix. Pinned in
   `test/compute-engine/compile-interval-collections.test.ts`.
 
 ## 0.130.0 _2026-09-17_
 
 ### New Features
 
-- **`expr.digest` — a 128-bit digest of the expression's serialized
-  structure, an in-memory cache key that needs no compare on hit.**
-  `expr.hash` is a 32-bit bucket: a hit must be confirmed with `isSame()`.
-  Consumers that wanted a key instead have used `JSON.stringify(expr.json)`,
-  which writes the expression out as a tree — once per path for a shared
-  sub-expression, exponential in the depth of a value that shares its
-  operands. `digest` keys the same way that string does — two expressions
-  digest alike exactly when their MathJSON is the same tree, up to a
-  dictionary's entry order and with a character digesting like the
-  one-cluster string of the same content — at a cost linear in the DISTINCT
-  nodes, memoized per node: a 16-level chain in which each level reads the
-  one below four times (64 distinct nodes, a billion as a tree) digests in a
+- **`expr.digest` — a 128-bit digest of the expression's serialized structure,
+  an in-memory cache key that needs no compare on hit.** `expr.hash` is a 32-bit
+  bucket: a hit must be confirmed with `isSame()`. Consumers that wanted a key
+  instead have used `JSON.stringify(expr.json)`, which writes the expression out
+  as a tree — once per path for a shared sub-expression, exponential in the
+  depth of a value that shares its operands. `digest` keys the same way that
+  string does — two expressions digest alike exactly when their MathJSON is the
+  same tree, up to a dictionary's entry order and with a character digesting
+  like the one-cluster string of the same content — at a cost linear in the
+  DISTINCT nodes, memoized per node: a 16-level chain in which each level reads
+  the one below four times (64 distinct nodes, a billion as a tree) digests in a
   few milliseconds. It is not an `isSame` key: two symbols of the same name
   digest alike whatever they are bound to, and `1/2` and `0.5` digest apart.
   Deterministic within a release, never to be persisted, not cryptographic.
@@ -124,31 +155,30 @@
   callback lowerings recomputed work on every call. The numeric derivative
   fallback wraps its operand in a `Function(body, x)` it builds itself, which
   the CSE harvest never walked, so the body compiled with no candidates and a
-  subexpression repeated in it was emitted, and evaluated, once per
-  occurrence: the stencil callback of one corpus row spelled the same minimum
-  of twenty squared distances twenty-one times (Tycho corpus document
-  `lwuwgb9ic5`; 83,798 characters of code, 84 µs per call). A lambda the
-  harvest did not see now gets a nested harvest of its own, with its
-  parameters shadowed, the way an emitted definition body does: that row is
-  17,514 characters and 4 µs per call, same value. The quadrature lowerings
-  (`_SYS.integrate`, `_IA.integrate`) compiled the integrand directly, so a
-  subexpression that mentions no integration variable ran once per sample —
-  `Γ(k/2)·√2^k` in a chi-square tail, at every one of 300 samples (document
-  `thpezd39zq`). Both lowerings now bind such subexpressions next to the
-  lambda and assign them on its first call, so an empty range that asks for
-  no sample evaluates none of them: 40 → 31 µs per call on JavaScript and
-  561 → 287 µs on the interval target for that integral. Pinned in
-  `test/compute-engine/compile-callback-invariants.test.ts`.
+  subexpression repeated in it was emitted, and evaluated, once per occurrence:
+  the stencil callback of one corpus row spelled the same minimum of twenty
+  squared distances twenty-one times (Tycho corpus document `lwuwgb9ic5`; 83,798
+  characters of code, 84 µs per call). A lambda the harvest did not see now gets
+  a nested harvest of its own, with its parameters shadowed, the way an emitted
+  definition body does: that row is 17,514 characters and 4 µs per call, same
+  value. The quadrature lowerings (`_SYS.integrate`, `_IA.integrate`) compiled
+  the integrand directly, so a subexpression that mentions no integration
+  variable ran once per sample — `Γ(k/2)·√2^k` in a chi-square tail, at every
+  one of 300 samples (document `thpezd39zq`). Both lowerings now bind such
+  subexpressions next to the lambda and assign them on its first call, so an
+  empty range that asks for no sample evaluates none of them: 40 → 31 µs per
+  call on JavaScript and 561 → 287 µs on the interval target for that integral.
+  Pinned in `test/compute-engine/compile-callback-invariants.test.ts`.
 
-- **`expr.hash` now agrees with `isSame` on number literals.** The hash of
-  a number literal was computed from its spelling (`toString()`), so the
-  exact rational `1/2` and the float `0.5` — the same literal to `isSame`,
-  which compares number literals by exact numeric equality — hashed apart,
-  against the hash's own invariant (`isSame` implies equal hashes). Every
-  hash-keyed consumer that bucketed the two separately (`Unique`, `Tally`,
-  set membership, the pattern matcher's anchor buckets) could then miss the
-  match. The hash is now computed from the numeric value (its machine real
-  and imaginary parts). Found while adding `digest`.
+- **`expr.hash` now agrees with `isSame` on number literals.** The hash of a
+  number literal was computed from its spelling (`toString()`), so the exact
+  rational `1/2` and the float `0.5` — the same literal to `isSame`, which
+  compares number literals by exact numeric equality — hashed apart, against the
+  hash's own invariant (`isSame` implies equal hashes). Every hash-keyed
+  consumer that bucketed the two separately (`Unique`, `Tally`, set membership,
+  the pattern matcher's anchor buckets) could then miss the match. The hash is
+  now computed from the numeric value (its machine real and imaginary parts).
+  Found while adding `digest`.
 
 - **The interval target binds a constant list once per artifact and selects a
   statically known element without reading the list.** A list value the emitter
@@ -177,89 +207,85 @@
 
 - **`ce.rebind` now matches `ce.expr(expr.json, …)` on an expression that
   already holds an `Error` node.** `rebind` (new in 0.129.0) rebuilt an
-  expression from BOXED copies of its nodes and canonicalized the root. A
-  boxed node that is invalid answers its own `.canonical` with itself, so
-  inside an operand that already held an error nothing below it was
-  canonicalized again: with `S` a function used as a number,
+  expression from BOXED copies of its nodes and canonicalized the root. A boxed
+  node that is invalid answers its own `.canonical` with itself, so inside an
+  operand that already held an error nothing below it was canonicalized again:
+  with `S` a function used as a number,
   `rebind(Tuple(S·PointX(u), PointX(u)), { scope })` under a scope declaring
   `u: real` reported the `PointX(u)` type error for the second operand only,
   where the MathJSON route reports it for both. Found by Tycho's all-states
   code-generation census, as a changed decline message on one row of
-  `art/2ki2hjsouf`. For the canonical and partial forms `rebind` now builds
-  the MathJSON as a DAG — one array per distinct node, shared by every parent
-  that reads it, so still no tree-sized serialization — and boxes it by the
-  ordinary route, which makes the match with the MathJSON route hold by
-  construction. The raw and structural forms canonicalize nothing, were not
-  affected, and keep rebuilding each distinct node once, so a shared
-  sub-expression stays shared in their result. Pinned in
-  `test/compute-engine/rebind.test.ts`.
+  `art/2ki2hjsouf`. For the canonical and partial forms `rebind` now builds the
+  MathJSON as a DAG — one array per distinct node, shared by every parent that
+  reads it, so still no tree-sized serialization — and boxes it by the ordinary
+  route, which makes the match with the MathJSON route hold by construction. The
+  raw and structural forms canonicalize nothing, were not affected, and keep
+  rebuilding each distinct node once, so a shared sub-expression stays shared in
+  their result. Pinned in `test/compute-engine/rebind.test.ts`.
 
 ## 0.129.0 _2026-09-17_
 
 ### New Features
 
-- **`ce.rebind(expr, { form, scope })` rebuilds a boxed expression as if it
-  had been boxed from its MathJSON, without producing the MathJSON.**
-  `ce.expr(expr, { scope })` on an already-boxed expression keeps the
-  bindings the expression was boxed with: it never re-resolves a symbol. A
-  consumer that needs an expression read under other declarations — a body
-  boxed in a shadow scope, a row re-classified after a declaration changed
-  — therefore serialized it and boxed the result, and `.json` writes a
-  tree: a sub-expression shared by many parents is written once per path,
-  which on a DAG-shared value (Tycho's terrain height map, 236,663 distinct
-  nodes, 25 billion as a tree) exhausts memory before any boxing starts.
-  `rebind` copies each distinct node once, from the same operands `.json`
-  would have written (the structural form's, minus a `Function` literal's
-  inference-written annotations), and constructs the result the way
-  MathJSON is constructed, so the canonical, structural and raw forms match
-  the MathJSON route — a held operand included, and every leaf rebuilt from
-  its own MathJSON (a mutable object as its record snapshot, as the MathJSON
-  route boxes it; no verbatim LaTeX survives, as none does on that route). A
-  partial form and an expression from another engine take the MathJSON
-  route inside `rebind`. See `doc/05b-guide-structural-tier.md`, "Rebinding
-  a Boxed Expression in Another Scope".
+- **`ce.rebind(expr, { form, scope })` rebuilds a boxed expression as if it had
+  been boxed from its MathJSON, without producing the MathJSON.**
+  `ce.expr(expr, { scope })` on an already-boxed expression keeps the bindings
+  the expression was boxed with: it never re-resolves a symbol. A consumer that
+  needs an expression read under other declarations — a body boxed in a shadow
+  scope, a row re-classified after a declaration changed — therefore serialized
+  it and boxed the result, and `.json` writes a tree: a sub-expression shared by
+  many parents is written once per path, which on a DAG-shared value (Tycho's
+  terrain height map, 236,663 distinct nodes, 25 billion as a tree) exhausts
+  memory before any boxing starts. `rebind` copies each distinct node once, from
+  the same operands `.json` would have written (the structural form's, minus a
+  `Function` literal's inference-written annotations), and constructs the result
+  the way MathJSON is constructed, so the canonical, structural and raw forms
+  match the MathJSON route — a held operand included, and every leaf rebuilt
+  from its own MathJSON (a mutable object as its record snapshot, as the
+  MathJSON route boxes it; no verbatim LaTeX survives, as none does on that
+  route). A partial form and an expression from another engine take the MathJSON
+  route inside `rebind`. See `doc/05b-guide-structural-tier.md`, "Rebinding a
+  Boxed Expression in Another Scope".
 
 ### Resolved Issues
 
 - **A sum, a product or a literal collection with a few hundred thousand
   operands no longer overflows the call stack.** Canonicalizing a flattened
   `Add` spread its operand list into `push(...)`, and the `Add`, `Multiply`,
-  `List` and `Set` type handlers spread their operand types into
-  `widen(...)`; a spread passes every element as a call argument, and past
-  roughly 125,000 of them V8 throws `RangeError: Maximum call stack size
-  exceeded`. A DAG-shared value written out as a tree reaches that size
-  (a 10-level chain in which each level reads the one below four times is
-  262,144 terms when flattened), so re-boxing such a value in another scope
-  failed where boxing it the first time had not. The flatten helpers and
-  `canonicalAdd` now push in a loop, the type handlers join their operand
-  types through the new `widenAll(list)` (`widen` itself is unchanged), and
-  the histogram's min/max scan no longer spreads its data. Pinned in
-  `test/compute-engine/large-operand-lists.test.ts`.
+  `List` and `Set` type handlers spread their operand types into `widen(...)`; a
+  spread passes every element as a call argument, and past roughly 125,000 of
+  them V8 throws `RangeError: Maximum call stack size exceeded`. A DAG-shared
+  value written out as a tree reaches that size (a 10-level chain in which each
+  level reads the one below four times is 262,144 terms when flattened), so
+  re-boxing such a value in another scope failed where boxing it the first time
+  had not. The flatten helpers and `canonicalAdd` now push in a loop, the type
+  handlers join their operand types through the new `widenAll(list)` (`widen`
+  itself is unchanged), and the histogram's min/max scan no longer spreads its
+  data. Pinned in `test/compute-engine/large-operand-lists.test.ts`.
 
-- **The reference analysis of a compiled result no longer expands a shared
-  value as a tree, and no longer runs a caller's `compile` handler inside a
-  value the compile refuses to bake in.** An expression is a DAG: one
-  sub-expression object can be an operand of many parents. A consumer that
-  substitutes helper bodies into a published value builds exactly that —
-  Tycho's terrain document (`art/nxlddeh5zv`) holds its height map as a
-  four-level chain of list helpers whose bodies each read their parameter a
-  dozen times, so the value has 236,663 distinct nodes but 25 billion when
-  walked as a tree. The compile itself refused to bake the value in (the
-  fold-size guard sizes the expansion with sharing), but the reference
-  analysis that every result carries (`freeSymbols`, `unsupported`) then ran
-  the process out of memory on that value in two ways, at any terrain size —
-  the failure that stopped the code-generation census on that document.
-  First, the walk visited the value as a tree; it now remembers, per node, the
-  binding frames it was visited under and skips a repeat. Second, at every
-  head with a caller-supplied `compile` handler it probed that handler with
-  the real operands to learn whether the handler claims the shape, and a
+- **The reference analysis of a compiled result no longer expands a shared value
+  as a tree, and no longer runs a caller's `compile` handler inside a value the
+  compile refuses to bake in.** An expression is a DAG: one sub-expression
+  object can be an operand of many parents. A consumer that substitutes helper
+  bodies into a published value builds exactly that — Tycho's terrain document
+  (`art/nxlddeh5zv`) holds its height map as a four-level chain of list helpers
+  whose bodies each read their parameter a dozen times, so the value has 236,663
+  distinct nodes but 25 billion when walked as a tree. The compile itself
+  refused to bake the value in (the fold-size guard sizes the expansion with
+  sharing), but the reference analysis that every result carries (`freeSymbols`,
+  `unsupported`) then ran the process out of memory on that value in two ways,
+  at any terrain size — the failure that stopped the code-generation census on
+  that document. First, the walk visited the value as a tree; it now remembers,
+  per node, the binding frames it was visited under and skips a repeat. Second,
+  at every head with a caller-supplied `compile` handler it probed that handler
+  with the real operands to learn whether the handler claims the shape, and a
   handler is free to read an operand's MathJSON (Tycho's `Which` handler reads
-  its conditions), which serializes a shared sub-value as a tree. Inside a
-  value the fold-size guard would refuse, the walk now takes a head that has
-  a handler as lowerable without asking — the compile never reaches such a
-  node either. The probe elsewhere also hands the handler a placeholder
-  operand compiler instead of the real one, which compiled every operand of
-  every such node once for the probe and once for the emission.
+  its conditions), which serializes a shared sub-value as a tree. Inside a value
+  the fold-size guard would refuse, the walk now takes a head that has a handler
+  as lowerable without asking — the compile never reaches such a node either.
+  The probe elsewhere also hands the handler a placeholder operand compiler
+  instead of the real one, which compiled every operand of every such node once
+  for the probe and once for the emission.
 
 - **A lazily held chain of list helpers no longer costs quadratic time per
   level, and a symbol's stored expression is evaluated once across reads.** The

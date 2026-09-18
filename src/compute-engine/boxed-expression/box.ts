@@ -1648,6 +1648,68 @@ function calleeSignatureType(def: BoxedValueDefinition): Type | undefined {
   return def.type.type;
 }
 
+/**
+ * Whether a call to `def` — a function-typed value definition whose type is
+ * INFERRED — must have its arguments validated at boxing as if the signature
+ * were declared, because the Epsil static pre-pass is checking the program.
+ *
+ * Outside the pass (`_staticPinnedCallees` undefined) the answer is always no:
+ * an inferred signature is not a user constraint, and an assigned function
+ * literal refuses a wrong argument itself, when applied, with an error VALUE
+ * (the `filter-predicate-errors` pins in `test/compute-engine/` depend on
+ * that timing). Inside the pass two definitions qualify — the pass mutates
+ * nothing, since the verdict lands in a boxed tree the pass reads and then
+ * discards:
+ *
+ * - one the pass itself pinned from a function literal the program declares
+ *   or assigns (`registerPinnedSignature`, `src/epsil/static-diagnostics.ts`)
+ *   — `let k = (n: integer) => n + 1`, checked in the same program;
+ * - one an earlier evaluation left HOLDING a function literal (a previous
+ *   notebook cell's `let k = (n: integer) => n + 1`), whose inferred type is
+ *   that literal's own signature: a call in a later cell that the literal
+ *   would refuse is reported where it is written.
+ */
+function staticallyPinnedCallee(
+  ce: ComputeEngine,
+  def: BoxedValueDefinition
+): boolean {
+  const pinned = ce._staticPinnedCallees;
+  if (pinned === undefined) return false;
+  return pinned.has(def) || def.value?.operator === 'Function';
+}
+
+/**
+ * The signature a call to a statically pinned literal (`staticallyPinnedCallee`)
+ * is validated against, so the static verdict is the one the literal's own
+ * application gives (`applyFunctionLiteral`, `function-utils.ts`):
+ *
+ * - an UNSATURATED call is a partial application, not a call with missing
+ *   arguments — `let k = (x: integer, y: integer) => x + y` then `k(1)` is
+ *   the literal `(y) => 1 + y` — so only the supplied prefix of the
+ *   parameters is checked, and nothing is reported missing;
+ * - a BARE parameter imposes no constraint: its slot holds whatever
+ *   inference left there (`unknown`), which is not a contract the author
+ *   wrote, and `nothing` is deliberately not a subtype of `unknown` — so the
+ *   slot is relaxed to `any` for validation, as the application relaxes it.
+ *
+ * A declared signature (`let k: (x: integer, y: integer) -> integer`) keeps
+ * the full check: its application reports the missing argument, so the
+ * static line is a true prediction there. Anything but a plain one-arm
+ * signature is returned unchanged.
+ */
+function pinnedValidationSignature(signature: Type, argCount: number): Type {
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return signature;
+  const args = signature.args ?? [];
+  const kept = argCount < args.length ? args.slice(0, argCount) : args;
+  const relaxed = kept.map((arg) =>
+    arg.type === 'unknown' ? { ...arg, type: 'any' as Type } : arg
+  );
+  // A signature rebuilt field-by-field must carry its adjuncts (`typeParams`,
+  // `effects`, `optArgs`, `restArg`); the spread does that.
+  return { ...signature, args: relaxed };
+}
+
 /** A `Spread` operand makes the final positional operands unknown until
  * evaluation, so a positional callback rewrite cannot be trusted. Answered on
  * the UNBOXED operand — the hook runs before anything is boxed. */
@@ -2132,11 +2194,13 @@ function makeCanonicalFunctionCore(
     // value-def application path historically honored the *result* type but
     // never validated the operands. An *inferred* signature carries no user
     // constraint (and an assigned function literal validates its own params
-    // when applied), so skip those.
+    // when applied), so skip those — except for the Epsil static pre-pass,
+    // which asks for a function LITERAL's signature to be enforced here
+    // (`staticallyPinnedCallee`).
     const valueType = def.value.type.type;
     if (
       ce.strict &&
-      !def.value.inferredType &&
+      (!def.value.inferredType || staticallyPinnedCallee(ce, def.value)) &&
       typeof valueType !== 'string' &&
       // A plain signature, OR an overload set (an intersection of signatures).
       // Gating on `kind === 'signature'` alone let an overload-typed value
@@ -2163,10 +2227,16 @@ function makeCanonicalFunctionCore(
       // call so result typing reads the arm the call was VALIDATED against
       // (`_resolvedOverload`, phase 2c).
       const valueResolutionOut: { resolution?: OverloadResolution } = {};
+      // A statically pinned literal is checked as its own application would
+      // check it (`pinnedValidationSignature`); a declared signature is
+      // checked whole.
+      const checkedType = def.value.inferredType
+        ? pinnedValidationSignature(valueType, boxedOps.length)
+        : valueType;
       const invalid = validateArguments(
         ce,
         boxedOps,
-        valueType,
+        checkedType,
         undefined,
         // A DECLARED `broadcastable<T>` slot is threadable BY DECLARATION
         // (Option A, 2026-08-08): the application MAPS a collection argument
@@ -2180,7 +2250,7 @@ function makeCanonicalFunctionCore(
         // binds WHOLE (`list<…>`, `tuple<…>`, a callback) is validated as
         // usual, or `(broadcastable<number>, list<string>)` would admit a
         // `list<number>` at the second slot unchecked.
-        threadableGate(valueType, paramsAreScalar(valueType)),
+        threadableGate(checkedType, paramsAreScalar(checkedType)),
         undefined,
         undefined,
         { resolutionOut: valueResolutionOut, operatorName: name }
@@ -2223,7 +2293,7 @@ function makeCanonicalFunctionCore(
               ce._staticAssignmentEvidence?.has(orig.valueDefinition)
             )
           ) {
-            const params = candidateParamsAt(valueType, i);
+            const params = candidateParamsAt(checkedType, i);
             if (
               params.length > 0 &&
               params.every((p) => orig.type.isDisjointFrom(p))

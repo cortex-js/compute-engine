@@ -2627,6 +2627,15 @@ export function assignFn(
     // If we get here, the previous definition was a value definition.
     // We can update it to an operator definition.
     console.assert(isValueDef(def));
+    // The refusal the value route makes on sight of a constant target
+    // (`assertAssignableValueDef`), repeated here because a function literal
+    // takes THIS route: without it the constant's definition was converted in
+    // place — `const k = (n) => n + 1` then `k = (s) => s` replaced `k`
+    // silently, and `ce.assign('Pi', (x) => 2x)` turned the engine's own
+    // system-scope `Pi` into that operator. Same message on both routes, so
+    // the `Assign` operator surfaces the same error value for either shape.
+    if (isValueDef(def) && def.value.isConstant)
+      throw Error(`Cannot assign a value to the constant "${id}"`);
     // updateDef removes def.value and sets def.operator — no separate
     // _setSymbolValue call needed to clear the old value.
     const callableBefore = defIsCallableShaped(def);

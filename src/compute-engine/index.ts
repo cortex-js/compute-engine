@@ -571,6 +571,9 @@ export class ComputeEngine implements IComputeEngine {
   _staticAssignmentEvidence: Map<BoxedValueDefinition, Type> | undefined =
     undefined;
 
+  /** See `IComputeEngine._staticPinnedCallees`. @internal */
+  _staticPinnedCallees: Set<BoxedValueDefinition> | undefined = undefined;
+
   /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
   _epsilDeclarationRoute = false;
 

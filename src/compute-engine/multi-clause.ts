@@ -770,6 +770,22 @@ export function defineFunctionClause(
 
   const incomingExplicit = functionLiteralDeclaredEffects(literal);
 
+  // A constant is not redefinable, whatever it holds: a `const` bound to a
+  // function literal would otherwise be converted into clause state below
+  // and silently replaced (`const k = (n) => n` then `k(x) = x * 2`), while
+  // the assignment routes refuse the same constant. A builtin was already
+  // set aside above (`isBuiltin`): a clause on a system-scope name shadows
+  // it in the current scope and is never a redefinition of it.
+  if (
+    existing !== undefined &&
+    isValueDef(existing) &&
+    existing.value.isConstant
+  )
+    throw new ClauseDefinitionError(
+      'invalid-clause-definition',
+      `"${id}" is a constant; it cannot be redefined`
+    );
+
   // Existing clause state, or the conversion of a pre-existing single
   // user-function definition into its 1-clause equivalent.
   const state = multiClauseState(existing) ?? convertToClauseState(existing);

@@ -1127,27 +1127,6 @@ the audit recorded by `docs/plans/2026-08-22-type-handlers-on-types.md` §2.5;
 the design's success criterion — item-219 drift 0 with the `scratch` exemption
 made a no-op — is what closes each row.
 
-### Epsil pre-pass misses argument errors at a LAMBDA callee (OPEN, lint — found 2026-08-23 implementing evidence path 2)
-
-`let k = (n: integer) => n + 1` followed by `k(1.5)` produces NO
-`static-type-error` from the pre-pass, while both named-head spellings —
-`let k: (integer) -> integer` and `k(n: integer) = n + 1` — flag the same call.
-The cause is not the pre-pass's error extraction: for a callee that is a VALUE
-definition holding a function literal, argument refusal is DELIBERATELY deferred
-to evaluation by the R1 runtime-conformance design (the
-`filter-predicate-errors` pins require a lambda applied to a wrong concrete
-value to produce its `incompatible-type` error VALUE at run time), so the
-valueless pre-pass boxes the call clean and has nothing to mint. The engine
-behavior is by design; only the LINT wants more — the same "linter stricter than
-the engine" principle as the evidence path-2 ruling (2026-08-23). Fix shape: a
-pre-pass-side check that walks each statement's canonical form for applications
-whose callee resolves to a signature-typed value definition and tests the
-CONCRETE literal arguments against the parameters by reusing the §4.4
-runtime-conformance helper (`runtimeConformanceError`) statically — never
-re-implementing the verdict — minting the same diagnostic the named routes get.
-Care: per-arm overload verdicts, no double-flag when the named route already
-errors, symbolic arguments stay silent (that is evidence path 2's job).
-
 ### `Complex` drops its `number` contract on the literal route (OPEN, low — found 2026-08-23 by the canonical-rewrite inventory)
 
 `Complex` (`(number, number)`, no canonical handler) canonicalizes to

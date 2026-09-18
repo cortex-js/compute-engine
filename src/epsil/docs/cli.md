@@ -104,8 +104,10 @@ malformed strings, invalid type annotations, `match` shape problems (a
 trap lints (`=` inside a call argument, a literal index `0`, a `//` comment
 that reads as floor division) — without evaluating anything. It also prepares
 the program to run (still without running it) and reports the problems that
-surface there — type errors such as `"a" + 1`, but also a wrong argument
-count — as `static-type-error` diagnostics anchored to the offending statement.
+surface there — type errors such as `"a" + 1`, a wrong argument count, or a
+call whose argument cannot satisfy a parameter annotation of the function it
+names (`let k = (n: integer) => n + 1` then `k(1.5)`) — as
+`static-type-error` diagnostics anchored to the offending statement.
 An `Error(…)` value the program itself builds is not reported: errors are
 values. It accepts the same source forms as evaluation: a file,
 `--eval`, or standard input.

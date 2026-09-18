@@ -778,6 +778,18 @@ export interface IComputeEngine {
    * @internal */
   _staticAssignmentEvidence: Map<BoxedValueDefinition, Type> | undefined;
 
+  /** The value definitions the Epsil static pre-pass pinned from a FUNCTION
+   * LITERAL the checked program declares or assigns (`registerPinnedSignature`
+   * in `src/epsil/static-diagnostics.ts`). Set (and restored) only by
+   * `staticDiagnostics`, like {@link IComputeEngine._staticAssignmentEvidence}.
+   * Boxing validates the arguments of a call to one of these as if its
+   * signature were declared (`staticallyPinnedCallee`, `box.ts`), so the pass
+   * reports `k(1.5)` after `let k = (n: integer) => n + 1` — a refusal the run
+   * time leaves to the literal itself, when applied, because the definition
+   * stays INFERRED. `undefined` outside the pass.
+   * @internal */
+  _staticPinnedCallees: Set<BoxedValueDefinition> | undefined;
+
   /** `true` only while the Epsil interpreter is canonicalizing or evaluating a
    * top-level statement whose AST head is `DeclareType`, `DeclareSumType` or
    * `DeclareProtocol` — the REDEFINITION DISCIPLINE's statement-route marker
