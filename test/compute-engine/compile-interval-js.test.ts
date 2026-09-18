@@ -1411,12 +1411,24 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     const fn = compile(ceDeclared.box(['Sin', 'Pt']), { to: 'interval-js' });
     expect(fn.success).toBe(false);
     expect(fn.error).toContain('is a collection');
-    // The same in a `Which` value position.
+    // A `Which` whose arm is a point is a SELECTION among values at the root:
+    // the point where its condition holds, the number where it fails, and no
+    // one value (the absence marker) where the condition is undecided.
     const fw = compile(
       cePt.box(['Which', ['Less', 'a', 1], ['Tuple', 'a', 'b'], 'True', 0]),
       { to: 'interval-js' }
     );
-    expect(fw.success).toBe(false);
+    expect(fw.success).toBe(true);
+    expect(fw.run!({ a: { lo: 0, hi: 0 }, b: 2 })).toEqual([
+      { lo: 0, hi: 0 },
+      { lo: 2, hi: 2 },
+    ]);
+    expect(fw.run!({ a: { lo: 5, hi: 5 }, b: 2 })).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 0 },
+    });
+    const straddle = fw.run!({ a: { lo: 0, hi: 5 }, b: 2 }) as { lo: number };
+    expect(Number.isNaN(straddle.lo)).toBe(true);
   });
 
   test('a point with a broadcasting component declines', () => {

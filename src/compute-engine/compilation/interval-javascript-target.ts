@@ -387,6 +387,27 @@ function compileIntervalCollectionValue(
       ? compileIntervalCollectionValue(literal.ops[0], target)
       : undefined;
   }
+  // A `Which` in a consuming position is a SELECTION among values, and its
+  // arms are spelled the way the position spells them: a helper whose body
+  // answers a list in one case and a number in another (`H(x, y) := {B(x, y)
+  // > 0: 0, h(⌊x⌋, ⌊y⌋)·2 − 1}`, the Tycho document `sgtdqnj2ox`) returns
+  // one or the other, and its callers index the result whole. Each arm is
+  // offered this spelling first and compiles the ordinary way otherwise (a
+  // scalar arm is an interval), so a mixed selection is an array or an
+  // interval at run time — the value model of every consuming position. The
+  // run-time `_IA.hull` of an undecided condition over two arms of different
+  // domains (an array against an interval) is the absence marker, which is
+  // right: no one value encloses both. The conditions stay scalar, as the
+  // `Which` handler requires of them. Nothing here changes the answer for a
+  // `Which` in a SCALAR position: that goes through the handler, which
+  // compiles a list arm the ordinary way and declines it there, as before.
+  // A `Which` the caller overrode (the `functions` compilation option) keeps
+  // its ordinary dispatch, which reaches the caller's implementation.
+  if (
+    literal.operator === 'Which' &&
+    target.unrollSkipHeads?.has('Which') !== true
+  )
+    return compileIntervalSelectionValue(literal, target);
   const head = literal.operator;
   if (!COLLECTION_VALUE_HEADS.has(head)) return undefined;
   if (target.unrollSkipHeads?.has(head) === true) return undefined;
@@ -454,6 +475,78 @@ function compileIntervalCollectionValue(
     compileIntervalCollectionValue(source, target) ??
     BaseCompiler.compileValueOperand(source, target);
   return `_IA.map(${BaseCompiler.compileValueOperand(fn, target)}, ${coll})`;
+}
+
+/**
+ * A `Which` at a consuming position (see `compileIntervalCollectionValue`):
+ * the same lowering as the `Which` handler — a ternary chain over the
+ * tri-state conditions, `_IA.hull` where a condition is undecided — with
+ * every arm offered the collection spelling first. Answers `undefined` when
+ * no arm is spelled as a collection: the selection is then a scalar one and
+ * the handler compiles it as it always has. A malformed `Which` (an odd
+ * operand count) is left to the handler too, which reports it.
+ *
+ * The clauses after an unconditional one (a `True` condition) are never
+ * reached and are not compiled, as the handler does not compile them: an
+ * unsupported head in an unreachable arm must not fail the expression. Each
+ * arm, and each condition after the first, is compiled AS the operand it is
+ * (`BaseCompiler.compileOpValue`), so the common-subexpression pass opens the
+ * conditionally-evaluated region the handler opens for the same operand and
+ * a temporary is never hoisted out of an arm that may not run.
+ */
+function compileIntervalSelectionValue(
+  which: Expression,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!isFunction(which)) return undefined;
+  const args = which.ops;
+  if (args.length < 2 || args.length % 2 !== 0) return undefined;
+  // The clauses that can be reached: up to and including the first
+  // unconditional one.
+  let reach = args.length;
+  for (let i = 0; i < args.length; i += 2)
+    if (isSymbol(args[i], 'True')) {
+      reach = i + 2;
+      break;
+    }
+  const spelled = (i: number): boolean =>
+    compileIntervalCollectionValue(args[i], target) !== undefined;
+  let any = false;
+  for (let i = 1; i < reach; i += 2) if (spelled(i)) any = true;
+  if (!any) return undefined;
+  const compileArm = (i: number): string =>
+    BaseCompiler.compileOpValue(
+      which,
+      i,
+      target,
+      0,
+      args[i]
+    );
+  const spellArm = (i: number): string =>
+    BaseCompiler.withCseOperand(
+      which,
+      i,
+      target,
+      () =>
+        compileIntervalCollectionValue(args[i], target) ??
+        BaseCompiler.compileValueOperand(args[i], target)
+    );
+  const build = (i: number): string => {
+    if (i >= reach) return `({ kind: 'empty' })`;
+    const cond = args[i];
+    const arm = spelled(i + 1) ? spellArm(i + 1) : compileArm(i + 1);
+    if (isSymbol(cond, 'True')) return arm;
+    BaseCompiler.assertScalarCondition(cond);
+    return compileIntervalConditional(
+      i === 0
+        ? BaseCompiler.compileValueOperand(cond, target)
+        : compileArm(i),
+      arm,
+      build(i + 2),
+      target
+    );
+  };
+  return build(0);
 }
 
 /**
@@ -4714,11 +4807,14 @@ function compileToIntervalTarget(
     // same spelling every consuming position uses
     // (`compileIntervalCollectionValue`); a root that spelling declines — a
     // list of booleans — compiles the ordinary way, which refuses it.
+    // A `Which` root is a collection root when one of its arms is spelled
+    // as a collection (`compileIntervalSelectionValue`); a scalar selection
+    // compiles through the `Which` handler as before.
+    const rootLiteral = assignedLiteral(expr, target) ?? expr;
     const collectionRoot =
       point === undefined &&
-      COLLECTION_VALUE_HEADS.has(
-        (assignedLiteral(expr, target) ?? expr).operator
-      );
+      (COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
+        rootLiteral.operator === 'Which');
     js =
       point !== undefined
         ? BaseCompiler.compileCseRoot(

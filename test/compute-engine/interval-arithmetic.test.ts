@@ -6,6 +6,7 @@
 // this target's RESULT — these project a run-time array of intervals back down
 // to the single interval the interval-js value model holds.
 import { BigDecimal } from '../../src/big-decimal';
+import { IntervalArithmetic } from '../../src/compute-engine/interval/index';
 import { nextDown, nextUp } from '../../src/compute-engine/numerics/numeric';
 import {
   integrate as integrateEnclosure,
@@ -261,6 +262,35 @@ describe('INTERVAL ARITHMETIC OPERATIONS', () => {
       expect(result.value.hi).toBe(Infinity);
       expect(result.domainClipped).toBe('hi');
     }
+  });
+});
+
+describe('a NaN input propagates through the kernels that branch on sign', () => {
+  // A NaN bound is the compile target's numeric ABSENCE marker, and an
+  // absent value must stay absent through every kernel. The kernels that
+  // branch on the sign of the input used to fall through to their
+  // "straddles zero" arm — every comparison with NaN is false — and widened
+  // the marker to an enclosure such as `[0, ∞)`.
+  test('sqrt, square, abs, ln, log10, log2, gamma, gammaln answer a NaN interval', () => {
+    const absent = { lo: NaN, hi: NaN };
+    for (const kernel of [
+      IntervalArithmetic.sqrt,
+      IntervalArithmetic.square,
+      IntervalArithmetic.abs,
+      IntervalArithmetic.ln,
+      IntervalArithmetic.log10,
+      IntervalArithmetic.log2,
+      IntervalArithmetic.gamma,
+      IntervalArithmetic.gammaln,
+    ]) {
+      const result = kernel(absent) as { kind: string; value?: { lo: number; hi: number } };
+      expect(result.kind).toBe('interval');
+      expect(Number.isNaN(result.value!.lo)).toBe(true);
+      expect(Number.isNaN(result.value!.hi)).toBe(true);
+    }
+    // The ordinary cases are unchanged.
+    expectInterval(IntervalArithmetic.sqrt({ lo: 4, hi: 9 }), 2, 3);
+    expectPartial(IntervalArithmetic.sqrt({ lo: -1, hi: 4 }), 0, 2, 'lo');
   });
 });
 

@@ -53,10 +53,30 @@ import { choose as scalarBinomial } from '../boxed-expression/expand.js';
  * - Entirely non-negative: straightforward monotonic
  * - Straddles zero: partial result with lower bound clipped
  */
+/**
+ * A NaN bound propagates as a NaN interval (Contract B `propagate`, ratified
+ * 2026-08-27) — the same value the plain arithmetic kernels produce for a NaN
+ * input, and the compile target's numeric ABSENCE marker (`{ lo: NaN, hi:
+ * NaN }`), which must stay absent through every kernel. Two families of
+ * kernels have to check this first, because every comparison with NaN is
+ * false and their branches then run as if the input straddled a boundary:
+ * the step functions, whose `Math.floor`-style point rules answer NaN for NaN
+ * and `NaN === NaN` is false, so they reported a discontinuity "at NaN" that
+ * the input never touched; and the kernels that branch on the sign of the
+ * input — `sqrt`, `ln`, `square`, `abs`, `gamma` — which fell through to
+ * their "straddles zero" arm and widened the absent value to an enclosure
+ * such as `[0, ∞)` behind a present-looking result.
+ */
+function isNaNInterval(x: Interval): boolean {
+  return Number.isNaN(x.lo) || Number.isNaN(x.hi);
+}
+const NAN_INTERVAL: Interval = { lo: NaN, hi: NaN };
+
 function sqrtRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   return _sqrt(xVal);
 }
 
@@ -88,6 +108,7 @@ function squareRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   if (xVal.lo >= 0) {
     // Entirely non-negative: monotonically increasing
     return ok({ lo: xVal.lo * xVal.lo, hi: xVal.hi * xVal.hi });
@@ -593,6 +614,7 @@ function lnRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   // Case 1: Entirely non-positive - no valid values
   if (xVal.hi <= 0) {
     return { kind: 'empty' };
@@ -619,6 +641,7 @@ function log10Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   if (xVal.hi <= 0) {
     return { kind: 'empty' };
   }
@@ -641,6 +664,7 @@ function log2Raw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   if (xVal.hi <= 0) {
     return { kind: 'empty' };
   }
@@ -663,6 +687,7 @@ function absRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   if (xVal.lo >= 0) {
     return ok(xVal);
   }
@@ -711,17 +736,8 @@ function ceilRaw(x: Interval | IntervalResult): IntervalResult {
   return jump(clo, 'left', { lo: clo, hi: chi });
 }
 
-/**
- * A NaN bound propagates as a NaN interval (Contract B `propagate`, ratified
- * 2026-08-27) — the same value the plain arithmetic kernels produce for a NaN
- * input. Every step function below checks this first: their `Math.floor`-style
- * point rules answer NaN for NaN, and `NaN === NaN` is false, so without the
- * check they reported a discontinuity "at NaN" that the input never touched.
- */
-function isNaNInterval(x: Interval): boolean {
-  return Number.isNaN(x.lo) || Number.isNaN(x.hi);
-}
-const NAN_INTERVAL: Interval = { lo: NaN, hi: NaN };
+// `isNaNInterval` and `NAN_INTERVAL` are defined near the top of this file:
+// the domain-restricted kernels above the step functions use them too.
 
 /** Round half away from zero (Round(-2.5) = -3) — the interpreter's convention.
  *  This differs from JS `Math.round` (half toward +∞: Math.round(-2.5) = -2). */
@@ -1065,6 +1081,7 @@ function gammaRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   return _gamma(xVal);
 }
 
@@ -1162,6 +1179,7 @@ function gammalnRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
+  if (isNaNInterval(xVal)) return ok(NAN_INTERVAL);
   return _gammaln(xVal);
 }
 

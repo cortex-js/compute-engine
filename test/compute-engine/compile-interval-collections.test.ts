@@ -1263,3 +1263,202 @@ describe('Interval target — point arithmetic', () => {
     }
   });
 });
+
+// A `Which` whose arms are lists — or a list in one arm and a number in
+// another — at a position that consumes the value whole: the body root of a
+// helper, an argument the callee binds whole, an accessor or reducer operand,
+// the compilation root. The arms take the collection spelling, the conditions
+// stay scalar, and the run-time hull of an undecided condition is
+// element-wise over two lists and the absence marker over a list against a
+// number (no one value encloses both). A scalar position is unchanged: a
+// kernel is handed the selection through the element-wise broadcast when its
+// type admits a list, and a list of verdicts, or a relation over the
+// selection, keeps declining. The witness is the Tycho document
+// `sgtdqnj2ox`, whose helper `H(x, y) := {B(x, y) > 0: 0, h(⌊x⌋, ⌊y⌋)·2 − 1}`
+// answers a number or a list, read by a dot product and a norm.
+describe('Interval target — a selection among list values', () => {
+  const which = (ce: ComputeEngine, ...arms: any[]) =>
+    ce.box(['Which', ['Greater', 'x', 0], arms[0], 'True', arms[1]]);
+  function selectionEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'number');
+    ce.declare('A', 'list<number>');
+    ce.parse('l(P) := \\sqrt{P[1]^2 + P[2]^2}').evaluate();
+    ce.parse('d(a, b) := a[1] b[1] + a[2] b[2]').evaluate();
+    // Z(x) is [x, x] for positive x and [x, 2x] otherwise; S(x) is 0 for
+    // positive x and [x, 2x] otherwise — the `sgtdqnj2ox` shape.
+    ce.assign(
+      'Z',
+      ce.box([
+        'Function',
+        which(ce, ['List', 'x', 'x'], ['List', 'x', ['Multiply', 2, 'x']]),
+        'x',
+      ])
+    );
+    ce.assign(
+      'S',
+      ce.box([
+        'Function',
+        which(ce, 0, ['List', 'x', ['Multiply', 2, 'x']]),
+        'x',
+      ])
+    );
+    return ce;
+  }
+  function run(ce: ComputeEngine, expr: any, vars: Record<string, any>) {
+    const r = compile(
+      typeof expr === 'string' ? ce.parse(expr) : ce.box(expr),
+      { to: 'interval-js', fallback: false }
+    );
+    expect(r.success).toBe(true);
+    return { code: r.code, preamble: r.preamble, out: bands(r.run!(vars)) };
+  }
+
+  test('a helper whose case arms are lists returns the selected list', () => {
+    const ce = selectionEngine();
+    expect(ce.box(['Z', 3]).evaluate().json).toEqual(['List', 3, 3]);
+    expect(ce.box(['Z', -3]).evaluate().json).toEqual(['List', -3, -6]);
+    // A collection-valued call is inlined at the compilation ROOT and as a
+    // whole-bound argument (the rule every collection-valued call takes on
+    // this target), so the selection appears at the call site.
+    const z = run(ce, ['Z', 'x'], { x: pt(3) });
+    expect(z.code).toBe(
+      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _tv1 === 'false' ? _IA.res([_.x, _IA.scale(_k2, _.x)]) : _IA.hull([_.x, _.x], [_.x, _IA.scale(_k2, _.x)]))"
+    );
+    expect(z.out).toEqual([
+      [3, 3],
+      [3, 3],
+    ]);
+    expect(run(ce, ['Z', 'x'], { x: pt(-3) }).out).toEqual([
+      [-3, -3],
+      [-6, -6],
+    ]);
+    // Undecided: the element-wise hull of the two lists (`2x` over
+    // `[−1, 1]` is `[−2, 2]`).
+    expect(run(ce, ['Z', 'x'], { x: { lo: -1, hi: 1 } }).out).toEqual([
+      [-1, 1],
+      [-2, 2],
+    ]);
+    // Consumed whole by a norm and a dot product.
+    const norm = run(ce, 'l(Z(x))', { x: pt(3) });
+    expect(norm.code).toBe(
+      "_fn_l(((_tv1 = _IA.less(_k3, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _tv1 === 'false' ? _IA.res([_.x, _IA.scale(_k2, _.x)]) : _IA.hull([_.x, _.x], [_.x, _IA.scale(_k2, _.x)])))"
+    );
+    expectEncloses(norm.out, Math.hypot(3, 3));
+    expectEncloses(
+      run(ce, ['d', ['Z', 'x'], ['List', 1, 1]], { x: pt(-3) }).out,
+      -9
+    );
+  });
+
+  test('a number in one arm and a list in the other', () => {
+    const ce = selectionEngine();
+    expect(run(ce, ['S', 'x'], { x: pt(3) }).out).toEqual([0, 0]);
+    expect(run(ce, ['S', 'x'], { x: pt(-3) }).out).toEqual([
+      [-3, -3],
+      [-6, -6],
+    ]);
+    // Undecided across the two domains: no one value encloses both.
+    const straddle = compile(ce.box(['S', 'x']), {
+      to: 'interval-js',
+      fallback: false,
+    }).run!({ x: { lo: -1, hi: 1 } }) as { lo: number };
+    expect(Number.isNaN(straddle.lo)).toBe(true);
+    // The dot product over the list arm is the interpreter's value; over the
+    // number arm the interpreter answers an error (`0[1]` is not a value),
+    // and this target answers the absence marker for the indexing of a
+    // scalar — no value either way.
+    expect(ce.parse('d(S(-3), [1, 1])').N().re).toBe(-9);
+    expectEncloses(
+      run(ce, ['d', ['S', 'x'], ['List', 1, 1]], { x: pt(-3) }).out,
+      -9
+    );
+    expect(ce.parse('d(S(3), [1, 1])').N().operator).toBe('Error');
+    const scalarArm = compile(ce.box(['d', ['S', 'x'], ['List', 1, 1]]), {
+      to: 'interval-js',
+      fallback: false,
+    }).run!({ x: pt(3) }) as { value: { lo: number } };
+    expect(Number.isNaN(scalarArm.value.lo)).toBe(true);
+  });
+
+  test('the selection at the root, and under a kernel', () => {
+    const ce = selectionEngine();
+    const root = run(
+      ce,
+      which(ce, ['List', 'x', 1], ['List', 1, 2]),
+      { x: pt(3) }
+    );
+    expect(root.code).toBe(
+      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _k2]) : _tv1 === 'false' ? _IA.res(_k4) : _IA.hull([_.x, _k2], _k4))"
+    );
+    expect(root.out).toEqual([
+      [3, 3],
+      [1, 1],
+    ]);
+    // A kernel over the selection broadcasts over whichever arm is taken:
+    // the type `integer | vector<2>` is a number or a list of numbers.
+    const plus = run(ce, ['Add', which(ce, ['List', 'x', 1], 1), 1], {
+      x: pt(3),
+    });
+    expect(plus.code).toBe(
+      "_IA.bcast((_tv1) => _IA.add(_tv1, _k1), ((_tv2 = _IA.less(_k2, _.x)) === 'true' ? _IA.res([_.x, _k1]) : _tv2 === 'false' ? _IA.res(_k1) : _IA.hull([_.x, _k1], _k1)))"
+    );
+    expect(plus.out).toEqual([
+      [4, 4],
+      [2, 2],
+    ]);
+    expect(
+      run(ce, ['Add', which(ce, ['List', 'x', 1], 1), 1], { x: pt(-3) }).out
+    ).toEqual([2, 2]);
+    expect(
+      run(ce, ['Add', which(ce, ['List', 'x', 1], 'A'), 1], {
+        x: pt(-3),
+        A: [pt(5), pt(6)],
+      }).out
+    ).toEqual([
+      [6, 6],
+      [7, 7],
+    ]);
+  });
+
+  test('an unreachable clause is not compiled, and an override is honored', () => {
+    const ce = selectionEngine();
+    // The clauses after an unconditional one are never reached; an
+    // unsupported head there must not fail the expression (`Zeta` has no
+    // interval lowering).
+    const unreachable = run(
+      ce,
+      ce.box(['Which', 'True', ['List', 'x', 1], 'True', ['List', ['Zeta', 'x'], 1]]),
+      { x: pt(3) }
+    );
+    expect(unreachable.out).toEqual([
+      [3, 3],
+      [1, 1],
+    ]);
+    // A caller-supplied `Which` implementation keeps its ordinary dispatch,
+    // which compiles the arms as the override's operands: the selection
+    // spelling is not taken, and a list arm then declines as it does at
+    // every ordinary position of this target.
+    const custom = compile(which(ce, ['List', 'x', 1], ['List', 1, 2]), {
+      to: 'interval-js',
+      fallback: false,
+      functions: { Which: () => '_IA.point(42)' },
+    });
+    expect(custom.success).toBe(false);
+    expect(custom.error).toMatch(/List/);
+  });
+
+  test('what keeps declining', () => {
+    const ce = selectionEngine();
+    // A list of verdicts is not a value of this target.
+    declines(ce, which(ce, ['List', ['Less', 'x', 1], ['Less', 'x', 2]], 1), /List/);
+    // A relation over the selection would be a list of verdicts too.
+    declines(ce, ['Less', which(ce, ['List', 'x', 1], 1), 2], /List/);
+    // The conditions stay scalar.
+    declines(
+      ce,
+      ce.box(['Which', ['List', ['Less', 'x', 1]], ['List', 'x', 1], 'True', 1]),
+      /branch condition is a collection/
+    );
+  });
+});
