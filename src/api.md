@@ -435,6 +435,41 @@ A list of the function calls to the current evaluation context
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~effects~~ {#effects-3}
+
+```ts
+get effects(): EffectHandlers
+set effects(handlers: EffectHandlerOverrides): void
+```
+
+The host capabilities of this engine: the handlers the library operators
+use to reach the host. `Print` and `Input` use `effects.console`.
+
+The registry is an immutable object. Reading returns the registry that a
+new evaluation would use. Assigning installs a new registry: the assigned
+object is a COMPLETE description — a handler it does not mention returns
+to its default, so `ce.effects = {}` restores every default. A `null`
+handler denies the capability: an operator that needs it evaluates to an
+`Error("capability-denied", …)` value.
+
+```ts
+const lines: string[] = [];
+ce.effects = {
+  console: { log: (line) => lines.push(line), readLine: () => undefined },
+};
+```
+
+Each evaluation (`evaluate()`, `N()`, `evaluateAsync()`) uses the registry
+that was installed when it started. An assignment does not change the
+handlers of an evaluation that is already running.
+
+For a change that must last for one block of code only, use
+[`withEffects`](#witheffects).
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~precision~~ {#precision-1}
 
 ```ts
@@ -610,6 +645,51 @@ that point runs **outside** the deadline and is never cancelled (see
 ####### fn
 
 () => `T` *extends* `Promise`\<`unknown`\> ? `never` : `T`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~withEffects()~~ {#witheffects-1}
+
+```ts
+withEffects<T>(overrides, fn): T
+```
+
+Run `fn` with some host capabilities replaced or denied, then put the
+previous ones back. Evaluations that START inside `fn` use the changed
+registry.
+
+`overrides` is applied on top of the registry in effect when
+`withEffects` is called, so calls nest: a capability an inner call does
+not mention keeps the handler of the outer call. A `null` value denies the
+capability, even if it has a default handler — this is how to evaluate an
+expression that is not trusted:
+
+```ts
+const result = ce.withEffects({ console: null }, () => expr.evaluate());
+```
+
+The previous registry is put back when `fn` returns or throws. If `fn`
+returns a promise, it is put back when that promise settles (fulfilled or
+rejected), and `withEffects` returns a promise that settles the same way.
+
+An asynchronous evaluation keeps the registry it started with, so an
+evaluation that started BEFORE `withEffects` was called is not changed by
+it. But while the promise of an asynchronous `fn` is pending, the changed
+registry is the installed one: an unrelated evaluation that starts during
+that time, from other code, also uses it. Start such evaluations before
+calling `withEffects`, or use a separate engine.
+
+• T
+
+####### overrides
+
+[`EffectHandlerOverrides`](#effecthandleroverrides)
+
+####### fn
+
+() => `T`
 
 </MemberCard>
 
@@ -3092,6 +3172,7 @@ ce.declare('MyGcd', {
 type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
   engine: ComputeEngine;
   expression: Expression;
+  effects: EffectHandlers;
 };
 ```
 
@@ -3135,6 +3216,23 @@ each held operand it consumes).
 
 Read-only: do not mutate it, and do not assume it is present (a handler
 invoked outside the evaluation driver may not receive one).
+
+#### EvaluateHandlerOptions.effects
+
+```ts
+effects: EffectHandlers;
+```
+
+The host capabilities of THIS evaluation: the `ce.effects` registry as it
+was when the evaluation started. A handler that reaches a host capability
+reads it from here, never from `ce.effects`, so that a change of registry
+made while the evaluation runs — or made for a different, concurrent
+asynchronous evaluation — has no effect on it.
+
+A handler may use a capability only if its operator declares the
+corresponding effect label: `options.effects.console` requires `console`
+in the signature. A `null` handler is a denial: return
+`ce.error(['capability-denied', '<capability>'])`.
 
 </MemberCard>
 
@@ -5350,6 +5448,131 @@ neq: (a, b) => boolean | undefined;
 ```ts
 type Hold = "none" | "all" | "first" | "rest" | "last" | "most";
 ```
+
+</MemberCard>
+
+## Host Capabilities
+
+### ConsoleHandler {#consolehandler}
+
+The host console, as the engine sees it: the implementation behind the
+`console` effect label. The `Print` operator calls `log`; the `Input`
+operator calls `readLine`.
+
+<MemberCard>
+
+##### ConsoleHandler.log() {#log}
+
+```ts
+log(line): void
+```
+
+Write one line of text. The line has no trailing newline; the handler
+adds the line break its output medium needs.
+
+####### line
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ConsoleHandler.readLine() {#readline}
+
+```ts
+readLine(prompt?): string | null | undefined
+```
+
+Read one line of text, synchronously. `prompt`, when given, is displayed
+before the read.
+
+The three results are distinct:
+- a string: the line, without its trailing newline;
+- `null`: end of input, or the user canceled the read — `Input`
+  evaluates to `Nothing`;
+- `undefined`: this host has no interactive input — `Input` stays
+  unevaluated.
+
+####### prompt?
+
+`string`
+
+</MemberCard>
+
+### EntropyHandler {#entropyhandler}
+
+The unseeded source of randomness of the host: the implementation behind
+the `entropy` effect label. `RandomExpression` draws from it, and so does
+every random operator (`Random`, `Shuffle`, `RandomChoice`, …) when it is
+evaluated OUTSIDE a `WithRandomSeed` frame — inside a frame the draws come
+from the seeded, deterministic stream and this handler is not consulted.
+
+<MemberCard>
+
+##### EntropyHandler.random() {#random}
+
+```ts
+random(): number
+```
+
+Return a uniformly distributed number in `[0, 1)`.
+
+</MemberCard>
+
+### EffectHandlers {#effecthandlers}
+
+The host capabilities of an engine: one handler for each capability the
+library operators can reach. This is the value of `ce.effects`.
+
+A handler is either an implementation or **`null`**. `null` is a denial:
+an operator that needs the capability evaluates to an
+`Error("capability-denied", …)` value instead of reaching the host.
+
+The object is immutable. To change a handler, install a new registry:
+assign `ce.effects`, or call `ce.withEffects()` for a change that lasts for
+one callback.
+
+Only `console` and `entropy` have a handler today, because the console
+operators and the random operators are the only library operators that
+reach a host capability. The other capability labels of the effect system
+(`network`, `fs_read`, `fs_write`, `time`, `environment`) get a handler when
+the first operator that needs one is added: a handler that no operator
+reads would accept an override and silently do nothing.
+
+<MemberCard>
+
+##### EffectHandlers.console {#console}
+
+```ts
+readonly console: ConsoleHandler | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### EffectHandlers.entropy {#entropy}
+
+```ts
+readonly entropy: EntropyHandler | null;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+### EffectHandlerOverrides {#effecthandleroverrides}
+
+```ts
+type EffectHandlerOverrides = { readonly [K in keyof EffectHandlers]?: EffectHandlers[K] };
+```
+
+A partial change to the host capabilities, for `ce.withEffects()` and the
+`ce.effects` setter. For each capability:
+- an implementation replaces the current handler;
+- `null` denies the capability, even when the default handler exists;
+- an absent key, or `undefined`, keeps the current handler.
 
 </MemberCard>
 
@@ -9881,6 +10104,41 @@ A list of the function calls to the current evaluation context
 
 <MemberCard>
 
+##### IComputeEngine.effects {#effects-2}
+
+```ts
+get effects(): EffectHandlers
+set effects(handlers: EffectHandlerOverrides): void
+```
+
+The host capabilities of this engine: the handlers the library operators
+use to reach the host. `Print` and `Input` use `effects.console`.
+
+The registry is an immutable object. Reading returns the registry that a
+new evaluation would use. Assigning installs a new registry: the assigned
+object is a COMPLETE description — a handler it does not mention returns
+to its default, so `ce.effects = {}` restores every default. A `null`
+handler denies the capability: an operator that needs it evaluates to an
+`Error("capability-denied", …)` value.
+
+```ts
+const lines: string[] = [];
+ce.effects = {
+  console: { log: (line) => lines.push(line), readLine: () => undefined },
+};
+```
+
+Each evaluation (`evaluate()`, `N()`, `evaluateAsync()`) uses the registry
+that was installed when it started. An assignment does not change the
+handlers of an evaluation that is already running.
+
+For a change that must last for one block of code only, use
+[`withEffects`](#witheffects).
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.precision {#precision}
 
 ```ts
@@ -10056,6 +10314,51 @@ that point runs **outside** the deadline and is never cancelled (see
 ####### fn
 
 () => `T` *extends* `Promise`\<`unknown`\> ? `never` : `T`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.withEffects() {#witheffects}
+
+```ts
+withEffects<T>(overrides, fn): T
+```
+
+Run `fn` with some host capabilities replaced or denied, then put the
+previous ones back. Evaluations that START inside `fn` use the changed
+registry.
+
+`overrides` is applied on top of the registry in effect when
+`withEffects` is called, so calls nest: a capability an inner call does
+not mention keeps the handler of the outer call. A `null` value denies the
+capability, even if it has a default handler — this is how to evaluate an
+expression that is not trusted:
+
+```ts
+const result = ce.withEffects({ console: null }, () => expr.evaluate());
+```
+
+The previous registry is put back when `fn` returns or throws. If `fn`
+returns a promise, it is put back when that promise settles (fulfilled or
+rejected), and `withEffects` returns a promise that settles the same way.
+
+An asynchronous evaluation keeps the registry it started with, so an
+evaluation that started BEFORE `withEffects` was called is not changed by
+it. But while the promise of an asynchronous `fn` is pending, the changed
+registry is the installed one: an unrelated evaluation that starts during
+that time, from other code, also uses it. Start such evaluations before
+calling `withEffects`, or use a separate engine.
+
+• T
+
+####### overrides
+
+[`EffectHandlerOverrides`](#effecthandleroverrides)
+
+####### fn
+
+() => `T`
 
 </MemberCard>
 
@@ -12370,7 +12673,7 @@ effect channel: "no impurity label in `effectsOf(expr)`" (see
 
 <MemberCard>
 
-##### Expression.effects {#effects-2}
+##### Expression.effects {#effects-4}
 
 ```ts
 readonly effects: 
