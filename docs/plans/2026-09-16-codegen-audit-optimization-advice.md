@@ -2,6 +2,10 @@
 
 Reviewed 2026-09-16 against compute-engine HEAD `c5a6272e`.
 
+Update: the priority list below is historical. See the
+[September 18 reassessment](2026-09-18-codegen-reassessment.md) for landed fixes,
+current-source probes, and the next recommendations.
+
 Input: `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/ce-0.128.13-all-tycho5ce55d2bd.json`.
 Design context: [interval collection handoff](2026-09-15-interval-js-collection-lowerings-handoff.md), especially sections 8–9.
 This is an advisory review; no compiler implementation was changed.
