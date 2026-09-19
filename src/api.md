@@ -6322,10 +6322,13 @@ will declare.
 The canonicalization that `ce.parse()` runs on its result consults the
 handler too, for the reading of a symbol before a parenthesized group
 (`s(x+1)` is a product when the handler says `s` is a value, an
-application when it says `s` is a function). The handler is known for
-the duration of the call only: a result parsed without canonicalization
-(`form: 'structural'`, `canonical: false`) and canonicalized later reads
-the scope alone at that later step.
+application when it says `s` is a function). Outside a `ce.parse()`
+call — a result parsed without canonicalization (`form: 'structural'`,
+`canonical: false`) and canonicalized later — the engine-wide handler
+(`ce.latexOptions.resolveSymbol`) is the one consulted; a handler passed
+to one call is known for that call only. A function declaration the
+engine inferred from an earlier application, with no body, yields to
+the handler's answer; a declaration the host made stands.
 
 The `symbol` argument is a [valid symbol](#symbols).
 

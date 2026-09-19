@@ -60,6 +60,17 @@ describe('POINTLIST STATIC WIDTH', () => {
     ]);
   });
 
+  test('a matrix component is zipped by its rows', () => {
+    // A `matrix<3x2>` contributes three rows, each a `vector<2>` coordinate;
+    // the static type carries that width as the value's type does.
+    const engine = new ComputeEngine();
+    engine.declare('M', 'matrix<3x2>');
+    engine.declare('V', 'vector<3>');
+    expect(
+      engine.parse('\\operatorname{PointList}(M, V)').type.toString()
+    ).toBe('list<tuple<vector<2>, number>^3>');
+  });
+
   test('an unknown width leaves the width off', () => {
     const engine = new ComputeEngine();
     engine.declare('L', 'list<number>');

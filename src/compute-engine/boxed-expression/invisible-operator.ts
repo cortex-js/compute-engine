@@ -672,7 +672,10 @@ function yieldInferredFunctionToOracle(
   if (!isSymbol(head)) return false;
   const def = ce.lookupDefinition(head.symbol);
   if (def === undefined || isOperatorDef(def)) return false;
-  if (!def.value.inferredType || def.value.value !== undefined) return false;
+  // The STORED value: a guess with nothing behind it, even while a value is
+  // shielded (the same reading `_infer` makes before it replaces a type).
+  if (!def.value.inferredType || def.value.storedValue !== undefined)
+    return false;
   if (!def.value.type.matches(FUNCTION_TYPE)) return false;
   const resolved = oracleHeadType(ce, head.symbol);
   if (resolved === undefined || !oracleTypeIsValue(resolved)) return false;

@@ -395,9 +395,12 @@ describe('PointList zip — JS projection composes over the construction (D4)', 
     // The interpreted route, with `n` bound: one error, not a list of markers.
     const ice = new ComputeEngine();
     ice.assign('n', ice.box(['List', 1, 2, 3]));
-    expect(ice.box(expr as any).evaluate().toString()).toMatch(
-      /incompatible-dimensions/
-    );
+    expect(
+      ice
+        .box(expr as any)
+        .evaluate()
+        .toString()
+    ).toMatch(/incompatible-dimensions/);
   });
 
   it('PointZ over a single 2-arity point FAILS CLOSED at compile time', () => {
@@ -678,18 +681,16 @@ describe('PointList — GPU projection (D3)', () => {
       );
   });
 
-  it('a COMPOSED use still declines via the operand-shape gate (v1 residual)', () => {
-    // `PointX(PointList(…))` types `list<number>` with no static dimension, so
-    // the shape gates read it as an array even though the emission is a legal
-    // `vec3`. Making the projection's TYPE carry its dimension is a follow-up.
-    // The cause is the SHAPE gate, not the projection — which is why the
-    // message is the operand-shape one, not a projection decline reason.
+  it('a COMPOSED use compiles: the projection carries its dimension', () => {
+    // `PointList(-6, v)` over a `vector<3>` types `list<tuple<…>^3>`, so
+    // `PointX` of it types `vector<3>` and the shape gate reads a `vec3`, not
+    // an array; the scalar component is repeated per point.
     const ce = gpuEngine();
-    expect(() =>
-      glsl.compile(ce.box(['Multiply', 2, ['PointX', ['PointList', -6, 'v']]]))
-    ).toThrow(
-      /Multiply: an operand lowers to a shader ARRAY .* which has no arithmetic operators/
+    const r = glsl.compile(
+      ce.box(['Multiply', 2, ['PointX', ['PointList', -6, 'v']]])
     );
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('2.0 * vec3(-6.0)');
   });
 });
 
@@ -840,11 +841,13 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
       const r = build();
       expect(r.success).toBe(true);
       // Observationally a SLOT: the same value in every point, not zipped.
-      expect((r.run as (s: any) => unknown)({ n: [1, 2, 3], c: slot })).toEqual([
-        [1, slot],
-        [2, slot],
-        [3, slot],
-      ]);
+      expect((r.run as (s: any) => unknown)({ n: [1, 2, 3], c: slot })).toEqual(
+        [
+          [1, slot],
+          [2, slot],
+          [3, slot],
+        ]
+      );
     }
   );
 

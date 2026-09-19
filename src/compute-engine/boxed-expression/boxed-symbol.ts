@@ -611,10 +611,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // A REPLACEMENT with `unknown` on a binding that holds no value is
         // the one safe case: there is no value for the setter to reset, and
         // the write forgets a guess (an inferred function declaration a
-        // `resolveSymbol` handler contradicts, `invisible-operator.ts`).
+        // `resolveSymbol` handler contradicts, `invisible-operator.ts`). The
+        // STORED value is what the setter would reset, so that is what the
+        // guard reads — the effective value is hidden while a value is
+        // shielded or overlaid by an assumption.
         if (
           inferred.isUnknown &&
-          !(inferenceMode === 'replace' && def.value.value === undefined)
+          !(inferenceMode === 'replace' && def.value.storedValue === undefined)
         )
           return false;
         // A re-inference that lands on the type already recorded is a no-op:

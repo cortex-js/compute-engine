@@ -4284,8 +4284,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // the zip pairs up to the SHORTEST component (the pairing contract of
         // `docs/BROADCAST-MODEL.md`: `PointList([1,2,3], [4,5])` is two
         // points), so the width is the smallest of them, as the value's
-        // type says. A component whose width is not known leaves the width
-        // off.
+        // type says. A component's width is its FIRST dimension: a matrix
+        // component is zipped by its rows, each row one coordinate, as
+        // `elementTypeOfD` reads its element type. A component whose width
+        // is not known leaves the width off.
         let width: number | undefined | null = undefined;
         for (const op of ops) {
           if (!isListType(op)) continue;
@@ -4294,7 +4296,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             typeof t !== 'string' && t.kind === 'list'
               ? t.dimensions
               : undefined;
-          const w = dims !== undefined && dims.length === 1 ? dims[0] : null;
+          const w = dims !== undefined && dims.length > 0 ? dims[0] : null;
           if (w === null || width === null) width = null;
           else if (width === undefined) width = w;
           else width = Math.min(width, w);

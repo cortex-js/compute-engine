@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The static width of `PointList` counts a matrix component by its rows.** The
+  0.131.2 rule carried a width only for one-dimensional list components:
+  `PointList(M, V)` with `M` a `matrix<3x2>` and `V` a `vector<3>` typed
+  `list<tuple<vector<2>, number>>` with no width, while its value types
+  `list<tuple<vector<2>, number>^3>` — the zip pairs the matrix by its rows,
+  each row one coordinate. A component's width is now its first dimension.
+
 ## 0.131.2 _2026-09-18_
 
 ### Resolved Issues
@@ -20,7 +31,10 @@
   `PointX` over that symbol typed `list<number>` instead of `vector<3>`. When
   every list component carries a width, the type now carries the smallest of
   them (the zip pairs up to the shortest component); a component of unknown
-  width leaves it off as before.
+  width leaves it off as before. A coordinate projection of such a list
+  therefore types `vector<n>`, and on the shader targets
+  `2 · PointX(PointList(-6, v))` over a `vector<3>` now compiles to
+  `2.0 * vec3(-6.0)` where the operand-shape gate declined it as an array.
 
 - **`ce.appliedNonFunctions()` reports a head whose function-ness was only
   inferred from an application.** The first parse of `g(x)` declares `g` an
