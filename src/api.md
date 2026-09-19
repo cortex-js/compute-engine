@@ -6319,6 +6319,14 @@ back to the scope's definitions. Use it to inject knowledge the scope
 cannot have yet — e.g. names a later pass of a multi-pass document load
 will declare.
 
+The canonicalization that `ce.parse()` runs on its result consults the
+handler too, for the reading of a symbol before a parenthesized group
+(`s(x+1)` is a product when the handler says `s` is a value, an
+application when it says `s` is a function). The handler is known for
+the duration of the call only: a result parsed without canonicalization
+(`form: 'structural'`, `canonical: false`) and canonicalized later reads
+the scope alone at that later step.
+
 The `symbol` argument is a [valid symbol](#symbols).
 
 #### ParseLatexOptions.parseUnexpectedToken
