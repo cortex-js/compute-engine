@@ -1,9 +1,24 @@
 ## 0.131.1 _2026-09-18_
 
+### Breaking Changes
+
+- **`\overline{z}` is the complex conjugate.** `\overline{…}` now parses as
+  `Conjugate`, and `Conjugate` serializes as `\overline{z}`. It used to
+  serialize as `z^\star`, which parses as `ConjugateTranspose` — the same
+  spelling the conjugate transpose has — so a conjugate did not survive a round
+  trip through LaTeX (Tycho ask 300: a document written with
+  `\operatorname{conj}` reached the host as `ConjugateTranspose`).
+  `\overline{…}` used to parse as `OverBar`, a decoration with no meaning;
+  `OverBar` built as MathJSON still serializes as `\overline{…}`. The other
+  `\overline` spellings keep their meaning: the repeating decimal
+  `0.\overline{3}`, and the extended sets `\overline\C`, `\overline\R`,
+  `\overline\Z` and `\overline\Q`. `z^\star` still parses as
+  `ConjugateTranspose`, which conjugates a scalar or a vector.
+
 ### Resolved Issues
 
-- **The `resolveSymbol` handler decides the product-or-application reading
-  as a declaration does.** The parser consults the handler first, but the
+- **The `resolveSymbol` handler decides the product-or-application reading as a
+  declaration does.** The parser consults the handler first, but the
   canonicalization that `ce.parse()` runs on its result read only the scope:
   with a handler answering `{ type: "number" }` for `s`, `ce.parse("s(x+1)")`
   was the application of `s`, which then typed `s` as a function and made
@@ -16,40 +31,41 @@
   number or a linear-algebra value multiplies a collection argument as a
   declared one does (`s(S)` with `s` vouched `real` and `S` a list). A
   speculative parse (`ce.parse(latex, { speculative: true })`) now reads a
-  host-declared `unknown` head as the normal parse does: the shadow it
-  declares carries the incumbent's own inferred flag.
+  host-declared `unknown` head as the normal parse does: the shadow it declares
+  carries the incumbent's own inferred flag.
 
-- **A head the host declared `unknown` keeps the product reading.** The
-  0.131.0 rule read `k(1 - w)` as an application whenever `k` was declared
-  with the type `unknown`. A document manager pre-declares its value heads so,
-  before their values are assigned (`k` is declared `unknown`, then
-  `k = 0.6` arrives), and every coefficient written before a parenthesis in
-  such a document became a call to an unknown function: the definition that
-  held it was never installed (Tycho's exoplanet-transit showcase, `I(w) = 1
-  - k(1 - \sqrt{1 - w^2})`, compiled to "Unknown operator `I`"). An explicit
-  `unknown` declaration says the name is a VALUE whose type is not known yet,
-  so it is type information: the product reading applies, as it does for a
-  declared number. Only an undeclared head, or one the engine auto-declared
-  from a bare use with a still-unknown inferred type, is applied.
+- **A head the host declared `unknown` keeps the product reading.** The 0.131.0
+  rule read `k(1 - w)` as an application whenever `k` was declared with the type
+  `unknown`. A document manager pre-declares its value heads so, before their
+  values are assigned (`k` is declared `unknown`, then `k = 0.6` arrives), and
+  every coefficient written before a parenthesis in such a document became a
+  call to an unknown function: the definition that held it was never installed
+  (Tycho's exoplanet-transit showcase, `I(w) = 1
+  - k(1 - \sqrt{1 -
+    w^2})`, compiled to "Unknown operator `I`"). An explicit `unknown`
+    declaration says the name is a VALUE whose type is not known yet, so it is
+    type information: the product reading applies, as it does for a declared
+    number. Only an undeclared head, or one the engine auto-declared from a bare
+    use with a still-unknown inferred type, is applied.
 
-- **`ConjugateTranspose` over a vector of more than 100 elements evaluates.**
-  A broadcast over more than `MAX_SIZE_EAGER_COLLECTION` elements produces a
-  lazy collection, not a `List` literal, and the `ConjugateTranspose` handler
-  packed its operand as a tensor, which refuses a lazy collection: `z^\star`
-  over a 200-element vector stayed symbolic while `Conjugate` over the same
-  vector evaluated (a piecewise over such a condition was a symbolic `Which`
-  of 8 MB; Tycho ask 300). The handler now conjugates a vector of numbers
-  element-wise whatever form it arrives in, decided from the operand's type,
-  so a matrix arriving lazily is still transposed.
+- **`ConjugateTranspose` over a vector of more than 100 elements evaluates.** A
+  broadcast over more than `MAX_SIZE_EAGER_COLLECTION` elements produces a lazy
+  collection, not a `List` literal, and the `ConjugateTranspose` handler packed
+  its operand as a tensor, which refuses a lazy collection: `z^\star` over a
+  200-element vector stayed symbolic while `Conjugate` over the same vector
+  evaluated (a piecewise over such a condition was a symbolic `Which` of 8 MB;
+  Tycho ask 300). The handler now conjugates a vector of numbers element-wise
+  whatever form it arrives in, decided from the operand's type, so a matrix
+  arriving lazily is still transposed.
 
 ## 0.131.0 _2026-09-18_
 
 ### New Features
 
 - **Host capabilities: `ce.effects` and `ce.withEffects()`.** The engine now
-  reaches the host through a registry of handlers that the embedding
-  application can replace or deny, one engine at a time. The first handler is
-  `console`, used by `Print` and `Input` (Epsil `print` and `input`):
+  reaches the host through a registry of handlers that the embedding application
+  can replace or deny, one engine at a time. The first handler is `console`,
+  used by `Print` and `Input` (Epsil `print` and `input`):
 
   ```ts
   const lines: string[] = [];
@@ -61,9 +77,9 @@
   `log(line)` receives each printed line. `readLine(prompt)` returns the line
   read, `null` at end of input (`Input` evaluates to `Nothing`), or `undefined`
   when the host has no interactive input (`Input` stays unevaluated). The
-  default handler is unchanged behavior: the real console, the terminal in
-  Node, the `prompt()` dialog in a browser. An assignment is a complete
-  description, so `ce.effects = {}` restores the defaults.
+  default handler is unchanged behavior: the real console, the terminal in Node,
+  the `prompt()` dialog in a browser. An assignment is a complete description,
+  so `ce.effects = {}` restores the defaults.
 
   A handler set to **`null` denies the capability**: the operator evaluates to
   an `Error("capability-denied", "console")` value and does not reach the host.
@@ -77,45 +93,45 @@
 
   The second handler is **`entropy`**, the unseeded source of randomness:
   `{ random(): number }`, a uniform number in `[0, 1)`, `Math.random` by
-  default. `RandomExpression` draws from it, and so does every random
-  operator (`Random`, `RandomShuffle`, `RandomChoice`, `RandomPrime`, the
-  Monte-Carlo estimators, …) when evaluated OUTSIDE a `WithRandomSeed` frame;
-  inside a frame the draws come from the seeded stream and the handler is not
-  consulted. A constant handler makes unframed random operators reproducible
-  in tests; `entropy: null` makes each of them evaluate to
+  default. `RandomExpression` draws from it, and so does every random operator
+  (`Random`, `RandomShuffle`, `RandomChoice`, `RandomPrime`, the Monte-Carlo
+  estimators, …) when evaluated OUTSIDE a `WithRandomSeed` frame; inside a frame
+  the draws come from the seeded stream and the handler is not consulted. A
+  constant handler makes unframed random operators reproducible in tests;
+  `entropy: null` makes each of them evaluate to
   `Error("capability-denied", "entropy")` (naming the operator) — a compiled
   function throws `CapabilityDeniedError` instead, since compiled code has no
   error-value channel.
 
-  Each evaluation uses the registry that was installed when it started. A
-  change made while an evaluation runs, or made with `withEffects` for another
+  Each evaluation uses the registry that was installed when it started. A change
+  made while an evaluation runs, or made with `withEffects` for another
   asynchronous evaluation on the same engine, does not reach it. Operator
-  handlers receive that registry as `options.effects`; a custom operator may
-  use `options.effects.console` if its signature declares the `console`
-  effect, and `options.effects.entropy` if it declares `entropy`. This is
-  Stage 4 of `docs/EFFECTS-MODEL.md`, for the `console` and `entropy`
-  capabilities; the other capabilities of that document (`network`,
-  `filesystem`, `time`, …) get a handler with their first operator.
+  handlers receive that registry as `options.effects`; a custom operator may use
+  `options.effects.console` if its signature declares the `console` effect, and
+  `options.effects.entropy` if it declares `entropy`. This is Stage 4 of
+  `docs/EFFECTS-MODEL.md`, for the `console` and `entropy` capabilities; the
+  other capabilities of that document (`network`, `filesystem`, `time`, …) get a
+  handler with their first operator.
 
   The type of the `options` argument of an `evaluate`/`evaluateAsync` handler,
   `EvaluateHandlerOptions`, has a new required member, `effects`. Code that
-  calls a handler directly with an options object it builds itself must add
-  it; code that forwards the `options` it received needs no change.
+  calls a handler directly with an options object it builds itself must add it;
+  code that forwards the `options` it received needs no change.
 
 ### Epsil
 
 - **The MCP server no longer patches globals to capture `print` and to keep
   `input` symbolic.** It used to replace `console.log` and hide
   `process.getBuiltinModule` and `prompt` around each evaluation. It now gives
-  the session's engine a `console` handler (`ce.effects`). The `output` lines
-  of the `evaluate` tool and the unevaluated `input(…)` are unchanged.
+  the session's engine a `console` handler (`ce.effects`). The `output` lines of
+  the `evaluate` tool and the unevaluated `input(…)` are unchanged.
 - **A denied `print` or `input` is a `capability-denied` runtime error**, with
-  an extended explanation (`epsil doc capability-denied`). The program
-  continues after it.
+  an extended explanation (`epsil doc capability-denied`). The program continues
+  after it.
 
 - **The VS Code extension navigates and renames type names, and renames a
-  parameter together with its named-argument labels.** A use of a declared
-  type sits inside type text (`let p: point`, `(point) -> list<point>`, another
+  parameter together with its named-argument labels.** A use of a declared type
+  sits inside type text (`let p: point`, `(point) -> list<point>`, another
   type's declaration, a protocol member's signature, a `where` constraint),
   which the parser keeps as an opaque string, so Go to Definition on an
   annotation found nothing, Find All References on a `type` listed only the
@@ -123,20 +139,19 @@
   (`src/epsil/occurrences.ts`) now lexes the source of that text and records
   each use of a type this file declares. Types and values stay separate
   namespaces (`(point: point) => point` has one use of the type), and field
-  labels, sum-type variant names, type variables and builtin type names are
-  not uses. A label such as the `a` of `g(a: 2)` is now an occurrence of the
+  labels, sum-type variant names, type variables and builtin type names are not
+  uses. A label such as the `a` of `g(a: 2)` is now an occurrence of the
   parameter it names when the callee is bound to exactly one function literal,
   so renaming the parameter rewrites the label too and Go to Definition on a
-  label reaches the parameter. Both renames still fail closed: a type is
-  refused while some spelling of its name resolves to no binding, and a
-  parameter is refused while a label of that name belongs to a callee whose
-  parameters are not certain (several clauses, a reassigned name, a library
-  or undeclared function). A parameter rename also rewrites the name its
-  declaration's signature annotation spells
-  (`const f: (a: number) -> number = (a) => a`), which the parser requires to
-  agree with the literal's. The new name of a type must be a plain identifier
-  that the type grammar does not reserve, that is not a builtin type, and
-  that no generic parameter in the file already spells.
+  label reaches the parameter. Both renames still fail closed: a type is refused
+  while some spelling of its name resolves to no binding, and a parameter is
+  refused while a label of that name belongs to a callee whose parameters are
+  not certain (several clauses, a reassigned name, a library or undeclared
+  function). A parameter rename also rewrites the name its declaration's
+  signature annotation spells (`const f: (a: number) -> number = (a) => a`),
+  which the parser requires to agree with the literal's. The new name of a type
+  must be a plain identifier that the type grammar does not reserve, that is not
+  a builtin type, and that no generic parameter in the file already spells.
 
 - **`epsil check` reports a call whose argument cannot satisfy the parameter
   annotation of a function literal bound with `let`, `const` or `:=`.**
@@ -175,33 +190,32 @@
 
 ### Breaking Changes
 
-- **A symbol with no type information followed by a parenthesized argument
-  is an application.** `f(x)` with `f` undeclared, or declared with an unknown
-  type, now parses as `["f", "x"]`. It used to parse as the product `f·x`
-  whenever the argument could be a number, which is silent when wrong:
+- **A symbol with no type information followed by a parenthesized argument is an
+  application.** `f(x)` with `f` undeclared, or declared with an unknown type,
+  now parses as `["f", "x"]`. It used to parse as the product `f·x` whenever the
+  argument could be a number, which is silent when wrong:
   `\operatorname{conj}(L)` over a list was the product `conj·L`, and
   `\int f(x) g(x) dx` pulled `g` out of the integral as a constant. A wrong
   application stays visible instead — `f(2)` evaluates to itself — and the
   declaration it makes is inferred, so a later value for `f` overrides it. The
   same reading applies on the box route (`InvisibleOperator(f, Delimiter(…))`),
   with a coefficient (`2f(x)` is `2·f(x)`), and through a power or a factorial
-  on the argument list (`f(3)^2` is `f(3)²`). The product reading remains for
-  a head that is a value: declared with a concrete type (`a: real`, `v: value`),
-  assigned a value, a constant (`\pi(x+1)`), a parameter of the function
-  literal being read (`(x, N) \mapsto x(N+1)`), or a head its own argument
-  refers to (`q(2q)`, `x(x+1)`). Definition order does not change the
-  reading: a function literal that applied a head before it had a definition
-  binds the definition made later (`A(t) := \sum h(i) a(2^i t)` before `a`
-  and `h` are defined), and is re-read as a product when the head instead
-  gains a value or a numeric declaration (`g(t) := 2x(t+1)` then `x := 5`
-  gives `g(3) = 40`). Because `s(x+1)` now re-parses as an application, the
-  serializer writes an explicit multiplication between a symbol and a
-  parenthesized group: `Multiply(s, x+1)` serializes as `s\times(x+1)`, as it
-  already did for a single uppercase letter (Tycho item 71). A non-canonical
-  `InvisibleOperator` still serializes as written. In non-strict mode
-  (`strict: false`) an unrecognized letter run before a parenthesis is still
-  split into letters, and the last letter is applied: `foo(x)` is
-  `f·o·o(x)`.
+  on the argument list (`f(3)^2` is `f(3)²`). The product reading remains for a
+  head that is a value: declared with a concrete type (`a: real`, `v: value`),
+  assigned a value, a constant (`\pi(x+1)`), a parameter of the function literal
+  being read (`(x, N) \mapsto x(N+1)`), or a head its own argument refers to
+  (`q(2q)`, `x(x+1)`). Definition order does not change the reading: a function
+  literal that applied a head before it had a definition binds the definition
+  made later (`A(t) := \sum h(i) a(2^i t)` before `a` and `h` are defined), and
+  is re-read as a product when the head instead gains a value or a numeric
+  declaration (`g(t) := 2x(t+1)` then `x := 5` gives `g(3) = 40`). Because
+  `s(x+1)` now re-parses as an application, the serializer writes an explicit
+  multiplication between a symbol and a parenthesized group: `Multiply(s, x+1)`
+  serializes as `s\times(x+1)`, as it already did for a single uppercase letter
+  (Tycho item 71). A non-canonical `InvisibleOperator` still serializes as
+  written. In non-strict mode (`strict: false`) an unrecognized letter run
+  before a parenthesis is still split into letters, and the last letter is
+  applied: `foo(x)` is `f·o·o(x)`.
 
 ### Resolved Issues
 
@@ -213,8 +227,8 @@
   held `conj(L)` could decide no element, stayed a symbolic `Which`, and held
   one copy of the list per element (41 MB of MathJSON for a 500-point list,
   against a 50 KB list of 500 points once `conj` is recognized). The entry is
-  parse-only, like `\operatorname{real}` and `\operatorname{imag}`:
-  `Conjugate` keeps serializing as `z^\star`.
+  parse-only, like `\operatorname{real}` and `\operatorname{imag}`: `Conjugate`
+  keeps serializing as `z^\star`.
 
 - **A square of a base that ends with a superscript serializes with a braced
   base.** `Power(Transpose(A), 2)` serialized as `A^T^2` and
@@ -312,63 +326,61 @@
   lowering of this target spells), 2 an `Add` over a matrix. Pinned in
   `test/compute-engine/compile-interval-collections.test.ts`.
 
-- **The interval target compiles point arithmetic.** A helper chain that
-  builds points with arithmetic and reads them back by coordinate —
+- **The interval target compiles point arithmetic.** A helper chain that builds
+  points with arithmetic and reads them back by coordinate —
   `r(V, a) := V.x·(cos a, sin a) + V.y·(−sin a, cos a)`, `r(M, −a) − C(D, d)`,
   `(a.x, −a.y) / (a.x² + a.y²)` — declined at "`PointList`: no lowering",
   because a point in the operand position of a kernel had none. A point is the
   array of its coordinate intervals, and the interpreter's arithmetic over
-  points is coordinate-wise (point ± point, scalar × point, point / scalar,
-  the negation of a point), so `Add`, `Subtract`, `Negate`, `Multiply` and
-  `Divide` over a point-valued operand now lower through the run-time
-  `_IA.bcastPoint`, which hands the kernel one coordinate at a time. The
-  helper is told which arguments are point-valued, because the value cannot
-  tell a point from a list of two numbers and the two broadcast differently:
-  the interpreter answers one point per element of a list beside a point
-  (`[1, 2]·(10, 20)` is `[(10, 20), (20, 40)]`), and a list of points plus a
-  point adds the point to every element. "Point-valued" covers a declared
-  tuple, a literal point, a list of points and a point-or-point-list union —
-  a document host that declares a helper's point parameter loosely types
-  `V.y·(−sin a, cos a)` as a list of points although the value is one point.
-  The operand shapes the interpreter refuses (point + number, point × point,
-  a division by a point) keep declining, as do `Abs` (the norm of a point)
-  and the elementary functions over a declared point. Two positions that
-  swallowed a point were opened with it: a point-valued helper DECLARED with a
-  return type inlines to its body under a `Typed` ascription, which is now
-  read through where a point is consumed (a contradicted scalar declaration
-  still declines), and a literal `PointList` of untyped coordinates under a
-  coordinate accessor is spelled as the array of its coordinates. On 17 Tycho
-  census documents, 30 interval-lane rows go from a decline to a compile, with
-  no regression and no change on the other lanes; each new row encloses the
-  JavaScript lane's value at sample points. Pinned in
+  points is coordinate-wise (point ± point, scalar × point, point / scalar, the
+  negation of a point), so `Add`, `Subtract`, `Negate`, `Multiply` and `Divide`
+  over a point-valued operand now lower through the run-time `_IA.bcastPoint`,
+  which hands the kernel one coordinate at a time. The helper is told which
+  arguments are point-valued, because the value cannot tell a point from a list
+  of two numbers and the two broadcast differently: the interpreter answers one
+  point per element of a list beside a point (`[1, 2]·(10, 20)` is
+  `[(10, 20), (20, 40)]`), and a list of points plus a point adds the point to
+  every element. "Point-valued" covers a declared tuple, a literal point, a list
+  of points and a point-or-point-list union — a document host that declares a
+  helper's point parameter loosely types `V.y·(−sin a, cos a)` as a list of
+  points although the value is one point. The operand shapes the interpreter
+  refuses (point + number, point × point, a division by a point) keep declining,
+  as do `Abs` (the norm of a point) and the elementary functions over a declared
+  point. Two positions that swallowed a point were opened with it: a
+  point-valued helper DECLARED with a return type inlines to its body under a
+  `Typed` ascription, which is now read through where a point is consumed (a
+  contradicted scalar declaration still declines), and a literal `PointList` of
+  untyped coordinates under a coordinate accessor is spelled as the array of its
+  coordinates. On 17 Tycho census documents, 30 interval-lane rows go from a
+  decline to a compile, with no regression and no change on the other lanes;
+  each new row encloses the JavaScript lane's value at sample points. Pinned in
   `test/compute-engine/compile-interval-collections.test.ts`.
 
-- **The interval target compiles a selection among list values, and the
-  absence marker survives every kernel.** A helper whose case arms answer a
-  list in one case and a number in another — `H(x, y) := {B(x, y) > 0: 0,
-  h(⌊x⌋, ⌊y⌋)·2 − 1}` in the Tycho document `sgtdqnj2ox`, read by a dot
-  product and a norm — declined on the interval target at "`List`: no
-  lowering": a list under a `Which` arm had no spelling. A `Which` at a
-  position that consumes its value whole (the body root of a helper, an
-  argument the callee binds whole, an accessor or reducer operand, the
-  compilation root) is now a selection among values: each arm takes the
+- **The interval target compiles a selection among list values, and the absence
+  marker survives every kernel.** A helper whose case arms answer a list in one
+  case and a number in another —
+  `H(x, y) := {B(x, y) > 0: 0, h(⌊x⌋, ⌊y⌋)·2 − 1}` in the Tycho document
+  `sgtdqnj2ox`, read by a dot product and a norm — declined on the interval
+  target at "`List`: no lowering": a list under a `Which` arm had no spelling. A
+  `Which` at a position that consumes its value whole (the body root of a
+  helper, an argument the callee binds whole, an accessor or reducer operand,
+  the compilation root) is now a selection among values: each arm takes the
   collection spelling where it has one and compiles as an interval otherwise,
   the conditions stay scalar, and an undecided condition answers the
   element-wise hull of two lists or the absence marker for a list against a
-  number, since no one value encloses both. A scalar position is unchanged:
-  a kernel over such a selection broadcasts over whichever arm is taken
-  (`Which(x > 0: [x, 1], 1) + 1` is `[x + 1, 2]` or `2`), and a list of
-  verdicts under an arm, or a relation over the selection, keeps declining.
-  A point under a `Which` arm is a selection too. Reached through this, a
-  second defect: the kernels that branch on the sign of their input —
-  `sqrt`, `square`, `abs`, `ln`, `gamma`, `gammaln` — widened the numeric
-  absence marker (a whole-NaN interval, every comparison with which is
-  false) to an enclosure such as `[0, ∞)` through their "straddles zero"
-  arm, so `l(H(…))` over the scalar arm answered a present-looking value
-  where the interpreter has none. They now propagate a NaN input as the
-  step functions already did. On the census, the six interval-lane rows of
-  `sgtdqnj2ox` go from a decline to a compile and agree with the JavaScript
-  lane at every sample point. Pinned in
+  number, since no one value encloses both. A scalar position is unchanged: a
+  kernel over such a selection broadcasts over whichever arm is taken
+  (`Which(x > 0: [x, 1], 1) + 1` is `[x + 1, 2]` or `2`), and a list of verdicts
+  under an arm, or a relation over the selection, keeps declining. A point under
+  a `Which` arm is a selection too. Reached through this, a second defect: the
+  kernels that branch on the sign of their input — `sqrt`, `square`, `abs`,
+  `ln`, `gamma`, `gammaln` — widened the numeric absence marker (a whole-NaN
+  interval, every comparison with which is false) to an enclosure such as
+  `[0, ∞)` through their "straddles zero" arm, so `l(H(…))` over the scalar arm
+  answered a present-looking value where the interpreter has none. They now
+  propagate a NaN input as the step functions already did. On the census, the
+  six interval-lane rows of `sgtdqnj2ox` go from a decline to a compile and
+  agree with the JavaScript lane at every sample point. Pinned in
   `test/compute-engine/compile-interval-collections.test.ts` and
   `test/compute-engine/interval-arithmetic.test.ts`.
 

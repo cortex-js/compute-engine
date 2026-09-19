@@ -1,4 +1,6 @@
-import { LatexDictionary } from '../types.js';
+import { LatexDictionary, Parser } from '../types.js';
+import { MathJsonExpression } from '../../../math-json/types.js';
+import { singleArgSerializer } from './definitions-other.js';
 
 export const DEFINITIONS_COMPLEX: LatexDictionary = [
   {
@@ -44,16 +46,25 @@ export const DEFINITIONS_COMPLEX: LatexDictionary = [
     parse: 'Imaginary',
     arguments: 'implicit',
   },
+  // The complex conjugate is written `\overline{z}`, and `\overline{…}` reads
+  // as the conjugate. `z^\star` is the conjugate transpose
+  // (`ConjugateTranspose`, `definitions-linear-algebra.ts`), which is the
+  // conjugate for a scalar or a vector; `Conjugate` used to serialize as
+  // `z^\star` as well, so it did not survive a round trip through LaTeX.
   {
     name: 'Conjugate',
-    latexTrigger: ['^', '\\star'],
-    kind: 'postfix',
+    latexTrigger: ['\\overline'],
+    parse: (parser: Parser): MathJsonExpression => {
+      const arg = parser.parseGroup();
+      return arg === null ? ['Conjugate'] : ['Conjugate', arg];
+    },
+    serialize: singleArgSerializer('\\overline'),
   },
   // Function-style alias: `\operatorname{conj}(z)`, the spelling Desmos writes
   // for the complex conjugate. Without it `conj` lexed as an undeclared symbol:
   // `\operatorname{conj}(z)` was the product `conj·z`, and over a list argument
   // it was an unknown function, which does not broadcast. Parse-only:
-  // `Conjugate` keeps serializing as `z^\star`.
+  // `Conjugate` serializes as `\overline{z}`.
   {
     symbolTrigger: 'conj',
     kind: 'function',

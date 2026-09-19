@@ -963,6 +963,12 @@ function serializeMultiply(
       else if (/^\d/.test(term)) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
+      // A conjugate of a number after a number reads as a repeating
+      // decimal when juxtaposed: `Multiply(0.5, Conjugate(3))` written
+      // `0.5\overline{3}` is the rational `8/15`.
+      else if (prevWasNumber && /^\\overline\{\d/.test(term)) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      }
       // A bare symbol juxtaposed with a parenthesized group re-parses as a
       // function CALL, not as a product: `s(x+1)` reads as `s` applied to
       // `x+1` when `s` has no type information (`canonicalInvisibleOperator`),

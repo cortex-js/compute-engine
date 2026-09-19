@@ -289,8 +289,42 @@ describe('Desmos spelling for the complex conjugate', () => {
     ]);
   });
 
-  test('the alias is parse-only: serialization is unchanged', () => {
-    expect(ce.box(['Conjugate', 'z']).latex).toBe('z^\\star');
+  test('`Conjugate` serializes as `\\overline{z}`, which parses back as `Conjugate`', () => {
+    // `z^\star` is the conjugate transpose, so a conjugate serialized that
+    // way came back as `ConjugateTranspose`.
+    const conjugate = ce.box(['Conjugate', 'z']);
+    expect(conjugate.latex).toBe('\\overline{z}');
+    expect(ce.parse(conjugate.latex).json).toEqual(['Conjugate', 'z']);
+    expect(ce.parse('\\operatorname{conj}(z)').latex).toBe('\\overline{z}');
+    // The base ends with a brace, not a superscript: no bracing of the square.
+    expect(ce.parse('\\operatorname{conj}(z)^2').latex).toBe('\\overline{z}^2');
+    expect(ce.parse('\\overline{z}^2').json).toEqual([
+      'Power',
+      ['Conjugate', 'z'],
+      2,
+    ]);
+    // Other `\overline` spellings keep their meaning.
+    expect(ce.parse('\\overline\\C').json).toEqual('ExtendedComplexNumbers');
+    expect(ce.parse('0.\\overline{3}').json).toEqual(['Rational', 1, 3]);
+    expect(ce.box(['OverBar', 'x'], { form: 'raw' }).latex).toBe(
+      '\\overline{x}'
+    );
+  });
+
+  test('a conjugate of a number after a number is not a repeating decimal', () => {
+    // Juxtaposed, `0.5\overline{3}` would read as the rational `8/15`.
+    const product = ce.box(['Multiply', 0.5, ['Conjugate', 3]], {
+      form: 'raw',
+    });
+    expect(product.latex).toBe('0.5\\times\\overline{3}');
+    expect(ce.parse(product.latex).json).toEqual([
+      'Multiply',
+      0.5,
+      ['Conjugate', 3],
+    ]);
+    expect(ce.box(['Multiply', 2, ['Conjugate', 'z']]).latex).toBe(
+      '2\\overline{z}'
+    );
   });
 
   test('`conj` evaluates like `Conjugate`, and broadcasts over a list', () => {
@@ -322,7 +356,9 @@ describe('Desmos spelling for the complex conjugate', () => {
 
 describe('A square of a base that ends with a superscript', () => {
   test('the base is braced, so the LaTeX has no double superscript', () => {
-    expect(ce.parse('\\operatorname{conj}(z)^2').latex).toBe('{z^\\star}^2');
+    expect(ce.box(['Power', ['ConjugateTranspose', 'z'], 2]).latex).toBe(
+      '{z^\\star}^2'
+    );
     expect(ce.box(['Power', ['Transpose', 'A'], 2]).latex).toBe('{A^T}^2');
     expect(ce.box(['Square', ['Prime', 'f']], { form: 'raw' }).latex).toBe(
       '{f^{\\prime}}^2'

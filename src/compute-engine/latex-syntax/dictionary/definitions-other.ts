@@ -78,11 +78,21 @@ function singleArgCommand(
     name,
     latexTrigger: [cmd],
     parse: parseSingleArg(name),
-    serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      const arg = operand(expr, 1);
-      if (arg === null) return cmd;
-      return `${cmd}{${serializer.serialize(arg)}}`;
-    },
+    serialize: singleArgSerializer(cmd),
+  };
+}
+
+/** The serializer of a LaTeX command that takes a single braced argument:
+ * `cmd{arg}`, or the bare command when the operator has no operand. Shared
+ * by the decorations above and by every operator that prints as such a
+ * command under another name (`Conjugate`, `definitions-complex.ts`). */
+export function singleArgSerializer(
+  cmd: string
+): (serializer: Serializer, expr: MathJsonExpression) => string {
+  return (serializer, expr) => {
+    const arg = operand(expr, 1);
+    if (arg === null) return cmd;
+    return `${cmd}{${serializer.serialize(arg)}}`;
   };
 }
 
@@ -316,7 +326,10 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
     },
     precedence: 740,
   },
-  singleArgCommand('OverBar', '\\overline'),
+  // `\overline{…}` parses as the complex conjugate (`Conjugate`,
+  // `definitions-complex.ts`). `OverBar` stays a serializable decoration for
+  // an expression built as MathJSON.
+  { name: 'OverBar', serialize: singleArgSerializer('\\overline') },
   singleArgCommand('UnderBar', '\\underline'),
   singleArgCommand('OverVector', '\\vec'),
   singleArgCommand('OverTilde', '\\tilde'),

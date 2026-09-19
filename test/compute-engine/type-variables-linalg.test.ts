@@ -80,7 +80,10 @@ describe('Conjugate — (T) -> T where T: number', () => {
   test('D10 — broadcast evaluates elementwise over complex entries', () => {
     const ce = fresh();
     expect(
-      ce.box(['Conjugate', ['List', ['Complex', 1, 2], 3]]).evaluate().toString()
+      ce
+        .box(['Conjugate', ['List', ['Complex', 1, 2], 3]])
+        .evaluate()
+        .toString()
     ).toBe('[(1 - 2i),3]');
   });
 
@@ -124,7 +127,10 @@ describe('Conjugate — (T) -> T where T: number', () => {
     const ce = fresh();
     expect(ce.box(['Conjugate', 2]).evaluate().toString()).toBe('2');
     expect(
-      ce.box(['Conjugate', ['Complex', 1, 2]]).evaluate().toString()
+      ce
+        .box(['Conjugate', ['Complex', 1, 2]])
+        .evaluate()
+        .toString()
     ).toBe('(1 - 2i)');
     expect(
       ce
@@ -138,8 +144,8 @@ describe('Conjugate — (T) -> T where T: number', () => {
     const ce = fresh();
     const viaFunction = ce.function('Conjugate', [ce.number(2)]);
     const viaBox = ce.box(['Conjugate', 2]);
-    // `\overline{…}` is `OverBar` and `^\star` is `ConjugateTranspose`; the
-    // only LaTeX form that reaches `Conjugate` is the operator name.
+    // `^\star` is `ConjugateTranspose`; `\overline{…}` and the operator
+    // name reach `Conjugate`.
     const viaParse = ce.parse('\\operatorname{Conjugate}(2)');
     expect(viaParse.operator).toBe('Conjugate');
     expect(viaFunction.type.toString()).toBe('integer');
@@ -160,7 +166,9 @@ describe('Conjugate — (T) -> T where T: number', () => {
       'vector<integer^3>'
     );
     expect(
-      ce.parse('\\operatorname{Conjugate}(\\lbrack 1, 2, 3\\rbrack)').type.toString()
+      ce
+        .parse('\\operatorname{Conjugate}(\\lbrack 1, 2, 3\\rbrack)')
+        .type.toString()
     ).toBe('vector<integer^3>');
   });
 });
