@@ -1701,9 +1701,10 @@ export interface IComputeEngine {
    * scope for the parser; the canonicalization that `ce.parse()` runs on its
    * result consults it here for the same question the scope answers, whether
    * a symbol is a value (`invisible-operator.ts`, the reading of `s(x+1)`).
-   * The handler is known for the duration of the call only: a result parsed
-   * without canonicalization (`form: 'structural'`, `canonical: false`) and
-   * canonicalized later reads the scope alone at that later step.
+   * Outside a parse the engine-wide `latexOptions.resolveSymbol` is read in
+   * its place (`oracleHeadType`, `invisible-operator.ts`), so a result parsed
+   * without canonicalization and canonicalized later reads as a canonical
+   * parse does.
    * @internal
    */
   _activeSymbolOracle:

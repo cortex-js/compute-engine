@@ -537,7 +537,10 @@ describe('REFERENCED_FUNCTIONS / REFERENCES', () => {
     const ce = new ComputeEngine();
     const lambda = ce.function(
       'Function',
-      [ce.function('p', [ce.symbol('x')], { canonical: false }), ce.symbol('p')],
+      [
+        ce.function('p', [ce.symbol('x')], { canonical: false }),
+        ce.symbol('p'),
+      ],
       { canonical: false }
     );
     expect(lambda.referencedFunctions).toEqual([]);
@@ -586,5 +589,19 @@ describe('APPLIED_NON_FUNCTIONS', () => {
     const ce = new ComputeEngine();
     ce.appliedNonFunctions('g(x)');
     expect(ce.lookupDefinition('g')).toBeUndefined();
+  });
+
+  it('still reports a head whose function-ness was only inferred from an application', () => {
+    // Parsing `g(x)` declares `g` an inferred function with no body; that is
+    // the engine's guess, not a definition by the host.
+    const ce = new ComputeEngine();
+    ce.parse('g(x)');
+    expect(ce.parse('\\mathrm{myfn}(2)').evaluate().toString()).toBe('myfn(2)');
+    expect(ce.appliedNonFunctions('g(x)')).toEqual(['g']);
+    expect(ce.appliedNonFunctions('\\mathrm{myfn}(2)')).toEqual(['myfn']);
+    ce.declare('f', 'function');
+    expect(ce.appliedNonFunctions('f(x) + g(x)')).toEqual(['g']);
+    ce.assign('g', ce.parse('x \\mapsto 2x'));
+    expect(ce.appliedNonFunctions('g(x)')).toEqual([]);
   });
 });

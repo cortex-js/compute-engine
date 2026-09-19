@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **The `resolveSymbol` handler is consulted outside a `ce.parse()` call too,
+  and outranks a function declaration the engine inferred.** The 0.131.1 rule
+  read the handler only for the duration of the parse call: a raw or structural
+  result canonicalized later read an undefined head as an application and left
+  the head declared as an inferred, bodiless function, after which even a
+  canonical parse read the application (Tycho ask 303: `b(\cos(NX)-1)` with a
+  handler vouching `b` as a value). Outside a parse the engine-wide
+  `latexOptions.resolveSymbol` is now consulted, and an inferred function
+  declaration with no body yields to the handler's answer; a declaration the
+  host made, or one that holds a value, stands.
+
+- **The static type of `PointList` over list components carries the list's
+  width.** `PointList([0.1, 0.4, 0.8], [0.2, 0.7, 0.3])` typed
+  `list<tuple<real, real>>` while its value types `list<tuple<real, real>^3>`,
+  so a consumer that declares a symbol from the static type lost the width, and
+  `PointX` over that symbol typed `list<number>` instead of `vector<3>`. When
+  every list component carries a width, the type now carries the smallest of
+  them (the zip pairs up to the shortest component); a component of unknown
+  width leaves it off as before.
+
+- **`ce.appliedNonFunctions()` reports a head whose function-ness was only
+  inferred from an application.** The first parse of `g(x)` declares `g` an
+  inferred function with no body, and the call then answered `[]` for `g` (Tycho
+  ask 302: a notebook's "define `g(x)`?" prompt vanished after the first
+  evaluation). Such a declaration is the engine's guess, not the host's
+  definition, so it does not count as a function for this call; a host
+  declaration or an assigned body does.
+
 ## 0.131.1 _2026-09-18_
 
 ### Breaking Changes

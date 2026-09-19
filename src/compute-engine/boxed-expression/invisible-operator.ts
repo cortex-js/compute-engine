@@ -130,6 +130,7 @@ export function canonicalInvisibleOperator(
     // Note: lhs might be a Subscript (e.g., f_\text{a}) which canonicalizes
     // to a symbol (f_a). Canonicalize first to handle this case.
     const lhsCanon = lhs.canonical;
+    yieldInferredFunctionToOracle(ce, lhsCanon);
 
     // A DECLARED function symbol applied to an argument list that carries a
     // power or a factorial: `(f)(3)^2`, `(\sin)(x)^2`. The postfix binds to
@@ -655,6 +656,30 @@ function isDeclaredFunction(ce: ComputeEngine, name: string): boolean {
 }
 
 /**
+ * Let the `resolveSymbol` handler's answer outrank the engine's own guess:
+ * a head that was declared a FUNCTION only because it was applied before
+ * (an inferred declaration with no body) is retyped to the value type the
+ * handler answers, in place, so every later read of the head — this
+ * juxtaposition's and the scope's — sees a value. A declaration the host
+ * made, or one that holds a value, stands: the handler supplements the
+ * scope, it does not override the host. Returns whether the head was
+ * retyped.
+ */
+function yieldInferredFunctionToOracle(
+  ce: ComputeEngine,
+  head: Expression
+): boolean {
+  if (!isSymbol(head)) return false;
+  const def = ce.lookupDefinition(head.symbol);
+  if (def === undefined || isOperatorDef(def)) return false;
+  if (!def.value.inferredType || def.value.value !== undefined) return false;
+  if (!def.value.type.matches(FUNCTION_TYPE)) return false;
+  const resolved = oracleHeadType(ce, head.symbol);
+  if (resolved === undefined || !oracleTypeIsValue(resolved)) return false;
+  return head._infer(() => resolved.type, 'replace');
+}
+
+/**
  * The application of a declared function symbol through a power or a
  * factorial the parser attached to its argument list — `(f)(3)^2` is
  * `Power(f(3), 2)`, `(f)(3)!^2` is `Power(Factorial(f(3)), 2)` — or
@@ -733,6 +758,17 @@ function combineFunctionApplications(
     // argument list (`2(f)(3)`): the application, as on the two-operand
     // path. A bare symbol before a bare argument list is the arm below,
     // which owns the declaration-dependent reading.
+    // The head may be written bare (`b`) or parenthesized (`(b)`), as
+    // `functionSymbolOf` reads it; the handler's answer applies to both.
+    if (i < ops.length - 1) {
+      const head =
+        isFunction(op, 'Delimiter') && op.nops === 1
+          ? op.op1.canonical
+          : isSymbol(op)
+            ? op.canonical
+            : undefined;
+      if (head !== undefined) yieldInferredFunctionToOracle(ce, head);
+    }
     const fnName = i < ops.length - 1 ? functionSymbolOf(ce, op) : undefined;
     if (fnName !== undefined) {
       const applied = applySymbolThroughPostfix(
@@ -951,7 +987,12 @@ function oracleHeadType(
   ce: ComputeEngine,
   name: string
 ): BoxedType | undefined {
-  const resolved = ce._activeSymbolOracle?.(name);
+  // Inside a `ce.parse()` call, the call's own handler (or the engine-wide
+  // one, which the call adopts); outside a parse — a raw or structural
+  // result canonicalized later — the engine-wide handler, so the reading of
+  // a juxtaposition does not depend on WHEN the tree is canonicalized.
+  const oracle = ce._activeSymbolOracle ?? ce.latexOptions?.resolveSymbol;
+  const resolved = oracle?.(name);
   if (resolved === undefined || resolved === null) return undefined;
   const type = resolved.type;
   if (typeof type !== 'string') return type;

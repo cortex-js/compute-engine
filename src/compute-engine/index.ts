@@ -3492,13 +3492,29 @@ export class ComputeEngine implements IComputeEngine {
   appliedNonFunctions(latex: string): string[] {
     const syntax = this.latexSyntax;
     if (!syntax) return [];
-    // Same handler-supplements-scope composition as `parse()`.
+    // Same handler-supplements-scope composition as `parse()`, except that a
+    // function declaration the engine INFERRED from an earlier application
+    // of the name, with nothing behind it, does not count as a function
+    // here: the question this call answers is whether the host has defined
+    // the name, and such a declaration is the engine's guess, not the
+    // host's definition. Without this, the first parse of `g(x)` made every
+    // later call answer `[]` for `g`.
+    const scope = (id: MathJsonSymbol) => {
+      const def = this.lookupDefinition(id);
+      if (
+        def !== undefined &&
+        isValueDef(def) &&
+        def.value.inferredType &&
+        def.value.value === undefined &&
+        def.value.type.matches('function')
+      )
+        return undefined;
+      return this._resolveSymbolFromScope(id);
+    };
     const userResolve = this._latexOptions?.resolveSymbol;
     const raw = syntax.parse(latex, {
       ...this._latexOptions,
-      resolveSymbol: userResolve
-        ? (id) => userResolve(id) ?? this._resolveSymbolFromScope(id)
-        : (id) => this._resolveSymbolFromScope(id),
+      resolveSymbol: userResolve ? (id) => userResolve(id) ?? scope(id) : scope,
     });
     const result = new Set<string>();
     if (raw !== null) collectAppliedNonFunctions(raw, result);

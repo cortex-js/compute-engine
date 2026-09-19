@@ -253,9 +253,10 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       expect(ce.parse('t(x+1)').json).toEqual(['t', ['Add', 'x', 1]]);
     });
 
-    test('a result canonicalized after the parse reads the scope alone', () => {
-      // The handler is known for the duration of the `parse()` call; a
-      // structural result canonicalized later has no handler to consult.
+    test('a result canonicalized after the parse reads the engine-wide handler', () => {
+      // A raw or structural result canonicalized later must read as a
+      // canonical parse does: the engine-wide handler applies outside a
+      // parse too. A per-call handler is known for its call only.
       const ce = oracle({ type: 'number' });
       const structural = ce.parse('s(x+1)', { form: 'structural' });
       expect(structural.json).toEqual([
@@ -263,7 +264,55 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
         's',
         ['Delimiter', ['Add', 'x', 1]],
       ]);
-      expect(structural.canonical.json).toEqual(['s', ['Add', 'x', 1]]);
+      const product = ['Multiply', 's', ['Add', 'x', 1]];
+      expect(structural.canonical.json).toEqual(product);
+      expect(ce.parse('s(x+1)', { form: 'raw' }).canonical.json).toEqual(
+        product
+      );
+      const perCall = new ComputeEngine();
+      const resolveSymbol = (id: string) =>
+        id === 't' ? { type: 'real' } : undefined;
+      expect(
+        perCall.parse('t(x+1)', { form: 'raw', resolveSymbol }).canonical.json
+      ).toEqual(['t', ['Add', 'x', 1]]);
+    });
+
+    test('an inferred function declaration yields to the handler', () => {
+      // A raw parse canonicalized while the handler was not consulted left
+      // `b` an inferred, bodiless function; a later canonical parse must
+      // still read the product the handler asks for, and a coefficient
+      // handler that answers `value` counts as a value.
+      const ce = new ComputeEngine();
+      ce.parse('b(y+1)'); // `b` is now an inferred function
+      expect(ce.lookupDefinition('b')).toBeDefined();
+      ce.latexOptions = {
+        ...ce.latexOptions,
+        resolveSymbol: (id) => (id === 'b' ? { type: 'value' } : undefined),
+      };
+      const term = ce.parse('b(\\cos(NX)-1)');
+      expect(term.operator).toBe('Multiply');
+      expect(term.ops!.map((op) => op.json)).toContainEqual('b');
+      expect(
+        ce.parse('b(\\cos(NX)-1)', { form: 'raw' }).canonical.operator
+      ).toBe('Multiply');
+      // An `unknown` answer is a value answer too, and a parenthesized head
+      // in a longer product takes the same override.
+      const forgotten = new ComputeEngine();
+      forgotten.parse('b(y+1)');
+      forgotten.latexOptions = {
+        ...forgotten.latexOptions,
+        resolveSymbol: (id) => (id === 'b' ? { type: 'unknown' } : undefined),
+      };
+      expect(forgotten.parse('b(2)').json).toEqual(['Multiply', 2, 'b']);
+      expect(forgotten.parse('2(b)(3)').json).toEqual(['Multiply', 6, 'b']);
+      // A host declaration stands against the handler.
+      const declared = new ComputeEngine();
+      declared.declare('g', 'function');
+      declared.latexOptions = {
+        ...declared.latexOptions,
+        resolveSymbol: (id) => (id === 'g' ? { type: 'value' } : undefined),
+      };
+      expect(declared.parse('g(2)').json).toEqual(['g', 2]);
     });
 
     test('an invalid type string from the handler is reported as the parser reports it', () => {

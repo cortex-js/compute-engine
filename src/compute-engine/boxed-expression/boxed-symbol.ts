@@ -608,7 +608,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // what un-assigned a value-holding symbol merely by *parsing* a call
         // that passes it as a bare argument to a callee with an `unknown`/`any`
         // parameter type (e.g. `f(S)` with `f: (unknown) -> unknown`).
-        if (inferred.isUnknown) return false;
+        // A REPLACEMENT with `unknown` on a binding that holds no value is
+        // the one safe case: there is no value for the setter to reset, and
+        // the write forgets a guess (an inferred function declaration a
+        // `resolveSymbol` handler contradicts, `invisible-operator.ts`).
+        if (
+          inferred.isUnknown &&
+          !(inferenceMode === 'replace' && def.value.value === undefined)
+        )
+          return false;
         // A re-inference that lands on the type already recorded is a no-op:
         // skip the write, which would replace the definition's `BoxedType`
         // with a fresh object (defeating caches keyed on its identity, such
