@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **In non-strict mode, a letter run before a parenthesis is one name.**
+  `ce.parse("foo(x)", { strict: false })` split the unknown run into letters and
+  applied the last one (`f·o·o(x)`), a reading no one writes. A run that holds
+  no spelled-out Greek constant and is followed by a parenthesis is now the
+  symbol `foo`, which the juxtaposition rule applies: `["foo", "x"]`, and
+  `myfn(2, 3)` is `["myfn", 2, 3]`. Away from a parenthesis the run is split as
+  before (`foo` is `f·o·o`), and a run that holds a constant keeps its
+  segmentation (`pix(3)` is `π·x·3`).
+
 ## 0.131.3 _2026-09-18_
 
 ### Resolved Issues

@@ -1,4 +1,6 @@
 import { ComputeEngine } from '../../../src/compute-engine';
+import { LatexSyntax } from '../../../src/compute-engine/latex-syntax/latex-syntax';
+import { LATEX_DICTIONARY } from '../../../src/compute-engine/latex-syntax/dictionary/default-dictionary';
 import { engine as ce } from '../../utils';
 
 function parse(s: string) {
@@ -256,12 +258,53 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       );
     });
 
-    test('Unknown function names are split into letters', () => {
-      // 'foo' is not a recognized function: the letter run is segmented, and
-      // the last letter, undeclared before a parenthesized argument, is
-      // applied to it.
+    test('An unknown name before a parenthesis is applied as one name', () => {
+      // 'foo' is not a recognized function, but a letter run before a
+      // parenthesis is one name, and an undeclared name before a
+      // parenthesized argument is applied.
       expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", "f", "o", ["o", "x"]]`
+        `["foo", "x"]`
+      );
+      expect(ce.parse('myfn(2, 3)', { strict: false })).toMatchInlineSnapshot(
+        `["myfn", 2, 3]`
+      );
+      expect(ce.parse('2foo (x)', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 2, ["foo", "x"]]`
+      );
+      expect(
+        ce.parse('foo\\left(x\\right)', { strict: false })
+      ).toMatchInlineSnapshot(`["foo", "x"]`);
+      // Only a parenthesis joins the run: a sized bar or bracket does not.
+      expect(
+        ce.parse('ab\\left|x\\right|', { strict: false })
+      ).toMatchInlineSnapshot(`["Multiply", "a", "b", ["Abs", "x"]]`);
+      // A dictionary entry that claims the run keeps it: the rule applies to
+      // an UNKNOWN name only.
+      const custom = new ComputeEngine({
+        latexSyntax: new LatexSyntax({
+          dictionary: [
+            ...LATEX_DICTIONARY,
+            {
+              latexTrigger: ['f', 'o', 'o'],
+              kind: 'function',
+              parse: 'CustomFoo',
+            },
+          ] as any,
+        }),
+      } as any);
+      expect(custom.parse('foo(x)', { strict: false }).json).toEqual([
+        'CustomFoo',
+        'x',
+      ]);
+      // No stray diagnostic for the letters the run is not split into.
+      const withDiagnostics = ce.parse('foo(x)', {
+        strict: false,
+        diagnostics: true,
+      });
+      expect(withDiagnostics.diagnostics ?? []).toEqual([]);
+      // Away from a parenthesis the run is still split into letters.
+      expect(ce.parse('foo', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", "f", "o", "o"]`
       );
     });
   });
@@ -714,9 +757,14 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
 
     // Word-bounded ASCII shorthands are NOT matched inside a run: `foo` keeps
     // its letters and does not pick up `oo` → ∞.
-    test('foo(x) stays letters (oo not matched mid-run)', () => {
-      expect(ce.parse('foo(x)', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", "f", "o", ["o", "x"]]`
+    test('foo stays letters (oo not matched mid-run)', () => {
+      expect(ce.parse('foo', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", "f", "o", "o"]`
+      );
+      // A run holding a Greek constant keeps its segmentation before a
+      // parenthesis too: `pix(3)` is `π·x·3`, not a call of `pix`.
+      expect(ce.parse('pix(3)', { strict: false })).toMatchInlineSnapshot(
+        `["Multiply", 3, "Pi", "x"]`
       );
     });
   });

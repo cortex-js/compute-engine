@@ -3051,9 +3051,15 @@ export class _Parser implements Parser {
    *   (`sin`), which is less surprising than the imaginary-unit letter soup
    *   `i·n·s`.
    * - Otherwise, greedily segment the run against the spelled-out Greek
-   *   constants (`2pix` → `2·π·x`, `xpi` → `x·π`). If no Greek constant is
-   *   found the run is left untouched (returns `null`) so the existing
-   *   per-letter parsing applies exactly as before.
+   *   constants (`2pix` → `2·π·x`, `xpi` → `x·π`).
+   * - A run with no Greek constant that is followed by a parenthesis (`(` or
+   *   `\left(`) is ONE name: `foo(x)` is the symbol `foo` before the group,
+   *   which the juxtaposition rule then reads as the application of `foo`.
+   *   Split into letters it read as `f·o·o(x)`, the last letter applied — a
+   *   reading no one writes. A subscripted run (`foo_1(x)`) is not read this
+   *   way: the run ends at the `_`, and the subscript attaches to the last
+   *   letter as before. Elsewhere the run is left untouched (returns `null`)
+   *   so the existing per-letter parsing applies exactly as before.
    */
   private tryParseBareRun(): MathJsonExpression | null {
     if (this.options.strict !== false) return null;
@@ -3085,8 +3091,12 @@ export class _Parser implements Parser {
     }
 
     // Greedy longest-match segmentation against spelled-out Greek constants.
+    // The leftover letters are only NOTED here: a symbol reference is emitted
+    // once the segmentation is adopted, so a run that is read another way
+    // below leaves no diagnostic for letters that are not in the result.
     const symbols = _Parser.SEGMENTABLE_SYMBOLS;
     const segments: MathJsonExpression[] = [];
+    const leftoverLetters: number[] = [];
     let matchedConstant = false;
     let i = 0;
     while (i < name.length) {
@@ -3104,24 +3114,53 @@ export class _Parser implements Parser {
         }
       }
       if (!matched) {
-        // A single leftover letter, emitted as-is. (The boxer still maps the
+        // A single leftover letter, kept as-is. (The boxer still maps the
         // identifiers `e`/`i` to `ExponentialE`/`ImaginaryUnit`, matching how
         // they parse standalone — that is a symbol-level decision, not one the
         // parser overrides here.)
-        // Each letter is a single token, so its span is `[start+i, start+i+1)`.
-        this.emitSymbolReference(name[i], start + i, start + i + 1);
+        leftoverLetters.push(i);
         segments.push(name[i]);
         i += 1;
       }
     }
 
-    // Only take over the run when a Greek constant was actually recognized;
-    // otherwise leave it to the unchanged per-letter path.
     if (!matchedConstant) {
+      // Before a parenthesis the run is one name (see above). The spaces
+      // between the run and the group do not separate them (`foo (x)`). A run
+      // that a dictionary entry claims — a custom multi-letter trigger — is
+      // left to that entry, which the dictionary dispatch reaches after this.
+      let j = this.index;
+      while (this._tokens[j] === '<space>') j++;
+      // `\left` sizes whatever delimiter follows it; only `\left(` opens a
+      // parenthesis (`ab\left|x\right|` stays the product `a·b·|x|`).
+      const parenthesisFollows =
+        this._tokens[j] === '(' ||
+        (this._tokens[j] === '\\left' && this._tokens[j + 1] === '(');
+      if (parenthesisFollows) {
+        this.index = start;
+        // A trigger that covers the run, or extends past it (`foo(`), claims
+        // it; a universal definition (no trigger, count 0) claims nothing.
+        const claimsRun = (defs: ReadonlyArray<[unknown, number]>): boolean =>
+          defs.some(([, tokenCount]) => tokenCount > 0);
+        const claimed =
+          claimsRun(this.peekDefinitions('function') ?? []) ||
+          claimsRun(this.peekDefinitions('expression') ?? []) ||
+          claimsRun(this.peekDefinitions('symbol') ?? []);
+        if (!claimed) {
+          this.index = start + name.length;
+          this.emitSymbolReference(name, start, this.index);
+          return name;
+        }
+      }
+      // Otherwise leave the run to the unchanged per-letter path.
       this.index = start;
       return null;
     }
 
+    // Each leftover letter is a single token, so its span is
+    // `[start+i, start+i+1)`.
+    for (const k of leftoverLetters)
+      this.emitSymbolReference(name[k], start + k, start + k + 1);
     return segments.length === 1 ? segments[0] : ['Multiply', ...segments];
   }
 
