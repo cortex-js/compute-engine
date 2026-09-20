@@ -98,6 +98,73 @@ describe('A symbolic integration attempt that timed out', () => {
     expect(compiled(ce, TAIL).searches).toBe(0);
   });
 
+  test('is not repeated when the same declarations are made again in a new scope', () => {
+    // A host that declares the symbols of a row in a scope of its own for
+    // every compilation makes new definition objects each time. The record
+    // reads what a definition says, not which object it is.
+    const ce = new ComputeEngine();
+    const inScope = (type: string) => {
+      ce.pushScope();
+      try {
+        ce.declare('k', type);
+        ce.declare('x', 'real');
+        return compiled(ce, TAIL).searches;
+      } finally {
+        ce.popScope();
+      }
+    };
+    expect(inScope('real<0..>')).toBe(1);
+    expect(inScope('real<0..>')).toBe(0);
+    // Another declared type is another question.
+    expect(inScope('integer')).toBe(1);
+  });
+
+  describe('with a symbol declared WITH a value in a new scope', () => {
+    // `c` is a coefficient of the integrand, declared with a value by the
+    // host. A declaration does not advance the `semantic` version, so the
+    // key has to tell these definitions apart.
+    const SCALED = TAIL.replace(String.raw`\exp(`, String.raw`c\exp(`);
+    const searches = (
+      ce: ComputeEngine,
+      def: Parameters<ComputeEngine['declare']>[1]
+    ) => {
+      ce.pushScope();
+      try {
+        ce.declare('c', def);
+        return compiled(ce, SCALED).searches;
+      } finally {
+        ce.popScope();
+      }
+    };
+
+    test('an equal value is not searched again, another value is', () => {
+      const ce = new ComputeEngine();
+      const held = { type: 'real', value: 2.5, holdUntil: 'N' } as const;
+      expect(searches(ce, held)).toBe(1);
+      expect(searches(ce, held)).toBe(0);
+      expect(searches(ce, { ...held, value: 3.5 })).toBe(1);
+    });
+
+    test('another substitution policy is searched again', () => {
+      // Held until `N`, the search sees the symbol `c`; held until
+      // `evaluate`, it sees the number.
+      const ce = new ComputeEngine();
+      const held = { type: 'real', value: 2.5, holdUntil: 'N' } as const;
+      expect(searches(ce, held)).toBe(1);
+      expect(searches(ce, { ...held, holdUntil: 'evaluate' })).toBe(1);
+    });
+
+    test('a value that mentions a symbol is searched again', () => {
+      // Its digest names `m` whatever `m` is bound to, so the definition is
+      // told apart by which object it is.
+      const ce = new ComputeEngine();
+      ce.declare('m', 'real');
+      const held = { type: 'real', value: ce.parse('m+1'), holdUntil: 'N' } as const;
+      expect(searches(ce, held)).toBe(1);
+      expect(searches(ce, held)).toBe(1);
+    });
+  });
+
   test('is repeated when a name of the integral resolves to another definition', () => {
     // A declaration in a nested scope shadows `k`. It is not an event the
     // `semantic` version counts, so the key says which definition a name

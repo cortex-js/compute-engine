@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **The record of a timed-out symbolic integration is found again by a host
+  that declares its symbols for each compilation.** The record of 0.132.2
+  named a declared symbol by WHICH definition object it resolved to. A host
+  that declares the symbols of a row in a scope of its own for every
+  compilation makes new definition objects each time, so the record was never
+  found and every compilation repeated the two-second search: measured on
+  Tycho with 0.132.2, the five compilations of the Desmos state `thpezd39zq`
+  still took 2,002 ms each. The record now names a symbol by what its
+  definition says — its declared type, whether it is a constant, when its
+  value is substituted, and the value it holds — so the same declarations
+  made again find it. A function, and a symbol whose value mentions another
+  symbol, are still named by their definition.
+
 ## 0.132.2 _2026-09-19_
 
 ### Improvements

@@ -15894,10 +15894,10 @@ export class BaseCompiler {
    * configuration change (angular unit, precision) advances; a changed stamp
    * drops every record. A DECLARATION does not advance that version, so the
    * key of a record carries the declared type of every symbol of the
-   * integral beside its MathJSON (`antiderivativeKey`), with the identity of
-   * the definition each name resolves to: a declaration in a nested scope
-   * that shadows a symbol or a function of the integrand gives the name
-   * another definition. The integration provider is compared too
+   * integral beside its MathJSON (`antiderivativeKey`), with the value the
+   * symbol holds and, for a function, which definition the name resolves to:
+   * a declaration in a nested scope that shadows a symbol or a function of
+   * the integrand changes one of them. The integration provider is compared too
    * (`provider`): loading another rule set replaces it without an engine
    * state event. The `any` and `callable` versions are not usable: a
    * parse and a compilation advance it, and one search advances it more than
@@ -15930,8 +15930,9 @@ export class BaseCompiler {
 
   /**
    * The key of one integral in {@link antiderivativeTimeouts}: its operands
-   * as MathJSON, and for each symbol and each function head in them, which
-   * definition the name resolves to and its DECLARED type.
+   * as MathJSON, and for each symbol and each function head in them, what
+   * the name resolves to — the DECLARED type and the value of a symbol, the
+   * definition of a function.
    *
    * An INFERRED type is left out. The engine narrows the type of a symbol
    * that has no declaration each time the symbol is used, so that type goes
@@ -15963,14 +15964,32 @@ export class BaseCompiler {
         (isValueDef(def) && def.value.inferredType) ||
         (isOperatorDef(def) && def.operator.inferredSignature);
       if (inferred) return n;
+      // A VALUE definition reads as its content: its declared type, whether
+      // it is a constant, when its value is substituted (`holdUntil`: the
+      // search evaluates, so a value held until `N` stays a bare symbol in
+      // it), and the digest of the value it holds. A host that declares the
+      // symbols of a row in a scope of its own for every compilation makes a
+      // new definition object each time, so the object's identity would
+      // never be met again, while the content is what the search reads.
+      //
+      // The digest of a held value names a symbol inside it by NAME only,
+      // whatever that symbol is bound to. So the content stands for the
+      // definition only when the held value mentions no symbol; any other
+      // value definition reads as which definition object it is, as an
+      // operator definition does.
+      if (isValueDef(def)) {
+        const held = def.value.value;
+        if (held === undefined || held.symbols.length === 0) {
+          const policy = `${def.value.isConstant ? 'const' : 'var'}/${def.value.holdUntil}`;
+          return `${n}:${def.value.type.toString()}:${policy}=${held?.digest ?? ''}`;
+        }
+      }
       let id = BaseCompiler.definitionIds.get(def);
       if (id === undefined) {
         id = BaseCompiler.nextDefinitionId++;
         BaseCompiler.definitionIds.set(def, id);
       }
-      return isValueDef(def)
-        ? `${n}#${id}:${def.value.type.toString()}`
-        : `${n}#${id}`;
+      return `${n}#${id}`;
     });
     return `${JSON.stringify(ops)}|${bindings.join(',')}`;
   }
