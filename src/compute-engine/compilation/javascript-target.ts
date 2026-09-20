@@ -6083,12 +6083,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const ta = BaseCompiler.tempVar(target);
     const tb = BaseCompiler.tempVar(target);
     const bindings = `${jsBinding(target, ta, compile(a))} ${jsBinding(target, tb, compile(b))}`;
+    // The quotient formula divides by the squared modulus `d` of the divisor,
+    // and it is wrong where `d` is zero or infinite. A divisor that is exactly
+    // zero makes both parts `0 / 0`: the formula answers `NaN + NaN·i` for
+    // `1 / (0·i)`, where the interpreter answers the unsigned pole `~oo`,
+    // whose absolute value is `+∞`. A divisor with an infinite part — `~oo`
+    // itself, which the first case produces — makes both parts `∞ / ∞`, where
+    // the interpreter answers `0`. And the squares of a very small or very
+    // large FINITE divisor underflow to zero or overflow to `∞`, where the
+    // quotient is an ordinary number. The quotient is read from
+    // `_SYS.cdivedge` in those cases.
     if (ac && bc) {
       const d = BaseCompiler.tempVar(target);
       return boundJSResult(
         target,
         `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im;`,
-        `{ re: (${ta}.re * ${tb}.re + ${ta}.im * ${tb}.im) / ${d}, im: (${ta}.im * ${tb}.re - ${ta}.re * ${tb}.im) / ${d} }`
+        `(${d} === 0 || ${d} === Infinity ? _SYS.cdivedge(${ta}.re, ${ta}.im, ${tb}.re, ${tb}.im) : { re: (${ta}.re * ${tb}.re + ${ta}.im * ${tb}.im) / ${d}, im: (${ta}.im * ${tb}.re - ${ta}.re * ${tb}.im) / ${d} })`
       );
     }
     if (ac && !bc) {
@@ -6102,7 +6112,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return boundJSResult(
       target,
       `${bindings} const ${d} = ${tb}.re * ${tb}.re + ${tb}.im * ${tb}.im;`,
-      `{ re: ${ta} * ${tb}.re / ${d}, im: -${ta} * ${tb}.im / ${d} }`
+      `(${d} === 0 || ${d} === Infinity ? _SYS.cdivedge(${ta}, 0, ${tb}.re, ${tb}.im) : { re: ${ta} * ${tb}.re / ${d}, im: -${ta} * ${tb}.im / ${d} })`
     );
   },
   Negate: ([x], compile, target) => {
@@ -6779,6 +6789,22 @@ function toRI(c: Complex): { re: number; im: number } {
     im: chop(c.im, ROUNDOFF_TOLERANCE),
   };
 }
+
+/**
+ * The interpreter's unsigned pole `~oo` (`ComplexInfinity`) as the compiled
+ * complex lane spells it: an infinite part and a non-zero imaginary part,
+ * which is what `isUnsignedPole` tests for. A fresh object at every call, so
+ * no caller can change the value another caller receives.
+ */
+const complexPole = (): { re: number; im: number } => ({
+  re: Infinity,
+  im: Infinity,
+});
+
+/** Is `z` exactly zero — the one argument at which a kernel's pole is hit
+ *  exactly in floating point? */
+const isComplexZero = (z: { re: number; im: number }): boolean =>
+  z.re === 0 && z.im === 0;
 
 /**
  * `|z|`. A purely real `z` reads `Math.abs` rather than `Math.hypot(x, 0)`,
@@ -9112,6 +9138,34 @@ const SYS_HELPERS = {
     typeof x === 'number'
       ? { re: x, im: 0 }
       : (x as { re: number; im: number }),
+  // The quotient `(ar + ai·i) / (br + bi·i)` where the squared modulus of the
+  // divisor is zero or infinite, which is where the quotient formula fails
+  // (see the `Divide` codegen). For a divisor that is exactly zero the
+  // interpreter answers the unsigned pole `~oo` when the dividend is not
+  // zero, and `NaN` for `0 / 0`. For a divisor with an infinite part it
+  // answers `0` when the dividend is finite, and `NaN` for `∞ / ∞`. Any other
+  // divisor is finite and not zero, and only its squares left the range of a
+  // double: the quotient is computed by scaling with the larger part of the
+  // divisor first, so no square is formed (`1 / (1e-200 + 1e-200·i)` is
+  // `5e199 − 5e199·i`).
+  cdivedge: (ar: number, ai: number, br: number, bi: number): ComplexResult => {
+    if (ar !== ar || ai !== ai || br !== br || bi !== bi)
+      return { re: NaN, im: NaN };
+    if (br === 0 && bi === 0)
+      return ar === 0 && ai === 0 ? { re: NaN, im: NaN } : complexPole();
+    if (Math.abs(br) === Infinity || Math.abs(bi) === Infinity)
+      return Math.abs(ar) === Infinity || Math.abs(ai) === Infinity
+        ? { re: NaN, im: NaN }
+        : { re: 0, im: 0 };
+    if (Math.abs(br) >= Math.abs(bi)) {
+      const r = bi / br;
+      const den = br + bi * r;
+      return { re: (ar + ai * r) / den, im: (ai - ar * r) / den };
+    }
+    const r = br / bi;
+    const den = br * r + bi;
+    return { re: (ar * r + ai) / den, im: (ai * r - ar) / den };
+  },
   // The exact runtime realness test of a value that may be a plain number or
   // a `{re, im}` object: true when the imaginary part is exactly zero. The
   // `complexIsReal` hook of this target (`CompileTarget.complexIsReal`); the
@@ -10179,29 +10233,72 @@ const SYS_HELPERS = {
     re: Math.log2(complexModulus(z)),
     im: Math.atan2(z.im, z.re) / Math.LN2,
   }),
+  // A ZERO base is answered here, as the interpreter answers it: `0` for an
+  // exponent with a positive real part, the unsigned pole `~oo` for a
+  // negative real exponent (`0⁻²`), and `NaN` otherwise (`0⁰`, `0ⁱ`,
+  // `0⁻¹⁺ⁱ`). The complex library answers `−∞` for `0⁻²`, `−∞·i` for `0⁻¹`,
+  // `NaN` for `0^(−1/2)` and `1` for `0⁰`.
   cpow: (z: number | ComplexResult, w: number | ComplexResult) => {
     const zz =
       typeof z === 'number' ? new Complex(z, 0) : new Complex(z.re, z.im);
     const ww =
       typeof w === 'number' ? new Complex(w, 0) : new Complex(w.re, w.im);
+    if (zz.re === 0 && zz.im === 0) {
+      if (ww.re > 0) return { re: 0, im: 0 };
+      if (ww.re < 0 && ww.im === 0) return complexPole();
+      return { re: NaN, im: NaN };
+    }
     return toRI(zz.pow(ww));
   },
-  ccot: (z: ComplexResult) => toRI(new Complex(z.re, z.im).cot()),
+  // The reciprocal kernels have a pole at zero, where the complex library
+  // answers `NaN`. The interpreter answers `~oo` for `cot 0` and `csc 0`, and
+  // `+∞` for `coth 0` and `csch 0`.
+  ccot: (z: ComplexResult) =>
+    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).cot()),
   csec: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sec()),
-  ccsc: (z: ComplexResult) => toRI(new Complex(z.re, z.im).csc()),
-  ccoth: (z: ComplexResult) => toRI(new Complex(z.re, z.im).coth()),
+  ccsc: (z: ComplexResult) =>
+    isComplexZero(z) ? complexPole() : toRI(new Complex(z.re, z.im).csc()),
+  ccoth: (z: ComplexResult) =>
+    isComplexZero(z)
+      ? { re: Infinity, im: 0 }
+      : toRI(new Complex(z.re, z.im).coth()),
   csech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).sech()),
-  ccsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).csch()),
+  ccsch: (z: ComplexResult) =>
+    isComplexZero(z)
+      ? { re: Infinity, im: 0 }
+      : toRI(new Complex(z.re, z.im).csch()),
   cacot: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acot()),
-  casec: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asec()),
-  cacsc: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsc()),
+  // `arcsec 0` and `arccsc 0` are `NaN` in the interpreter, and `arsech 0` is
+  // `+∞`. The complex library answers a value with an infinite imaginary
+  // part for each, which reads as the unsigned pole.
+  casec: (z: ComplexResult) =>
+    isComplexZero(z)
+      ? { re: NaN, im: NaN }
+      : toRI(new Complex(z.re, z.im).asec()),
+  cacsc: (z: ComplexResult) =>
+    isComplexZero(z)
+      ? { re: NaN, im: NaN }
+      : toRI(new Complex(z.re, z.im).acsc()),
   cacoth: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acoth()),
-  casech: (z: ComplexResult) => toRI(new Complex(z.re, z.im).asech()),
+  casech: (z: ComplexResult) =>
+    isComplexZero(z)
+      ? { re: Infinity, im: 0 }
+      : toRI(new Complex(z.re, z.im).asech()),
   cacsch: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acsch()),
   cacosh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).acosh()),
   catanh: (z: ComplexResult) => toRI(new Complex(z.re, z.im).atanh()),
-  cabs: (z: ComplexResult) => new Complex(z.re, z.im).abs(),
-  carg: (z: ComplexResult) => new Complex(z.re, z.im).arg(),
+  // A value with an infinite part has an infinite absolute value: the
+  // unsigned pole `{ re: ∞, im: ∞ }` (see `complexPole`) and a signed infinity
+  // alike, as the interpreter answers (`|~oo|` is `+∞`). The complex library
+  // answers `NaN` for the pole.
+  cabs: (z: ComplexResult) =>
+    Math.abs(z.re) === Infinity || Math.abs(z.im) === Infinity
+      ? Infinity
+      : new Complex(z.re, z.im).abs(),
+  // The unsigned pole has no direction: its argument is `NaN`, as in the
+  // interpreter, where `atan2(∞, ∞)` would answer `π/4`.
+  carg: (z: ComplexResult) =>
+    isUnsignedPole(z) ? NaN : new Complex(z.re, z.im).arg(),
   // Ring operation, not a kernel: no roundoff chop (see `toRI`).
   cconj: (z: ComplexResult) => ({ re: z.re, im: -z.im }),
   cneg: (z: ComplexResult) => ({ re: -z.re, im: -z.im }),

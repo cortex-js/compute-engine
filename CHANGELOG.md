@@ -18,9 +18,51 @@
   array of the coordinates; it was a decline. The interval target keeps its
   earlier kernel for a list of constant points, which it reads through the
   run-time broadcast.
+- **A symbolic integration attempt that timed out is not repeated by the next
+  compilation of the same integral.** Compiling an `Integrate` first searches
+  for a closed form for up to two seconds and emits numeric integration when
+  the search fails. A document compiles one integral several times — once per
+  target, and again inside each helper that holds it — and every compilation
+  repeated the search to its limit: the Desmos state `thpezd39zq` issued five
+  compilations of about 2,000 ms over two integrands. The compiler now records
+  an integral whose search used its whole budget without a closed form, and
+  the next compilation of it goes to the numeric emitter at once (measured:
+  2,033 ms for the first compilation, 5 ms for the second target). A timeout
+  depends on the load of the machine and is not proof that no closed form
+  exists, so the record is dropped by an assignment, an assumption, a change
+  of the angular unit or of the precision, and it does not apply when a symbol
+  of the integral has another type. A closed form, and a search that completed
+  without one, are searched for again as before. The emitted code does not
+  change.
+- **A broadcast head over a list that mixes complex and real cells compiles on
+  the JavaScript target.** An element-wise `Which` with a complex arm beside a
+  real one, `Which(0 < L, i·L, True, 0)`, answers a list whose cells are
+  complex at some positions and plain numbers at the others. `Add`,
+  `Subtract`, `Multiply` and `Negate` read such a list; every other head
+  declined (`Abs`, `Divide`, `Power`, `Real`, `Imaginary`, `Exp`, `Sign`, …),
+  while the scalar form of the same expression compiled. Those heads now read
+  each cell as a complex number. The Desmos state `s8ishknvhe`, a
+  stereographic projection of a list of points, compiles when its point list
+  is declared `list<tuple<number, number, number>>`, and agrees with the
+  interpreter to 1.1 × 10⁻¹⁶ on nine sample points, poles included.
 
 ### Resolved Issues
 
+- **The compiled complex arithmetic of the JavaScript target answers a pole as
+  the interpreter does.** The interpreter answers the unsigned infinity `~oo`
+  for `1 / (0·i)`, `+∞` for its absolute value, and `0` for its reciprocal. The
+  compiled code answered `NaN` for all three, so a formula that divides by a
+  complex value lost every point at which that value is zero.
+  - A complex quotient whose divisor is exactly zero is `~oo` (`NaN` for
+    `0 / 0`), and a quotient whose divisor is infinite is `0`.
+  - `|~oo|` is `+∞`, and `Arg(~oo)` is `NaN`; it was `π/4`.
+  - A complex power of a zero base is `0` for an exponent with a positive real
+    part, `~oo` for a negative real exponent, and `NaN` otherwise. The
+    compiled code answered `−∞` for `0⁻²`, `−∞·i` for `0⁻¹`, `NaN` for
+    `0^(−1/2)` and `1` for `0⁰`.
+  - At a complex zero, `Cot` and `Csc` are `~oo`, and `Coth`, `Csch` and
+    `Arsech` are `+∞`; they were `NaN`, and `Arsech` was `~oo`. `Arcsec` and
+    `Arccsc` are `NaN`; they had an infinite imaginary part.
 - **A coordinate accessor over a wide list of points no longer answers where
   the interpreter reports an error, and no longer drops code the caller
   supplied.** Three defects of the rewrite that folds `PointX([p₁, …, p₅])` to

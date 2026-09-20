@@ -470,92 +470,38 @@ are the width floor — the rule cannot see the width of `P`, and a narrow list
 is a native vector on the shader targets — and a `P` whose type is the union
 of a point and a list of points, where `PointX(P)` dispatches at run time.
 
-### A broadcast head over an element-wise `Which` with a complex arm declines on the JavaScript target, and the compiled complex lane is wrong at a pole (OPEN, defects — causes found 2026-09-19; item 3 of `docs/plans/2026-09-19-codegen-reassessment-ce1313.md`)
+### The Tycho corpus document `s8ishknvhe`: what stays open after the mixed-cell and pole round (OPEN — found 2026-09-19; item 3 of `docs/plans/2026-09-19-codegen-reassessment-ce1313.md`)
 
-Repro, with `L` declared `list<number>`: `Abs(Which(0 < L, i·L, True, 0))`
-declines with "Abs: cannot compile a broadcastable head over a possibly
-list-valued operand". The interpreter answers `[2, 0]` at `L = [2, −3]`.
-Controls, all of which compile: the same `Which` with a real arm `L`; the
-scalar form with `x` in place of `L`; `Abs(i·L)` with no `Which`; the `Which`
-alone. The Tycho corpus document `s8ishknvhe` (a stereographic projection of a
-list of 3-D points, audit record 146 of
-`/private/tmp/ce-codegen-reassessment-0919/ce-0.131.3-targeted.json`) declines
-for this reason, whatever the declared type of its point list.
+The round (in `CHANGELOG.md`) made a broadcast head read a list that mixes
+complex and real cells, and made the compiled complex arithmetic of the
+JavaScript target answer a pole as the interpreter does. The stereographic
+projection of the document (audit record 146 of
+`/private/tmp/ce-codegen-reassessment-0919/ce-0.131.3-targeted.json`) now
+compiles when its point list `C_c` is declared
+`list<tuple<number, number, number>>`. Three things stay open.
 
-Cause: the scalar `Which` lowering promotes a real arm beside a complex one
-(`0` is emitted as `{re: 0, im: 0}`), but the element-wise lowering
-(`_SYS.select`) does not: compiled alone, the `Which` above runs to
-`[{re: 0, im: 2}, 0]`, a list that mixes complex cells and plain numbers. The
-lane analysis of the broadcast closure (`operandElementLane` in
-`compilation/base-compiler.ts`) therefore answers `'mixed'` for it, and only
-`Add`, `Subtract`, `Multiply` and `Negate` have a lowering for a mixed operand
-(`DISPATCHING_BROADCAST_HEADS`). Every other head — `Abs`, `Divide`, `Power`,
-`Real`, `Imaginary`, all of which the witness uses — declines.
-
-The mix of cells is the documented convention of the compiled arrays
-(`compileJSSelection` in `compilation/javascript-target.ts` says so), so the
-selection is not the place to fix. The fix is in the consumer: a head with no
-dispatching helper reads a `'mixed'` operand through `_SYS.cplx` (a number
-becomes `{re, im: 0}`, an object passes through) and then takes its complex
-lowering, and `_operandElementLane` answers the application's own
-complex-valued verdict for such a head. Built and measured 2026-09-19 in a
-worktree: the repro compiles to `_SYS.cabs(_SYS.cplx(…))` and runs to `[2, 0]`,
-and the real body of `s8ishknvhe` compiles (3,250 characters) when its point
-list is declared `list<tuple<number, number, number>>`.
-
-**It was not landed, because the compiled complex lane is wrong at a pole, and
-the document reaches a pole at every point with z = 0.** Three defects, all on
-the unchanged tree and all reachable without the change above:
-
-1. Complex division by a divisor that is exactly zero answers `NaN + NaN·i`:
-   `1 / (i·x)` at `x = 0` (`Divide` codegen, both branches that divide by the
-   squared modulus). The interpreter answers `ComplexInfinity`, which the
-   compiled complex lane spells `{re: ∞, im: ∞}` (`isUnsignedPole`, the
-   pole-encoding decision of 2026-08-28).
-2. `_SYS.cabs` of that pole answers `NaN`; the interpreter answers `+∞`.
-3. `_SYS.cpow` of a zero base and a negative exponent (`|w|⁻²` at `w = 0`)
-   answers a value the inline complex code cannot read: `((|w|²)⁻¹ + 1)⁻¹` runs
-   to `NaN` where the interpreter answers `0`.
-
-With 1 and 2 fixed (also built in the worktree: a `_SYS.cdivzero` helper, and
-`cabs` answering `+∞` for an infinite part), the five sample points of the
-witness agree with the interpreter in two coordinates and differ in the third
-at the two points with z = 0, because of 3. To do, as one round: check every
-complex kernel of the JavaScript runtime (`cpow`, and the kernels that go
-through `toRI`) against the interpreter at its poles, fix them to the pole
-convention, then land the mixed-operand change with interpreter parity on the
-witness, including points with z = 0 and x = y = 0. The shader and Python
-targets have their own complex division and were not examined. The partial
-patch and its probes are on this machine in `build/probe-0919/`
-(`mixed-lane-and-poles.patch`, `p11.ts`–`p13.ts`; the folder is ignored by
-git).
-
-The second decline of the same document (`Hsv`, record 149, `asOklab(c_f)`) is
-a colour-conversion gate and a separate cause, not yet traced.
-
-### The symbolic integration attempt is repeated for every compilation of the same integral (OPEN, compile latency, needs a user decision — cause found 2026-09-19; item 2 of `docs/plans/2026-09-19-codegen-reassessment-ce1313.md`)
-
-The Tycho corpus document `thpezd39zq` issues five compilations that each take
-about 2,000 ms (audit records 670–674 of the file named in the entry above):
-two integrands (`∫ₓ^∞ e^(−y/2)·y^(k/2−1) / (Γ(k/2)·√2^k) dy` and the same with
-`(k/2−1)!`), each compiled for `javascript` and for `interval-js`, and one call
-`p(X)` of a helper whose body holds the integral. Every one of them runs the
-antiderivative-first attempt of `BaseCompiler.closedFormIntegral` to its
-wall-clock limit (`ANTIDERIVATIVE_ATTEMPT_BUDGET_MS`, 2,000 ms) and then emits
-numeric integration. The attempt has no memory across compilations: the
-shared pool (`ANTIDERIVATIVE_COMPILATION_BUDGET_MS`) is reset at every
-outermost compilation.
-
-Remembering a closed form, or an attempt that COMPLETED without one, is
-deterministic and safe, but does not help this witness: its attempts end by
-timeout. A timeout is not proof that no closed form exists, and it depends on
-machine load. So the decision is the user's: (a) remember a timed-out attempt
-while the engine state that can change the answer is unchanged (the integrand,
-the bindings and assumptions of its free symbols, the angular unit, the
-precision); (b) a compilation option with which the caller asks for numeric
-integration directly; (c) both; (d) neither. The deterministic bounds of the
-constant folder stay as they are, and its retired wall-clock limit is not to
-be restored.
+1. **With `C_c` undeclared, the body still declines.** Its type is then
+   `broadcastable<tuple<broadcastable<number>, …>>`, a value that may be a
+   scalar or a collection at run time, and the lane analysis of the broadcast
+   closure refuses such an operand when it has complex evidence
+   (`_operandElementLane` in `compilation/base-compiler.ts`, the
+   `isBoundPossiblyCollectionTyped` case, pinned in
+   `test/compute-engine/broadcastable-compile.test.ts`). The reason given there
+   is that a scalar binding of a complex-typed parameter is refused at the
+   entry of the compiled function, so compiling the array case would trade a
+   decline for a run-time error. Whether Tycho declares `C_c` with the narrow
+   type is a Tycho question; on the CE side the refusal could be revisited now
+   that a mixed cell is read through `_SYS.cplx`.
+2. **The second decline of the document is not traced.** `asOklab(c_f)`
+   declines at `Hsv` with "cannot compile a broadcastable head over a possibly
+   list-valued operand" (record 149). It is a colour-conversion gate, with a
+   different cause from the one above.
+3. **The other targets were not examined at a pole.** The shader targets and
+   the Python target have their own complex division and power. Python raises
+   `ZeroDivisionError` for a complex division by zero; the shader result is
+   whatever the hardware answers for `0.0 / 0.0`. The kernels of the JavaScript
+   runtime were checked at an exact zero argument only, which is the one pole a
+   floating-point argument reaches exactly.
 
 ### Codegen audit follow-ups (CE 0.128.9)
 

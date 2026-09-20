@@ -287,18 +287,32 @@ describe('Tycho item 246 (b) — arithmetic over a point list with a complex col
     ]);
   });
 
-  test('a head with no dispatching helper still fails closed on a mixed lane', () => {
+  test('a head with no dispatching helper reads a mixed lane as complex', () => {
     // `Divide` by a SYMBOL stays a `Divide`, which has no run-time
     // dispatching scalar helper; `Sin` has none either. (Division by a
-    // literal canonicalizes to a product, which dispatches.)
-    for (const json of [
-      ['Divide', ['PointList', 'L', separatorColumn], 's'],
-      ['Sin', ['PointList', 'L', separatorColumn]],
-    ]) {
-      const r = compile(ce.box(json as never), { to: 'javascript' });
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/list-valued operand/);
-    }
+    // literal canonicalizes to a product, which dispatches.) Such a head
+    // reads each cell through `_SYS.cplx` and applies its complex lowering;
+    // both shapes failed closed until the closure could read such a cell.
+    const quotient = compile(
+      ce.box(['Divide', ['PointList', 'L', separatorColumn], 's'] as never),
+      { to: 'javascript' }
+    );
+    expect(quotient.success).toBe(true);
+    expect(quotient.run({ L: Lv, s: 2 })).toEqual([
+      [0.05, { re: 0, im: 0.5 }],
+      [0.1, 2.5],
+      [0.15, 2.5],
+    ]);
+    const sine = compile(
+      ce.box(['Sin', ['PointList', 'L', separatorColumn]] as never),
+      { to: 'javascript' }
+    );
+    expect(sine.success).toBe(true);
+    const points = sine.run({ L: Lv }) as [number, unknown][];
+    expect(points.map((p) => p[0])).toEqual(Lv.map(Math.sin));
+    // sin(i) = i·sinh 1
+    expect(points[0][1]).toEqual({ re: 0, im: Math.sinh(1) });
+    expect(points[1][1]).toBeCloseTo(Math.sin(5), 12);
     const half = compile(
       ce.box(['Divide', ['PointList', 'L', separatorColumn], 2] as never),
       { to: 'javascript' }

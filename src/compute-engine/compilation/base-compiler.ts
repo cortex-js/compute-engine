@@ -10040,10 +10040,25 @@ export class BaseCompiler {
       BaseCompiler.operandElementLane(a, engine, target)
     );
     if (argLanes.some((l) => l === undefined)) return null;
-    const dispatch = argLanes.some((l) => l === 'mixed');
-    if (dispatch && !BaseCompiler.DISPATCHING_BROADCAST_HEADS.has(h))
-      return null;
-    const argIsComplex = argLanes.map((l) => l === true);
+    const anyMixed = argLanes.some((l) => l === 'mixed');
+    const dispatch =
+      anyMixed && BaseCompiler.DISPATCHING_BROADCAST_HEADS.has(h);
+    // A head with no dispatching helper reads a `'mixed'` operand through a
+    // NORMALIZED element: the closure coerces that element to a `{re, im}`
+    // object on entry (`_SYS.cplx`: a plain number gets a zero imaginary part,
+    // an object passes through), so the head's complex lowering sees one shape
+    // at every position. This is what an element-wise `Which` with a complex
+    // arm beside a real one needs — its cells are `{re, im}` where the complex
+    // arm was selected and plain numbers elsewhere — and before it
+    // `Abs(Which(0 < L, i·L, True, 0))` declined while the scalar form, which
+    // promotes the real arm itself, compiled. The gates below then apply as
+    // they do to a complex operand: a head with no complex lowering declines.
+    // Only the JavaScript runtime has the coercion helper.
+    const normalized = argLanes.map(
+      (l) => l === 'mixed' && !dispatch && target.language === 'javascript'
+    );
+    if (anyMixed && !dispatch && !normalized.some((n) => n)) return null;
+    const argIsComplex = argLanes.map((l, i) => l === true || normalized[i]);
     const anyComplex = argIsComplex.some((c) => c);
 
     // A STRING-mapped head is a real-only scalar helper (`Math.sign`,
@@ -10151,7 +10166,12 @@ export class BaseCompiler {
      * was decided in: the radical verdict strictly inside the local-complex
      * frame, so the memo layer a build writes is the frame's own.
      */
-    const buildScalarBody = (sources: ReadonlyArray<string>): string => {
+    const buildScalarBody = (rawSources: ReadonlyArray<string>): string => {
+      // A normalized operand is read through the coercion at every mention;
+      // a call is an atomic expression, as the contract above requires.
+      const sources = rawSources.map((source, i) =>
+        normalized[i] ? `_SYS.cplx(${source})` : source
+      );
       const innerTarget: CompileTarget<Expression> = {
         ...target,
         var: (id: string) => {
@@ -15792,6 +15812,21 @@ export class BaseCompiler {
    */
   private static readonly ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
 
+  /** The per-attempt budget in force: the constant above, unless a test
+   *  shortened it with {@link setAntiderivativeAttemptBudgetForTesting}. */
+  private static antiderivativeAttemptBudgetMs =
+    BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS;
+
+  /**
+   * Shorten the per-attempt budget, or restore it when called with no
+   * argument. For tests only: a test of what follows a timeout needs a search
+   * that times out on every machine, and quickly.
+   */
+  static setAntiderivativeAttemptBudgetForTesting(ms?: number): void {
+    BaseCompiler.antiderivativeAttemptBudgetMs =
+      ms ?? BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS;
+  }
+
   /**
    * Shared wall-clock budget for ALL antiderivative-first attempts in one
    * outermost compilation.
@@ -15836,6 +15871,108 @@ export class BaseCompiler {
   static resetSharedCompilationBudgets(): void {
     BaseCompiler.antiderivativeBudgetLeftMs =
       BaseCompiler.ANTIDERIVATIVE_COMPILATION_BUDGET_MS;
+  }
+
+  /**
+   * The integrals whose antiderivative-first attempt TIMED OUT, per engine,
+   * and the engine state they timed out in.
+   *
+   * One document compiles the same integral several times: once per target,
+   * and again inside each helper that holds it. The Tycho corpus document
+   * `thpezd39zq` issues five compilations over two integrands, and each one
+   * ran the symbolic search to its two-second limit before emitting numeric
+   * integration. A search that ran out of time once will run out of time
+   * again while nothing it reads has changed, so the next compilation of that
+   * integral goes to the numeric emitter at once.
+   *
+   * A timeout is not proof that no closed form exists: it depends on the
+   * load of the machine. So the record is kept only while the engine state
+   * the search reads is the one the attempt ran in, and only for an attempt
+   * that was granted its full budget and used it — one shortened by a nearly
+   * empty compilation pool says little. The state has two parts. `stamp` is the engine's
+   * `semantic` invalidation version, which every assignment, assumption and
+   * configuration change (angular unit, precision) advances; a changed stamp
+   * drops every record. A DECLARATION does not advance that version, so the
+   * key of a record carries the declared type of every symbol of the
+   * integral beside its MathJSON (`antiderivativeKey`), with the identity of
+   * the definition each name resolves to: a declaration in a nested scope
+   * that shadows a symbol or a function of the integrand gives the name
+   * another definition. The integration provider is compared too
+   * (`provider`): loading another rule set replaces it without an engine
+   * state event. The `any` and `callable` versions are not usable: a
+   * parse and a compilation advance it, and one search advances it more than
+   * a thousand times. Closed forms and searches that completed without one
+   * are not recorded: they are quick to repeat.
+   */
+  private static readonly antiderivativeTimeouts = new WeakMap<
+    object,
+    { stamp: string; provider: unknown; integrals: Set<string> }
+  >();
+
+  /** A number for each definition object met by {@link antiderivativeKey},
+   *  so that a key can say WHICH definition a name resolved to. */
+  private static readonly definitionIds = new WeakMap<object, number>();
+  private static nextDefinitionId = 1;
+
+  /** The most integrals {@link antiderivativeTimeouts} holds for one engine;
+   *  the record is emptied when it would grow past this. */
+  private static readonly MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS = 256;
+
+  /** How many antiderivative-first attempts have RUN, as opposed to being
+   *  skipped. Read by tests, before and after a compilation. */
+  static antiderivativeAttemptCount = 0;
+
+  /** The engine state a record of {@link antiderivativeTimeouts} is valid
+   *  in. */
+  private static antiderivativeStateStamp(engine: ComputeEngine): string {
+    return String(engine._semanticVersion);
+  }
+
+  /**
+   * The key of one integral in {@link antiderivativeTimeouts}: its operands
+   * as MathJSON, and for each symbol and each function head in them, which
+   * definition the name resolves to and its DECLARED type.
+   *
+   * An INFERRED type is left out. The engine narrows the type of a symbol
+   * that has no declaration each time the symbol is used, so that type goes
+   * on changing through the search itself and through the rest of the
+   * compilation, and a key that carried it would not be found again. It is
+   * also not an input: it follows from the uses, which are the same the next
+   * time. A declaration replaces the inferred type with a stated one, and
+   * that does change the key.
+   */
+  private static antiderivativeKey(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>,
+    ops: ReadonlyArray<unknown>
+  ): string {
+    const names = new Set(args.flatMap((a) => a.symbols));
+    const addHeads = (e: Expression): void => {
+      if (!isFunction(e)) return;
+      names.add(e.operator);
+      e.ops.forEach(addHeads);
+    };
+    args.forEach(addHeads);
+    const bindings = [...names].sort().map((n) => {
+      const def = engine.lookupDefinition(n);
+      // A name with no definition gets an INFERRED one the first time it is
+      // used, which can be during the search itself. Both read as the bare
+      // name, for the reason given above for an inferred type.
+      const inferred =
+        def === undefined ||
+        (isValueDef(def) && def.value.inferredType) ||
+        (isOperatorDef(def) && def.operator.inferredSignature);
+      if (inferred) return n;
+      let id = BaseCompiler.definitionIds.get(def);
+      if (id === undefined) {
+        id = BaseCompiler.nextDefinitionId++;
+        BaseCompiler.definitionIds.set(def, id);
+      }
+      return isValueDef(def)
+        ? `${n}#${id}:${def.value.type.toString()}`
+        : `${n}#${id}`;
+    });
+    return `${JSON.stringify(ops)}|${bindings.join(',')}`;
   }
 
   /**
@@ -15961,20 +16098,34 @@ export class BaseCompiler {
     // hundreds of nodes cannot each arm a fresh full span — once the pool is
     // dry, remaining integrals go straight to their numeric emitter.
     if (BaseCompiler.antiderivativeBudgetLeftMs <= 0) return undefined;
+
+    // An attempt that timed out in this engine state is not repeated — see
+    // `antiderivativeTimeouts`.
+    const ops = args.map((x) => x.json);
+    const integralKey = BaseCompiler.antiderivativeKey(engine, args, ops);
+    const timeouts = BaseCompiler.antiderivativeTimeouts.get(engine);
+    if (timeouts !== undefined) {
+      if (
+        timeouts.stamp !== BaseCompiler.antiderivativeStateStamp(engine) ||
+        timeouts.provider !== engine._integrationProvider
+      )
+        BaseCompiler.antiderivativeTimeouts.delete(engine);
+      else if (timeouts.integrals.has(integralKey)) return undefined;
+    }
+
+    const grantedMs = Math.min(
+      BaseCompiler.antiderivativeAttemptBudgetMs,
+      BaseCompiler.antiderivativeBudgetLeftMs
+    );
+    let elapsedMs = 0;
+    BaseCompiler.antiderivativeAttemptCount += 1;
     //
     // eslint-disable-next-line no-restricted-globals
     const attemptStart = performance.now();
     engine.pushScope();
     try {
-      const ops = args.map((x) => x.json);
       closed = engine.withTimeLimit(
-        {
-          ms: Math.min(
-            BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS,
-            BaseCompiler.antiderivativeBudgetLeftMs
-          ),
-          label: 'compile:antiderivative',
-        },
+        { ms: grantedMs, label: 'compile:antiderivative' },
         () => engine.function('Integrate', ops).evaluate()
       );
     } catch {
@@ -15982,19 +16133,45 @@ export class BaseCompiler {
       // integration.
     } finally {
       engine.popScope();
-      BaseCompiler.antiderivativeBudgetLeftMs -=
-        // eslint-disable-next-line no-restricted-globals
-        performance.now() - attemptStart;
+      // eslint-disable-next-line no-restricted-globals
+      elapsedMs = performance.now() - attemptStart;
+      BaseCompiler.antiderivativeBudgetLeftMs -= elapsedMs;
     }
 
+    const usable =
+      closed !== undefined &&
+      !closed.has('Integrate') &&
+      closed.isValid &&
+      closed.isNaN !== true;
+
+    // A timeout is read from the clock, not from the error: the search does
+    // not always end by throwing the cancellation of this span. A rule that
+    // runs out of time is skipped and the search goes on to the next, so an
+    // attempt can use its whole budget and still return an unevaluated
+    // integral. Nine tenths of the budget counts as the whole: the deadline
+    // is kept on a millisecond clock, so it can fire a fraction of a
+    // millisecond before this finer clock reads the full budget.
     if (
-      closed === undefined ||
-      closed.has('Integrate') ||
-      !closed.isValid ||
-      closed.isNaN === true
-    )
-      return undefined;
-    return closed;
+      !usable &&
+      elapsedMs >= 0.9 * grantedMs &&
+      grantedMs === BaseCompiler.antiderivativeAttemptBudgetMs
+    ) {
+      const stamp = BaseCompiler.antiderivativeStateStamp(engine);
+      let record = BaseCompiler.antiderivativeTimeouts.get(engine);
+      const provider = engine._integrationProvider;
+      if (
+        record === undefined ||
+        record.stamp !== stamp ||
+        record.provider !== provider ||
+        record.integrals.size >= BaseCompiler.MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS
+      ) {
+        record = { stamp, provider, integrals: new Set() };
+        BaseCompiler.antiderivativeTimeouts.set(engine, record);
+      }
+      record.integrals.add(integralKey);
+    }
+
+    return usable ? closed : undefined;
   }
 
   /**

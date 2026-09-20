@@ -315,12 +315,22 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       expect(r.run!({})).toEqual([-1, -2, -3, -4]);
     });
 
-    it('a complex-element list fails closed (D6), never scalar garbage', () => {
-      // `Math.sin({re, im})` is NaN. The broadcast closure documents the
-      // complex deferral; the fan-out used to defeat it via `.map`.
+    it('a complex-element list takes the complex lowering, never scalar garbage', () => {
+      // `Math.sin({re, im})` is NaN. A `list<complex>` may hold a plain
+      // number beside a `{re, im}` object, so the closure reads each cell
+      // through `_SYS.cplx` and applies the complex sine. This shape failed
+      // closed until the closure could read such a cell.
       const r = compile(ce.box(['Sin', 'Z']));
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/list-valued operand/);
+      expect(r.success).toBe(true);
+      expect(r.code).toBe('_SYS.bcast((_tv1) => _SYS.csin(_SYS.cplx(_tv1)), _.Z)');
+      const out = r.run!({ Z: [{ re: 1, im: 2 }, 3] }) as unknown as [
+        { re: number; im: number },
+        number,
+      ];
+      // sin(1 + 2i) = sin 1·cosh 2 + i·cos 1·sinh 2
+      expect(out[0].re).toBeCloseTo(Math.sin(1) * Math.cosh(2), 12);
+      expect(out[0].im).toBeCloseTo(Math.cos(1) * Math.sinh(2), 12);
+      expect(out[1]).toBeCloseTo(Math.sin(3), 12);
     });
   });
 
@@ -402,9 +412,22 @@ describe('BROADCAST OF A STRING-MAPPED HEAD (JavaScript)', () => {
     expect(out[1]).toBeCloseTo(Math.hypot(6, 4), 12);
   });
 
-  it('a string-mapped head over a COMPLEX list still fails closed', () => {
+  it('a string-mapped head over a COMPLEX list answers NaN at a complex cell', () => {
+    // `Math.hypot` has no complex form. Its operand is projected onto the
+    // real numbers first, so a complex cell is NaN and a real cell is read.
+    const r = compile(ce.box(['Hypot', 'Z', 4]));
+    expect(r.success).toBe(true);
+    const out = r.run!({ Z: [{ re: 3, im: 4 }, 3] }) as unknown as number[];
+    expect(out[0]).toBeNaN();
+    expect(out[1]).toBe(5);
+  });
+
+  it('`Sign` over a COMPLEX list takes its complex lowering', () => {
+    // `Sign` has a complex form (`z / |z|`), and reads a cell that may be a
+    // plain number through `_SYS.cplx`.
     const r = compile(ce.box(['Sign', 'Z']));
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/list-valued operand/);
+    expect(r.success).toBe(true);
+    const out = r.run!({ Z: [{ re: 3, im: 4 }, -2, 0] }) as unknown[];
+    expect(out).toEqual([{ re: 0.6, im: 0.8 }, -1, 0]);
   });
 });
