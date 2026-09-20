@@ -1,3 +1,40 @@
+## [Unreleased]
+
+### Improvements
+
+- **A coordinate of point arithmetic over a list of points is computed without
+  building the points.** `PointX(0.3(t, t) + 4[(x₁, y₁), …])` adds one point to
+  each point of a scaled list and reads the first coordinate of each result.
+  Points add and scale coordinate by coordinate, so the compiler now rewrites
+  the expression to `0.3t + 4[x₁, …]` before any target sees it. The rewrite
+  applies to a sum, a negation or a scalar multiple with a written-out list of
+  five or more points among its point operands. Measured on the Desmos state
+  `woeywky0kj` (a list of 7,225 points, Tycho code-generation audit of
+  0.131.3): the JavaScript kernel goes from 295,869 to 140,737 characters, and
+  one call from 2.55 ms to 0.14 ms (median of 15 interleaved rounds of 40
+  calls, load average 3.5 on 8 cores). The values agree with the earlier kernel to 9 × 10⁻¹⁶: the flattened
+  sum adds its terms in a different order. On the shader targets, a list of
+  points whose coordinates are computed at run time now compiles to a `float[N]`
+  array of the coordinates; it was a decline. The interval target keeps its
+  earlier kernel for a list of constant points, which it reads through the
+  run-time broadcast.
+
+### Resolved Issues
+
+- **A coordinate accessor over a wide list of points no longer answers where
+  the interpreter reports an error, and no longer drops code the caller
+  supplied.** Three defects of the rewrite that folds `PointX([p₁, …, p₅])` to
+  the list of first coordinates:
+  - A point that is a sum of points of different sizes, `(a, b) + (1, 2, 3)`,
+    is an `incompatible-type` error. The compiled code answered `a + 1` for
+    that element. It now answers `NaN`, as it does for a narrow list.
+  - A discarded coordinate that reads a `vars` entry given as JavaScript source
+    was removed from the kernel, so source that counts its reads or draws a
+    number stopped running. Such a coordinate now keeps the point.
+  - An `operators` or `functions` override of `Add`, `Negate` or `Multiply`
+    inside one of the points received coordinates in place of the points it
+    is written for. The rewrite now stops at an overridden head at any depth.
+
 ## 0.132.1 _2026-09-19_
 
 ### Resolved Issues

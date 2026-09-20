@@ -426,6 +426,137 @@ so the scalar tiers below claim a number for a value the evaluator refuses. The
 honest claim is the same `error` the tuple pair receives, or `never`. Low blast
 radius: no document in the audited corpus multiplies two point-shaped operands.
 
+### Coordinate projection through point arithmetic: what stays open (OPEN, compile performance — found 2026-09-19 while implementing item 1 of `docs/plans/2026-09-19-codegen-reassessment-ce1313.md`)
+
+The pre-pass (`foldPointAccessor` in `compilation/fixed-width-unroll.ts`) now
+rewrites `PointX(p + k·[points])` to `PointX(p) + k·[first coordinates]` when
+the list of points is written out and has five or more elements. Two shapes
+are left as they were.
+
+**1. The interval target writes a constant list of numbers out element by
+element, with no upper width.** The element-wise rule of the pre-pass
+(`distributeOverList`) has a lower width limit and no upper one, and the
+interval target turns it on for constant lists
+(`UnrollOptions.unrollConstantLists`). Measured on the unchanged tree:
+`Sin(x + 4·[2,000 numbers])` compiles on `interval-js` to a 60,876-character
+body, where the same arithmetic over a list of 2,000 POINTS compiles to a
+307-character body that reads a table bound once per artifact
+(`_IA.bcastPoint`). For that reason the new projection rule is withheld on
+that target when any list of points in the arithmetic has a number literal at
+the coordinate being read in every point (`isPointArithmeticOverWideList`);
+without the exception the 7,225-point witness grew from a 413-character
+interval body to a 202,510-character one.
+
+An experiment gave the fan-out of a constant list an upper limit of 100
+elements (the value of `INTERVAL_UNROLL_LIMIT`). At 150 elements, the interval
+bodies of `Sin(x + 4·L)`, `Max(x + 4·L)`, `Sum((M − x·L)²)`, a run-time index
+into `x + 4·L`, and `x·L + M` went from 3,075–8,671 characters to 113–338, with
+identical enclosures. One shape regressed: `Reduce((M − x·L)², Add)` declined,
+because the `Reduce` lowering of that target only accepts the written-out list
+the fan-out produces. The limit was not landed: it changes which interval rows
+compile, and the plan asks for a new whole-corpus baseline before another
+broad lowering change. To land it: give the interval `Reduce` lowering a
+run-time list operand (or keep the fan-out under `Reduce`), apply the limit,
+and then remove the constant-list exception from
+`isPointArithmeticOverWideList`.
+
+**2. A list of points that is a symbol, not a written-out list.**
+`PointX(4·P + 0.3·(t, t))` with `P` declared `list<tuple<number, number>>`
+still builds every transformed point and maps over them twice (records 687 and
+688 of the targeted audit, `woeywky0kj` setup rows). The rewrite needs a fourth
+leaf in `coordinateAndArity`: an operand whose TYPE is a list of points, to
+which the accessor is re-applied (`4·PointX(P) + 0.3·t`). The open questions
+are the width floor — the rule cannot see the width of `P`, and a narrow list
+is a native vector on the shader targets — and a `P` whose type is the union
+of a point and a list of points, where `PointX(P)` dispatches at run time.
+
+### A broadcast head over an element-wise `Which` with a complex arm declines on the JavaScript target, and the compiled complex lane is wrong at a pole (OPEN, defects — causes found 2026-09-19; item 3 of `docs/plans/2026-09-19-codegen-reassessment-ce1313.md`)
+
+Repro, with `L` declared `list<number>`: `Abs(Which(0 < L, i·L, True, 0))`
+declines with "Abs: cannot compile a broadcastable head over a possibly
+list-valued operand". The interpreter answers `[2, 0]` at `L = [2, −3]`.
+Controls, all of which compile: the same `Which` with a real arm `L`; the
+scalar form with `x` in place of `L`; `Abs(i·L)` with no `Which`; the `Which`
+alone. The Tycho corpus document `s8ishknvhe` (a stereographic projection of a
+list of 3-D points, audit record 146 of
+`/private/tmp/ce-codegen-reassessment-0919/ce-0.131.3-targeted.json`) declines
+for this reason, whatever the declared type of its point list.
+
+Cause: the scalar `Which` lowering promotes a real arm beside a complex one
+(`0` is emitted as `{re: 0, im: 0}`), but the element-wise lowering
+(`_SYS.select`) does not: compiled alone, the `Which` above runs to
+`[{re: 0, im: 2}, 0]`, a list that mixes complex cells and plain numbers. The
+lane analysis of the broadcast closure (`operandElementLane` in
+`compilation/base-compiler.ts`) therefore answers `'mixed'` for it, and only
+`Add`, `Subtract`, `Multiply` and `Negate` have a lowering for a mixed operand
+(`DISPATCHING_BROADCAST_HEADS`). Every other head — `Abs`, `Divide`, `Power`,
+`Real`, `Imaginary`, all of which the witness uses — declines.
+
+The mix of cells is the documented convention of the compiled arrays
+(`compileJSSelection` in `compilation/javascript-target.ts` says so), so the
+selection is not the place to fix. The fix is in the consumer: a head with no
+dispatching helper reads a `'mixed'` operand through `_SYS.cplx` (a number
+becomes `{re, im: 0}`, an object passes through) and then takes its complex
+lowering, and `_operandElementLane` answers the application's own
+complex-valued verdict for such a head. Built and measured 2026-09-19 in a
+worktree: the repro compiles to `_SYS.cabs(_SYS.cplx(…))` and runs to `[2, 0]`,
+and the real body of `s8ishknvhe` compiles (3,250 characters) when its point
+list is declared `list<tuple<number, number, number>>`.
+
+**It was not landed, because the compiled complex lane is wrong at a pole, and
+the document reaches a pole at every point with z = 0.** Three defects, all on
+the unchanged tree and all reachable without the change above:
+
+1. Complex division by a divisor that is exactly zero answers `NaN + NaN·i`:
+   `1 / (i·x)` at `x = 0` (`Divide` codegen, both branches that divide by the
+   squared modulus). The interpreter answers `ComplexInfinity`, which the
+   compiled complex lane spells `{re: ∞, im: ∞}` (`isUnsignedPole`, the
+   pole-encoding decision of 2026-08-28).
+2. `_SYS.cabs` of that pole answers `NaN`; the interpreter answers `+∞`.
+3. `_SYS.cpow` of a zero base and a negative exponent (`|w|⁻²` at `w = 0`)
+   answers a value the inline complex code cannot read: `((|w|²)⁻¹ + 1)⁻¹` runs
+   to `NaN` where the interpreter answers `0`.
+
+With 1 and 2 fixed (also built in the worktree: a `_SYS.cdivzero` helper, and
+`cabs` answering `+∞` for an infinite part), the five sample points of the
+witness agree with the interpreter in two coordinates and differ in the third
+at the two points with z = 0, because of 3. To do, as one round: check every
+complex kernel of the JavaScript runtime (`cpow`, and the kernels that go
+through `toRI`) against the interpreter at its poles, fix them to the pole
+convention, then land the mixed-operand change with interpreter parity on the
+witness, including points with z = 0 and x = y = 0. The shader and Python
+targets have their own complex division and were not examined. The partial
+patch and its probes are on this machine in `build/probe-0919/`
+(`mixed-lane-and-poles.patch`, `p11.ts`–`p13.ts`; the folder is ignored by
+git).
+
+The second decline of the same document (`Hsv`, record 149, `asOklab(c_f)`) is
+a colour-conversion gate and a separate cause, not yet traced.
+
+### The symbolic integration attempt is repeated for every compilation of the same integral (OPEN, compile latency, needs a user decision — cause found 2026-09-19; item 2 of `docs/plans/2026-09-19-codegen-reassessment-ce1313.md`)
+
+The Tycho corpus document `thpezd39zq` issues five compilations that each take
+about 2,000 ms (audit records 670–674 of the file named in the entry above):
+two integrands (`∫ₓ^∞ e^(−y/2)·y^(k/2−1) / (Γ(k/2)·√2^k) dy` and the same with
+`(k/2−1)!`), each compiled for `javascript` and for `interval-js`, and one call
+`p(X)` of a helper whose body holds the integral. Every one of them runs the
+antiderivative-first attempt of `BaseCompiler.closedFormIntegral` to its
+wall-clock limit (`ANTIDERIVATIVE_ATTEMPT_BUDGET_MS`, 2,000 ms) and then emits
+numeric integration. The attempt has no memory across compilations: the
+shared pool (`ANTIDERIVATIVE_COMPILATION_BUDGET_MS`) is reset at every
+outermost compilation.
+
+Remembering a closed form, or an attempt that COMPLETED without one, is
+deterministic and safe, but does not help this witness: its attempts end by
+timeout. A timeout is not proof that no closed form exists, and it depends on
+machine load. So the decision is the user's: (a) remember a timed-out attempt
+while the engine state that can change the answer is unchanged (the integrand,
+the bindings and assumptions of its free symbols, the angular unit, the
+precision); (b) a compilation option with which the caller asks for numeric
+integration directly; (c) both; (d) neither. The deterministic bounds of the
+constant folder stay as they are, and its retired wall-clock limit is not to
+be restored.
+
 ### Codegen audit follow-ups (CE 0.128.9)
 
 The CORE audit `ce-0.128.9.json` pairs all 784 records with

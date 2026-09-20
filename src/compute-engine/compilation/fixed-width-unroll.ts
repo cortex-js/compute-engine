@@ -7,7 +7,11 @@ import {
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { isTupleShapedType } from '../collection-utils.js';
-import { isPointElementType } from '../../common/type/utils.js';
+import {
+  isPointElementType,
+  resolveTypeAlias,
+} from '../../common/type/utils.js';
+import type { Type } from '../../common/type/types.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
@@ -332,12 +336,27 @@ const POINT_ACCESSOR_POSITION: Readonly<Record<string, number>> = {
  * of each (the Tycho code-generation audit of 0.128.9 measured a three-point
  * list built once per row and projected three times, records 683–748).
  *
+ * A fourth operand is POINT ARITHMETIC over a wide literal list of points —
+ * a sum, a negation or a scalar multiple with such a list somewhere among its
+ * point operands (`0.3·(t, t) + 4·[(x₁, y₁), …]`). Points add and scale
+ * coordinate by coordinate, and a single point added to a list of points is
+ * added to each of them, which is what a number added to a list of numbers
+ * does too. So the coordinate of the arithmetic is the same arithmetic over
+ * the coordinates (`0.3·t + 4·[x₁, …]`), and the points are never built. The
+ * targets otherwise build every point, transform every coordinate, and read
+ * one coordinate back: the Tycho code-generation audit of 0.131.3 measured a
+ * list of 7,225 two-coordinate points transformed whole to read its x
+ * coordinates (document `woeywky0kj`, a 295,869-character kernel). The width
+ * floor is checked once, over the whole arithmetic: at least one list in it
+ * must be wide. Arithmetic over single points, or over narrow lists only, is
+ * left to the targets, for the reason given above.
+ *
  * Returns `undefined` — leaving the node for the target's own lowering, or
  * its own decline — when the operand is none of those shapes, when the
  * coordinate is past the arity of a literal point, or when a coordinate the
- * rewrite would DISCARD is impure: the interpreter evaluates the whole point
- * once, so dropping an impure coordinate would change how many times its
- * effect runs.
+ * rewrite would DISCARD is impure or reads code the caller supplied
+ * (`readsCallerSource`): the interpreter evaluates the whole point once, so
+ * dropping such a coordinate would change how many times its effect runs.
  */
 function foldPointAccessor(
   expr: Expression & FunctionInterface,
@@ -354,13 +373,64 @@ function foldPointAccessor(
   if (options.skipHeads?.has(point.operator)) return undefined;
   if (literalPointOperands(point) !== undefined)
     return options.foldSingleLiteralPoint === true
-      ? coordinateOf(point, expr.operator, position)
+      ? coordinateOf(point, expr.operator, position, options)
       : undefined;
   if (isUnrollableList(point, options))
-    return coordinateOf(point, expr.operator, position);
+    return coordinateOf(point, expr.operator, position, options);
   if (isFunction(point, 'PointList'))
     return projectPointListColumn(point, position, options);
+  if (isPointArithmeticOverWideList(point, position, options))
+    return coordinateOf(point, expr.operator, position, options);
   return undefined;
+}
+
+/**
+ * Is `point` a sum, a negation or a scalar multiple with a WIDE literal list
+ * (`isUnrollableList`) among its point operands, at any depth of such
+ * arithmetic? The walk follows exactly the operands `coordinateOf` reads a
+ * coordinate from, so a list in a position that is not a point operand — a
+ * provably scalar factor — does not count.
+ *
+ * The rule is withheld on a target that writes constant lists out element by
+ * element (`UnrollOptions.unrollConstantLists`, the interval target) when a
+ * list the walk reaches has a NUMBER LITERAL at `position` in every point.
+ * The projected list would be a constant list of numbers, which the
+ * element-wise rule then fans out with no upper width: the 7,225-point
+ * witness named on `foldPointAccessor` became a 202,510-character interval
+ * kernel, where the unprojected arithmetic compiles to a 413-character one
+ * that reads the point table through the run-time broadcast. On a target that
+ * keeps a constant list whole, the projection has no such cost.
+ */
+function isPointArithmeticOverWideList(
+  point: Expression & FunctionInterface,
+  position: number,
+  options: UnrollOptions
+): boolean {
+  const projectsToConstants = (list: Expression & FunctionInterface) =>
+    list.ops.every((element) => {
+      const coordinates = literalPointOperands(element);
+      return (
+        coordinates !== undefined &&
+        position <= coordinates.length &&
+        isNumber(coordinates[position - 1])
+      );
+    });
+  let wide = false;
+  let constant = false;
+  const walk = (e: Expression, depth: number): void => {
+    if (!isFunction(e)) return;
+    if (depth > 0 && e.operator === 'List') {
+      if (isUnrollableList(e, options)) wide = true;
+      if (e.nops > 0 && projectsToConstants(e)) constant = true;
+      return;
+    }
+    if (e.operator === 'Add' || e.operator === 'Negate')
+      for (const op of e.ops) walk(op, depth + 1);
+    else if (e.operator === 'Multiply')
+      for (const op of e.ops) if (!isProvablyScalar(op)) walk(op, depth + 1);
+  };
+  walk(point, 0);
+  return wide && !(options.unrollConstantLists === true && constant);
 }
 
 /**
@@ -513,9 +583,52 @@ function isUnrollableList(
 function coordinateOf(
   point: Expression,
   accessor: string,
-  position: number
+  position: number,
+  options: UnrollOptions
 ): Expression | undefined {
+  return coordinateAndArity(point, accessor, position, options)?.coordinate;
+}
+
+/**
+ * What the pass can prove about the points an operand holds.
+ *
+ * `arity` is how many coordinates each point has, or `undefined` when the
+ * pass cannot name one count: a value typed as a bare `tuple`, or a list
+ * whose points do not all have the same count (a valid list on its own, but
+ * not one a point can be added to). `width` is how many points a written-out
+ * list holds, or `undefined` for a single point.
+ */
+type PointShape = { arity: number | undefined; width: number | undefined };
+
+/**
+ * {@link coordinateOf}, together with the shape of the points the operand
+ * holds ({@link PointShape}).
+ *
+ * The shape is what keeps the rewrite from answering where the interpreter
+ * reports an error. Points of different arities do not add: `(a, b) +
+ * (1, 2, 3)` is an `incompatible-type` error, and so is a point added to a
+ * list that holds a point of another arity. Two lists of points of different
+ * widths do not add either (`incompatible-dimensions`). The coordinates alone
+ * would add without complaint (`a + 1`), and the check the target makes on
+ * the points at run time would be gone with the points. So a sum is rewritten
+ * only when every operand has a PROVEN arity and they all agree, and when no
+ * two written-out lists among its operands differ in width. A sum with an
+ * operand of unknown arity — a symbol typed as a bare `tuple` — is left to
+ * the target.
+ */
+function coordinateAndArity(
+  point: Expression,
+  accessor: string,
+  position: number,
+  options: UnrollOptions
+): ({ coordinate: Expression } & PointShape) | undefined {
   const ce = point.engine;
+
+  // A head the caller overrode is emitted by the caller's implementation,
+  // which receives the node's operands. The rewrite would hand it coordinates
+  // where it is handed points today, so it stops at such a head, at any depth.
+  if (isFunction(point) && options.skipHeads?.has(point.operator) === true)
+    return undefined;
 
   const literal = literalPointOperands(point);
   if (literal !== undefined) {
@@ -525,26 +638,53 @@ function coordinateOf(
     if (position > literal.length) return undefined;
     // Every OTHER coordinate is discarded by the rewrite. See the purity
     // constraint in `foldPointAccessor`.
-    if (literal.some((op, i) => i !== position - 1 && op.isPure !== true))
+    if (
+      literal.some(
+        (op, i) =>
+          i !== position - 1 &&
+          (op.isPure !== true || readsCallerSource(op, options))
+      )
+    )
       return undefined;
-    return literal[position - 1];
+    return {
+      coordinate: literal[position - 1],
+      arity: literal.length,
+      width: undefined,
+    };
   }
 
   if (isFunction(point, 'Add') || isFunction(point, 'List')) {
     // Points add componentwise, and the coordinate of a list of points is the
     // list of the elements' coordinates.
     const parts: Expression[] = [];
+    const shapes: PointShape[] = [];
     for (const op of point.ops) {
-      const part = coordinateOf(op, accessor, position);
+      const part = coordinateAndArity(op, accessor, position, options);
       if (part === undefined) return undefined;
-      parts.push(part);
+      parts.push(part.coordinate);
+      shapes.push(part);
     }
-    return ce.function(point.operator, parts);
+    // One arity when every operand has a proven one and they all agree.
+    const arities = new Set(shapes.map((shape) => shape.arity));
+    const [firstArity] = arities;
+    const arity = arities.size === 1 ? firstArity : undefined;
+    const coordinate = ce.function(point.operator, parts);
+    if (point.operator === 'List')
+      return { coordinate, arity, width: point.nops };
+    // The operands of a sum must agree: see the shape rule above.
+    const widths = new Set(
+      shapes.map((shape) => shape.width).filter((w) => w !== undefined)
+    );
+    if (point.nops > 1 && (arity === undefined || widths.size > 1))
+      return undefined;
+    const [width] = widths;
+    return { coordinate, arity, width };
   }
 
   if (isFunction(point, 'Negate') && point.nops === 1) {
-    const part = coordinateOf(point.op1, accessor, position);
-    return part === undefined ? undefined : ce.function('Negate', [part]);
+    const part = coordinateAndArity(point.op1, accessor, position, options);
+    if (part === undefined) return undefined;
+    return { ...part, coordinate: ce.function('Negate', [part.coordinate]) };
   }
 
   if (isFunction(point, 'Multiply')) {
@@ -556,19 +696,44 @@ function coordinateOf(
       .map((f, i) => (isProvablyScalar(f) ? -1 : i))
       .filter((i) => i >= 0);
     if (pointIndexes.length !== 1) return undefined;
-    const part = coordinateOf(factors[pointIndexes[0]], accessor, position);
-    if (part === undefined) return undefined;
-    return ce.function(
-      'Multiply',
-      factors.map((f, i) => (i === pointIndexes[0] ? part : f))
+    const part = coordinateAndArity(
+      factors[pointIndexes[0]],
+      accessor,
+      position,
+      options
     );
+    if (part === undefined) return undefined;
+    return {
+      ...part,
+      coordinate: ce.function(
+        'Multiply',
+        factors.map((f, i) => (i === pointIndexes[0] ? part.coordinate : f))
+      ),
+    };
   }
 
   // Base case: an operand whose static type is a tuple is a single point the
   // targets can already read a coordinate from.
-  if (isTupleShapedType(point.type.type)) return ce.function(accessor, [point]);
+  if (isTupleShapedType(point.type.type))
+    return {
+      coordinate: ce.function(accessor, [point]),
+      arity: tupleTypeArity(point.type.type),
+      width: undefined,
+    };
 
   return undefined;
+}
+
+/**
+ * The number of elements of a tuple type, when the type states it: a
+ * parameterized tuple. `undefined` for the bare `tuple`. A transparent alias
+ * is unfolded first; a nominal reference stays opaque.
+ */
+function tupleTypeArity(t: Readonly<Type>): number | undefined {
+  const resolved = resolveTypeAlias(t);
+  return typeof resolved !== 'string' && resolved.kind === 'tuple'
+    ? resolved.elements.length
+    : undefined;
 }
 
 /**
