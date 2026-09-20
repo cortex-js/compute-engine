@@ -115,8 +115,40 @@ describe('A symbolic integration attempt that timed out', () => {
     };
     expect(inScope('real<0..>')).toBe(1);
     expect(inScope('real<0..>')).toBe(0);
-    // Another declared type is another question.
+    // A declared type that does not include the recorded one is another
+    // question.
     expect(inScope('integer')).toBe(1);
+  });
+
+  test('is not repeated under WIDER declared types, and is under narrower ones', () => {
+    // A host declares other types for another target: `k: real<0..>, x: real`
+    // for JavaScript, `k: real, x: number` for the interval target. A search
+    // that timed out knowing more about its symbols is not repeated knowing
+    // less. A narrower type can be what lets a search finish, so that
+    // direction searches again.
+    const ce = new ComputeEngine();
+    const inScope = (
+      k: string,
+      x: string,
+      to: 'javascript' | 'interval-js'
+    ) => {
+      ce.pushScope();
+      try {
+        ce.declare('k', k);
+        ce.declare('x', x);
+        return compiled(ce, TAIL, to).searches;
+      } finally {
+        ce.popScope();
+      }
+    };
+    expect(inScope('real<0..>', 'real', 'javascript')).toBe(1);
+    expect(inScope('real', 'number', 'interval-js')).toBe(0);
+    // Wider in one symbol, narrower in the other: not included.
+    expect(inScope('number', 'integer', 'javascript')).toBe(1);
+    // Narrower than everything recorded so far.
+    expect(inScope('integer<1..>', 'integer', 'javascript')).toBe(1);
+    // …and now that record answers the wider declarations too.
+    expect(inScope('integer', 'real', 'javascript')).toBe(0);
   });
 
   describe('with a symbol declared WITH a value in a new scope', () => {
@@ -163,6 +195,32 @@ describe('A symbolic integration attempt that timed out', () => {
       expect(searches(ce, held)).toBe(1);
       expect(searches(ce, held)).toBe(1);
     });
+  });
+
+  test('keeps the type it timed out under when the host changes its type object', () => {
+    // A host can declare with a type OBJECT of its own, change it, and
+    // declare with it again. The record must not change with it.
+    const ce = new ComputeEngine();
+    const kType = { kind: 'numeric', type: 'real', lower: 0 } as {
+      kind: 'numeric';
+      type: 'real';
+      lower: number;
+    };
+    const inScope = () => {
+      ce.pushScope();
+      try {
+        ce.declare('k', { type: kType as never });
+        ce.declare('x', 'real');
+        return compiled(ce, TAIL).searches;
+      } finally {
+        ce.popScope();
+      }
+    };
+    expect(inScope()).toBe(1);
+    expect(inScope()).toBe(0);
+    // Narrower now: `real<1..>` does not include the recorded `real<0..>`.
+    kType.lower = 1;
+    expect(inScope()).toBe(1);
   });
 
   test('is repeated when a name of the integral resolves to another definition', () => {

@@ -503,32 +503,26 @@ compiles when its point list `C_c` is declared
    runtime were checked at an exact zero argument only, which is the one pole a
    floating-point argument reaches exactly.
 
-### The timeout record of a symbolic integration finds no repeat among the five compilations of `thpezd39zq` (OPEN, compile latency, needs a user decision — measured 2026-09-20 on Tycho `afadae282` with a trace in `BaseCompiler.closedFormIntegral`)
+### Three of the five compilations of `thpezd39zq` still search for a closed form for two seconds (OPEN, compile latency — measured 2026-09-20 on Tycho `afadae282`)
 
-The record skips a symbolic integration search that timed out, while the
-engine state is unchanged and the integral and what its names resolve to are
-the same (`antiderivativeTimeouts` in `compilation/base-compiler.ts`). On
-Tycho's route the five compilations of this document are five different
-questions, so each one searches for 2,000 ms:
+The record of a timed-out symbolic integration (`antiderivativeTimeouts` in
+`compilation/base-compiler.ts`) now lets the second target of a row skip the
+search, so this document makes three searches in place of five. The three
+that remain are different questions, which no key can share:
 
 - two integrands that differ in spelling, `Γ(k/2)` and `(k/2 − 1)!`;
-- each compiled for `javascript` with `k: real<0..>, x: real` and for
-  `interval-js` with `k: real, x: number` — Tycho declares other types for the
-  interval target;
 - one call `p(X)` of a helper whose body holds the first integral with the
   parameter names `ceArg_0` and `ceArg_1` in place of `x` and `y`.
 
-The record does hit when the same row is compiled again for the same target
-with nothing changed. One extension would make the second target hit: let a
-record made under NARROWER declared types answer a lookup under WIDER ones
-(`real<0..>` is a subtype of `real`, `real` of `number`). The argument is that
-a search that ran out of time knowing more about its symbols will not finish
-knowing less. It is an argument, not a proof, and it goes past the decision
-that was made (the record holds while the bindings are unchanged), so it
-needs the user's decision. With it the document would make three searches in
-place of five. The helper call and the second spelling cannot be shared by a
-key; they need the search itself to be quicker for this integrand, which has
-no elementary closed form for a symbolic `k`.
+Each runs the search to its 2,000 ms limit. What would help is a search that
+gives up sooner on this integrand, the upper tail of a chi-squared density
+with a symbolic number of degrees of freedom, which has no elementary closed
+form: find where the two seconds go (the trace of the search prints
+"Timeout exceeded — Skipping rule" for an `Arcsin` rule, so at least one rule
+runs to the deadline), and see whether a structural test can refuse the
+integrand before the rules run. A timeout stays no proof that a closed form
+does not exist, and the deterministic bounds of the constant folder stay as
+they are.
 
 ### Codegen audit follow-ups (CE 0.128.9)
 

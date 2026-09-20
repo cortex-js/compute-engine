@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+### Improvements
+
+- **A symbolic integration that timed out is not searched again for another
+  target that declares wider types.** The record of a timed-out search
+  compares the declared types of the integral's symbols by inclusion: a
+  record made with `k: real<0..>, x: real` answers a compilation with
+  `k: real, x: number`, because a search that ran out of time knowing more
+  about its symbols is not expected to finish knowing less. A narrower type
+  searches again, since it can be what lets a search finish. Tycho declares
+  wider types for the interval target than for the JavaScript target, so the
+  second target of a row now skips the search: measured on Tycho's route, the
+  five compilations of the Desmos state `thpezd39zq` make three searches in
+  place of five (the two interval compilations take 6 ms and 3 ms, were
+  2,002 ms each), with identical emitted code.
+
 ### Resolved Issues
 
 - **The record of a timed-out symbolic integration is found again by a host

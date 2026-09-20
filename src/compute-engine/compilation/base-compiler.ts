@@ -15903,10 +15903,27 @@ export class BaseCompiler {
    * parse and a compilation advance it, and one search advances it more than
    * a thousand times. Closed forms and searches that completed without one
    * are not recorded: they are quick to repeat.
+   *
+   * The declared TYPES are compared by inclusion, not for equality. A record
+   * made with narrower declared types answers a lookup with wider ones
+   * (`k: real<0..>` answers `k: real`, `x: real` answers `x: number`): a
+   * search that ran out of time knowing more about its symbols is not
+   * expected to finish knowing less. A host declares other types for another
+   * target — Tycho declares `k: real<0..>, x: real` for the JavaScript target
+   * and `k: real, x: number` for the interval target — and the second target
+   * of a row then skips the search. The other direction does not hold: a
+   * narrower type can be what lets a search finish. This is a judgment about
+   * the search, which the user approved, and not a property that is proved.
+   * So `integrals` maps the key of an integral to the lists of declared types
+   * it timed out under, in the order of the key's names.
    */
   private static readonly antiderivativeTimeouts = new WeakMap<
     object,
-    { stamp: string; provider: unknown; integrals: Set<string> }
+    {
+      stamp: string;
+      provider: unknown;
+      integrals: Map<string, Type[][]>;
+    }
   >();
 
   /** A number for each definition object met by {@link antiderivativeKey},
@@ -15914,9 +15931,16 @@ export class BaseCompiler {
   private static readonly definitionIds = new WeakMap<object, number>();
   private static nextDefinitionId = 1;
 
-  /** The most integrals {@link antiderivativeTimeouts} holds for one engine;
-   *  the record is emptied when it would grow past this. */
+  /** The most lists of types {@link antiderivativeTimeouts} holds for one
+   *  engine; the record is emptied when it would grow past this. */
   private static readonly MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS = 256;
+
+  /** How many lists of types a record holds, over all its integrals. */
+  private static recordedTypeLists(integrals: Map<string, Type[][]>): number {
+    let count = 0;
+    for (const lists of integrals.values()) count += lists.length;
+    return count;
+  }
 
   /** How many antiderivative-first attempts have RUN, as opposed to being
    *  skipped. Read by tests, before and after a compilation. */
@@ -15929,10 +15953,12 @@ export class BaseCompiler {
   }
 
   /**
-   * The key of one integral in {@link antiderivativeTimeouts}: its operands
-   * as MathJSON, and for each symbol and each function head in them, what
-   * the name resolves to — the DECLARED type and the value of a symbol, the
-   * definition of a function.
+   * One integral as {@link antiderivativeTimeouts} records it. `key` is its
+   * operands as MathJSON, and for each symbol and each function head in them,
+   * what the name resolves to — the value of a symbol, the definition of a
+   * function. `types` is the DECLARED type of each symbol the key names by
+   * its content, in the order of the names; the types are kept out of the key
+   * because they are compared by inclusion.
    *
    * An INFERRED type is left out. The engine narrows the type of a symbol
    * that has no declaration each time the symbol is used, so that type goes
@@ -15946,7 +15972,8 @@ export class BaseCompiler {
     engine: ComputeEngine,
     args: ReadonlyArray<Expression>,
     ops: ReadonlyArray<unknown>
-  ): string {
+  ): { key: string; types: Type[] } {
+    const types: Type[] = [];
     const names = new Set(args.flatMap((a) => a.symbols));
     const addHeads = (e: Expression): void => {
       if (!isFunction(e)) return;
@@ -15981,7 +16008,8 @@ export class BaseCompiler {
         const held = def.value.value;
         if (held === undefined || held.symbols.length === 0) {
           const policy = `${def.value.isConstant ? 'const' : 'var'}/${def.value.holdUntil}`;
-          return `${n}:${def.value.type.toString()}:${policy}=${held?.digest ?? ''}`;
+          types.push(def.value.type.type);
+          return `${n}:${policy}=${held?.digest ?? ''}`;
         }
       }
       let id = BaseCompiler.definitionIds.get(def);
@@ -15991,7 +16019,7 @@ export class BaseCompiler {
       }
       return `${n}#${id}`;
     });
-    return `${JSON.stringify(ops)}|${bindings.join(',')}`;
+    return { key: `${JSON.stringify(ops)}|${bindings.join(',')}`, types };
   }
 
   /**
@@ -16121,7 +16149,7 @@ export class BaseCompiler {
     // An attempt that timed out in this engine state is not repeated — see
     // `antiderivativeTimeouts`.
     const ops = args.map((x) => x.json);
-    const integralKey = BaseCompiler.antiderivativeKey(engine, args, ops);
+    const integral = BaseCompiler.antiderivativeKey(engine, args, ops);
     const timeouts = BaseCompiler.antiderivativeTimeouts.get(engine);
     if (timeouts !== undefined) {
       if (
@@ -16129,7 +16157,18 @@ export class BaseCompiler {
         timeouts.provider !== engine._integrationProvider
       )
         BaseCompiler.antiderivativeTimeouts.delete(engine);
-      else if (timeouts.integrals.has(integralKey)) return undefined;
+      else if (
+        // Every recorded type is included in the type declared now — see
+        // `antiderivativeTimeouts` for why inclusion is enough.
+        timeouts.integrals
+          .get(integral.key)
+          ?.some(
+            (recorded) =>
+              recorded.length === integral.types.length &&
+              recorded.every((t, i) => isSubtype(t, integral.types[i]))
+          ) === true
+      )
+        return undefined;
     }
 
     const grantedMs = Math.min(
@@ -16182,12 +16221,28 @@ export class BaseCompiler {
         record === undefined ||
         record.stamp !== stamp ||
         record.provider !== provider ||
-        record.integrals.size >= BaseCompiler.MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS
+        BaseCompiler.recordedTypeLists(record.integrals) >=
+          BaseCompiler.MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS
       ) {
-        record = { stamp, provider, integrals: new Set() };
+        record = { stamp, provider, integrals: new Map() };
         BaseCompiler.antiderivativeTimeouts.set(engine, record);
       }
-      record.integrals.add(integralKey);
+      // The record keeps a COPY of each type. A host can hand the engine a
+      // type object of its own, change it later and declare with it again;
+      // the recorded type must stay the one the search ran under.
+      const types = integral.types.map((t) => structuredClone(t));
+      // A recorded list that includes the new one is dropped: the new list
+      // answers every lookup the old one answered. One integral therefore
+      // keeps only its narrowest lists, none of which includes another.
+      const kept = (record.integrals.get(integral.key) ?? []).filter(
+        (recorded) =>
+          !(
+            recorded.length === types.length &&
+            types.every((t, i) => isSubtype(t, recorded[i]))
+          )
+      );
+      kept.push(types);
+      record.integrals.set(integral.key, kept);
     }
 
     return usable ? closed : undefined;
