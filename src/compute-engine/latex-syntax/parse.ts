@@ -68,6 +68,8 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { TypeString } from '../types.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import { normalizeContinuationRanges } from './dictionary/definitions-core.js';
+import { ApplicationPolicy } from './application-policy.js';
+import { continuationRanges } from './range-provenance.js';
 
 /**
  * A collected parse diagnostic with its internal monotonic sequence id. The
@@ -519,6 +521,16 @@ function describeTypeCallbackResult(value: unknown): string {
 export class _Parser implements Parser {
   readonly options: Readonly<ParseLatexOptions>;
 
+  private _applicationPolicy?: ApplicationPolicy;
+
+  resolveApplications(expr: MathJsonExpression): MathJsonExpression {
+    return this._applicationPolicy?.finish(expr) ?? expr;
+  }
+
+  _isApplicationCandidate(expr: MathJsonExpression): boolean {
+    return this._applicationPolicy?.has(expr) ?? false;
+  }
+
   _index = 0;
 
   symbolTable: SymbolTable = {
@@ -928,7 +940,9 @@ export class _Parser implements Parser {
    */
   resolveSymbol(
     id: MathJsonSymbol
-  ): { type: BoxedType; subscriptEvaluate?: boolean } | undefined {
+  ):
+    | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
+    | undefined {
     // Parser-local bindings shadow the ambient environment
     let table: SymbolTable | null = this.symbolTable;
     while (table) {
@@ -2585,6 +2599,50 @@ export class _Parser implements Parser {
       // path that backtracks below is cleaned up by the index-setter auto-prune.
       if (typeof fn === 'string')
         this.emitSymbolReference(fn, start, this.index);
+      if (typeof fn === 'string' && this.options.resolveApplication) {
+        // Match the ordinary symbol path before committing the occurrence.
+        // The low-level name scanner can spell dictionary aliases differently.
+        const scannerEnd = this.index;
+        this.index = start;
+        const policyHead = this.parseSymbol(until);
+        const info =
+          typeof policyHead === 'string'
+            ? this.resolveSymbol(policyHead)
+            : undefined;
+        if (
+          typeof policyHead === 'string' &&
+          (info === undefined || info.inferred === true)
+        ) {
+          const headEnd = this.index;
+          const fallback = this.isFunctionOperator(policyHead)
+            ? 'apply'
+            : this.looksLikePredicate(policyHead)
+              ? this.inQuantifierScope
+                ? 'predicate'
+                : 'apply'
+              : 'juxtapose';
+          this.skipVisualSpace();
+          let opening = this.index;
+          if (OPEN_DELIMITER_PREFIX[this._tokens[opening]]) opening++;
+          if (this._tokens[opening] === '<{>') opening++;
+          if (DELIMITER_SHORTHAND['('].includes(this._tokens[opening])) {
+            const group = this.parseEnclosure();
+            if (group !== null) {
+              this._applicationPolicy ??= new ApplicationPolicy(
+                this.options.resolveApplication
+              );
+              return this._applicationPolicy.add({
+                head: policyHead,
+                group,
+                fallback,
+                sourceOffsets: this.sourceOffsets(start, this.index),
+                headSourceOffsets: this.sourceOffsets(start, headEnd),
+              });
+            }
+          }
+        }
+        this.index = scannerEnd;
+      }
       if (!this.isFunctionOperator(fn)) {
         // Check if this looks like a predicate: single uppercase letter
         // followed by parentheses (e.g., P(x), Q(a,b))
@@ -3706,6 +3764,8 @@ export class _Parser implements Parser {
       let index = this.index;
       do {
         postfix = this.parsePostfixOperator(result, until);
+        if (postfix !== null && result !== null)
+          this._applicationPolicy?.suffix(result, postfix);
         result = postfix ?? result;
         if (this.index === index && postfix !== null) {
           console.assert(this.index !== index, 'No token consumed');
@@ -3718,7 +3778,11 @@ export class _Parser implements Parser {
     //
     // 7. Are there superscript or subfix operators?
     //
-    if (result !== null) result = this.parseSupsub(result);
+    if (result !== null) {
+      const scripted = this.parseSupsub(result);
+      if (scripted !== null) this._applicationPolicy?.suffix(result, scripted);
+      result = scripted;
+    }
 
     //
     // 7b. Scripted-brace sequence notation: `\{a_n\}_{n=1}^{\infty}`.
@@ -3744,6 +3808,7 @@ export class _Parser implements Parser {
       let index = this.index;
       do {
         postfix = this.parsePostfixOperator(result, until);
+        if (postfix !== null) this._applicationPolicy?.suffix(result, postfix);
         result = postfix ?? result;
         if (this.index === index && postfix !== null) {
           console.assert(this.index !== index, 'No token consumed');
@@ -3895,15 +3960,24 @@ export class _Parser implements Parser {
                   start,
                   rhsStartToken
                 );
-                if (operator(lhs) === 'InvisibleOperator') {
-                  if (operator(rhs) === 'InvisibleOperator')
+                if (
+                  operator(lhs) === 'InvisibleOperator' &&
+                  !this._applicationPolicy?.has(lhs)
+                ) {
+                  if (
+                    operator(rhs) === 'InvisibleOperator' &&
+                    !this._applicationPolicy?.has(rhs)
+                  )
                     result = [
                       'InvisibleOperator',
                       ...operands(lhs),
                       ...operands(rhs),
                     ];
                   else result = ['InvisibleOperator', ...operands(lhs), rhs];
-                } else if (operator(rhs) === 'InvisibleOperator') {
+                } else if (
+                  operator(rhs) === 'InvisibleOperator' &&
+                  !this._applicationPolicy?.has(rhs)
+                ) {
                   result = ['InvisibleOperator', lhs, ...operands(rhs)];
                 } else result = ['InvisibleOperator', lhs, rhs];
               } else {
@@ -3942,7 +4016,11 @@ export class _Parser implements Parser {
     const latex = this.latex(start, this.index);
 
     if (Array.isArray(expr)) {
-      expr = { latex, fn: expr } as MathJsonExpression;
+      const decorated = { latex, fn: expr } as MathJsonExpression;
+      this._applicationPolicy?.decorated(expr, decorated as object);
+      if (continuationRanges.has(expr))
+        continuationRanges.add(decorated as object);
+      expr = decorated;
     } else if (typeof expr === 'number') {
       expr = { latex, num: Number(expr).toString() };
     } else if (typeof expr === 'string') {
@@ -4323,6 +4401,7 @@ export function parse(
   }
 
   expr ??= 'Nothing';
+  expr = adoptedParser.resolveApplications(expr);
 
   // The range infixes bind above `+` (and, for `..`, above implicit
   // multiplication and the prefix minus), so a compound first anchor is split:

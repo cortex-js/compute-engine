@@ -253,10 +253,10 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       expect(ce.parse('t(x+1)').json).toEqual(['t', ['Add', 'x', 1]]);
     });
 
-    test('a result canonicalized after the parse reads the engine-wide handler', () => {
+    test('a result canonicalized after the parse retains its symbol facts', () => {
       // A raw or structural result canonicalized later must read as a
-      // canonical parse does: the engine-wide handler applies outside a
-      // parse too. A per-call handler is known for its call only.
+      // canonical parse does. Both engine-wide and per-call answers remain
+      // part of the parsed expression's binding environment.
       const ce = oracle({ type: 'number' });
       const structural = ce.parse('s(x+1)', { form: 'structural' });
       expect(structural.json).toEqual([
@@ -274,7 +274,7 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
         id === 't' ? { type: 'real' } : undefined;
       expect(
         perCall.parse('t(x+1)', { form: 'raw', resolveSymbol }).canonical.json
-      ).toEqual(['t', ['Add', 'x', 1]]);
+      ).toEqual(['Multiply', 't', ['Add', 'x', 1]]);
     });
 
     test('an inferred function declaration yields to the handler', () => {

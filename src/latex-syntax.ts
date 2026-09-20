@@ -42,6 +42,8 @@ export type {
   LatexDictionary,
   SerializeLatexOptions,
   ParseLatexOptions,
+  ApplicationContext,
+  SymbolResolution,
   LatexString,
   Parser,
   Serializer,

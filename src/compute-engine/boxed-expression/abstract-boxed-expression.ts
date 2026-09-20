@@ -206,6 +206,56 @@ export abstract class _BoxedExpression implements Expression {
     return this;
   }
 
+  /** The binding environment captured by a parse with external symbol facts.
+   * Rebuilding a function must retain its head's signature as well as the
+   * bindings of its operands. Raw nodes remain unbound until rebuilt. */
+  _parseScope?: Scope;
+
+  /** Retain bindings on function nodes and unbound descendants. Canonical
+   * leaves already carry their bindings and can be shared or interned. */
+  _retainParseScope(scope: Scope): void {
+    const pending: [Expression, Scope][] = [[this, scope]];
+    const seen = new Set<Expression>();
+    while (pending.length) {
+      const [expr, inherited] = pending.pop()!;
+      if (seen.has(expr)) continue;
+      seen.add(expr);
+      if (!isFunction(expr) && expr.isCanonical) continue;
+      const node = expr as _BoxedExpression;
+      const captured = node._parseScope ?? inherited;
+      node._parseScope = captured;
+      if (isFunction(expr)) {
+        // A canonical binder's children were bound in its own scope. Keep
+        // that scope when an operand is extracted and rebuilt on its own.
+        const childScope = expr.localScope ?? captured;
+        for (const op of expr.ops) pending.push([op, childScope]);
+      }
+    }
+  }
+
+  /** Rebuild with the expression's retained bindings. @internal */
+  _withParseScope(f: () => Expression): Expression {
+    const captured = this._parseScope;
+    if (!captured) return f();
+    // A binder created while rebuilding this expression must retain its own
+    // local bindings above the captured environment.
+    for (
+      let scope: Scope | null = this.engine.context.lexicalScope;
+      scope;
+      scope = scope.parent
+    )
+      if (scope === captured) {
+        const result = f();
+        (result as _BoxedExpression)._retainParseScope(
+          this.engine.context.lexicalScope
+        );
+        return result;
+      }
+    const result = this.engine._inScope(captured, f);
+    (result as _BoxedExpression)._retainParseScope(captured);
+    return result;
+  }
+
   constructor(ce: ComputeEngine, metadata?: Metadata) {
     this.engine = ce;
     if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
@@ -988,6 +1038,13 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   map(
+    fn: (x: Expression) => Expression,
+    options?: { canonical: CanonicalOptions; recursive?: boolean }
+  ): Expression {
+    return this._withParseScope(() => this._mapInParseScope(fn, options));
+  }
+
+  private _mapInParseScope(
     fn: (x: Expression) => Expression,
     options?: { canonical: CanonicalOptions; recursive?: boolean }
   ): Expression {

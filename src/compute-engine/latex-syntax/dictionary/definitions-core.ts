@@ -45,6 +45,7 @@ import {
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
 import { absorbSubscripts } from '../parse-symbol.js';
+import { continuationRanges } from '../range-provenance.js';
 
 // ---------------------------------------------------------------------------
 // Component-access member-name table (C2)
@@ -1623,8 +1624,42 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // at ARROW_PRECEDENCE (270) instead would close the lambda before a
       // comparison (245), mis-parsing `n \mapsto n > 102` as
       // `(n \mapsto n) > 102`.
-      let rhs =
-        parser.parseExpression({ ...(until ?? {}), minPrec: 21 }) ?? 'Nothing';
+      let rhs: MathJsonExpression;
+      parser.pushSymbolTable();
+      try {
+        for (const param of params) {
+          const name =
+            operator(param) === 'Typed'
+              ? symbol(operand(param, 1))
+              : symbol(param);
+          if (!name) continue;
+          const annotation =
+            operator(param) === 'Typed' ? operand(param, 2) : null;
+          // An unannotated callable parameter keeps the existing call spelling;
+          // boxing still binds it locally, never to the outer function body.
+          let type: BoxedType | 'unknown' | 'value' | 'function' =
+            annotation === null &&
+            parser.resolveSymbol(name)?.type.matches('function')
+              ? 'function'
+              : 'value';
+          if (annotation !== null) {
+            try {
+              type = new BoxedType(
+                stringValue(annotation) ?? symbol(annotation) ?? 'unknown'
+              );
+            } catch {
+              // Nominal annotations are resolved by the engine at boxing.
+              // They still bind the parameter and shadow external facts.
+            }
+          }
+          parser.addSymbol(name, type);
+        }
+        rhs =
+          parser.parseExpression({ ...(until ?? {}), minPrec: 21 }) ??
+          'Nothing';
+      } finally {
+        parser.popSymbolTable();
+      }
       // A delimited body is DATA — a Tuple — whatever its separator, matching
       // the `f(t) := …` form and the generic `Delimiter` canonicalization. A
       // genuine statement block has already been built as a `Block` by the `;`
@@ -4104,18 +4139,6 @@ function signedMachineValue(expr: MathJsonExpression): number | null {
 }
 
 /**
- * Provenance set of `Range` nodes produced by the range *infix* operators
- * (`..`, `...`, `\ldots`, `\dots` — see `parseRange`). Membership distinguishes
- * a range written with the ellipsis/`..` idiom (which, as a trailing element of
- * a bracketed sample list, denotes a continuation: `[0, 15...210]`,
- * `[1, 3..10]`) from a range written explicitly as a `\operatorname{Range}(…)`
- * function call (which is a literal list element: `[3, Range(1, 5)]` stays a
- * `List`). Keyed on the raw MathJSON array object, which is preserved by
- * reference from `parseRange` through to `tryInferRangeFromElements`.
- */
-const continuationRanges = new WeakSet<object>();
-
-/**
  * Read a raw numeric sample as an exact rational: a plain machine number
  * (`{num: v, den: 1}`), a `Negate` of one, or a `Divide`/`Rational` of two
  * integer literals (`\frac{1}{6}` → `{num: 1, den: 6}`). Returns `null` for
@@ -4285,7 +4308,13 @@ export function normalizeContinuationRanges(
   let normalized = expr;
   const newArgs = args.map(normalizeContinuationRanges);
   if (newArgs.some((arg, i) => arg !== args[i])) {
-    normalized = [h, ...newArgs];
+    const fn: [string, ...MathJsonExpression[]] = [h, ...newArgs];
+    // The enclosing operator still represents the same source expression.
+    // Preserve its requested metadata while replacing the normalized children.
+    normalized =
+      !Array.isArray(expr) && typeof expr === 'object' && 'fn' in expr
+        ? { ...expr, fn }
+        : fn;
     // Rebuilding loses the WeakSet identity: carry the tag over.
     if (continuationRanges.has(expr as object))
       continuationRanges.add(normalized as object);
@@ -5104,23 +5133,25 @@ function parseFunctionDefinitionBody(
     sig !== undefined && typeof sig === 'object' && sig.kind === 'signature'
       ? [...(sig.args ?? []), ...(sig.optArgs ?? [])]
       : undefined;
-  if (!args || !sigArgs || sigArgs.length === 0) return parseBody();
-
-  let pushed = false;
+  if (!args) return parseBody();
+  parser.pushSymbolTable();
   try {
+    // A definition's parameters and recursive head shadow ambient names even
+    // when no parameter type has been inferred yet.
+    if (!args.some((arg) => symbol(arg) === fn))
+      parser.addSymbol(fn, 'function');
     for (let i = 0; i < args.length; i++) {
       const name = symbol(args[i]);
-      const type = sigArgs[i]?.type;
-      if (!name || type === undefined) continue;
-      if (!pushed) {
-        parser.pushSymbolTable();
-        pushed = true;
-      }
-      parser.addSymbol(name, new BoxedType(type));
+      if (!name) continue;
+      const type = sigArgs?.[i]?.type;
+      parser.addSymbol(
+        name,
+        type === undefined ? 'value' : new BoxedType(type)
+      );
     }
     return parseBody();
   } finally {
-    if (pushed) parser.popSymbolTable();
+    parser.popSymbolTable();
   }
 }
 
@@ -5972,6 +6003,7 @@ function parseAt(
       operator(lhs) !== 'List' &&
       operator(lhs) !== 'At' &&
       !isParenGroupDelimiter(lhs) &&
+      !parser._isApplicationCandidate?.(lhs) &&
       !isFunctionApplication(lhs)
     )
       return null;

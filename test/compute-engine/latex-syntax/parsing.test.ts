@@ -47,6 +47,9 @@ describe('FUNCTIONS', () => {
 });
 
 describe('CUSTOM SYMBOL RESOLUTION CALLBACK', () => {
+  // The shared test engine explicitly declares f. Explicit declarations now
+  // take precedence, so exercise external facts on an undeclared name.
+  const ce = new ComputeEngine();
   test('Accept type strings from resolveSymbol()', () => {
     expect(
       ce.parse('f(x)', {

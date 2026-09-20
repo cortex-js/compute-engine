@@ -1,5 +1,6 @@
 import { flatten } from './flatten.js';
 import { isImaginaryUnit, isOperatorDef } from './utils.js';
+import { isInferredDefinition } from './definition-guards.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -995,6 +996,9 @@ function oracleHeadType(
   // result canonicalized later — the engine-wide handler, so the reading of
   // a juxtaposition does not depend on WHEN the tree is canonicalized.
   const oracle = ce._activeSymbolOracle ?? ce.latexOptions?.resolveSymbol;
+  const definition = ce.lookupDefinition(name);
+  if (definition !== undefined && !isInferredDefinition(definition))
+    return undefined;
   const resolved = oracle?.(name);
   if (resolved === undefined || resolved === null) return undefined;
   const type = resolved.type;

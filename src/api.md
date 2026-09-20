@@ -6242,6 +6242,7 @@ type ParseLatexOptions = NumberFormat & {
   skipSpace: boolean;
   parseNumbers: "auto" | "rational" | "decimal" | "never";
   resolveSymbol: (symbol) => SymbolResolution | undefined;
+  resolveApplication: (context) => "apply" | "multiply" | undefined;
   parseUnexpectedToken: (lhs, parser) => MathJsonExpression | null;
   preserveLatex: boolean;
   diagnostics: boolean;
@@ -6313,24 +6314,37 @@ a symbol declared with an `unknown` type is still declared (return
 `{ type: 'unknown' }` for it), which is distinct from returning
 `undefined`.
 
-Through `ce.parse()` this handler *supplements* the engine scope: it is
-consulted first, and a symbol it does not resolve (`undefined`) falls
-back to the scope's definitions. Use it to inject knowledge the scope
-cannot have yet — e.g. names a later pass of a multi-pass document load
-will declare.
+Lexical bindings and explicit engine declarations take precedence. This
+handler supplies facts for names without an authoritative declaration;
+speculative types inferred from earlier uses do not suppress it.
+Answers are cached by name for a single parse. Use `resolveApplication`
+for notation choices that depend on an occurrence's syntax or position.
 
-The canonicalization that `ce.parse()` runs on its result consults the
-handler too, for the reading of a symbol before a parenthesized group
-(`s(x+1)` is a product when the handler says `s` is a value, an
-application when it says `s` is a function). Outside a `ce.parse()`
-call — a result parsed without canonicalization (`form: 'structural'`,
-`canonical: false`) and canonicalized later — the engine-wide handler
-(`ce.latexOptions.resolveSymbol`) is the one consulted; a handler passed
-to one call is known for that call only. A function declaration the
-engine inferred from an earlier application, with no body, yields to
-the handler's answer; a declaration the host made stands.
+Supplied facts belong to the resulting expression: they are retained for
+deferred canonicalization, including per-call handlers, without declaring
+symbols in the caller's scope. Changing a handler later does not change
+the meaning of an already parsed expression.
 
 The `symbol` argument is a [valid symbol](#symbols).
+
+#### ParseLatexOptions.resolveApplication?
+
+```ts
+optional resolveApplication?: (context) => "apply" | "multiply" | undefined;
+```
+
+Interpret an unresolved symbol followed by parentheses.
+
+Called after structural parsing for heads without an authoritative type.
+Explicit declarations, external symbol facts and lexical parameters take
+precedence. Return `undefined` to retain the usual notation heuristics.
+Return `apply` or `multiply` to commit an occurrence's reading without
+declaring its head. The decision is retained in raw MathJSON and survives
+later canonicalization, including when this handler is supplied per-call.
+
+This is a pure syntax policy, not a definition recognizer: a host that uses
+`=` for definitions should discover headers and declare them before parsing
+bodies. The hook is not called for bare juxtaposition or square brackets.
 
 #### ParseLatexOptions.parseUnexpectedToken
 
@@ -6528,6 +6542,7 @@ resolveSymbol(id):
   | {
   type: BoxedType;
   subscriptEvaluate: boolean;
+  inferred: boolean;
  }
   | undefined
 ```
@@ -6537,7 +6552,7 @@ The single symbol oracle: everything the parser knows about `id`.
 Merges (in priority order) parser-local bindings — sum indices, `Block`/
 `Function` parameters, tracked in the parser's symbol table — over the
 [ParseLatexOptions.resolveSymbol](#parselatexoptions) handler (which `ce.parse()` wires
-to consult per-call/engine-wide handlers first, then the engine scope).
+to consult explicit engine declarations before external handlers).
 
 Returns `undefined` if `id` is undeclared. A declared symbol always gets
 a record — declaration *presence* is the `!== undefined` check, distinct
@@ -6710,7 +6725,7 @@ was expected.
 
 <MemberCard>
 
-##### Parser.sourceOffsets() {#sourceoffsets}
+##### Parser.sourceOffsets() {#sourceoffsets-1}
 
 ```ts
 sourceOffsets(startToken, endToken?): [number, number]
@@ -8908,6 +8923,32 @@ function newSymbolIds(): {}
 ```
 
 A prototype-free [SymbolTable.ids](#ids) map — see the note there.
+
+</MemberCard>
+
+<MemberCard>
+
+### ApplicationContext {#applicationcontext}
+
+```ts
+type ApplicationContext = {
+  head: MathJsonSymbol;
+  arguments: ReadonlyArray<MathJsonExpression>;
+  sourceOffsets: readonly [number, number];
+  headSourceOffsets: readonly [number, number];
+  ancestors: ReadonlyArray<{
+     operator: MathJsonSymbol;
+     operandIndex: number;
+    }>;
+};
+```
+
+A syntactically ambiguous symbol followed by parentheses.
+
+The arguments and ancestry describe the parsed structure, not LaTeX tokens.
+Source offsets are half-open UTF-16 offsets in normalized LaTeX, as for parse
+diagnostics. Ancestry runs from the outermost expression to the nearest
+parent, with one-based operand indices; it includes written Delimiters.
 
 </MemberCard>
 
@@ -12525,7 +12566,7 @@ If the expression was constructed from a LaTeX string, the verbatim LaTeX
 
 <MemberCard>
 
-##### Expression.sourceOffsets? {#sourceoffsets-1}
+##### Expression.sourceOffsets? {#sourceoffsets-2}
 
 ```ts
 optional sourceOffsets?: [number, number];

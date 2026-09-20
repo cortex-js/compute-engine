@@ -81,6 +81,7 @@ import type {
 } from './latex-syntax/types.js';
 import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import { isInferredDefinition } from './boxed-expression/definition-guards.js';
 import {
   recordTypeProvenance,
   currentBoxingEpoch,
@@ -3349,17 +3350,44 @@ export class ComputeEngine implements IComputeEngine {
       };
     }
 
-    // The symbol oracle: a per-call or engine-wide `resolveSymbol` handler
-    // SUPPLEMENTS the engine scope — it is consulted first (it may know
-    // about symbols the scope cannot, e.g. names a later pass will declare),
-    // and any symbol it does not resolve falls back to the scope's
-    // definitions. Wired after the spreads so the composition always wins.
+    // Explicit lexical bindings shadow external facts. Only an inferred,
+    // unassigned binding yields to the resolver. Cache answers by name for
+    // this parse: symbol facts do not depend on speculative parser retries.
     const userResolve =
       parseOpts.resolveSymbol ?? this._latexOptions?.resolveSymbol;
+    const facts = new Map<MathJsonSymbol, SymbolResolution>();
+    const unresolved = new Set<MathJsonSymbol>();
     const resolveSymbol = userResolve
-      ? (id: MathJsonSymbol) =>
-          userResolve(id) ?? this._resolveSymbolFromScope(id)
+      ? (id: MathJsonSymbol) => {
+          const def = this.lookupDefinition(id);
+          const scoped = this._scopeResolution(def);
+          if (scoped !== undefined && !isInferredDefinition(def)) return scoped;
+          let resolved = facts.get(id);
+          if (resolved === undefined && !unresolved.has(id)) {
+            resolved = userResolve(id) ?? undefined;
+            if (resolved !== undefined) facts.set(id, resolved);
+            else unresolved.add(id);
+          }
+          return resolved ?? scoped;
+        }
       : (id: MathJsonSymbol) => this._resolveSymbolFromScope(id);
+
+    const userResolveApplication =
+      parseOpts.resolveApplication ?? this._latexOptions?.resolveApplication;
+    const supersededGuesses = new Set<MathJsonSymbol>();
+    const resolveApplication: ParseLatexOptions['resolveApplication'] =
+      userResolveApplication
+        ? (context) => {
+            const decision = userResolveApplication(context);
+            if (
+              decision !== undefined &&
+              !facts.has(context.head) &&
+              isInferredDefinition(this.lookupDefinition(context.head))
+            )
+              supersededGuesses.add(context.head);
+            return decision;
+          }
+        : undefined;
 
     const outerOracle = this._activeSymbolOracle;
     this._activeSymbolOracle = userResolve;
@@ -3370,6 +3398,7 @@ export class ComputeEngine implements IComputeEngine {
         ...this._latexOptions,
         ...parseOpts,
         resolveSymbol,
+        resolveApplication,
         // Resolved diagnostics wiring wins over both spreads.
         diagnostics: wantDiagnostics,
         onDiagnostic,
@@ -3378,11 +3407,51 @@ export class ComputeEngine implements IComputeEngine {
 
       if (result === null) return null;
 
-      let boxed = box(
-        this,
-        result,
-        optionsToInternal({ form, canonical, structural })
-      );
+      // External facts live in an expression-owned scope. Declaring them in
+      // the caller's scope would make a raw parse mutate its environment and
+      // would let one parse's resolver affect unrelated later expressions.
+      const parseScope: Scope | undefined = facts.size || supersededGuesses.size
+        ? {
+            parent: this.context.lexicalScope,
+            bindings: new Map(),
+            // Only the explicitly installed facts belong to this overlay.
+            // Ordinary free variables keep the caller's inference scope.
+            noAutoDeclare: true,
+          }
+        : undefined;
+      let boxed = this._inScope(parseScope, () => {
+        // An occurrence decision may contradict an earlier inferred use.
+        // Give that occurrence a fresh unknown binding and let its explicit
+        // tree constrain it, without rewriting the ambient guess.
+        for (const id of supersededGuesses)
+          if (!facts.has(id))
+            this.declare(id, { type: 'unknown', inferred: true });
+        for (const [id, fact] of facts)
+          this.declare(id, {
+            type: fact.type,
+            inferred: false,
+            // The resolver reports handler presence, not its implementation.
+            // Rebuild in the captured scope so evaluation keeps the external
+            // subscript symbolic instead of folding it to a compound name.
+            ...(fact.subscriptEvaluate
+              ? {
+                  subscriptEvaluate: (subscript: Expression) =>
+                    this._inScope(parseScope, () =>
+                      this._fn('Subscript', [this.symbol(id), subscript])
+                    ),
+                }
+              : {}),
+          });
+        return box(
+          this,
+          result,
+          optionsToInternal({ form, canonical, structural })
+        );
+      });
+
+      if (parseScope) {
+        (boxed as _BoxedExpression)._retainParseScope(parseScope);
+      }
 
       if (diagnostics !== undefined) {
         // Attach to a fresh top-level instance: `_unshared()` clones interned
@@ -3458,14 +3527,24 @@ export class ComputeEngine implements IComputeEngine {
    */
   private _resolveSymbolFromScope(
     id: MathJsonSymbol
-  ): { type: BoxedType; subscriptEvaluate?: boolean } | undefined {
-    const def = this.lookupDefinition(id);
+  ):
+    | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
+    | undefined {
+    return this._scopeResolution(this.lookupDefinition(id));
+  }
+
+  private _scopeResolution(
+    def: BoxedDefinition | undefined
+  ):
+    | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
+    | undefined {
     if (!def) return undefined;
     if (isOperatorDef(def)) return { type: def.operator.signature };
     if (isValueDef(def))
       return {
         type: def.value.type,
         subscriptEvaluate: !!def.value.subscriptEvaluate,
+        inferred: isInferredDefinition(def),
       };
     // A definition of neither kind is still a declaration.
     return { type: BoxedType.unknown };
@@ -3505,7 +3584,7 @@ export class ComputeEngine implements IComputeEngine {
         def !== undefined &&
         isValueDef(def) &&
         def.value.inferredType &&
-        def.value.value === undefined &&
+        def.value.storedValue === undefined &&
         def.value.type.matches('function')
       )
         return undefined;
@@ -3514,7 +3593,13 @@ export class ComputeEngine implements IComputeEngine {
     const userResolve = this._latexOptions?.resolveSymbol;
     const raw = syntax.parse(latex, {
       ...this._latexOptions,
-      resolveSymbol: userResolve ? (id) => userResolve(id) ?? scope(id) : scope,
+      resolveSymbol: userResolve
+        ? (id) => {
+            const scoped = scope(id);
+            if (scoped !== undefined && !scoped.inferred) return scoped;
+            return userResolve(id) ?? scoped;
+          }
+        : scope,
     });
     const result = new Set<string>();
     if (raw !== null) collectAppliedNonFunctions(raw, result);

@@ -1221,12 +1221,14 @@ export class BoxedFunction
     // inside a scoped operator can be mapped back to source). `latex` is
     // deliberately NOT threaded here: the canonical form is a different
     // expression, for which verbatim source LaTeX would be a lie.
-    return this.engine.function(
-      this._operator,
-      this._ops,
-      this.sourceOffsets !== undefined
-        ? { metadata: { sourceOffsets: this.sourceOffsets } }
-        : undefined
+    return this._withParseScope(() =>
+      this.engine.function(
+        this._operator,
+        this._ops,
+        this.sourceOffsets !== undefined
+          ? { metadata: { sourceOffsets: this.sourceOffsets } }
+          : undefined
+      )
     );
   }
 
@@ -1246,6 +1248,10 @@ export class BoxedFunction
   };
 
   get structural(): Expression {
+    return this._withParseScope(() => this._structuralInScope());
+  }
+
+  private _structuralInScope(): Expression {
     if (this.isStructural) return this;
     if (_inStructuralRead) return this._memoizedStructural();
     // The outermost read owns the transient map's lifetime and must drop it
@@ -1514,6 +1520,13 @@ export class BoxedFunction
    * that scope — see the rebuild at the end of this method for why.
    */
   subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): Expression {
+    return this._withParseScope(() => this._subsInParseScope(sub, options));
+  }
+
+  private _subsInParseScope(
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
@@ -4980,7 +4993,9 @@ export class BoxedFunction
         this.isCanonical &&
         tail.every((x, i) => x === this._ops[i])
           ? this
-          : this.engine.function(this._operator, tail));
+          : this._withParseScope(() =>
+              this.engine.function(this._operator, tail)
+            ));
 
       // 6a/ String preservation, re-checked on the RESULT. Step 2d could only
       // see the node as authored, whose type may be a union that resolves to
@@ -5769,7 +5784,9 @@ export class BoxedFunction
           this.isCanonical &&
           tail.every((x, i) => x === this._ops[i])
             ? this
-            : engine.function(this._operator, tail));
+            : this._withParseScope(() =>
+                engine.function(this._operator, tail)
+              ));
 
         // 5a/ String preservation, re-checked on the RESULT. The step that
         // ran before evaluation could only see the node as authored, whose
@@ -6862,7 +6879,7 @@ function applyFunctionLiteral(
     const opDef = expr.engine.lookupDefinition(expr.operator);
     if (opDef && isOperatorDef(opDef))
       return expr.engine.function(expr.operator, ops).evaluate(options);
-    return expr.engine.function(expr.operator, ops);
+    return expr._withParseScope(() => expr.engine.function(expr.operator, ops));
   }
 
   // Broadcast if any operand is a finite indexed collection and the
@@ -6903,7 +6920,7 @@ function applyFunctionLiteral(
     // against 3 — so it is reported rather than held.
     const mismatch = broadcastLengthMismatch(expr.engine, ops);
     if (mismatch) return mismatch;
-    return expr.engine.function(expr.operator, ops);
+    return expr._withParseScope(() => expr.engine.function(expr.operator, ops));
   }
   if (broadcastsElementwise) {
     // Hybrid laziness, as at the operator-def lambda broadcast (step 2b):
@@ -6997,7 +7014,7 @@ function applyFunctionLiteral(
     ops,
     options,
     'bubble',
-    expr.engine.function(expr.operator, ops)
+    expr._withParseScope(() => expr.engine.function(expr.operator, ops))
   );
 }
 

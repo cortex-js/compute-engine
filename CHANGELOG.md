@@ -1,4 +1,35 @@
-## [Unreleased]
+## 0.132.1 _2026-09-19_
+
+### Resolved Issues
+
+- **Application policy callbacks preserve range precedence.** A callback could
+  change `f(x)+1...n` into `f(x)+(1...n)`, even when it returned `undefined`.
+  Raw syntax rewrites now preserve the metadata used to recognize continuation
+  ranges. This also keeps offsets inside indexed range bounds, such as
+  `L[I(l,r,i)+1...n]`, and preserves explicitly parenthesized ranges.
+
+## 0.132.0 _2026-09-19_
+
+### Features
+
+- **Separate symbol facts from application notation.** The new
+  `resolveApplication(context)` parse hook receives a head, parsed arguments,
+  normalized LaTeX source offsets, and structural ancestry. Return `apply`,
+  `multiply`, or `undefined` to choose an unresolved parenthesized occurrence's
+  reading. Decisions are stored in raw MathJSON and survive deferred
+  canonicalization without declaring the head. Explicit declarations, lexical
+  parameters, and external symbol facts take precedence.
+
+### Behavior Changes
+
+- **Explicit declarations outrank `resolveSymbol`.** The handler supplies
+  external facts only when a name lacks an authoritative binding. An explicit
+  `unknown` declaration still shadows external facts; an unassigned type
+  inferred from earlier use may yield. Supplied facts are retained with the
+  expression, including per-call handlers used with raw parsing, instead of
+  being installed in the caller's scope. Use `resolveApplication` for
+  occurrence-dependent notation policy.
+
 
 ### Resolved Issues
 

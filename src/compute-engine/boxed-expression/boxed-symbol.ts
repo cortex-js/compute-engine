@@ -283,13 +283,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override _unshared(): BoxedSymbol {
     // Constants (`Pi`, `True`, …) and common symbols are interned; return a
     // fresh copy so parse-time metadata does not leak onto the shared instance.
-    return new BoxedSymbol(this.engine, this._id, {
+    const result = new BoxedSymbol(this.engine, this._id, {
       metadata: {
         latex: this.verbatimLatex,
         sourceOffsets: this.sourceOffsets,
       },
       def: this._def,
     });
+    result._parseScope = this._parseScope;
+    return result;
   }
 
   get isPure(): boolean {
@@ -321,11 +323,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Return a new canonical symbol, scoped in the current context. The
     // source position rides along (a bare-symbol statement is the idiomatic
     // Epsil return value; the debugger pauses on it by its offsets).
-    return this.engine.symbol(
-      this._id,
-      this.sourceOffsets !== undefined
-        ? { metadata: { sourceOffsets: this.sourceOffsets } }
-        : undefined
+    return this._withParseScope(() =>
+      this.engine.symbol(
+        this._id,
+        this.sourceOffsets !== undefined
+          ? { metadata: { sourceOffsets: this.sourceOffsets } }
+          : undefined
+      )
     );
   }
 
