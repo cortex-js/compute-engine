@@ -492,10 +492,55 @@ compiles when its point list `C_c` is declared
    decline for a run-time error. Whether Tycho declares `C_c` with the narrow
    type is a Tycho question; on the CE side the refusal could be revisited now
    that a mixed cell is read through `_SYS.cplx`.
-2. **The second decline of the document is not traced.** `asOklab(c_f)`
-   declines at `Hsv` with "cannot compile a broadcastable head over a possibly
-   list-valued operand" (record 149). It is a colour-conversion gate, with a
-   different cause from the one above.
+2. **The second decline of the document is a chain of gates under
+   `mode: 'complex'`, of which three are understood.** The row is the colour of
+   the point cloud, `AsOklab(c_f)` with
+   `c_f = Hsv((180/π)·PointX(A_rg(C_cf)), Min(1, 2 − 2·PointZ(C_cf)), Min(1, 2·PointZ(C_cf)))`
+   and `A_rg(p) := (Arg(p.x + i·p.y), Arccos(2·p.z − 1))`. It compiles under
+   `mode: 'strict'` and `'auto'` and declines under `'complex'`, the mode
+   Tycho compiles it in. Repro without Tycho: assign `A_rg` as above, declare
+   `C: list<tuple<number, number, number>>`, and compile
+   `Hsv(57.29·PointX(A_rg(C)), 1, 0.5)` with `mode: 'complex'`. The gates, in
+   the order the row meets them (measured 2026-09-20 on Tycho's route, each
+   with a trial fix that let the row reach the next one):
+   - **A coordinate read inherits the verdict of the whole point.** Under
+     complex mode `Arccos` of a value of unknown range is complex-valued, so
+     the pair `A_rg(p)` is, and `isComplexValued(PointX(A_rg(C)))` answers
+     `true` although `PointX` reads `Arg(…)`, which is real. The hue then has
+     complex evidence and a possibly-collection type, `operandElementLane`
+     answers "undecided", and `Hsv` declines. Trial fix: an arm in
+     `_isComplexValuedFunction` (`compilation/base-compiler.ts`) beside the
+     one for `At`: a point accessor over ONE point whose coordinates can be
+     seen (a `Tuple`, or a call of a user function whose body is a `Tuple` or
+     a `PointList`) answers from that coordinate. Tycho's converted `A_rg`
+     builds its point with `PointList`, whose operands are not provably
+     numbers, so `collectionConstructorBody` must accept any `PointList` for
+     this question.
+   - **`PointList` refuses a component typed `list<number> | number`.**
+     `compileJSPointList` (`compilation/javascript-target.ts`) has a run-time
+     role test (`Array.isArray`) for a `broadcastable<number>` component, and
+     throws "neither a scalar slot nor a list source" for the union that
+     means the same thing — the type a coordinate read has when its point may
+     be one point or a list of points. Trial fix: admit a union whose every
+     member is a scalar number type or an indexed collection of scalar
+     numbers, with no tuple member, to the same run-time test.
+   - **An ordering over `|1/Conjugate(…)|` is refused as complex-valued.**
+     Not traced: `Less` declines with "an ordering comparison over the
+     complex-valued operand" for an `Abs`, which is real by definition. The
+     stereographic projection of the same document has the same comparison
+     and compiles, so the difference is in the operand's shape here (`C_cf`
+     is the fully expanded `S(f(N(F(0))))`).
+   - In the repro without Tycho, the first fix moves the decline to
+     `Argument` ("a broadcastable head over a possibly list-valued operand"),
+     which is the refusal described in item 1.
+   None of the trial fixes was landed: no route yet compiles the row to a
+   value that can be compared with the interpreter.
+   A separate observation for Tycho, not a Compute Engine defect:
+   `Min(1, L)` with a list `L` is a REDUCTION in Compute Engine (it answers
+   one number, in the interpreter and compiled alike), so the saturation and
+   the value of `c_f` are one number for the whole cloud. If Desmos evaluates
+   `min(1, L)` element by element, the conversion of that row needs an
+   element-wise form.
 3. **The other targets were not examined at a pole.** The shader targets and
    the Python target have their own complex division and power. Python raises
    `ZeroDivisionError` for a complex division by zero; the shader result is
@@ -503,26 +548,18 @@ compiles when its point list `C_c` is declared
    runtime were checked at an exact zero argument only, which is the one pole a
    floating-point argument reaches exactly.
 
-### Three of the five compilations of `thpezd39zq` still search for a closed form for two seconds (OPEN, compile latency — measured 2026-09-20 on Tycho `afadae282`)
+### `(x+y)² ≡ x²+2xy+y²` answered `undefined` once in a full test run (OPEN, not reproduced — observed 2026-09-20)
 
-The record of a timed-out symbolic integration (`antiderivativeTimeouts` in
-`compilation/base-compiler.ts`) now lets the second target of a row skip the
-search, so this document makes three searches in place of five. The three
-that remain are different questions, which no key can share:
-
-- two integrands that differ in spelling, `Γ(k/2)` and `(k/2 − 1)!`;
-- one call `p(X)` of a helper whose body holds the first integral with the
-  parameter names `ceArg_0` and `ceArg_1` in place of `x` and `y`.
-
-Each runs the search to its 2,000 ms limit. What would help is a search that
-gives up sooner on this integrand, the upper tail of a chi-squared density
-with a symbolic number of degrees of freedom, which has no elementary closed
-form: find where the two seconds go (the trace of the search prints
-"Timeout exceeded — Skipping rule" for an `Arcsin` rule, so at least one rule
-runs to the deadline), and see whether a structural test can refuse the
-integrand before the rules run. A timeout stays no proof that a closed form
-does not exist, and the deterministic bounds of the constant folder stay as
-they are.
+`test/compute-engine/stochastic-equal.test.ts`, "multi-variable: (x+y)² =
+x²+2xy+y²": `isIdenticallyEqual` answered `undefined` where the test expects
+`true`, once, in a full suite run with six workers while another single
+process was compiling beside it. The same file then passed five times out of
+five alone in that tree and three out of three on the unchanged tree. The
+expression holds no integral, and the change under test in that run was in
+the symbolic integrator, so the two are not connected. `stochasticEqual`
+unwinds on a deadline (`CancellationError`), so a time budget that expires
+under load is the first thing to check; the sample points come from derived
+random sub-streams, so a different draw is the second.
 
 ### Codegen audit follow-ups (CE 0.128.9)
 

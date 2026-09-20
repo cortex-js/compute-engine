@@ -18,7 +18,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 
 // The upper tail of a chi-squared density with a symbolic number of degrees
-// of freedom: the search does not close it.
+// of freedom: it has no elementary closed form, so the search does not close
+// it.
 const TAIL = String.raw`\int_{x}^{\infty}\!\frac{\exp(-(y/2))y^{k/2-1}}{\Gamma(\frac{k}{2})\sqrt{2}^{k}}\, \mathrm{d}y`;
 
 /** Compile, and report how many searches RAN and the emitted code. */
@@ -37,8 +38,17 @@ function compiled(
 }
 
 describe('A symbolic integration attempt that timed out', () => {
-  // A short budget makes the search time out on every machine.
-  beforeAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting(50));
+  // A budget of ZERO makes every search time out, whatever the clocks read.
+  // The deadline is `Date.now() + budget` and the check is `now >= deadline`,
+  // so the first check of the search cancels it; and the compiler counts an
+  // attempt as timed out when it used nine tenths of its budget, which is
+  // nine tenths of zero. A small positive budget would not do: the deadline
+  // is kept on a millisecond clock and can fire before the finer clock the
+  // compiler reads has counted nine tenths of it. The search for this
+  // integrand completes, without a closed form, in about a tenth of a second,
+  // so a budget large enough to be safe from the rounding no longer times
+  // out.
+  beforeAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting(0));
   afterAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting());
 
   test('is not repeated for another target, or for the same one', () => {

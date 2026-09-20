@@ -314,6 +314,54 @@ describe('INDEFINITE INTEGRATION', () => {
       `-1/4 * x^2 + 1/2 * ln(x) * x^2`
     ));
 
+  // A power of the variable is taken as `u` only when its exponent is a
+  // positive integer: differentiating any other power gives a power of the
+  // same kind, and the integral that is left is the one that was asked with
+  // the exponent lowered by one. Each of these has no elementary closed form
+  // and must come back unevaluated, promptly. Before the guard the recursion
+  // ran to its frame cap with a full rule search at every level, and the
+  // first three did not finish in ten seconds. The time limit is what
+  // fails the test on a regression, where there would otherwise be a hang.
+  test.each([
+    ['x^n e^x, symbolic exponent', '\\int x^n e^x dx'],
+    ['x^n sin(x), symbolic exponent', '\\int x^n \\sin(x) dx'],
+    [
+      'the chi-squared upper tail',
+      '\\int_{x}^{\\infty} e^{-y/2} y^{k/2-1} dy',
+    ],
+    ['sqrt(x) e^x, fractional exponent', '\\int \\sqrt{x} e^x dx'],
+    ['e^x / x^2, negative exponent', '\\int \\frac{e^x}{x^2} dx'],
+    ['(2x+1)^n e^x, a power of a linear base', '\\int (2x+1)^n e^x dx'],
+  ])(
+    '%s stays unevaluated and returns promptly',
+    (_label, latex) => {
+      const ce = new ComputeEngine();
+      const result = ce.withTimeLimit({ ms: 10000 }, () =>
+        ce.parse(latex).evaluate()
+      );
+      expect(result.operator).toBe('Integrate');
+      expect(result.isValid).toBe(true);
+    },
+    // Above the engine's own limit, so that limit is the one that reports.
+    15000
+  );
+
+  test.each([
+    ['nth root of x times e^x', '\\int \\sqrt[n]{x} e^x dx'],
+    ['nth root of x times sin(x)', '\\int \\sqrt[n]{x} \\sin(x) dx'],
+  ])('%s is not half resolved', (_label, latex) => {
+    // Integration by parts once, with the root as `u`, left a product term
+    // beside an integral that is no easier: `e^x·ⁿ√x − (1/n)·∫ e^x·x^(1/n−1)`.
+    const ce = new ComputeEngine();
+    const result = ce.withTimeLimit({ ms: 10000 }, () =>
+      ce.parse(latex).evaluate()
+    );
+    expect(result.operator).toBe('Integrate');
+  }, 15000);
+
+  test('a power of a linear base with a positive integer exponent still integrates', () =>
+    expect(evaluate('\\int (2x+1)^2 e^x dx')).not.toMatch(/int/));
+
   test('sec(x) (basic)', () =>
     expect(evaluate('\\int \\sec x dx')).toMatchInlineSnapshot(
       `ln(|tan(x) + sec(x)|)`

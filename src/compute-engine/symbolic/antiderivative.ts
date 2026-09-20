@@ -125,6 +125,21 @@ function tryIntegrationByParts(
 
     // Choose u (highest LIATE priority) and dv (rest)
     const u = sorted[0];
+    // Integration by parts makes progress because differentiating `u`
+    // simplifies it. A power of the index, or of an expression linear in the
+    // index, does so only when its exponent is a positive integer: `x³` goes
+    // to `3x²` and reaches a constant, while `x^a` with a symbolic `a`,
+    // `x^(1/2)`, `x^(-2)` and `(2x + 1)^a` each go to another power of the
+    // same kind, and the integral that is left is the one that was asked with
+    // the exponent lowered by one. A root is such a power: `Sqrt(x)` is
+    // `x^(1/2)` and `Root(x, n)` is `x^(1/n)`. Such an integral has no
+    // elementary closed form with an exponential or a trigonometric factor
+    // (it is an incomplete gamma function, an error function, an
+    // exponential integral), and the recursion ended only at the frame cap,
+    // after a full rule search at every level: the upper tail of a
+    // chi-squared density with a symbolic number of degrees of freedom,
+    // `∫ e^(-y/2)·y^(k/2-1) dy`, did not finish in twenty seconds.
+    if (isNonReducingPower(u, index)) return null;
     const dvFactors = sorted.slice(1);
     const dv = dvFactors.length === 1 ? dvFactors[0] : mul(...dvFactors);
 
@@ -149,6 +164,30 @@ function tryIntegrationByParts(
   } finally {
     byPartsFrames -= 1;
   }
+}
+
+/**
+ * Is `u` a power that differentiation does not reduce: a power of the index,
+ * or of an expression linear in the index, whose exponent is free of the
+ * index and is not a positive integer — or a root of such a base? See the
+ * use in `tryIntegrationByParts`.
+ */
+function isNonReducingPower(u: Expression, index: string): boolean {
+  if (!isFunction(u)) return false;
+  const overIndex = (base: Expression): boolean =>
+    sym(base) === index || linearIndexCoefficient(base, index) !== null;
+  if (u.operator === 'Sqrt') return overIndex(u.op1);
+  if (u.operator === 'Root')
+    return overIndex(u.op1) && !u.op2.has(index) && !u.op2.isSame(1);
+  if (u.operator !== 'Power') return false;
+  const exponent = u.op2;
+  if (!overIndex(u.op1) || exponent.has(index)) return false;
+  return !(
+    isNumber(exponent) &&
+    exponent.im === 0 &&
+    Number.isInteger(exponent.re) &&
+    exponent.re > 0
+  );
 }
 
 /**

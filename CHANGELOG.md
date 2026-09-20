@@ -17,6 +17,28 @@
 
 ### Resolved Issues
 
+- **Integrating `xⁿ·eˣ` with a symbolic exponent no longer hangs.**
+  `ce.parse('\int x^n e^x dx').evaluate()` did not return: it was still
+  running after twenty seconds, and `evaluate()` has no time limit of its own.
+  Integration by parts took the power as `u`, and differentiating a power
+  whose exponent is not a positive integer gives another power of the same
+  kind, so every step left the integral that was asked with the exponent
+  lowered by one. The recursion ended only at its frame limit, after a full
+  search of the integration rules at every level. The same happened with
+  `xⁿ·sin x`, with a power of a linear expression such as `(2x+1)ⁿ·eˣ`, and
+  with any such product under a time limit, which ran to the limit. A power
+  of the variable, or of an expression linear in it, is now taken as `u` only
+  when its exponent is a positive integer, and a root is never taken; for any
+  other exponent the integral has no elementary closed form (it is an
+  incomplete gamma function, an error function or an exponential integral)
+  and comes back unevaluated at once: 35 ms for `xⁿ·eˣ`. An nth root times
+  `eˣ` or `sin x` came back half resolved, as a product beside an integral
+  that was no easier; it now comes back as the integral that was asked. `x³·eˣ`, `x²·sin x` and the other integrals that
+  integration by parts does solve are unchanged. For the compiler this
+  removes the two-second symbolic search of the Desmos state `thpezd39zq`
+  (the upper tail of a chi-squared density with a symbolic number of degrees
+  of freedom): the search for a closed form now completes, without one, in
+  about a tenth of a second.
 - **The record of a timed-out symbolic integration is found again by a host
   that declares its symbols for each compilation.** The record of 0.132.2
   named a declared symbol by WHICH definition object it resolved to. A host
