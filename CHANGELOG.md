@@ -80,6 +80,19 @@
 
 ### Resolved Issues
 
+- **`Exp(x).N()` and `Exp(x).evaluate()` agree to the last digit at machine
+  precision, on every version of Node.** `Exp(x)` is `Power(e, x)`. Under
+  `evaluate()` the base is the symbol and the value was `Math.exp(x)`; under
+  `N()` the base was already the number `2.718…` and the value was
+  `Math.pow(e, x)`, which differs from it by one unit in the last place on
+  about one input in ten: `Exp(1.1)` was `3.0041660239464334` on one route
+  and `3.004166023946433` on the other. `Math.pow` is also the one `Math`
+  function, of 28 compared on 20,000 inputs, whose results changed between
+  Node 22 and Node 26 (neither version is the more accurate one), so the
+  `N()` value depended on the version of Node. A power of `e` is now
+  `Math.exp(x)` on both routes. `Exp(π).N()` is `23.140692632779267`, where
+  it was `23.140692632779263`; the value is `23.14069263277926900…`. Above
+  machine precision nothing changes.
 - **`Max` and `Min` walk a lazy operand once.** `Max` and `Min` walked every
   collection operand to look for a `Missing` or a `NaN` element, and then
   walked it again to find the extremum. A lazy collection computes its

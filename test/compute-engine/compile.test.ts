@@ -1071,7 +1071,13 @@ describe('COMPILE — WP-2.8 P0 regressions', () => {
       const expr = ce.box(src as any);
       expect(expr.type.toString()).toBe('complex');
       const result = compile(expr, { fallback: false });
-      expect(result.run!()).toEqual(exp);
+      // Compared to 12 digits, not bit for bit: the fold goes through
+      // `Math.pow`, whose last digit is not the same on every version of V8
+      // (`Root(-4, 4)` is `1 + 0.9999999999999998i` on Node 22 and
+      // `1.0000000000000002 + i` on Node 26).
+      const folded = result.run!() as { re: number; im: number };
+      expect(folded.re).toBeCloseTo(exp.re, 12);
+      expect(folded.im).toBeCloseTo(exp.im, 12);
       // …matching the interpreter, which is the point of the ruling.
       expect(expr.N().re).toBeCloseTo(exp.re, 12);
       expect(expr.N().im).toBeCloseTo(exp.im, 12);

@@ -472,15 +472,41 @@ describe('FindFit deadline (§ 7.9)', () => {
   //     short, so the parameters are genuine best-so-far.
   // Non-timeout throws propagate unchanged in both phases.
 
-  /** The six-parameter double-sine fit over 400 rows: setup alone (data
-   * evaluation + six analytic derivatives + compilation) far outruns a 2 ms
-   * budget, so the deadline fires before the solver is ever reached. */
+  /** The budget of the setup-phase test, and an operator that outlasts it.
+   * `SpendSetupBudget()` stands for one datum; evaluating it waits until the
+   * budget has run out and answers `0`. The data of a fit is evaluated during
+   * setup, so the deadline passes INSIDE setup on a machine of any speed: not
+   * before `FindFit` starts (the evaluator's own periodic check would then
+   * throw a cancellation, not answer a record), and not after setup. */
+  const SETUP_BUDGET_MS = 200;
+  const declareBudgetSpender = () => {
+    if (ce.lookupDefinition('SpendSetupBudget') !== undefined) return;
+    ce.declare('SpendSetupBudget', {
+      signature: '() -> number',
+      evaluate: () => {
+        const end = Date.now() + SETUP_BUDGET_MS + 50;
+        while (Date.now() < end);
+        return ce.Zero;
+      },
+    } as any);
+  };
+
+  /** The six-parameter double-sine fit over 400 rows, one of whose data
+   * outlasts the budget (`declareBudgetSpender`). */
   const setupHeavyOperands = () => {
+    declareBudgetSpender();
     const rnd = lcg(42);
     const pts: [number, number][] = [];
     for (let i = 0; i < 400; i++) pts.push([i * 0.03, rnd() * 2 - 1]);
+    const spender = ce.function('Tuple', [
+      ce.number(12),
+      ce.function('SpendSetupBudget', []),
+    ]);
     return {
-      data: dataset(pts),
+      data: ce.function('List', [
+        ...pts.map(([x, y]) => ce.tuple(ce.number(x), ce.number(y))),
+        spender,
+      ]),
       model: ce.box([
         'Add',
         ['Multiply', 'a', ['Sin', ['Add', ['Multiply', 'b', 'x'], 'c']]],
@@ -501,8 +527,10 @@ describe('FindFit deadline (§ 7.9)', () => {
   test('a setup-phase timeout reports in band with phase: "setup"', () => {
     const { data, model, params } = setupHeavyOperands();
 
-    const r = ce.withTimeLimit({ ms: 2, label: 'test:fit-deadline' }, () =>
-      ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
+    const r = ce.withTimeLimit(
+      { ms: SETUP_BUDGET_MS, label: 'test:fit-deadline' },
+      () =>
+        ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
     );
 
     // The returned record is the assertion, and `timedOut: True` with
@@ -530,14 +558,17 @@ describe('FindFit deadline (§ 7.9)', () => {
     const pts: string[] = [];
     for (let i = 0; i < 400; i++)
       pts.push(`(${(i * 0.03).toFixed(4)}, ${(rnd() * 2 - 1).toFixed(4)})`);
+    declareBudgetSpender();
+    pts.push('(12, \\operatorname{SpendSetupBudget}())');
     const expr = ce.parse(
       `\\operatorname{FindFit}(\\lbrack ${pts.join(
         ', '
       )} \\rbrack, a\\sin(b x + c) + p\\sin(q x + r), \\lbrack a, b, c, p, q, r \\rbrack, x)`
     );
 
-    const r = ce.withTimeLimit({ ms: 2, label: 'test:fit-parse-deadline' }, () =>
-      expr.evaluate()
+    const r = ce.withTimeLimit(
+      { ms: SETUP_BUDGET_MS, label: 'test:fit-parse-deadline' },
+      () => expr.evaluate()
     );
     expect(r.operator).toBe('Dictionary');
     expect(r.get('timedOut')?.symbol).toBe('True');
@@ -593,9 +624,20 @@ describe('FindFit deadline (§ 7.9)', () => {
     const model = ce.box(['Multiply', 'a', ['Exp', ['Multiply', 'b', 'x']]]);
     const params = ce.box(['List', ['Tuple', 'a', 1], ['Tuple', 'b', 1]]);
 
-    const r = ce.withTimeLimit({ ms: 100, label: 'test:fit-budget' }, () =>
-      ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
-    );
+    // No fixed budget lands in the solve phase on every machine: 100 ms ran
+    // out during SETUP on a slow, loaded runner. The full fit takes about two
+    // hundred times as long as its setup, so the budget is raised by steps of
+    // four until setup fits in it, and the first such budget is still far too
+    // short for the fit.
+    const fit = (ms: number) =>
+      ce.withTimeLimit({ ms, label: 'test:fit-budget' }, () =>
+        ce.function('FindFit', [data, model, params, ce.symbol('x')]).evaluate()
+      );
+    let r = fit(100);
+    for (const ms of [400, 1600, 6400]) {
+      if (r.get('phase')?.string !== 'setup') break;
+      r = fit(ms);
+    }
     // Returned (did not throw), and reported the overrun in band: the record
     // below — `timedOut: True` in phase `solve`, `converged: False` — is what
     // the per-row deadline checks produce, and a run that finished its LM

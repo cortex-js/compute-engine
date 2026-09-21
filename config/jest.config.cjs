@@ -3,7 +3,12 @@ module.exports = {
   verbose: false,
   preset: 'ts-jest',
   testEnvironment: 'node',
-  maxWorkers: 6, // Optimized for M3 (8-core: 4P + 4E) based on benchmarking
+  // Six workers is the measured optimum on the 8-core development machine
+  // (4 performance + 4 efficiency cores). A continuous-integration runner
+  // has 4 cores: six workers there made tests with a time limit run about
+  // eight times slower than alone and fail. `CI` is set by GitHub Actions;
+  // `'100%'` is one worker per core.
+  maxWorkers: process.env.CI ? '100%' : 6,
   collectCoverageFrom: ['src/**/*.ts', '!<rootDir>/node_modules/'],
   coverageReporters: ['lcov'],
   coverageDirectory: '../coverage',

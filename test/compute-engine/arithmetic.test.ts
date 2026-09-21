@@ -977,6 +977,22 @@ describe('EXP', () => {
     expect(checkJson(['Exp', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
   test(`Exp ['List', 1.1, 2, 4]`, () =>
     expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchSnapshot());
+
+  // `Exp(x)` is `Power(e, x)`. Under `N()` the base is already the number
+  // `2.718…`, and the generic power of two numbers is `Math.pow`, which is
+  // one unit in the last place away from `Math.exp` on about one input in
+  // ten and does not answer the same digits on every version of Node. Both
+  // routes must compute `Math.exp`.
+  test('Exp(x).N() is Exp(x).evaluate() to the last digit', () => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    for (const x of [1.1, 0.1, -2.5, 3.3, 7.77, 10.01, -0.003, 25.4]) {
+      const expr = machine.box(['Exp', x]);
+      expect(expr.N().re).toBe(Math.exp(x));
+      expect(expr.evaluate().re).toBe(Math.exp(x));
+    }
+    expect(machine.box(['Exp', 'Pi']).N().re).toBe(Math.exp(Math.PI));
+  });
 });
 
 describe('SUM', () => {

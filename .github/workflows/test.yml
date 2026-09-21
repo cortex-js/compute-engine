@@ -10,13 +10,24 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # The suite runs on the newest Node the project is developed on and on
+    # the oldest major version `package.json` declares support for
+    # (`engines.node`). The two are not interchangeable: `Math.pow` answers a
+    # different last digit on about one input in ten between V8 12 (Node 22)
+    # and V8 14 (Node 26), so a test that pins such a digit passes on one and
+    # fails on the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '26']
+
     steps:
       - uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -34,7 +45,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '26'
           cache: 'npm'
 
       - name: Install dependencies
@@ -103,7 +114,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '26'
           cache: 'npm'
 
       - name: Install dependencies
@@ -121,7 +132,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '26'
           cache: 'npm'
 
       - name: Install dependencies

@@ -968,7 +968,10 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
   // suite slower — these tests time out under full-suite parallel load if they
   // are oversized.
   const SMALL = 10;
-  const LARGE = 60_000;
+  // 20 000 terms, not more: on a continuous-integration runner these tests
+  // run about eight times slower than alone on a developer machine, and
+  // 60 000 terms (650 ms alone) exceeded the 5 s test timeout there.
+  const LARGE = 20_000;
   // Still in flight while a poller watches it (~250ms of work)
   const BIGGER_FOR_SUSPEND = 100_000;
   const sum = (index: string, upper: number): Expression => [

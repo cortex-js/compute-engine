@@ -11,11 +11,7 @@ import {
 import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
-import {
-  bignumPreferred,
-  canonicalAngle,
-  getImaginaryFactor,
-} from './utils.js';
+import { canonicalAngle, getImaginaryFactor } from './utils.js';
 import { apply, apply2 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -1058,12 +1054,20 @@ export function pow(
       // which is the bulk of Exp(x).N()'s cost at high precision. The base is
       // the interned numeric value of the E constant, so an O(1) reference
       // check against the cached `E.N()` detects it; compute exp(exp) directly.
-      // Gated to bignum: at machine precision the generic path is a single
-      // `Math.pow(e, x)` (no separate ln, so nothing to save) and `exp(x)`
-      // would differ by 1 ULP. (A complex exponent falls through to the
-      // e^(a+bi) handling below.)
+      // At machine precision the generic path would cost the same, one
+      // `Math.pow(e, x)`, but it is the wrong primitive for two reasons.
+      // `evaluate()` of the same power computes `Math.exp(x)` (the base is
+      // still the symbol there), and the two differ by one unit in the last
+      // place on about one input in ten, so `Exp(1.1).N()` was not
+      // `Exp(1.1).evaluate()`. And `Math.pow` is the one `Math` function
+      // whose results changed between V8 12 (Node 22) and V8 14 (Node 26),
+      // where `Math.exp` answers the same bits on both. (A complex exponent
+      // falls through to the e^(a+bi) handling below.)
+      // The test on the value comes first because it is two comparisons of
+      // doubles, where reading `E.N()` resolves a symbol: every numeric power
+      // passes here, and nearly none has the base `e`.
       const ce = x.engine;
-      if (bignumPreferred(ce) && x === ce.E.N()) {
+      if (x.re > 2.718 && x.re < 2.719 && x === ce.E.N()) {
         if (typeof exp === 'number')
           return ce.number(ce._numericValue(exp).exp());
         if (isNumber(exp) && exp.im === 0)

@@ -561,6 +561,37 @@ unwinds on a deadline (`CancellationError`), so a time budget that expires
 under load is the first thing to check; the sample points come from derived
 random sub-streams, so a different draw is the second.
 
+### The `corpus-pipeline` job of continuous integration fails at "Recompile drift" (OPEN, Fungrim rule artifact — measured 2026-09-21)
+
+`npx tsx scripts/fungrim/recompile-drift.ts` exits 1 on `main`, under Node 22
+and under Node 26 alike: of the 1434 committed simplify rules, a fresh
+recompile gives a different `match` for 22 (none dropped, none added, none in
+the `recompileDivergence` allowlist of `scripts/fungrim/curation-overrides.json`).
+The first three are `fungrim:04427b`, `fungrim:27766c` and `fungrim:40baa9`;
+the command prints all of them. The job has failed at this step on every push
+to `main` since at least 0.128.12 (2026-09-15), and the steps after it
+("Analytic-property store freshness", "Integration-rules bundle freshness",
+the MathNet gate) have not run on the server since. What is needed: find
+which canonicalization change moved the `match` side of these rules, and then
+either regenerate the committed artifact or allowlist the divergence with its
+reason. The three steps before it pass ("Corpus box-check", "Artifact
+freshness", "Solve-template freshness"), and so does
+`compile-properties.ts --check`.
+
+### A sequence with two ellipses parses to a `Range` with an error bound (OPEN, LaTeX parsing — measured 2026-09-21)
+
+`npx tsx docs/mathnet/scripts/check-corpus.ts` reports one regression against
+`docs/mathnet/parser-test-cases.json`: the case `[ellipsis]`
+`\alpha = 0, a_1a_2a_3 \dots a_k \dots` parsed clean on 2026-07-12 and now
+holds an `incompatible-type` error. `a_1a_2 \dots a_k` parses to
+`Range(a_1·a_2, a_k)`, and `a_k \dots` to `Sequence(a_k,
+ContinuationPlaceholder)`. With both in one expression the trailing
+continuation becomes the upper bound of the `Range`, a tuple where a number is
+expected. The reading that is wanted for "a run, then a last term, then a
+continuation" needs a decision; a `Range` whose bound is an error is not one.
+The gate that would have caught this is a step of the `corpus-pipeline` job
+that has not run on the server (see the entry above).
+
 ### `Norm` of a lazy collection stays unevaluated (OPEN, evaluation — found 2026-09-21)
 
 `Norm` reads its operand as a tensor, and a lazy `Map` is not one. Above a
@@ -574,20 +605,6 @@ lazy; above machine precision, and for every function head, they stay
 unevaluated. The other
 reducers (`Sum`, `Max`, `Mean`, `Variance`) walk a finite lazy collection;
 `Norm` should too.
-
-### `Exp(1.1)` differs by one unit in the last place between `evaluate()` and `N()` on Node 22 (OPEN, numerics — found 2026-09-21)
-
-At machine precision `Exp(1.1).evaluate()` is `3.0041660239464334`
-(`Math.exp`) and `Exp(1.1).N()` is `3.004166023946433` (`Math.E ** 1.1`, the
-`Power` route), and the snapshot of `arithmetic.test.ts` records both. The
-second is the correctly rounded value. On Node 26 `Math.E ** 1.1` also gives
-`…4334`, so the two routes agree there and two snapshots of
-`test/compute-engine/arithmetic.test.ts` (`Exp 1.1`, `Exp ['List', 1.1, 2,
-4]`) fail on a machine whose default Node is 26, and so does one test of
-`test/compute-engine/compile.test.ts` that compares a folded complex constant
-exactly ("non-real constants are folded, not refused"). Continuous integration
-runs Node 22, where they pass. Measured the same on the 0.132.3 tree, so it is not
-a recent change. The two routes should use one primitive.
 
 ### Element-wise FUNCTIONS over a large list of machine numbers are still interpreted per element (OPEN, evaluation performance — measured 2026-09-21)
 
@@ -603,10 +620,10 @@ computed at once on doubles at machine precision (`machineBroadcast`,
   gives, and three things make that more than a table of `Math` functions.
   Under `evaluate()` an integer element stays exact (`Sin(1)`), so the list
   must hold no integer. A negative element of `Sqrt` or `Ln` has a complex
-  value. And the primitive must be the interpreter's own: `Exp(x)` is
-  `Math.E ** x` on the `N()` route and `Math.exp(x)` under `evaluate()`,
-  which differ by one unit in the last place on Node 22 (see the `Exp(1.1)`
-  entry). `Divide` and `Power` belong here too (`L / 3` is canonically
+  value. And the primitive must be the interpreter's own, to the last digit:
+  a power goes through `Math.pow`, whose last digit is not the same on Node
+  22 and on Node 26 for about one input in ten, so a kernel for `Power` must
+  call what the interpreter calls. `Divide` and `Power` belong here too (`L / 3` is canonically
   `Multiply(Rational(1, 3), L)`, and the exact rational scalar declines).
 - **Sums and products of three or more operands** (`L + M + 1`): the
   interpreter adds the exact operands apart from the floats, so the rounding
