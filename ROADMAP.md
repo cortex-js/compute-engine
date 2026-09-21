@@ -561,6 +561,59 @@ unwinds on a deadline (`CancellationError`), so a time budget that expires
 under load is the first thing to check; the sample points come from derived
 random sub-streams, so a different draw is the second.
 
+### The interpreter over a list of ten thousand elements: where the time goes (OPEN, evaluation performance — measured 2026-09-20)
+
+Measured while looking at `Min(1, 2 − 2·PointZ(C))` over ten thousand points,
+the colour row of the Tycho corpus document `s8ishknvhe`, which Tycho
+interprets today (the row declines to compile, see the entry for that
+document). Machine precision, medians of five runs, after the change that
+reads the coordinates of a written-out list directly: `PointZ(C)` 79 ms,
+`2 − 2·PointZ(C)` 175 ms, `Min(1, 2 − 2·PointZ(C))` 219 ms. The reduction
+itself is not the cost — a scan of ten thousand doubles was tried in its
+place and changed nothing measurable. A CPU profile of `PointZ(C)` (64 ms per
+evaluation) gives, overlapping:
+
+- **The value of a symbol is evaluated again on every use** — about 42%.
+  `C` holds a list of ten thousand tuples; each `ce.box(['PointZ', 'C']).evaluate()`
+  evaluates that list again, 24 ms (`_memoizedStoredValue` →
+  `evaluateInOwnBindings`), so the memo of the stored value is not answering
+  across evaluations.
+- **The type of a large list is computed per fresh list** — about 49%
+  (`get type` → `describe` → one operand descriptor per element), and an
+  evaluation produces a fresh list. `isNumber` on a list of ten thousand
+  numbers costs 7–10 ms for that reason, and the reducers ask it
+  (`processMinMaxItem`, `cannotContainAbsentValue`).
+- **The canonical construction of the result list** — about 27%
+  (`ce.function('List', …)` → `makeCanonicalFunction` →
+  `applyOperatorDefinition`).
+
+Two more, measured on `Min(1, 2 − 2·L)` over a list that holds its numbers
+unboxed (124 ms at the default precision):
+
+- **A reducer walks a lazy operand twice**: the absent-datum gate
+  (`aggregateAbsence` in `library/missing-data.ts`) walks it, then the fold
+  does. A lazy `Map` keeps no elements, so the arithmetic runs twice:
+  `2 − 2·PointZ(C)` alone 262 ms, inside `Min` or `Sum` about 430 ms (before
+  the coordinate change). The gate skips its walk only when the element type
+  rules an absent element out, and a coordinate read is typed
+  `number | missing`.
+- **At the default precision each element is computed with `BigDecimal`**:
+  75% of that profile is the lazy map's element function in the interpreter's
+  exact arithmetic (`add` → `nvSum` → `BigDecimal`), about 12 µs per element.
+  The derived `array` of a list of such floats is also slow to build
+  (8–15 ms), because each float is a big-number value that is checked by
+  boxing its machine value again (`machineNumberOf`).
+
+Smaller, measured and not built: on the JavaScript target `Min(1, L)` copies
+its operand (`[1, ...L]`) and `Min(L, M)` copies both (0.22 ms against 0.07 ms
+for `Min(L)` at ten thousand elements); a seeded `reduce` would not copy.
+
+For Tycho, not a Compute Engine defect: its lowering of Desmos `min`/`max`
+with two or more arguments to `ElementMin`/`ElementMax`
+(`elementwise-extrema-lowering.ts`) did not reach that colour row: the engine
+received the reducing `Min(1, …)`, so the saturation and the value of the
+colour are one number for the whole cloud.
+
 ### Codegen audit follow-ups (CE 0.128.9)
 
 The CORE audit `ce-0.128.9.json` pairs all 784 records with

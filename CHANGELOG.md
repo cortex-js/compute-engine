@@ -2,6 +2,28 @@
 
 ### Improvements
 
+- **`Max` and `Min` of a scalar and a collection compile on the interval
+  target.** `Max` and `Min` are reducers: a collection operand is flattened
+  into the operand list, so `Min(1, L)` is the least of `1` and the elements
+  of `L`. The interval target compiled the reduction of one collection
+  (`Min(L)`) and declined a collection beside a scalar (`Min(1, L)`,
+  `Max(0, Min(1, L))`, `Min(1, [x, 2, 3])`), which the interpreter and the
+  JavaScript target both answer. It now folds the scalar operands with the
+  reduction of each collection; an empty collection beside a scalar
+  contributes nothing (`Min(1, [])` is `1`), and a `NaN` element absorbs, as
+  in the interpreter. Several collections with no scalar operand
+  (`Min(L, M)`) compile too: the answer is `NaN` only when every one of them
+  is empty at run time.
+- **A coordinate of a large written-out list of points is read directly.**
+  Above a hundred elements, `PointX`, `PointY` and `PointZ` over a list of
+  points answered a lazy `Map` that applies `At` to each point as a function,
+  16 µs per point, paid again by every consumer that walks the result. That
+  form is for a source that is itself lazy, such as a `Map` over a long
+  `Range`, and it stays for those. A written-out `List` is already in memory,
+  and its coordinates are now read off the points. Measured on ten thousand
+  points at machine precision: `PointZ(C)` 165 → 79 ms, and
+  `Min(1, 2 − 2·PointZ(C))` 406 → 219 ms (a reduction walks its operand
+  twice).
 - **A symbolic integration that timed out is not searched again for another
   target that declares wider types.** The record of a timed-out search
   compares the declared types of the integral's symbols by inclusion: a

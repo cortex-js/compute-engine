@@ -443,8 +443,14 @@ describe('Interval target — reductions over collection values', () => {
     // The interpreter's Max([]) is NaN: the absence marker here.
     const empty = run(ce, '\\max(V)', { V: [] }).out;
     expect(Number.isNaN(empty[0])).toBe(true);
-    // A collection beside a scalar is not the reduce form; it stays gated.
-    declines(ce, '\\max(1, V)', /Max: cannot compile/);
+    // A collection beside a scalar is the same reduction, as in the
+    // interpreter: the collection is flattened into the operand list. This
+    // shape was gated until the scalar operands were folded with the
+    // reduction of the collection.
+    expectEncloses(run(ce, '\\max(1, V)', { V: [1, 5, 2] }).out, 5);
+    expectEncloses(run(ce, '\\max(7, V)', { V: [1, 5, 2] }).out, 7);
+    // An empty collection beside a scalar contributes nothing.
+    expectEncloses(run(ce, '\\max(1, V)', { V: [] }).out, 1);
   });
 
   test('a reduction over a range with a symbolic bound (audit mavxszbvzk)', () => {

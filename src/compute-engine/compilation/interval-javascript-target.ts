@@ -2042,37 +2042,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_IA.div(_IA.ln(${compile(args[0])}), _IA.ln(${compile(args[1])}))`;
   },
   Lb: (args, compile) => `_IA.log2(${compile(args[0])})`,
-  // `Max`/`Min` over ONE collection operand is the interpreter's reduction
-  // over its elements (`Max([1, 2, 3])` is `3`; it flattens, it does not
-  // broadcast) — see `compileIntervalCollectionReduce`. Every other form is
-  // the scalar fold; a collection operand beside a scalar one fails closed
-  // at the scalar-operand gate.
+  // `Max`/`Min` over a collection operand is the interpreter's reduction
+  // over its elements (`Max([1, 2, 3])` is `3`, `Max(0, [1, 2, 3])` is `3`
+  // too; it flattens, it does not broadcast) — see `compileIntervalExtremum`.
   // The two heads are in `COLLECTION_AWARE_HEADS` for the reduce form, so
   // the scalar fold gates its own operands (`assertScalarIntervalOperands`).
-  Max: (args, compile, target) => {
-    if (args.length === 0) return '_IA.point(-Infinity)';
-    if (args.length === 1 && isCollectionReduceOperand(args[0], target))
-      return compileIntervalCollectionReduce('Max', args[0], target);
-    assertScalarIntervalOperands('Max', args);
-    if (args.length === 1) return compile(args[0]);
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `_IA.max(${result}, ${compile(args[i])})`;
-    }
-    return result;
-  },
-  Min: (args, compile, target) => {
-    if (args.length === 0) return '_IA.point(Infinity)';
-    if (args.length === 1 && isCollectionReduceOperand(args[0], target))
-      return compileIntervalCollectionReduce('Min', args[0], target);
-    assertScalarIntervalOperands('Min', args);
-    if (args.length === 1) return compile(args[0]);
-    let result = compile(args[0]);
-    for (let i = 1; i < args.length; i++) {
-      result = `_IA.min(${result}, ${compile(args[i])})`;
-    }
-    return result;
-  },
+  Max: (args, compile, target) =>
+    compileIntervalExtremum('Max', args, compile, target),
+  Min: (args, compile, target) =>
+    compileIntervalExtremum('Min', args, compile, target),
   // Element-wise max/min and clamp. These lowerings are SCALAR: they fold the
   // operands with the interval max/min, and `Clamp(x, lo, hi)` becomes
   // `min(max(x, lo), hi)`. A collection operand has no element-wise treatment
@@ -2710,12 +2688,67 @@ const INTERVAL_REDUCTIONS: Record<
   },
 };
 
+/**
+ * `Max`/`Min` on the interval target: the fold of its scalar operands, and of
+ * the reduction of each collection operand, with the interval kernel.
+ *
+ * The interpreter flattens every collection operand into the operand list
+ * (`Min(1, [x, 2, 3])` is `Min(1, x, 2, 3)`), so a collection beside a scalar
+ * is a reduction like any other. Beside a scalar, an EMPTY collection
+ * contributes nothing (`Min(1, [])` is `1`), so its reduction answers the
+ * identity of the fold there, where the reduction of a lone collection
+ * answers the absence marker (`Min([])` is `NaN`).
+ *
+ * With NO scalar operand the answer is the absence marker exactly when every
+ * collection is empty at run time (`Min([], [])` is `NaN`, `Min([], [3])` is
+ * `3`). Each reduction then answers `undefined` for an empty collection, and
+ * the fold is made over the reductions that answered an interval.
+ */
+function compileIntervalExtremum(
+  kind: 'Max' | 'Min',
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const { op, identity } = INTERVAL_REDUCTIONS[kind];
+  if (args.length === 0) return identity;
+  const isCollection = args.map((a) => isCollectionReduceOperand(a, target));
+  if (args.length === 1 && isCollection[0])
+    return compileIntervalCollectionReduce(kind, args[0], target);
+  const scalars = args.filter((_a, i) => !isCollection[i]);
+  if (scalars.length > 0) {
+    assertScalarIntervalOperands(kind, scalars);
+    return args
+      .map((a, i) =>
+        isCollection[i]
+          ? compileIntervalCollectionReduce(kind, a, target, identity)
+          : compile(a)
+      )
+      .reduce((acc, cur) => `${op}(${acc}, ${cur})`);
+  }
+  // Every operand is a collection. The operands are evaluated once each, in
+  // operand order, as the arguments of the call.
+  const reductions = args.map((a) =>
+    compileIntervalCollectionReduce(kind, a, target, 'undefined')
+  );
+  const empty = INTERVAL_REDUCTIONS[kind].empty;
+  return (
+    `((..._r) => { const _v = _r.filter((_x) => _x !== undefined); ` +
+    `return _v.length === 0 ? ${empty} : ` +
+    `_v.reduce((_a, _b) => ${op}(_a, _b)); })(${reductions.join(', ')})`
+  );
+}
+
 function compileIntervalCollectionReduce(
   kind: 'Sum' | 'Product' | 'Max' | 'Min',
   operand: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  // The answer for an EMPTY collection, when it is not the reduction's own:
+  // see `compileIntervalExtremum`.
+  emptyAnswer?: string
 ): string {
-  const { op: iaOp, identity, empty } = INTERVAL_REDUCTIONS[kind];
+  const { op: iaOp, identity } = INTERVAL_REDUCTIONS[kind];
+  const empty = emptyAnswer ?? INTERVAL_REDUCTIONS[kind].empty;
   const elements = intervalCollectionElements(
     operand,
     target,
@@ -2747,7 +2780,12 @@ function compileIntervalCollectionReduce(
   }
   // A `Range` with a SYMBOLIC bound, alone or under element-wise heads or a
   // `Map`, is reduced by a run-time loop over the range's elements.
-  const dynamic = compileIntervalDynamicRangeReduce(kind, operand, target);
+  const dynamic = compileIntervalDynamicRangeReduce(
+    kind,
+    operand,
+    target,
+    empty
+  );
   if (dynamic !== undefined) return dynamic;
   // The runtime-array fold below hands each element to `_IA.add`/`_IA.mul`,
   // so it requires elements PROVABLY numeric — the bare shape test
@@ -2889,11 +2927,15 @@ function dynamicRangeTerm(
 function compileIntervalDynamicRangeReduce(
   kind: 'Sum' | 'Product' | 'Max' | 'Min',
   operand: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  // The answer for an EMPTY range, when it is not the reduction's own: see
+  // `compileIntervalExtremum`.
+  emptyAnswer?: string
 ): string | undefined {
   const shape = dynamicRangeTerm(operand, target);
   if (shape === undefined) return undefined;
-  const { op: iaOp, identity, empty } = INTERVAL_REDUCTIONS[kind];
+  const { op: iaOp, identity } = INTERVAL_REDUCTIONS[kind];
+  const empty = emptyAnswer ?? INTERVAL_REDUCTIONS[kind].empty;
   const ce = operand.engine;
   const index = BaseCompiler.tempVar(target);
   const acc = BaseCompiler.tempVar(target);

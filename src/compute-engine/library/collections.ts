@@ -3679,8 +3679,17 @@ function pointComponentAt(
         // `Map(p ↦ At(p, position), xs)` instead of materializing every
         // coordinate. At or below the threshold the eager `List` is built
         // unchanged, so small point lists stay byte-identical.
+        // A written-out `List` is the exception: its points are already in
+        // memory, so there is nothing for laziness to save, and reading a
+        // coordinate off each one (`at`) is far cheaper than the lazy form,
+        // which applies `At` to every element as a function — 16 µs per
+        // point, paid again by every consumer that walks the result, since
+        // a lazy `Map` keeps no elements. Measured on ten thousand points:
+        // `PointZ(C)` 162 ms lazy, and `Min(1, 2 − 2·PointZ(C))` 437 ms
+        // because the reduction walks its operand twice.
         const n = xs.count;
         if (
+          !isFunction(xs, 'List') &&
           xs.isIndexedCollection === true &&
           (n === undefined || n > MAX_SIZE_EAGER_COLLECTION)
         )
