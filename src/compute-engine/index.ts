@@ -3410,15 +3410,16 @@ export class ComputeEngine implements IComputeEngine {
       // External facts live in an expression-owned scope. Declaring them in
       // the caller's scope would make a raw parse mutate its environment and
       // would let one parse's resolver affect unrelated later expressions.
-      const parseScope: Scope | undefined = facts.size || supersededGuesses.size
-        ? {
-            parent: this.context.lexicalScope,
-            bindings: new Map(),
-            // Only the explicitly installed facts belong to this overlay.
-            // Ordinary free variables keep the caller's inference scope.
-            noAutoDeclare: true,
-          }
-        : undefined;
+      const parseScope: Scope | undefined =
+        facts.size || supersededGuesses.size
+          ? {
+              parent: this.context.lexicalScope,
+              bindings: new Map(),
+              // Only the explicitly installed facts belong to this overlay.
+              // Ordinary free variables keep the caller's inference scope.
+              noAutoDeclare: true,
+            }
+          : undefined;
       let boxed = this._inScope(parseScope, () => {
         // An occurrence decision may contradict an earlier inferred use.
         // Give that occurrence a fresh unknown binding and let its explicit

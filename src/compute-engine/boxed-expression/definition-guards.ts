@@ -29,7 +29,9 @@ export function isOperatorDef(
 /** An inferred, unassigned binding is a guess that external facts may replace.
  * Explicit declarations, including an unknown local binding, shadow the
  * external environment. */
-export function isInferredDefinition(def: BoxedDefinition | undefined): boolean {
+export function isInferredDefinition(
+  def: BoxedDefinition | undefined
+): boolean {
   return (
     isValueDef(def) &&
     def.value.inferredType &&
