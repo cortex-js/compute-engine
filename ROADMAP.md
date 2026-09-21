@@ -561,6 +561,53 @@ unwinds on a deadline (`CancellationError`), so a time budget that expires
 under load is the first thing to check; the sample points come from derived
 random sub-streams, so a different draw is the second.
 
+### Element-wise arithmetic over a large list takes one of three routes in the interpreter, and only one is fast (OPEN, evaluation performance, needs a design decision — measured 2026-09-21)
+
+Measured at machine precision over ten thousand elements, `L` a symbol that
+holds a list of numbers and `C` one that holds a list of points, on a quiet
+machine and in source mode (where `console.assert` is about a quarter of the
+time; the production build strips it):
+
+| Expression | `evaluate()` | `N()` |
+| --- | ---: | ---: |
+| `Sum(2·L)` | 48.6 ms | 47.3 ms |
+| `Sum(Sin(L))` | 46.3 ms | 46.9 ms |
+| `Min(1, 2 − 2·L)` | 88.5 ms | 27.0 ms |
+| `Sum(2·PointZ(C))` | 51.7 ms | 48.1 ms |
+| `Min(1, 2 − 2·PointZ(C))` | 129.4 ms | 170.8 ms |
+
+A compiled kernel over a `Float64` array does the same arithmetic in about a
+tenth of a millisecond. The three routes:
+
+1. **The tensor route** (`mulTensors` → `scaleTensor` in
+   `boxed-expression/arithmetic-mul-div.ts`), taken when an operand is an
+   EVALUATED `List`: eager, one symbolic product per cell. `scalar · vector`
+   over machine numbers now multiplies doubles (`scaleMachineVector`); the
+   sum of two vectors, a vector plus a scalar, and every function head do
+   not have that path.
+2. **The lazy map, interpreted** (`lazyBroadcastMap`), taken above a hundred
+   elements when the operand is a symbol or a lazy collection: each element is
+   a function application, about 4.7 µs, and a lazy `Map` keeps no elements,
+   so every consumer pays again. A reducer is two consumers: the absent-datum
+   gate (`aggregateAbsence`, `library/missing-data.ts`) walks the operand, and
+   then the fold does.
+3. **The lazy map, compiled** (`library/map-auto-compile.ts`): the float
+   kernel. It needs machine precision AND the `N()` route AND a consumer that
+   drains through the map's iterator. `Min(1, 2 − 2·L)` reaches it under
+   `N()` (27 ms, two drains per evaluation); `Sum(2·L)` and `Sum(Sin(L))` do
+   not reach it on either route.
+
+The decision that is needed: whether arithmetic over machine-numeric lists
+should be computed EAGERLY on `Float64` arrays (a list of ten thousand doubles
+is 80 KB; the products cost microseconds) and answered as a list that holds
+its numbers unboxed, with the reducers folding the doubles directly. That
+would replace the laziness rule for this case (above a hundred elements a
+broadcast answers a lazy `Map`, the "hybrid laziness" of Tycho item 52, which
+exists for sources that are themselves lazy or huge), so it is the user's
+call, and it needs a design note: which heads, which precision, how exact
+integers and rationals are kept out, and what a consumer that relied on the
+lazy form sees.
+
 ### The interpreter over a list of ten thousand elements: where the time goes (OPEN, evaluation performance — measured 2026-09-20)
 
 Measured while looking at `Min(1, 2 − 2·PointZ(C))` over ten thousand points,

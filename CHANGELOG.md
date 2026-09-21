@@ -2,6 +2,20 @@
 
 ### Improvements
 
+- **A scalar times a vector of machine numbers is computed on doubles.** The
+  product of a number and an evaluated list boxed every element and built a
+  symbolic product for it, about 3.5 µs an element. When the list and the
+  scalar are machine numbers, and the products are exact integers or floats
+  the engine computes as doubles (machine precision), the doubles are the same
+  values, and the answer is a list that holds its numbers unboxed. Everything
+  else takes the general route: an exact rational scalar or element, a float
+  above machine precision, an integer product past the safe range, `NaN`, an
+  infinity, a symbolic value. The results are unchanged: the MathJSON, the
+  type and the exactness of every element are the same as before on 480
+  scalar-and-vector combinations at two precisions, under `evaluate()` and
+  under `N()`. Measured over ten thousand points, both versions interleaved
+  in one process: `Sum(2·PointZ(C))` is 2.0 to 2.4 times faster and
+  `Min(1, 2 − 2·PointZ(C))` 1.2 to 1.7 times.
 - **A written-out list of numbers or of points evaluates to itself.** A
   canonical `List` or `Tuple` whose every element is a number literal, or such
   a `List` or `Tuple` in turn, has nothing to evaluate, and `evaluate()` now

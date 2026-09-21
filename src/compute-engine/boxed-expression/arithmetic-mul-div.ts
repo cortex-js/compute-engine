@@ -5,6 +5,8 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isTensorValue, packTensor } from './tensor-view.js';
+import { machineNumberOf, isExactNonInteger } from './machine-number.js';
+import { bignumPreferred } from './utils.js';
 import {
   isNumber,
   isFunction,
@@ -2364,6 +2366,71 @@ function mulTensors(
 }
 
 /**
+ * Is this number literal exact, or a float the engine stores as a JavaScript
+ * number? `false` for a big-number float, whose arithmetic is decimal
+ * whatever the precision of the engine is now.
+ */
+function isStoredAsDouble(x: Expression): boolean {
+  if (!isNumber(x)) return false;
+  const value = x.numericValue;
+  if (typeof value === 'number' || value.isExact) return true;
+  return typeof (value as { decimal?: unknown }).decimal === 'number';
+}
+
+/**
+ * `scalar · vector` computed on doubles, when that is what the cell products
+ * of {@link scaleTensor} answer, or `undefined` when it is not.
+ *
+ * The general route boxes every cell and builds a symbolic product for it,
+ * about 3.5 µs a cell: `Sum(2·L)` over ten thousand numbers took 48 ms, most
+ * of it here. The doubles are the same values under these conditions:
+ *
+ * - the vector is MACHINE NUMERIC (`isMachineNumeric`): every element is a
+ *   machine number and none is an exact rational such as `1/2`, whose
+ *   product must stay exact; the scalar is one too;
+ * - every value is finite, so no `0 · ∞` or `NaN` is decided here;
+ * - the products are exact integers (both factors integers, the product a
+ *   safe integer), or the engine computes floats as doubles (machine
+ *   precision) AND the scalar is stored as a double (`isStoredAsDouble`). At
+ *   a higher precision a float product carries more digits than a double
+ *   holds. A scalar made at a higher precision keeps its decimal digits when
+ *   the engine is later set to machine precision, and the cell product
+ *   multiplies those digits: `0.1 · [3]` is `[0.3]` for such a `0.1`, where
+ *   the doubles give `0.30000000000000004`. The ELEMENTS need no such test:
+ *   the cell products read them from the packed tensor, which holds doubles.
+ *
+ * The answer is a list that holds its numbers unboxed (`ce.list`), whose
+ * elements are exactly `ce.number(product)`.
+ */
+function scaleMachineVector(
+  ce: ComputeEngine,
+  vector: Expression,
+  scalar: Expression
+): Expression | undefined {
+  if (!isFunction(vector, 'List') || vector.isMachineNumeric !== true)
+    return undefined;
+  const k = machineNumberOf(scalar);
+  if (k === undefined || !Number.isFinite(k) || isExactNonInteger(scalar, k))
+    return undefined;
+  const values = vector.array;
+  if (values === undefined) return undefined;
+  const floatsAreDoubles = !bignumPreferred(ce) && isStoredAsDouble(scalar);
+  const integerScalar = Number.isInteger(k);
+  const out = new Array<number>(values.length);
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (!Number.isFinite(v)) return undefined;
+    const p = k * v;
+    if (integerScalar && Number.isInteger(v)) {
+      if (!Number.isSafeInteger(p)) return undefined;
+    } else if (!floatsAreDoubles) return undefined;
+    // `-0` is stored as `0`, as the `array` of a list stores it.
+    out[i] = p === 0 ? 0 : p;
+  }
+  return ce.list(out);
+}
+
+/**
  * Scale every element of a vector or matrix `tensor` by the scalar `scalar`,
  * multiplying each cell with `multiply` — the route's own product helper
  * (`mul`, `mulFactored` or `mulN`), so the cells follow the same
@@ -2383,6 +2450,8 @@ function scaleTensor(
 
   // Vector (rank 1)
   if (shape.length === 1) {
+    const scaled = scaleMachineVector(ce, tensor, scalar);
+    if (scaled !== undefined) return scaled;
     const result: Expression[] = [];
     for (let i = 0; i < shape[0]; i++) {
       const val = ce.expr(packed.at(i + 1) ?? ce.Zero);
