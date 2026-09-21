@@ -2,6 +2,53 @@
 
 ### Improvements
 
+- **Arithmetic over large lists of machine numbers is computed on doubles, at
+  machine precision.** Above a hundred elements `2·L`, `L + 1`, `L + M`,
+  `L·M` and `−L` answered a lazy `Map`, whose elements the interpreter
+  computes one function application at a time, about 4.5 µs each, at every
+  evaluation. That form is for a source that is itself lazy or very large. A
+  `List` of machine numbers is in memory already: when the engine is at
+  machine precision and every operand is such a list (or a symbol that holds
+  one) or a machine number, the sum, the product or the negation is now
+  computed at once on doubles, and the answer is a list that holds its
+  numbers unboxed. `Sum`, `Max` and `Min` of such a list fold its doubles
+  (`Max` and `Min` with the tolerance rule of the comparison they used), and
+  `PointX`, `PointY` and `PointZ` over a written-out list of more than a
+  hundred points answer a list of unboxed doubles. Everything else takes the
+  route it took before: an exact rational, a symbolic, non-finite or complex
+  value, a float made above machine precision, an integer past the safe
+  range, a sum or a product of three or more operands, every function head
+  (`Sin(L)`, `L / 3`, `L^2`), and every engine above machine precision.
+
+  What changes for a caller: the result is a `List` of numbers where it was
+  `Map(f, L)`. It is a value, as it already was for a hundred elements or
+  fewer: a later assignment to `L` does not change it. `Norm(2·L)` is now a
+  number, where it stayed unevaluated because its operand was a lazy `Map`.
+
+  The values are the same. 25,536 evaluations were compared between the two
+  versions (28 expressions and their reductions over 19 kinds of list, three
+  engine setups, `evaluate()` and `N()`; every element's MathJSON, exactness
+  and type). The differences, all at machine precision: `Norm` as above; and
+  a `Sum` or a `Product` of elements that are integer-valued results of float
+  arithmetic, when it passes `2^53`, is now the exact integer where the fold
+  over the lazy form answered a rounded float (`Sum(9007199254740000 + L)`).
+
+  Measured over ten thousand elements at machine precision, both versions
+  interleaved in one process, medians of eleven runs:
+
+  | Expression | `evaluate()` before | after | `N()` before | after |
+  | --- | ---: | ---: | ---: | ---: |
+  | `Sum(2·L)` | 44.7 ms | 7.0 ms | 43.1 ms | 6.7 ms |
+  | `Min(1, 2 − 2·L)` | 81.5 ms | 4.0 ms | 22.0 ms | 4.0 ms |
+  | `Min(1, 2 − 2·PointZ(C))` | 94.1 ms | 8.0 ms | 89.2 ms | 18.4 ms |
+  | `Sum(2·PointZ(C))` | 19.6 ms | 12.4 ms | 16.6 ms | 11.9 ms |
+  | `Sum(L + M)` | 32.6 ms | 7.8 ms | 31.8 ms | 7.4 ms |
+  | `Max(L·M)` | 41.4 ms | 4.0 ms | 16.4 ms | 3.7 ms |
+  | `Mean(2 − 2·L)` | 68.8 ms | 6.3 ms | 15.1 ms | 6.8 ms |
+  | `Min(L)` | 4.6 ms | 0.3 ms | 4.6 ms | 0.3 ms |
+  | `Sum(L)` | 3.0 ms | 0.3 ms | 2.7 ms | 0.2 ms |
+  | `Sum(Sin(L))` (not covered) | 45.5 ms | 47.1 ms | 44.1 ms | 44.3 ms |
+  | `PointZ(C)` alone | 2.5 ms | 3.9 ms | 2.3 ms | 3.8 ms |
 - **A scalar times a vector of machine numbers is computed on doubles.** The
   product of a number and an evaluated list boxed every element and built a
   symbolic product for it, about 3.5 µs an element. When the list and the
@@ -57,6 +104,17 @@
 - **An empty `Linspace` beside other operands of `Max` or `Min` contributes
   nothing.** `Max(Linspace(1, 5, 0), 1)` stayed unevaluated; it is now `1`, as
   `Max([], 1)` is.
+- **`FindFit` and `FindRoot` report a time limit that ran out during setup as
+  the `"setup"` phase again.** The only deadline checks that setup reached
+  were inside the evaluation of the data, and since written-out data
+  evaluates to itself they no longer ran: a fit whose budget was spent before
+  the solver started answered `phase: "solve"`. Setup now checks the deadline
+  once before it hands over to the solver.
+- **A scalar times a vector: a huge float product stays a float.**
+  `1e308 · [0.9, …]` over a list of machine numbers answered `9e307` as an
+  exact integer of 308 digits, because an integer-valued double past the safe
+  range is boxed as an exact big integer. Such a product now takes the
+  general route, which answers the float.
 - **`Linspace` between endpoints whose difference overflows a double.**
   `Linspace(-1e308, 1e308, 3)` enumerated as `NaN, +oo, +oo`, because the span
   `upper − lower` is formed first and overflows. The samples are now

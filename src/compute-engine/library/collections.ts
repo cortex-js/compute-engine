@@ -132,6 +132,7 @@ import type {
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { isValueDef } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import { machineListFrom } from '../boxed-expression/machine-broadcast.js';
 import {
   isAbsentValue,
   isDictionary,
@@ -3737,6 +3738,15 @@ function pointComponentAt(
         const comps: Expression[] = [];
         for (const e of xs.each())
           comps.push(pointComponentOf(e, position, ce));
+        // Above the eager threshold (a written-out `List` of points), machine
+        // coordinates are answered as a list that holds them unboxed: the
+        // arithmetic and the reductions that follow read its doubles without
+        // a walk of ten thousand boxed numbers. At or below the threshold the
+        // ordinary `List` is kept, so that small lists are unchanged.
+        if (comps.length > MAX_SIZE_EAGER_COLLECTION) {
+          const unboxed = machineListFrom(ce, comps);
+          if (unboxed !== undefined) return unboxed;
+        }
         return ce.function('List', comps);
       }
       // Elements are not points → element indexing, like First/Second/Third.

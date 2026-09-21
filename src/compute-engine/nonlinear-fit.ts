@@ -632,6 +632,11 @@ function findFitCore(
     units.push({ ...unit, paramFresh });
   }
 
+  // A budget that ran out during setup is reported as such. Setup has no
+  // other deadline check of its own: the ones it used to reach were inside
+  // the evaluation of the data, and written-out data evaluates to itself
+  // without a walk.
+  checkDeadline(ce._deadlineFrame);
   ctx.phase = 'solve';
   return solve(ce, units, specs);
 }
@@ -700,6 +705,11 @@ function findRootCore(
     units.push({ ...unit, paramFresh });
   }
 
+  // A budget that ran out during setup is reported as such. Setup has no
+  // other deadline check of its own: the ones it used to reach were inside
+  // the evaluation of the data, and written-out data evaluates to itself
+  // without a walk.
+  checkDeadline(ce._deadlineFrame);
   ctx.phase = 'solve';
   return solve(ce, units, specs);
 }

@@ -22,6 +22,7 @@ import {
 } from '../common/type/primitive.js';
 import { numericStoreTiers } from './boxed-expression/literal-tier.js';
 import { machineNumberOf } from './boxed-expression/machine-number.js';
+import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
@@ -2134,7 +2135,11 @@ export function broadcastOverIndexedCollections(
   // byte-identical. Callers that require an eager `List` shape at any finite
   // size (e.g. `PointList`, whose `List<Tuple>` shape is a consumer contract)
   // leave `allowLazy` false and always get the eager materialization.
-  if (allowLazy && n > MAX_SIZE_EAGER_COLLECTION)
+  if (allowLazy && n > MAX_SIZE_EAGER_COLLECTION) {
+    // Lists of machine numbers are computed at once, on doubles, as in
+    // `lazyBroadcastMapIfNeeded`.
+    const eager = machineBroadcast(ce, operator, xs);
+    if (eager !== undefined) return eager;
     return lazyBroadcastMap(
       ce,
       operator,
@@ -2143,6 +2148,7 @@ export function broadcastOverIndexedCollections(
       numericApproximation,
       strictLengths
     );
+  }
 
   const options = { numericApproximation };
   // Stream the broadcast operands with hoisted `each()` iterators instead of
@@ -2330,6 +2336,16 @@ export function lazyBroadcastMapIfNeeded(
   if (!hasBroadcast) return undefined;
   if (!hasUnknownOrInfinite && minKnown <= MAX_SIZE_EAGER_COLLECTION)
     return undefined;
+  // Lists of machine numbers are in memory already: their element-wise
+  // arithmetic is computed at once, on doubles, when that gives the values
+  // the interpreter gives (`machineBroadcast`). The lazy form below is for a
+  // source that is itself lazy, or that is not made of machine numbers. A
+  // declared function (`callee`) has its own element function and is never
+  // computed this way.
+  if (!hasUnknownOrInfinite && options?.callee === undefined) {
+    const eager = machineBroadcast(ce, operator, ops);
+    if (eager !== undefined) return eager;
+  }
   return lazyBroadcastMap(
     ce,
     operator,

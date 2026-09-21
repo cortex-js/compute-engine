@@ -567,8 +567,11 @@ random sub-streams, so a different draw is the second.
 hundred elements a broadcast answers a lazy `Map`, so the answer depends on
 the SIZE of the list: with `L` a list of fifty numbers `Norm(Sin(L))` is a
 number, and with a thousand numbers it is `Norm(Map(x ↦ Sin(x), L))`,
-unevaluated, under `evaluate()` and under `N()`. `Norm(2·L)` does the same
-when `L` is a symbol. `Norm(L)` itself is a number at both sizes. The other
+unevaluated, under `evaluate()` and under `N()`. `Norm(L)` itself is a number
+at both sizes. `Norm(2·L)` and `Norm(L + M)` are numbers at machine precision
+when `L` and `M` hold machine numbers, because that arithmetic is no longer
+lazy; above machine precision, and for every function head, they stay
+unevaluated. The other
 reducers (`Sum`, `Max`, `Mean`, `Variance`) walk a finite lazy collection;
 `Norm` should too.
 
@@ -586,86 +589,60 @@ exactly ("non-real constants are folded, not refused"). Continuous integration
 runs Node 22, where they pass. Measured the same on the 0.132.3 tree, so it is not
 a recent change. The two routes should use one primitive.
 
-### Element-wise arithmetic over a large list takes one of three routes in the interpreter, and only one is fast (OPEN, evaluation performance, needs a design decision — measured 2026-09-21)
+### Element-wise FUNCTIONS over a large list of machine numbers are still interpreted per element (OPEN, evaluation performance — measured 2026-09-21)
 
-Measured at machine precision over ten thousand elements, `L` a symbol that
-holds a list of numbers and `C` one that holds a list of points, on a quiet
-machine and in source mode (where `console.assert` is about a quarter of the
-time; the production build strips it):
+Element-wise `Add`, `Multiply` and `Negate` over lists of machine numbers are
+computed at once on doubles at machine precision (`machineBroadcast`,
+`boxed-expression/machine-broadcast.ts`; the rule is in
+`docs/COLLECTIONS-MODEL.md`, "Lists of machine numbers"), and `Sum`, `Max` and
+`Min` fold the doubles. Over ten thousand elements `Min(1, 2 − 2·L)` went from
+81 ms to 4 ms. What is left on the lazy `Map`, about 4.5 µs per element:
 
-| Expression | `evaluate()` | `N()` |
-| --- | ---: | ---: |
-| `Sum(2·L)` | 48.6 ms | 47.3 ms |
-| `Sum(Sin(L))` | 46.3 ms | 46.9 ms |
-| `Min(1, 2 − 2·L)` | 88.5 ms | 27.0 ms |
-| `Sum(2·PointZ(C))` | 51.7 ms | 48.1 ms |
-| `Min(1, 2 − 2·PointZ(C))` | 129.4 ms | 170.8 ms |
+- **Function heads**: `Sum(Sin(L))` is 45 ms under `evaluate()` and under
+  `N()`. A kernel for a function head must give the value the interpreter
+  gives, and three things make that more than a table of `Math` functions.
+  Under `evaluate()` an integer element stays exact (`Sin(1)`), so the list
+  must hold no integer. A negative element of `Sqrt` or `Ln` has a complex
+  value. And the primitive must be the interpreter's own: `Exp(x)` is
+  `Math.E ** x` on the `N()` route and `Math.exp(x)` under `evaluate()`,
+  which differ by one unit in the last place on Node 22 (see the `Exp(1.1)`
+  entry). `Divide` and `Power` belong here too (`L / 3` is canonically
+  `Multiply(Rational(1, 3), L)`, and the exact rational scalar declines).
+- **Sums and products of three or more operands** (`L + M + 1`): the
+  interpreter adds the exact operands apart from the floats, so the rounding
+  depends on an order the kernel does not reproduce. Reading that order from
+  `add()` (`boxed-expression/arithmetic-add.ts`) would let the kernel follow
+  it.
+- **A symbol that holds a list of points is walked at every use**:
+  `evaluateInOwnBindings` (`boxed-expression/binders.ts`) walks the stored
+  value with `rewriteWithBinders` to find free symbols, 13% of
+  `(2 − 2·PointZ(C)).N()` over ten thousand points. A written-out list of
+  number tuples holds no symbol; the fast path there covers a number literal
+  only.
+- **Above machine precision** nothing changed: every element is a
+  `BigDecimal` computation, about 12 µs.
 
-A compiled kernel over a `Float64` array does the same arithmetic in about a
-tenth of a millisecond. The three routes:
+### Reductions over ten thousand elements: what is left outside the interpreter's arithmetic (OPEN, evaluation performance — measured 2026-09-20, revised 2026-09-21)
 
-1. **The tensor route** (`mulTensors` → `scaleTensor` in
-   `boxed-expression/arithmetic-mul-div.ts`), taken when an operand is an
-   EVALUATED `List`: eager, one symbolic product per cell. `scalar · vector`
-   over machine numbers now multiplies doubles (`scaleMachineVector`); the
-   sum of two vectors, a vector plus a scalar, and every function head do
-   not have that path.
-2. **The lazy map, interpreted** (`lazyBroadcastMap`), taken above a hundred
-   elements when the operand is a symbol or a lazy collection: each element is
-   a function application, about 4.7 µs. A lazy `Map` keeps the elements of a
-   complete walk of one instance (its element memo, up to 100,000 elements),
-   but each evaluation makes a new instance, so every evaluation pays again.
-3. **The lazy map, compiled** (`library/map-auto-compile.ts`): the float
-   kernel. It needs machine precision AND the `N()` route AND a consumer that
-   drains through the map's iterator. `Min(1, 2 − 2·L)` reaches it under
-   `N()` (27 ms, two drains per evaluation); `Sum(2·L)` and `Sum(Sin(L))` do
-   not reach it on either route.
+Found while looking at `Min(1, 2 − 2·PointZ(C))` over ten thousand points, the
+colour row of the Tycho corpus document `s8ishknvhe`, which Tycho interprets
+today (the row declines to compile, see the entry for that document). At
+machine precision that expression is now 8 ms under `evaluate()` (it was
+219 ms on 2026-09-20): written-out data evaluates to itself, the coordinates
+are read into a list of unboxed doubles, the arithmetic runs on doubles, and
+`Min` scans them. What is left:
 
-The decision that is needed: whether arithmetic over machine-numeric lists
-should be computed EAGERLY on `Float64` arrays (a list of ten thousand doubles
-is 80 KB; the products cost microseconds) and answered as a list that holds
-its numbers unboxed, with the reducers folding the doubles directly. That
-would replace the laziness rule for this case (above a hundred elements a
-broadcast answers a lazy `Map`, the "hybrid laziness" of Tycho item 52, which
-exists for sources that are themselves lazy or huge), so it is the user's
-call, and it needs a design note: which heads, which precision, how exact
-integers and rationals are kept out, and what a consumer that relied on the
-lazy form sees.
-
-### The interpreter over a list of ten thousand elements: where the time goes (OPEN, evaluation performance — measured 2026-09-20)
-
-Measured while looking at `Min(1, 2 − 2·PointZ(C))` over ten thousand points,
-the colour row of the Tycho corpus document `s8ishknvhe`, which Tycho
-interprets today (the row declines to compile, see the entry for that
-document). Machine precision, medians of five runs, after the change that
-reads the coordinates of a written-out list directly: `PointZ(C)` 79 ms,
-`2 − 2·PointZ(C)` 175 ms, `Min(1, 2 − 2·PointZ(C))` 219 ms. The reduction
-itself is not the cost — a scan of ten thousand doubles was tried in its
-place and changed nothing measurable. A CPU profile of `PointZ(C)` (64 ms per
-evaluation) gives, overlapping:
-
-- **The type of a large list is computed per fresh list** — about 49%
-  (`get type` → `describe` → one operand descriptor per element), and an
-  evaluation produces a fresh list. `isNumber` on a list of ten thousand
-  numbers costs 7–10 ms for that reason, and the reducers ask it
-  (`processMinMaxItem`, `cannotContainAbsentValue`).
-- **The canonical construction of the result list** — about 27%
-  (`ce.function('List', …)` → `makeCanonicalFunction` →
-  `applyOperatorDefinition`).
-
-One more, measured on `Min(1, 2 − 2·L)` over a list that holds its numbers
-unboxed (124 ms at the default precision):
-
-- **At the default precision each element is computed with `BigDecimal`**:
-  75% of that profile is the lazy map's element function in the interpreter's
-  exact arithmetic (`add` → `nvSum` → `BigDecimal`), about 12 µs per element.
-  The derived `array` of a list of such floats is also slow to build
-  (8–15 ms), because each float is a big-number value that is checked by
-  boxing its machine value again (`machineNumberOf`).
-
-Smaller, measured and not built: on the JavaScript target `Min(1, L)` copies
-its operand (`[1, ...L]`) and `Min(L, M)` copies both (0.22 ms against 0.07 ms
-for `Min(L)` at ten thousand elements); a seeded `reduce` would not copy.
+- **At the default precision each element is computed with `BigDecimal`**,
+  about 12 µs per element (`add` → `nvSum` → `BigDecimal`). The derived
+  `array` of a list of such floats is also slow to build (8–15 ms), because
+  each float is a big-number value that is checked by boxing its machine
+  value again (`machineNumberOf`).
+- **Under `N()` the same expression is 18 ms**: the symbol `C` is walked at
+  every use (see the entry on element-wise functions).
+- Smaller, measured and not built: on the JavaScript target `Min(1, L)`
+  copies its operand (`[1, ...L]`) and `Min(L, M)` copies both (0.22 ms
+  against 0.07 ms for `Min(L)` at ten thousand elements); a seeded `reduce`
+  would not copy.
 
 For Tycho, not a Compute Engine defect: its lowering of Desmos `min`/`max`
 with two or more arguments to `ElementMin`/`ElementMax`

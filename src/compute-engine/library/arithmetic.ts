@@ -21,6 +21,11 @@ import {
 } from '../boxed-expression/value-membership.js';
 import { hasAsyncOnlyApplication } from '../boxed-expression/async-only-descendants.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
+import {
+  DEADLINE_STRIDE,
+  holdsDoubles,
+  machineListOf,
+} from '../boxed-expression/machine-broadcast.js';
 import { withEvaluationEffects } from '../effects-registry.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
@@ -286,6 +291,7 @@ import {
   run,
   runAsync,
   CancellationError,
+  checkDeadline,
 } from '../../common/interruptible.js';
 import type {
   Expression,
@@ -6765,13 +6771,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // collection whose iterator declines (symbolic elements) would
           // silently fold to 0 — stay symbolic too.
           if (first.isFiniteCollection !== true) return undefined;
+          // A `List` of machine numbers is summed on its doubles: see
+          // `machineSum`.
+          const summed = machineSum(first);
+          if (typeof summed === 'number') return engine.number(summed);
+          // The operand `machineSum` evaluated is walked below in place of
+          // `first`, so that it is not evaluated a second time.
+          const source = summed ?? first;
           // The decline is read off the fold's OWN walk (below) rather than
           // probed first: probing starts a second enumeration, which re-runs
           // the element callback of a lazy `Map`/`Filter` once more than there
           // are elements.
           let walked = 0;
           const result = run(
-            reduceCollection(first, engine.Zero, (acc, x) => {
+            reduceCollection(source, engine.Zero, (acc, x) => {
               walked += 1;
               return sumAccumulate(
                 acc,
@@ -7636,6 +7649,13 @@ function processMinMaxItem(
   // collections (`docs/STRING_ROADMAP.md`, design constraint 5).
   if (isTextAtom(item)) return [undefined, [item]];
 
+  // A `List` of machine numbers is folded on its doubles, at machine
+  // precision: see `machineExtremum`.
+  if (isMachineDoubleList(item)) {
+    const extremum = machineExtremum(item.array, upper, ce);
+    if (extremum !== undefined) return [ce.number(extremum), []];
+  }
+
   if (item.isCollection) {
     // Only a finite, enumerable collection can be folded for an extremum.
     // An infinite one (an Interval's dyadic sampler, a Map over it) would
@@ -7681,6 +7701,119 @@ function processMinMaxItem(
 
   if (!item.isNumber || !isNumber(item)) return [undefined, [item]];
   return [item, []];
+}
+
+/**
+ * Is `x` a `List` of machine numbers that the interpreter computes with as
+ * doubles: the engine is at machine precision, and every element is stored
+ * as a double or is exact (`holdsDoubles`)? At a higher precision a float is
+ * a big-number value, whose arithmetic and comparisons are decimal.
+ */
+function isMachineDoubleList(
+  x: Expression
+): x is Expression & { array: readonly number[] } {
+  return (
+    isFunction(x, 'List') &&
+    x.isMachineNumeric &&
+    !bignumPreferred(x.engine) &&
+    holdsDoubles(x)
+  );
+}
+
+/**
+ * The sum of the operand of `Sum(L)` computed on doubles, when the operand
+ * is, or holds, or evaluates to, a `List` of machine numbers at machine
+ * precision (`isMachineDoubleList`). Answers the sum, or the collection the
+ * caller must fold in place of the operand, or `undefined` when the caller
+ * folds the operand itself.
+ *
+ * The fold adds the elements in order with `add()`, starting from `0`. Each
+ * `add()` of a float is the addition of two doubles, in the same order as
+ * here. A partial sum that has an integer value is an EXACT integer in the
+ * fold, also when floats produced it (`0.5 + 0.5`), and the fold then adds
+ * integers exactly, past the safe range too. So this function declines as
+ * soon as a partial sum is an integer past the safe range, where a double
+ * no longer holds what the fold holds. A non-finite element declines: the
+ * fold decides `∞ − ∞` and `NaN`.
+ *
+ * The value of a symbol is read, never evaluated (`machineListOf`). An
+ * operand that is a function with no iterator of its own is evaluated here:
+ * walking such an operand evaluates it in the same way
+ * (`BoxedFunction.each()`). When this function evaluated the operand and
+ * then declines, it answers the evaluated collection, and the caller walks
+ * that one, so the operand is evaluated once. A lazy collection with its own
+ * iterator (`Map`, `Range`) is left to the fold.
+ */
+function machineSum(operand: Expression): number | Expression | undefined {
+  const evaluatedByWalk =
+    isFunction(operand) &&
+    operand.operator !== 'List' &&
+    operand.operatorDefinition?.collection?.iterator === undefined &&
+    operand.isPure;
+  const evaluated = evaluatedByWalk ? operand.evaluate() : undefined;
+  const declined =
+    evaluated?.isFiniteCollection === true ? evaluated : undefined;
+  const list = machineListOf(evaluated ?? operand);
+  if (list === undefined || !isMachineDoubleList(list)) return declined;
+  const values = list.array;
+  const frame = operand.engine._deadlineFrame;
+  let total = 0;
+  for (let i = 0; i < values.length; i++) {
+    if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE) checkDeadline(frame);
+    const v = values[i];
+    if (!Number.isFinite(v)) return declined;
+    total += v;
+    if (Number.isInteger(total) && !Number.isSafeInteger(total))
+      return declined;
+  }
+  return total === 0 ? 0 : total;
+}
+
+/**
+ * The maximum (`upper`) or the minimum of a non-empty array of doubles, as the
+ * element-by-element fold of `processMinMaxItem` answers it, or `undefined`
+ * when the fold must answer (an empty array, an integer past the safe range).
+ *
+ * The fold compares with `isGreater`/`isLess`, which are tolerance-aware: a
+ * value replaces the extremum so far only when it differs from it by the
+ * tolerance of the engine or more, so that the first of several values
+ * within the tolerance of each other is the one kept. Two details of that
+ * comparison (`cmp()`, `boxed-expression/compare.ts`) are reproduced here.
+ * A difference EQUAL to the tolerance is a tie between two integers and is
+ * not a tie when one of the values is a float. And a comparison with the
+ * integer `0` reads the sign, with no tolerance. With both, the scan answers
+ * the element the fold answers. `NaN` absorbs, as in the fold. Boxing each of
+ * ten thousand doubles to compare it cost about 10 ms; the scan costs
+ * microseconds.
+ */
+function machineExtremum(
+  values: readonly number[],
+  upper: boolean,
+  ce: ComputeEngine
+): number | undefined {
+  if (values.length === 0) return undefined;
+  const tolerance = ce.tolerance;
+  let result = values[0];
+  if (Number.isNaN(result)) return NaN;
+  if (Number.isInteger(result) && !Number.isSafeInteger(result))
+    return undefined;
+  for (let i = 1; i < values.length; i++) {
+    if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
+      checkDeadline(ce._deadlineFrame);
+    const v = values[i];
+    if (Number.isNaN(v)) return NaN;
+    // An integer past the safe range is boxed as an exact big integer, whose
+    // comparison takes a route of its own: the fold answers.
+    if (Number.isInteger(v) && !Number.isSafeInteger(v)) return undefined;
+    if (v === result) continue;
+    if (result !== 0) {
+      const gap = Math.abs(v - result);
+      const bothIntegers = Number.isInteger(v) && Number.isInteger(result);
+      if (bothIntegers ? gap <= tolerance : gap < tolerance) continue;
+    }
+    if (upper ? v > result : v < result) result = v;
+  }
+  return result;
 }
 
 /**

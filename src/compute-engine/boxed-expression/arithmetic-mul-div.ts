@@ -6,6 +6,7 @@ import type {
 } from '../global-types.js';
 import { isTensorValue, packTensor } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
+import { isStoredAsDouble } from './machine-broadcast.js';
 import { bignumPreferred } from './utils.js';
 import {
   isNumber,
@@ -2366,18 +2367,6 @@ function mulTensors(
 }
 
 /**
- * Is this number literal exact, or a float the engine stores as a JavaScript
- * number? `false` for a big-number float, whose arithmetic is decimal
- * whatever the precision of the engine is now.
- */
-function isStoredAsDouble(x: Expression): boolean {
-  if (!isNumber(x)) return false;
-  const value = x.numericValue;
-  if (typeof value === 'number' || value.isExact) return true;
-  return typeof (value as { decimal?: unknown }).decimal === 'number';
-}
-
-/**
  * `scalar · vector` computed on doubles, when that is what the cell products
  * of {@link scaleTensor} answer, or `undefined` when it is not.
  *
@@ -2421,9 +2410,12 @@ function scaleMachineVector(
     const v = values[i];
     if (!Number.isFinite(v)) return undefined;
     const p = k * v;
-    if (integerScalar && Number.isInteger(v)) {
-      if (!Number.isSafeInteger(p)) return undefined;
-    } else if (!floatsAreDoubles) return undefined;
+    // An integer past the safe range is declined whatever the factors are:
+    // `ce.number()` makes it an exact big integer, which is not the value
+    // the cell product holds when a factor is a float.
+    if (Number.isInteger(p) && !Number.isSafeInteger(p)) return undefined;
+    if (!(integerScalar && Number.isInteger(v)) && !floatsAreDoubles)
+      return undefined;
     // `-0` is stored as `0`, as the `array` of a list stores it.
     out[i] = p === 0 ? 0 : p;
   }
@@ -2444,14 +2436,20 @@ function scaleTensor(
 ): Expression {
   const shape = tensor.shape;
 
+  // A vector of machine numbers is scaled on its doubles, which needs no
+  // packed tensor: packing boxes every element of a list that holds its
+  // numbers unboxed.
+  if (shape.length === 1) {
+    const scaled = scaleMachineVector(ce, tensor, scalar);
+    if (scaled !== undefined) return scaled;
+  }
+
   // Pack once for the whole scaling. A pack failure leaves the scaling inert.
   const packed = packTensor(ce, tensor);
   if (!packed) return ce._fn('Multiply', [scalar, tensor]);
 
   // Vector (rank 1)
   if (shape.length === 1) {
-    const scaled = scaleMachineVector(ce, tensor, scalar);
-    if (scaled !== undefined) return scaled;
     const result: Expression[] = [];
     for (let i = 0; i < shape[0]; i++) {
       const val = ce.expr(packed.at(i + 1) ?? ce.Zero);
