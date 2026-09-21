@@ -31,6 +31,37 @@
   `Sum(PointX(C))` 9.8 times, and `Min(1, 2 − 2·PointZ(C))` 1.6 times (that
   one is dominated by the arithmetic over the coordinates).
 
+### Resolved Issues
+
+- **`Max` and `Min` walk a lazy operand once.** `Max` and `Min` walked every
+  collection operand to look for a `Missing` or a `NaN` element, and then
+  walked it again to find the extremum. A lazy collection computes its
+  elements on every walk. Two cases were already spared: the first walk was
+  skipped when the element type is `real`, and a lazy `Map` answers a second
+  complete walk of the same instance from the elements it kept. The cases
+  that were left ran the element function twice per element: a lazy `Map`
+  whose elements are typed `number` (or wider), read through `Reverse`,
+  `Take` or `Drop`. With a callback that writes to a variable, the two runs
+  were visible: `Max(Reverse(Map(f, xs)))` ran `f` six times for three
+  elements. The absent element is now found on the walk that finds the
+  extremum. Measured over ten thousand elements at machine precision, both
+  versions interleaved in one process: `Min(Reverse(|ln M|))`,
+  `Min(Take(|ln M|, 5000))` and `Max(Drop(|ln M|, 5000))` are 1.7 to 1.9
+  times faster; `Min(1, 2 − 2·L)`, `Sum(2·L)` and the other expressions that
+  were already walked once are unchanged (0.92 to 1.01). Every value is the
+  same as before on 140 operand shapes, two precisions, `evaluate()` and
+  `N()`, except the two corrections below.
+- **`Max` and `Min` find a `Missing` element of a nested list.**
+  `Max([[1, Missing], 3])` answered `Max(3, Missing)`, which evaluated a
+  second time to `NaN`. It is now `NaN` at once, as for `Max([1, Missing])`.
+- **An empty `Linspace` beside other operands of `Max` or `Min` contributes
+  nothing.** `Max(Linspace(1, 5, 0), 1)` stayed unevaluated; it is now `1`, as
+  `Max([], 1)` is.
+- **`Linspace` between endpoints whose difference overflows a double.**
+  `Linspace(-1e308, 1e308, 3)` enumerated as `NaN, +oo, +oo`, because the span
+  `upper − lower` is formed first and overflows. The samples are now
+  `-1e308, 0, 1e308`. Every other `Linspace` is unchanged to the last digit.
+
 ## 0.132.3 _2026-09-20_
 
 ### Improvements

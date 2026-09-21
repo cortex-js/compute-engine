@@ -561,6 +561,31 @@ unwinds on a deadline (`CancellationError`), so a time budget that expires
 under load is the first thing to check; the sample points come from derived
 random sub-streams, so a different draw is the second.
 
+### `Norm` of a lazy collection stays unevaluated (OPEN, evaluation — found 2026-09-21)
+
+`Norm` reads its operand as a tensor, and a lazy `Map` is not one. Above a
+hundred elements a broadcast answers a lazy `Map`, so the answer depends on
+the SIZE of the list: with `L` a list of fifty numbers `Norm(Sin(L))` is a
+number, and with a thousand numbers it is `Norm(Map(x ↦ Sin(x), L))`,
+unevaluated, under `evaluate()` and under `N()`. `Norm(2·L)` does the same
+when `L` is a symbol. `Norm(L)` itself is a number at both sizes. The other
+reducers (`Sum`, `Max`, `Mean`, `Variance`) walk a finite lazy collection;
+`Norm` should too.
+
+### `Exp(1.1)` differs by one unit in the last place between `evaluate()` and `N()` on Node 22 (OPEN, numerics — found 2026-09-21)
+
+At machine precision `Exp(1.1).evaluate()` is `3.0041660239464334`
+(`Math.exp`) and `Exp(1.1).N()` is `3.004166023946433` (`Math.E ** 1.1`, the
+`Power` route), and the snapshot of `arithmetic.test.ts` records both. The
+second is the correctly rounded value. On Node 26 `Math.E ** 1.1` also gives
+`…4334`, so the two routes agree there and two snapshots of
+`test/compute-engine/arithmetic.test.ts` (`Exp 1.1`, `Exp ['List', 1.1, 2,
+4]`) fail on a machine whose default Node is 26, and so does one test of
+`test/compute-engine/compile.test.ts` that compares a folded complex constant
+exactly ("non-real constants are folded, not refused"). Continuous integration
+runs Node 22, where they pass. Measured the same on the 0.132.3 tree, so it is not
+a recent change. The two routes should use one primitive.
+
 ### Element-wise arithmetic over a large list takes one of three routes in the interpreter, and only one is fast (OPEN, evaluation performance, needs a design decision — measured 2026-09-21)
 
 Measured at machine precision over ten thousand elements, `L` a symbol that
@@ -587,10 +612,9 @@ tenth of a millisecond. The three routes:
    not have that path.
 2. **The lazy map, interpreted** (`lazyBroadcastMap`), taken above a hundred
    elements when the operand is a symbol or a lazy collection: each element is
-   a function application, about 4.7 µs, and a lazy `Map` keeps no elements,
-   so every consumer pays again. A reducer is two consumers: the absent-datum
-   gate (`aggregateAbsence`, `library/missing-data.ts`) walks the operand, and
-   then the fold does.
+   a function application, about 4.7 µs. A lazy `Map` keeps the elements of a
+   complete walk of one instance (its element memo, up to 100,000 elements),
+   but each evaluation makes a new instance, so every evaluation pays again.
 3. **The lazy map, compiled** (`library/map-auto-compile.ts`): the float
    kernel. It needs machine precision AND the `N()` route AND a consumer that
    drains through the map's iterator. `Min(1, 2 − 2·L)` reaches it under
@@ -629,16 +653,9 @@ evaluation) gives, overlapping:
   (`ce.function('List', …)` → `makeCanonicalFunction` →
   `applyOperatorDefinition`).
 
-Two more, measured on `Min(1, 2 − 2·L)` over a list that holds its numbers
+One more, measured on `Min(1, 2 − 2·L)` over a list that holds its numbers
 unboxed (124 ms at the default precision):
 
-- **A reducer walks a lazy operand twice**: the absent-datum gate
-  (`aggregateAbsence` in `library/missing-data.ts`) walks it, then the fold
-  does. A lazy `Map` keeps no elements, so the arithmetic runs twice:
-  `2 − 2·PointZ(C)` alone 262 ms, inside `Min` or `Sum` about 430 ms (before
-  the coordinate change). The gate skips its walk only when the element type
-  rules an absent element out, and a coordinate read is typed
-  `number | missing`.
 - **At the default precision each element is computed with `BigDecimal`**:
   75% of that profile is the lazy map's element function in the interpreter's
   exact arithmetic (`add` → `nvSum` → `BigDecimal`), about 12 µs per element.

@@ -300,9 +300,9 @@ import {
   isCharacter,
   isSymbol,
   isContinuationOperand,
+  isAbsentValue,
 } from '../boxed-expression/type-guards.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { aggregateAbsence } from './missing-data.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
   typeCouldBeNumericTuple,
@@ -7564,6 +7564,16 @@ function processMinMaxItem(
   const ce = item.engine;
   const upper = mode === 'Max' || mode === 'Supremum';
 
+  // An ABSENT datum (the `Missing` symbol or a `NaN` number) makes the whole
+  // extremum absent, and in a numeric result absence is `NaN`. It is reported
+  // as this item's value, and the caller's `NaN` check absorbs it. The test is
+  // made here, on the walk that folds the elements, and not by a separate walk
+  // before the fold: a lazy collection computes its elements again on every
+  // walk, so a second walk doubles the work (and doubles the runs of a
+  // callback that has a side effect). Because this function recurses into
+  // nested collections, an absent datum at any depth is found.
+  if (isAbsentValue(item)) return [ce.NaN, []];
+
   // An interval is continuous
   if (isFunction(item, 'Interval')) {
     const b = upper ? item.op2 : item.op1;
@@ -7603,10 +7613,10 @@ function processMinMaxItem(
     // `Linspace` sits at `start` and never reaches `end` (`Linspace(1, 5, 1)`
     // is [1], the NumPy convention the `at`/`iterator` handlers implement), so
     // reading the extremum off both endpoints would answer 5 for a collection
-    // whose only element is 1. A zero-sample `Linspace` has no extremum at
-    // all; it is an empty collection, which the absent-datum gate answers as
-    // `NaN` before this runs — declining here too is consistent either way.
-    if (count === 0) return [undefined, [item]];
+    // whose only element is 1. A zero-sample `Linspace` is an empty
+    // collection: it contributes no value and nothing symbolic, so that
+    // `evaluateMinMax` answers `NaN` when no other operand supplies data.
+    if (count === 0) return [undefined, []];
     if (count === 1) return [start, []];
     // Two or more samples span both endpoints inclusive, so the extremum is
     // the larger/smaller OF THE TWO — endpoints that cannot be ordered (a
@@ -7733,15 +7743,12 @@ function evaluateMinMax(
 ): Expression {
   const upper = mode === 'Max' || mode === 'Supremum';
 
-  // Absent-datum / empty-input gate (§3.C): any absent datum (`Missing` or
-  // `NaN`, scalar operand or flattened element) or empty input ⇒ `NaN`.
-  const absent = aggregateAbsence(ce, ops);
-  if (absent) return absent;
-
+  // The rule for an aggregate that consumes data: an absent datum (`Missing`
+  // or `NaN`, as an operand or as an element at any depth) or an empty input
+  // gives `NaN`. Both halves are decided by the ONE walk below:
+  // `processMinMaxItem` reports an absent datum as a `NaN` value, and an input
+  // that supplied no value and nothing symbolic is empty.
   ops = flatten(ops);
-
-  if (ops.length === 0)
-    return upper ? ce.NegativeInfinity : ce.PositiveInfinity;
 
   let result: Expression | undefined = undefined;
   const rest: Expression[] = [];
@@ -7771,11 +7778,10 @@ function evaluateMinMax(
     return ce.expr(result ? [mode, result, ...rest] : [mode, ...rest]);
   // No orderable value and nothing left symbolic: every operand contributed no
   // data at all, i.e. the input was EMPTY. That is an absent result (`NaN`)
-  // under the §3.C aggregate rule, not an identity element — `Max([])` is not
-  // `-Infinity`. The absent-datum gate above answers this case whenever it can
-  // decide emptiness itself; it DECLINES for a collection whose emptiness only
-  // a walk can settle (a lazy `Filter`), which is why the verdict is repeated
-  // here off the walk this function just performed.
+  // under the rule above, not an identity element — `Max([])` is not
+  // `-Infinity`. The emptiness of a lazy collection (a `Filter` with no match)
+  // is known only after a walk, so the verdict is read off the walk this
+  // function just performed.
   if (result === undefined) return ce.NaN;
   return result;
 }

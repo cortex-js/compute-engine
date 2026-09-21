@@ -20,11 +20,12 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 // Several consumers used to break that. Each ran a PROBE enumeration before
 // the real one — `enumerationDeclined()` pulling a first element to find out
 // whether the iterator declines, `Length` asking `isEmptyCollection` before
-// `count`, the `Missing`-datum gate (`aggregateAbsence`) flattening every
-// collection operand before `Max`/`Min` folded the same elements again. The
+// `count`, and `Max`/`Min` walking every collection operand to look for a
+// `Missing` or `NaN` element before they folded the same elements again. The
 // probe's answer is now read off the consumer's OWN walk instead
-// (`enumerationDeclinedAfterWalk` in `library/collections.ts`), and the
-// absence gate skips collections whose element type rules an absent datum out.
+// (`enumerationDeclinedAfterWalk` in `library/collections.ts`), and `Max`/`Min`
+// look for the absent element on the walk that folds (`processMinMaxItem` in
+// `library/arithmetic.ts`).
 //
 // These tests assert exact CALL COUNTS, never elapsed time: the count is the
 // contract. Each also asserts the VALUE, so a "fix" that skips work by
@@ -252,12 +253,11 @@ describe('lazy collection: an EFFECTFUL callback is re-run per consumption', () 
   });
 });
 
-describe('the absent-datum gate still fires after the extra walk was removed', () => {
+describe('the absent-datum rule still holds after the extra walk was removed', () => {
   //
-  // `Max`/`Min` no longer flatten their collection operands to look for a
-  // `Missing` or `NaN` element when the element TYPE rules one out. These pin
-  // the cases where the type does NOT rule it out, so the gate must still walk
-  // and still answer `NaN`.
+  // `Max`/`Min` no longer walk their collection operands a first time to look
+  // for a `Missing` or `NaN` element. These pin that the one remaining walk
+  // still finds the absent element and still answers `NaN`.
   //
   const ce = new ComputeEngine();
 
@@ -386,8 +386,8 @@ describe('a collection that DECLINES to enumerate still keeps consumers inert', 
 
 describe('a DECLINED enumeration is not an EMPTY one', () => {
   //
-  // The absent-datum gate (`library/missing-data.ts`) used to judge a
-  // collection empty whenever walking it produced nothing. But a collection
+  // `Max`/`Min` used to judge a collection empty whenever walking it produced
+  // nothing. But a collection
   // can report a definite size and still decline to enumerate:
   // `Linspace(a, 1, 3)` HAS three elements — with a symbolic endpoint none of
   // them has a computable value. Reading that as empty fired the gate and made
@@ -395,8 +395,7 @@ describe('a DECLINED enumeration is not an EMPTY one', () => {
   // shape stayed symbolic everywhere else (`Sum(Linspace(a, 1, 3))`,
   // `Max(Range(a, 3))`).
   //
-  // A declined operand is now UNDECIDABLE to the gate, which passes it to the
-  // operator's own handler to keep symbolic. A genuinely empty collection
+  // A declined operand is kept symbolic. A genuinely empty collection
   // reports `isEmptyCollection === true`, is not "declined", and still gives
   // `NaN` — that distinction is what these tests hold apart.
   //
@@ -522,6 +521,22 @@ describe('Linspace extrema come from BOTH endpoints', () => {
     expect(minOf(['Linspace', 1, 5, 0])).toBe('NaN');
   });
 
+  // The span `upper - lower` of these endpoints overflows to an infinity, and
+  // the samples used to come out as `NaN, +oo, +oo`. The extremum read off the
+  // endpoints and the extremum of the walked samples must agree.
+  test('Linspace whose span overflows a double', () => {
+    const wide = ['Linspace', -1e308, 1e308, 3];
+    expect([...ce.box(wide).each()].map((x) => x.re)).toEqual([
+      -1e308, 0, 1e308,
+    ]);
+    expect([1, 2, 3].map((k) => ce.box(wide).at(k)?.re)).toEqual([
+      -1e308, 0, 1e308,
+    ]);
+    expect(ce.box(['Max', wide]).evaluate().re).toBe(1e308);
+    expect(ce.box(['Min', wide]).evaluate().re).toBe(-1e308);
+    expect(ce.box(['Sum', wide]).evaluate().re).toBe(0);
+  });
+
   // A count that is not statically known leaves the sample set unknown, so
   // neither endpoint can be claimed as the extremum.
   test('symbolic-count Linspace stays symbolic', () => {
@@ -556,11 +571,10 @@ describe('an aggregate walks its lazy operand exactly once', () => {
       .toBe('(1, 3)');
   });
 
-  // `Max`/`Min` over a lazy Filter were N+1: the absent-datum gate skipped its
-  // own walk (the element type rules an absent datum out) but then asked
-  // `isEmptyCollection` to decide the empty-input case, and `Filter.isEmpty`
-  // enumerates its source up to the first match. The gate now declines that
-  // question and the extremum fold, which walks the data anyway, owns it.
+  // `Max`/`Min` over a lazy Filter were N+1: a check made before the fold
+  // asked `isEmptyCollection` to decide the empty-input case, and
+  // `Filter.isEmpty` enumerates its source up to the first match. The extremum
+  // fold, which walks the data anyway, now decides that case from its own walk.
   test('Max over a lazy Filter: 3 elements, 3 runs', () => {
     expect(run(`let s = Max(Filter([1, 2, 3], (x) => b1()))\n(s, n)`)) //
       .toBe('(3, 3)');
@@ -571,14 +585,100 @@ describe('an aggregate walks its lazy operand exactly once', () => {
       .toBe('(1, 3)');
   });
 
-  // A `number`-typed element CAN be a NaN, so the gate does not skip its walk
-  // here — it enumerates and short-circuits on the absent datum it finds. One
-  // walk, three runs; pinned so the skip's type test is not widened to
-  // `number` (which would let a real absent datum through).
+  // A `number`-typed element CAN be a NaN. The walk stops at the absent datum
+  // it finds, and it is the only walk: three elements, three runs.
   test('an aggregate over number-typed elements still walks once', () => {
     expect(run(`let s = Max(Map((x) => x + t1(), [1, 2, NaN]))\n(s, n)`)) //
       .toBe('(NaN, 3)');
     expect(run(`let s = Mean(Map((x) => x + t1(), [1, 2, NaN]))\n(s, n)`)) //
       .toBe('(NaN, 3)');
+  });
+});
+
+describe('Max and Min look for an absent datum on the walk that folds', () => {
+  //
+  // `Max`/`Min` used to walk every collection operand once to look for a
+  // `Missing` or `NaN` element, and then walk it again to fold it. The first
+  // walk was skipped when the element type is `real` (no absent element is
+  // possible), and a lazy `Map` serves a second COMPLETE walk of one instance
+  // from its element memo, so those two cases already ran the callback once
+  // per element. The callbacks here return `number`, so the first walk was
+  // NOT skipped, and the lazy `Map` is read through `Reverse`/`Take`/`Drop`,
+  // whose walks do not leave a complete memo: these ran the callback twice
+  // per element.
+  //
+  const NUMBER_CALLBACK = `function tn() scope -> number { n = n + 1
+  1 }
+`;
+
+  test('Max over Reverse of a lazy Map: 3 elements, 3 runs', () => {
+    expect(
+      run(
+        `${NUMBER_CALLBACK}let s = Max(Reverse(Map((x) => x + tn(), [1, 2, 3])))\n(s, n)`
+      )
+    ).toBe('(4, 3)');
+  });
+
+  test('Min over Take(2) of a lazy Map: 2 elements, 2 runs', () => {
+    expect(
+      run(
+        `${NUMBER_CALLBACK}let s = Min(Take(Map((x) => x + tn(), [1, 2, 3, 4]), 2))\n(s, n)`
+      )
+    ).toBe('(2, 2)');
+  });
+
+  test('Max over Drop(2) of a lazy Map: 2 elements, 2 runs', () => {
+    expect(
+      run(
+        `${NUMBER_CALLBACK}let s = Max(Drop(Map((x) => x + tn(), [1, 2, 3, 4]), 2))\n(s, n)`
+      )
+    ).toBe('(5, 2)');
+  });
+
+  const ce = new ComputeEngine();
+  const evaluated = (json: unknown[]) =>
+    ce
+      .box(json as never)
+      .evaluate()
+      .toString();
+
+  // The fold recurses into nested collections, and the search for an absent
+  // datum now goes with it. The earlier search looked at the first level
+  // only, so `Max([[1, Missing], 3])` answered `Max(3, Missing)`, which
+  // evaluated a second time to `NaN`.
+  test.each(['Max', 'Min'])(
+    '%s finds a Missing element of a nested list',
+    (head) => {
+      expect(evaluated([head, ['List', ['List', 1, 'Missing'], 3]])).toBe(
+        'NaN'
+      );
+      expect(evaluated([head, ['List', ['List', ['List', 'Missing']]]])).toBe(
+        'NaN'
+      );
+    }
+  );
+
+  // An absent operand beside an operand that is not folded element by element
+  // (a text, a range, an infinite collection, a free symbol).
+  test.each(['Max', 'Min'])(
+    '%s of an absent operand beside an operand that is not folded',
+    (head) => {
+      expect(evaluated([head, { str: 'abc' }, 'Missing'])).toBe('NaN');
+      expect(evaluated([head, ['Range', 1, 5], 'Missing'])).toBe('NaN');
+      expect(evaluated([head, ['Cycle', ['List', 1, 2]], 'Missing'])).toBe(
+        'NaN'
+      );
+      expect(evaluated([head, 'x', 'Missing'])).toBe('NaN');
+      expect(evaluated([head, 'x', 'NaN'])).toBe('NaN');
+    }
+  );
+
+  // Operands that supply no datum at all are an empty input.
+  test.each(['Max', 'Min'])('%s of empty collections only is NaN', (head) => {
+    expect(evaluated([head, ['List'], ['List']])).toBe('NaN');
+    expect(evaluated([head, ['List', ['List']]])).toBe('NaN');
+    expect(evaluated([head, ['Linspace', 1, 5, 0], ['List']])).toBe('NaN');
+    expect(evaluated([head, ['List'], 1])).toBe('1');
+    expect(evaluated([head, ['Linspace', 1, 5, 0], 1])).toBe('1');
   });
 });

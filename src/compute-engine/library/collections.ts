@@ -204,6 +204,29 @@ function protocolFunctionFieldError(
 export const DEFAULT_LINSPACE_COUNT = 50;
 
 /**
+ * Sample `k` of the `denom + 1` evenly spaced samples from `lower` to `upper`
+ * (`k` from 0 to `denom`, both endpoints finite).
+ *
+ * The usual form is `lower + (upper − lower)·k / denom`. The span
+ * `upper − lower` overflows to an infinity when the endpoints are far apart
+ * with opposite signs (`-1e308` and `1e308`), and the samples then came out
+ * as `NaN, +oo, +oo`. In that case the sample is computed as the weighted
+ * mean of the endpoints, which does not form the span. The usual form is kept
+ * for every other input, so that its samples are unchanged to the last digit.
+ */
+function linspaceSample(
+  lower: number,
+  upper: number,
+  k: number,
+  denom: number
+): number {
+  const span = upper - lower;
+  if (Number.isFinite(span)) return lower + (span * k) / denom;
+  const t = k / denom;
+  return lower * (1 - t) + upper * t;
+}
+
+/**
  * Tri-state read of an integer parameter for collection handlers whose
  * fallback would be a different collection rather than
  * "unknown":
@@ -5379,7 +5402,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // count === 1 is a degenerate case — return lower (NumPy convention).
         if (count === 1) return expr.engine.number(lower);
         return expr.engine.number(
-          lower + ((upper - lower) * (index - 1)) / (count - 1)
+          linspaceSample(lower, upper, index - 1, count - 1)
         );
       },
       iterator: (expr) => {
@@ -5418,7 +5441,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             index += 1;
             return {
               value: expr.engine.number(
-                lower + ((upper - lower) * (index - 1 - 1)) / denom
+                linspaceSample(lower, upper, index - 1 - 1, denom)
               ),
               done: false,
             };
