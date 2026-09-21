@@ -209,9 +209,15 @@ describe('lazy collection regimes', () => {
       expect(e.isCanonical).toBe(true);
       if (name === 'Tuple') {
         // `Tuple`'s `isLazy` handler answers `false`: an inert member of the
-        // def-level set, and correctly NOT memoized.
+        // def-level set, and correctly NOT memoized. A tuple of number
+        // literals is written-out data and evaluates to ITSELF
+        // (`evaluate-literal-data.test.ts`), which is not the memo, so the
+        // memo question is asked of a tuple with an element to evaluate.
         expect(e.isLazyCollection).toBe(false);
-        expect(e.evaluate()).not.toBe(e.evaluate());
+        expect(e.evaluate()).toBe(e);
+        const computed = ce.box(['Tuple', 1, ['Add', 'x', 2]]);
+        expect(computed.isLazyCollection).toBe(false);
+        expect(computed.evaluate()).not.toBe(computed.evaluate());
         return;
       }
       if (name === 'Iterate') {

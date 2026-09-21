@@ -573,11 +573,6 @@ itself is not the cost — a scan of ten thousand doubles was tried in its
 place and changed nothing measurable. A CPU profile of `PointZ(C)` (64 ms per
 evaluation) gives, overlapping:
 
-- **The value of a symbol is evaluated again on every use** — about 42%.
-  `C` holds a list of ten thousand tuples; each `ce.box(['PointZ', 'C']).evaluate()`
-  evaluates that list again, 24 ms (`_memoizedStoredValue` →
-  `evaluateInOwnBindings`), so the memo of the stored value is not answering
-  across evaluations.
 - **The type of a large list is computed per fresh list** — about 49%
   (`get type` → `describe` → one operand descriptor per element), and an
   evaluation produces a fresh list. `isNumber` on a list of ten thousand

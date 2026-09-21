@@ -422,6 +422,11 @@ export class BoxedFunction
    * a double holds (`1/2`), which `array` admits. See `get isMachineNumeric()`. */
   private _derivedArrayIsMachine: boolean | undefined;
 
+  /** Is this node written-out DATA, which evaluates to itself? Computed
+   * once: `0` no, `1` under `evaluate()`, `2` under a numeric approximation
+   * too. See `_isLiteralData()`. */
+  private _literalData: 0 | 1 | 2 | undefined;
+
   /** The boxed operands. A store-backed list boxes them here, once, on the
    * first read; every other node has them from construction. */
   private get _ops(): ReadonlyArray<Expression> {
@@ -2488,6 +2493,8 @@ export class BoxedFunction
     // value, under every option (a materialization or a numeric
     // approximation of it is itself), so it is returned without boxing.
     if (this._numericStore !== undefined) return this;
+    // Written-out data is its own value too: see `_isLiteralData()`.
+    if (this._isLiteralData(options)) return this;
     // Checkpoint quiescence (`checkpoint.ts`): an evaluation must not be open
     // when a checkpoint is taken or restored — the snapshot would capture
     // state the evaluation is still about to move, and a later restore would
@@ -2536,6 +2543,70 @@ export class BoxedFunction
       engine._evaluationDepth -= 1;
       if (capturesEffects) engine._evaluationEffects = undefined;
     }
+  }
+
+  /** Is this node bound to the definition the standard library gives its
+   * operator name — the binding of that name in the outermost scope — and
+   * not to a definition a host declared under the same name? */
+  private _isBoundToLibraryDefinition(): boolean {
+    let scope = this.engine.context?.lexicalScope;
+    if (scope === undefined || scope === null || this._def === undefined)
+      return false;
+    while (scope.parent) scope = scope.parent;
+    return scope.bindings.get(this._operator) === this._def;
+  }
+
+  /**
+   * Is this node written-out DATA that evaluates to itself under `options`:
+   * a canonical `List` or `Tuple` whose every element is a number literal,
+   * or such a `List` or `Tuple` in turn?
+   *
+   * A number literal evaluates to itself, and under a numeric approximation
+   * it does when `N()` answers the same object (a machine number, or a
+   * big-number float already at the working precision; an exact rational
+   * does not). A list or tuple of such elements evaluates to an equal node,
+   * so the node itself is the answer. The general route evaluates every
+   * element as a function expression and builds a new node: 25 ms for a list
+   * of ten thousand points, paid at every use of a symbol that holds one —
+   * the stored-value memo leaves a written-out list out on purpose — and
+   * the new node starts with empty caches, so its type, 7 to 10 ms more for
+   * that list, is computed again as well.
+   *
+   * The answer is computed once per node, in one walk of the elements: a
+   * node's definition is bound when it is made canonical, and whether `N()`
+   * of a number literal is that literal does not depend on the precision of
+   * the engine. Any evaluation option other than `numericApproximation`
+   * takes the general route.
+   */
+  private _isLiteralData(options?: Partial<EvaluateOptions>): boolean {
+    if (this._operator !== 'List' && this._operator !== 'Tuple') return false;
+    let numeric = false;
+    if (options !== undefined)
+      for (const k in options) {
+        if (k !== 'numericApproximation') return false;
+        numeric = options.numericApproximation === true;
+      }
+    if (this._literalData === undefined) {
+      // The node must be bound to the LIBRARY's `List` or `Tuple`. A host can
+      // declare an operator of its own under either name, with an `evaluate`
+      // handler that answers something else, and that handler must run.
+      let level: 0 | 1 | 2 =
+        this.isCanonical && this._isBoundToLibraryDefinition() ? 2 : 0;
+      for (const op of this._ops) {
+        if (level === 0) break;
+        if (isNumber(op)) {
+          if (level === 2 && op.N() !== op) level = 1;
+        } else if (op instanceof BoxedFunction) {
+          // A list that holds its numbers unboxed is its own value under
+          // every option, and asking it would box them.
+          if (op._numericStore !== undefined) continue;
+          op._isLiteralData();
+          level = Math.min(level, op._literalData ?? 0) as 0 | 1 | 2;
+        } else level = 0;
+      }
+      this._literalData = level;
+    }
+    return this._literalData >= (numeric ? 2 : 1);
   }
 
   /**

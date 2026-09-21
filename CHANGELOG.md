@@ -1,3 +1,22 @@
+## [Unreleased]
+
+### Improvements
+
+- **A written-out list of numbers or of points evaluates to itself.** A
+  canonical `List` or `Tuple` whose every element is a number literal, or such
+  a `List` or `Tuple` in turn, has nothing to evaluate, and `evaluate()` now
+  answers the expression itself. The general route evaluated every element as
+  a function expression and built an equal list, at every use of a symbol that
+  holds one, and the new list started with empty caches, so its type was
+  computed again as well. Under `N()` the list answers itself when every
+  number is one `N()` leaves as it is; a list with an exact rational is
+  approximated as before. The values are unchanged: `evaluate()` and `N()`
+  give the same MathJSON and the same type as before on fourteen kinds of data
+  list at three precisions. Measured over ten thousand points, both versions
+  interleaved in one process: `PointZ(C)` is 14.7 times faster,
+  `Sum(PointX(C))` 9.8 times, and `Min(1, 2 − 2·PointZ(C))` 1.6 times (that
+  one is dominated by the arithmetic over the coordinates).
+
 ## 0.132.3 _2026-09-20_
 
 ### Improvements
