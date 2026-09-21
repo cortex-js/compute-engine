@@ -17,6 +17,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { loadIdentities } from '../../src/identities';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 type Interval = { lo: number; hi: number };
@@ -47,7 +48,13 @@ describe('Max/Min of a scalar and a collection on the interval target', () => {
     const bindings = Object.fromEntries(
       Object.entries(bind).map(([k, v]) => [k, ce.box(v as never)])
     );
-    return Number(ce.box(json as never).subs(bindings).evaluate().valueOf());
+    return Number(
+      ce
+        .box(json as never)
+        .subs(bindings)
+        .evaluate()
+        .valueOf()
+    );
   }
 
   test.each([
@@ -114,9 +121,7 @@ describe('Max/Min of a scalar and a collection on the interval target', () => {
     expect(run(json, { L: [], M: [5, -1] })).toEqual(point(-1));
     expect(run(json, { L: [4, 3], M: [] })).toEqual(point(3));
     expect(run(json, { L: [], M: [] }).lo).toBeNaN();
-    expect(
-      interpreted(json, { L: ['List'], M: ['List', 5, -1] })
-    ).toBe(-1);
+    expect(interpreted(json, { L: ['List'], M: ['List', 5, -1] })).toBe(-1);
     expect(interpreted(json, { L: ['List'], M: ['List'] })).toBeNaN();
   });
 
@@ -175,5 +180,67 @@ describe('A coordinate accessor over a large written-out list of points', () => 
     const x = ce.box(['PointX', lazyPoints] as never).evaluate();
     expect(x.operator).not.toBe('List');
     expect(x.at!(3)?.re).toBe(3);
+  });
+});
+
+describe('simplify() keeps the head of an extremum over one collection', () => {
+  // `Max`, `Min`, `Supremum` and `Infimum` reduce a collection operand to a
+  // number. A simplification rule rewrote the extremum of ONE operand to the
+  // operand, which is right for a scalar only: `Min(Map(Sin, RealNumbers))`
+  // became the `Map` itself, a list where a number is meant, and the Fungrim
+  // identity for that minimum never saw its head.
+  const local = new ComputeEngine();
+  const sinOverReals = ['Map', ['Function', ['Sin', 'x'], 'x'], 'RealNumbers'];
+
+  test.each(['Max', 'Min', 'Supremum', 'Infimum'])(
+    '%s of a collection operand',
+    (head) => {
+      expect(local.box([head, sinOverReals] as never).simplify().operator).toBe(
+        head
+      );
+      expect(
+        local.box([head, ['Range', 1, 'n']] as never).simplify().operator
+      ).toBe(head);
+    }
+  );
+
+  // A symbol with no declared type can be given a list later, and the
+  // simplified form must then still reduce it.
+  test('an operand of unknown type keeps its head', () => {
+    const fresh = new ComputeEngine();
+    const simplified = fresh.box(['Max', 'u']).simplify();
+    expect(simplified.json).toEqual(['Max', 'u']);
+    fresh.assign('u', fresh.box(['List', 1, 2, 3]));
+    expect(simplified.evaluate().json).toEqual(3);
+  });
+
+  // The operator names are compared one by one. A lookup in an object
+  // literal also answers for the names every object inherits.
+  test('an application named like an inherited property is left alone', () => {
+    expect(local.box(['toString', 5] as never).simplify().json).toEqual([
+      'toString',
+      5,
+    ]);
+    expect(local.box(['constructor'] as never).simplify().json).toEqual([
+      'constructor',
+    ]);
+  });
+
+  test('a scalar operand is still its own extremum', () => {
+    expect(local.box(['Max', 5]).simplify().json).toEqual(5);
+    expect(local.box(['Min', ['Sqrt', 2]]).simplify().json).toEqual([
+      'Sqrt',
+      2,
+    ]);
+    local.declare('r', 'real');
+    expect(local.box(['Max', 'r']).simplify().json).toEqual('r');
+  });
+
+  test('with the Fungrim identities the minimum of sin over the reals is -1', () => {
+    const withRules = new ComputeEngine();
+    loadIdentities(withRules);
+    expect(withRules.box(['Min', sinOverReals] as never).simplify().json).toBe(
+      -1
+    );
   });
 });

@@ -732,26 +732,44 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   // Min/Max/Supremum/Infimum
   //
+  // These operators are REDUCERS: a collection operand contributes its
+  // elements, so `Max(L)` is the largest element of `L` and not `L`. The
+  // extremum of ONE operand is that operand only when the operand is a
+  // number. The test is that its type is a subtype of `number`, not that it
+  // is "not a collection": a symbol with no declared type has the type
+  // `unknown`, which admits a list, and `Max(x)` rewritten to `x` answered
+  // the list itself once `x` was given one. `Max(Map(f, xs))` was rewritten
+  // to `Map(f, xs)` by the same rule, a list where a number is meant, and the
+  // rule for `Min(Map(Sin, RealNumbers))` of the Fungrim set never saw its
+  // head.
+  //
+  // With no operand the input is empty, and the extremum of an empty input
+  // is `NaN`, as `evaluate()` answers it.
   (x): RuleStep | undefined => {
     if (!isFunction(x)) return undefined;
-    if (x.operator === 'Max') {
-      if (x.nops === 0)
-        return { value: x.engine.NegativeInfinity, because: 'max' };
-      if (x.nops === 1) return { value: x.op1, because: 'max' };
-    } else if (x.operator === 'Min') {
-      if (x.nops === 0)
-        return { value: x.engine.PositiveInfinity, because: 'min' };
-      if (x.nops === 1) return { value: x.op1, because: 'min' };
-    } else if (x.operator === 'Supremum') {
-      if (x.nops === 0)
-        return { value: x.engine.NegativeInfinity, because: 'sup' };
-      if (x.nops === 1) return { value: x.op1, because: 'sup' };
-    } else if (x.operator === 'Infimum') {
-      if (x.nops === 0)
-        return { value: x.engine.PositiveInfinity, because: 'inf' };
-      if (x.nops === 1) return { value: x.op1, because: 'inf' };
+    let because: string;
+    switch (x.operator) {
+      case 'Max':
+        because = 'max';
+        break;
+      case 'Min':
+        because = 'min';
+        break;
+      case 'Supremum':
+        because = 'sup';
+        break;
+      case 'Infimum':
+        because = 'inf';
+        break;
+      default:
+        return undefined;
     }
-    return undefined;
+    if (x.nops === 0) return { value: x.engine.NaN, because };
+    if (x.nops !== 1) return undefined;
+    const operand = x.op1;
+    if (operand.isCollection === true) return undefined;
+    if (!operand.type.matches('number')) return undefined;
+    return { value: operand, because };
   },
 
   //

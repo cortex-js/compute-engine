@@ -1366,7 +1366,7 @@
   {
    "latex": "2 \\mathbb{Z} + 1",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "2^n \\equiv 1 \\pmod{p^{k+1}}",
@@ -1501,7 +1501,7 @@
   {
    "latex": "f: \\mathbb{Z} \\rightarrow 2 \\mathbb{Z} + 1",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'"
+   "observed": "clean"
   },
   {
    "latex": "f: \\mathbb{Z} \\rightarrow \\mathbb{Z}",
@@ -1789,19 +1789,19 @@
   {
    "latex": "\\mathbb{Z}[x]",
    "category": "polynomial-ring",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\mathbb{R}[X, Y]",
    "category": "polynomial-ring",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "fresh-sample-2026-07-04"
   },
   {
    "latex": "\\theta : \\mathbb{Z}[x] \\to \\mathbb{Z}",
    "category": "polynomial-ring",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "fresh-sample-2026-07-04"
   },
   {
@@ -1915,7 +1915,7 @@
   {
    "latex": "B = \\{x \\mid -x \\in A, 2 - x^2 \\notin A\\}",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -1933,13 +1933,13 @@
   {
    "latex": "S=\\{(x, y) \\mid 0 \\leq x \\leq 1, 0 \\leq y \\leq 1\\}",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
    "latex": "X \\Delta Y = \\{a \\mid a \\in X, a \\notin Y\\} \\cup \\{a \\mid a \\in Y, a \\notin X\\}",
    "category": "sets-and-congruence",
-   "observed": "'incompatible-type'",
+   "observed": "clean",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -2364,5 +2364,5 @@
    "observed": "clean"
   }
  ],
- "lastChecked": "2026-07-12"
+ "lastChecked": "2026-09-21"
 }

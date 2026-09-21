@@ -5013,6 +5013,26 @@ function parseRange(
     ] as MathJsonExpression;
   }
 
+  // The right-hand side ends with an ellipsis of its own: in
+  // `a_1 a_2 \dots a_k \dots` it parsed to
+  // `Sequence(a_k, ContinuationPlaceholder)` (the trailing-continuation
+  // recovery above). A `Range` runs from a first term to a LAST term, and the
+  // second ellipsis says there is no last term, so this is a sequence that
+  // goes on: the left-hand side, a continuation, then the terms of the
+  // right-hand side with their continuation. As a `Range` its upper bound was
+  // that `Sequence`, a tuple where a number is expected, and the parse
+  // carried an `incompatible-type` error.
+  if (operator(second) === 'Sequence') {
+    const rest = operands(second);
+    if (symbol(rest[rest.length - 1]) === 'ContinuationPlaceholder')
+      return [
+        'Sequence',
+        lhs,
+        'ContinuationPlaceholder',
+        ...rest,
+      ] as MathJsonExpression;
+  }
+
   // If we have 1..2..3, we have a range with a step, and second returned
   // ["Range", 2, 3]
   if (operator(second) === 'Range') {

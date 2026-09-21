@@ -129,7 +129,7 @@
     "WeierstrassSigma": 1,
     "WeierstrassZeta": 1
   },
-  "declaredShells": 94,
+  "declaredShells": 93,
   "injected": [
     "zeta-trivial-zeros"
   ],

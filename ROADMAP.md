@@ -561,36 +561,27 @@ unwinds on a deadline (`CancellationError`), so a time budget that expires
 under load is the first thing to check; the sample points come from derived
 random sub-streams, so a different draw is the second.
 
-### The `corpus-pipeline` job of continuous integration fails at "Recompile drift" (OPEN, Fungrim rule artifact — measured 2026-09-21)
+### The MathNet round-trip check fails, and continuous integration does not run it (OPEN, LaTeX serialization — measured 2026-09-21)
 
-`npx tsx scripts/fungrim/recompile-drift.ts` exits 1 on `main`, under Node 22
-and under Node 26 alike: of the 1434 committed simplify rules, a fresh
-recompile gives a different `match` for 22 (none dropped, none added, none in
-the `recompileDivergence` allowlist of `scripts/fungrim/curation-overrides.json`).
-The first three are `fungrim:04427b`, `fungrim:27766c` and `fungrim:40baa9`;
-the command prints all of them. The job has failed at this step on every push
-to `main` since at least 0.128.12 (2026-09-15), and the steps after it
-("Analytic-property store freshness", "Integration-rules bundle freshness",
-the MathNet gate) have not run on the server since. What is needed: find
-which canonicalization change moved the `match` side of these rules, and then
-either regenerate the committed artifact or allowlist the divergence with its
-reason. The three steps before it pass ("Corpus box-check", "Artifact
-freshness", "Solve-template freshness"), and so does
-`compile-properties.ts --check`.
+`npm run check:roundtrip` (`docs/mathnet/scripts/check-roundtrip.ts`) is the
+last step of the `ci:corpus-pipeline` npm script, but
+`.github/workflows/test.yml` has no step for it, so nothing runs it. On `main`
+it exits 1 with three findings:
 
-### A sequence with two ellipses parses to a `Range` with an error bound (OPEN, LaTeX parsing — measured 2026-09-21)
+- **One unexpected failure.** `f(yf(x))(x + y) = x^2(f(x) + f(y))` parses to
+  `Multiply(f, y, x + y, f(x))` on the left, is serialized as
+  `fy\times(x+y)f(x)`, and that LaTeX parses to something else (an
+  `incompatible-type` error is in the result). The serialized product of a
+  bare `f`, a symbol and an applied `f(x)` does not read back as written.
+- **One recorded exception changed detail** (`DRIFTED`): the inequality with
+  `\frac{1}{2} \cdot \frac{1}{a_1 (a_1 - 1) + x^2}` now serializes
+  `a_1\times(a_1-1)` where the record has `a_1(a_1-1)`.
+- **One recorded exception now round-trips** and can leave the list (the
+  limit of a Riemann sum with `a_k f(k/n)`).
 
-`npx tsx docs/mathnet/scripts/check-corpus.ts` reports one regression against
-`docs/mathnet/parser-test-cases.json`: the case `[ellipsis]`
-`\alpha = 0, a_1a_2a_3 \dots a_k \dots` parsed clean on 2026-07-12 and now
-holds an `incompatible-type` error. `a_1a_2 \dots a_k` parses to
-`Range(a_1·a_2, a_k)`, and `a_k \dots` to `Sequence(a_k,
-ContinuationPlaceholder)`. With both in one expression the trailing
-continuation becomes the upper bound of the `Range`, a tuple where a number is
-expected. The reading that is wanted for "a run, then a last term, then a
-continuation" needs a decision; a `Range` whose bound is an error is not one.
-The gate that would have caught this is a step of the `corpus-pipeline` job
-that has not run on the server (see the entry above).
+What is needed: a fix or a recorded exception for the first, a decision on the
+`\times` in the second, `--update` for the third, and then a workflow step so
+that the check runs on the server.
 
 ### `Norm` of a lazy collection stays unevaluated (OPEN, evaluation — found 2026-09-21)
 

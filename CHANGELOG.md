@@ -80,6 +80,26 @@
 
 ### Resolved Issues
 
+- **`simplify()` keeps `Max`, `Min`, `Supremum` and `Infimum` over one
+  collection.** These operators reduce a collection operand to a number, but a
+  simplification rule rewrote the extremum of one operand to the operand, for
+  a collection too: `Min(Map(Sin, RealNumbers)).simplify()` was the `Map`
+  itself, a list where a number is meant. The rule now applies to a scalar
+  operand only. With the Fungrim identities loaded, that minimum is now `-1`;
+  the identity existed and never saw its head. `Max().simplify()` is `NaN`,
+  as `Max().evaluate()` is.
+- **A run with a second ellipsis after its last term is a sequence, not a
+  range.** `a_1 a_2 \dots a_k` is `Range(a_1·a_2, a_k)`. With a second
+  ellipsis, `a_1 a_2 \dots a_k \dots`, the run has no last term; it parsed
+  to a `Range` whose upper bound was the tuple `(a_k, …)`, with an
+  `incompatible-type` error. It now parses to the sequence `a_1·a_2, …, a_k,
+  …`, the reading of the comma spelling `1, 2, \dots, n, \dots`.
+- **The compiled Fungrim rules are regenerated.** 22 of the 1,434 stored
+  simplify rules held a parameter type annotation (`Typed(x, "real")`) that
+  the engine infers and no longer writes out, so a fresh compile differed from
+  the stored file and the "Recompile drift" check of continuous integration
+  failed. Only the `match` of those 22 rules changes. Each of the 22 gives the
+  same result with the old and with the new file.
 - **`Exp(x).N()` and `Exp(x).evaluate()` agree to the last digit at machine
   precision, on every version of Node.** `Exp(x)` is `Power(e, x)`. Under
   `evaluate()` the base is the symbol and the value was `Math.exp(x)`; under

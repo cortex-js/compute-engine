@@ -83,7 +83,13 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
     expect(e.latex).toContain('\\dots');
     // Serialize, then re-parse to the same structure.
     const reparsed = ce.parse(e.latex);
-    expect(reparsed.json).toEqual(['Add', 1, 2, 'ContinuationPlaceholder', 'n']);
+    expect(reparsed.json).toEqual([
+      'Add',
+      1,
+      2,
+      'ContinuationPlaceholder',
+      'n',
+    ]);
   });
 
   test('Multiply round-trips through LaTeX (numeric 2n anchor)', () => {
@@ -166,10 +172,7 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
       ['Multiply', 3, 'N'],
     ]);
     // Substituting the free variable yields an enumerable range
-    const r = ce
-      .parse('\\left[-N,\\ldots,N\\right]')
-      .subs({ N: 2 })
-      .evaluate();
+    const r = ce.parse('\\left[-N,\\ldots,N\\right]').subs({ N: 2 }).evaluate();
     expect([...r.each()].map((x) => x.toString())).toEqual([
       '-2',
       '-1',
@@ -275,5 +278,67 @@ describe('Continuation placeholder (ellipsis fold barrier)', () => {
       'ContinuationPlaceholder',
       ['Multiply', 2, 'n'],
     ]);
+  });
+});
+
+describe('a run with a second ellipsis after its last term', () => {
+  // `a \\dots b` is a `Range` from a first term to a LAST term. A second
+  // ellipsis after `b` says there is no last term, so the run is a sequence
+  // that goes on, the same reading as the comma spelling
+  // `1, 2, \\dots, n, \\dots`. It used to be a `Range` whose upper bound was
+  // `Sequence(a_k, ContinuationPlaceholder)`, a tuple where a number is
+  // expected, so the parse carried an `incompatible-type` error (the MathNet
+  // corpus case `[ellipsis]`, `docs/mathnet/parser-test-cases.json`).
+  const local = new ComputeEngine();
+
+  test('juxtaposed terms', () => {
+    const e = local.parse('\\alpha = 0, a_1a_2a_3 \\dots a_k \\dots');
+    expect(e.isValid).toBe(true);
+    expect(e.json).toEqual([
+      'Tuple',
+      ['Equal', 'alpha', 0],
+      ['Multiply', 'a_1', 'a_2', 'a_3'],
+      'ContinuationPlaceholder',
+      'a_k',
+      'ContinuationPlaceholder',
+    ]);
+  });
+
+  test('is the reading of the comma spelling', () => {
+    expect(local.parse('a_1 \\dots a_k \\dots').json).toEqual([
+      'Sequence',
+      'a_1',
+      'ContinuationPlaceholder',
+      'a_k',
+      'ContinuationPlaceholder',
+    ]);
+    expect(local.parse('1, 2, \\dots, n, \\dots').json).toEqual([
+      'Tuple',
+      1,
+      2,
+      'ContinuationPlaceholder',
+      'n',
+      'ContinuationPlaceholder',
+    ]);
+  });
+
+  test('round-trips through LaTeX', () => {
+    for (const source of [
+      'a_1 \\dots a_k \\dots',
+      '\\alpha = 0, a_1a_2a_3 \\dots a_k \\dots',
+    ]) {
+      const e = local.parse(source);
+      expect(local.parse(e.latex).json).toEqual(e.json);
+    }
+  });
+
+  test('one ellipsis is still a Range', () => {
+    expect(local.parse('a_1a_2 \\dots a_k').json).toEqual([
+      'Range',
+      ['Multiply', 'a_1', 'a_2'],
+      'a_k',
+    ]);
+    expect(local.parse('1 \\dots 5').json).toEqual(['Range', 1, 5]);
+    expect(local.parse('1..5').json).toEqual(['Range', 1, 5]);
   });
 });
