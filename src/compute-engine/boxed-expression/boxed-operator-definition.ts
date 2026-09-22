@@ -21,6 +21,7 @@ import {
   inferredCollectionParameterType,
   signatureEffects,
   stripArrowEffects,
+  refineDeclaredPlaceholders,
 } from './effects-inference.js';
 
 import type {
@@ -68,7 +69,6 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
 import { journalDefinitionRecord } from './boxed-value-definition.js';
-import { refineDeclaredPlaceholders } from './effects-inference.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base

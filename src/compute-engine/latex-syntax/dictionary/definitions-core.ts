@@ -4346,9 +4346,7 @@ type ContinuationFrame = {
 
 /** A frame for `expr` when it is a function node with operands to normalize,
  *  `null` when it normalizes to itself. */
-function continuationFrame(
-  expr: MathJsonExpression
-): ContinuationFrame | null {
+function continuationFrame(expr: MathJsonExpression): ContinuationFrame | null {
   const head = operator(expr);
   if (!head) return null;
   const args = operands(expr);
@@ -4358,9 +4356,7 @@ function continuationFrame(
 
 /** Rebuild one node from its normalized operands and apply the
  *  embedded-range repair to it. */
-function finishContinuationFrame(
-  frame: ContinuationFrame
-): MathJsonExpression {
+function finishContinuationFrame(frame: ContinuationFrame): MathJsonExpression {
   const { source, head, args, newArgs } = frame;
 
   let normalized: MathJsonExpression = source;
