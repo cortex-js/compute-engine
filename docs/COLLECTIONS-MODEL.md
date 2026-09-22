@@ -81,7 +81,11 @@ took before.
   `Arcsin`, `Arccos` and a power of `e` (`machine-broadcast.ts`,
   `FUNCTION_KERNELS`). Each kernel is the `Math` primitive the scalar route
   computes for a machine float, measured bit for bit on 3,000 random floats
-  per head under both routes. The inputs on which the scalar route takes
+  per head under both routes. `Round` is the one head whose kernel is not a
+  bare `Math` primitive: a half rounds AWAY FROM ZERO (`Round(-0.5)` is
+  `-1`; user decision, 2026-09-21), which `Math.round` does not do, so the
+  kernel is `roundHalfAway` — the rule the scalar route follows at every
+  precision. The inputs on which the scalar route takes
   another way are declined, and the whole list then keeps the lazy form:
   an integer element under `evaluate()` (`Sinh(1)` and `Sqrt(2)` are exact;
   `|−3|`, `⌊2.5⌋` and `3^2` are admitted), an argument outside the real

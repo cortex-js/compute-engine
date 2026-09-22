@@ -1,207 +1,315 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **Breaking**: a whole-collection `Equal` or `NotEqual` whose element recursion
+  meets a pair with no answer is now UNDECIDED (ruled 2026-09-21). The answer is
+  the marker the absence contract already uses: `Missing` in the interpreter
+  (under `evaluate()` and `.N()` alike) and `NaN` in compiled code.
+  `Equal([1, Missing], [1, Missing])` answered `True` and compiled to `false`;
+  `Equal([1, Missing], [1, 2])` stayed unevaluated and compiled to `false`. Both
+  now answer the marker on both lanes, and `NotEqual` answers the same marker —
+  never a confident `True` where `Equal` could not report `False`. One undecided
+  pair is enough, even when another pair is decidedly unequal:
+  `Equal([1, Missing, 3], [2, Missing, 3])` is the marker, not `False`, because
+  an absent cell can stand for any value and the cells that are there cannot
+  settle the question. Unchanged: two collections whose element pairs are all
+  decided keep their answer; a length mismatch is `False`; the element-wise
+  shape (`Equal([1, Missing], 1)`) still marks exactly the absent positions; and
+  a comparison left undecided by free variables stays inert, so `[x] = [y]` is
+  still usable as an equation. A branch on the marker takes no arm:
+  `Which(Equal([1, Missing], [1, Missing]), 1, True, 0)` answers `Missing` in
+  the interpreter and `NaN` compiled, and the marker passes through `Not`, `And`
+  and `Or` by the ordinary Kleene table. That holds when only ONE operand may be
+  a collection at run time — an opaque `(number) -> unknown` application, a
+  `number | list<number>` symbol — which is exactly when the comparison lowers
+  to the runtime dispatch: a statement-form `If` on such a condition used to
+  test the operands for `NaN`, read the array as decided, and take the else arm.
+  Not covered: `.isEqual()` and `IdenticallyEqual` still answer `true` for two
+  such lists (their answer cannot carry the marker), and the Python target's
+  collection-equality helper stays strictly boolean.
+- **A stored symbol value keeps the binding it was written against, on the
+  compiled route as well as in the interpreter** (ruled 2026-09-21). With
+  `a := 3t + 1` and `g := t ↦ t + a`, the `t` inside the value of `a` names the
+  global `t`, not the parameter of `g`. The interpreter already read it that way
+  — `g(2)` is `3t + 3` — while the compiler folded the value of `a` INLINE into
+  the body of the emitted `_fn_g`, where the parameter captured it and `run({})`
+  answered `9`. Such a value is now emitted once as a preamble local, outside
+  the function: `const _val_a = 3 * _.t + 1; const _fn_g = (t) => _val_a + t;`,
+  and `run({ t: 5 })` answers `18`, matching the interpreter with `t := 5`. `t`
+  is reported in `freeSymbols`. A value too small to be worth a name of its own
+  — `a := t` — is still written inline, but it compiles against the preamble's
+  environment, so the body of `g` reads `_.t` rather than its parameter and
+  `g(2)` is `t + 2` on both routes. The decision reaches a binder too:
+  `Σ_{n=1}^{3} a` with `a := n + 1` is `3n + 3` in both routes, where it was
+  `9`, and with `a := n` it is `3n`, where the compiled route answered `6`. Two
+  shapes have no place to put the value outside the binder, and both now DECLINE
+  (D6) naming the symbol and the shadowing name, so the public route answers
+  through the interpreter instead of reading a local of the same name: a
+  compiled top-level lambda, whose preamble has to sit inside the lambda body
+  because a compiled lambda takes only its declared parameters
+  (`compile((n) ↦ Σ_{n=1}^{3} a)` with `a := n + 1` used to answer `18`); and
+  the `glsl`/`wgsl` targets, which declare statically typed functions and have
+  no place for an untyped value binding (`compile(g(2), { to: 'glsl' })` used to
+  emit `_fn_g(float t) { return (3.0 * t + 1.0) + t; }`). The lowerings that
+  would compile them — a preamble at the root for a lambda, a uniform or an
+  alpha-renamed parameter for a shader — are recorded in `ROADMAP.md`.
+- **A binder of the caller no longer intercepts a read of a global inside the
+  body of the function it calls** (ruled 2026-09-21). With `w` declared real and
+  holding no value and `W(x) := [w·x, x]`, the `w` inside the body of `W` names
+  the global for every caller, so `[W(w)[1] for w in [1, 2, 3]]` answers
+  `[w, 2w, 3w]` and `Σ_{w=1}^{3} W(w)[1]` answers `6w` — exactly what the
+  spelling with a different index name, `[W(k)[1] for k in [1, 2, 3]]`, already
+  answered. Reading the caller's index by name gave `[1, 4, 9]` and `14`. A
+  lambda parameter never intercepted (`Apply((w ↦ W(w)[1]), 2)` is `2w`) and an
+  assigned global is unchanged (`w := 2.5` gives `[2.5, 5, 7.5]`). The compiled
+  route already read the global, so the two routes now agree, and the constant
+  folder no longer bakes `[1, 4, 9]` into the emitted code. A read whose
+  occurrence carries no binding, and a read by one binder's index of another
+  binder's index of the same name, still resolve by name: two big operators
+  sharing an index name can be evaluated at once on the asynchronous lane, and
+  the loop's assignment and the body's read must resolve the name the same way.
+
+- **A broadcast over a lone empty list answers the empty list.** `Sin([])`,
+  `-[]`, `Not([])`, `Abs([])` and `[] < 3` answered `Nothing`, the marker for an
+  erased value, while `2·[]` and `[] + 1` already answered `[]`. Every one of
+  them now answers `[]`, under `evaluate()` and under `N()`, and the compiled
+  JavaScript answers the empty array for the same expressions. A broadcast over
+  an empty list beside a NON-empty one is a length mismatch, as it is for any
+  two lengths that disagree: `Sin([]) + [1, 2]` answers the
+  `incompatible-dimensions` error, where it used to erase the empty side and
+  answer `[1, 2]`. The pairing constructors are unchanged — `PointList` and
+  `Zip` still pair up to the shorter input.
+
 ### Improvements
 
-- **The common functions of one number over a large list of machine numbers
-  are computed on doubles, at machine precision.** `Sin`, `Cos`, `Tan`,
-  `Cot`, `Sec`, `Csc`, `Sinh`, `Cosh`, `Tanh`, `Ln`, `Sqrt`, `Abs`, `Floor`,
-  `Ceil`, `Round`, `Power` with a machine-number exponent, and under `N()`
-  `Arctan`, `Arcsin`, `Arccos` and a power of `e`, over a list of machine
-  numbers answered a lazy `Map` above a hundred elements, whose elements the
-  interpreter computed one function application at a time. Each of these
-  heads is now computed at once with the `Math` primitive its scalar route
-  computes, measured bit for bit on 3,000 random floats per head under both
-  routes, and the answer is a list that holds its numbers unboxed. Every
-  input on which the scalar route takes another way keeps the lazy form: an
-  integer element under `evaluate()` (`Sinh(1)` is exact), a negative
-  argument of `Sqrt` or `Ln`, a pole of `Tan`, a float near a special angle
-  under `evaluate()` (`Sin(3.141592653589793)` is exactly `0`), another
-  angular unit than radians. `Add` and `Multiply` of three or more operands
-  (`L + M + 1`), and `Log` and `Lb`, are computed on doubles too.
-  `Sum(…).N()` of a body with no indexing set first evaluates that body on
+- **The common functions of one number over a large list of machine numbers are
+  computed on doubles, at machine precision.** `Sin`, `Cos`, `Tan`, `Cot`,
+  `Sec`, `Csc`, `Sinh`, `Cosh`, `Tanh`, `Ln`, `Sqrt`, `Abs`, `Floor`, `Ceil`,
+  `Round`, `Power` with a machine-number exponent, and under `N()` `Arctan`,
+  `Arcsin`, `Arccos` and a power of `e`, over a list of machine numbers answered
+  a lazy `Map` above a hundred elements, whose elements the interpreter computed
+  one function application at a time. Each of these heads is now computed at
+  once with the `Math` primitive its scalar route computes, measured bit for bit
+  on 3,000 random floats per head under both routes, and the answer is a list
+  that holds its numbers unboxed. Every input on which the scalar route takes
+  another way keeps the lazy form: an integer element under `evaluate()`
+  (`Sinh(1)` is exact), a negative argument of `Sqrt` or `Ln`, a pole of `Tan`,
+  a float near a special angle under `evaluate()` (`Sin(3.141592653589793)` is
+  exactly `0`), another angular unit than radians. `Add` and `Multiply` of three
+  or more operands (`L + M + 1`), and `Log` and `Lb`, are computed on doubles
+  too. `Sum(…).N()` of a body with no indexing set first evaluates that body on
   the numeric route and adds the doubles when the value is a finite list of
   machine numbers, so `Sum(Exp(L/100)).N()` reaches the kernel of a power of
-  `e`; any other value takes the exact route, as before. Measured over
-  ten thousand elements at machine precision, both versions interleaved in
-  one process, `evaluate()` and `N()`: `Sum(Sin(L))` 58 → 2 ms,
-  `Sum(Cos(L))` 70 → 2 ms, `Sum(Tan(L))` 72 → 3 ms, `Max(Sqrt(L))`
-  69 → 4 ms, `Max(Ln(L))` 90 → 6 ms, `Sum(L^2)` 79 → 2 ms, `Sum(L^-2)`
-  85 → 2 ms, `Sum(Exp(L/100)).N()` 165 → 3 ms.
+  `e`; any other value takes the exact route, as before. Measured over ten
+  thousand elements at machine precision, both versions interleaved in one
+  process, `evaluate()` and `N()`: `Sum(Sin(L))` 58 → 2 ms, `Sum(Cos(L))` 70 → 2
+  ms, `Sum(Tan(L))` 72 → 3 ms, `Max(Sqrt(L))` 69 → 4 ms, `Max(Ln(L))` 90 → 6 ms,
+  `Sum(L^2)` 79 → 2 ms, `Sum(L^-2)` 85 → 2 ms, `Sum(Exp(L/100)).N()` 165 → 3 ms.
 
-  Some values change in their last digit, which is accepted for the
-  performance. The value of every element of a function of one number is
-  the scalar route's value; under `N()` that is a change for two heads,
-  because the lazy `Map` was compiled (`library/map-auto-compile.ts`) and
-  compiled code computes a power of `e` as `Math.pow(e, x)` and a small
-  integer power as repeated multiplication, where the scalar route computes
-  `Math.exp(x)` and `Math.pow(x, 3)`. A sum or a product of three or more
-  operands combines the integers first, exactly, as the interpreter does,
-  and then the floats from left to right, in an order that may differ from
-  the interpreter's. `Log` and `Lb` compute
-  `Math.log10` and `Math.log2`, the primitives of the `N()` route and of the
-  compiled code, where `evaluate()` of a scalar takes another way. And the
-  body of `Sum(…).N()` is now computed on the numeric route, so
-  `Sum(L / 3).N()` adds `0.333… · v` where it added `v / 3`. Every such
-  difference is one unit in the last place; an exact value never changes.
+  Some values change in their last digit, which is accepted for the performance.
+  The value of every element of a function of one number is the scalar route's
+  value; under `N()` that is a change for two heads, because the lazy `Map` was
+  compiled (`library/map-auto-compile.ts`) and compiled code computes a power of
+  `e` as `Math.pow(e, x)` and a small integer power as repeated multiplication,
+  where the scalar route computes `Math.exp(x)` and `Math.pow(x, 3)`. A sum or a
+  product of three or more operands combines the integers first, exactly, as the
+  interpreter does, and then the floats from left to right, in an order that may
+  differ from the interpreter's. `Log` and `Lb` compute `Math.log10` and
+  `Math.log2`, the primitives of the `N()` route and of the compiled code, where
+  `evaluate()` of a scalar takes another way. And the body of `Sum(…).N()` is
+  now computed on the numeric route, so `Sum(L / 3).N()` adds `0.333… · v` where
+  it added `v / 3`. Every such difference is one unit in the last place; an
+  exact value never changes.
+
 - **A symbol that holds a large list of numbers or of points costs nothing to
   read.** Each use of such a symbol walked the whole stored value to look for
-  symbols to protect, 1.2 ms for ten thousand points, although written-out
-  data holds numbers only. The walk is skipped for written-out data. Reading a
+  symbols to protect, 1.2 ms for ten thousand points, although written-out data
+  holds numbers only. The walk is skipped for written-out data. Reading a
   coordinate (`PointX`, `PointY`, `PointZ`) out of such a list boxed every
-  machine float a second time to check that a double holds it; a machine
-  float IS a double, and it is now read directly. `Sum` of a body that
-  evaluates to a list of machine numbers (`Sum(PointX(C))`) adds its doubles,
-  as `Sum(L)` does. Measured over ten thousand points at machine precision,
-  both versions interleaved in one process, under `evaluate()` and `N()`:
-  `PointZ(C)` 3.8 → 0.8 ms, `Sum(PointX(C))` 10.8 → 2.5 ms,
-  `Sum(2·PointZ(C))` 11.2 → 3.1 ms, `Min(1, 2 − 2·PointZ(C))` 7.2 → 4.8 ms
-  (`N()`: 15.5 → 6.6 ms), `Length(C)` 1.2 → 0.03 ms. The values are unchanged.
+  machine float a second time to check that a double holds it; a machine float
+  IS a double, and it is now read directly. `Sum` of a body that evaluates to a
+  list of machine numbers (`Sum(PointX(C))`) adds its doubles, as `Sum(L)` does.
+  Measured over ten thousand points at machine precision, both versions
+  interleaved in one process, under `evaluate()` and `N()`: `PointZ(C)` 3.8 →
+  0.8 ms, `Sum(PointX(C))` 10.8 → 2.5 ms, `Sum(2·PointZ(C))` 11.2 → 3.1 ms,
+  `Min(1, 2 − 2·PointZ(C))` 7.2 → 4.8 ms (`N()`: 15.5 → 6.6 ms), `Length(C)` 1.2
+  → 0.03 ms. The values are unchanged.
 - **Arithmetic over large lists of machine numbers is computed on doubles, at
-  machine precision.** Above a hundred elements `2·L`, `L + 1`, `L + M`,
-  `L·M` and `−L` answered a lazy `Map`, whose elements the interpreter
-  computes one function application at a time, about 4.5 µs each, at every
-  evaluation. That form is for a source that is itself lazy or very large. A
-  `List` of machine numbers is in memory already: when the engine is at
-  machine precision and every operand is such a list (or a symbol that holds
-  one) or a machine number, the sum, the product or the negation is now
-  computed at once on doubles, and the answer is a list that holds its
-  numbers unboxed. `Sum`, `Max` and `Min` of such a list fold its doubles
-  (`Max` and `Min` with the tolerance rule of the comparison they used), and
-  `PointX`, `PointY` and `PointZ` over a written-out list of more than a
-  hundred points answer a list of unboxed doubles. Everything else takes the
-  route it took before: an exact rational, a symbolic, non-finite or complex
-  value, a float made above machine precision, an integer past the safe
-  range, a sum or a product of three or more operands, every function head
-  (`Sin(L)`, `L / 3`, `L^2`), and every engine above machine precision.
+  machine precision.** Above a hundred elements `2·L`, `L + 1`, `L + M`, `L·M`
+  and `−L` answered a lazy `Map`, whose elements the interpreter computes one
+  function application at a time, about 4.5 µs each, at every evaluation. That
+  form is for a source that is itself lazy or very large. A `List` of machine
+  numbers is in memory already: when the engine is at machine precision and
+  every operand is such a list (or a symbol that holds one) or a machine number,
+  the sum, the product or the negation is now computed at once on doubles, and
+  the answer is a list that holds its numbers unboxed. `Sum`, `Max` and `Min` of
+  such a list fold its doubles (`Max` and `Min` with the tolerance rule of the
+  comparison they used), and `PointX`, `PointY` and `PointZ` over a written-out
+  list of more than a hundred points answer a list of unboxed doubles.
+  Everything else takes the route it took before: an exact rational, a symbolic,
+  non-finite or complex value, a float made above machine precision, an integer
+  past the safe range, a sum or a product of three or more operands, every
+  function head (`Sin(L)`, `L / 3`, `L^2`), and every engine above machine
+  precision.
 
   What changes for a caller: the result is a `List` of numbers where it was
-  `Map(f, L)`. It is a value, as it already was for a hundred elements or
-  fewer: a later assignment to `L` does not change it. `Norm(2·L)` is now a
-  number, where it stayed unevaluated because its operand was a lazy `Map`.
+  `Map(f, L)`. It is a value, as it already was for a hundred elements or fewer:
+  a later assignment to `L` does not change it. `Norm(2·L)` is now a number,
+  where it stayed unevaluated because its operand was a lazy `Map`.
 
   The values are the same. 25,536 evaluations were compared between the two
   versions (28 expressions and their reductions over 19 kinds of list, three
-  engine setups, `evaluate()` and `N()`; every element's MathJSON, exactness
-  and type). The differences, all at machine precision: `Norm` as above; and
-  a `Sum` or a `Product` of elements that are integer-valued results of float
+  engine setups, `evaluate()` and `N()`; every element's MathJSON, exactness and
+  type). The differences, all at machine precision: `Norm` as above; and a `Sum`
+  or a `Product` of elements that are integer-valued results of float
   arithmetic, when it passes `2^53`, is now the exact integer where the fold
   over the lazy form answered a rounded float (`Sum(9007199254740000 + L)`).
 
   Measured over ten thousand elements at machine precision, both versions
   interleaved in one process, medians of eleven runs:
 
-  | Expression | `evaluate()` before | after | `N()` before | after |
-  | --- | ---: | ---: | ---: | ---: |
-  | `Sum(2·L)` | 44.7 ms | 7.0 ms | 43.1 ms | 6.7 ms |
-  | `Min(1, 2 − 2·L)` | 81.5 ms | 4.0 ms | 22.0 ms | 4.0 ms |
-  | `Min(1, 2 − 2·PointZ(C))` | 94.1 ms | 8.0 ms | 89.2 ms | 18.4 ms |
-  | `Sum(2·PointZ(C))` | 19.6 ms | 12.4 ms | 16.6 ms | 11.9 ms |
-  | `Sum(L + M)` | 32.6 ms | 7.8 ms | 31.8 ms | 7.4 ms |
-  | `Max(L·M)` | 41.4 ms | 4.0 ms | 16.4 ms | 3.7 ms |
-  | `Mean(2 − 2·L)` | 68.8 ms | 6.3 ms | 15.1 ms | 6.8 ms |
-  | `Min(L)` | 4.6 ms | 0.3 ms | 4.6 ms | 0.3 ms |
-  | `Sum(L)` | 3.0 ms | 0.3 ms | 2.7 ms | 0.2 ms |
-  | `Sum(Sin(L))` (not covered) | 45.5 ms | 47.1 ms | 44.1 ms | 44.3 ms |
-  | `PointZ(C)` alone | 2.5 ms | 3.9 ms | 2.3 ms | 3.8 ms |
+  | Expression                  | `evaluate()` before |   after | `N()` before |   after |
+  | --------------------------- | ------------------: | ------: | -----------: | ------: |
+  | `Sum(2·L)`                  |             44.7 ms |  7.0 ms |      43.1 ms |  6.7 ms |
+  | `Min(1, 2 − 2·L)`           |             81.5 ms |  4.0 ms |      22.0 ms |  4.0 ms |
+  | `Min(1, 2 − 2·PointZ(C))`   |             94.1 ms |  8.0 ms |      89.2 ms | 18.4 ms |
+  | `Sum(2·PointZ(C))`          |             19.6 ms | 12.4 ms |      16.6 ms | 11.9 ms |
+  | `Sum(L + M)`                |             32.6 ms |  7.8 ms |      31.8 ms |  7.4 ms |
+  | `Max(L·M)`                  |             41.4 ms |  4.0 ms |      16.4 ms |  3.7 ms |
+  | `Mean(2 − 2·L)`             |             68.8 ms |  6.3 ms |      15.1 ms |  6.8 ms |
+  | `Min(L)`                    |              4.6 ms |  0.3 ms |       4.6 ms |  0.3 ms |
+  | `Sum(L)`                    |              3.0 ms |  0.3 ms |       2.7 ms |  0.2 ms |
+  | `Sum(Sin(L))` (not covered) |             45.5 ms | 47.1 ms |      44.1 ms | 44.3 ms |
+  | `PointZ(C)` alone           |              2.5 ms |  3.9 ms |       2.3 ms |  3.8 ms |
+
 - **A scalar times a vector of machine numbers is computed on doubles.** The
   product of a number and an evaluated list boxed every element and built a
-  symbolic product for it, about 3.5 µs an element. When the list and the
-  scalar are machine numbers, and the products are exact integers or floats
-  the engine computes as doubles (machine precision), the doubles are the same
-  values, and the answer is a list that holds its numbers unboxed. Everything
-  else takes the general route: an exact rational scalar or element, a float
-  above machine precision, an integer product past the safe range, `NaN`, an
-  infinity, a symbolic value. The results are unchanged: the MathJSON, the
-  type and the exactness of every element are the same as before on 480
-  scalar-and-vector combinations at two precisions, under `evaluate()` and
-  under `N()`. Measured over ten thousand points, both versions interleaved
-  in one process: `Sum(2·PointZ(C))` is 2.0 to 2.4 times faster and
-  `Min(1, 2 − 2·PointZ(C))` 1.2 to 1.7 times.
+  symbolic product for it, about 3.5 µs an element. When the list and the scalar
+  are machine numbers, and the products are exact integers or floats the engine
+  computes as doubles (machine precision), the doubles are the same values, and
+  the answer is a list that holds its numbers unboxed. Everything else takes the
+  general route: an exact rational scalar or element, a float above machine
+  precision, an integer product past the safe range, `NaN`, an infinity, a
+  symbolic value. The results are unchanged: the MathJSON, the type and the
+  exactness of every element are the same as before on 480 scalar-and-vector
+  combinations at two precisions, under `evaluate()` and under `N()`. Measured
+  over ten thousand points, both versions interleaved in one process:
+  `Sum(2·PointZ(C))` is 2.0 to 2.4 times faster and `Min(1, 2 − 2·PointZ(C))`
+  1.2 to 1.7 times.
 - **A written-out list of numbers or of points evaluates to itself.** A
-  canonical `List` or `Tuple` whose every element is a number literal, or such
-  a `List` or `Tuple` in turn, has nothing to evaluate, and `evaluate()` now
-  answers the expression itself. The general route evaluated every element as
-  a function expression and built an equal list, at every use of a symbol that
+  canonical `List` or `Tuple` whose every element is a number literal, or such a
+  `List` or `Tuple` in turn, has nothing to evaluate, and `evaluate()` now
+  answers the expression itself. The general route evaluated every element as a
+  function expression and built an equal list, at every use of a symbol that
   holds one, and the new list started with empty caches, so its type was
-  computed again as well. Under `N()` the list answers itself when every
-  number is one `N()` leaves as it is; a list with an exact rational is
-  approximated as before. The values are unchanged: `evaluate()` and `N()`
-  give the same MathJSON and the same type as before on fourteen kinds of data
-  list at three precisions. Measured over ten thousand points, both versions
-  interleaved in one process: `PointZ(C)` is 14.7 times faster,
-  `Sum(PointX(C))` 9.8 times, and `Min(1, 2 − 2·PointZ(C))` 1.6 times (that
-  one is dominated by the arithmetic over the coordinates).
+  computed again as well. Under `N()` the list answers itself when every number
+  is one `N()` leaves as it is; a list with an exact rational is approximated as
+  before. The values are unchanged: `evaluate()` and `N()` give the same
+  MathJSON and the same type as before on fourteen kinds of data list at three
+  precisions. Measured over ten thousand points, both versions interleaved in
+  one process: `PointZ(C)` is 14.7 times faster, `Sum(PointX(C))` 9.8 times, and
+  `Min(1, 2 − 2·PointZ(C))` 1.6 times (that one is dominated by the arithmetic
+  over the coordinates).
 
 ### Resolved Issues
 
+- **`Undefined` in a numeric slot answers `NaN`, as `Missing` does.** The
+  `Undefined` symbol names a value that does not exist, and a program or a host
+  can write it for such a value. In a numeric slot it stayed symbolic —
+  `\cos(\mathrm{Undefined})` evaluated to itself — while the same input gave
+  `NaN` in compiled code and in a sum (`Undefined + 1`). The absence gate now
+  reads both absence symbols the same way, so `Cos(Undefined)`, `2 · Undefined`,
+  `1 / Undefined` and `Sqrt(Undefined)` are `NaN` under `evaluate()`, under
+  `N()` and under `evaluateAsync()`, and an `Undefined` cell of a list under an
+  element-wise head is `NaN` at that position, as a `Missing` cell is. Outside a
+  numeric slot `Undefined` is unchanged: it still evaluates to itself, its type
+  is still `unknown`, and `IsMissing`, `Coalesce` and the statistics reducers
+  still read it as an ordinary value. Note for a host: the masking operator
+  `When` answers `Missing`, and its result type carries a `missing` arm — for a
+  `number` value `When(x, x > 0)` is typed `missing | number`, not `number` — so
+  a probe that tests `matches('number')` on a restriction row sees the absence
+  arm and must strip it before it decides.
+- **`Round` rounds a half AWAY FROM ZERO at every precision.** At machine
+  precision (`ce.precision = 'machine'`) the value of a half came from
+  JavaScript `Math.round`, which rounds a half toward `+∞`: `Round(-0.5)` was
+  `0` and `Round(-1.5)` was `-1`, where the default precision answered `-1` and
+  `-2`. The two precisions now agree, and both answer `-1`, `-2`, `1` and `3`
+  for `Round(-0.5)`, `Round(-1.5)`, `Round(0.5)` and `Round(2.5)`. The rule
+  holds on every route: a single number, an exact rational (`Round(-1/2)` is
+  `-1`), a list of machine numbers, the precision form `Round(x, n)` (which
+  rounds the scaled value `x·10ⁿ`), and the compiled JavaScript, Python,
+  interval and GPU code, which already rounded a half away from zero and now
+  matches the interpreter at machine precision too. `Floor`, `Ceil` and
+  `Truncate` are unchanged.
 - **`simplify()` keeps `Max`, `Min`, `Supremum` and `Infimum` over one
   collection.** These operators reduce a collection operand to a number, but a
-  simplification rule rewrote the extremum of one operand to the operand, for
-  a collection too: `Min(Map(Sin, RealNumbers)).simplify()` was the `Map`
-  itself, a list where a number is meant. The rule now applies to a scalar
-  operand only. With the Fungrim identities loaded, that minimum is now `-1`;
-  the identity existed and never saw its head. `Max().simplify()` is `NaN`,
-  as `Max().evaluate()` is.
+  simplification rule rewrote the extremum of one operand to the operand, for a
+  collection too: `Min(Map(Sin, RealNumbers)).simplify()` was the `Map` itself,
+  a list where a number is meant. The rule now applies to a scalar operand only.
+  With the Fungrim identities loaded, that minimum is now `-1`; the identity
+  existed and never saw its head. `Max().simplify()` is `NaN`, as
+  `Max().evaluate()` is.
 - **A run with a second ellipsis after its last term is a sequence, not a
-  range.** `a_1 a_2 \dots a_k` is `Range(a_1·a_2, a_k)`. With a second
-  ellipsis, `a_1 a_2 \dots a_k \dots`, the run has no last term; it parsed
-  to a `Range` whose upper bound was the tuple `(a_k, …)`, with an
-  `incompatible-type` error. It now parses to the sequence `a_1·a_2, …, a_k,
-  …`, the reading of the comma spelling `1, 2, \dots, n, \dots`.
+  range.** `a_1 a_2 \dots a_k` is `Range(a_1·a_2, a_k)`. With a second ellipsis,
+  `a_1 a_2 \dots a_k \dots`, the run has no last term; it parsed to a `Range`
+  whose upper bound was the tuple `(a_k, …)`, with an `incompatible-type` error.
+  It now parses to the sequence `a_1·a_2, …, a_k, …`, the reading of the comma
+  spelling `1, 2, \dots, n, \dots`.
 - **The compiled Fungrim rules are regenerated.** 22 of the 1,434 stored
-  simplify rules held a parameter type annotation (`Typed(x, "real")`) that
-  the engine infers and no longer writes out, so a fresh compile differed from
-  the stored file and the "Recompile drift" check of continuous integration
-  failed. Only the `match` of those 22 rules changes. Each of the 22 gives the
-  same result with the old and with the new file.
+  simplify rules held a parameter type annotation (`Typed(x, "real")`) that the
+  engine infers and no longer writes out, so a fresh compile differed from the
+  stored file and the "Recompile drift" check of continuous integration failed.
+  Only the `match` of those 22 rules changes. Each of the 22 gives the same
+  result with the old and with the new file.
 - **`Exp(x).N()` and `Exp(x).evaluate()` agree to the last digit at machine
   precision, on every version of Node.** `Exp(x)` is `Power(e, x)`. Under
   `evaluate()` the base is the symbol and the value was `Math.exp(x)`; under
   `N()` the base was already the number `2.718…` and the value was
-  `Math.pow(e, x)`, which differs from it by one unit in the last place on
-  about one input in ten: `Exp(1.1)` was `3.0041660239464334` on one route
-  and `3.004166023946433` on the other. `Math.pow` is also the one `Math`
-  function, of 28 compared on 20,000 inputs, whose results changed between
-  Node 22 and Node 26 (neither version is the more accurate one), so the
-  `N()` value depended on the version of Node. A power of `e` is now
-  `Math.exp(x)` on both routes. `Exp(π).N()` is `23.140692632779267`, where
-  it was `23.140692632779263`; the value is `23.14069263277926900…`. Above
-  machine precision nothing changes.
+  `Math.pow(e, x)`, which differs from it by one unit in the last place on about
+  one input in ten: `Exp(1.1)` was `3.0041660239464334` on one route and
+  `3.004166023946433` on the other. `Math.pow` is also the one `Math` function,
+  of 28 compared on 20,000 inputs, whose results changed between Node 22 and
+  Node 26 (neither version is the more accurate one), so the `N()` value
+  depended on the version of Node. A power of `e` is now `Math.exp(x)` on both
+  routes. `Exp(π).N()` is `23.140692632779267`, where it was
+  `23.140692632779263`; the value is `23.14069263277926900…`. Above machine
+  precision nothing changes.
 - **`Max` and `Min` walk a lazy operand once.** `Max` and `Min` walked every
-  collection operand to look for a `Missing` or a `NaN` element, and then
-  walked it again to find the extremum. A lazy collection computes its
-  elements on every walk. Two cases were already spared: the first walk was
-  skipped when the element type is `real`, and a lazy `Map` answers a second
-  complete walk of the same instance from the elements it kept. The cases
-  that were left ran the element function twice per element: a lazy `Map`
-  whose elements are typed `number` (or wider), read through `Reverse`,
-  `Take` or `Drop`. With a callback that writes to a variable, the two runs
-  were visible: `Max(Reverse(Map(f, xs)))` ran `f` six times for three
-  elements. The absent element is now found on the walk that finds the
-  extremum. Measured over ten thousand elements at machine precision, both
-  versions interleaved in one process: `Min(Reverse(|ln M|))`,
-  `Min(Take(|ln M|, 5000))` and `Max(Drop(|ln M|, 5000))` are 1.7 to 1.9
-  times faster; `Min(1, 2 − 2·L)`, `Sum(2·L)` and the other expressions that
-  were already walked once are unchanged (0.92 to 1.01). Every value is the
-  same as before on 140 operand shapes, two precisions, `evaluate()` and
-  `N()`, except the two corrections below.
+  collection operand to look for a `Missing` or a `NaN` element, and then walked
+  it again to find the extremum. A lazy collection computes its elements on
+  every walk. Two cases were already spared: the first walk was skipped when the
+  element type is `real`, and a lazy `Map` answers a second complete walk of the
+  same instance from the elements it kept. The cases that were left ran the
+  element function twice per element: a lazy `Map` whose elements are typed
+  `number` (or wider), read through `Reverse`, `Take` or `Drop`. With a callback
+  that writes to a variable, the two runs were visible:
+  `Max(Reverse(Map(f, xs)))` ran `f` six times for three elements. The absent
+  element is now found on the walk that finds the extremum. Measured over ten
+  thousand elements at machine precision, both versions interleaved in one
+  process: `Min(Reverse(|ln M|))`, `Min(Take(|ln M|, 5000))` and
+  `Max(Drop(|ln M|, 5000))` are 1.7 to 1.9 times faster; `Min(1, 2 − 2·L)`,
+  `Sum(2·L)` and the other expressions that were already walked once are
+  unchanged (0.92 to 1.01). Every value is the same as before on 140 operand
+  shapes, two precisions, `evaluate()` and `N()`, except the two corrections
+  below.
 - **`Max` and `Min` find a `Missing` element of a nested list.**
-  `Max([[1, Missing], 3])` answered `Max(3, Missing)`, which evaluated a
-  second time to `NaN`. It is now `NaN` at once, as for `Max([1, Missing])`.
+  `Max([[1, Missing], 3])` answered `Max(3, Missing)`, which evaluated a second
+  time to `NaN`. It is now `NaN` at once, as for `Max([1, Missing])`.
 - **An empty `Linspace` beside other operands of `Max` or `Min` contributes
   nothing.** `Max(Linspace(1, 5, 0), 1)` stayed unevaluated; it is now `1`, as
   `Max([], 1)` is.
 - **`FindFit` and `FindRoot` report a time limit that ran out during setup as
-  the `"setup"` phase again.** The only deadline checks that setup reached
-  were inside the evaluation of the data, and since written-out data
-  evaluates to itself they no longer ran: a fit whose budget was spent before
-  the solver started answered `phase: "solve"`. Setup now checks the deadline
-  once before it hands over to the solver.
+  the `"setup"` phase again.** The only deadline checks that setup reached were
+  inside the evaluation of the data, and since written-out data evaluates to
+  itself they no longer ran: a fit whose budget was spent before the solver
+  started answered `phase: "solve"`. Setup now checks the deadline once before
+  it hands over to the solver.
 - **A scalar times a vector: a huge float product stays a float.**
-  `1e308 · [0.9, …]` over a list of machine numbers answered `9e307` as an
-  exact integer of 308 digits, because an integer-valued double past the safe
-  range is boxed as an exact big integer. Such a product now takes the
-  general route, which answers the float.
+  `1e308 · [0.9, …]` over a list of machine numbers answered `9e307` as an exact
+  integer of 308 digits, because an integer-valued double past the safe range is
+  boxed as an exact big integer. Such a product now takes the general route,
+  which answers the float.
 - **`Linspace` between endpoints whose difference overflows a double.**
   `Linspace(-1e308, 1e308, 3)` enumerated as `NaN, +oo, +oo`, because the span
   `upper − lower` is formed first and overflows. The samples are now
@@ -212,76 +320,74 @@
 ### Improvements
 
 - **`Max` and `Min` of a scalar and a collection compile on the interval
-  target.** `Max` and `Min` are reducers: a collection operand is flattened
-  into the operand list, so `Min(1, L)` is the least of `1` and the elements
-  of `L`. The interval target compiled the reduction of one collection
-  (`Min(L)`) and declined a collection beside a scalar (`Min(1, L)`,
-  `Max(0, Min(1, L))`, `Min(1, [x, 2, 3])`), which the interpreter and the
-  JavaScript target both answer. It now folds the scalar operands with the
-  reduction of each collection; an empty collection beside a scalar
-  contributes nothing (`Min(1, [])` is `1`), and a `NaN` element absorbs, as
-  in the interpreter. Several collections with no scalar operand
-  (`Min(L, M)`) compile too: the answer is `NaN` only when every one of them
-  is empty at run time.
-- **A coordinate of a large written-out list of points is read directly.**
-  Above a hundred elements, `PointX`, `PointY` and `PointZ` over a list of
-  points answered a lazy `Map` that applies `At` to each point as a function,
-  16 µs per point, paid again by every consumer that walks the result. That
-  form is for a source that is itself lazy, such as a `Map` over a long
-  `Range`, and it stays for those. A written-out `List` is already in memory,
-  and its coordinates are now read off the points. Measured on ten thousand
-  points at machine precision: `PointZ(C)` 165 → 79 ms, and
-  `Min(1, 2 − 2·PointZ(C))` 406 → 219 ms (a reduction walks its operand
-  twice).
+  target.** `Max` and `Min` are reducers: a collection operand is flattened into
+  the operand list, so `Min(1, L)` is the least of `1` and the elements of `L`.
+  The interval target compiled the reduction of one collection (`Min(L)`) and
+  declined a collection beside a scalar (`Min(1, L)`, `Max(0, Min(1, L))`,
+  `Min(1, [x, 2, 3])`), which the interpreter and the JavaScript target both
+  answer. It now folds the scalar operands with the reduction of each
+  collection; an empty collection beside a scalar contributes nothing
+  (`Min(1, [])` is `1`), and a `NaN` element absorbs, as in the interpreter.
+  Several collections with no scalar operand (`Min(L, M)`) compile too: the
+  answer is `NaN` only when every one of them is empty at run time.
+- **A coordinate of a large written-out list of points is read directly.** Above
+  a hundred elements, `PointX`, `PointY` and `PointZ` over a list of points
+  answered a lazy `Map` that applies `At` to each point as a function, 16 µs per
+  point, paid again by every consumer that walks the result. That form is for a
+  source that is itself lazy, such as a `Map` over a long `Range`, and it stays
+  for those. A written-out `List` is already in memory, and its coordinates are
+  now read off the points. Measured on ten thousand points at machine precision:
+  `PointZ(C)` 165 → 79 ms, and `Min(1, 2 − 2·PointZ(C))` 406 → 219 ms (a
+  reduction walks its operand twice).
 - **A symbolic integration that timed out is not searched again for another
-  target that declares wider types.** The record of a timed-out search
-  compares the declared types of the integral's symbols by inclusion: a
-  record made with `k: real<0..>, x: real` answers a compilation with
-  `k: real, x: number`, because a search that ran out of time knowing more
-  about its symbols is not expected to finish knowing less. A narrower type
-  searches again, since it can be what lets a search finish. Tycho declares
-  wider types for the interval target than for the JavaScript target, so the
-  second target of a row now skips the search: measured on Tycho's route, the
-  five compilations of the Desmos state `thpezd39zq` make three searches in
-  place of five (the two interval compilations take 6 ms and 3 ms, were
-  2,002 ms each), with identical emitted code.
+  target that declares wider types.** The record of a timed-out search compares
+  the declared types of the integral's symbols by inclusion: a record made with
+  `k: real<0..>, x: real` answers a compilation with `k: real, x: number`,
+  because a search that ran out of time knowing more about its symbols is not
+  expected to finish knowing less. A narrower type searches again, since it can
+  be what lets a search finish. Tycho declares wider types for the interval
+  target than for the JavaScript target, so the second target of a row now skips
+  the search: measured on Tycho's route, the five compilations of the Desmos
+  state `thpezd39zq` make three searches in place of five (the two interval
+  compilations take 6 ms and 3 ms, were 2,002 ms each), with identical emitted
+  code.
 
 ### Resolved Issues
 
 - **Integrating `xⁿ·eˣ` with a symbolic exponent no longer hangs.**
-  `ce.parse('\int x^n e^x dx').evaluate()` did not return: it was still
-  running after twenty seconds, and `evaluate()` has no time limit of its own.
-  Integration by parts took the power as `u`, and differentiating a power
-  whose exponent is not a positive integer gives another power of the same
-  kind, so every step left the integral that was asked with the exponent
-  lowered by one. The recursion ended only at its frame limit, after a full
-  search of the integration rules at every level. The same happened with
-  `xⁿ·sin x`, with a power of a linear expression such as `(2x+1)ⁿ·eˣ`, and
-  with any such product under a time limit, which ran to the limit. A power
-  of the variable, or of an expression linear in it, is now taken as `u` only
-  when its exponent is a positive integer, and a root is never taken; for any
-  other exponent the integral has no elementary closed form (it is an
-  incomplete gamma function, an error function or an exponential integral)
-  and comes back unevaluated at once: 35 ms for `xⁿ·eˣ`. An nth root times
-  `eˣ` or `sin x` came back half resolved, as a product beside an integral
-  that was no easier; it now comes back as the integral that was asked. `x³·eˣ`, `x²·sin x` and the other integrals that
-  integration by parts does solve are unchanged. For the compiler this
-  removes the two-second symbolic search of the Desmos state `thpezd39zq`
-  (the upper tail of a chi-squared density with a symbolic number of degrees
-  of freedom): the search for a closed form now completes, without one, in
-  about a tenth of a second.
-- **The record of a timed-out symbolic integration is found again by a host
-  that declares its symbols for each compilation.** The record of 0.132.2
-  named a declared symbol by WHICH definition object it resolved to. A host
-  that declares the symbols of a row in a scope of its own for every
-  compilation makes new definition objects each time, so the record was never
-  found and every compilation repeated the two-second search: measured on
-  Tycho with 0.132.2, the five compilations of the Desmos state `thpezd39zq`
-  still took 2,002 ms each. The record now names a symbol by what its
-  definition says — its declared type, whether it is a constant, when its
-  value is substituted, and the value it holds — so the same declarations
-  made again find it. A function, and a symbol whose value mentions another
-  symbol, are still named by their definition.
+  `ce.parse('\int x^n e^x dx').evaluate()` did not return: it was still running
+  after twenty seconds, and `evaluate()` has no time limit of its own.
+  Integration by parts took the power as `u`, and differentiating a power whose
+  exponent is not a positive integer gives another power of the same kind, so
+  every step left the integral that was asked with the exponent lowered by one.
+  The recursion ended only at its frame limit, after a full search of the
+  integration rules at every level. The same happened with `xⁿ·sin x`, with a
+  power of a linear expression such as `(2x+1)ⁿ·eˣ`, and with any such product
+  under a time limit, which ran to the limit. A power of the variable, or of an
+  expression linear in it, is now taken as `u` only when its exponent is a
+  positive integer, and a root is never taken; for any other exponent the
+  integral has no elementary closed form (it is an incomplete gamma function, an
+  error function or an exponential integral) and comes back unevaluated at once:
+  35 ms for `xⁿ·eˣ`. An nth root times `eˣ` or `sin x` came back half resolved,
+  as a product beside an integral that was no easier; it now comes back as the
+  integral that was asked. `x³·eˣ`, `x²·sin x` and the other integrals that
+  integration by parts does solve are unchanged. For the compiler this removes
+  the two-second symbolic search of the Desmos state `thpezd39zq` (the upper
+  tail of a chi-squared density with a symbolic number of degrees of freedom):
+  the search for a closed form now completes, without one, in about a tenth of a
+  second.
+- **The record of a timed-out symbolic integration is found again by a host that
+  declares its symbols for each compilation.** The record of 0.132.2 named a
+  declared symbol by WHICH definition object it resolved to. A host that
+  declares the symbols of a row in a scope of its own for every compilation
+  makes new definition objects each time, so the record was never found and
+  every compilation repeated the two-second search: measured on Tycho with
+  0.132.2, the five compilations of the Desmos state `thpezd39zq` still took
+  2,002 ms each. The record now names a symbol by what its definition says — its
+  declared type, whether it is a constant, when its value is substituted, and
+  the value it holds — so the same declarations made again find it. A function,
+  and a symbol whose value mentions another symbol, are still named by their
+  definition.
 
 ## 0.132.2 _2026-09-19_
 
@@ -294,42 +400,41 @@
   the expression to `0.3t + 4[x₁, …]` before any target sees it. The rewrite
   applies to a sum, a negation or a scalar multiple with a written-out list of
   five or more points among its point operands. Measured on the Desmos state
-  `woeywky0kj` (a list of 7,225 points, Tycho code-generation audit of
-  0.131.3): the JavaScript kernel goes from 295,869 to 140,737 characters, and
-  one call from 2.55 ms to 0.14 ms (median of 15 interleaved rounds of 40
-  calls, load average 3.5 on 8 cores). The values agree with the earlier kernel to 9 × 10⁻¹⁶: the flattened
-  sum adds its terms in a different order. On the shader targets, a list of
-  points whose coordinates are computed at run time now compiles to a `float[N]`
-  array of the coordinates; it was a decline. The interval target keeps its
-  earlier kernel for a list of constant points, which it reads through the
-  run-time broadcast.
+  `woeywky0kj` (a list of 7,225 points, Tycho code-generation audit of 0.131.3):
+  the JavaScript kernel goes from 295,869 to 140,737 characters, and one call
+  from 2.55 ms to 0.14 ms (median of 15 interleaved rounds of 40 calls, load
+  average 3.5 on 8 cores). The values agree with the earlier kernel to 9 ×
+  10⁻¹⁶: the flattened sum adds its terms in a different order. On the shader
+  targets, a list of points whose coordinates are computed at run time now
+  compiles to a `float[N]` array of the coordinates; it was a decline. The
+  interval target keeps its earlier kernel for a list of constant points, which
+  it reads through the run-time broadcast.
 - **A symbolic integration attempt that timed out is not repeated by the next
   compilation of the same integral.** Compiling an `Integrate` first searches
-  for a closed form for up to two seconds and emits numeric integration when
-  the search fails. A document compiles one integral several times — once per
+  for a closed form for up to two seconds and emits numeric integration when the
+  search fails. A document compiles one integral several times — once per
   target, and again inside each helper that holds it — and every compilation
   repeated the search to its limit: the Desmos state `thpezd39zq` issued five
   compilations of about 2,000 ms over two integrands. The compiler now records
-  an integral whose search used its whole budget without a closed form, and
-  the next compilation of it goes to the numeric emitter at once (measured:
-  2,033 ms for the first compilation, 5 ms for the second target). A timeout
-  depends on the load of the machine and is not proof that no closed form
-  exists, so the record is dropped by an assignment, an assumption, a change
-  of the angular unit or of the precision, and it does not apply when a symbol
-  of the integral has another type. A closed form, and a search that completed
-  without one, are searched for again as before. The emitted code does not
-  change.
+  an integral whose search used its whole budget without a closed form, and the
+  next compilation of it goes to the numeric emitter at once (measured: 2,033 ms
+  for the first compilation, 5 ms for the second target). A timeout depends on
+  the load of the machine and is not proof that no closed form exists, so the
+  record is dropped by an assignment, an assumption, a change of the angular
+  unit or of the precision, and it does not apply when a symbol of the integral
+  has another type. A closed form, and a search that completed without one, are
+  searched for again as before. The emitted code does not change.
 - **A broadcast head over a list that mixes complex and real cells compiles on
   the JavaScript target.** An element-wise `Which` with a complex arm beside a
-  real one, `Which(0 < L, i·L, True, 0)`, answers a list whose cells are
-  complex at some positions and plain numbers at the others. `Add`,
-  `Subtract`, `Multiply` and `Negate` read such a list; every other head
-  declined (`Abs`, `Divide`, `Power`, `Real`, `Imaginary`, `Exp`, `Sign`, …),
-  while the scalar form of the same expression compiled. Those heads now read
-  each cell as a complex number. The Desmos state `s8ishknvhe`, a
-  stereographic projection of a list of points, compiles when its point list
-  is declared `list<tuple<number, number, number>>`, and agrees with the
-  interpreter to 1.1 × 10⁻¹⁶ on nine sample points, poles included.
+  real one, `Which(0 < L, i·L, True, 0)`, answers a list whose cells are complex
+  at some positions and plain numbers at the others. `Add`, `Subtract`,
+  `Multiply` and `Negate` read such a list; every other head declined (`Abs`,
+  `Divide`, `Power`, `Real`, `Imaginary`, `Exp`, `Sign`, …), while the scalar
+  form of the same expression compiled. Those heads now read each cell as a
+  complex number. The Desmos state `s8ishknvhe`, a stereographic projection of a
+  list of points, compiles when its point list is declared
+  `list<tuple<number, number, number>>`, and agrees with the interpreter to 1.1
+  × 10⁻¹⁶ on nine sample points, poles included.
 
 ### Resolved Issues
 
@@ -342,25 +447,25 @@
     `0 / 0`), and a quotient whose divisor is infinite is `0`.
   - `|~oo|` is `+∞`, and `Arg(~oo)` is `NaN`; it was `π/4`.
   - A complex power of a zero base is `0` for an exponent with a positive real
-    part, `~oo` for a negative real exponent, and `NaN` otherwise. The
-    compiled code answered `−∞` for `0⁻²`, `−∞·i` for `0⁻¹`, `NaN` for
-    `0^(−1/2)` and `1` for `0⁰`.
+    part, `~oo` for a negative real exponent, and `NaN` otherwise. The compiled
+    code answered `−∞` for `0⁻²`, `−∞·i` for `0⁻¹`, `NaN` for `0^(−1/2)` and `1`
+    for `0⁰`.
   - At a complex zero, `Cot` and `Csc` are `~oo`, and `Coth`, `Csch` and
     `Arsech` are `+∞`; they were `NaN`, and `Arsech` was `~oo`. `Arcsec` and
     `Arccsc` are `NaN`; they had an infinite imaginary part.
-- **A coordinate accessor over a wide list of points no longer answers where
-  the interpreter reports an error, and no longer drops code the caller
-  supplied.** Three defects of the rewrite that folds `PointX([p₁, …, p₅])` to
-  the list of first coordinates:
-  - A point that is a sum of points of different sizes, `(a, b) + (1, 2, 3)`,
-    is an `incompatible-type` error. The compiled code answered `a + 1` for
-    that element. It now answers `NaN`, as it does for a narrow list.
+- **A coordinate accessor over a wide list of points no longer answers where the
+  interpreter reports an error, and no longer drops code the caller supplied.**
+  Three defects of the rewrite that folds `PointX([p₁, …, p₅])` to the list of
+  first coordinates:
+  - A point that is a sum of points of different sizes, `(a, b) + (1, 2, 3)`, is
+    an `incompatible-type` error. The compiled code answered `a + 1` for that
+    element. It now answers `NaN`, as it does for a narrow list.
   - A discarded coordinate that reads a `vars` entry given as JavaScript source
     was removed from the kernel, so source that counts its reads or draws a
     number stopped running. Such a coordinate now keeps the point.
   - An `operators` or `functions` override of `Add`, `Negate` or `Multiply`
-    inside one of the points received coordinates in place of the points it
-    is written for. The rewrite now stops at an overridden head at any depth.
+    inside one of the points received coordinates in place of the points it is
+    written for. The rewrite now stops at an overridden head at any depth.
 
 ## 0.132.1 _2026-09-19_
 
@@ -393,7 +498,6 @@
   expression, including per-call handlers used with raw parsing, instead of
   being installed in the caller's scope. Use `resolveApplication` for
   occurrence-dependent notation policy.
-
 
 ### Resolved Issues
 

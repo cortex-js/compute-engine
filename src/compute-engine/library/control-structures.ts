@@ -67,7 +67,11 @@ import {
   ELEMENT_MEMO_CAP,
 } from '../boxed-expression/collection-element-memo.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
-import { assignLoopIndex, bindIndexAuthoritatively } from './utils.js';
+import {
+  assignLoopIndex,
+  bindIndexAuthoritatively,
+  substituteBinderValues,
+} from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
 
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
@@ -919,8 +923,17 @@ const BRANCH_RELATIONS: ReadonlySet<string> = new Set([
  * A branch condition after evaluation: `value` is what the condition
  * evaluates to — exactly what `cond.canonical.evaluate()` answers, errors,
  * element-wise lists and inert symbolic forms included — and `undecided` is
- * `true` when that value is a scalar `True`/`False` that rests on a NaN
- * operand and therefore selects no arm.
+ * `true` when that value selects no arm although it is not symbolic.
+ *
+ * Two shapes carry the flag:
+ * - a scalar `True`/`False` that rests on a NaN operand;
+ * - the absent marker `Missing` that a whole-collection comparison answers
+ *   when its element recursion meets a pair with no answer (user ruling of
+ *   2026-09-21). That marker reports an undecided comparison, not absent
+ *   condition DATA, which is why it takes no arm instead of raising the
+ *   absent-condition error a `Missing` condition otherwise raises. The
+ *   marker survives `Not` and the connectives through their ordinary Kleene
+ *   evaluation, so the flag has to survive them too.
  */
 type EvaluatedCondition = { value: Expression; undecided: boolean };
 
@@ -982,9 +995,20 @@ function evaluateCondition(cond: Expression): EvaluatedCondition {
     const value = ce.function(op, ops).evaluate();
     const s = sym(value);
     const decided = s === 'True' || s === 'False';
+    // A whole-collection comparison (two or more collection operands) answers
+    // the absent marker `Missing` when its element recursion meets a pair
+    // with no answer — an absent cell on either side (user ruling of
+    // 2026-09-21, `library/relational-operator.ts`). That marker reports an
+    // UNDECIDED comparison, not absent condition DATA, so the branch takes no
+    // arm, the same way a comparison resting on a NaN operand takes none. A
+    // scalar `Missing` condition keeps its own answer, the catchable
+    // absent-condition error: there the condition itself is the absent datum.
+    const absentCollectionPair =
+      s === 'Missing' && ops.filter((x) => x.isCollection).length >= 2;
     return {
       value,
-      undecided: decided && ops.some((x) => x.isNaN === true),
+      undecided:
+        (decided && ops.some((x) => x.isNaN === true)) || absentCollectionPair,
     };
   }
 
@@ -1001,7 +1025,14 @@ function evaluateCondition(cond: Expression): EvaluatedCondition {
   return { value: c.evaluate(), undecided: false };
 }
 
-/** `Not` of an evaluated condition: the flag survives a decided value. */
+/**
+ * `Not` of an evaluated condition: the flag survives a value that is still
+ * one of the shapes it describes — a decided `True`/`False`, or the absent
+ * marker `Missing`, which `Not` reproduces (`Not(Missing)` is `Missing`).
+ * Dropping the flag on the marker made the interpreter raise the
+ * absent-condition error for `Which(Not(<undecided comparison>), …)` where
+ * the compiled lane took no arm.
+ */
 function negateCondition(inner: EvaluatedCondition): EvaluatedCondition {
   const ce = inner.value.engine;
   if (errorValue(inner.value) !== undefined) return inner;
@@ -1009,7 +1040,8 @@ function negateCondition(inner: EvaluatedCondition): EvaluatedCondition {
   const s = sym(value);
   return {
     value,
-    undecided: inner.undecided && (s === 'True' || s === 'False'),
+    undecided:
+      inner.undecided && (s === 'True' || s === 'False' || s === 'Missing'),
   };
 }
 
@@ -1050,9 +1082,14 @@ function evaluateConnective(
   // A symbolic survivor keeps the connective inert, spelled with the
   // original sub-conditions (a NaN-decided survivor folded to its IEEE
   // value would decide the connective the wrong way).
+  // A survivor that is already FLAGGED is not symbolic: its value is the
+  // absent marker `Missing` of an undecided whole-collection comparison,
+  // which the connective folds by the ordinary Kleene table (`And(Missing,
+  // True)` is `Missing`). Treating it as symbolic left the whole `Which`
+  // inert where the compiled lane took no arm.
   const symbolic = survivors.some((s) => {
     const v = sym(s.result.value);
-    return v !== 'True' && v !== 'False';
+    return v !== 'True' && v !== 'False' && !s.result.undecided;
   });
   if (symbolic)
     return {
@@ -2536,6 +2573,15 @@ function* comprehensionStream(
     // final value, or to nothing once the walk completes) instead of closing
     // over 1, 2, 3. Substituting the index values into the element is a
     // no-op for a body that already resolved them.
+    //
+    // The substitution reaches only the occurrences that DENOTE this
+    // comprehension's index (`substituteBinderValues`, ruled 2026-09-21).
+    // An occurrence of the same name that denotes a global keeps the global:
+    // with `w` valueless and `W := x ↦ [w x, x]`,
+    // `[W(w)[1] for w in [1, 2, 3]]` answers `[w, 2w, 3w]`, exactly what the
+    // spelling `[W(k)[1] for k in [1, 2, 3]]` answers. Substituting by name
+    // gave `[1, 4, 9]`. The comprehension's own scope is passed because it
+    // has left the ambient chain by this point.
     let subs: Record<string, Expression> | undefined;
     if (scope) ce._pushEvalContext(scope, undefined, { ambient: true });
     frame.install();
@@ -2549,7 +2595,7 @@ function* comprehensionStream(
     if (indexNames.length > 0) subs = frame.subs(indexNames);
     const value =
       subs !== undefined && r.value.has(indexNames)
-        ? r.value.subs(subs)
+        ? substituteBinderValues(r.value, subs, () => scope)
         : r.value;
     yield value;
   }

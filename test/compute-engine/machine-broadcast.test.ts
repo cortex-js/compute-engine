@@ -376,9 +376,9 @@ describe('functions of one machine number on doubles', () => {
       sameAsScalar(['Power', symbol, k], source, route, (x) => ['Power', x, k]);
   });
 
-  // `Math.round` rounds a tie toward `+∞`: `Round(-0.5)` is `0` at machine
-  // precision (above it, the big-number lane rounds a tie away from zero).
-  // The kernel must answer what the scalar route answers at this precision.
+  // `Round` rounds a tie AWAY FROM ZERO at every precision: `Round(-0.5)` is
+  // `-1` (user decision, 2026-09-21). The kernel must answer what the scalar
+  // route answers at this precision.
   test('Round at the ties', () => {
     const ties = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5];
     ce.declare('Ties', { value: ce.box(['List', ...FLOATS, ...ties]) });

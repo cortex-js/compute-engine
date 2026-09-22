@@ -124,6 +124,25 @@ per-helper result-kind rules for no gain. The measurements and the decision
 are in
 `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
 
+### Statement order on the shader targets
+
+GLSL and WGSL have no let-expression, so a lowering that needs statements — a
+loop-form `Sum` or `Product`, a `Block` used as a value, the statement form of
+a conditional, a lowering that binds an impure operand to a temporary — is
+hoisted into the enclosing statement sink, AHEAD of the whole enclosing
+expression. An operand written EARLIER in that expression therefore runs after
+the hoisted statements where the interpreter runs it first. With constant
+folding off, `(Random(), Σ_{n=1}^{⌊t⌋} Random())` emits the loop and then
+`return vec2(_gpu_rnd_draw(…), _tv1);`, so the first component is the draw
+after the loop's; `(k := 1, Σ_n k·n)` reads `k` before the assignment. This is
+a documented difference of the shader targets (decided 2026-09-21): an
+expression that mixes a hoisting operand with an effect written before it does
+not keep the interpreter's order. A general reordering (bind an earlier operand
+ahead of a hoisting sibling, decided per occurrence at the parent's lowering
+dispatch) was built and withdrawn in 2026-09 after review kept finding compile
+paths it did not cover; it is not planned. Pure expressions, which every corpus
+document has at this position, are unaffected.
+
 ## Complex modes
 
 `strict` preserves real-lane assumptions and declines on an incompatible
@@ -353,10 +372,10 @@ The other two things that can stand in a callback position both broadcast, and
 take a wrapper of the first kind. A bare BUILT-IN operator name
 (`Map(Sin, xs)`) is eta-expanded into a scalar kernel, so an element-wise
 operator is handed out as `_fn_Sin$b`; its
-wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast, because an
-empty operator position evaluates to `Nothing` — `Sin([])` — which a
-real-valued target spells NaN, where applying a function literal to `[]` zips
-zero elements into an empty list. A built-in that consumes its argument whole,
+wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast; a function
+literal takes `_SYS.bcastFn`. The two follow the same element-wise rule,
+empty operand included — a broadcast over a lone empty operand answers the
+empty list (`Sin([])` is `[]`). A built-in that consumes its argument whole,
 such as `Length` or `First`, is not broadcast by the interpreter either and
 keeps the bare name. An INLINE function literal (`Map((x) ↦ 2x, xs)`) takes
 the `_SYS.bcastFn` wrapper a named user function gets; having no name of its

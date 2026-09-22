@@ -502,6 +502,14 @@ describe('the Tycho noise kernel (art/hyvhlz4chj)', () => {
       ['Multiply', ['Subtract', 3, ['Multiply', 2, 'w']], ['Square', 'w']],
       'w'
     );
+    // The parameters are spelled `u`/`v`, not `x`/`y`. The body reads only
+    // the stored values `s_x`, `s_y` and `d_00`…`d_11`, and those were
+    // written against the GLOBAL `x` and `y` — a stored value keeps the
+    // binding it was written against (ruled 2026-09-21), so the interpreter
+    // reads the globals here whatever this function's parameters are called.
+    // Spelled `x`/`y`, the parameters would shadow the values' own names and
+    // the compile fails closed rather than emitting a body that reads the
+    // parameters (`compile-fold-shared-values.test.ts`).
     def(
       'c_2',
       blk(
@@ -511,8 +519,8 @@ describe('the Tycho noise kernel (art/hyvhlz4chj)', () => {
         ],
         ['I', ['I', 'd_00', 'd_10', 'f_x'], ['I', 'd_01', 'd_11', 'f_x'], 'f_y']
       ),
-      'x',
-      'y'
+      'u',
+      'v'
     );
     const ang: MathJsonExpression = [
       'Multiply',

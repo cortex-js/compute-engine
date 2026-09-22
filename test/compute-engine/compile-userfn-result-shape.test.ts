@@ -674,10 +674,9 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
   // through `Number` and answers NaN for `[1, 2]` and `0` for `[]`. The
   // interpreter applies the operator's own broadcast to such an element.
   //
-  // The wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast: an
-  // empty operator position is `Nothing` (`Sin([])` evaluates to `"Nothing"`),
-  // which a real-valued target spells NaN — where a function literal applied
-  // to `[]` zips zero elements into an empty list.
+  // The wrapper dispatches through `_SYS.bcast`, the OPERATOR broadcast. An
+  // empty operator position answers the EMPTY LIST (`Sin([])` evaluates to
+  // `[]`), the same answer a function literal applied to `[]` gives.
 
   test('an element that is a collection is broadcast, not coerced', () => {
     const ce = new ComputeEngine();
@@ -701,17 +700,17 @@ describe('a BUILT-IN operator name referenced as a callback broadcasts', () => {
     expect(interpreted.ops![1].re).toBeCloseTo(Math.sin(2), 12);
   });
 
-  test('an EMPTY element projects to NaN, as the empty operator position does', () => {
+  test('an EMPTY element answers the empty list, as the empty operator position does', () => {
     const ce = new ComputeEngine();
     ce.declare('xs', 'list');
     const r = build(ce, ['Map', 'Sin', 'xs']);
-    expect(r.run({ xs: [[]] })).toEqual([NaN]);
+    expect(r.run({ xs: [[]] })).toEqual([[]]);
     expect(
       ce
         .box(['Sin', ['List']])
         .evaluate()
         .toString()
-    ).toBe('"Nothing"');
+    ).toBe('[]');
   });
 
   test('a SCALAR element is unchanged', () => {

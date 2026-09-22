@@ -17,14 +17,59 @@ Reading a symbol's VALUE during evaluation (`valueDefinitionInContext`,
 `boxed-expression/binders.ts`) walks the scope chain for the innermost binding
 of the name — the compatibility reading: a declaration made in a scope pushed
 after the occurrence was bound, or a re-pushed saved scope, is read, and the
-lazy-collection memo stamps the ambient scope for that reason — with one
-binding skipped: a call frame's parameter activation of a binding OTHER than
-the occurrence's own. A same-named parameter of the function being evaluated
-is not the symbol an outer occurrence denotes, so an expression boxed outside
-a call frame evaluates to the same value inside it, however many times a
-handler re-evaluates it. Ordinary shadowing declarations deliberately keep
-re-pointing earlier-bound occurrences (ruled 2026-08-22): the re-pushed-scope
-reading and the compile fallback runner rely on it.
+lazy-collection memo stamps the ambient scope for that reason — with BINDER
+bindings of a binding other than the occurrence's own skipped. A binder
+binding is a call frame's parameter activation (`markActivation`) or a binder
+operator's variable (`markBinderVariable`): a `Sum` or `Product` index, a
+comprehension or loop index, a `D` or `Integrate` variable. A same-named
+parameter of the function being evaluated is not the symbol an outer
+occurrence denotes, so an expression boxed outside a call frame evaluates to
+the same value inside it, however many times a handler re-evaluates it.
+
+Ruled 2026-09-21 — the LEXICAL reading of a binder: a binder of the CALLER
+never intercepts a read of a global inside the body of the function it calls,
+whether or not the global holds a value. With `w` declared real and valueless
+and `W(x) := [w·x, x]`, `[W(w)[1] for w in [1, 2, 3]]` answers `[w, 2w, 3w]`
+and `Σ_{w=1}^{3} W(w)[1]` answers `6w` — exactly what the spelling
+`[W(k)[1] for k in [1, 2, 3]]` answers. Reading the binder by name gave
+`[1, 4, 9]` and `14`. The same decision stops a binder from capturing a stored
+value's free name: with `a := n + 1`, `Σ_{n=1}^{3} a` is `3n + 3`, not `9`.
+This replaces the compatibility hatch the 2026-08-21 symbol-resolution round
+kept for an ordinary declaration, which a comprehension or `Sum` binder was
+treated as. Two conditions bound the skip. An occurrence with NO binding still
+reads the innermost binding by name, because it denotes nothing in
+particular. And an occurrence whose own binding is itself a binder's variable
+also reads by name: two big operators that use the same index name can be
+evaluated at once (the asynchronous lane suspends one mid-loop), and the
+loop's per-term assignment and the body's read must resolve the name the same
+way.
+
+Ordinary shadowing declarations deliberately keep re-pointing earlier-bound
+occurrences (ruled 2026-08-22): the re-pushed-scope reading and the compile
+fallback runner rely on it. A shield (`markShieldDeclaration`) intercepts for
+the same reason, including a shield that sits on a binder's own variable —
+which is how `D`, `Integrate`, `Limit` and `Solve` hide an assigned value of
+their variable.
+
+A pass that substitutes a binder's current index value into a finished term —
+the leak repair of a big-operator fold (`evaluateBigOpTerm`), the
+capture-by-value of a comprehension element (`comprehensionStream`) — follows
+the same rule: it reaches only the occurrences that DENOTE the index
+(`substituteBinderValues`, `library/utils.ts`). Substituting by name captured
+the globals a stored value refers to.
+
+The COMPILED route honours the same rule: a folded symbol value is emitted
+once as a preamble local outside every emitted function
+(`bindsFoldedValue`/`ensureFoldedValueEmitted`, `compilation/base-compiler.ts`)
+rather than inline where a parameter or an index could rebind its names, and a
+value still written inline — a leaf, an impure value — compiles against the
+preamble owner when the position would capture one of its names
+(`inlineFoldTarget`). The reference analysis descends into such a value the
+same way, so a name the value reads is reported in `freeSymbols`. Two shapes
+still read a local of the same name — a compiled top-level lambda,
+whose preamble has to sit inside the lambda body, and the shader targets,
+which have no place for an untyped value binding. Both are recorded in
+`ROADMAP.md`.
 
 A node that owns a local scope — a comprehension, a sum, a block — pushes that
 scope again on every evaluation. Its parent link is the scope it was

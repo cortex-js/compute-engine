@@ -15,10 +15,13 @@
  * - an impure value (`Random()`): a preamble local is evaluated once per call
  *   of the compiled function, which would stop the re-sampling at each
  *   reference that the interpreter performs;
- * - a fold requested from inside a binder whose bound names differ from the
- *   root's (a `Sum` index): the interpreter resolves a value's free symbols
- *   at the point of use, so `a := n + 1` under `Sum(a, n, 1, 3)` reads the
- *   index, and a preamble local outside the binder could not.
+ * A stored value keeps the binding it was written against (ruled
+ * 2026-09-21), so a binder the fold sits under must NOT rebind one of the
+ * value's names: `a := n + 1` under `Sum(a, n, 1, 3)` reads the global `n`,
+ * which is why the local is written outside the loop. Where no lowering can
+ * put it outside the binder — inside a compiled lambda, whose preamble sits
+ * in the lambda body, and on the shader targets, which have no preamble at
+ * all — the compile DECLINES rather than reading the binder.
  *
  * The constant-folding pre-pass is part of the same story: it saw no
  * `unknowns` in the tower (a symbol with a value is not unknown) and ran an
@@ -60,30 +63,33 @@ function occurrences(s: string, needle: string): number {
 
 describe('COMPILE: folded symbol values are bound once', () => {
   it('a compound value is emitted once as a local and read by name', () => {
+    // The EXPRESSION route: `x` is a free symbol both in the value and in
+    // the compiled expression, so the local reads the same `_.x` the
+    // interpreter reads. Written as the lambda `x ↦ a² + a` this declines —
+    // the lambda's parameter would spell the value's `x` (see the decline
+    // pins below).
     const ce = new ComputeEngine();
     ce.assign('a', ce.parse('3x + 1'));
-    const result = compile(ce.parse('x \\mapsto a^2 + a'), {
-      fallback: false,
-    });
+    const result = compile(ce.parse('a^2 + a'), { fallback: false });
     expect(result.success).toBe(true);
-    expect(result.code).toContain('const _val_a = 3 * x + 1;');
-    expect(occurrences(result.code, '3 * x')).toBe(1);
-    expect((result.run as (x: number) => number)(4)).toBe(13 * 13 + 13);
+    expect(result.preamble).toContain('const _val_a = 3 * _.x + 1;');
+    expect(occurrences(result.preamble ?? '', '3 * _.x')).toBe(1);
+    expect(result.run!({ x: 4 })).toBe(13 * 13 + 13);
   });
 
   it('a value referencing another value emits each level once, dependencies first', () => {
     const ce = towerEngine(3);
-    const result = compile(ce.box(['Function', ['Add', 'f3', 'f2'], 'x']), {
-      fallback: false,
-    });
+    const result = compile(ce.box(['Add', 'f3', 'f2']), { fallback: false });
     expect(result.success).toBe(true);
-    expect(result.code.match(/const _val_f\d/g)).toEqual([
+    expect((result.preamble ?? '').match(/const _val_f\d/g)).toEqual([
       'const _val_f1',
       'const _val_f2',
       'const _val_f3',
     ]);
-    expect(result.code).toMatch(/const _val_f2 = [^;]*_val_f1[^;]*_val_f1;/);
-    expect((result.run as (x: number) => number)(1)).toBe(27 + 9);
+    expect(result.preamble).toMatch(
+      /const _val_f2 = [^;]*_val_f1[^;]*_val_f1;/
+    );
+    expect(result.run!({ x: 1 })).toBe(27 + 9);
   });
 
   it('the expression route reads the value by name and computes it', () => {
@@ -205,51 +211,106 @@ describe('COMPILE: folded symbol values are bound once', () => {
     expect(run!({ x: 1 })).toBe(2 + 2);
   });
 
-  it('a binder that rebinds a root parameter name keeps the value inline', () => {
-    // The lambda binds `n` and so does the Sum: the value `a := n + 1` reads
-    // the Sum index in the interpreter, so it must not be hoisted to the
-    // lambda body where `n` is the parameter.
+  it('a value under a lambda parameter of the same name DECLINES', () => {
+    // The top-level lambda binds `n` and so does the Sum, and the value
+    // `a := n + 1` names `n` too. The preamble of a compiled lambda sits
+    // INSIDE the lambda body (`userFunctions.valueRoot`), which is the one
+    // place a compiled lambda can hold a binding at all: it takes only its
+    // declared parameters, so a free symbol has no channel there. A local
+    // written in that preamble would read the lambda's parameter, where the
+    // interpreter reads the global `n` and answers `3n + 3` — so the compile
+    // fails closed rather than answering 18.
     const ce = new ComputeEngine();
     ce.assign('a', ce.parse('n + 1'));
     const expr = ce.parse('(n) \\mapsto \\sum_{n=1}^{3} a');
-    expect(ce.box(['Apply', expr, 5]).evaluate().re).toBe(9);
-    const result = compile(expr, { fallback: false });
-    expect(result.success).toBe(true);
-    expect(result.code).not.toContain('_val_a');
-    expect((result.run as (n: number) => number)(5)).toBe(9);
+    expect(ce.box(['Apply', expr, 5]).evaluate().toString()).toBe('3n + 3');
+    expect(() => compile(expr, { fallback: false })).toThrow(
+      /mentions `n`.*Fail closed \(D6\)/s
+    );
+    // The public route degrades to the interpreter, whose answer here is the
+    // symbolic `3n + 3` — no number, so `NaN`. It is NOT the 18 the captured
+    // local used to produce.
+    const result = compile(expr);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/mentions `n`/);
+    expect((result.run as (n: number) => number)(5)).toBeNaN();
   });
 
-  it('a value read inside a user function binds at the root only when it mentions no parameter', () => {
-    const engine = () => {
-      const ce = new ComputeEngine();
-      ce.assign('a', ce.parse('3t + 1'));
-      ce.assign('g', ce.parse('(t) \\mapsto t + a'));
-      return ce;
-    };
-    // Inside the emitted `_fn_g`, `a` is folded inline and reads g's own `t`
-    // (2 → a = 7, g(2) = 9), as it did before values were bound; at the root
-    // it reads the free `t` through the bound local. (The interpreter reads
-    // the GLOBAL `t` inside `g` — symbol-value resolution skips a foreign
-    // call-frame activation — so it answers 10 here; that compiled-vs-
-    // interpreted divergence predates value binding and is recorded in
-    // ROADMAP.md under "Compiling a DAG-shared symbol value".)
-    const ce = engine();
+  it('a lambda whose own parameter shadows a name of the value DECLINES', () => {
+    // Same shape with no binder inside the body: the lambda's parameter `t`
+    // is the only thing that spells `t`, and the value `a := 3t + 1` was
+    // written against the global one. `Apply(expr, 5)` is `3t + 6` in the
+    // interpreter — a symbolic answer in that global `t`, which a compiled
+    // lambda of one parameter cannot express at all.
+    const ce = new ComputeEngine();
+    ce.assign('a', ce.parse('3t + 1'));
+    const expr = ce.parse('(t) \\mapsto t + a');
+    expect(ce.box(['Apply', expr, 5]).evaluate().toString()).toBe('3t + 6');
+    expect(() => compile(expr, { fallback: false })).toThrow(/mentions `t`/);
+  });
+
+  it('a shader target DECLINES the value its emitted function would capture', () => {
+    // The shader targets declare statically typed functions and have no
+    // place for an untyped preamble local, so the value is folded INLINE —
+    // inside `_fn_g`, whose parameter is spelled `t` too. A free symbol is a
+    // bare uniform identifier there, so resolving the value's names outside
+    // the function does not help: the spliced text reads the parameter.
+    // `float _fn_g(float t) { return (3.0 * t + 1.0) + t; }` answered `7` for
+    // `g(2)` where the interpreter answers `3t + 3`.
+    const ce = new ComputeEngine();
+    ce.assign('a', ce.parse('3t + 1'));
+    ce.assign('g', ce.parse('(t) \\mapsto t + a'));
+    expect(ce.parse('g(2)').evaluate().toString()).toBe('3t + 3');
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(() => compile(ce.parse('g(2)'), { to, fallback: false })).toThrow(
+        /mentions `t`.*Fail closed \(D6\)/s
+      );
+      // The public route answers through the interpreter: `3t + 3` at
+      // `t = 1` is 6, where the captured shader code answered 7.
+      const result = compile(ce.parse('g(2)'), { to });
+      expect(result.success).toBe(false);
+      expect(result.run!({ t: 1 })).toBe(6);
+    }
+    // The JavaScript target has the preamble, so it still compiles — the
+    // value binds OUTSIDE `_fn_g` and both routes agree.
+    const js = ce._getCompilationTarget('javascript')!;
+    expect(js.compile(ce.parse('g(2)')).preamble).toContain(
+      'const _val_a = 3 * _.t + 1;'
+    );
+  });
+
+  it('a value read inside an emitted user function binds outside it', () => {
+    // Ruled 2026-09-21: a stored symbol value keeps the binding it was
+    // written against. The `t` of `a := 3t + 1` is the global `t`, so the
+    // value binds in the preamble — outside `_fn_g`, whose parameter is also
+    // spelled `t` — and both routes answer the same. Folding the value
+    // INLINE in the body of `_fn_g` read the parameter instead and made
+    // `g(2)` answer 9 where the interpreter answers `3t + 3`.
+    const ce = new ComputeEngine();
+    ce.assign('a', ce.parse('3t + 1'));
+    ce.assign('g', ce.parse('(t) \\mapsto t + a'));
+    expect(ce.parse('g(2) + a').evaluate().toString()).toBe('6t + 4');
     const js = ce._getCompilationTarget('javascript')!;
     const { preamble, run } = js.compile(ce.parse('g(2) + a'));
-    expect(preamble).toContain('const _fn_g = (t) => (3 * t + 1) + t;');
     expect(preamble).toContain('const _val_a = 3 * _.t + 1;');
-    expect(run!({ t: 1 })).toBe(13);
+    expect(preamble).toContain('const _fn_g = (t) => _val_a + t;');
+    // 6t + 4 at t = 1.
+    expect(run!({ t: 1 })).toBe(10);
   });
 
-  it('a fold under a Sum index keeps the interpreter capture (inline)', () => {
+  it('a value under a Sum index of the same name binds outside the loop', () => {
+    // Same decision as above, with a binder in place of a parameter: the `n`
+    // of `a := n + 1` is the global one, so `Σ_{n=1}^{3} a` is `3n + 3` in
+    // both routes. Substituting the index by name gave `2 + 3 + 4 = 9`.
     const ce = new ComputeEngine();
     ce.assign('a', ce.parse('n + 1'));
     const expr = ce.parse('\\sum_{n=1}^{3} a');
-    expect(expr.evaluate().re).toBe(9);
+    expect(expr.evaluate().toString()).toBe('3n + 3');
     const result = compile(expr);
     expect(result.success).toBe(true);
-    expect(result.code).not.toContain('_val_a');
-    expect(result.run!({})).toBe(9);
+    expect(result.preamble).toContain('const _val_a = _.n + 1;');
+    expect(result.freeSymbols).toContain('n');
+    expect(result.run!({ n: 2 })).toBe(9);
   });
 
   it('a value read from inside an emitted user function binds at the root, once', () => {

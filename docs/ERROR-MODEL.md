@@ -355,6 +355,50 @@ interactions follow `docs/COLLECTIONS-MODEL.md` and
 `docs/BROADCAST-MODEL.md`. **`Nothing` splices** (statistics skip it;
 `Missing`/`NaN` propagate).
 
+**`Undefined` in a numeric slot takes the same route as `Missing`** (ruled
+2026-09-21). The `Undefined` symbol names a value that does not exist. When
+it reaches a numeric slot of an operator whose missing behavior is
+`propagate`, the absence gate normalizes it to the codomain's marker exactly
+as it normalizes `Missing`: `Cos(Undefined)` is `NaN` under `evaluate()` and
+under `.N()`, `Undefined + 1` is `NaN`, and an `Undefined` cell of a list
+under a broadcast head is `NaN` at that position. This closes the gap with
+the compiled lanes, which already answered `NaN` for the same input, and with
+the `Add` fold, which already read `Undefined` as `NaN`. Outside a numeric
+slot `Undefined` is unchanged: its declared type is still `unknown`, it is not
+an absence for the operators that own their absence semantics
+(`missingBehavior: 'handle'` — the statistics reducers, `Coalesce`,
+`IsMissing`, which all still read it as an ordinary value), and a bare
+`Undefined` still evaluates to itself. The one predicate the numeric gate and
+its async twin share is `isAbsentScalarSymbol`
+(`src/compute-engine/boxed-expression/validate.ts`).
+
+**A comparison of two COLLECTIONS asks about the collections as a whole, and
+one element pair with no answer leaves that whole question unanswered** (user
+ruling of 2026-09-21). `Equal` and `NotEqual` then answer the marker of this
+section — `Missing` in the interpreter, `NaN` in compiled code — and never a
+confident truth. An absent cell (`Missing` or `Undefined`) on either side is
+what makes a pair undecided: the cell can stand for any value, so no walk of
+the cells that ARE there can tell whether the two collections hold the same
+values. The rule holds even when another pair is decidedly unequal:
+`Equal([1, Missing, 3], [2, Missing, 3])` answers `Missing`, not `False`, and
+the compiled kernel answers `NaN`, not `false`. `NotEqual` answers the same
+marker, because a question with no answer has no answer under negation
+either. Three shapes stay decided: a length mismatch is `False`, since no
+value an absent cell could hold makes 2 elements equal 3; a cell pair of
+different shape — a nested list against a scalar — is `False` whatever the
+cells hold; and a pair left undecided by FREE VARIABLES is not absence, so
+`Equal([x], [y])` stays inert, exactly as the scalar `x = y` does, which keeps
+a list equation usable as an equation. This is the whole-collection shape
+only: the element-wise shape, a collection against a scalar
+(`Equal([1, Missing], 1)`), still marks exactly the absent POSITIONS and
+answers `[True, Missing]`. Branching on the marker takes no arm, not the else
+arm and not the absent-condition error, because the marker reports an
+undecided COMPARISON, not absent condition data:
+`Which(Equal([1, Missing], [1, Missing]), 1, True, 0)` answers `Missing`, and
+the compiled kernel answers `NaN`, the same answer a condition resting on a
+`NaN` operand already gives. The marker passes through `Not`, `And` and `Or`
+by the ordinary Kleene table, so a settling sibling still decides the branch.
+
 Because errors absorb *before* ordinary handlers run, an ordinary
 operator handler never receives an error operand and needs no error
 tests — laziness does not change that, since a lazy handler that demands

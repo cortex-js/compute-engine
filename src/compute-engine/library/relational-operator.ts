@@ -19,6 +19,7 @@ import {
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { eq, eqIdentical } from '../boxed-expression/compare.js';
+import { holdsDoubles } from '../boxed-expression/machine-broadcast.js';
 import {
   isNumber,
   isFunction,
@@ -53,6 +54,7 @@ import {
   getExpressionDimension,
   getExpressionScale,
 } from './unit-data.js';
+import { isAbsentScalarSymbol } from '../boxed-expression/validate.js';
 
 /**
  * Compare two Quantity expressions.
@@ -471,6 +473,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       }
       if (undecidedCollectionComparison(ops))
         return inertRelation(ce, 'Equal', rawOps, ops);
+      // One element pair with no answer makes the WHOLE comparison undecided
+      // (user ruling of 2026-09-21): see `absentCollectionComparison`. The
+      // answer is the absent marker `Missing`, which compiled code spells
+      // `NaN`.
+      if (absentCollectionComparison(ops)) return ce.Missing;
       // Absence semantics (§3.D, amended 2026-07-24): once broadcast has had
       // its chance (so a list-vs-scalar operand comparison is per-cell), a
       // SCALAR `Missing` operand makes the comparison `Missing` (Kleene), while
@@ -728,6 +735,11 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       }
       if (undecidedCollectionComparison(ops))
         return inertRelation(ce, 'NotEqual', rawOps, ops);
+      // The same undecided marker as `Equal`, never its negation (user ruling
+      // of 2026-09-21): a comparison with no answer has no answer under
+      // negation either, so `NotEqual` must not report a confident `True`
+      // where `Equal` could not report `False`.
+      if (absentCollectionComparison(ops)) return ce.Missing;
       // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`
       // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
       // = True`). `Missing` wins over `NaN`; a numeric-domain slot's `Missing`
@@ -1497,6 +1509,92 @@ function broadcastableComparisonOperands(
           op.type.matches('collection<any>'))
     ).length < 2
   );
+}
+
+/**
+ * Does the element recursion of a whole-collection comparison of `a` against
+ * `b` meet a pair that has NO answer?
+ *
+ * One undecided element pair makes the whole comparison undecided (user
+ * ruling of 2026-09-21). An absent cell can stand for any value, so no walk
+ * of the cells that ARE there can tell whether the two collections hold the
+ * same values. The rule holds even when another pair is decidedly unequal:
+ * `Equal([1, Missing, 3], [2, Missing, 3])` answers the absent marker, not
+ * `False`, because equality asks about the two collections as a whole and
+ * that question still has no answer. `NotEqual` answers the same marker, so
+ * neither operator ever reports a confident truth it cannot support. The
+ * marker is `Missing` here and `NaN` in compiled code, where `eqTensor`
+ * (`compilation/javascript-target.ts`) applies the same fold.
+ *
+ * Three shapes stay DECIDED, and the walk declines each of them:
+ * - a length mismatch (`ca !== cb`): no value in an absent cell can make 2
+ *   elements equal 3, so the comparison is `False` as it always was;
+ * - a cell pair of different SHAPE (a nested list against a scalar), which
+ *   the comparison decides `False` whatever the cells hold;
+ * - a pair left undecided by FREE VARIABLES (`Equal([x], [y])`): that is not
+ *   absence. The comparison stays INERT, exactly as the scalar `x = y` does,
+ *   which keeps a list equation usable as an equation.
+ *
+ * Two `List` nodes of machine doubles cannot hold an absent cell, so they
+ * skip the walk (`holdsDoubles` memoizes its answer per list, and it reads
+ * the OPERANDS of the node, which is why the `List` head is required: the
+ * operands of a `Range` or a `Map` are its bounds or its callback, not its
+ * elements). Text is skipped for the same reason: a character is never
+ * absent.
+ */
+function undecidedElementPair(a: Expression, b: Expression): boolean {
+  if (isAbsentScalarSymbol(a) || isAbsentScalarSymbol(b)) return true;
+  if (!a.isCollection || !b.isCollection) return false;
+  if (isTextAtom(a) || isTextAtom(b)) return false;
+  if (
+    isFunction(a, 'List') &&
+    isFunction(b, 'List') &&
+    holdsDoubles(a) &&
+    holdsDoubles(b)
+  )
+    return false;
+  const ca = a.count;
+  const cb = b.count;
+  if (ca === undefined || cb === undefined || ca !== cb) return false;
+  if (!Number.isFinite(ca)) return false;
+  if (a.isIndexedCollection && b.isIndexedCollection) {
+    const itB = b.each();
+    for (const xa of a.each()) {
+      const xb = itB.next();
+      if (xb.done) return false;
+      if (undecidedElementPair(xa, xb.value)) return true;
+    }
+    return false;
+  }
+  // Unordered (set-like) collections are compared by membership, not by
+  // position, so there is no element PAIR to test: an absent element on
+  // either side leaves every membership question about it unanswered.
+  for (const x of a.each()) if (isAbsentScalarSymbol(x)) return true;
+  for (const x of b.each()) if (isAbsentScalarSymbol(x)) return true;
+  return false;
+}
+
+/**
+ * Is a whole-collection `Equal`/`NotEqual` over these EVALUATED operands
+ * undecided because its element recursion meets a pair with no answer?
+ *
+ * Only the whole-collection shape is concerned — two or more collection
+ * operands. The ELEMENT-WISE shape (a collection against a scalar, such as
+ * `Equal([1, Missing], 1)`) has already broadcast by the time this is asked,
+ * and it marks exactly the absent POSITIONS, which is a different and
+ * unchanged answer. Adjacent operands are paired the way the handlers'
+ * own loops pair them, so a chain (`a = b = c`) is undecided as soon as one
+ * of its adjacent pairs is.
+ */
+function absentCollectionComparison(ops: ReadonlyArray<Expression>): boolean {
+  if (ops.filter((op) => op.isCollection).length < 2) return false;
+  for (let i = 1; i < ops.length; i++) {
+    const a = ops[i - 1];
+    const b = ops[i];
+    if (a.isCollection && b.isCollection && undecidedElementPair(a, b))
+      return true;
+  }
+  return false;
 }
 
 /**

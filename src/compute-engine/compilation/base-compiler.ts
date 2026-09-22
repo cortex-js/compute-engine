@@ -51,6 +51,7 @@ import {
   isNumericTuple,
   isPointListValue,
   isPossiblyCollectionTyped,
+  isTextAtom,
   isTuple,
   isTupleShapedType,
 } from '../collection-utils.js';
@@ -4749,10 +4750,7 @@ export class BaseCompiler {
   /**
    * Every symbol name `expr` mentions, once every assigned symbol value it
    * reaches is looked through — free names AND value-carrying names, at any
-   * depth. The interpreter resolves a value's symbols at the point of use, so
-   * a value mentioning a name that some enclosing binder rebinds (a `Sum`
-   * index, a function parameter) reads the binder's variable there; this set
-   * is what a caller intersects with the bound names to find out.
+   * depth.
    *
    * Linear in the DISTINCT nodes reached (memoized by identity for the
    * compilation); a value that refers to itself contributes nothing on
@@ -4789,6 +4787,114 @@ export class BaseCompiler {
     visit(expr);
     memo.set(expr, out);
     return out;
+  }
+
+  /**
+   * Would folding `value` at a position that binds `bound`, in a preamble
+   * owner that binds `ownerBound`, let one of the position's own names
+   * capture a name of the value?
+   *
+   * A stored symbol value keeps the binding it was written against (ruled
+   * 2026-09-21), so a name the value mentions denotes what it denotes in the
+   * owner's environment. A name the POSITION binds and the owner does not is
+   * therefore a capture: `a := t` met inside the emitted body of
+   * `g := t ↦ t + a` would read the parameter, where the interpreter reads
+   * the global and answers `t + 2` for `g(2)`.
+   */
+  private static foldValueCaptured(
+    value: Expression,
+    bound: ReadonlySet<string> | undefined,
+    ownerBound: ReadonlySet<string> | undefined
+  ): boolean {
+    if (bound === undefined || bound.size === 0) return false;
+    if (bound === ownerBound) return false;
+    const mentions = BaseCompiler.foldValueMentions(value);
+    for (const name of bound)
+      if (mentions.has(name) && ownerBound?.has(name) !== true) return true;
+    return false;
+  }
+
+  /**
+   * The target an INLINE fold of `value` compiles against.
+   *
+   * Normally the requesting target: the folded code is spliced at the
+   * requesting position, so that position's `vars` mapping, shape frame and
+   * value facts are the ones that apply to it.
+   *
+   * When the position would CAPTURE a name of the value
+   * (`foldValueCaptured`), the value compiles against the target that owns
+   * the preamble instead — the environment the interpreter reads it in. The
+   * code is still spliced inline, so an impure value is still evaluated once
+   * per reference; only the names resolve elsewhere. Ruled 2026-09-21.
+   */
+  private static inlineFoldTarget(
+    target: CompileTarget<Expression>,
+    value: Expression
+  ): CompileTarget<Expression> {
+    const registry = target.userFunctions;
+    const owner = registry?.valueRoot ?? registry?.root;
+    if (owner === undefined || owner === target) return target;
+    return BaseCompiler.foldValueCaptured(value, target.boundVars, owner.boundVars)
+      ? owner
+      : target;
+  }
+
+  /**
+   * Can an INLINE fold keep the value's names resolving in the preamble
+   * owner's scope, although the code is spliced inside the requesting
+   * position's binder (`inlineFoldTarget`)?
+   *
+   * Only on a target that reads a free symbol off a vars object (`_.n` on the
+   * JavaScript family, `CompileTarget.varsObjectName`). That spelling is not
+   * an identifier an emitted parameter or loop variable can shadow, so the
+   * spliced text keeps meaning what it meant at the owner. Where a free
+   * symbol is a BARE identifier — the shader targets, which read it as a
+   * uniform — the spliced text is read again inside the binder and denotes
+   * the binder, so resolving it elsewhere changes nothing.
+   */
+  private static inlineFoldKeepsOwnerScope(
+    target: CompileTarget<Expression>,
+    owner: CompileTarget<Expression> | undefined
+  ): boolean {
+    return (
+      owner !== undefined &&
+      owner !== target &&
+      target.varsObjectName !== undefined
+    );
+  }
+
+  /**
+   * The name a fold of `value` requested from `target` would CAPTURE — a name
+   * the value mentions that a parameter or binder binds in the scope where
+   * the value is written — or `undefined` when nothing is captured.
+   *
+   * `binds` says whether the emitter holds the value as a preamble local
+   * (`bindsFoldedValue`). A bound value is written once in the scope of the
+   * target that owns the preamble; an inline fold is spliced at the
+   * requesting position, and keeps the owner's name resolution only where
+   * `inlineFoldKeepsOwnerScope` allows it.
+   *
+   * A captured name has no compiled answer. The value denotes what it
+   * denotes where it was written (ruled 2026-09-21), and the scope it is
+   * emitted into gives that spelling another meaning, so the caller fails
+   * closed instead of answering the binder's value.
+   */
+  private static foldCapturedName(
+    target: CompileTarget<Expression>,
+    value: Expression,
+    binds: boolean
+  ): string | undefined {
+    const registry = target.userFunctions;
+    const owner = registry?.valueRoot ?? registry?.root;
+    const scope =
+      binds || BaseCompiler.inlineFoldKeepsOwnerScope(target, owner)
+        ? (owner ?? target)
+        : target;
+    const bound = scope.boundVars;
+    if (bound === undefined || bound.size === 0) return undefined;
+    const mentions = BaseCompiler.foldValueMentions(value);
+    for (const name of bound) if (mentions.has(name)) return name;
+    return undefined;
   }
 
   /**
@@ -16846,6 +16952,41 @@ export class BaseCompiler {
       return BaseCompiler.connectiveNode(cond, h, canBind, target);
     if (!BaseCompiler.BRANCH_RELATIONS.has(h))
       return { negate: false, test: { kind: 'value', expr: cond } };
+    // An `Equal`/`NotEqual` over an operand that may be a COLLECTION at run
+    // time is the one relation whose compiled value is not a genuine boolean.
+    // It lowers to the runtime dispatch (`_SYS.eq`/`_SYS.neq` in the
+    // JavaScript target), and one element pair with no answer makes that
+    // value the numeric absence marker instead of `true`/`false` (user ruling
+    // of 2026-09-21). Decidedness must therefore be read off the condition's
+    // own VALUE: the NaN test the other relations use reads an array operand
+    // as decided and the marker is a falsy value, so the branch silently took
+    // the else arm.
+    //
+    // The classification is the target's own (`collectionEqualityOperand`),
+    // so it matches the operands its emitter sends to that dispatch — one
+    // operand is enough, and an opaque top-typed application or a
+    // scalar-or-list union counts. A target that declares none keeps the
+    // conservative rule: every operand statically collection-typed. Reading
+    // an ordinary SCALAR comparison off its value would be wrong in the other
+    // direction: a NaN operand compares to a plain `false`, which the value
+    // test would take as a decided answer.
+    //
+    // A TEXT operand is excluded. A string is a collection of its characters
+    // in the lattice, but a string comparison lowers to the content-equality
+    // helper, whose answer is a genuine boolean.
+    const collectionEqualityOperand = target?.collectionEqualityOperand;
+    if (
+      (h === 'Equal' || h === 'NotEqual') &&
+      cond.nops === 2 &&
+      (collectionEqualityOperand !== undefined
+        ? cond.ops.some(
+            (op) => !isTextAtom(op) && collectionEqualityOperand(op)
+          )
+        : cond.ops.every(
+            (op) => !isTextAtom(op) && op.type.matches('collection<any>')
+          ))
+    )
+      return { negate: false, test: { kind: 'value', expr: cond } };
     // The operands are named again inside the test. An operand with effects
     // is therefore bound to a name first and evaluated once
     // (`withConditionOperands` for a lone relation, `kleeneRelationLeaf`
@@ -18613,7 +18754,16 @@ export class BaseCompiler {
     // capture set (see `CompileTarget.symbolDeps`). Nested symbols inside the
     // value are recorded by the recursive compile below.
     target.symbolDeps?.add(id);
-    if (BaseCompiler.bindsFoldedValue(target, target.boundVars, value))
+    const binds = BaseCompiler.bindsFoldedValue(target, value);
+    // A name the value mentions that is bound where the value would be
+    // written denotes the binder there, not what it denoted when the value
+    // was stored. No lowering on this target can move the value out of that
+    // binder, so the compile fails closed rather than answering the binder's
+    // value (see `foldCapturedName`).
+    const captured = BaseCompiler.foldCapturedName(target, value, binds);
+    if (captured !== undefined)
+      throw new Error(BaseCompiler.foldCaptureRefusal(id, captured));
+    if (binds)
       return BaseCompiler.ensureFoldedValueEmitted(id, value, target);
     // The inline fold of a value that mentions its own symbol (`a := a + 1`,
     // storable in raw form) would recurse without end. Refuse it the same way
@@ -18625,7 +18775,7 @@ export class BaseCompiler {
     try {
       return BaseCompiler.compile(
         value,
-        target,
+        BaseCompiler.inlineFoldTarget(target, value),
         BaseCompiler.FOLD_OPERAND_PREC
       );
     } finally {
@@ -18635,6 +18785,20 @@ export class BaseCompiler {
 
   /** Symbols whose value `tryFoldKnownSymbol` is currently folding INLINE. */
   private static readonly _inlineFoldInProgress = new Set<string>();
+
+  /**
+   * The fail-closed message for a value whose name `name` would be captured
+   * by a binder of the position the value is emitted into.
+   */
+  private static foldCaptureRefusal(id: string, name: string): string {
+    return (
+      `${id}: the value assigned to this symbol mentions \`${name}\`, which ` +
+      `a parameter or index binds where the value would be emitted, and ` +
+      `this target cannot place the value outside that binder. The value ` +
+      `would read the binder instead of the \`${name}\` it was written ` +
+      `against. Fail closed (D6).`
+    );
+  }
 
   /** The fail-closed message for a value that refers to its own symbol. */
   private static selfReferenceRefusal(id: string): string {
@@ -18667,24 +18831,20 @@ export class BaseCompiler {
    * caller-supplied functions, which may keep or mutate an array they are
    * handed (see the gate below).
    *
-   * And the binding must not change what the value's names denote. The
-   * interpreter resolves a value's symbols at the point of use: inside a
-   * `Sum` whose index `n` shadows a global `n`, the value `a := n + 1` reads
-   * the index. A preamble local is evaluated once, in the scope of the
-   * target that owns the preamble (`userFunctions.valueRoot`, else `root`).
-   * When the requesting position binds exactly that owner's names — the
-   * SAME set object, which is how an unchanged binding environment is
-   * inherited through the compiler's target spreads — every name resolves
-   * identically in both places and the value binds. Any other binding
-   * environment (a binder inside the expression, an emitted definition's
-   * parameters) may rebind a name the value mentions, possibly under the
-   * owner's own spelling (`(n) ↦ Sum(a, n, 1, 3)` rebinds the root's `n`),
-   * so the value binds only if it mentions NONE of that environment's bound
-   * names (`foldValueMentions`, transitive through assigned values).
+   * The names the requesting position binds do NOT hold the value back.
+   * Ruled 2026-09-21: a stored symbol value keeps the binding it was written
+   * against, so no parameter of an emitted function and no binder index the
+   * value sits under may rebind one of its names. The value is emitted once
+   * in the scope of the target that owns the preamble
+   * (`userFunctions.valueRoot`, else `root`), which is exactly the
+   * environment the interpreter reads it in. With `a := 3t + 1` and
+   * `g := t ↦ t + a`, `g(2)` answers `3t + 3` for the global `t`; folding
+   * the value inline in the body of the emitted `_fn_g` let the parameter
+   * `t` capture it and answered `9`. The same decision makes
+   * `Sum(a, n, 1, 3)` with `a := n + 1` read the global `n` in both routes.
    */
   private static bindsFoldedValue(
     target: CompileTarget<Expression>,
-    bound: ReadonlySet<string> | undefined,
     value: Expression
   ): boolean {
     const registry = target.userFunctions;
@@ -18701,12 +18861,6 @@ export class BaseCompiler {
       isSubtype(value.type.type, COLLECTION_SHAPE_TYPE)
     )
       return false;
-    const ownerBound = (registry.valueRoot ?? registry.root)?.boundVars;
-    if (bound === ownerBound) return true;
-    if ((bound?.size ?? 0) === 0 && (ownerBound?.size ?? 0) === 0) return true;
-    if (bound === undefined) return true;
-    const mentions = BaseCompiler.foldValueMentions(value);
-    for (const name of bound) if (mentions.has(name)) return false;
     return true;
   }
 
@@ -18813,11 +18967,11 @@ export class BaseCompiler {
    * the position where it is met counts as one node — the name read — and
    * its value is charged ONCE per symbol, the first time, since the preamble
    * holds a single copy per symbol (two symbols assigned the same value
-   * object are two locals). Whether a value binds depends on the names bound
-   * at the position (a binder inside the value — a `Sum` index, a function
-   * literal's parameters — can force a nested reference inline), so the walk
-   * carries the bound names down through binder nodes exactly as the emitter
-   * does, and memoizes per (bound-name set, node).
+   * object are two locals). The walk still carries the bound names down
+   * through binder nodes and memoizes per (bound-name set, node), because a
+   * BOUND name is a run-time variable rather than a fold and costs one node
+   * wherever it is met; since 2026-09-21 the bind decision itself no longer
+   * depends on them (`bindsFoldedValue`).
    */
   private static expandedFoldSize(
     engine: ComputeEngine,
@@ -18867,7 +19021,7 @@ export class BaseCompiler {
         if (bound?.has(s) !== true && target.varsKeys?.has(s) !== true) {
           const v = engine._getSymbolValue(s);
           if (v !== undefined) {
-            if (BaseCompiler.bindsFoldedValue(target, bound, v)) {
+            if (BaseCompiler.bindsFoldedValue(target, v)) {
               if (!boundOnce.has(s)) {
                 boundOnce.add(s);
                 // The bound value compiles in the preamble owner's scope.
@@ -18973,7 +19127,7 @@ export class BaseCompiler {
     // On a target that binds each folded value once, the count IS the
     // program's size; on the others a shared sub-value is written out once
     // per reference path, which is what inflates it.
-    const why = BaseCompiler.bindsFoldedValue(target, target.boundVars, value)
+    const why = BaseCompiler.bindsFoldedValue(target, value)
       ? `even with every shared sub-value bound once as a preamble local`
       : `Generated source is text on this target, so a sub-value shared by ` +
         `several references is written out once per reference path`;
@@ -22588,13 +22742,11 @@ export class BaseCompiler {
    * `nParams` arguments is an array, and takes the `helper` route otherwise:
    * `(_tv1) => Array.isArray(_tv1) ? _SYS.<helper>(callee, _tv1) : callee(_tv1)`.
    *
-   * `helper` selects what the wrapper does with an array argument. The two
-   * broadcasting forms disagree about an EMPTY position: `bcastFn` is the
-   * user-function form: it zips zero elements into an empty list, which is
-   * what applying a function literal to `[]` answers in the interpreter.
-   * `bcast` is the OPERATOR form: an empty operator position answers
-   * `Nothing`, which the real-valued targets spell NaN (`Sin([])` evaluates to
-   * `Nothing`). Both recurse into nested arrays. `refuse` is the third form:
+   * `helper` selects what the wrapper does with an array argument. `bcastFn`
+   * is the user-function form and `bcast` the OPERATOR form; both follow the
+   * same element-wise rule, empty position included — an empty operand
+   * answers the empty list, as it does in the interpreter (`Sin([])` is
+   * `[]`). Both recurse into nested arrays. `refuse` is the third form:
    * it broadcasts nothing and projects the array to NaN, because a callee
    * whose parameters are definite scalars answers an error rather than a
    * collection there (`userFunctionRefusesCollectionArg`), and NaN is how the
@@ -23171,9 +23323,8 @@ export class BaseCompiler {
    * `Sin([1, 2])` is `[sin 1, sin 2]`.
    *
    * The runtime helper is `_SYS.bcast`, the OPERATOR broadcast, not the
-   * `_SYS.bcastFn` a user function gets: an empty operator position evaluates
-   * to `Nothing` (`Sin([])` is `Nothing`, spelled NaN on a real-valued
-   * target), where applying a function literal to `[]` answers the empty list.
+   * `_SYS.bcastFn` a user function gets. The two answer alike today; the
+   * names stay apart so the emitter keeps saying which form it lowers.
    *
    * Only an element-wise operator is wrapped. A built-in that consumes its
    * argument WHOLE — `Length`, `Sum`, `Min` over a list — is not broadcast by
@@ -24633,6 +24784,16 @@ export class BaseCompiler {
     const unsupported = new Set<string>();
     // Guard against a symbol whose value (transitively) references itself.
     const foldedSeen = new Set<string>();
+    // The names in scope where a BOUND folded value is emitted: none, except
+    // on the `Function`-literal route, where the preamble sits inside the
+    // lambda body and the lambda's own parameters are visible there
+    // (`userFunctions.valueRoot`). Mirrors the emitter so the analysis and
+    // the generated code agree about which names are external inputs.
+    const valueBound: ReadonlySet<string> = new Set(
+      isFunction(expr, 'Function')
+        ? functionLiteralBoundNames(expr.ops.slice(1))
+        : []
+    );
     // Guard against a (mutually) recursive user-defined function body.
     const userFnSeen = new Set<string>();
 
@@ -24819,6 +24980,19 @@ export class BaseCompiler {
         if (value !== undefined) {
           if (!foldedSeen.has(s)) {
             foldedSeen.add(s);
+            // A value the emitter BINDS as a preamble local is written
+            // outside every enclosing parameter and index, so its names are
+            // read there and a name an enclosing binder happens to spell is
+            // still an external input (ruled 2026-09-21; see
+            // `bindsFoldedValue`). With `a := 3t + 1` and `g := t ↦ t + a`,
+            // compiling `g(2)` emits `const _val_a = 3 * _.t + 1`, so `t` is
+            // an input the caller must supply. A value folded INLINE keeps
+            // the enclosing names, which is where it is written.
+            const inner =
+              BaseCompiler.bindsFoldedValue(target, value) ||
+              BaseCompiler.foldValueCaptured(value, bound, valueBound)
+                ? valueBound
+                : bound;
             // Sized with sharing, as the fold guard sizes it, so the check
             // itself stays linear in the value's distinct nodes.
             const oversized =
@@ -24827,7 +25001,7 @@ export class BaseCompiler {
                 BaseCompiler.MAX_FOLD_EXPANDED_NODES;
             if (oversized) oversizedValueDepth++;
             try {
-              visit(value, bound);
+              visit(value, inner);
             } finally {
               if (oversized) oversizedValueDepth--;
             }

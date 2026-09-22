@@ -760,7 +760,8 @@ export function nonNumericOperandError(
  * running its handler (`docs/ERROR-MODEL.md` §3: in a numeric slot `Missing`
  * is normalized to `NaN` at the boundary).
  *
- * The absence has to be the `Missing` symbol: a `NaN` operand already
+ * The absence has to be an absence SYMBOL — `Missing` or `Undefined`, the two
+ * names {@link isAbsentScalarSymbol} accepts. A `NaN` operand already
  * propagates through numeric evaluation natively, and some operators give a
  * literal `NaN` operand a bespoke meaning.
  *
@@ -782,9 +783,33 @@ export function hasAbsentScalarOperand(
   ops: ReadonlyArray<Expression>
 ): boolean {
   return (
-    ops.some((x) => isSymbol(x, 'Missing')) &&
+    ops.some(isAbsentScalarSymbol) &&
     !ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
   );
+}
+
+/**
+ * Is this operand one of the two symbols that stand for an absent scalar in a
+ * numeric slot — `Missing` or `Undefined`?
+ *
+ * `Missing` is the position-preserving absent datum of
+ * `docs/ERROR-MODEL.md` §1. `Undefined` is the symbol the engine writes for a
+ * value that does not exist, and a user can write it directly. The two names
+ * take the same route through the numeric absence gate, so `Cos(Undefined)`
+ * answers `NaN` exactly as `Cos(Missing)` does (user ruling of 2026-09-21).
+ * Before that ruling only `Missing` was recognized here, and an `Undefined`
+ * operand stayed symbolic (`cos("Undefined")`) while the compiled lanes
+ * already answered `NaN` for the same row.
+ *
+ * The scope is the numeric absence gate alone. `Undefined` keeps its own
+ * meaning everywhere else: its declared type is still `unknown`, it is not an
+ * absence for {@link isAbsentValue} (`boxed-expression/type-guards.ts`), and
+ * the operators that OWN their absence semantics — the ones declared
+ * `missingBehavior: 'handle'`, such as the statistics reducers and `Coalesce`
+ * — never consult this predicate.
+ */
+export function isAbsentScalarSymbol(x: Expression): boolean {
+  return isSymbol(x, 'Missing') || isSymbol(x, 'Undefined');
 }
 
 /**

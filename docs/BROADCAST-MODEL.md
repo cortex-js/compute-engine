@@ -4,6 +4,8 @@
 2026-07-27 attempt to pull `PointList` into the strict regime, which was
 reverted the same day). The lifted-operator half shipped with the element-wise
 rounds of 2026-07-24/26 (see `CHANGELOG.md` under 0.97 "Breaking Changes").
+The lone-empty operand answers the EMPTY LIST since the user ruling of
+2026-09-21 (it answered the erasure marker `Nothing` before that date).
 
 ## The rule
 
@@ -38,8 +40,15 @@ Corollary rules for the strict regime:
   nothing to compare until it resolves. (Residue: the lazy variadic `Map`
   that then zips those uses shortest-input semantics, so a late-resolving
   mismatch can still truncate; see ROADMAP "Broadcast semantics residue".)
-- An **empty** operand alongside a non-empty one is a mismatch; a lone empty
-  operand broadcasts to `Nothing` (`Not([])`).
+- A lone **empty** operand broadcasts to the EMPTY LIST: `Not([])`, `Sin([])`,
+  `-[]`, `|[]|`, `[] < 3`, `2·[]` and `[] + 1` all evaluate to `[]`, under
+  `evaluate()` and under `.N()` alike (ruled 2026-09-21; the answer used to be
+  the erasure marker `Nothing` for the unary and element-wise heads, while
+  `Add` and `Multiply` already answered `[]`). An empty operand alongside a
+  NON-empty one is an ordinary length mismatch, not an erasure:
+  `Sin([]) + [1, 2]` is `incompatible-dimensions` (`0 vs 2`), exactly as
+  `Sin([1,2,3]) + [1,2]` is. The pairing constructors are unaffected —
+  `PointList` and `Zip` still pair up to the shorter input.
 
 ## Why this split
 
@@ -88,8 +97,15 @@ Corollary rules for the strict regime:
   `strictLengths = true` is the default parameter; `PointList`
   (`library/collections.ts`) is the only opt-out.
 - Compiled lowering: `_SYS.bcast` on the JavaScript target mirrors the
-  interpreter per POSITION (an empty or mismatched position projects to NaN
-  without poisoning siblings).
+  interpreter per POSITION — an empty position answers the empty list and a
+  mismatched one projects to NaN, neither poisoning a sibling. The operator
+  form (`_SYS.bcast`) and the user-function form (`_SYS.bcastFn`) answer
+  alike; the two names stay apart so the emitter keeps saying which form it
+  lowers. The fused emitter (`emitFusedBroadcast`, `base-compiler.ts`) folds
+  a chain of heads into ONE call, so `Sin(N) + M` with `N = []` and
+  `M = [1, 2]` reaches the helper as one length mismatch and answers NaN,
+  where the interpreter answers the `incompatible-dimensions` error. The
+  Python comprehension lowering answers the empty list for the same shapes.
 - Compiled pairing site (2026-07-31): the JavaScript `PointList` zip lowering
   (`JAVASCRIPT_FUNCTIONS.PointList`, `javascript-target.ts`) emits
   shortest-zip via `Math.min` over the source lengths — the pairing-regime
@@ -103,7 +119,10 @@ Corollary rules for the strict regime:
   `pointlist-lazy-broadcast.test.ts` (ragged lazy transpose),
   `multiply-mixed-collection-kinds.test.ts` (mixed-kind operands join the
   strict regime), `linear-algebra.test.ts` (rank-1 `Multiply` mismatch
-  errors), `elementwise-which.test.ts` (selection joins the strict regime).
+  errors), `elementwise-which.test.ts` (selection joins the strict regime),
+  `empty-broadcast.test.ts` (the lone-empty operand answers `[]` on the
+  interpreter and on the compiled JavaScript lane, and the empty-beside-
+  non-empty mismatch).
 - Selection (2026-07-27): elementwise `Which`/`If` over list-valued
   conditions belongs to the LIFTED regime — every list-valued participant
   (conditions and selected arms) must share one length, checked through the
@@ -121,7 +140,8 @@ Empirical probe of every operator that can see ≥2 collection operands
 `Implies`/`Equivalent`, measurement lists (`[1,2,3] m + [1,2] m`), and a
 scalar-parameter function literal applied to mismatched collections (incl.
 an infinite operand). Edge rules all hold: scalar lift, empty vs non-empty
-mismatch, lone-empty → `Nothing`, unknown-length skipped.
+mismatch, lone-empty → `Nothing` (the empty LIST since the 2026-09-21
+ruling), unknown-length skipped.
 
 **Conformant — pairing regime shortest:** `Zip`, variadic `Map`, `PointList`.
 

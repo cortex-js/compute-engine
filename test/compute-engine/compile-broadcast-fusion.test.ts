@@ -144,15 +144,13 @@ describe('Nested broadcasts fuse into one closure', () => {
     expect(r.code).toContain('_.myCos(');
   });
 
-  test('an error position is NaN in both forms', () => {
-    // The nested form answered `[NaN, NaN]` for `Sin([]) + M`, an array of
-    // M's length, and the fused form answers one NaN: the runtime helper
-    // reads the empty list and the two-element list as a length mismatch.
-    // The interpreter answers `[1, 2]` (a `Nothing` operand leaves a sum)
-    // for the empty list and an `incompatible-dimensions` error for
-    // `Sin([1, 2, 3]) + [1, 2]`, so neither form was faithful before; see
-    // the open ruling on a broadcast over a lone empty operand in
-    // `ROADMAP.md`.
+  test('a length mismatch is NaN in both forms', () => {
+    // The fused call reads both sources, so `Sin([]) + M` with a
+    // two-element `M` is ONE length mismatch and answers one NaN, which is
+    // how a real-valued target spells the interpreter's
+    // `incompatible-dimensions` error. A lone empty operand is not a
+    // mismatch — `Sin([])` alone answers `[]` on both routes
+    // (`docs/BROADCAST-MODEL.md`, `empty-broadcast.test.ts`).
     const r = compile(ce.box(['Add', ['Sin', 'L'], 'M']), { fallback: false });
     expect(r.success).toBe(true);
     expect(sites(r.code!)).toBe(1);

@@ -203,8 +203,8 @@ describe('ruling 2 — a length mismatch is an error, not a truncation', () => {
 });
 
 describe('per-position projection', () => {
-  test('an empty operand is Nothing, not an empty list', () => {
-    expect(parity(ce.box(['Not', ['List']] as any))).toBeNaN();
+  test('an empty operand is the empty list', () => {
+    expect(parity(ce.box(['Not', ['List']] as any))).toEqual([]);
   });
 
   test('an empty POSITION does not poison its siblings', () => {
@@ -214,7 +214,7 @@ describe('per-position projection', () => {
       ce.box(['Not', ['List', ['List'], ['List', 'True']]] as any)
     ) as unknown[];
     expect(out).toHaveLength(2);
-    expect(out[0]).toBeNaN();
+    expect(out[0]).toEqual([]);
     expect(out[1]).toEqual([false]);
   });
 });

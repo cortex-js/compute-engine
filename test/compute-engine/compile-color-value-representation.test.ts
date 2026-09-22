@@ -410,9 +410,9 @@ describe('a list of colors is an array of color objects', () => {
     // A color STRING is one color, and a list of them is a list.
     expect(compiled.run({ w: 'red' }).space).toBe('rgb');
     expect(compiled.run({ w: ['red', 'red'] })).toHaveLength(2);
-    // An empty array is the empty list; a broadcast over an empty operand is
-    // `Nothing` in the interpreter, which this target spells `NaN`.
-    expect(compiled.run({ w: [] })).toBeNaN();
+    // An empty array is the empty list, and a broadcast over an empty
+    // operand answers the empty list on this target as in the interpreter.
+    expect(compiled.run({ w: [] })).toEqual([]);
   });
 
   test('Colormap answers an array of color objects', () => {

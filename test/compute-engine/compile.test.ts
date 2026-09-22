@@ -3065,9 +3065,9 @@ describe('COMPILE user-defined function calls', () => {
     });
 
     // Applying a function literal to an EMPTY collection zips zero elements:
-    // the interpreter answers `[]`. (An empty OPERATOR position instead
-    // answers `Nothing` — `Not([])` → NaN — which is why the call site
-    // dispatches through `_SYS.bcastFn`, not `_SYS.bcast`.)
+    // the interpreter answers `[]`. An empty OPERATOR position answers `[]`
+    // too, so the two agree; the call site dispatches through
+    // `_SYS.bcastFn` because that is the form it lowers.
     it('answers [] for an empty collection argument, like evaluate()', () => {
       const e = setup();
       const expr = e.box(['q', ['List']]);

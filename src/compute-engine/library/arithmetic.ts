@@ -96,7 +96,14 @@ import {
   airyAiPrime,
   airyBiPrime,
 } from '../numerics/special-functions.js';
-import { factorial2, gcd, lcm, realGcd, realLcm } from '../numerics/numeric.js';
+import {
+  factorial2,
+  gcd,
+  lcm,
+  realGcd,
+  realLcm,
+  roundHalfAway,
+} from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
 import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 
@@ -5246,14 +5253,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below no longer holds.
         if (n !== undefined) return undefined;
         if (x.isNaN) return 'unsigned';
-        // Above machine precision the evaluate handler rounds a half AWAY
-        // from zero (`Round(-1/2) = -1`, the big-number lane); at machine
-        // precision it computes `Math.round`, which rounds a tie toward +∞
-        // (`Round(-0.5) = 0`). This sign follows the first rule:
-        // negate-and-round for a negative real. The two lanes disagree at
-        // `-0.5`, which ROADMAP records.
-        if (isNumber(x))
-          return numberSgn(x.re < 0 ? -Math.round(-x.re) : Math.round(x.re));
+        // The evaluate handler rounds a half AWAY FROM ZERO at every
+        // precision (`Round(-1/2)` and `Round(-0.5)` are both `-1`; user
+        // decision, 2026-09-21), so this sign uses the same rule.
+        if (isNumber(x)) return numberSgn(roundHalfAway(x.re));
         if (x.isGreaterEqual(0.5)) return 'positive';
         if (x.isLessEqual(-0.5)) return 'negative';
         if (x.isLess(0.5) && x.isGreater(-0.5)) return 'zero';
@@ -5262,8 +5265,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x, n], { engine: ce }) => {
+        // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is
+        // `-1`, `Round(2.5)` is `3`; user decision, 2026-09-21). The
+        // big-number lane `BigDecimal.round()` already does that; the machine
+        // lane needs `roundHalfAway`, because JavaScript `Math.round` rounds
+        // a half toward `+∞`. The precision form below inherits the rule: it
+        // rounds the SCALED value with the same helper.
         const roundToInteger = (v: Expression) =>
-          apply(v, Math.round, (v) => v.round());
+          apply(v, roundHalfAway, (v) => v.round());
         if (n === undefined) return roundToInteger(x);
         // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
         if (!isNumber(n) || n.isFinite !== true) return undefined;

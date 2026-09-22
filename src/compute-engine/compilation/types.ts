@@ -575,6 +575,26 @@ export interface CompileTarget<Expr = unknown> {
   ) => TargetSource | null;
 
   /**
+   * Is `a` an operand that makes this target lower an `Equal`/`NotEqual` to
+   * its collection-aware runtime dispatch (`_SYS.eq`/`_SYS.neq` on the
+   * JavaScript target) rather than to a scalar comparison?
+   *
+   * That dispatch answers the numeric ABSENCE MARKER — not `true`/`false` —
+   * when an element pair has no answer, so a branch whose condition takes it
+   * must read its decidedness off the condition's own VALUE instead of
+   * testing the operands for NaN (`BaseCompiler.conditionDecidability`). The
+   * two sites have to agree exactly: a branch that inspects the value of a
+   * SCALAR comparison would read an ordinary `false` — what a NaN operand
+   * compares to — as a decided answer and take the else arm.
+   *
+   * Declared by the target that owns the lowering, so the emitter and the
+   * branch analysis share one classification. A target that leaves it
+   * undefined keeps the conservative rule: only an `Equal`/`NotEqual` whose
+   * operands are ALL collection-typed is read off its value.
+   */
+  collectionEqualityOperand?: (a: Expr) => boolean;
+
+  /**
    * Apply a `broadcastable` head's scalar element lowering across its single
    * collection operand (`Sin([1,2,3])`, `-[1,2,3]`, `1 + L`).
    *

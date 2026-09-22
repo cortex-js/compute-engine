@@ -83,6 +83,22 @@ export function nextDown(x: number): number {
 }
 
 /**
+ * Round a machine double to the nearest integer, with a half rounded AWAY
+ * FROM ZERO: `roundHalfAway(-0.5)` is `-1` and `roundHalfAway(2.5)` is `3`.
+ *
+ * This is the tie rule of the `Round` operator, at every precision and on
+ * every route (user decision, 2026-09-21); the big-number lane
+ * (`BigDecimal.round()`) already rounds a half away from zero. JavaScript
+ * `Math.round` rounds a half toward `+∞` instead (`Math.round(-0.5)` is
+ * `-0`), so it must not be used for `Round`. `Math.round` of the MAGNITUDE
+ * is the same rule, because the magnitude is never negative; the sign is put
+ * back afterwards.
+ */
+export function roundHalfAway(x: number): number {
+  return Math.sign(x) * Math.round(Math.abs(x));
+}
+
+/**
  * Accurate real n-th root of a non-negative machine double.
  *
  * `Math.pow(x, 1/n)` is not correctly rounded — the reciprocal `1/n` is itself

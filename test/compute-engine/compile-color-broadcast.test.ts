@@ -192,10 +192,10 @@ describe('the compiled conversion answers what the interpreter answers', () => {
     expect(run({ w: ['red', 'red'] })).toHaveLength(2);
 
     // An empty array holds no channels, so it is the empty list, and a
-    // broadcast over an empty operand answers `Nothing` in the interpreter —
-    // NaN on this target, the same answer `_SYS.bcast` gives.
-    expect(ce.box(['AsRgb', ['List']]).evaluate().symbol).toBe('Nothing');
-    expect(run({ w: [] })).toBeNaN();
+    // broadcast over an empty operand answers the empty list in the
+    // interpreter — the same answer `_SYS.bcast` gives on this target.
+    expect(ce.box(['AsRgb', ['List']]).evaluate().toString()).toBe('[]');
+    expect(run({ w: [] })).toEqual([]);
   });
 
   test('a literal list of colors compiles to the map', () => {
@@ -249,10 +249,10 @@ describe('the compiled conversion answers what the interpreter answers', () => {
     }
   });
 
-  test('an absent position inside the operand stays that position', () => {
-    // An upstream broadcast spells an empty position `NaN`, so a ragged
-    // operand reaches `_SYS.bcastColor` with a number and a color side by
-    // side. Reading the FIRST element alone called the whole array one color.
+  test('an empty position inside the operand stays that position', () => {
+    // A ragged operand reaches `_SYS.bcastColor` with an empty list and a
+    // list of colors side by side. Reading the FIRST element alone called
+    // the whole array one color.
     const ce = new ComputeEngine();
     ce.declare('u', 'broadcastable<number>');
     const run = js(ce, ['AsRgb', ['Hsv', 'u', 0.5, 0.5]]).run;
@@ -260,19 +260,34 @@ describe('the compiled conversion answers what the interpreter answers', () => {
     const interpreted = ce
       .box(['AsRgb', ['Hsv', ['List', ['List'], ['List', 20]], 0.5, 0.5]])
       .evaluate();
-    // The interpreter answers an `incompatible-type` error at the empty
-    // position and a one-element list of colors at the other.
-    expect(interpreted.ops![0].operator).toBe('Error');
+    // The interpreter answers the empty list at the empty position and a
+    // one-element list of colors at the other.
+    expect(interpreted.ops![0].operator).toBe('List');
+    expect(interpreted.ops![0].count).toBe(0);
     const secondPosition = channelList(interpreted.ops![1]);
 
     const actual = run({ u: [[], [20]] });
     expect(actual).toHaveLength(2);
-    // The error position projects as the non-finite color — a color value
-    // with NaN channels, the same projection `_SYS.rgb` gives a non-finite
-    // channel.
-    expect(compiledChannels(actual[0])).toEqual([NaN, NaN, NaN]);
+    expect(actual[0]).toEqual([]);
     expect(actual[1]).toHaveLength(1);
     expectChannelsClose(actual[1][0], secondPosition[0]);
+  });
+
+  test('a mismatched position inside the operand projects to a non-finite color', () => {
+    // A length disagreement inside one position is `NaN` there, so a number
+    // and a color still arrive at `_SYS.bcastColor` side by side. The NaN
+    // position projects as the non-finite color — a color value with NaN
+    // channels, the same projection `_SYS.rgb` gives a non-finite channel —
+    // and the sibling position is unchanged.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'broadcastable<number>');
+    ce.declare('v', 'broadcastable<number>');
+    const run = js(ce, ['AsRgb', ['Hsv', 'u', 'v', 0.5]]).run;
+
+    const actual = run({ u: [[1, 2], [20]], v: [[1], [20]] });
+    expect(actual).toHaveLength(2);
+    expect(compiledChannels(actual[0])).toEqual([NaN, NaN, NaN]);
+    expect(actual[1]).toHaveLength(1);
   });
 
   test('a colormap — a head whose own type is `color | list<color>`', () => {

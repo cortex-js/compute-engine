@@ -1,7 +1,7 @@
 import type { Expression } from '../types-expression.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { isExactNonInteger, machineNumberOf } from './machine-number.js';
-import { MACHINE_PRECISION } from '../numerics/numeric.js';
+import { MACHINE_PRECISION, roundHalfAway } from '../numerics/numeric.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
 /**
@@ -292,7 +292,11 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
   Abs: { apply: Math.abs, routes: 'both', integers: true },
   Floor: { apply: Math.floor, routes: 'both', integers: true },
   Ceil: { apply: Math.ceil, routes: 'both', integers: true },
-  Round: { apply: Math.round, routes: 'both', integers: true },
+  // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is `-1`,
+  // `Round(2.5)` is `3`; user decision, 2026-09-21), which is what the scalar
+  // route answers. JavaScript `Math.round` rounds a half toward `+∞`, so the
+  // kernel is `roundHalfAway`, not the bare primitive.
+  Round: { apply: roundHalfAway, routes: 'both', integers: true },
 };
 
 /**

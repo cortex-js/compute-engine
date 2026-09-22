@@ -1219,13 +1219,9 @@ function compileJSEquality(
   // `_SYS.neq` instead: scalar
   // operands compare tolerantly, an array-vs-scalar pair is element-wise, an
   // array-vs-array pair is whole-collection equality — see `eqTensor`. The
-  // gate uses the declared type (not `.isCollection`, which is false for a
-  // `list<number>` such as `Power(L, 2)`), plus
-  // `isPossiblyCollectionTypedJS` (a `broadcastable<T>` node or a top-typed
-  // application such as `h(x)` — `broadcastable<T>` is NOT a subtype of
-  // `collection`, so it needs its own test). A bare unknown SYMBOL is
-  // excluded by the predicate, so plot equalities (`x^2 + y^2 = 4`) stay on
-  // the scalar fast path below.
+  // gate is `isCollectionEqualityOperandJS`, which the target also declares
+  // so the branch-decidedness analysis classifies these operands identically
+  // (`CompileTarget.collectionEqualityOperand`).
   //
   // The chained form fails closed. It is not
   // a pairwise conjunction the way `a < b < c` is: the interpreter's n-ary
@@ -1237,9 +1233,7 @@ function compileJSEquality(
   // reimplementing the n-ary dispatch in `_SYS`, not conjoining `_SYS.eq`
   // calls — and a conjunction of them is demonstrably a different value. No
   // faithful runtime dispatch, so no relaxation.
-  const collectionish = (a: Expression): boolean =>
-    a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a);
-  if (args.some(collectionish)) {
+  if (args.some(isCollectionEqualityOperandJS)) {
     if (args.length === 2) {
       const helper = kind === 'Equal' ? 'eq' : 'neq';
       return `_SYS.${helper}((${compile(args[0])}), (${compile(args[1])}))`;
@@ -1833,6 +1827,28 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Does this operand make an `Equal`/`NotEqual` lower to the collection-aware
+ * runtime dispatch (`_SYS.eq`/`_SYS.neq`) instead of a scalar comparison?
+ *
+ * The declared type answers for a statically visible collection — not
+ * `.isCollection`, which is false for a `list<number>` such as `Power(L, 2)`
+ * — and `isPossiblyCollectionTypedJS` for the operands whose collection-ness
+ * is not statically visible: a `broadcastable<T>` node, or a top-typed
+ * application such as `h(x)`. (`broadcastable<T>` is NOT a subtype of
+ * `collection`, so it needs its own test.) A bare unknown SYMBOL is excluded
+ * by that predicate, so plot equalities (`x^2 + y^2 = 4`) stay scalar.
+ *
+ * Declared on the target as `collectionEqualityOperand` as well, because the
+ * branch-decidedness analysis has to classify these operands exactly as the
+ * emitter does: the dispatch answers the absence marker rather than a
+ * boolean, and only a condition that may carry the marker is read off its
+ * own value.
+ */
+function isCollectionEqualityOperandJS(a: Expression): boolean {
+  return a.type.matches('collection<any>') || isPossiblyCollectionTypedJS(a);
 }
 
 /**
@@ -7912,21 +7928,22 @@ function bcast(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: unknown[]
 ): BcastValue {
-  return bcastWith(false, f, args);
+  return bcastWith(f, args);
 }
 
 /**
  * `bcast` for a USER-FUNCTION application (`q(L)` — see
- * `tryCompileUserFunction`). Identical except at an empty position: applying a
- * function literal to an empty collection zips zero elements and answers the
- * EMPTY LIST in the interpreter (`q([])` → `[]`), where an empty OPERATOR
- * position answers `Nothing` (NaN — see `bcastWith`).
+ * `tryCompileUserFunction`). An operator position and a function application
+ * follow the same element-wise rule, including at an empty position, where
+ * both answer the empty list. The two names are kept apart because the
+ * emitter picks between them by what it is lowering, and a future divergence
+ * would otherwise have to re-introduce the split at every call site.
  */
 function bcastFn(
   f: (...xs: BcastValue[]) => BcastValue,
   ...args: unknown[]
 ): BcastValue {
-  return bcastWith(true, f, args);
+  return bcastWith(f, args);
 }
 
 /**
@@ -7942,17 +7959,17 @@ function bcastFn(
  * and the map recurses — a nested list of colors stays nested, as the
  * interpreter's broadcast does.
  *
- * An empty array is the empty list, and the interpreter answers `Nothing` for
- * a broadcast over an empty operand (`AsRgb([])` measured); this target
- * spells that `NaN`, which is also what `_SYS.bcast` answers at an empty
- * position.
+ * An empty array maps to the empty list, as the interpreter does for a
+ * broadcast over an empty operand (`AsRgb([])` evaluates to `[]`) and as
+ * `_SYS.bcast` does at an empty position.
  *
- * An upstream broadcast spells an absent position `NaN`, so a ragged operand
- * reaches this helper with a number and a color side by side: `AsRgb(Hsv(u,
- * 0.5, 0.5))` with `u = [[], [20]]` hands over `[NaN, [color]]`. A `NaN`
- * element goes through `f` like any other element, and the converters answer
- * the non-finite color for it (`asCompiledColor`) — the same projection the
- * interpreter's per-position `incompatible-type` error takes on this target.
+ * An upstream broadcast spells a MISMATCHED position `NaN`, so a ragged
+ * operand reaches this helper with a number and a color side by side:
+ * `AsRgb(Hsv(u, v, 0.5))` with `u = [[1, 2], [20]]` and `v = [[1], [20]]`
+ * hands over `[NaN, [color]]`. A `NaN` element goes through `f` like any
+ * other element, and the converters answer the non-finite color for it
+ * (`asCompiledColor`) — the same projection the interpreter's
+ * `incompatible-dimensions` error takes on this target.
  *
  * A list of plain NUMBERS at a color position is a list of errors in the
  * interpreter, and each element reaches `f` here and throws the color-shape
@@ -7962,7 +7979,6 @@ function bcastFn(
  */
 function bcastColor(f: (c: unknown) => unknown, v: unknown): unknown {
   if (!Array.isArray(v)) return f(v);
-  if (v.length === 0) return NaN;
   return v.map((e) => bcastColor(f, e));
 }
 
@@ -8124,9 +8140,7 @@ function bcastKernel(signature: string): BcastKernel | undefined {
 }
 
 /**
- * Shared implementation of `bcast`/`bcastFn`. `emptyIsList` selects what an
- * empty broadcast position produces, and is carried into the nested positions
- * so a `[[], [1]]` argument projects consistently at every depth.
+ * Shared implementation of `bcast`/`bcastFn`.
  *
  * An operand is a scalar, an array, or a rotation view (`RotView`, read in
  * place — see `rotv`). The array and view operands must share one length;
@@ -8134,7 +8148,6 @@ function bcastKernel(signature: string): BcastKernel | undefined {
  * NaN. Do not truncate or recycle operands.
  */
 function bcastWith(
-  emptyIsList: boolean,
   f: (...xs: BcastValue[]) => BcastValue,
   args: unknown[]
 ): BcastValue {
@@ -8158,14 +8171,14 @@ function bcastWith(
     else if (len !== n) return NaN;
   }
   if (n < 0) return f(...(args as BcastValue[]));
-  // An EMPTY position broadcasts to `Nothing` in the interpreter, not to an
-  // empty list — `Not([])` is `Nothing` (NaN here), and in a nested operand
-  // (`Not([[], [True]])` → `[Nothing, [False]]`) only that position is
-  // projected. Recursing per position is what keeps a sibling from being
-  // poisoned by it. A user-function application instead zips zero elements
-  // into an empty list (`emptyIsList` — a fresh array per position, never a
-  // shared instance).
-  if (n === 0) return emptyIsList ? [] : NaN;
+  // An EMPTY position broadcasts to the EMPTY LIST, as in the interpreter:
+  // `Not([])` is `[]`, and a nested operand keeps that per position
+  // (`Not([[], [True]])` → `[[], [False]]`). Each empty position gets a
+  // fresh array, never a shared instance, so a caller that mutates one
+  // result cannot reach another. (Rule of 2026-09-21,
+  // `docs/BROADCAST-MODEL.md`; an empty operand BESIDE a non-empty one is a
+  // length mismatch, answered NaN by the loop above.)
+  if (n === 0) return [];
   const out: BcastValue[] = new Array(n);
 
   // Flat fast path: every position whose cells are all scalars is one direct
@@ -8201,7 +8214,7 @@ function bcastWith(
     // The recursive call keeps its operand array (it reads it after this loop
     // has moved on), so it gets a copy; the direct call consumes the buffer
     // before the next position overwrites it.
-    out[i] = nested ? bcastWith(emptyIsList, f, cell.slice()) : f(...cell);
+    out[i] = nested ? bcastWith(f, cell.slice()) : f(...cell);
   }
   return out;
 }
@@ -8495,10 +8508,36 @@ function eqTensor(
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
   if (aArr && bArr) {
+    // A length mismatch is DECIDED: no value an absent cell could hold makes
+    // 2 elements equal 3.
     if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++)
-      if (eqTensor(a[i], b[i]) !== true) return false;
-    return true;
+    // One element pair with no answer makes the WHOLE comparison undecided
+    // (user ruling of 2026-09-21, the compiled half of the rule the
+    // interpreter applies in `undecidedElementPair`,
+    // `library/relational-operator.ts`). An absent cell can stand for any
+    // value, so the cells that ARE there cannot settle whether the two
+    // collections hold the same values. The rule holds even when another
+    // pair is decidedly unequal, which is why the walk does NOT stop at the
+    // first mismatch: `[1, undefined, 3]` against `[2, undefined, 3]`
+    // answers the marker, not `false`. The marker is `NaN`, the compiled
+    // spelling of the interpreter's `Missing` (see the absence note on the
+    // scalar leaf below).
+    let undecided = false;
+    let unequal = false;
+    for (let i = 0; i < a.length; i++) {
+      // The absence test comes BEFORE the recursion. An absent cell opposite
+      // a NESTED array would otherwise reach the array-vs-scalar branch,
+      // whose per-element array reads here as a decided mismatch.
+      if (a[i] === undefined || b[i] === undefined) {
+        undecided = true;
+        continue;
+      }
+      const cmp = eqTensor(a[i], b[i]);
+      if (typeof cmp === 'number') undecided = true;
+      else if (cmp !== true) unequal = true;
+    }
+    if (undecided) return Number.NaN;
+    return !unequal;
   }
   // Array-vs-scalar with a NUMBER on the scalar side: one exact test per
   // element, with the `{re, im}` projection and the string branch reserved
@@ -8561,7 +8600,13 @@ function neqTensor(
 ): boolean | number | (boolean | number | unknown[])[] {
   const aArr = Array.isArray(a);
   const bArr = Array.isArray(b);
-  if (aArr && bArr) return eqTensor(a, b) !== true;
+  if (aArr && bArr) {
+    // A whole-collection comparison with no answer keeps its marker under
+    // negation (user ruling of 2026-09-21): `NotEqual` must not report a
+    // confident `true` where `Equal` could not report `false`.
+    const equal = eqTensor(a, b);
+    return typeof equal === 'number' ? equal : equal !== true;
+  }
   if (aArr)
     return a.map((x) => neqTensor(x, b)) as (boolean | number | unknown[])[];
   if (bArr)
@@ -11439,6 +11484,12 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // Element-wise `Which`/`If` selection over a collection-valued condition.
       selection: (args, compile, target, compileUnder) =>
         compileJSSelection(args, compile, target, compileUnder),
+      // The operands that send an `Equal`/`NotEqual` to `_SYS.eq`/`_SYS.neq`,
+      // whose answer is the absence marker when an element pair has none.
+      // The SAME predicate the equality emitter gates on
+      // (`compileJSEquality`), so the branch-decidedness analysis reads such a
+      // condition off its value and every other one off its operands.
+      collectionEqualityOperand: isCollectionEqualityOperandJS,
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
       // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
       absence: {

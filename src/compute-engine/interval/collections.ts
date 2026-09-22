@@ -305,15 +305,13 @@ const MAX_RUNTIME_COLLECTION_LENGTH = 1_000_000;
  * rule for a broadcastable operator (`sin([1, 2])` is `[sin 1, sin 2]`, and
  * `[1, 2] + [10, 20]` is `[11, 22]`).
  *
- * Two shapes have no element-wise value, and the answer for both is the
- * numeric ABSENCE marker rather than an enclosure:
- *
- * - arrays of different lengths, which the interpreter reports as the
- *   `incompatible-dimensions` error at every point of the plane (the lengths
- *   do not depend on the evaluation point), so "no value" is exact, and it is
- *   what the JavaScript target answers there (`NaN`);
- * - an EMPTY array, which the interpreter answers with `Nothing` for an
- *   operator position (`sin([])` evaluates to `Nothing`, not to `[]`).
+ * Arrays of different lengths have no element-wise value, and the answer is
+ * the numeric ABSENCE marker rather than an enclosure: the interpreter
+ * reports `incompatible-dimensions` at every point of the plane (the lengths
+ * do not depend on the evaluation point), so "no value" is exact, and it is
+ * what the JavaScript target answers there (`NaN`). An EMPTY array answers
+ * the empty list, as the interpreter does (`sin([])` evaluates to `[]` —
+ * rule of 2026-09-21, `docs/BROADCAST-MODEL.md`).
  *
  * The compiler emits a call to this function only when every collection
  * argument's static type proves a list of numbers (`tryIntervalBroadcast`
@@ -325,26 +323,24 @@ export function bcast(
   f: (...operands: unknown[]) => unknown,
   ...args: unknown[]
 ): unknown {
-  return bcastWith(false, f, args);
+  return bcastWith(f, args);
 }
 
 /**
  * `bcast` for the application of a USER FUNCTION to its arguments (`f(L)`
- * with `f(x) := x²`): the same element-wise rule, except that an EMPTY list
- * argument answers the empty list — the interpreter zips zero elements into
- * `[]` there, where an operator over an empty list answers `Nothing`.
+ * with `f(x) := x²`): the same element-wise rule, empty argument included.
+ * The two names are kept apart because the emitter picks between them by
+ * what it is lowering.
  */
 export function bcastFn(
   f: (...operands: unknown[]) => unknown,
   ...args: unknown[]
 ): unknown {
-  return bcastWith(true, f, args);
+  return bcastWith(f, args);
 }
 
-/** Shared implementation of `bcast` and `bcastFn`; `emptyIsList` selects
- *  what an empty position answers, and is carried into nested positions. */
+/** Shared implementation of `bcast` and `bcastFn`. */
 function bcastWith(
-  emptyIsList: boolean,
   f: (...operands: unknown[]) => unknown,
   args: unknown[]
 ): unknown {
@@ -355,7 +351,8 @@ function bcastWith(
     else if (a.length !== n) return absent();
   }
   if (n < 0) return f(...args);
-  if (n === 0) return emptyIsList ? [] : absent();
+  // An empty position answers the empty list, as in the interpreter.
+  if (n === 0) return [];
   const out: unknown[] = new Array(n);
   for (let i = 0; i < n; i++) {
     let nested = false;
@@ -364,7 +361,7 @@ function bcastWith(
       if (Array.isArray(x)) nested = true;
       return x;
     });
-    out[i] = nested ? bcastWith(emptyIsList, f, cell) : f(...cell);
+    out[i] = nested ? bcastWith(f, cell) : f(...cell);
   }
   return out;
 }

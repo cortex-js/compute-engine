@@ -111,24 +111,41 @@ export function sameBindingDef(
 /**
  * The value definition a symbol OCCURRENCE reads its value from in the
  * current runtime context. The scope chain is walked for the innermost
- * binding of `name`, as a name lookup would — with ONE binding skipped: a
- * call frame's parameter activation of a binding OTHER than `own`, the
- * definition the occurrence is bound to (`sameBindingDef` recognizes an
- * activation of `own` itself). Such an activation is a different function's
- * parameter that merely shares the name, and reading its value through this
- * occurrence is a capture.
+ * binding of `name`, as a name lookup would — with BINDER bindings of a
+ * binding OTHER than `own` skipped. `own` is the definition the occurrence
+ * is bound to, and `sameBindingDef` recognizes an activation of `own`
+ * itself. A binder binding is one of two things: a call frame's parameter
+ * activation (`markActivation`), or a name a binder operator declares in its
+ * own scope — a `Sum` or `Product` index, a comprehension or loop index, a
+ * `D` variable (`markBinderVariable`, written by `bindBindingSites` in
+ * `box.ts`). Such a binding belongs to another expression's variable that
+ * merely shares the name, and reading its value through this occurrence is a
+ * capture.
  *
- * Why the parameter case alone, and not every same-named binding: a
- * declaration made in a scope pushed after the occurrence was bound is ALSO
- * a different binding, but re-pointing earlier-boxed expressions that way is
- * relied upon — a document manager re-pushes a saved, populated scope around
+ * Ruled 2026-09-21: a binder of the CALLER never intercepts a read of a
+ * global inside the body of the function it calls, whether or not the global
+ * holds a value. With `w` declared and valueless and `W := x ↦ [w x, x]`,
+ * `[W(w)[1] for w in [1, 2, 3]]` answers `[w, 2w, 3w]` — exactly what the
+ * spelling `[W(k)[1] for k in [1, 2, 3]]` answers — where a by-name reading
+ * of the comprehension index gave `[1, 4, 9]`. The same decision removes the
+ * capture of a stored value's free name: with `a := n + 1`,
+ * `Sum(a, n, 1, 3)` is `3n + 3`, not `9`. Before this date the binder case
+ * was restricted to the parameter activation and every other binder read by
+ * name, as a compatibility hatch.
+ *
+ * Why only binder bindings, and not every same-named binding: a declaration
+ * made in a scope pushed after the occurrence was bound is ALSO a different
+ * binding, but re-pointing earlier-boxed expressions that way is relied
+ * upon — a document manager re-pushes a saved, populated scope around
  * evaluations and expects the expressions to read it (the lazy-collection
  * memo stamps the ambient scope for exactly this; see "a memoized view
  * re-resolves inside a re-pushed populated scope" in
  * `test/compute-engine/lazy-collection-regimes.test.ts`). That is the
  * compatibility reading `docs/SCOPING-MODEL.md` §"Symbol identity" allows,
  * and it stays. A shield (`markShieldDeclaration`) intercepts for the same
- * reason every ordinary declaration does.
+ * reason every ordinary declaration does — including a shield that sits on a
+ * binder's own name, which is how `D`, `Integrate`, `Limit` and `Solve` hide
+ * an assigned value of their variable.
  *
  * Why the parameter case must be skipped: a call frame captures whenever an
  * expression bound OUTSIDE it is evaluated INSIDE it. With `G(x) := cos(x)`
@@ -174,26 +191,125 @@ export function bindingInContext(
   own: BoxedBaseDefinition | undefined,
   scope: Scope | null = ce.context.lexicalScope
 ): BoxedDefinition | undefined {
-  let skippedActivation: BoxedDefinition | undefined;
+  let skippedBinder: BoxedDefinition | undefined;
   while (scope) {
     const found = scope.bindings.get(name);
     if (found !== undefined) {
-      if (
-        'value' in found &&
-        isActivation(found.value) &&
-        !sameBindingDef(found.value, own)
-      ) {
-        skippedActivation ??= found;
+      if ('value' in found && isForeignBinderBinding(found.value, own)) {
+        skippedBinder ??= found;
       } else return found;
     }
     scope = scope.parent;
   }
-  return skippedActivation;
+  return skippedBinder;
+}
+
+/**
+ * Is the binding `scope` holds for `name` a BINDER's variable that the
+ * occurrence bound to `own` does not denote?
+ *
+ * A call frame's parameter activation qualifies even when the occurrence
+ * carries no binding at all (`own` is `undefined`), which is what the reading
+ * before 2026-09-21 did. A binder operator's index (`markBinderVariable`)
+ * qualifies under two further conditions.
+ *
+ * The occurrence must HAVE a binding. One with no binding names nothing in
+ * particular, so the innermost binding by name is still the best answer for
+ * it, and a raw index symbol handed to a binder from outside keeps reading
+ * that binder's variable.
+ *
+ * And the occurrence's own binding must not itself be a binder's variable.
+ * Two big operators that use the same index name can be evaluated at once —
+ * the asynchronous lane suspends one mid-loop and runs the other — and then
+ * both the loop's per-term ASSIGNMENT and the body's read resolve the name
+ * through the ambient chain. They must resolve it the same way or the two
+ * evaluations answer each other's terms, so an index reads by name, as it
+ * did before. What the decision of 2026-09-21 removes is a caller's index
+ * intercepting a read of a GLOBAL, which no assignment of the loop was ever
+ * meant to reach.
+ *
+ * A shield never qualifies. A shield is a valueless shadow declared for the
+ * sole purpose of hiding an enclosing value (`markShieldDeclaration`), and
+ * `D`, `Integrate`, `Limit` and `Solve` put one on their own binding site —
+ * so a shield sits on a binder's variable, and skipping it would read the
+ * very value it hides.
+ */
+function isForeignBinderBinding(
+  def: BoxedValueDefinition,
+  own: BoxedBaseDefinition | undefined
+): boolean {
+  if (sameBindingDef(def, own)) return false;
+  if (isActivation(def)) return true;
+  if (own === undefined || isShield(def)) return false;
+  return isBinderVariable(def) && !isBinderVariable(own);
 }
 
 /** Is `def` a call frame's parameter activation (see `markActivation`)? */
 function isActivation(def: BoxedBaseDefinition): boolean {
   return (def as Activated)._activationOf !== undefined;
+}
+
+/**
+ * The binding a BINDER holds for `name`, looked up from `scope` outward, or
+ * `undefined` when the innermost binding of the name is not a binder's
+ * variable.
+ *
+ * A caller that substitutes a binder's current index value into an
+ * expression uses this to tell the occurrences the value is meant for — the
+ * ones bound to the index — from occurrences of the same NAME that denote
+ * something else, typically a global a stored value's body refers to. Ruled
+ * 2026-09-21: only the former take the value (`substituteBinderValues`,
+ * `library/utils.ts`).
+ *
+ * `scope` is the binder's own scope when the caller holds it — a
+ * comprehension substitutes after its scope is no longer on the ambient
+ * chain — and the current context otherwise.
+ */
+export function binderBindingOf(
+  ce: ComputeEngine,
+  name: string,
+  scope: Scope | null = ce.context.lexicalScope
+): BoxedValueDefinition | undefined {
+  while (scope) {
+    const found = scope.bindings.get(name);
+    if (found !== undefined) {
+      if (!('value' in found)) return undefined;
+      if (isActivation(found.value) || isBinderVariable(found.value))
+        return found.value;
+      return undefined;
+    }
+    scope = scope.parent;
+  }
+  return undefined;
+}
+
+/** @see markBinderVariable */
+type BinderVariable = { _isBinderVariable?: true };
+
+/**
+ * Mark the binding `scope` holds for `name` as a BINDER VARIABLE: the
+ * variable a binder operator declares at one of its binding sites — a `Sum`
+ * or `Product` index, a comprehension or loop index, a `D` or `Integrate`
+ * variable. Written by `bindBindingSites` (`box.ts`), which owns the
+ * authoritative set of sites.
+ *
+ * The mark is what lets `bindingInContext` tell such a binding from an
+ * ordinary declaration without holding the scope it came from, and so lets a
+ * read of a GLOBAL inside a called function body walk past a caller's index
+ * of the same name (ruled 2026-09-21).
+ *
+ * A no-op for a name the scope does not bind, or binds to an operator
+ * definition — the same two cases `markShieldDeclaration` leaves alone.
+ */
+export function markBinderVariable(scope: Scope, name: string): void {
+  const def = scope.bindings.get(name);
+  if (def !== undefined && 'value' in def)
+    (def.value as unknown as BinderVariable)._isBinderVariable = true;
+}
+
+/** Is `def` a binder's variable (see `markBinderVariable`)? */
+function isBinderVariable(def: BoxedBaseDefinition | undefined): boolean {
+  return (def as BinderVariable | undefined)?._isBinderVariable === true;
 }
 
 /** @see markShieldDeclaration */

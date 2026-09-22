@@ -208,6 +208,7 @@ import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
   hasAbsentScalarOperand,
+  isAbsentScalarSymbol,
   runtimeConformanceError,
 } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
@@ -4312,10 +4313,10 @@ export class BoxedFunction
         // definition is `broadcastable`: an annotated literal assigned bare
         // derives that flag from `paramsAreScalar` (`engine-declarations.ts`),
         // and a clause set derives it the same way (`multi-clause.ts`). The
-        // two arms agree except on the empty source, where this one answers
-        // `Nothing` and step 2b answers `[]` — and `[]` is what the
-        // declare-then-assign VALUE route answers, so a user function must
-        // not be captured here.
+        // two arms now agree on the empty source as well — both answer the
+        // empty list, which is also what the declare-then-assign VALUE route
+        // answers — but a user function still belongs to step 2b, which binds
+        // the literal's own parameters.
         !isUserFunctionDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
@@ -4372,7 +4373,7 @@ export class BoxedFunction
         if (lazy) return lazy;
 
         const items = zip(bops);
-        if (!items) return this.engine.Nothing;
+        if (!items) return this.engine._fn('List', []);
 
         const results: Expression[] = [];
         while (true) {
@@ -4381,10 +4382,16 @@ export class BoxedFunction
           results.push(this.engine._fn(this.operator, value).evaluate(options));
         }
 
-        if (results.length === 0) return this.engine.Nothing;
         // Always wrap in a `List` — even a single-element broadcast — so the
         // value matches the `list<E>` broadcast type (the type handler never
         // unwraps a singleton). Mirrors the lambda broadcast in step 4b.
+        //
+        // A broadcast over a lone EMPTY collection operand answers the EMPTY
+        // LIST, not the erasure marker `Nothing`: `Sin([])` is `[]`, as
+        // `2·[]` and a user function applied to an empty source already were
+        // (rule of 2026-09-21, `docs/BROADCAST-MODEL.md`). An empty operand
+        // beside a NON-empty one is a length mismatch instead, and the check
+        // above has already answered `incompatible-dimensions` for it.
         return this.engine._fn('List', results);
       }
 
@@ -4697,7 +4704,7 @@ export class BoxedFunction
           sawPropagate &&
           !(
             def.resolvedMissingBehavior === 'reject' &&
-            tail.some((x) => isSymbol(x, 'Missing'))
+            tail.some(isAbsentScalarSymbol)
           )
         )
           return this.engine.NaN;
@@ -4767,7 +4774,8 @@ export class BoxedFunction
       //
       // 4a/ Missing-value behavior gate (§3.E of the missing-value typing
       // design). A `propagate` operator with an absent SCALAR operand
-      // (`Missing`, or a `NaN`) answers the quiet marker of its own codomain
+      // (`Missing`, `Undefined`, or a `NaN`) answers the quiet marker of its
+      // own codomain
       // (`absentScalarMarker`, `validate.ts`): `NaN` in a numeric result cell
       // (I6 absorption), and the position-preserving `Missing` when the
       // application is typed anything else — a point, a collection, or a type
@@ -4782,11 +4790,11 @@ export class BoxedFunction
       //
       if (def instanceof _BoxedOperatorDefinition) {
         const behavior = def.resolvedMissingBehavior;
-        // The gate fires on the `Missing` SYMBOL only, and only when no
-        // operand is collection-shaped: both conditions live in
-        // `hasAbsentScalarOperand` (`validate.ts`), which the async twin
-        // (step 3a) and the lazy `Add`/`Multiply` handlers share, so the
-        // three routes decide the same question the same way.
+        // The gate fires on an absence SYMBOL — `Missing` or `Undefined`
+        // — and only when no operand is collection-shaped: both conditions
+        // live in `hasAbsentScalarOperand` (`validate.ts`), which the async
+        // twin (step 3a) and the lazy `Add`/`Multiply` handlers share, so
+        // the three routes decide the same question the same way.
         if (
           (behavior === 'propagate' || behavior === 'reject') &&
           hasAbsentScalarOperand(tail)
@@ -4794,7 +4802,12 @@ export class BoxedFunction
           if (behavior === 'reject')
             return this.engine.error([
               'unexpected-argument',
-              this.engine.Missing.toString(),
+              // Name the operand that is actually absent: the gate accepts
+              // both `Missing` and `Undefined`, so a fixed `Missing` in the
+              // message would misreport an `Undefined` operand.
+              (
+                tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
+              ).toString(),
             ]);
           return absentScalarMarker(this.engine, this);
         }
@@ -4902,12 +4915,17 @@ export class BoxedFunction
           }
           // A broadcast always yields a `List`, even for a single-element
           // collection, so the value matches the `list<E>` broadcast type.
+          // An operand that became the EMPTY collection only at evaluation
+          // — `Sin(f())` with `f` answering `[]` — yields the empty list, the
+          // same answer a literal `[]` gets in step 2 (rule of 2026-09-21,
+          // `docs/BROADCAST-MODEL.md`). A computed empty source and a literal
+          // one must not answer differently.
           if (lambdaBroadcast)
             return this.engine._fn(
               'List',
               annotateBroadcastErrors(this.operator, results)
             );
-          if (results.length > 0) return this.engine._fn('List', results);
+          return this.engine._fn('List', results);
         }
       }
 
@@ -5207,7 +5225,7 @@ export class BoxedFunction
         if (lazy) return lazy;
 
         const items = zip(bops);
-        if (!items) return this.engine.Nothing;
+        if (!items) return this.engine._fn('List', []);
 
         const results: Promise<Expression>[] = [];
         while (true) {
@@ -5219,9 +5237,9 @@ export class BoxedFunction
           );
         }
 
-        if (results.length === 0) return this.engine.Nothing;
         // Always wrap in a `List` — even a single-element broadcast — so the
-        // value matches the `list<E>` broadcast type (mirrors the sync path).
+        // value matches the `list<E>` broadcast type, and a lone empty
+        // operand answers the empty list (mirrors the sync path).
         return Promise.all(results).then((resolved) =>
           this.engine._fn('List', resolved)
         );
@@ -5500,7 +5518,7 @@ export class BoxedFunction
           sawPropagate &&
           !(
             def.resolvedMissingBehavior === 'reject' &&
-            tail.some((x) => isSymbol(x, 'Missing'))
+            tail.some(isAbsentScalarSymbol)
           )
         )
           return this.engine.NaN;
@@ -5560,8 +5578,9 @@ export class BoxedFunction
 
       //
       // 3a/ Missing-value behavior gate (§3.E) — parity with the sync path's
-      // step 4a. A `propagate` operator with an absent `Missing` scalar operand
-      // (no collection operand) yields the quiet marker of its own codomain
+      // step 4a. A `propagate` operator with an absent scalar operand — the
+      // `Missing` or `Undefined` symbol, no collection operand — yields the
+      // quiet marker of its own codomain
       // (`absentScalarMarker`): `NaN` into a numeric application type,
       // `Missing` otherwise. A `reject` operator errors.
       // "No collection operand" is collection-SHAPED, not the `isCollection`
@@ -5577,7 +5596,12 @@ export class BoxedFunction
           if (behavior === 'reject')
             return this.engine.error([
               'unexpected-argument',
-              this.engine.Missing.toString(),
+              // Name the operand that is actually absent: the gate accepts
+              // both `Missing` and `Undefined`, so a fixed `Missing` in the
+              // message would misreport an `Undefined` operand.
+              (
+                tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
+              ).toString(),
             ]);
           return absentScalarMarker(this.engine, this);
         }
@@ -5686,10 +5710,13 @@ export class BoxedFunction
                 throw withBroadcastThrowContext(e, this.operator, tail);
               }
             );
-          if (results.length > 0)
-            return Promise.all(results).then((resolved) =>
-              this.engine._fn('List', resolved)
-            );
+          // An operand that became the EMPTY collection only at evaluation
+          // yields the empty list, the same answer a literal `[]` gets
+          // (rule of 2026-09-21, `docs/BROADCAST-MODEL.md`; mirrors the sync
+          // path's step 4b).
+          return Promise.all(results).then((resolved) =>
+            this.engine._fn('List', resolved)
+          );
         }
       }
 

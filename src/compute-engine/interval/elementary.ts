@@ -43,6 +43,7 @@ import {
   chop as scalarChop,
   nextDown,
   nextUp,
+  roundHalfAway,
 } from '../numerics/numeric.js';
 import { choose as scalarBinomial } from '../boxed-expression/expand.js';
 
@@ -738,12 +739,6 @@ function ceilRaw(x: Interval | IntervalResult): IntervalResult {
 
 // `isNaNInterval` and `NAN_INTERVAL` are defined near the top of this file:
 // the domain-restricted kernels above the step functions use them too.
-
-/** Round half away from zero (Round(-2.5) = -3) — the interpreter's convention.
- *  This differs from JS `Math.round` (half toward +∞: Math.round(-2.5) = -2). */
-function roundHalfAway(n: number): number {
-  return Math.sign(n) * Math.round(Math.abs(n));
-}
 
 /**
  * Sound enclosure of a step-rounding function on an interval, given its

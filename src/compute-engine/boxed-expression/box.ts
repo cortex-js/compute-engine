@@ -120,7 +120,7 @@ import {
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
-import { rebindToBindings } from './binders.js';
+import { markBinderVariable, rebindToBindings } from './binders.js';
 import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
@@ -3193,6 +3193,13 @@ function bindBindingSites(
       // than to the binding this node just declared for it.
       binding = ce._bindingSymbol(id, scope);
       if (binding === undefined) continue;
+      // The binding is this node's VARIABLE, not an ordinary declaration.
+      // Symbol-value resolution walks past a binder's variable when the
+      // occurrence it is reading denotes something else — a global a stored
+      // value refers to (ruled 2026-09-21) — and the mark is how it
+      // recognizes one without holding the scope (`markBinderVariable`,
+      // `binders.ts`).
+      markBinderVariable(scope, id);
       bound.set(id, binding);
     }
     if (sym.valueDefinition === binding.valueDefinition) continue;

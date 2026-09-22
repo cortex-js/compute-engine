@@ -162,7 +162,7 @@ describe('TYCHO 262 — rotation views agree with the interpreter', () => {
     }
   });
 
-  test('an empty list rotates to an empty list, and an empty broadcast position answers NaN', () => {
+  test('an empty list rotates to an empty list, and an empty broadcast position answers it too', () => {
     expect(run(['RotateLeft', ['List'], 3])).toEqual([]);
     ce.pushScope();
     ce.declare('E', 'list<number>');
@@ -172,7 +172,7 @@ describe('TYCHO 262 — rotation views agree with the interpreter', () => {
         fallback: false,
       });
       expect(r.code).toContain('_SYS.rotv(_.E, 3, 1)');
-      expect((r.run as (v: any) => unknown)({ E: [] })).toBeNaN();
+      expect((r.run as (v: any) => unknown)({ E: [] })).toEqual([]);
       expect((r.run as (v: any) => unknown)({ E: [5, 6] })).toEqual([7, 6]);
     } finally {
       ce.popScope();
@@ -365,7 +365,7 @@ describe('TYCHO 264 — per-shape broadcast kernels keep the interpreter semanti
     expect(run(expr)).toEqual(interpreted(expr));
   });
 
-  test('a length mismatch and an empty position answer NaN as before', () => {
+  test('a length mismatch answers NaN, an empty position the empty list', () => {
     expect(run(['Add', ['List', 1, 2, 3], ['List', 1, 2]])).toBeNaN();
     expect(
       run(['Add', ['RotateLeft', ['List', 1, 2, 3], 1], ['List', 1, 2]])
@@ -373,7 +373,7 @@ describe('TYCHO 264 — per-shape broadcast kernels keep the interpreter semanti
     ce.pushScope();
     ce.declare('E', 'list<number>');
     try {
-      expect(run(['Add', 'E', 1], { E: [] })).toBeNaN();
+      expect(run(['Add', 'E', 1], { E: [] })).toEqual([]);
       expect(run(['Add', 'E', ['List', 1, 2]], { E: [1] })).toBeNaN();
     } finally {
       ce.popScope();

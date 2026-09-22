@@ -212,8 +212,10 @@ test.each([false, true])(
         ],
         [15, 22],
       ],
-      [[1, []], NaN],
-      [[[], 1], NaN],
+      // A broadcast over a lone empty coordinate answers the empty list, as
+      // the interpreter does (`docs/BROADCAST-MODEL.md`).
+      [[1, []], []],
+      [[[], 1], []],
       [[NaN, 2], NaN],
       [
         [1, [NaN, Infinity]],

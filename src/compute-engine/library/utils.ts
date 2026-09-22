@@ -1,4 +1,5 @@
 import type {
+  BoxedValueDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
   OperandDescriptor,
@@ -20,7 +21,11 @@ import {
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
-import { rewriteWithBinders } from '../boxed-expression/binders.js';
+import {
+  binderBindingOf,
+  rewriteWithBinders,
+  sameBindingDef,
+} from '../boxed-expression/binders.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
@@ -2451,18 +2456,34 @@ function substituteIndexBindings(
         for (const sym of subs[name].symbols)
           if (binders.has(sym)) return undefined;
   }
-  return substituteFreeNames(expr, subs);
+  return substituteBinderValues(expr, subs);
 }
 
 /**
- * Replace every FREE occurrence of the names in `subs` by the given value,
- * leaving occurrences bound by a binder inside `expr` (a `Function` literal's
- * parameters, a `Sum`/`Product`/`Block`/… scope) untouched.
+ * Replace every occurrence that DENOTES a binder's variable named in `subs`
+ * by the value the binder currently holds for it.
+ *
+ * Two kinds of occurrence are left alone. One is an occurrence bound by a
+ * binder INSIDE `expr` (a `Function` literal's parameter, a
+ * `Sum`/`Product`/`Block`/… scope): it is not free, so the outer binder's
+ * value is not its value. The other — ruled 2026-09-21 — is a free
+ * occurrence that denotes a binding OUTSIDE the binder, typically a global
+ * that a stored symbol value refers to. With `a := n + 1`, the term of
+ * `Σ_{n=1}^{3} a` evaluates to `n + 1` whose `n` is the global, so the sum
+ * is `3n + 3`; substituting it by name gave `2 + 3 + 4 = 9` and captured a
+ * name the writer of `a` never offered. An occurrence carrying no binding at
+ * all is still substituted: it names nothing in particular, and the index
+ * value is the best answer for it.
+ *
+ * `scopeOf` supplies the binder's own scope for a name when the caller holds
+ * it. A comprehension substitutes into a finished element AFTER its scope
+ * has left the ambient chain, so without it no occurrence would be
+ * recognized. The big-operator fold substitutes while the index assignment
+ * is still in force and passes nothing.
  *
  * Built on `rewriteWithBinders` (`boxed-expression/binders.ts`), which owns
  * the three behaviors a hand-rolled walk gets wrong: it tracks shadowing
- * through binder nodes (an occurrence under a binder that rebinds the name is
- * not free and stays), it descends into DICTIONARY values (not function
+ * through binder nodes, it descends into DICTIONARY values (not function
  * operands, so a plain `ops` recursion never reaches them), and a rebuilt
  * scoped node keeps its original `localScope` and form — a bare
  * `ce.function` rebuild would mint a fresh empty scope, leaving untouched
@@ -2470,13 +2491,30 @@ function substituteIndexBindings(
  * `Sum` whose body no longer resolves its index). Returns `expr` itself when
  * nothing was replaced.
  */
-function substituteFreeNames(
+export function substituteBinderValues(
   expr: Expression,
-  subs: Readonly<Record<string, Expression>>
+  subs: Readonly<Record<string, Expression>>,
+  scopeOf?: (name: string) => Scope | undefined
 ): Expression {
-  return rewriteWithBinders(expr, (sym, shadowed) =>
-    shadowed?.has(sym.symbol) ? sym : (subs[sym.symbol] ?? sym)
-  );
+  const ce = expr.engine;
+  // The binder binding of each substituted name, resolved once.
+  const bindings = new Map<string, BoxedValueDefinition | undefined>();
+  for (const name of Object.keys(subs))
+    bindings.set(
+      name,
+      binderBindingOf(ce, name, scopeOf?.(name) ?? ce.context.lexicalScope)
+    );
+
+  return rewriteWithBinders(expr, (sym, shadowed) => {
+    const name = sym.symbol;
+    if (shadowed?.has(name)) return sym;
+    const value = subs[name];
+    if (value === undefined) return sym;
+    const own = sym.valueDefinition;
+    if (own === undefined) return value;
+    const binding = bindings.get(name);
+    return binding !== undefined && sameBindingDef(binding, own) ? value : sym;
+  });
 }
 
 /**

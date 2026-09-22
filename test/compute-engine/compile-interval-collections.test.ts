@@ -131,18 +131,16 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
     ]);
   });
 
-  test('a length mismatch and an empty list answer the absence marker', () => {
+  test('a length mismatch answers the absence marker, an empty list the empty list', () => {
     const ce = engine();
     const r = compile(ce.parse('V \\cdot W'), { to: 'interval-js' });
     expect(r.success).toBe(true);
     // The interpreter reports `incompatible-dimensions` at every point.
     const mismatch: any = r.run!({ V: [1, 2, 3], W: [1, 2] });
     expect(Number.isNaN(mismatch.lo)).toBe(true);
-    // The empty case follows the JavaScript target's `bcast` (`Nothing`, as
-    // the interpreter answers a unary head over `[]`; `[] · []` evaluates to
-    // `[]` there — the split is an open roadmap entry).
-    const empty: any = r.run!({ V: [], W: [] });
-    expect(Number.isNaN(empty.lo)).toBe(true);
+    // A broadcast over a lone empty operand answers the EMPTY LIST, as it
+    // does in the interpreter (`[] · []` evaluates to `[]`).
+    expect(r.run!({ V: [], W: [] })).toEqual([]);
   });
 
   test('a literal list of lists broadcasts to its leaves', () => {

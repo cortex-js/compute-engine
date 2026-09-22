@@ -99,7 +99,8 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
       1,
       Math.cos(Math.PI / 2) - 1,
     ]);
-    expect(r.run!({ x: 0, y: 1, P: [] })).toBeNaN();
+    // A broadcast over a lone empty operand answers the empty list.
+    expect(r.run!({ x: 0, y: 1, P: [] })).toEqual([]);
   });
 
   test('a caller override cannot inherit the helper body proof', () => {
