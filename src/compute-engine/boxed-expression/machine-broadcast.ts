@@ -50,25 +50,37 @@ export const DEADLINE_STRIDE = 0xffff;
  *   interpreter answers an exact integer. The double is that integer when the
  *   operands and the result are safe integers; otherwise the function
  *   declines.
- * - **Heads.** `Add` and `Multiply` of exactly two operands, and `Negate`.
- *   One addition or one multiplication of two doubles is one correctly
- *   rounded operation, in any order. A sum or a product of three or more
- *   operands is not: the interpreter adds the exact operands apart from the
- *   floats, and the rounding depends on that order.
+ * - **Heads.** `Add` and `Multiply` of two or more operands, `Negate`, and
+ *   the functions of one machine number that {@link FUNCTION_KERNELS} and
+ *   {@link powerKernel} list, each with the inputs it must decline. A sum or
+ *   a product of two doubles is one correctly rounded operation, in any
+ *   order. With three or more operands the interpreter combines the exact
+ *   operands (the integers) first and then adds the floats, and the fold
+ *   here does the same, so that a cancellation among the integers is exact
+ *   (`1e15 + 1e-5 − 1e15` is `1e-5`, not `0`); the floats are then added
+ *   left to right, and the last digit of a cell can differ from the
+ *   element-by-element value. A change in the last digit of a float is
+ *   accepted for the performance (user decision, 2026-09-21); an exact value
+ *   is never changed.
  */
 export function machineBroadcast(
   ce: Expression['engine'],
   operator: string,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  numericApproximation = false
 ): Expression | undefined {
+  if (!atMachinePrecision(ce)) return undefined;
+
   const kernel = KERNELS[operator];
-  if (kernel === undefined || ops.length !== kernel.arity) return undefined;
+  if (kernel === undefined) {
+    if (!isLibraryOperator(ce, operator)) return undefined;
+    return machineFunctionBroadcast(ce, operator, ops, numericApproximation);
+  }
+  if (kernel.arity === 1 ? ops.length !== 1 : ops.length < 2) return undefined;
 
   // The operator must be the library's own: a redefined `Add` has its own
   // element function.
   if (!isLibraryOperator(ce, operator)) return undefined;
-
-  if (!atMachinePrecision(ce)) return undefined;
 
   let length: number | undefined = undefined;
   const columns: (readonly number[] | number)[] = [];
@@ -92,28 +104,313 @@ export function machineBroadcast(
   if (length === undefined || length === 0) return undefined;
 
   const out = new Array<number>(length);
-  const a = columns[0];
-  const b = columns[1];
+  const cell = new Array<number>(columns.length);
   for (let i = 0; i < length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
       checkDeadline(ce._deadlineFrame);
-    const x = typeof a === 'number' ? a : a[i];
-    const y = b === undefined ? 0 : typeof b === 'number' ? b : b[i];
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
-    const r = kernel.apply(x, y);
-    if (!Number.isFinite(r)) return undefined;
-    // An integer past the safe range: `ce.number()` makes it an exact big
-    // integer, which is not the value the interpreter holds when an operand
-    // was a float, and the double may not be the exact sum or product when
-    // both operands were integers.
+    for (let c = 0; c < columns.length; c++) {
+      const column = columns[c];
+      const x = typeof column === 'number' ? column : column[i];
+      if (!Number.isFinite(x)) return undefined;
+      // An integer past the safe range is an exact big integer in the
+      // interpreter, which the double does not hold.
+      if (Number.isInteger(x) && !Number.isSafeInteger(x)) return undefined;
+      cell[c] = x;
+    }
+    const r =
+      kernel.arity === 1
+        ? kernel.apply(cell[0], 0)
+        : foldExactFirst(kernel, cell);
+    // A `NaN` or an infinite result, and an integer result past the safe
+    // range (an exact big integer in the interpreter when every operand is
+    // an integer, and not the value it holds when one is a float), are
+    // decided by the interpreter.
+    if (r === undefined || !Number.isFinite(r)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
-    if (
-      Number.isInteger(x) &&
-      Number.isInteger(y) &&
-      !(Number.isSafeInteger(x) && Number.isSafeInteger(y))
-    )
-      return undefined;
     // `-0` is stored as `0`, as the `array` of a list stores it.
+    out[i] = r === 0 ? 0 : r;
+  }
+  return ce.list(out);
+}
+
+/**
+ * A function of one machine number, computed on doubles for a whole list.
+ *
+ * `apply` is the primitive the interpreter's scalar route calls for a
+ * machine number, measured bit for bit on 3,000 random floats per head under
+ * `evaluate()` and under `N()`; a kernel whose head takes another route on
+ * some input declines that input:
+ *
+ * - `routes`: `'N'` for a head whose `evaluate()` recognizes special
+ *   arguments and answers an exact value for them: the inverse trigonometric
+ *   functions (`Arcsin(0.5)` is `π/6`), and a power of `e` (`√e` for the
+ *   exponent `0.5`). Under `N()` every such head computes the primitive.
+ * - `avoid`: the arguments that `evaluate()` recognizes, for a head that
+ *   computes the primitive on every other argument. The trigonometric
+ *   functions answer an exact value for a float within `1e-12` of a special
+ *   angle (`Sin(3.141592653589793)` is `0`, `Cos(π/3)` is `1/2`, and a tiny
+ *   argument is a special angle too: `Sin(1e-300)` is `0`): see
+ *   `nearSpecialAngle`.
+ * - `integers`: whether an integer element is admitted under `evaluate()`.
+ *   `Sinh(1)` and `Sqrt(2)` are exact there, `|−3|`, `⌊2.5⌋` and `3^2`
+ *   are the integers the primitive gives. Under `N()` an integer element is
+ *   admitted by every kernel: the interpreter numericizes it, and where it
+ *   answers an exact value (`Sqrt(4)`, `Sinh(0)`) that value is the double.
+ * - `domain`: the arguments with a finite real value. A negative argument of
+ *   `Sqrt` or `Ln` has a complex value; `Arcsin` outside `[−1, 1]` too.
+ * - `bound`: `Tan` and its three relatives answer the pole `~oo` when the
+ *   primitive's value passes a million in magnitude.
+ * - The trigonometric heads read `ce.angularUnit`: in another unit than
+ *   radians the argument is converted first, which the kernel does not do.
+ */
+interface MachineFunctionKernel {
+  apply: (x: number) => number;
+  routes: 'both' | 'N';
+  integers: boolean;
+  domain?: (x: number) => boolean;
+  avoid?: (x: number) => boolean;
+  bound?: number;
+  angle?: boolean;
+}
+
+const POLE_BOUND = 1e6;
+
+/**
+ * Is `x` an angle (in radians) that `evaluate()` of a trigonometric function
+ * may answer an exact value for?
+ *
+ * The recognizer (`constructibleValues`, `boxed-expression/trigonometry.ts`)
+ * reduces the angle to `[0, π/2)` with the two remainders below, and answers
+ * an exact value when the remainder is within `1e-12` of `π·n/d` for a
+ * fraction `n/d` of its table, whose denominators all divide 120. The test
+ * here is the same reduction, followed by the distance to the nearest
+ * multiple of `π/120` with a tolerance a thousand times wider: every angle
+ * the recognizer answers is within it, and an angle that is within it and
+ * that the recognizer does not answer takes the general route, which
+ * computes the same primitive.
+ */
+function nearSpecialAngle(x: number): boolean {
+  const theta = Math.abs(x % (2 * Math.PI)) % (Math.PI / 2);
+  const step = Math.PI / 120;
+  const r = theta % step;
+  return r <= 1e-9 || step - r <= 1e-9;
+}
+
+const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
+  Sin: {
+    apply: Math.sin,
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: nearSpecialAngle,
+  },
+  Cos: {
+    apply: Math.cos,
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: nearSpecialAngle,
+  },
+  Tan: {
+    apply: Math.tan,
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: nearSpecialAngle,
+    bound: POLE_BOUND,
+  },
+  Cot: {
+    apply: (x) => 1 / Math.tan(x),
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: nearSpecialAngle,
+    bound: POLE_BOUND,
+  },
+  Sec: {
+    apply: (x) => 1 / Math.cos(x),
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: nearSpecialAngle,
+    bound: POLE_BOUND,
+  },
+  Csc: {
+    apply: (x) => 1 / Math.sin(x),
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: nearSpecialAngle,
+    bound: POLE_BOUND,
+  },
+  Arctan: { apply: Math.atan, routes: 'N', integers: false, angle: true },
+  Arcsin: {
+    apply: Math.asin,
+    routes: 'N',
+    integers: false,
+    angle: true,
+    domain: (x) => x >= -1 && x <= 1,
+  },
+  Arccos: {
+    apply: Math.acos,
+    routes: 'N',
+    integers: false,
+    angle: true,
+    domain: (x) => x >= -1 && x <= 1,
+  },
+  Sinh: { apply: Math.sinh, routes: 'both', integers: false },
+  Cosh: { apply: Math.cosh, routes: 'both', integers: false },
+  Tanh: { apply: Math.tanh, routes: 'both', integers: false },
+  Ln: {
+    apply: Math.log,
+    routes: 'both',
+    integers: false,
+    domain: (x) => x > 0,
+  },
+  // `Math.log10` and `Math.log2` are the primitives of the `N()` route and
+  // of the compiled code; `evaluate()` of a scalar computes the logarithm
+  // another way and differs from them in the last digit on about half of
+  // the arguments, which is accepted (see the note on the heads above).
+  Log: {
+    apply: Math.log10,
+    routes: 'both',
+    integers: false,
+    domain: (x) => x > 0,
+  },
+  Lb: {
+    apply: Math.log2,
+    routes: 'both',
+    integers: false,
+    domain: (x) => x > 0,
+  },
+  Sqrt: {
+    apply: Math.sqrt,
+    routes: 'both',
+    integers: false,
+    domain: (x) => x >= 0,
+  },
+  Abs: { apply: Math.abs, routes: 'both', integers: true },
+  Floor: { apply: Math.floor, routes: 'both', integers: true },
+  Ceil: { apply: Math.ceil, routes: 'both', integers: true },
+  Round: { apply: Math.round, routes: 'both', integers: true },
+};
+
+/**
+ * The kernel of `Power` with a machine-number exponent `k`, or of a power
+ * of `e` with a list exponent, as {@link machineFunctionBroadcast} applies it.
+ *
+ * A power of a machine float is `x ** k` (`Math.pow`), measured bit for bit
+ * against the scalar route for `k` from −5 to 7 (an exponent of −1 never
+ * arrives: `Power(x, −1)` is canonically `Divide(1, x)`). An integer element
+ * is admitted only for a positive integer `k`, where the interpreter answers
+ * the exact integer the primitive gives; a negative `k` gives an exact
+ * rational, and a non-integer `k` a value the interpreter may keep exact. A
+ * non-integer `k` needs a non-negative base (a negative base has a complex
+ * value), and a negative `k` a non-zero base (the pole is `~oo`). A power of `e` is `Math.exp` (the same primitive as
+ * `Exp(x).evaluate()`), under `N()` only: `evaluate()` keeps `e^2` and
+ * answers `√e` for `e^0.5`.
+ */
+function powerKernel(
+  ce: Expression['engine'],
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): [MachineFunctionKernel, Expression] | undefined {
+  if (ops.length !== 2) return undefined;
+  const [base, exponent] = ops;
+  if (numericApproximation && base === ce.E.N())
+    return [{ apply: Math.exp, routes: 'N', integers: true }, exponent];
+  const k = machineNumberOf(exponent);
+  if (
+    k === undefined ||
+    !Number.isFinite(k) ||
+    k === 0 ||
+    isExactNonInteger(exponent, k) ||
+    !isStoredAsDouble(exponent)
+  )
+    return undefined;
+  if (Number.isInteger(k)) {
+    if (k > 0)
+      return [{ apply: (x) => x ** k, routes: 'both', integers: true }, base];
+    return [
+      {
+        apply: (x) => x ** k,
+        routes: 'both',
+        integers: false,
+        domain: (x) => x !== 0,
+      },
+      base,
+    ];
+  }
+  return [
+    {
+      apply: (x) => x ** k,
+      routes: 'both',
+      integers: false,
+      domain: (x) => x >= 0,
+    },
+    base,
+  ];
+}
+
+/**
+ * `operator` applied to every element of a `List` of machine numbers, on
+ * doubles, when a kernel exists for it ({@link FUNCTION_KERNELS},
+ * {@link powerKernel}) and every element is one the kernel gives the
+ * interpreter's value for; `undefined` otherwise. The result of every
+ * element must be finite (a `NaN` or an infinite result means a value the
+ * interpreter decides another way), and an integer result past the safe
+ * range declines as in {@link machineBroadcast}.
+ */
+function machineFunctionBroadcast(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression | undefined {
+  let kernel: MachineFunctionKernel | undefined;
+  let operand: Expression | undefined;
+  if (operator === 'Power') {
+    const found = powerKernel(ce, ops, numericApproximation);
+    if (found === undefined) return undefined;
+    [kernel, operand] = found;
+  } else if (operator === 'Log' && ops.length === 2) {
+    // `Lb(x)` is canonically `Log(x, 2)`. A base of 2 or 10 has its own
+    // primitive on the scalar route (`Math.log2`, `Math.log10`); another base
+    // is a quotient of two logarithms and has no kernel.
+    const base = machineNumberOf(ops[1]);
+    if (base !== 2 && base !== 10) return undefined;
+    kernel = FUNCTION_KERNELS[base === 2 ? 'Lb' : 'Log'];
+    operand = ops[0];
+  } else {
+    if (ops.length !== 1) return undefined;
+    kernel = FUNCTION_KERNELS[operator];
+    operand = ops[0];
+  }
+  if (kernel === undefined) return undefined;
+  if (kernel.routes === 'N' && !numericApproximation) return undefined;
+  if (kernel.angle && ce.angularUnit !== 'rad') return undefined;
+
+  const list = machineListOf(operand);
+  if (list === undefined || !holdsDoubles(list)) return undefined;
+  const values = list.array;
+  if (values === undefined || values.length === 0) return undefined;
+
+  const admitsIntegers = numericApproximation || kernel.integers;
+  const out = new Array<number>(values.length);
+  for (let i = 0; i < values.length; i++) {
+    if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
+      checkDeadline(ce._deadlineFrame);
+    const x = values[i];
+    if (!Number.isFinite(x)) return undefined;
+    if (!admitsIntegers && Number.isInteger(x)) return undefined;
+    if (kernel.domain !== undefined && !kernel.domain(x)) return undefined;
+    if (!numericApproximation && kernel.avoid !== undefined && kernel.avoid(x))
+      return undefined;
+    const r = kernel.apply(x);
+    if (!Number.isFinite(r)) return undefined;
+    if (kernel.bound !== undefined && Math.abs(r) > kernel.bound)
+      return undefined;
+    if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
     out[i] = r === 0 ? 0 : r;
   }
   return ce.list(out);
@@ -127,15 +424,40 @@ function atMachinePrecision(ce: Expression['engine']): boolean {
   return ce.precision <= MACHINE_PRECISION;
 }
 
+/**
+ * The fold of one cell of an `Add` or a `Multiply` over `values`, in the
+ * interpreter's order: the integers first (an exact partial result, which
+ * declines past the safe range), then the floats from left to right.
+ * `undefined` when an exact partial result leaves the safe range.
+ */
+function foldExactFirst(
+  kernel: MachineKernel,
+  values: readonly number[]
+): number | undefined {
+  let exact: number | undefined = undefined;
+  for (const x of values) {
+    if (!Number.isInteger(x)) continue;
+    exact = exact === undefined ? x : kernel.apply(exact, x);
+    if (!Number.isSafeInteger(exact)) return undefined;
+  }
+  let r = exact;
+  for (const x of values) {
+    if (Number.isInteger(x)) continue;
+    r = r === undefined ? x : kernel.apply(r, x);
+  }
+  return r;
+}
+
 interface MachineKernel {
-  arity: 1 | 2;
+  /** One operand, or two or more: the integers first, then the floats. */
+  arity: 1 | 'n';
   /** The second argument is `0` for a kernel of arity 1. */
   apply: (x: number, y: number) => number;
 }
 
 const KERNELS: Record<string, MachineKernel> = {
-  Add: { arity: 2, apply: (x, y) => x + y },
-  Multiply: { arity: 2, apply: (x, y) => x * y },
+  Add: { arity: 'n', apply: (x, y) => x + y },
+  Multiply: { arity: 'n', apply: (x, y) => x * y },
   Negate: { arity: 1, apply: (x) => -x },
 };
 

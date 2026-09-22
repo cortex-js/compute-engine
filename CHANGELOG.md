@@ -2,6 +2,47 @@
 
 ### Improvements
 
+- **The common functions of one number over a large list of machine numbers
+  are computed on doubles, at machine precision.** `Sin`, `Cos`, `Tan`,
+  `Cot`, `Sec`, `Csc`, `Sinh`, `Cosh`, `Tanh`, `Ln`, `Sqrt`, `Abs`, `Floor`,
+  `Ceil`, `Round`, `Power` with a machine-number exponent, and under `N()`
+  `Arctan`, `Arcsin`, `Arccos` and a power of `e`, over a list of machine
+  numbers answered a lazy `Map` above a hundred elements, whose elements the
+  interpreter computed one function application at a time. Each of these
+  heads is now computed at once with the `Math` primitive its scalar route
+  computes, measured bit for bit on 3,000 random floats per head under both
+  routes, and the answer is a list that holds its numbers unboxed. Every
+  input on which the scalar route takes another way keeps the lazy form: an
+  integer element under `evaluate()` (`Sinh(1)` is exact), a negative
+  argument of `Sqrt` or `Ln`, a pole of `Tan`, a float near a special angle
+  under `evaluate()` (`Sin(3.141592653589793)` is exactly `0`), another
+  angular unit than radians. `Add` and `Multiply` of three or more operands
+  (`L + M + 1`), and `Log` and `Lb`, are computed on doubles too.
+  `Sum(…).N()` of a body with no indexing set first evaluates that body on
+  the numeric route and adds the doubles when the value is a finite list of
+  machine numbers, so `Sum(Exp(L/100)).N()` reaches the kernel of a power of
+  `e`; any other value takes the exact route, as before. Measured over
+  ten thousand elements at machine precision, both versions interleaved in
+  one process, `evaluate()` and `N()`: `Sum(Sin(L))` 58 → 2 ms,
+  `Sum(Cos(L))` 70 → 2 ms, `Sum(Tan(L))` 72 → 3 ms, `Max(Sqrt(L))`
+  69 → 4 ms, `Max(Ln(L))` 90 → 6 ms, `Sum(L^2)` 79 → 2 ms, `Sum(L^-2)`
+  85 → 2 ms, `Sum(Exp(L/100)).N()` 165 → 3 ms.
+
+  Some values change in their last digit, which is accepted for the
+  performance. The value of every element of a function of one number is
+  the scalar route's value; under `N()` that is a change for two heads,
+  because the lazy `Map` was compiled (`library/map-auto-compile.ts`) and
+  compiled code computes a power of `e` as `Math.pow(e, x)` and a small
+  integer power as repeated multiplication, where the scalar route computes
+  `Math.exp(x)` and `Math.pow(x, 3)`. A sum or a product of three or more
+  operands combines the integers first, exactly, as the interpreter does,
+  and then the floats from left to right, in an order that may differ from
+  the interpreter's. `Log` and `Lb` compute
+  `Math.log10` and `Math.log2`, the primitives of the `N()` route and of the
+  compiled code, where `evaluate()` of a scalar takes another way. And the
+  body of `Sum(…).N()` is now computed on the numeric route, so
+  `Sum(L / 3).N()` adds `0.333… · v` where it added `v / 3`. Every such
+  difference is one unit in the last place; an exact value never changes.
 - **A symbol that holds a large list of numbers or of points costs nothing to
   read.** Each use of such a symbol walked the whole stored value to look for
   symbols to protect, 1.2 ms for ten thousand points, although written-out

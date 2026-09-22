@@ -5246,9 +5246,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below no longer holds.
         if (n !== undefined) return undefined;
         if (x.isNaN) return 'unsigned';
-        // The evaluate handler rounds halves AWAY from zero in every lane
-        // (Round(-1/2) = -1); Math.round ties toward +∞, so negate-and-round
-        // for negative reals or `.sgn` and `.evaluate()` disagree at -0.5.
+        // Above machine precision the evaluate handler rounds a half AWAY
+        // from zero (`Round(-1/2) = -1`, the big-number lane); at machine
+        // precision it computes `Math.round`, which rounds a tie toward +∞
+        // (`Round(-0.5) = 0`). This sign follows the first rule:
+        // negate-and-round for a negative real. The two lanes disagree at
+        // `-0.5`, which ROADMAP records.
         if (isNumber(x))
           return numberSgn(x.re < 0 ? -Math.round(-x.re) : Math.round(x.re));
         if (x.isGreaterEqual(0.5)) return 'positive';
@@ -6600,6 +6603,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below and report a wrong value, so the decline is carried out of
         // the closure by this flag instead.
         let captureUnsafe = false;
+        // No fold of a whole list exists for a product, so the options that
+        // `Sum` passes (the fold, and with it the numeric-route evaluation of
+        // a body with no indexing set) are not passed here: the body is
+        // evaluated exactly and the factors are numericized one by one.
         const result = run(
           reduceBigOp(
             ops[0],
@@ -6858,11 +6865,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return sumAccumulate(acc, term, numeric);
             },
             engine.Zero,
-            // A body that evaluates to a list of machine numbers
-            // (`Sum(PointX(C))`) is summed on its doubles: `machineSum`.
-            (collection) => {
-              const total = machineListTotal(collection);
-              return total === undefined ? undefined : engine.number(total);
+            {
+              // A body that evaluates to a list of machine numbers
+              // (`Sum(PointX(C))`) is summed on its doubles: `machineSum`.
+              foldValue: (collection) => {
+                const total = machineListTotal(collection);
+                return total === undefined ? undefined : engine.number(total);
+              },
+              numericApproximation: numeric,
             }
           ),
           engine._timeRemaining,
@@ -6997,7 +7007,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       effects
                     ).then((term) => accumulate(acc, term))
                   : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
-              engine.Zero
+              engine.Zero,
+              {
+                // The same fold as the synchronous handler, so that both
+                // answer the same value for a body that is a list of machine
+                // numbers.
+                foldValue: (collection) => {
+                  const total = machineListTotal(collection);
+                  return total === undefined ? undefined : engine.number(total);
+                },
+                numericApproximation: numeric,
+              }
             )
           ),
           engine._timeRemaining,

@@ -2138,7 +2138,7 @@ export function broadcastOverIndexedCollections(
   if (allowLazy && n > MAX_SIZE_EAGER_COLLECTION) {
     // Lists of machine numbers are computed at once, on doubles, as in
     // `lazyBroadcastMapIfNeeded`.
-    const eager = machineBroadcast(ce, operator, xs);
+    const eager = machineBroadcast(ce, operator, xs, numericApproximation);
     if (eager !== undefined) return eager;
     return lazyBroadcastMap(
       ce,
@@ -2343,7 +2343,7 @@ export function lazyBroadcastMapIfNeeded(
   // declared function (`callee`) has its own element function and is never
   // computed this way.
   if (!hasUnknownOrInfinite && options?.callee === undefined) {
-    const eager = machineBroadcast(ce, operator, ops);
+    const eager = machineBroadcast(ce, operator, ops, numericApproximation);
     if (eager !== undefined) return eager;
   }
   return lazyBroadcastMap(

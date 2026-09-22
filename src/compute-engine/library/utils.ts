@@ -2499,7 +2499,23 @@ export function* reduceBigOp<T>(
   indexes: ReadonlyArray<Expression>,
   fn: BigOpTermCallback<T>,
   initial: T,
-  foldValue?: (collection: Expression) => T | undefined
+  options?: {
+    /** Folds an evaluated collection body as a whole, or answers
+     * `undefined` to have its elements folded one by one. */
+    foldValue?: (collection: Expression) => T | undefined;
+    /** The route of the enclosing evaluation. Under a numeric evaluation a
+     * body with no indexing set is first evaluated on the numeric route,
+     * which computes doubles for a whole list (`Exp(L)` over machine numbers
+     * has such a route under `N()` only), and that value is used when
+     * `foldValue` folds it. Otherwise the body is evaluated exactly, as
+     * always: a value the numeric route overflows to an infinity or a `NaN`
+     * (`1e308 · K`), or a pole (`1/X` with a zero in `X`), must keep the
+     * exact route's answer. What can change is the last digit of a sum whose
+     * body the numeric route computes with another rounding (`L / 3` is
+     * `v / 3` per element under `evaluate()` and `0.333… · v` under `N()`),
+     * which is accepted for the performance (user decision, 2026-09-21). */
+    numericApproximation?: boolean;
+  }
 ): Generator<
   | T
   | typeof NON_ENUMERABLE_DOMAIN
@@ -2535,13 +2551,17 @@ export function* reduceBigOp<T>(
     // `Sum(mod(floor(7/2^[0...10]), 2))`. Reduce the value; returning
     // `fn(initial, body)` would fold the broadcast list in whole (`0 + [...]`)
     // and hand back the list unchanged.
+    if (options?.numericApproximation && options.foldValue !== undefined) {
+      const numeric = body.evaluate({ numericApproximation: true });
+      if (numeric.isCollection && numeric.isFiniteCollection === true) {
+        const folded = options.foldValue(numeric);
+        if (folded !== undefined) return folded;
+      }
+    }
     const value = body.evaluate();
     if (value.isCollection) {
       if (value.isFiniteCollection !== true) return NON_ENUMERABLE_DOMAIN;
-      // The caller can fold the evaluated collection as a whole (`Sum` adds
-      // the doubles of a list of machine numbers); `undefined` means that it
-      // does not, and the elements are folded one by one.
-      const folded = foldValue?.(value);
+      const folded = options?.foldValue?.(value);
       if (folded !== undefined) return folded;
       return yield* reduceCollectionOrDecline(value, fn, initial);
     }

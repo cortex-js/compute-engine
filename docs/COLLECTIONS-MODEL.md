@@ -67,14 +67,39 @@ took before.
   radical, a complex number, a symbol or a nested list among the elements
   declines. Every value must be finite: `0 · ∞`, `∞ − ∞` and `NaN` are decided
   by the interpreter.
-- **Heads.** `Add` and `Multiply` of exactly two operands, `Negate`, and a
+- **Heads.** `Add` and `Multiply` of two or more operands, `Negate`, and a
   scalar times a vector on the tensor route (`scaleMachineVector`). One
-  operation on two doubles is correctly rounded in any order. A sum or a
-  product of three or more operands is not reproduced: the interpreter adds
-  the exact operands apart from the floats. A function head (`Sin`, `Sqrt`,
-  `Power`, `Divide`) keeps the lazy form: an integer argument stays exact
-  under `evaluate()` (`Sin(1)`), a negative argument can have a complex
-  value, and the primitive must be the one the interpreter uses.
+  operation on two doubles is correctly rounded in any order; with three or
+  more operands the integers are combined first, exactly, as the interpreter
+  does, and then the floats from left to right. The last digit of a float
+  may then differ from the element-by-element value, which is accepted for
+  the performance (user decision, 2026-09-21). An exact value never
+  changes.
+- **Functions of one number.** `Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`,
+  `Sinh`, `Cosh`, `Tanh`, `Ln`, `Sqrt`, `Abs`, `Floor`, `Ceil`, `Round`,
+  `Power` with a machine-number exponent, and under `N()` only `Arctan`,
+  `Arcsin`, `Arccos` and a power of `e` (`machine-broadcast.ts`,
+  `FUNCTION_KERNELS`). Each kernel is the `Math` primitive the scalar route
+  computes for a machine float, measured bit for bit on 3,000 random floats
+  per head under both routes. The inputs on which the scalar route takes
+  another way are declined, and the whole list then keeps the lazy form:
+  an integer element under `evaluate()` (`Sinh(1)` and `Sqrt(2)` are exact;
+  `|−3|`, `⌊2.5⌋` and `3^2` are admitted), an argument outside the real
+  domain (`Sqrt` and `Ln` of a negative, `Arcsin` outside `[−1, 1]`), a
+  value past a million in magnitude for `Tan` and its relatives (the pole
+  `~oo`), a float within `1e-9` of a special angle for a trigonometric head
+  under `evaluate()` (the recognizer answers an exact value within `1e-12`),
+  an angular unit other than radians, and a non-finite result. `Log` and
+  `Lb` (canonically `Log(x, 2)`), and `Log(x, 10)`, compute `Math.log10`
+  and `Math.log2`, the primitives of the `N()` route; another base has no
+  kernel. A division by an exact rational (`L / 3`) has no kernel.
+- **Reductions of a body.** `Sum(…).N()` of a body with no indexing set
+  first evaluates the body on the numeric route and adds the doubles when
+  the value is a finite list of machine numbers, so that `Sum(Exp(L)).N()`
+  reaches a kernel that works under `N()` only; `Sum(L / 3).N()` then adds
+  `0.333… · v` where `Sum(L / 3).evaluate().N()` adds `v / 3`. Any other
+  value (an overflow to an infinity, a pole, a lazy collection) takes the
+  exact route, as before.
 - **Precision.** Machine precision only. Above it a broadcast of integers
   over a symbol keeps the lazy `Map` that the exact compiled tier reads (see
   "Map execution"). Each float must be stored as a double. A float made at a higher precision

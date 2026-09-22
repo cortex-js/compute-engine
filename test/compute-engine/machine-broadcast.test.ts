@@ -199,16 +199,37 @@ describe('element-wise arithmetic on doubles: declined cases', () => {
     );
   });
 
-  // The interpreter does not add three numbers from left to right (it adds
-  // the exact operands apart from the floats), so the rounding of a sum of
-  // three depends on an order this route does not reproduce. The reference is
-  // the element function of the lazy form, applied to each pair.
-  test('three operands: the rounding depends on the order of the sum', () => {
-    const result = ce.box(['Add', 'L', 'M', 0.1]).evaluate();
-    expect(isUnboxedList(result)).toBe(false);
-    const f = ['Function', ['Add', 'a', 'b', 0.1], 'a', 'b'];
-    expect(elements(result)).toEqual(
-      FLOATS.map((x, i) => scalar(['Apply', f, x, FLOATS2[i]]))
+  // Three or more operands are folded left to right on doubles. The
+  // interpreter adds the exact operands apart from the floats, so the last
+  // digit of a cell can differ from the element-by-element value; that
+  // change is accepted for the performance. An all-integer cell is exact on
+  // both routes.
+  test('three or more operands: the integers first, then the floats', () => {
+    const sum = ce.box(['Add', 'L', 'M', 0.1]).evaluate();
+    expect(isUnboxedList(sum)).toBe(true);
+    expect(elements(sum)).toEqual(FLOATS.map((x, i) => x + FLOATS2[i] + 0.1));
+    const product = ce.box(['Multiply', 2, 'L', 'M', 'L']).N();
+    expect(isUnboxedList(product)).toBe(true);
+    expect(elements(product)).toEqual(
+      FLOATS.map((x, i) => 2 * x * FLOATS2[i] * x)
+    );
+    // The integers are combined first, exactly: a cancellation among them
+    // does not lose the float. `1e15 + 1e-5 − 1e15` is `1e-5`, as the scalar
+    // route answers, and not `0`.
+    ce.declare('Big', { value: ce.box(['List', ...FLOATS.map(() => 1e15)]) });
+    ce.declare('Tiny', { value: ce.box(['List', ...FLOATS.map(() => 1e-5)]) });
+    ce.declare('NegBig', {
+      value: ce.box(['List', ...FLOATS.map(() => -1e15)]),
+    });
+    const cancelled = ce.box(['Add', 'Big', 'Tiny', 'NegBig']).evaluate();
+    expect(isUnboxedList(cancelled)).toBe(true);
+    expect(elements(cancelled)).toEqual(FLOATS.map(() => 1e-5));
+    expect(ce.box(['Add', 1e15, 1e-5, -1e15]).evaluate().re).toBe(1e-5);
+    const integers = ce.box(['Add', 'K', 'K', 5]).evaluate();
+    expect(isUnboxedList(integers)).toBe(true);
+    expect(elements(integers)).toEqual(INTEGERS.map((k) => 2 * k + 5));
+    expect([...integers.each()].every((el) => el.isInteger === true)).toBe(
+      true
     );
   });
 
@@ -259,6 +280,204 @@ describe('element-wise arithmetic on doubles: declined cases', () => {
     expect(result.operator).toBe('List');
     expect(elements(result)).toEqual(
       FLOATS.slice(0, 40).map((x) => scalar(['Add', x, 1]))
+    );
+  });
+});
+
+describe('functions of one machine number on doubles', () => {
+  // Each kernel is the primitive the scalar route computes; the test is the
+  // scalar route itself, element by element, under both routes.
+  const ce = machineEngine();
+  const POSITIVE = FLOATS.map((x) => Math.abs(x) + 0.001);
+  const SMALL = FLOATS.map((x) => x / 25);
+  const UNIT = FLOATS.map((x) => x / 200);
+  ce.declare('P', { value: ce.box(['List', ...POSITIVE]) });
+  ce.declare('S', { value: ce.box(['List', ...SMALL]) });
+  ce.declare('U', { value: ce.box(['List', ...UNIT]) });
+
+  const sameAsScalar = (
+    json: unknown[],
+    source: number[],
+    route: 'evaluate' | 'N',
+    scalarOf: (x: number) => unknown[]
+  ) => {
+    const expr = ce.box(json as never);
+    const result = route === 'N' ? expr.N() : expr.evaluate();
+    expect(isUnboxedList(result)).toBe(true);
+    const expected = source.map((x) => {
+      const e = ce.box(scalarOf(x) as never);
+      return (route === 'N' ? e.N() : e.evaluate()).json;
+    });
+    expect(elements(result)).toEqual(expected);
+  };
+
+  test.each([
+    ['Sin', 'L', FLOATS],
+    ['Cos', 'L', FLOATS],
+    ['Tan', 'L', FLOATS],
+    ['Cot', 'L', FLOATS],
+    ['Sec', 'L', FLOATS],
+    ['Csc', 'L', FLOATS],
+    ['Sinh', 'S', SMALL],
+    ['Cosh', 'S', SMALL],
+    ['Tanh', 'L', FLOATS],
+    ['Ln', 'P', POSITIVE],
+    ['Sqrt', 'P', POSITIVE],
+    ['Abs', 'L', FLOATS],
+    ['Floor', 'L', FLOATS],
+    ['Ceil', 'L', FLOATS],
+    ['Round', 'L', FLOATS],
+  ] as const)('%s under both routes', (head, symbol, source) => {
+    for (const route of ['evaluate', 'N'] as const)
+      sameAsScalar([head, symbol], source, route, (x) => [head, x]);
+  });
+
+  // `Math.log10` and `Math.log2` are the primitives of the `N()` route and of
+  // the compiled code. `evaluate()` of a scalar computes the logarithm another
+  // way, one unit in the last place apart on about half of the arguments; the
+  // list answers the primitive on both routes.
+  test('Log and Lb compute the base-10 and base-2 primitives', () => {
+    for (const route of ['evaluate', 'N'] as const) {
+      // `Lb(x)` is canonically `Log(x, 2)`.
+      const log = ce.box(['Log', 'P']);
+      const lb = ce.box(['Lb', 'P']);
+      const logResult = route === 'N' ? log.N() : log.evaluate();
+      const lbResult = route === 'N' ? lb.N() : lb.evaluate();
+      expect(isUnboxedList(logResult)).toBe(true);
+      expect(isUnboxedList(lbResult)).toBe(true);
+      expect(elements(logResult)).toEqual(POSITIVE.map(Math.log10));
+      expect(elements(lbResult)).toEqual(POSITIVE.map(Math.log2));
+    }
+    sameAsScalar(['Log', 'P'], POSITIVE, 'N', (x) => ['Log', x]);
+    sameAsScalar(['Log', 'P', 10], POSITIVE, 'N', (x) => ['Log', x, 10]);
+    // Another base is a quotient of two logarithms; a negative argument has a
+    // complex logarithm.
+    expect(isUnboxedList(ce.box(['Log', 'P', 3]).evaluate())).toBe(false);
+    expect(isUnboxedList(ce.box(['Log', 'L']).evaluate())).toBe(false);
+  });
+
+  test.each([
+    ['Arctan', 'L', FLOATS],
+    ['Arcsin', 'U', UNIT],
+    ['Arccos', 'U', UNIT],
+    ['Exp', 'S', SMALL],
+  ] as const)(
+    '%s under N() only: evaluate() recognizes special arguments',
+    (head, symbol, source) => {
+      sameAsScalar([head, symbol], source, 'N', (x) => [head, x]);
+      expect(ce.box([head, symbol]).evaluate().operator).toBe('Map');
+    }
+  );
+
+  test.each([2, 3, 7, -2, -5, 1.5])('a power with the exponent %s', (k) => {
+    const source = k === 1.5 ? POSITIVE : FLOATS;
+    const symbol = k === 1.5 ? 'P' : 'L';
+    for (const route of ['evaluate', 'N'] as const)
+      sameAsScalar(['Power', symbol, k], source, route, (x) => ['Power', x, k]);
+  });
+
+  // `Math.round` rounds a tie toward `+∞`: `Round(-0.5)` is `0` at machine
+  // precision (above it, the big-number lane rounds a tie away from zero).
+  // The kernel must answer what the scalar route answers at this precision.
+  test('Round at the ties', () => {
+    const ties = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5];
+    ce.declare('Ties', { value: ce.box(['List', ...FLOATS, ...ties]) });
+    for (const route of ['evaluate', 'N'] as const)
+      sameAsScalar(['Round', 'Ties'], [...FLOATS, ...ties], route, (x) => [
+        'Round',
+        x,
+      ]);
+  });
+
+  test('integers stay exact under evaluate(), and float under N()', () => {
+    expect(ce.box(['Sin', 'K']).evaluate().operator).toBe('Map');
+    expect(ce.box(['Sqrt', 'K']).evaluate().operator).toBe('Map');
+    sameAsScalar(['Sin', 'K'], INTEGERS, 'N', (x) => ['Sin', x]);
+    sameAsScalar(['Abs', 'K'], INTEGERS, 'evaluate', (x) => ['Abs', x]);
+    sameAsScalar(['Power', 'K', 2], INTEGERS, 'evaluate', (x) => [
+      'Power',
+      x,
+      2,
+    ]);
+    expect(
+      [...ce.box(['Power', 'K', 2]).evaluate().each()].every(
+        (el) => el.isInteger === true
+      )
+    ).toBe(true);
+    // A negative exponent on an integer is an exact rational.
+    expect(ce.box(['Power', 'K', -2]).evaluate().operator).toBe('Map');
+  });
+
+  // `evaluate()` of a trigonometric function answers an exact value for a
+  // float within `1e-12` of a special angle, and `0` for a tiny argument.
+  test('a special angle in the list keeps the lazy form under evaluate()', () => {
+    for (const angle of [Math.PI, Math.PI / 3 + 1e-13, 1e-300]) {
+      ce.declare('A', { value: ce.box(['List', ...FLOATS, angle]) });
+      const lazy = ce.box(['Sin', 'A']).evaluate();
+      expect(lazy.operator).toBe('Map');
+      const last = [...lazy.each()].pop()!;
+      expect(last.json).toEqual(ce.box(['Sin', angle]).evaluate().json);
+      expect(isUnboxedList(ce.box(['Sin', 'A']).N())).toBe(true);
+      ce.forget('A');
+    }
+  });
+
+  test('declined arguments: out of the domain, at a pole, in degrees', () => {
+    // A negative argument of `Sqrt` and `Ln` has a complex value.
+    expect(ce.box(['Sqrt', 'L']).evaluate().operator).toBe('Map');
+    expect(ce.box(['Ln', 'L']).N().operator).toBe('Map');
+    expect(ce.box(['Arcsin', 'L']).N().operator).toBe('Map');
+    // A value past a million in magnitude is the pole `~oo`.
+    ce.declare('Pole', {
+      value: ce.box(['List', ...FLOATS, Math.PI / 2 + 1e-9]),
+    });
+    expect(ce.box(['Tan', 'Pole']).N().operator).toBe('Map');
+    // A zero base with a negative exponent.
+    ce.declare('Zero', { value: ce.box(['List', ...FLOATS, 0]) });
+    expect(ce.box(['Power', 'Zero', -2]).evaluate().operator).toBe('Map');
+    // Another angular unit converts the argument first.
+    const degrees = machineEngine();
+    degrees.angularUnit = 'deg';
+    expect(degrees.box(['Sin', 'L']).N().operator).toBe('Map');
+    expect(isUnboxedList(degrees.box(['Sqrt', 'L']).N())).toBe(false);
+    // A head with no kernel.
+    expect(ce.box(['Gamma', 'P']).N().operator).toBe('Map');
+  });
+
+  test('a reduction over a function of a list', () => {
+    let total = 0;
+    for (const x of FLOATS) total += Math.sin(x);
+    expect(ce.box(['Sum', ['Sin', 'L']]).evaluate().re).toBe(total);
+    expect(ce.box(['Sum', ['Sin', 'L']]).N().re).toBe(total);
+    let integers = 0;
+    for (const k of INTEGERS) integers += Math.sin(k);
+    // `Sum` evaluates its body on the route of the sum: under `N()` the
+    // integers are numericized and the kernel sums the doubles.
+    expect(ce.box(['Sum', ['Sin', 'K']]).N().re).toBe(integers);
+    // A kernel that works under `N()` only is reached by `Sum(…).N()`.
+    let exps = 0;
+    for (const x of FLOATS) exps += Math.exp(x * 0.01);
+    expect(ce.box(['Sum', ['Exp', ['Divide', 'L', 100]]]).N().re).toBe(exps);
+    // The numeric route is used only when it gives a finite list of machine
+    // numbers. `1e308 · K` overflows the doubles to infinities, and the exact
+    // route answers the exact big integer; `1/X` with a zero in `X` has the
+    // pole `~oo` in the exact route.
+    const huge = ce.box(['Sum', ['Multiply', 1e308, 'K']]).N();
+    expect(huge.isNaN).toBe(false);
+    expect(huge.isInteger).toBe(true);
+    ce.declare('X0', { value: ce.box(['List', ...FLOATS, 0]) });
+    expect(ce.box(['Sum', ['Divide', 1, 'X0']]).N().json).toEqual(
+      ce
+        .box(['Sum', ['Divide', 1, 'X0']])
+        .evaluate()
+        .N().json
+    );
+    // Under `evaluate()` the sines of integers stay exact, and so does the sum.
+    expect(
+      JSON.stringify(ce.box(['Sum', ['Sin', 'K']]).evaluate().json)
+    ).toContain('"Sin"');
+    expect(ce.box(['Max', ['Sqrt', 'P']]).evaluate().re).toBe(
+      Math.max(...POSITIVE.map(Math.sqrt))
     );
   });
 });
@@ -455,5 +674,16 @@ describe('the doubles of a list (`array`)', () => {
     const list = ce.function('List', [third, ce.number(1)]);
     expect(list.array).toBeUndefined();
     expect(list.isMachineNumeric).toBe(false);
+  });
+});
+
+describe('the asynchronous Sum answers as the synchronous one', () => {
+  test('a body that the numeric route computes on doubles', async () => {
+    const ce = machineEngine();
+    const sync = ce.box(['Sum', ['Exp', ['Divide', 'L', 100]]]).N();
+    const async = await ce
+      .box(['Sum', ['Exp', ['Divide', 'L', 100]]])
+      .evaluateAsync({ numericApproximation: true });
+    expect(async.json).toEqual(sync.json);
   });
 });

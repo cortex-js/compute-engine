@@ -583,6 +583,33 @@ What is needed: a fix or a recorded exception for the first, a decision on the
 `\times` in the second, `--update` for the third, and then a workflow step so
 that the check runs on the server.
 
+### Compiled `Tan`, `Cot`, `Sec` and `Csc` have no pole (OPEN, compilation — found 2026-09-21)
+
+The interpreter answers the pole `~oo` when the value of `Tan`, `Cot`, `Sec`
+or `Csc` passes a million in magnitude (`boxed-expression/trigonometry.ts`):
+`Tan(1.5707963267948966).N()` is `~oo`, and so is `Cot(1e-13).N()`. Compiled
+code computes `Math.tan(x)` and answers `16331239353195370` and
+`10000000000000`. A lazy `Map` over more than a hundred elements is compiled
+under `N()` at machine precision (`library/map-auto-compile.ts`), so
+`Tan(L).N()` over a list that holds such an angle answers the number where
+the scalar route answers the pole. The eager kernel of `machine-broadcast.ts`
+declines a list that holds such an angle, because it cannot answer the pole,
+and the list then goes to that compiled `Map`, which answers the number.
+Found while comparing the two on 712 special angles.
+
+### `Round` at a half rounds toward `+∞` at machine precision and away from zero above it (OPEN, numerics — found 2026-09-21)
+
+`Round(-0.5).evaluate()` is `0` at machine precision (`Math.round`, which
+rounds a tie toward `+∞`) and `-1` at the default precision (the big-number
+lane rounds a tie away from zero); `Round(-1.5)` is `-1` and `-2`, and the
+positive halves agree. The `sgn` handler of `Round` follows the away-from-zero
+rule at every precision, so at machine precision `Round(-0.5).sgn` says
+`negative` for a value that evaluates to `0`. One rule is needed for both
+lanes (away from zero is the usual convention of a calculator; `Math.round`
+is the convention of JavaScript), and the machine kernel of
+`boxed-expression/machine-broadcast.ts` must then follow it. Found by the
+review of that kernel.
+
 ### `Norm` of a lazy collection stays unevaluated (OPEN, evaluation — found 2026-09-21)
 
 `Norm` reads its operand as a tensor, and a lazy `Map` is not one. Above a
@@ -597,32 +624,22 @@ unevaluated. The other
 reducers (`Sum`, `Max`, `Mean`, `Variance`) walk a finite lazy collection;
 `Norm` should too.
 
-### Element-wise FUNCTIONS over a large list of machine numbers are still interpreted per element (OPEN, evaluation performance — measured 2026-09-21)
+### Element-wise arithmetic over a large list: what is still interpreted per element (OPEN, evaluation performance — measured 2026-09-21)
 
-Element-wise `Add`, `Multiply` and `Negate` over lists of machine numbers are
-computed at once on doubles at machine precision (`machineBroadcast`,
-`boxed-expression/machine-broadcast.ts`; the rule is in
-`docs/COLLECTIONS-MODEL.md`, "Lists of machine numbers"), and `Sum`, `Max` and
-`Min` fold the doubles. Over ten thousand elements `Min(1, 2 − 2·L)` went from
-81 ms to 4 ms. What is left on the lazy `Map`, about 4.5 µs per element:
+Element-wise `Add`, `Multiply`, `Negate` and the common functions of one
+number over lists of machine numbers are computed at once on doubles at
+machine precision (`machineBroadcast`, `boxed-expression/machine-broadcast.ts`;
+the rule is in `docs/COLLECTIONS-MODEL.md`, "Lists of machine numbers"), and
+`Sum`, `Max` and `Min` fold the doubles. Over ten thousand elements
+`Sum(Sin(L))` went from 58 ms to 2 ms. What is left on the lazy `Map`, about
+4.5 µs per element:
 
-- **Function heads**: `Sum(Sin(L))` is 45 ms under `evaluate()` and under
-  `N()`. A kernel for a function head must give the value the interpreter
-  gives, and three things make that more than a table of `Math` functions.
-  Under `evaluate()` an integer element stays exact (`Sin(1)`), so the list
-  must hold no integer. A negative element of `Sqrt` or `Ln` has a complex
-  value. And the primitive must be the interpreter's own, to the last digit:
-  a power goes through `Math.pow`, whose last digit is not the same on Node
-  22 and on Node 26 for about one input in ten, so a kernel for `Power` must
-  call what the interpreter calls. `Divide` and `Power` belong here too (`L / 3` is canonically
-  `Multiply(Rational(1, 3), L)`, and the exact rational scalar declines).
-- **Sums and products of three or more operands** (`L + M + 1`): the
-  interpreter adds the exact operands apart from the floats, so the rounding
-  depends on an order the kernel does not reproduce. Reading that order from
-  `add()` (`boxed-expression/arithmetic-add.ts`) would let the kernel follow
-  it.
-- **Above machine precision** nothing changed: every element is a
-  `BigDecimal` computation, about 12 µs.
+- **A power of `e` and the inverse trigonometric functions under
+  `evaluate()`**: `Exp(0.5)` is `√e`, `Arcsin(0.5)` is `π/6`. A guard like the
+  one for the special angles of `Sin` would need the exact set of values the
+  recognizer (`constructibleValuesInverse`) answers for.
+- **A division by an exact rational**: `L / 3` is canonically
+  `Multiply(Rational(1, 3), L)`, and an exact scalar declines.
 
 ### Reductions over ten thousand elements: what is left outside the interpreter's arithmetic (OPEN, evaluation performance — measured 2026-09-20, revised 2026-09-21)
 
