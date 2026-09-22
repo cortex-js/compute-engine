@@ -246,7 +246,13 @@ that no ruling covers yet.
   substitutes a literal for the index) and now declines too; Python's was wrong
   and now declines. The lowering that would compile them is the entry "No
   lowering compiles a stored symbol value where a binder rebinds one of its
-  names" below. Tycho has not been told.
+  names" below. Tycho was told on 2026-09-22 in
+  `~/dev/tycho/docs/COMPUTE_ENGINE.md` ("A defined value keeps the binding it
+  was written against"), with the importer rewrite that restores the Desmos
+  meaning (define the value as a function of the rebound name) and the census to
+  run at the next adoption; the zero-argument-helper lowering is recorded there
+  as a CE possibility, to be built only if the census shows more than a handful
+  of rows that want the global reading.
 
 ### Findings of the Tycho code-generation audit of 2026-09-09 (OPEN — CE 0.127.0; report `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-09-report.md`, records in `ce-0.127.0.json` of that folder)
 
