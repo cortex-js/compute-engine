@@ -5,8 +5,13 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // 2026-09-21, recorded in `docs/ERROR-MODEL.md` §3). The absence gate turns an
 // absent scalar operand of a `propagate` operator into the marker of the
 // operator's own codomain, and both absence symbols — `Missing` and
-// `Undefined` — take that route. Outside a numeric slot `Undefined` keeps its
-// own meaning.
+// `Undefined` — take that route.
+//
+// The ruling of 2026-09-22 extends the reading to the operators that OWN their
+// absence semantics (`missingBehavior: 'handle'`): where such an operator
+// reads a `Missing` element or operand as absent, an `Undefined` one is absent
+// in the same way. `Undefined` keeps its own meaning outside an absence test:
+// it still evaluates to itself and its declared type is still `unknown`.
 
 const ce = new ComputeEngine();
 
@@ -71,22 +76,13 @@ describe('UNDEFINED in a numeric slot', () => {
     });
   });
 
-  describe('outside a numeric slot, Undefined is unchanged', () => {
+  describe('outside an absence test, Undefined is unchanged', () => {
     it('a bare Undefined evaluates to itself', () => {
       expect(ce.box('Undefined').evaluate().symbol).toBe('Undefined');
     });
 
     it('its declared type is still `unknown`', () => {
       expect(ce.box('Undefined').type.toString()).toBe('unknown');
-    });
-
-    it('the operators that own their absence semantics still read it as an ordinary value', () => {
-      expect(ce.box(['IsMissing', 'Undefined']).evaluate().symbol).toBe(
-        'False'
-      );
-      expect(ce.box(['Coalesce', 'Undefined', 2]).evaluate().symbol).toBe(
-        'Undefined'
-      );
     });
   });
 
@@ -102,6 +98,211 @@ describe('UNDEFINED in a numeric slot', () => {
         'integer | missing'
       );
       expect(ce.box(['When', 1, 'True']).type.toString()).toBe('integer');
+    });
+  });
+});
+
+// The operators declared `missingBehavior: 'handle'` decide for themselves
+// what an absent operand or element means. They all run one value-level test,
+// `isAbsentValue` (`src/compute-engine/boxed-expression/type-guards.ts`),
+// which reads both absence symbols and a `NaN`. Each row below is asserted for
+// `Missing` and for `Undefined` side by side: the point of the 2026-09-22
+// ruling is that the two answers are the SAME, so the comparison against the
+// `Missing` answer is the assertion that matters, and the literal answer is
+// pinned as well so a silent change of both at once is still caught.
+describe('UNDEFINED for the operators that own their absence semantics', () => {
+  // `'@'` stands for the absence symbol under test, at any depth of the
+  // MathJSON. Each row is evaluated twice, once with `Missing` substituted and
+  // once with `Undefined`, and the two answers are returned in that order.
+  const substitute = (op: unknown, marker: string): unknown =>
+    Array.isArray(op)
+      ? op.map((x) => substitute(x, marker))
+      : op === '@'
+        ? marker
+        : op;
+
+  const evaluated = (head: string, ...rest: unknown[]): string[] =>
+    ['Missing', 'Undefined'].map((marker) =>
+      ce
+        .box([head, ...rest.map((op) => substitute(op, marker))] as any)
+        .evaluate()
+        .toString()
+    );
+
+  describe('the statistics reducers answer NaN for an absent datum', () => {
+    for (const head of [
+      'Mean',
+      'Median',
+      'Variance',
+      'StandardDeviation',
+      'Max',
+      'Min',
+      'Sum',
+      'Product',
+    ]) {
+      it(`${head} of [1, marker, 3]`, () => {
+        const [withMissing, withUndefined] = evaluated(head, [
+          'List',
+          1,
+          '@',
+          3,
+        ]);
+        expect(withUndefined).toEqual(withMissing);
+        expect(withMissing).toBe('NaN');
+      });
+    }
+
+    it('Quantile of [1, marker, 3]', () => {
+      const [withMissing, withUndefined] = evaluated(
+        'Quantile',
+        ['List', 1, '@', 3],
+        0.5
+      );
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('NaN');
+    });
+
+    it('Covariance against data with an absent datum', () => {
+      const [withMissing, withUndefined] = evaluated(
+        'Covariance',
+        ['List', 1, 2, 3],
+        ['List', 1, '@', 3]
+      );
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('NaN');
+    });
+  });
+
+  describe('the absence-discharge operators', () => {
+    it('IsMissing(marker) is True', () => {
+      const [withMissing, withUndefined] = evaluated('IsMissing', '@');
+      expect(withUndefined).toEqual(withMissing);
+      expect(ce.box(['IsMissing', 'Undefined']).evaluate().symbol).toBe('True');
+    });
+
+    it('Coalesce(marker, 2) is 2', () => {
+      const [withMissing, withUndefined] = evaluated('Coalesce', '@', 2);
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('2');
+    });
+
+    it('Coalesce of absences alone stays absent, returning the last operand verbatim', () => {
+      expect(
+        ce.box(['Coalesce', 'Undefined', 'Undefined']).evaluate().symbol
+      ).toBe('Undefined');
+      expect(ce.box(['Coalesce', 'Missing', 'Missing']).evaluate().symbol).toBe(
+        'Missing'
+      );
+    });
+  });
+
+  describe('chained At absorbs an absent base or index', () => {
+    it('an absent INDEX absorbs into the numeric domain of the elements', () => {
+      const [withMissing, withUndefined] = evaluated('At', ['List', 1, 2], '@');
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('NaN');
+    });
+
+    it('an absent BASE propagates the position-preserving marker', () => {
+      const [withMissing, withUndefined] = evaluated('At', '@', 1);
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('"Missing"');
+    });
+  });
+
+  describe('Count and Tally read an absent cell as a cell', () => {
+    it('Count counts it — neither marker erases a position', () => {
+      const [withMissing, withUndefined] = evaluated('Count', [
+        'List',
+        1,
+        '@',
+        3,
+      ]);
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('3');
+    });
+
+    it('Tally keeps it as its own value, with a count of one', () => {
+      expect(
+        ce
+          .box(['Tally', ['List', 1, 'Undefined', 3]])
+          .evaluate()
+          .toString()
+      ).toBe('([1,"Undefined",3], [1,1,1])');
+      expect(
+        ce
+          .box(['Tally', ['List', 1, 'Missing', 3]])
+          .evaluate()
+          .toString()
+      ).toBe('([1,"Missing",3], [1,1,1])');
+    });
+  });
+
+  describe('an absent operand beside a POINT makes the point absent', () => {
+    // The tuple is atomic, so there is no cell for the absence to land in.
+    it('marker + (1, 1, 1) is Missing', () => {
+      const [withMissing, withUndefined] = evaluated('Add', '@', [
+        'Tuple',
+        1,
+        1,
+        1,
+      ]);
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('"Missing"');
+    });
+
+    it('marker · (1, 1, 1) is Missing', () => {
+      const [withMissing, withUndefined] = evaluated('Multiply', '@', [
+        'Tuple',
+        1,
+        1,
+        1,
+      ]);
+      expect(withUndefined).toEqual(withMissing);
+      expect(withMissing).toBe('"Missing"');
+    });
+  });
+
+  describe('compiled JavaScript lane', () => {
+    // `Undefined` is a DECLARED engine symbol, so a row written with it has no
+    // free symbol and the compiler folds the whole row to the interpreter's
+    // answer. A written `Missing` reaches the compiler's symbol branch, which
+    // since 2026-09-22 lowers BOTH absence symbols to the target's object null
+    // (`undefined` on JavaScript). Each row below is pinned against the
+    // INTERPRETER's answer for the same row — the contract the two lanes owe
+    // each other. The rows that used to disagree for a written `Missing`
+    // (`Median`, `IsMissing`, `Coalesce`) are pinned in
+    // `compiled-absence-literal.test.ts`.
+    const compiled = (expr: unknown): unknown =>
+      compile(ce.expr(expr as any))!.run!({});
+
+    for (const head of ['Mean', 'Median', 'Variance', 'Max', 'Min']) {
+      it(`${head} of [1, Undefined, 3] compiles to NaN, as the interpreter answers`, () => {
+        expect(compiled([head, ['List', 1, 'Undefined', 3]])).toBeNaN();
+      });
+    }
+
+    it('Mean, Variance, Max and Min of [1, Missing, 3] compile to NaN too', () => {
+      for (const head of ['Mean', 'Variance', 'Max', 'Min'])
+        expect(compiled([head, ['List', 1, 'Missing', 3]])).toBeNaN();
+    });
+
+    it('IsMissing(Undefined) compiles to true', () => {
+      expect(compiled(['IsMissing', 'Undefined'])).toBe(true);
+    });
+
+    it('Coalesce(Undefined, 2) compiles to 2', () => {
+      expect(compiled(['Coalesce', 'Undefined', 2])).toBe(2);
+    });
+
+    it('Count of [1, Undefined, 3] compiles to 3, as it does for Missing', () => {
+      expect(compiled(['Count', ['List', 1, 'Undefined', 3]])).toBe(3);
+      expect(compiled(['Count', ['List', 1, 'Missing', 3]])).toBe(3);
+    });
+
+    it('At([1, 2], Undefined) compiles to NaN, as it does for Missing', () => {
+      expect(compiled(['At', ['List', 1, 2], 'Undefined'])).toBeNaN();
+      expect(compiled(['At', ['List', 1, 2], 'Missing'])).toBeNaN();
     });
   });
 });

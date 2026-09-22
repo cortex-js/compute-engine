@@ -92,6 +92,35 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       expect(ce.parse('f(2)').evaluate().toString()).toBe('f(2)');
     });
 
+    test('when the argument itself declares the head a function', () => {
+      // `f(yf(x))`: the inner `f(x)` declares `f` a function while the outer
+      // argument list is canonicalized, and a DECLARED function applied to an
+      // argument that mentions it is a call — the self-reference exception
+      // (`q(2q)`) only covers a head that is still without type information.
+      // The reading must not depend on how many factors follow: the
+      // two-operand route reads the head after the arguments, and the
+      // multi-operand route (`combineFunctionApplications`) has to settle the
+      // reading again once the arguments are canonicalized. Before it did,
+      // `f(yf(x))(x+y)` collapsed to the product `Multiply(f, y, x+y, f(x))`,
+      // which no longer re-parses from its own serialization.
+      for (const [input, expected] of [
+        ['f(yf(x))', ['f', ['Multiply', 'y', ['f', 'x']]]],
+        ['f(f(x))', ['f', ['f', 'x']]],
+        [
+          'f(yf(x))(x+y)',
+          ['Multiply', ['Add', 'x', 'y'], ['f', ['Multiply', 'y', ['f', 'x']]]],
+        ],
+        ['f(yf(x))z', ['Multiply', 'z', ['f', ['Multiply', 'y', ['f', 'x']]]]],
+        [
+          'f(f(x))(x+y)',
+          ['Multiply', ['Add', 'x', 'y'], ['f', ['f', 'x']]],
+        ],
+      ] as [string, any][]) {
+        const ce = new ComputeEngine();
+        expect([input, ce.parse(input).json]).toEqual([input, expected]);
+      }
+    });
+
     test('an integrand of two applications stays inside the integral', () => {
       // `g(x)` used to be the product `g·x`, and `g` was pulled out of the
       // integral as a constant.
@@ -436,6 +465,31 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
       expect(ce.box(['Multiply', 's', ['Add', 'x', 1]]).latex).toBe(
         's\\times(x+1)'
       );
+    });
+
+    test('a self-applying call re-parses from its own serialization', () => {
+      // The round-trip gate over the MathNet corpus
+      // (`docs/mathnet/scripts/check-roundtrip.ts`) reads this functional
+      // equation. While `f(yf(x))(x+y)` parsed as the flat product
+      // `Multiply(f, y, x+y, f(x))`, it serialized with an explicit `\times`
+      // at the symbol/group seam, and the bare `f` factor then failed the
+      // `Multiply` signature on re-parse (`(number*) -> number`) because the
+      // trailing `f(x)` declares `f` a function.
+      const ce = new ComputeEngine();
+      const expr = ce.parse('f(yf(x))(x + y) = x^2(f(x) + f(y))');
+      expect(expr.latex).toBe('(x+y)f(yf(x))=(f(x)+f(y))x^2');
+      expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
+    });
+
+    test('a symbol before a group keeps its explicit multiply', () => {
+      // The control for the case above: a bare symbol juxtaposed with a
+      // parenthesized group would re-parse as a call, so the seam keeps an
+      // explicit separator. `a_1(a_1-1)` is the spelling the corpus gate
+      // records for the inequality with `\frac{1}{a_1 (a_1 - 1) + x^2}`.
+      const ce = new ComputeEngine();
+      const expr = ce.box(['Multiply', 'a_1', ['Subtract', 'a_1', 1]]);
+      expect(expr.latex).toBe('a_1\\times(a_1-1)');
+      expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
     });
 
     test('a sized parenthesis counts as a parenthesized group', () => {

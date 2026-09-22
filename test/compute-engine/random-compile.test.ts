@@ -290,6 +290,23 @@ describe('compiled RandomChoice — framed bit-parity', () => {
       expect([domain, c]).toEqual([domain, i]);
     }
   });
+
+  it('a STRING domain compiles to the same string as the interpreter', () => {
+    // Ruled 2026-09-22: choosing from a string yields a string (the
+    // string-preservation rule, `docs/STRING_ROADMAP.md`). The compiled
+    // artifact segments the source into characters, draws from them and
+    // re-joins, so it must answer the same string as the interpreter and
+    // leave the frame's counter in the same place.
+    const ce = new ComputeEngine();
+    const json = ['RandomChoice', { str: 'abcdef' }, 7];
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, 11, () => r.run!());
+    const i = withRandomSeedFrame(ce, 11, () => ce.box(json).evaluate().string);
+    expect(typeof c).toBe('string');
+    expect(c).toBe(i);
+    // Exactly 7 draws, as over a list of the same characters.
+    expect(trailingDraw(ce, 11, () => r.run!())).toBe(draw(11, 7));
+  });
 });
 
 describe('compiled draws are decided at CALL time, never at compile time', () => {

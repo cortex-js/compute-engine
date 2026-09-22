@@ -107,6 +107,7 @@ import {
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import { contextualSlotSignature } from '../boxed-expression/generic-instantiation.js';
+import { broadcastAdmitsCollectionElement } from '../boxed-expression/callback-broadcast-admission.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
@@ -971,12 +972,18 @@ function callbackCompatibilityError(
   const elementOf = (src: Expression): Type =>
     collectionElementType(src.type.type) ?? ('any' as Type);
   let supplyArrow: FunctionSignature;
+  // Which supply positions carry a SOURCE ELEMENT, as opposed to a parameter
+  // the operator supplies from somewhere else (a reducer's accumulator). Only
+  // an element position may be descended into by the broadcast admission
+  // below, because only an element comes out of the collection.
+  let elementDerived: boolean[];
   if (sources.length > 1) {
     supplyArrow = {
       kind: 'signature',
       args: sources.map((src) => ({ type: elementOf(src) })),
       result: declared.result,
     };
+    elementDerived = sources.map(() => true);
   } else {
     const domainVars = new Set<string>();
     for (const el of declared.args ?? [])
@@ -994,6 +1001,11 @@ function callbackCompatibilityError(
       })),
       result: declared.result,
     };
+    // A declared slot mentions the element type through its domain variable,
+    // so a position that had a free variable is the element position.
+    elementDerived = (declared.args ?? []).map(
+      (el) => freeTypeVariables(el.type).size > 0
+    );
   }
   // Rule 2 owns an arity-incapable operand (its richer diagnostic already
   // ran, or deliberately declined on an unreadable shape). The supplied
@@ -1024,7 +1036,10 @@ function callbackCompatibilityError(
   // Rule 5 — the effect bound, checked against the declared arrow.
   if (!narrowingPreservesEffects(opType, declared as Type)) return mint();
   // Rules 1/3/4.
-  if (callbackIncompatibility(supplyArrow, opType) !== undefined) return mint();
+  if (callbackIncompatibility(supplyArrow, opType) !== undefined) {
+    if (!broadcastAdmitsCollectionElement(supplyArrow, opType, elementDerived))
+      return mint();
+  }
   return undefined;
 }
 
@@ -3344,7 +3359,14 @@ function componentAt(
   // An absent base propagates position-preservingly, mirroring `At` over a
   // `Missing` base (`missingBehavior: 'handle'` on First/Second/Third/Last —
   // the element domain is unknown, so the marker stays `Missing`, not `NaN`).
-  if (isSymbol(xs, 'Missing')) return xs;
+  // Both symbols that name an absent datum take this route (user ruling of
+  // 2026-09-22): `Undefined` is declared `unknown`, so without this test it
+  // fell through to the type error below and reported that an absent operand
+  // is not an indexed collection. The answer is the `Missing` marker for both,
+  // never the operand itself — the marker is what a consumer discharges with
+  // `IsMissing`/`Coalesce`. The same two names are tested by
+  // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
+  if (isSymbol(xs, 'Missing') || isSymbol(xs, 'Undefined')) return ce.Missing;
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
     // gate is overlap-deferred, so an `unknown`-typed operand can arrive
@@ -10283,12 +10305,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // an empty List would falsely claim a complete ordering.
       if (xs.isFiniteCollection !== true) return undefined;
       // Same for a finite-but-unwalkable source (`Take(xs, 2)` over a valueless
-      // `xs`), where the walk below finds no elements to order. `Sort` already
-      // declines it — `sortedIndices` returns null — but `Ordering` reads that
-      // as the empty ordering.
+      // `xs`), where the walk below finds no elements to order. This is a cheap
+      // early decline: it answers before the sort walk reads any element.
       if (!isEnumerableSource(xs)) return undefined;
       const indices = sortedIndices(xs, fn);
-      if (!indices) return ce.function('List', []);
+      // `sortedIndices` returns `undefined` when the order cannot be decided —
+      // a key that cannot be computed, or a pair of keys that compare neither
+      // equal nor less in either direction (a list key, a NaN key). A
+      // permutation of N elements has N entries, so a truncated or empty index
+      // list would be a wrong count, not a decline. Stay unevaluated, the same
+      // answer `Sort` gives for the same input. Fixed 2026-09-22.
+      if (!indices) return undefined;
       return ce.function('List', indices);
     },
   },

@@ -241,8 +241,12 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     // `list<number>` in this union is now spelled `vector`, for the same
     // reason as the `v+v` case above (commit eaae156c): an unsized vector
     // keeps its rank-1 dimension rather than flattening to a bare list.
-    expect(sym(ce, 'u')).toBe('matrix | tuple | vector');
-    expect(sym(ce, 'v')).toBe('matrix | tuple | vector');
+    // `list<tuple>` — a LIST of points — joined the union when `Dot` gained
+    // its point-list broadcast (one inner product per point, ruled
+    // 2026-09-22); the union is read straight off `Dot`'s signature, so it
+    // grows with every operand shape the operator accepts.
+    expect(sym(ce, 'u')).toBe('list<tuple> | matrix | tuple | vector');
+    expect(sym(ce, 'v')).toBe('list<tuple> | matrix | tuple | vector');
   });
 
   test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {

@@ -3981,11 +3981,18 @@ function gpuAtBaseShape(
 
   const t = gpuType(base);
 
-  if (isSymbol(base, 'Missing') || t === 'missing')
+  // Both symbols that name an absent datum are read alike (user ruling of
+  // 2026-09-22); `isAbsentScalarSymbol` (`boxed-expression/validate.ts`)
+  // tests the same two names.
+  if (
+    isSymbol(base, 'Missing') ||
+    isSymbol(base, 'Undefined') ||
+    t === 'missing'
+  )
     return {
       decline:
-        'the base is the absence marker `Missing`, which has no shader ' +
-        'value to index into',
+        'the base is the absence marker (`Missing` or `Undefined`), which ' +
+        'has no shader value to index into',
     };
 
   // A complex value lowers to `vec2(re, im)` — a NUMBER in the shader's
@@ -4235,6 +4242,7 @@ function gpuAtEntryKind(e: Expression): GPUAtEntry {
   if (
     isString(e) ||
     isSymbol(e, 'Missing') ||
+    isSymbol(e, 'Undefined') ||
     isFunction(e, 'List') ||
     isFunction(e, 'Tuple') ||
     isFunction(e, 'Dictionary')
@@ -4485,8 +4493,13 @@ function compileGPUAt(
 
   // The absence marker itself: the interpreter has no value to index with, and
   // the numeric projection of "no value" is NaN. The fold emits neither
-  // operand, so neither may be impure.
-  if (isSymbol(index, 'Missing') || isSubtype(it, 'missing')) {
+  // operand, so neither may be impure. Both symbols that name an absent datum
+  // are read alike (user ruling of 2026-09-22).
+  if (
+    isSymbol(index, 'Missing') ||
+    isSymbol(index, 'Undefined') ||
+    isSubtype(it, 'missing')
+  ) {
     requirePureFold('base');
     requirePureFold('index');
     return gpuNaN(target);

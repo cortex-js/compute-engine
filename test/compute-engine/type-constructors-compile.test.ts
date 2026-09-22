@@ -348,7 +348,9 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     ce.declare('x', 'maybe_n');
     ce.declare('y', 'number | missing');
 
-    expect(jsCode(ce, ['IsMissing', 'x'])).toBe('Number.isNaN(_.x)');
+    expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
+      'Number.isNaN((_.x) ?? Number.NaN)'
+    );
     expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
       jsCode(ce, ['IsMissing', 'y']).replace(/_\.y/g, '_.x')
     );
@@ -369,8 +371,11 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     expect(jsCode(ce, ['Coalesce', 'x', 0])).toBe(
       jsCode(ce, ['Coalesce', 'y', 0]).replace(/_\.y/g, '_.x')
     );
-    // NOT the `??` object axis: `NaN ?? 0` is `NaN`, which would disagree.
-    expect(jsCode(ce, ['Coalesce', 'x', 0])).not.toMatch(/\?\?/);
+    // NOT the object axis, whose whole form is `(x ?? 0)`: that answers `NaN`
+    // for a `NaN` operand, which would disagree. The numeric axis is the one
+    // that tests `Number.isNaN` (it coalesces an ABSENT read to `NaN` first,
+    // so it carries a `??` of its own).
+    expect(jsCode(ce, ['Coalesce', 'x', 0])).toContain('Number.isNaN');
     const coalesce = compile(ce.box(['Coalesce', 'x', 0])).run!;
     expect(coalesce({ x: NaN })).toBe(0);
     expect(coalesce({ x: 5 })).toBe(5);
@@ -398,7 +403,9 @@ describe('ABSENCE AXIS — the reference unfolds BEFORE the missing-strip', () =
     ce.declareType('mn', 'number | missing');
     ce.declare('x', 'mn');
     expect(ce.box('x').type.toString()).toBe('mn');
-    expect(jsCode(ce, ['IsMissing', 'x'])).toBe('Number.isNaN(_.x)');
+    expect(jsCode(ce, ['IsMissing', 'x'])).toBe(
+      'Number.isNaN((_.x) ?? Number.NaN)'
+    );
     expect(compile(ce.box(['IsMissing', 'x'])).run!({ x: NaN })).toBe(true);
   });
 });
@@ -467,7 +474,9 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
     expect(jsCode(ce, ['IsMissing', 'a'])).toBe(
       jsCode(ce, ['IsMissing', 'n']).replace(/_\.n/g, '_.a')
     );
-    expect(jsCode(ce, ['IsMissing', 'a'])).toBe('Number.isNaN(_.a)');
+    expect(jsCode(ce, ['IsMissing', 'a'])).toBe(
+      'Number.isNaN((_.a) ?? Number.NaN)'
+    );
     // The SAME declaration, instantiated at an object-domain argument, takes
     // the other axis — exactly as the inline spelling does.
     expect(jsCode(ce, ['IsMissing', 'b'])).toBe(
@@ -488,8 +497,11 @@ describe('PARAMETERIZED NOMINAL — erasure at the INSTANTIATED body', () => {
     expect(jsCode(ce, ['Coalesce', 'a', 0])).toBe(
       jsCode(ce, ['Coalesce', 'n', 0]).replace(/_\.n/g, '_.a')
     );
-    // NOT the `??` object axis: `NaN ?? 0` is `NaN`, which would disagree.
-    expect(jsCode(ce, ['Coalesce', 'a', 0])).not.toMatch(/\?\?/);
+    // NOT the object axis, whose whole form is `(x ?? 0)`: that answers `NaN`
+    // for a `NaN` operand, which would disagree. The numeric axis is the one
+    // that tests `Number.isNaN` (it coalesces an ABSENT read to `NaN` first,
+    // so it carries a `??` of its own).
+    expect(jsCode(ce, ['Coalesce', 'a', 0])).toContain('Number.isNaN');
     const coalesce = compile(ce.box(['Coalesce', 'a', 0])).run!;
     expect(coalesce({ a: NaN })).toBe(0);
     expect(coalesce({ a: 5 })).toBe(5);

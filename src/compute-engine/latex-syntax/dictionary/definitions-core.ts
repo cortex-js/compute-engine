@@ -4300,23 +4300,80 @@ function repairedContinuationRange(
 export function normalizeContinuationRanges(
   expr: MathJsonExpression
 ): MathJsonExpression {
-  const h = operator(expr);
-  if (!h) return expr;
-  const args = operands(expr);
-  if (args.length === 0) return expr;
+  // The tree is walked bottom-up with an explicit stack instead of by
+  // recursion. It is as deep as the input nests, and a left-nested chain is as
+  // deep as the input is long: measured 2026-09-22, the recursive form of this
+  // walk overflowed the stack on a 5 000-term `1-2-3-…` subtraction chain,
+  // which parses and boxes without trouble otherwise. Each node is visited
+  // once, its operands first, exactly as the recursion visited them.
+  const root = continuationFrame(expr);
+  if (root === null) return expr;
 
-  let normalized = expr;
-  const newArgs = args.map(normalizeContinuationRanges);
+  const stack: ContinuationFrame[] = [root];
+  for (;;) {
+    const frame = stack[stack.length - 1];
+    if (frame.index < frame.args.length) {
+      const arg = frame.args[frame.index];
+      const child = continuationFrame(arg);
+      if (child !== null) {
+        stack.push(child);
+        continue;
+      }
+      // A leaf normalizes to itself.
+      frame.newArgs.push(arg);
+      frame.index += 1;
+      continue;
+    }
+    stack.pop();
+    const normalized = finishContinuationFrame(frame);
+    if (stack.length === 0) return normalized;
+    const parent = stack[stack.length - 1];
+    parent.newArgs.push(normalized);
+    parent.index += 1;
+  }
+}
+
+/** One node of the {@link normalizeContinuationRanges} walk. */
+type ContinuationFrame = {
+  /** The node as the parser produced it. */
+  readonly source: MathJsonExpression;
+  readonly head: string;
+  readonly args: ReadonlyArray<MathJsonExpression>;
+  /** The normalized operands, filled in as the walk comes back up. */
+  readonly newArgs: MathJsonExpression[];
+  index: number;
+};
+
+/** A frame for `expr` when it is a function node with operands to normalize,
+ *  `null` when it normalizes to itself. */
+function continuationFrame(
+  expr: MathJsonExpression
+): ContinuationFrame | null {
+  const head = operator(expr);
+  if (!head) return null;
+  const args = operands(expr);
+  if (args.length === 0) return null;
+  return { source: expr, head, args, newArgs: [], index: 0 };
+}
+
+/** Rebuild one node from its normalized operands and apply the
+ *  embedded-range repair to it. */
+function finishContinuationFrame(
+  frame: ContinuationFrame
+): MathJsonExpression {
+  const { source, head, args, newArgs } = frame;
+
+  let normalized: MathJsonExpression = source;
   if (newArgs.some((arg, i) => arg !== args[i])) {
-    const fn: [string, ...MathJsonExpression[]] = [h, ...newArgs];
+    const fn: [string, ...MathJsonExpression[]] = [head, ...newArgs];
     // The enclosing operator still represents the same source expression.
     // Preserve its requested metadata while replacing the normalized children.
     normalized =
-      !Array.isArray(expr) && typeof expr === 'object' && 'fn' in expr
-        ? { ...expr, fn }
+      !Array.isArray(source) && typeof source === 'object' && 'fn' in source
+        ? { ...source, fn }
         : fn;
     // Rebuilding loses the WeakSet identity: carry the tag over.
-    if (continuationRanges.has(expr as object))
+    if (continuationRanges.has(source as object))
       continuationRanges.add(normalized as object);
   }
 

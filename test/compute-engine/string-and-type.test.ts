@@ -146,6 +146,127 @@ describe('StringFrom joins a collection of code points', () => {
   });
 });
 
+//
+// With NO format operand, a number or a list of numbers is read as Unicode
+// scalar values; every other value keeps the printed form. An explicit
+// format, `"default"` included, is not affected. (User decision of
+// 2026-09-22.)
+//
+describe('StringFrom with no format decodes numbers as code points', () => {
+  const from = (ce: ComputeEngine, value: any) =>
+    ce.box(['StringFrom', value]).evaluate();
+
+  test('a single code point above the basic plane', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, 128287).string).toBe('🔟');
+  });
+
+  test('a list of code points (a regional-indicator pair)', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, ['List', 127467, 127479]).string).toBe('🇫🇷');
+  });
+
+  test('an ASCII code point', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, 65).string).toBe('A');
+  });
+
+  // The printed form of a string and of a boolean carries the quotes the
+  // engine puts around them. That is the behavior `StringFrom` had before
+  // this change, and it is not touched here.
+  test('a string keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, { str: 'hi' }).string).toBe('"hi"');
+  });
+
+  test('a boolean keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, 'True').string).toBe('"True"');
+  });
+
+  test('a symbol keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, 'x').string).toBe('x');
+  });
+
+  test('an expression keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, ['Add', 'x', 1]).string).toBe('x + 1');
+  });
+
+  // A tuple carries the coordinates of a point, so it must not decode.
+  test('a tuple of numbers keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, ['Tuple', 65, 66]).string).toBe('(65, 66)');
+  });
+
+  // A list with a non-number element is printed, not refused.
+  test('a list that holds a symbol keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, ['List', 'x']).string).toBe('[x]');
+  });
+
+  // A list-typed expression whose elements cannot be reached yet walks to
+  // nothing. That must not be read as an empty list of code points, or the
+  // unresolved expression is lost.
+  test('a list whose elements are unavailable keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list<integer>');
+    expect(from(ce, ['Take', 'xs', 2]).string).toContain('Take');
+  });
+
+  test('an empty list is the empty string', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, ['List']).string).toBe('');
+  });
+
+  // `NaN`, an infinity, a non-integer, a negative number and a complex
+  // number are not code points, so with no format they keep printing.
+  test('a number that cannot be a code point keeps the printed form', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, 'NaN').string).toBe('NaN');
+    expect(from(ce, 'PositiveInfinity').string).toBe('+oo');
+    expect(from(ce, 1.5).string).toBe('1.5');
+    expect(from(ce, -1).string).toBe('-1');
+    expect(from(ce, ['Complex', 1, 2]).string).toBe('(1 + 2i)');
+    expect(from(ce, ['List', 65, 1.5]).string).toBe('[65,1.5]');
+  });
+
+  test('an explicit "default" format still prints a number', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['StringFrom', 128287, { str: 'default' }]).evaluate().string
+    ).toBe('128287');
+  });
+
+  // An invalid Unicode scalar value answers what the explicit
+  // `"unicode-scalars"` format answers for it: `String.fromCodePoint` throws
+  // a `RangeError`, which the evaluation reports as an `internal-error`.
+  test('a code point above U+10FFFF is the same error as the explicit format', () => {
+    const ce = new ComputeEngine();
+    for (const expr of [
+      ce.box(['StringFrom', 0x110000]).evaluate(),
+      ce.box(['StringFrom', 0x110000, { str: 'unicode-scalars' }]).evaluate(),
+    ]) {
+      expect(expr.operator).toBe('Error');
+      expect(expr.toString()).toContain('internal-error');
+      expect(expr.toString()).toContain('Invalid code point');
+    }
+  });
+
+  // A lone surrogate is NOT a Unicode scalar value. Both routes build the
+  // same unpaired UTF-16 code unit, and the string constructor replaces it
+  // with U+FFFD REPLACEMENT CHARACTER, as it does for any lone surrogate.
+  test('a lone surrogate answers the same as the explicit format', () => {
+    const ce = new ComputeEngine();
+    expect(from(ce, 0xd800).string).toBe(
+      ce.box(['StringFrom', 0xd800, { str: 'unicode-scalars' }]).evaluate()
+        .string
+    );
+    expect(from(ce, 0xd800).string).toBe('�');
+  });
+});
+
 describe('Characters splits a string into grapheme clusters', () => {
   const chars = (ce: ComputeEngine, s: string): string[] =>
     ce
@@ -337,16 +458,16 @@ describe('Type operator reports the canonical type without evaluating', () => {
   test('symbol bound to an integer', () => {
     const ce = new ComputeEngine();
     ce.assign('y', 2047);
-    expect(
-      ce.box(['StringFrom', ['Type', 'y']]).evaluate().string
-    ).toBe('integer');
+    expect(ce.box(['StringFrom', ['Type', 'y']]).evaluate().string).toBe(
+      'integer'
+    );
   });
 
   test('number literal', () => {
     const ce = new ComputeEngine();
-    expect(
-      ce.box(['StringFrom', ['Type', 2047]]).evaluate().string
-    ).toBe('2047');
+    expect(ce.box(['StringFrom', ['Type', 2047]]).evaluate().string).toBe(
+      '2047'
+    );
   });
 
   test('string literal', () => {

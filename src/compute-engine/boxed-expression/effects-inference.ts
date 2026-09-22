@@ -19,6 +19,7 @@ import {
   objectLayoutOfType,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
+import { reduceType } from '../../common/type/reduce.js';
 import {
   effectSetToString,
   isCoFiniteEffects,
@@ -34,7 +35,13 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { isFunction, isString, isSymbol, sym } from './type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isString,
+  isSymbol,
+  sym,
+} from './type-guards.js';
 import {
   effectiveDischarge,
   mayStoreIntoReceiverOfType,
@@ -400,6 +407,71 @@ function hasAnyFunctionSignatureArm(t: Readonly<Type>): boolean {
   return false;
 }
 
+/**
+ * The type a RESTRICTION presents when its condition holds, as a union with
+ * the `missing` arm it keeps — or `undefined` when the value is not one of
+ * the narrow shape this refinement covers.
+ *
+ * A restriction such as `5 {a > 0}` holds the number 5 when its condition is
+ * true and the absence marker when it is false. Its own type cannot say which
+ * number: a type-handler result is widened back to ordinary types, because a
+ * handler must not store an over-specific contract nobody wrote, so the
+ * literal type `5` becomes the tier `integer` and the restriction types
+ * `integer | missing`. A declared RANGE then refuses the restriction —
+ * `integer` inhabits no range — although the value it holds does inhabit it,
+ * and the identical ungated `5` is accepted. Reading the literal back off the
+ * held operand restores that precision at the one place it is needed: the
+ * check that admits a value into a declared type. (2026-09-22)
+ *
+ * The shape is deliberately narrow:
+ * - the value's own type must be a union with a `missing` arm, which is the
+ *   SCALAR restriction. A list-broadcast restriction types
+ *   `list<T | missing>`, and there the held operand describes one cell rather
+ *   than the whole value, so it keeps its own type.
+ * - the held operand must be a number literal, the only operand whose type
+ *   carries a value the widening erased.
+ * - that literal type must be a subtype of what the restriction's own type
+ *   already says, so this can narrow the check but never contradict it.
+ */
+function restrictionValueType(
+  value: BoxedType,
+  valueExpr: Expression | undefined
+): Type | undefined {
+  if (valueExpr === undefined) return undefined;
+  const t = value.type;
+  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
+  if (!t.types.includes('missing')) return undefined;
+  // Stacked restrictions canonicalize into one `When`, but a value that was
+  // not canonicalized can still nest, so walk to the innermost held operand.
+  let held: Expression = valueExpr;
+  while (isFunction(held, 'When') && held.ops.length === 2) held = held.op1;
+  if (held === valueExpr || !isNumber(held)) return undefined;
+  const literal = held.type.type;
+  if (!isSubtype(literal, stripMissingFromType(t))) return undefined;
+  return reduceType({ kind: 'union', types: [literal, 'missing'] });
+}
+
+/**
+ * The type a value PRESENTS to a constraint: the type it has when it is
+ * there, with the `missing` arm removed and a literal held through a
+ * restriction read back (see {@link restrictionValueType}).
+ *
+ * Absence is a state every type can take (ruled 2026-09-09), so a check that
+ * asks what a value IS must ask it of the present arm. This is the same
+ * reading {@link matchesDeclaredTypeAxes} applies to a declared type, shared
+ * here for the assumption check in `assertAssignableValueDef`, which asks the
+ * identical question of the type the facts in force prove. (2026-09-22)
+ */
+export function presentedValueType(
+  ce: ComputeEngine,
+  value: Expression
+): BoxedType {
+  const refined = restrictionValueType(value.type, value);
+  const t = refined ?? value.type.type;
+  if (!typeContainsMissing(t)) return value.type;
+  return ce.type(stripMissingFromType(t));
+}
+
 export function matchesDeclaredTypeAxes(
   ce: ComputeEngine,
   value: BoxedType,
@@ -429,6 +501,13 @@ export function matchesDeclaredTypeAxes(
   // proved. Those declarations keep refusing an `unknown` value, as they did
   // before this rule existed.
   if (value.isUnknown && !hasFunctionSignature(declared.type)) return true;
+
+  // A restriction over a number literal presents that literal, not the tier
+  // its own type shows — see `restrictionValueType` for why the two differ.
+  // Applied before the strip below, whose `never` carve-out then judges the
+  // refined union exactly as it judges the original one. (2026-09-22)
+  const restricted = restrictionValueType(value, valueExpr);
+  if (restricted !== undefined) value = ce.type(restricted);
 
   // ABSENCE IS A STATE EVERY TYPE CAN TAKE (ruled 2026-09-09), so the value's
   // `missing` member is removed before its type is compared with the declared

@@ -1435,25 +1435,29 @@ function comparisonResultType(ops: ReadonlyArray<OperandDescriptor>): Type {
 /**
  * Domain-directed absence read for comparison operands (§3.D + I6).
  *
- * An operand that EVALUATED to the `Missing` symbol is Kleene — except when
+ * An operand that EVALUATED to an absence symbol is Kleene — except when
  * the operand it evaluated from is typed with a numeric-domain `missing` arm
  * (`numericMissingSlot`): that slot's honest absence value is `NaN`, so the
  * comparison reads it as `NaN` and follows IEEE. Keeps the static type
  * (plain `boolean`, per `relationalAbsenceType`), the interpreter, and
  * compiled code (where the slot's absent value already IS `NaN` at the ABI)
  * in agreement.
+ *
+ * An `Undefined` operand is normalized to the `Missing` symbol here, so that
+ * the one test each caller makes afterwards — "is an operand the `Missing`
+ * symbol?" — decides for both absence symbols.
  */
 function readComparisonAbsence(
   ce: ComputeEngine,
   rawOps: ReadonlyArray<Expression>,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
-  if (!ops.some((op) => isSymbol(op, 'Missing'))) return ops;
-  return ops.map((op, i) =>
-    isSymbol(op, 'Missing') && numericMissingSlot(rawOps[i].type.type)
-      ? ce.NaN
-      : op
-  );
+  if (!ops.some(isAbsentScalarSymbol)) return ops;
+  return ops.map((op, i) => {
+    if (!isAbsentScalarSymbol(op)) return op;
+    if (numericMissingSlot(rawOps[i].type.type)) return ce.NaN;
+    return ce.Missing;
+  });
 }
 
 /**

@@ -12,6 +12,7 @@ import { functionLiteralParameterType } from './function-literal.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { callbackArityError } from './callback-arity.js';
 import { callbackIncompatibility } from '../../common/type/compatibility.js';
+import { broadcastAdmitsCollectionElement } from './callback-broadcast-admission.js';
 import {
   admissionOf,
   concreteValueOf,
@@ -76,6 +77,7 @@ import {
   isFunction,
   isNumber,
   isString,
+  isAbsentSymbol,
   isContinuationOperand,
   containsContinuationOperand,
 } from './type-guards.js';
@@ -801,15 +803,16 @@ export function hasAbsentScalarOperand(
  * operand stayed symbolic (`cos("Undefined")`) while the compiled lanes
  * already answered `NaN` for the same row.
  *
- * The scope is the numeric absence gate alone. `Undefined` keeps its own
- * meaning everywhere else: its declared type is still `unknown`, it is not an
- * absence for {@link isAbsentValue} (`boxed-expression/type-guards.ts`), and
- * the operators that OWN their absence semantics — the ones declared
- * `missingBehavior: 'handle'`, such as the statistics reducers and `Coalesce`
- * — never consult this predicate.
+ * The two names are read as the same absence everywhere else too: the
+ * operators that OWN their absence semantics — the ones declared
+ * `missingBehavior: 'handle'`, such as the statistics reducers, `Coalesce`
+ * and `IsMissing` — test `isAbsentValue`, which shares this predicate's
+ * {@link isAbsentSymbol} choke point (user ruling of 2026-09-22).
+ * `Undefined` keeps its own meaning outside an absence test: its declared
+ * type is still `unknown`, and a bare `Undefined` evaluates to itself.
  */
 export function isAbsentScalarSymbol(x: Expression): boolean {
-  return isSymbol(x, 'Missing') || isSymbol(x, 'Undefined');
+  return isAbsentSymbol(x);
 }
 
 /**
@@ -1680,7 +1683,10 @@ function arrowSlotArityRejection(
  *   (the EXISTING effect-subset check — `narrowingPreservesEffects` — kept
  *   mandatory; a mixed-union slot has no arm bound to read and passes, which
  *   is conservative-admit and moot for the library's effect-top slots);
- * - rules 1/3/4: `callbackIncompatibility`, admitting if ANY arm admits.
+ * - rules 1/3/4: `callbackIncompatibility`, admitting if ANY arm admits, and
+ *   an arm that supplies a COLLECTION admitting a scalar-parameter callback
+ *   through the broadcast the application itself performs
+ *   (`broadcastAdmitsCollectionElement`).
  */
 function arrowSlotAdmission(
   ce: ComputeEngine,
@@ -1720,6 +1726,15 @@ function arrowSlotAdmission(
     sawArityCapableArm = true;
     if (!narrowingPreservesEffects(opType, arm)) continue;
     if (callbackIncompatibility(arm, opType) === undefined) return 'admit';
+    // The BROADCAST admission (user ruling of 2026-09-22). A callback whose
+    // parameters are all scalar is applied element-wise to a collection
+    // argument instead of binding it whole, so a slot that supplies a
+    // collection — `Sort`'s sort key over a list of rows, `GroupBy`'s and
+    // `ChunkBy`'s per-element callback — is usable after all, and answers a
+    // collection of what the body answers. The lazy callback family takes the
+    // same decision in its own canonical handler
+    // (`callbackCompatibilityError`, `library/collections.ts`).
+    if (broadcastAdmitsCollectionElement(arm, opType)) return 'admit';
   }
   // Arity is already settled: every caller asks `arrowSlotArityRejection` the
   // same question before reaching this gate, so an operand that arrives here

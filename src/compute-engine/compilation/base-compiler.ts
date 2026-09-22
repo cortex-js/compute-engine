@@ -97,6 +97,7 @@ import {
   isCharacter,
   isFunction,
   isDictionary,
+  isAbsentSymbol,
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { asRational } from '../boxed-expression/numerics.js';
@@ -4834,7 +4835,11 @@ export class BaseCompiler {
     const registry = target.userFunctions;
     const owner = registry?.valueRoot ?? registry?.root;
     if (owner === undefined || owner === target) return target;
-    return BaseCompiler.foldValueCaptured(value, target.boundVars, owner.boundVars)
+    return BaseCompiler.foldValueCaptured(
+      value,
+      target.boundVars,
+      owner.boundVars
+    )
       ? owner
       : target;
   }
@@ -5800,6 +5805,48 @@ export class BaseCompiler {
         }
         // We're compiling something like "Add"
         return `(a,b) => a ${op[0]} b`;
+      }
+      // A WRITTEN absence symbol (`Missing`, `Undefined`) is a VALUE, not an
+      // input the caller supplies (2026-09-22). Without this branch it fell
+      // through to the free-symbol read `_.Missing`, so the artifact reported
+      // `freeSymbols: ["Missing"]` and every absence test ran against whatever
+      // the caller happened to bind: `IsMissing(Missing)` answered `false`,
+      // `Coalesce(Missing, 2)` answered `undefined` and `Median([1, Missing,
+      // 3])` answered `3`, where the interpreter answers `True`, `2` and
+      // `NaN`.
+      //
+      // The lowering is the target's OBJECT-domain null (`undefined` on
+      // JavaScript, `None` on Python). It cannot be the numeric marker: a list
+      // cell holding the numeric marker is a number that equals nothing, which
+      // the whole-collection equality rule of 2026-09-21 must keep distinct
+      // from an ABSENT cell (`Equal([1, Missing], [1, Missing])` is undecided,
+      // while `Equal([1, NaN], [1, NaN])` is false). On a target with no
+      // object axis (the shader targets, the interval target) the numeric
+      // marker is the only spelling there is, and it is used. A target with no
+      // absence capability at all fails closed (D6).
+      //
+      // The guard reads `boundVars`/`varsKeys` only — it runs BEFORE
+      // `target.var()` is consulted, so that resolving the name does not
+      // record a vars-object reference the lambda route would then refuse. A
+      // bound name or a caller `vars` key spelled `Missing` is a genuine
+      // variable and keeps its meaning.
+      if (
+        isAbsentSymbol(expr) &&
+        target.boundVars?.has(s) !== true &&
+        target.varsKeys?.has(s) !== true
+      ) {
+        if (
+          target.absence?.object !== undefined &&
+          target.absence.writtenSymbol !== 'numeric'
+        )
+          return target.absence.object.nullLiteral;
+        if (target.absence?.numeric !== undefined)
+          return target.absence.numeric.make();
+        throw new Error(
+          `${s}: target '${target.language ?? 'unknown'}' has no absence ` +
+            `representation (no 'absence' capability), so the absence marker ` +
+            `cannot be spelled. Fail closed (D6).`
+        );
       }
       // Resolving a free symbol RECORDS it as a vars-object reference (see
       // `CompileTarget.varsObjectRefs`), and the lambda route refuses a body
@@ -18763,8 +18810,7 @@ export class BaseCompiler {
     const captured = BaseCompiler.foldCapturedName(target, value, binds);
     if (captured !== undefined)
       throw new Error(BaseCompiler.foldCaptureRefusal(id, captured));
-    if (binds)
-      return BaseCompiler.ensureFoldedValueEmitted(id, value, target);
+    if (binds) return BaseCompiler.ensureFoldedValueEmitted(id, value, target);
     // The inline fold of a value that mentions its own symbol (`a := a + 1`,
     // storable in raw form) would recurse without end. Refuse it the same way
     // the bound route does.
@@ -20429,57 +20475,6 @@ export class BaseCompiler {
         isSubtype(t, 'string')
       );
     });
-  }
-
-  /**
-   * Is `t` a DEFINITE scalar type — a number, a boolean or a string, or a
-   * subtype of one? `unknown` and `any` answer `false`: they accept a
-   * collection as well, so a parameter typed that way says nothing about the
-   * shape of the value it receives.
-   */
-  private static isDefiniteScalarType(t: Type | undefined): boolean {
-    if (t === undefined || t === 'unknown' || t === 'any') return false;
-    return (
-      isSubtype(t, 'number') ||
-      isSubtype(t, 'boolean') ||
-      isSubtype(t, 'string')
-    );
-  }
-
-  /**
-   * Does user-defined function `h` REFUSE a collection argument, rather than
-   * broadcast over it? That is the case when every parameter of the signature
-   * it compiles as is a definite scalar (`isDefiniteScalarType`).
-   *
-   * The interpreter checks the type of a callback's parameter against the
-   * element type of the collection the callback is applied over. With `f`
-   * declared `(number) -> number`, `Map(f, [[1, 2], [3, 4]])` answers
-   * `Map(Error(ErrorCode("incompatible-type", …)), …)`, because a row is not
-   * a number; the same map over a function typed `(unknown) -> number`
-   * applies the function element-wise to each row and answers
-   * `[[2, 4], [6, 8]]`. So a definite scalar parameter refuses, and an open
-   * one broadcasts. (Applying such a function DIRECTLY still broadcasts —
-   * `f([1, 2])` is `[2, 4]` — which is the interpreter's own asymmetry
-   * between an application and a callback position.)
-   *
-   * In practice only a DECLARED signature carries definite parameter types:
-   * a signature the engine infers from a body leaves every parameter
-   * `unknown`, even when the body is scalar arithmetic and even when the
-   * literal's own parameter carries a `Typed` annotation.
-   */
-  private static userFunctionRefusesCollectionArg(
-    engine: ComputeEngine,
-    h: string
-  ): boolean {
-    const signature = BaseCompiler.userFunctionSignature(engine, h);
-    if (signature === undefined) return false;
-    const params = [
-      ...(signature.args ?? []),
-      ...(signature.optArgs ?? []),
-      ...(signature.variadicArg ? [signature.variadicArg] : []),
-    ];
-    if (params.length === 0) return false;
-    return params.every(({ type: t }) => BaseCompiler.isDefiniteScalarType(t));
   }
 
   private static userFunctionParamsAreScalar(
@@ -22553,12 +22548,16 @@ export class BaseCompiler {
    * `[[2, 4], [6, 8]]`. So a scalar-parameter function is handed out as a
    * shape-aware wrapper under its own name, emitted ONCE next to the
    * function itself — a consumer that maps over a million elements pays one
-   * closure, not one per element. The wrapper BROADCASTS (`$b`) where the
-   * interpreter does, and GUARDS (`$s`, an array answers NaN) where the
-   * interpreter refuses instead: see `userFunctionRefusesCollectionArg`. A
-   * function with a parameter that is NOT scalar binds its arguments whole
-   * and keeps the plain reference, because the interpreter does not broadcast
-   * it either.
+   * closure, not one per element. The wrapper always BROADCASTS (`$b`),
+   * because the interpreter always does at a callback position: a callback
+   * whose parameters are all scalar is applied element-wise to a collection
+   * element, whether those parameters are DECLARED scalars
+   * (`(number) -> number`) or left open, which is the user ruling of
+   * 2026-09-22. Before that ruling a declared-scalar callback was refused
+   * there, and the reference took a second, guarding form that projected an
+   * array element to NaN. A function with a parameter that is NOT scalar
+   * binds its arguments whole and keeps the plain reference, because the
+   * interpreter does not broadcast it either.
    *
    * The wrapper takes the complex-coercing shim as its callee where both
    * apply, so an element reaches the body coerced, the same order the
@@ -22625,18 +22624,14 @@ export class BaseCompiler {
     )
       return callee;
 
-    // A function whose parameters are DEFINITE scalars refuses a collection
-    // argument in a callback position instead of broadcasting over it (see
-    // `userFunctionRefusesCollectionArg`), so its wrapper guards rather than
-    // dispatches: an element that is an array projects to NaN, which is how
-    // the compiled routes spell an error value. The guard is the run-time
-    // half only. When the source's element type is PROVABLY a collection, the
-    // canonicalization of `Map`/`Filter`/`Reduce` already puts that error in
-    // the callback's place, which makes the expression invalid, and an
-    // invalid expression is refused before any lowering runs; the interpreter
-    // then evaluates it and reports the error.
-    const refuses = BaseCompiler.userFunctionRefusesCollectionArg(engine, h);
-    const wrapperName = `${name}${refuses ? '$s' : '$b'}`;
+    // Every scalar-parameter function takes the BROADCASTING wrapper, whatever
+    // its parameter types say. Until the user ruling of 2026-09-22 a function
+    // whose parameters were DECLARED scalars — `(number) -> number` — was
+    // refused by the interpreter at a callback position, and took a guarding
+    // wrapper that projected an array element to NaN. The interpreter now
+    // broadcasts there, exactly as a direct application of the same function
+    // always has, so the guarding form has no behavior left to reproduce.
+    const wrapperName = `${name}$b`;
     if (!registry.defs.has(wrapperName))
       registry.defs.set(
         wrapperName,
@@ -22644,7 +22639,7 @@ export class BaseCompiler {
           callee,
           nParams,
           target,
-          refuses ? 'refuse' : 'bcastFn'
+          'bcastFn'
         )};`
       );
     return wrapperName;
@@ -22712,18 +22707,12 @@ export class BaseCompiler {
     ];
     if (clauses.every((c) => clauseParams(c).length === 0)) return undefined;
 
-    // A clause set whose every parameter is a DEFINITE scalar refuses a
-    // collection argument in a callback position instead of broadcasting over
-    // it, for the reason `userFunctionRefusesCollectionArg` gives for a single
-    // signature; one clause with an open parameter is enough to broadcast.
-    const refuses = clauses.every((c) => {
-      const params = clauseParams(c);
-      return (
-        params.length > 0 &&
-        params.every(({ type: t }) => BaseCompiler.isDefiniteScalarType(t))
-      );
-    });
-    const wrapperName = `${name}${refuses ? '$s' : '$b'}`;
+    // Every clause set that reaches here takes the BROADCASTING wrapper. A
+    // clause set whose every parameter was a DECLARED scalar used to take a
+    // guarding wrapper instead, because the interpreter refused a collection
+    // argument at a callback position; since the user ruling of 2026-09-22 it
+    // broadcasts there, so there is one form left.
+    const wrapperName = `${name}$b`;
     if (!registry.defs.has(wrapperName))
       registry.defs.set(
         wrapperName,
@@ -22731,7 +22720,7 @@ export class BaseCompiler {
           name,
           'rest',
           target,
-          refuses ? 'refuse' : 'bcastFn'
+          'bcastFn'
         )};`
       );
     return wrapperName;
@@ -22746,11 +22735,7 @@ export class BaseCompiler {
    * is the user-function form and `bcast` the OPERATOR form; both follow the
    * same element-wise rule, empty position included — an empty operand
    * answers the empty list, as it does in the interpreter (`Sin([])` is
-   * `[]`). Both recurse into nested arrays. `refuse` is the third form:
-   * it broadcasts nothing and projects the array to NaN, because a callee
-   * whose parameters are definite scalars answers an error rather than a
-   * collection there (`userFunctionRefusesCollectionArg`), and NaN is how the
-   * compiled routes spell an error value.
+   * `[]`). Both recurse into nested arrays.
    *
    * The wrapper takes a FIXED number of parameters wherever the function has
    * one, read from the function literal, rather than a rest argument: a
@@ -22771,28 +22756,25 @@ export class BaseCompiler {
     callee: string,
     nParams: number | 'rest',
     target: CompileTarget<Expression>,
-    helper: 'bcast' | 'bcastFn' | 'refuse'
+    helper: 'bcast' | 'bcastFn'
   ): string {
     if (nParams === 'rest') {
       const rest = BaseCompiler.tempVar(target);
       // `Array.isArray` reads only its first argument, so it serves as the
       // `some` predicate unchanged.
-      const applied =
-        helper === 'refuse' ? 'NaN' : `_SYS.${helper}(${callee}, ...${rest})`;
       return (
         `(...${rest}) => ${rest}.some(Array.isArray) ? ` +
-        `${applied} : ${callee}(...${rest})`
+        `_SYS.${helper}(${callee}, ...${rest}) : ${callee}(...${rest})`
       );
     }
     const params: string[] = [];
     for (let i = 0; i < nParams; i++) params.push(BaseCompiler.tempVar(target));
     const args = params.join(', ');
     const test = params.map((p) => `Array.isArray(${p})`).join(' || ');
-    // Every caller of this helper emits JavaScript, so the NaN of the
-    // refusing form is spelled with the JavaScript literal.
-    const applied =
-      helper === 'refuse' ? 'NaN' : `_SYS.${helper}(${callee}, ${args})`;
-    return `(${args}) => ${test} ? ${applied} : ${callee}(${args})`;
+    return (
+      `(${args}) => ${test} ? _SYS.${helper}(${callee}, ${args}) : ` +
+      `${callee}(${args})`
+    );
   }
 
   /**
@@ -25023,6 +25005,13 @@ export class BaseCompiler {
         // JavaScript target inlines the booleans — so the answer has to come
         // from the target rather than from a fixed list here.
         if (target.constant?.(s) !== undefined) return;
+        // A WRITTEN absence symbol is a value the emitter spells out — the
+        // target's object null, or its numeric marker where there is no object
+        // axis (2026-09-22, see the absence-symbol branch of `_compileInner`).
+        // Nothing binds it at run time, so it is not an input the caller has
+        // to supply. A BOUND name or a `vars` key spelled `Missing` is a
+        // genuine variable and was claimed above.
+        if (isAbsentSymbol(e)) return;
         // No mapping, no value, not a constant: a genuinely free symbol.
         free.add(s);
         return;

@@ -2,7 +2,7 @@
  "$comment": "Known failures of the serialize->parse round-trip property `ce.parse(t.latex).isSame(t)` (structural tier) over docs/mathnet/parser-test-cases.json. Maintained by docs/mathnet/scripts/check-roundtrip.ts (npm run check:roundtrip); regenerate with `npm run check:roundtrip -- --update`. `reason` is `bug` (a serializer/round-trip defect to fix) or `documented-lossy` (a form the serializer is contractually allowed to lose). `class` groups identical-cause entries; see `classes` below. CI fails only on failures NOT listed here.",
  "date": "2026-08-04",
  "engineVersion": "0.101.0+unreleased",
- "lastChecked": "2026-08-05",
+ "lastChecked": "2026-09-22",
  "classes": {
   "fraction-fallback-inverse-power": {
    "reason": "documented-lossy",
@@ -49,15 +49,8 @@
   },
   {
    "latex": "\\left[ \\sum_{i=1}^{n} \\frac{1}{a_i^2 + x^2} \\right]^2 \\leq \\frac{1}{2} \\cdot \\frac{1}{a_1 (a_1 - 1) + x^2}.",
-   "reserialized": "\\bigl\\lbrack\\sum_{i=1}^{n}1/(a_{i}^2+x^2)\\bigr\\rbrack^2\\le(2(x^2+a_1(a_1-1)))^{-1}",
+   "reserialized": "\\bigl\\lbrack\\sum_{i=1}^{n}1/(a_{i}^2+x^2)\\bigr\\rbrack^2\\le(2(x^2+a_1\\times(a_1-1)))^{-1}",
    "mismatch": "[\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Multiply\",[\"Rational\",1,2],[\"Divide\",1,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]…  ≠  [\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Divide\",1,[\"Multiply\",2,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]]]",
-   "class": "quotient-factor-merged-into-fraction",
-   "reason": "documented-lossy"
-  },
-  {
-   "latex": "\\lim_{n \\to \\infty} \\frac{1}{n} \\sum_{k=1}^{n} a_k f\\left(\\frac{k}{n}\\right) = a \\int_{0}^{1} f(x) dx.",
-   "reserialized": "\\lim_{n\\to\\infty}\\frac{1}{n}(\\sum_{k=1}^{n}(a_{k}fk)/n)=a\\int_{0}^{1}\\!fx\\, \\mathrm{d}x",
-   "mismatch": "[\"Equal\",[\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Divide\",1,\"n\"],[\"Sum\",[\"Multiply\",\"a_k\",\"f\",[\"Divide\",\"k\",\"n\"]],[\"Limits\",\"k\",1,\"n\"]]]],\"n\"],\"PositiveInfinity\"],[\"Multiply\",\"a\",[\"Integrate\",[\"Function\",[\"Block\",[\"M…  ≠  [\"Equal\",[\"Limit\",[\"Function\",[\"Block\",[\"Multiply\",[\"Divide\",1,\"n\"],[\"Sum\",[\"Divide\",[\"Multiply\",\"a_k\",\"f\",\"k\"],\"n\"],[\"Limits\",\"k\",1,\"n\"]]]],\"n\"],\"PositiveInfinity\"],[\"Multiply\",\"a\",[\"Integrate\",[\"Function\",[\"Block\",[\"M…",
    "class": "quotient-factor-merged-into-fraction",
    "reason": "documented-lossy"
   }

@@ -332,12 +332,38 @@ export type ConformanceRecord = {
   declaredByStatement: boolean;
 };
 
+/** A whole-SUM conformance, as the author wrote it: `type shape is Area { … }`
+ * where `shape` is a sum type (user ruling of 2026-09-22).
+ *
+ * The statement itself registers one ordinary edge per variant — a sum names a
+ * transparent alias of its variants, and an alias cannot conform — so this
+ * record is bookkeeping, not an edge: it is what lets a variant the sum gains
+ * in a LATER batch receive the same implementation block. The block is kept as
+ * the author wrote it, BEFORE `Self` is bound: each variant's edge substitutes
+ * `Self` with its own target, so the substituted block of one variant is the
+ * wrong body for another. */
+export type SumConformanceRecord = {
+  /** The sum type the statement named. */
+  sum: string;
+  /** The implementation block, ungrounded; absent for a block-less
+   * conformance declaration. */
+  impl?: Record<string, Expression | JSImplementation>;
+  /** The block expression's identity, threaded to the duplicate rule of
+   * {@link ConformanceRecord._implOrigin} when the block is re-applied. */
+  block?: Expression;
+};
+
 /** A protocol declaration and every conformance registered against it. */
 export type ProtocolRecord = {
   name: string;
   members: Record<string, ProtocolMember>;
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
+  /** The whole-SUM conformance statements registered against this protocol,
+   * one entry per sum type. Written by the desugaring of `type <sum> is P`,
+   * and read when that sum gains a variant, so the new variant gets the same
+   * implementation. Absent while no sum conforms to this protocol. */
+  _sumConformances?: SumConformanceRecord[];
   /** REDEFINITION DISCIPLINE — which compilation unit and which declaring
    * STATEMENT this record came from
    * (`docs/TYPE-SYSTEM.md`). The DECLARATION-level

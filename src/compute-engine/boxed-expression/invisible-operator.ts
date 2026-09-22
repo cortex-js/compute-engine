@@ -866,6 +866,20 @@ function combineFunctionApplications(
         const args = flatten(
           isFunction(delim.op1, 'Sequence') ? delim.op1.ops : [delim.op1]
         );
+        // Canonicalizing the argument list above can DECLARE the head as a
+        // function, because the argument applies it: `f(yf(x))` declares `f`
+        // from the inner `f(x)`. The definition read into `def` predates that
+        // declaration, so the reading must be settled again here, before the
+        // self-reference exception below turns the pair into a product. The
+        // two-operand route gets this for free — it flattens the arguments
+        // first and only then looks the head up ("Parse the arguments first,
+        // in case they reference lhsCanon.symbol") — and a declared function
+        // applied to an argument that mentions it is a call there too.
+        if (isDeclaredFunction(ce, symName)) {
+          result.push(ce.function(symName, args));
+          i += 2;
+          continue;
+        }
         const head = op.canonical;
         if (isSymbol(head) && !args.some((a) => a.has(symName))) {
           result.push(applyUndeclaredHead(ce, head, args));

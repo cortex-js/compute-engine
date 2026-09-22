@@ -114,7 +114,7 @@ To search the library by concept rather than by name, use
 | — | `ProtocolProperty` | `(protocol: string, property: string, receiver: any, value: any?) -> unknown` | Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). |
 | `quadrilateral` | `Quadrilateral` | `(any+) -> expression` | Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated. |
 | `random` | `Random` | `((collection<any> \| set<real>)?) random -> any` | Random(): non-deterministic real in [0, 1) |
-| `randomChoice` | `RandomChoice` | `(collection<any> \| set<real>, number) random -> list<any>` | RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. |
+| `randomChoice` | `RandomChoice` | `((T, number) random -> T where T: string) & ((collection<any> \| set<real>, number) random -> list<any>)` | RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. |
 | `randomExpression` | `RandomExpression` | `() entropy -> expression` | Generate a random expression. |
 | — | `ReleaseHold` | `(any) -> unknown` | Release an expression held by `Hold` |
 | `replaceAll` | `ReplaceAll` | `(any, any+) -> any` | ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, |
@@ -129,7 +129,7 @@ To search the library by concept rather than by name, use
 | — | `Spread` | `(any) -> unknown` | Spread(t): splice the elements of the tuple `t` into the enclosing |
 | — | `String` | `(any*) -> string` | A string created by joining its arguments. |
 | `stringCompare` | `StringCompare` | `(string, string) -> integer` | StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. |
-| `stringFrom` | `StringFrom` | `(any, format: string?) -> string` | Create a string by converting its arguments to a string and joining them. |
+| `stringFrom` | `StringFrom` | `(any, format: string?) -> string` | StringFrom(value, format?): create a string from `value`. |
 | `stringJoin` | `StringJoin` | `(collection<character \| string>, separator: string?) -> string` | StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string. |
 | `stringRepeat` | `StringRepeat` | `(string, n: integer) -> string` | StringRepeat(s, n): `n` copies of the string `s`, concatenated. |
 | `stringReplace` | `StringReplace` | `((string, string, string, count: integer?) -> string) & ((string, regexp, string, count: integer?) -> string) & ((string, regexp, function, count: integer?) -> string)` | StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters. |

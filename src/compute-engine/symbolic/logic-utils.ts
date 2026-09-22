@@ -10,6 +10,35 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
  * Extracted from logic.ts for better code organization.
  */
 
+/**
+ * Is this the name of an absent truth value? The two symbols that name an
+ * absent datum are `Missing` and `Undefined`, and the connectives read them
+ * alike (user ruling of 2026-09-22): `Not(Undefined)` is the absence marker,
+ * exactly as `Not(Missing)` is. The same two names are tested by
+ * `isAbsentScalarSymbol` (`src/compute-engine/boxed-expression/validate.ts`),
+ * which this module does not otherwise depend on.
+ *
+ * The argument is the operand's symbol NAME, since every caller here already
+ * holds one (`sym(arg)`).
+ */
+function isAbsenceName(name: string | undefined): boolean {
+  return name === 'Missing' || name === 'Undefined';
+}
+
+/**
+ * Replace each absent operand with the `Missing` symbol, so the reducers of
+ * `And` and `Or` — which have no absence rule of their own, and answer an
+ * absent operand because it is the one operand that survives the fold —
+ * answer the one marker for both absence symbols.
+ */
+function normalizeAbsentOperands(
+  args: ReadonlyArray<Expression>,
+  ce: ComputeEngine
+): ReadonlyArray<Expression> {
+  if (!args.some((arg) => isAbsenceName(sym(arg)))) return args;
+  return args.map((arg) => (isAbsenceName(sym(arg)) ? ce.Missing : arg));
+}
+
 /** Helper to get `.op1` from a function expression, or undefined. */
 function fnOp1(expr: Expression): Expression | undefined {
   return isFunction(expr) ? expr.op1 : undefined;
@@ -194,7 +223,7 @@ export function evaluateAnd(
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   if (args.length === 0) return ce.True;
-  args = flattenSame(args, 'And');
+  args = normalizeAbsentOperands(flattenSame(args, 'And'), ce);
   const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an Or operand is a tautology (contains A and Not(A))
@@ -272,7 +301,7 @@ export function evaluateOr(
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
   if (args.length === 0) return ce.True;
-  args = flattenSame(args, 'Or');
+  args = normalizeAbsentOperands(flattenSame(args, 'Or'), ce);
   const ops: Expression[] = [];
   for (let arg of args) {
     // Check if an And operand is a contradiction (contains A and Not(A))
@@ -353,7 +382,7 @@ export function evaluateNot(
   if (op1 === 'True') return ce.False;
   if (op1 === 'False') return ce.True;
   // Kleene: the negation of an absent truth value is absent.
-  if (op1 === 'Missing') return ce.Missing;
+  if (isAbsenceName(op1)) return ce.Missing;
   return undefined;
 }
 
@@ -391,7 +420,7 @@ export function evaluateImplies(
   if (lhs === 'True' && rhs === 'False') return ce.False;
   // Kleene over absence: `False ⇒ q` and `p ⇒ True` are decided above; every
   // other implication with an absent side is itself absent.
-  if (lhs === 'Missing' || rhs === 'Missing') return ce.Missing;
+  if (isAbsenceName(lhs) || isAbsenceName(rhs)) return ce.Missing;
   return undefined;
 }
 
@@ -457,7 +486,7 @@ export function evaluateNand(
   }
   // Kleene over absence: no `False` decided it, so an absent operand makes
   // the conjunction — and its negation — absent.
-  if (args.some((arg) => sym(arg) === 'Missing')) return ce.Missing;
+  if (args.some((arg) => isAbsenceName(sym(arg)))) return ce.Missing;
 
   // Check if all are True
   let allTrue = true;
@@ -487,7 +516,7 @@ export function evaluateNor(
   }
   // Kleene over absence: no `True` decided it, so an absent operand makes
   // the disjunction — and its negation — absent.
-  if (args.some((arg) => sym(arg) === 'Missing')) return ce.Missing;
+  if (args.some((arg) => isAbsenceName(sym(arg)))) return ce.Missing;
 
   // Check if all are False
   let allFalse = true;

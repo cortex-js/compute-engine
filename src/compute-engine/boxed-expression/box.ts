@@ -188,6 +188,57 @@ import {
 const RAW_OPERAND = { canonical: false, structural: false } as const;
 
 /**
+ * How many function nodes of the input tree are between the node being boxed
+ * now and the root of the boxing pass. Boxing recurses once per level, so this
+ * is also, up to a constant factor, how much of the JS stack the pass has
+ * already spent.
+ *
+ * The counter is module-level rather than a field on the engine because what
+ * it stands in for — the JS stack — is shared by every engine in the process.
+ * A canonical handler may box on a DIFFERENT engine, and those frames sit on
+ * the same stack as this pass's, so a per-engine counter would under-report
+ * exactly the nesting that a combined pass runs out of stack on.
+ *
+ * It is set to 0 when a boxing pass starts at the root (`box()` and
+ * `boxFunction()` outside an active root repair) and adjusted around the
+ * recursive descent in `boxInternal()`. There is no `try`/`finally` around the
+ * decrement: a `finally` would cost a frame per level on the very path whose
+ * frames are being counted, and an exception thrown mid-descent leaves the
+ * counter high only until the next root boxing pass resets it. A high counter
+ * is not a correctness problem in any case — it only makes the next pass
+ * devolve earlier than it needs to. Added 2026-09-22.
+ */
+let boxingDepth = 0;
+
+/**
+ * The nesting depth at which boxing stops recursing and boxes the rest of the
+ * subtree with an explicit work stack instead (see `preboxDeepOperands`).
+ *
+ * 200 levels is well below the depth at which the recursion runs out of stack.
+ * Measured 2026-09-22 on Node 26 with the default stack: a left-nested
+ * `Subtract` chain from `ce.parse('1-2-3-…')` reached 585 levels, a `Sin` nest
+ * 1 171 levels, and the canonicalization of an already raw-boxed chain 702
+ * levels. The work stack itself runs at the depth that triggered it, so the
+ * threshold must leave room for the deepest single node build below it — a
+ * canonical handler that boxes sub-expressions of its own. A third of the
+ * smallest measured ceiling leaves that room and still devolves only trees
+ * that no ordinary input produces.
+ */
+let boxingDevolveThreshold = 200;
+
+/**
+ * Set the depth at which boxing devolves to a work stack, and return the
+ * previous value. Only for tests, which lower it so an ordinary-sized tree
+ * takes the devolved route and can be compared against the recursive one.
+ * @internal
+ */
+export function _setBoxingDevolveThreshold(depth: number): number {
+  const previous = boxingDevolveThreshold;
+  boxingDevolveThreshold = depth;
+  return previous;
+}
+
+/**
  * Box the operands of a construction: the same result as
  * `ops.map((x) => box(ce, x, options))` (for the dense arrays MathJSON
  * operands are — a hole in a sparse array would be boxed as a missing
@@ -321,6 +372,9 @@ export function boxFunction(
   // is stack a deep MathJSON tree cannot use (see `box()`).
   if (ce._boxingState.isRootActive)
     return boxFunctionInternal(ce, name, ops, options);
+  // A construction that starts here starts at the root of the JS stack too,
+  // so the nesting counter starts over (see `boxingDepth`).
+  boxingDepth = 0;
   return withDevolveRepair(ce, options?.scope, () =>
     boxFunctionInternal(ce, name, ops, options)
   );
@@ -388,6 +442,16 @@ function boxFunctionInternal(
   }
 
   const structural = options.structural ?? false;
+
+  // Deep tree: box what is left of it with an explicit work stack instead of
+  // recursing into it (see `preboxDeepOperands`). The operands come back
+  // already boxed, so the construction below proceeds exactly as it would for
+  // a caller that had handed over boxed operands, and the recursion stops
+  // growing here.
+  if (boxingDepth >= boxingDevolveThreshold) {
+    const preboxed = preboxDeepOperands(ce, name, ops, options);
+    if (preboxed !== null) ops = preboxed;
+  }
 
   // An operand that IS, or that transitively CONTAINS, an object from another
   // engine cannot be adopted into this engine's expression (see the same check
@@ -608,6 +672,317 @@ function boxFunctionInternal(
     options.canonical ?? false,
     options.scope
   );
+}
+
+/**
+ * The operator names whose operands are NOT boxed the way an ordinary operand
+ * of the same construction is boxed, so an operand boxed ahead of the
+ * construction would not be the expression the construction expects.
+ *
+ * `Hold` boxes its operand with `boxHold()`, which leaves every function node
+ * below it non-canonical and unbound whatever form the construction is in.
+ * `Error` and `ErrorCode` box their operands raw for the same reason. A node
+ * with one of these heads is left to the recursion.
+ */
+const PREBOX_OPAQUE_HEADS: ReadonlySet<string> = new Set([
+  'Hold',
+  'Error',
+  'ErrorCode',
+]);
+
+/** The options the operands of a construction are boxed with: `undefined` for
+ *  a fully canonical construction (which boxes its operands with no options at
+ *  all), the construction's own form otherwise. */
+type PreboxOperandOptions =
+  | undefined
+  | {
+      canonical: CanonicalOptions;
+      structural: boolean;
+      scope: Scope | undefined;
+    };
+
+/**
+ * May the operands of `name(…ops)` be boxed BEFORE the construction runs, the
+ * construction then being handed the boxed operands?
+ *
+ * The answer is yes when the construction would box each operand on its own,
+ * with the same options, and read nothing of the unboxed operand first. It is
+ * no whenever the construction decides something about an operand before
+ * boxing it — which of them it is, what type it carries, or which scope it
+ * belongs to.
+ */
+function mayPreboxOperands(
+  ce: ComputeEngine,
+  name: string,
+  ops: ReadonlyArray<ExpressionInput>,
+  fullyCanonical: boolean,
+  scope: Scope | undefined
+): boolean {
+  if (PREBOX_OPAQUE_HEADS.has(name)) return false;
+
+  // A construction that canonicalizes nothing boxes every operand with one
+  // and the same set of options (the tail of `boxFunctionInternal`), so
+  // nothing below applies to it.
+  if (!fullyCanonical) return true;
+
+  // A named call is permuted into declaration order before any operand is
+  // read by position, and a `Spread` operand leaves the final positional
+  // operands unknown until evaluation. Both decide WHICH operand sits at a
+  // position, so neither can be settled after the operands are boxed.
+  if (hasNamedArguments(ops)) return false;
+  for (const op of ops)
+    if (
+      isSpreadOperand(op) ||
+      // An inline `Function` literal is annotated from the callee's declared
+      // parameter type before it is boxed, so that it canonicalizes once,
+      // already annotated (`annotateCallbacksFromSignature`). Boxing it here
+      // would canonicalize it unannotated instead.
+      mayBeInlineFunctionLiteral(op)
+    )
+      return false;
+
+  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  // A LAZY operator receives its operands raw and unbound and decides itself
+  // what to canonicalize; a SCOPED one canonicalizes its operands in a scope
+  // that does not exist yet when this runs. Boxing an operand up front would
+  // take that decision away from both.
+  if (def !== undefined && !isValueDef(def))
+    if (def.operator.lazy || def.operator.scoped) return false;
+
+  return true;
+}
+
+/**
+ * The head and operands of `x` when the work stack can build `x` itself from
+ * its own boxed operands, `null` otherwise.
+ *
+ * Two node kinds qualify. A MathJSON function node written as an array is
+ * built the way `boxInternal()` builds it. A boxed function node that is not
+ * canonical yet qualifies only for a fully canonical construction, where the
+ * construction would ask it for `.canonical` — a rebuild from its operands —
+ * and only when that getter's answer IS that plain rebuild: it answers with
+ * the node itself for an invalid node, and rebuilds inside the scope the node
+ * was parsed in when it retained one.
+ *
+ * The MathJSON object form (`{ fn: […] }`) is deliberately not included: it
+ * carries metadata that `boxInternal()` threads into the construction and
+ * drops the scope option while doing so, so it is left to the recursion. A
+ * tree built of those nodes is as deep as boxing can take, as before.
+ */
+function preboxableNodeOperands(
+  x: ExpressionInput,
+  fullyCanonical: boolean
+): { name: MathJsonSymbol; ops: ReadonlyArray<ExpressionInput> } | null {
+  if (Array.isArray(x)) {
+    if (typeof x[0] !== 'string') return null;
+    return { name: x[0], ops: x.slice(1) as ExpressionInput[] };
+  }
+  if (!fullyCanonical || !(x instanceof _BoxedExpression)) return null;
+  const node = x as _BoxedExpression & Expression;
+  if (!isFunction(node) || node.isCanonical || !node.isValid) return null;
+  if (node._parseScope !== undefined) return null;
+  return { name: node.operator, ops: node.ops };
+}
+
+/** Build one node of the work stack from its already-boxed operands: the same
+ *  construction the recursion would have performed for that node. */
+function buildPreboxedNode(
+  ce: ComputeEngine,
+  source: ExpressionInput,
+  boxedOps: ReadonlyArray<ExpressionInput>,
+  operandOptions: PreboxOperandOptions
+): Expression {
+  if (Array.isArray(source)) {
+    // What `boxInternal()` does with a MathJSON function node, with the
+    // operands boxed already.
+    const forms = operandOptions?.canonical ?? true;
+    const fn = (
+      ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction
+    )(ce, source[0] as MathJsonSymbol, boxedOps, {
+      canonical: forms === true,
+      structural: operandOptions?.structural ?? false,
+      scope: operandOptions?.scope,
+    });
+    return canonicalForm(fn, forms, operandOptions?.scope);
+  }
+  // What `BoxedFunction`'s `.canonical` getter does, with the operands
+  // canonical already. A node that retained a parse scope never gets here
+  // (`preboxableNodeOperands`), so the getter's scope bracket has nothing to
+  // restore and is not reproduced.
+  const node = source as _BoxedExpression & Expression;
+  return ce.function(
+    node.operator,
+    boxedOps,
+    node.sourceOffsets !== undefined
+      ? { metadata: { sourceOffsets: node.sourceOffsets } }
+      : undefined
+  );
+}
+
+/**
+ * Box the operands of a construction that is already `boxingDevolveThreshold`
+ * levels deep, using an explicit work stack instead of the boxing recursion,
+ * and return the boxed operand list. Returns `null` when this construction is
+ * not one whose operands may be boxed ahead of it (`mayPreboxOperands`), or
+ * when none of its operands is a node the work stack can build; the caller
+ * then recurses as before.
+ *
+ * The walk is a post-order traversal of the operand trees: an operand that is
+ * a buildable node is descended into, its own operands are boxed first, and
+ * the node is then built from them (`buildPreboxedNode`). An operand that is
+ * not — a leaf, or a node one of the guards declines — is boxed on the spot,
+ * at its position in the walk, by the ordinary recursive route. So the JS
+ * stack depth stays bounded whatever the depth of the input, while the ORDER
+ * in which operands are boxed, and the construction each node goes through,
+ * are the ones the recursion would have produced.
+ *
+ * For a canonical construction the inference cause is threaded the way
+ * `makeCanonicalFunction()` threads it: while the operands of a node are
+ * boxed, that node is the cause recorded for any type inferred from them.
+ * Without this, every inference below the threshold would be attributed to
+ * the one construction that triggered the devolve. A construction that
+ * canonicalizes nothing infers nothing and sets no cause, which is what the
+ * recursion it replaces does.
+ *
+ * Added 2026-09-22 for the deep-tree boxing limit ("Boxing a long `1-2-3-…`
+ * chain overflows the stack").
+ */
+function preboxDeepOperands(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  ops: ReadonlyArray<ExpressionInput>,
+  options: BoxFunctionOptions
+): ExpressionInput[] | null {
+  const fullyCanonical = options.canonical === true;
+
+  // A fully canonical construction boxes its operands with NO options
+  // (`applyOperatorDefinition`), which is only the same thing as boxing them
+  // in this construction's form when that form carries nothing else.
+  if (
+    fullyCanonical &&
+    (options.structural === true || options.scope !== undefined)
+  )
+    return null;
+
+  // Is there anything here for the work stack to build? Checked before the
+  // guards below, which cost a definition lookup: every node the walk builds
+  // re-enters this function (it is still past the threshold) with operands
+  // that are boxed already, and must leave again cheaply.
+  let deep = false;
+  for (const op of ops)
+    if (preboxableNodeOperands(op, fullyCanonical) !== null) {
+      deep = true;
+      break;
+    }
+  if (!deep) return null;
+
+  if (!mayPreboxOperands(ce, name, ops, fullyCanonical, options.scope))
+    return null;
+
+  const operandOptions: PreboxOperandOptions = fullyCanonical
+    ? undefined
+    : {
+        canonical: options.canonical!,
+        structural: options.structural ?? false,
+        scope: options.scope,
+      };
+
+  type Frame = {
+    /** The node this frame builds, or `null` for the construction that
+     *  triggered the devolve: only its operand list is wanted. */
+    readonly source: ExpressionInput | null;
+    readonly ops: ReadonlyArray<ExpressionInput>;
+    readonly boxed: ExpressionInput[];
+    /** The inference cause in force while this frame's operands are boxed,
+     *  `null` for a construction that canonicalizes nothing. */
+    readonly cause: {
+      operator: string;
+      ops: ReadonlyArray<ExpressionInput>;
+    } | null;
+    index: number;
+  };
+
+  const stack: Frame[] = [
+    {
+      source: null,
+      ops,
+      boxed: [],
+      index: 0,
+      cause: fullyCanonical ? { operator: name, ops } : null,
+    },
+  ];
+
+  const previousCause = ce._inferenceCause;
+  try {
+    if (fullyCanonical) ce._inferenceCause = stack[0].cause;
+    for (;;) {
+      const frame = stack[stack.length - 1];
+      if (frame.index < frame.ops.length) {
+        const op = frame.ops[frame.index];
+        const node = preboxableNodeOperands(op, fullyCanonical);
+        if (
+          node !== null &&
+          mayPreboxOperands(
+            ce,
+            node.name,
+            node.ops,
+            fullyCanonical,
+            operandOptions?.scope
+          )
+        ) {
+          const child: Frame = {
+            source: op,
+            ops: node.ops,
+            boxed: [],
+            index: 0,
+            cause: fullyCanonical
+              ? { operator: node.name, ops: node.ops }
+              : null,
+          };
+          stack.push(child);
+          if (fullyCanonical) ce._inferenceCause = child.cause;
+          continue;
+        }
+        // An operand the walk does not descend into — a leaf, or a node one
+        // of the guards declines — is boxed HERE, at its position in the
+        // walk, and NOT left raw for the construction to box afterwards.
+        // Boxing has effects that depend on the order it happens in: a
+        // canonical handler declares symbols and infers their types, so the
+        // operand boxed first is the one that decides what a shared symbol's
+        // type is. The recursion this walk stands in for boxes operands left
+        // to right; leaving this one raw would box it AFTER every later
+        // sibling that the walk builds on the spot. The skipped subtree
+        // recurses from here exactly as it did before — its own depth is
+        // what it is.
+        //
+        // The operand options are the ones the construction would use for
+        // this position, and the inference cause in force is this frame's
+        // (set when the frame was pushed, restored when a child frame pops),
+        // so the boxing is the same in every respect but where it happens.
+        // `boxInternal` rather than `box` when both brackets `box()` puts
+        // around it are already open, the choice the two operand-boxing
+        // loops this stands in for make (`boxFunctionInternal` and
+        // `applyOperatorDefinition`).
+        frame.boxed.push(
+          (ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
+            ? boxInternal
+            : box)(ce, op, operandOptions)
+        );
+        frame.index += 1;
+        continue;
+      }
+      stack.pop();
+      if (stack.length === 0) return frame.boxed;
+      const parent = stack[stack.length - 1];
+      if (fullyCanonical) ce._inferenceCause = parent.cause;
+      parent.boxed.push(
+        buildPreboxedNode(ce, frame.source!, frame.boxed, operandOptions)
+      );
+      parent.index += 1;
+    }
+  } finally {
+    ce._inferenceCause = previousCause;
+  }
 }
 
 /**
@@ -895,6 +1270,9 @@ export function box(
     // boxed at all (a left-nested `Subtract` chain from parsing `1-2-3-…`, or
     // `Sin(Sin(…))`, overflows the stack past a few hundred levels).
     if (ce._boxingState.isRootActive) return boxInternal(ce, expr, options);
+    // A construction that starts here starts at the root of the JS stack too,
+    // so the nesting counter starts over (see `boxingDepth`).
+    boxingDepth = 0;
     return withDevolveRepair(ce, options?.scope, () =>
       boxInternal(ce, expr, options)
     );
@@ -1057,10 +1435,20 @@ function boxInternal(
     // The common case — full canonical form, no scope — is exactly the
     // `.canonical` getter; `canonicalForm()` would only add a frame on the
     // recursive path of canonicalizing an already-boxed tree.
+    //
+    // Canonicalizing an already-boxed tree descends one level per operand
+    // too — the `.canonical` getter of a function node rebuilds it from its
+    // operands, each of which comes back through here — so this descent is
+    // counted like the MathJSON one below (see `boxingDepth`).
+    //
     const forms = options?.canonical ?? true;
-    if (forms === true && options?.scope === undefined)
-      return (rebound ?? expr).canonical;
-    return canonicalForm(rebound ?? expr, forms, options?.scope);
+    boxingDepth += 1;
+    const canonicalized =
+      forms === true && options?.scope === undefined
+        ? (rebound ?? expr).canonical
+        : canonicalForm(rebound ?? expr, forms, options?.scope);
+    boxingDepth -= 1;
+    return canonicalized;
   }
 
   options = options ? { ...options } : {};
@@ -1095,16 +1483,16 @@ function boxInternal(
     // `boxFunction()` is only a root-repair dispatcher; with the root
     // already active it would call `boxFunctionInternal()` straight back, so
     // skip its frame (boxing recurses once per level, see `box()`).
-    return canonicalForm(
-      (ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction)(
-        ce,
-        expr[0],
-        expr.slice(1) as ExpressionInput[],
-        { canonical, structural, scope: options?.scope }
-      ),
-      options?.canonical ?? true,
-      options?.scope
-    );
+    boxingDepth += 1;
+    const fn = (
+      ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction
+    )(ce, expr[0], expr.slice(1) as ExpressionInput[], {
+      canonical,
+      structural,
+      scope: options?.scope,
+    });
+    boxingDepth -= 1;
+    return canonicalForm(fn, options?.canonical ?? true, options?.scope);
   }
 
   //
@@ -1179,16 +1567,12 @@ function boxInternal(
 
     if ('fn' in expr) {
       const [fnName, ...ops] = expr.fn;
-      return canonicalForm(
-        (ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction)(
-          ce,
-          fnName,
-          ops,
-          { canonical, structural, metadata }
-        ),
-        options.canonical!,
-        options.scope
-      );
+      boxingDepth += 1;
+      const fn = (
+        ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction
+      )(ce, fnName, ops, { canonical, structural, metadata });
+      boxingDepth -= 1;
+      return canonicalForm(fn, options.canonical!, options.scope);
     }
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
     if ('sym' in expr) return ce.symbol(expr.sym, { canonical, metadata });

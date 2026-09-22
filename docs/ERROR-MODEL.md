@@ -363,14 +363,46 @@ as it normalizes `Missing`: `Cos(Undefined)` is `NaN` under `evaluate()` and
 under `.N()`, `Undefined + 1` is `NaN`, and an `Undefined` cell of a list
 under a broadcast head is `NaN` at that position. This closes the gap with
 the compiled lanes, which already answered `NaN` for the same input, and with
-the `Add` fold, which already read `Undefined` as `NaN`. Outside a numeric
-slot `Undefined` is unchanged: its declared type is still `unknown`, it is not
-an absence for the operators that own their absence semantics
-(`missingBehavior: 'handle'` — the statistics reducers, `Coalesce`,
-`IsMissing`, which all still read it as an ordinary value), and a bare
-`Undefined` still evaluates to itself. The one predicate the numeric gate and
-its async twin share is `isAbsentScalarSymbol`
+the `Add` fold, which already read `Undefined` as `NaN`. A bare `Undefined`
+still evaluates to itself and its declared type is still `unknown`. The one
+predicate the numeric gate and its async twin share is `isAbsentScalarSymbol`
 (`src/compute-engine/boxed-expression/validate.ts`).
+
+**The operators that OWN their absence semantics read `Undefined` as absent
+too** (ruled 2026-09-22, extending the rule above). When an operator declared
+`missingBehavior: 'handle'` reads a `Missing` element or operand as absent, an
+`Undefined` element or operand is absent in the same way, and answers the
+same: `Mean([1, Undefined, 3])` is `NaN`, as `Mean([1, Missing, 3])` is; so
+are `Median`, the variance family, `Max`/`Min`, `Quantile` and `Covariance`.
+`IsMissing(Undefined)` is `True`, `Coalesce(Undefined, 2)` is `2`, a chained
+`At` absorbs an `Undefined` base or index, and `Count`/`Tally` treat an
+`Undefined` cell exactly as a `Missing` one (both count it — neither erases a
+position). Until this ruling those operators read `Undefined` as an ordinary
+value, so `Mean([1, Undefined, 3])` stayed symbolic. The value-level test they
+all run is `isAbsentValue`
+(`src/compute-engine/boxed-expression/type-guards.ts`), which now shares its
+absence-SYMBOL choke point, `isAbsentSymbol`, with the numeric gate's
+`isAbsentScalarSymbol`; `isAbsentValue` adds the `NaN` arm on top of it.
+
+Two families are deliberately NOT covered, because their scalar arm reads the
+`Missing` symbol BY NAME on a separate Kleene route rather than through that
+predicate: the relational operators (`Equal`, `Less`, …) and the boolean
+connectives (`And`, `Or`, `Not`). `Equal(Undefined, 1)` is still `False` where
+`Equal(Missing, 1)` is `Missing`, and `And(Undefined, True)` answers
+`Undefined` where `And(Missing, True)` answers `Missing`. The
+whole-collection comparison of the next section is an exception inside that
+family: it tests the cells with `isAbsentScalarSymbol`
+(`absentCollectionComparison`, `library/relational-operator.ts`), so
+`Equal([1, Undefined], [1, Undefined])` already answered `Missing` at the
+2026-09-21 ruling. Its element-wise sibling does not — `Equal([1, Undefined], 1)`
+is `[True, False]` where `Equal([1, Missing], 1)` is `[True, Missing]`.
+
+**The two symbols that name an absent datum — `Missing` and `Undefined` — are
+read alike by the comparison operators, by the logical connectives, and by the
+handlers that own their absence semantics** (user ruling of 2026-09-22).
+`Equal(Undefined, 1)` is `Missing`, `Not(Undefined)` is `Missing`,
+`First(Undefined)` is `Missing`, and `Distance(Undefined, (1, 1))` is `NaN` —
+each the answer the same expression gives for `Missing`.
 
 **A comparison of two COLLECTIONS asks about the collections as a whole, and
 one element pair with no answer leaves that whole question unanswered** (user
@@ -398,6 +430,17 @@ undecided COMPARISON, not absent condition data:
 the compiled kernel answers `NaN`, the same answer a condition resting on a
 `NaN` operand already gives. The marker passes through `Not`, `And` and `Or`
 by the ordinary Kleene table, so a settling sibling still decides the branch.
+
+**A WRITTEN absence symbol lowers to the target's object-domain null** —
+`undefined` on JavaScript, and the target's numeric marker where there is no
+object axis (the shader targets, the interval target) or where the object null
+would break the numeric library (the Python target spells `math.nan`, since
+numpy raises on `None`). It is
+a value the compiler spells out, not a free variable the caller supplies, so
+`compile(Missing).freeSymbols` is empty; the object null rather than the
+numeric marker, because the whole-collection rule above must keep an absent
+cell distinct from a `NaN` one, and each target's numeric absence test
+therefore reads the object null as absent too (2026-09-22).
 
 Because errors absorb *before* ordinary handlers run, an ordinary
 operator handler never receives an error operand and needs no error

@@ -82,8 +82,9 @@ The conforming type must be a **named, concrete type**: a built-in
 type](/epsil/types/#nominal-type). A union, an anonymous tuple or
 record shape, or a `type alias` name cannot conform
 (`protocol-conformance-target-invalid`) — wrap the shape in a nominal type
-first. A new nominal type can declare its conformance in the same
-statement:
+first. A sum type is the one exception, and it is a spelling, not a new
+kind of conformer: see [Conforming a sum type](#conforming-a-sum-type). A
+new nominal type can declare its conformance in the same statement:
 
 ```epsil-live
 protocol Area { function area(self: Self) -> number }
@@ -111,6 +112,50 @@ is `protocol-signature-mismatch`. Parameter types may be *wider* than the
 requirement and the result *narrower*; parameter names are not significant
 for matching. Implementing the same protocol twice for one type in a single
 program is `protocol-implementation-duplicate`; a later run replaces.
+
+### Conforming a sum type {#conforming-a-sum-type}
+
+A sum type (`type light = red | green | yellow`) is a name for the union of
+its variants, and a union cannot conform. Write the conformance for the sum
+anyway: it declares the conformance once **for each variant**, with the
+same implementation block, and `Self` is that variant in each of them. It
+is the same as writing the block once per variant:
+
+```epsil-live
+protocol Area { function area(self: Self) -> number }
+
+type shape = circle(r: number) | square(s: number)
+
+type shape is Area {
+  function area(self: Self) -> number {
+    match self {
+      circle(r) => 3 * r * r
+      square(s) => s * s
+    }
+  }
+}
+
+area(square(3))
+// ➔ 9
+```
+
+Because the conformance is per variant, dispatch is unchanged: a value of
+any variant finds the implementation, and each variant may still be given
+its own block instead.
+
+Three rules follow from that:
+
+- If a variant already has its own implementation of the protocol, the sum
+  block is a second implementation of that variant:
+  `protocol-implementation-duplicate`, naming the variant. Nothing is
+  registered — the sum spelling is all or nothing.
+- A variant the sum gains **later** — a second `type shape = … | triangle`
+  statement in a later program or notebook cell — is given the same
+  implementation as it is declared.
+- A generic sum (`type tree<T> = leaf | node(value: T, kids: list<tree<T>>)`)
+  cannot be written this way: each variant is declared with only the type
+  parameters its own payload uses, so there is no one spelling that fits
+  every variant. Write the conformance for each variant.
 
 ## Calling a protocol function
 

@@ -101,6 +101,93 @@ function isUnwrittenPointWithCollectionComponent(expr: Expression): boolean {
 }
 
 /**
+ * Does this operand's TYPE say it is a LIST OF POINTS — `list<tuple<…>>`,
+ * which `PointList(1, L)` with a collection component reports and which a
+ * literal `[(1, 2), (3, 4)]` reports too?
+ *
+ * Read from the type alone, because that is what the emitted shape follows: a
+ * list of points compiles to an array of arrays, and the `Dot` lowering must
+ * decide which of its two operands is the list BEFORE either is compiled. A
+ * matrix (`list<list<number>>`) is excluded, because its element type is a
+ * list and not a tuple, so it keeps the matrix product.
+ *
+ * A TUPLE is excluded as well, even when its own coordinates are tuples: the
+ * interpreter reads `((1, 2), (3, 4))` as ONE point with nested coordinates,
+ * which `Norm` flattens and `PointX` indexes, so it is not a list of points
+ * here either.
+ */
+function isPointListOperandType(expr: Expression): boolean {
+  if (isPointOperandType(expr)) return false;
+  const elt = collectionElementType(jsType(expr));
+  if (elt === undefined) return false;
+  const r = resolveTypeForCompilation(elt);
+  return r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple');
+}
+
+/** Does this operand's TYPE say it is a POINT — a tuple, of any width? */
+function isPointOperandType(expr: Expression): boolean {
+  const t = jsType(expr);
+  return t === 'tuple' || (typeof t !== 'string' && t.kind === 'tuple');
+}
+
+/**
+ * The COORDINATE TYPES of a `Dot` operand that is a point or a list of
+ * points — every alternative's every component — or `undefined` when the
+ * operand's type does not name them (a bare `tuple`, a nominal reference, a
+ * union with a non-tuple arm).
+ *
+ * The point-list broadcast multiplies coordinate by coordinate, so this is
+ * what says whether the emitted `*` and `+` are the right operators for the
+ * values that will arrive.
+ */
+function pointOperandCoordinateTypes(expr: Expression): Type[] | undefined {
+  const t = jsType(expr);
+  const point = isPointListOperandType(expr) ? collectionElementType(t) : t;
+  if (point === undefined) return undefined;
+  const arms = pointTypeAlternatives(point);
+  if (arms === undefined) return undefined;
+  return arms.flatMap((arm) => arm.elements.map((e) => e.type));
+}
+
+/**
+ * Is every value of this coordinate type a NUMBER — so that the emitted `*`
+ * and `+` are the operators the interpreter would apply?
+ *
+ * A union answers only when every arm does. A string, a list and an open type
+ * (`unknown`) all answer `false`: the interpreter's point-list broadcast
+ * requires every component to be a number literal and leaves the product
+ * symbolic otherwise (`pointListDotProduct`, `library/linear-algebra.ts`),
+ * while `"1" * "2"` in JavaScript quietly answers `2`.
+ *
+ * This is the numeric half of the test
+ * `BaseCompiler.compileBroadcastInnerProduct` applies to the TUPLE spelling
+ * of the same product, narrowed: that path admits a coordinate that is a
+ * collection of numbers, because it broadcasts the coordinate itself, and
+ * this one does not.
+ */
+function isNumberCoordinateType(t: Type): boolean {
+  const r = resolveTypeForCompilation(t);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.every(isNumberCoordinateType);
+  return isSubtype(r, 'number');
+}
+
+/**
+ * Is every value of this coordinate type a REAL number?
+ *
+ * The real half of the sibling test named in {@link isNumberCoordinateType}.
+ * A `complex` coordinate compiles to a `{ re, im }` object, whose JavaScript
+ * `*` is `NaN`, so the point-list lowering declines it exactly as the tuple
+ * broadcast does.
+ */
+function isRealNumberCoordinateType(t: Type): boolean {
+  const r = resolveTypeForCompilation(t);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.every(isRealNumberCoordinateType);
+  return !isNonRealNumber(r);
+}
+
+/**
  * The tuple alternatives of a POINT-typed operand: one for a tuple type, one
  * per arm for a union whose every arm is a tuple, `undefined` for anything
  * else (a scalar, a list, a union with a non-tuple arm). Aliases are
@@ -4985,6 +5072,76 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Dot: missing argument');
     const broadcast = BaseCompiler.compileBroadcastInnerProduct(args, target);
     if (broadcast !== undefined) return broadcast;
+    // A LIST OF POINTS against a point, or against another list of points:
+    // one inner product per point (user ruling of 2026-09-22). This is the
+    // `PointList` spelling of the tuple broadcast above, and it answers the
+    // same list. `_SYS.matmul` cannot serve it: an array of points and an
+    // array of rows look alike at run time, so matrix multiplication happens
+    // to be right for `Dot(P, q)` and is the wrong contraction for `Dot(q, P)`
+    // and for two point lists. `_SYS.pointdot` is told which operand is the
+    // list and broadcasts.
+    if (args.some(isPointListOperandType)) {
+      // The broadcast is defined for a point list against a POINT and for two
+      // point lists, and for nothing else. A point list against a plain
+      // vector or a matrix has no arm in the interpreter — it types `value`
+      // and stays symbolic — so emitting a list here would make the compiled
+      // route answer something the type does not describe. Fail closed (D6).
+      if (
+        !args.every((a) => isPointListOperandType(a) || isPointOperandType(a))
+      )
+        throw new Error(
+          'Dot: a list of points is defined against a point or another list ' +
+            'of points only; the other operand is neither, and the ' +
+            'interpreter leaves this product unevaluated. Fail closed (D6).'
+        );
+      // The product is computed coordinate by coordinate, so every
+      // coordinate on both sides must be a value the emitted `*` and `+`
+      // multiply and add. A pair of STRING coordinates would otherwise
+      // answer a number (`"1" * "2"` is `2`) where the interpreter leaves
+      // `Dot([("1", "2")], (3, 4))` symbolic, and a COMPLEX coordinate would
+      // answer NaN with nothing to say why. The sibling tuple broadcast
+      // (`BaseCompiler.compileBroadcastInnerProduct`) declines complex
+      // coordinates with the same message.
+      const coordinates: Type[] = [];
+      for (const arg of args) {
+        const cs = pointOperandCoordinateTypes(arg);
+        if (cs === undefined)
+          throw new Error(
+            'Dot: a list of points is multiplied coordinate by coordinate, ' +
+              'and this operand does not name its coordinate types, so they ' +
+              'cannot be proved numbers. Fail closed (D6).'
+          );
+        coordinates.push(...cs);
+      }
+      if (!coordinates.every(isNumberCoordinateType))
+        throw new Error(
+          'Dot: a list of points is multiplied coordinate by coordinate, and ' +
+            'a coordinate here is not a number (a string, a nested ' +
+            'collection, or a type too open to tell); the interpreter leaves ' +
+            'such a product unevaluated. Fail closed (D6).'
+        );
+      if (
+        target.mode === 'complex' ||
+        !coordinates.every(isRealNumberCoordinateType)
+      )
+        throw new Error(
+          'Dot: broadcasting complex point coordinates is not supported by this target.'
+        );
+      // Which operand is the list is decided HERE, from the static type, and
+      // passed to the helper. Read from the run-time value instead — by
+      // testing whether the first element is an array — an EMPTY point list
+      // is indistinguishable from a single point, and `Dot(P, q)` with
+      // `P = []` answered NaN where the interpreter answers `[]`.
+      const listFlags = args.map(isPointListOperandType);
+      const operand = (arg: Expression, position: number) =>
+        listFlags[position - 1]
+          ? collArg('Dot', arg, compile, position)
+          : compile(arg);
+      return (
+        `_SYS.pointdot(${operand(args[0], 1)}, ${operand(args[1], 2)}, ` +
+        `${listFlags[0]}, ${listFlags[1]})`
+      );
+    }
     // Tuple coordinates with numeric list components use the broadcast path
     // above. Other point-list spellings have no faithful component expansion;
     // passing their nested arrays to matrix multiplication changes the result.
@@ -5809,10 +5966,23 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `k` independent draws from a domain, WITH replacement. Exactly `k` draws,
   // in output order — the same order and count as the interpreter
   // (`library/core.ts`), so the frame's counter lands in the same place.
+  //
+  // A STRING domain is segmented into its characters, drawn from and
+  // re-joined: the draws are the source string's own characters, so the
+  // result is a string (the string-preservation rule, ruled 2026-09-22 —
+  // `docs/STRING_ROADMAP.md`). The domain descriptor is built here rather
+  // than by `randomDomain`, whose `collArg` funnel is shared with `Random`
+  // and refuses a string on purpose. Same shape as `RandomSample` below.
   RandomChoice: (args, compile) => {
     if (args.length !== 2)
       throw new Error(
         `RandomChoice: expected exactly two arguments. Fail closed (D6).`
+      );
+    if (args[0] !== undefined && isProvablyStringOperand(args[0]))
+      return joinIfString(
+        args[0],
+        `_SYS.randomChoice(_SYS.domainList("RandomChoice", ` +
+          `_SYS.chars(${compile(args[0])})), ${compile(args[1])})`
       );
     const domain = randomDomain('RandomChoice', args[0], compile, true);
     return `_SYS.randomChoice(${domain}, ${compile(args[1])})`;
@@ -7916,12 +8086,58 @@ function indexValue(v: unknown): number {
  *
  * The static type is no help at the emission site — a bare symbol can be bound
  * to a number OR an array at call time — so the test is on the runtime value.
+ *
+ * It also applies the family's ABSENCE rule before the reducer runs
+ * (2026-09-22): if ANY datum is absent, the answer is `absentResult()` and
+ * the reducer is never called.
+ *
+ * That is the interpreter's rule, not an approximation of it. `collectData`
+ * (`library/statistics.ts`) walks the operands, and a datum for which
+ * `isAbsentValue` holds — the symbols `Missing` and `Undefined`, or a `NaN`
+ * number — makes the whole head answer `NaN`, or the triple `(NaN, NaN, NaN)`
+ * for `Quartiles`. The reducers in `numerics/statistics.ts` are shared with
+ * the interpreter and never see an absent cell, so the compiled lane has to
+ * apply the rule at this boundary.
+ *
+ * Normalizing an absent cell to `NaN` and reducing anyway is NOT enough, and
+ * was the previous attempt: the reducers that SORT select a middle element,
+ * so a `NaN` outside that position leaves an ordinary number — with a written
+ * `Missing` at either end, `Median([Missing, 2, 3])` and `Median([1, 2,
+ * Missing])` both answered `2`. The reducers that COUNT (`mode`) and the
+ * quantile ones ignore it likewise.
+ *
+ * Three kinds of absent datum reach here. A written absence symbol lowers to
+ * the JavaScript object null `undefined` (`docs/ERROR-MODEL.md` §3); a HOLE in
+ * a sparse array the caller supplied reads `undefined` too, which is why the
+ * scan is an index loop and not `Array.prototype.some` (`some` skips holes);
+ * and a `NaN` cell is an absence marker for this family, by `isAbsentValue`.
+ * A whole operand that is absent (`Mean(Missing)` emits
+ * `_SYS.mean(undefined)`) is absent data as well, and used to throw "values is
+ * not iterable" behind `success: true`.
+ *
+ * A lazy iterable is materialized so the scan can see it. The sorting
+ * reducers already materialize; the streaming ones (the variance family) pay
+ * one buffer for the parity.
  */
 function oneDatumOk<T>(
-  reduce: (values: Iterable<number>) => T
-): (values: Iterable<number> | number) => T {
-  return (values) =>
-    typeof values === 'number' ? reduce([values]) : reduce(values);
+  reduce: (values: Iterable<number>) => T,
+  absentResult: () => T = () => Number.NaN as unknown as T
+): (values: Iterable<number> | number | undefined | null) => T {
+  return (values) => {
+    if (values === undefined || values === null) return absentResult();
+    if (typeof values === 'number')
+      return Number.isNaN(values) ? absentResult() : reduce([values]);
+    const data: ArrayLike<number> & Iterable<number> =
+      Array.isArray(values) || ArrayBuffer.isView(values)
+        ? (values as unknown as ArrayLike<number> & Iterable<number>)
+        : Array.from(values);
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i] as number | undefined | null;
+      if (v === undefined || v === null || Number.isNaN(v))
+        return absentResult();
+    }
+    return reduce(data);
+  };
 }
 
 function bcast(
@@ -8422,6 +8638,47 @@ function matmul(a: any, b: any): any {
     out.push(row);
   }
   return out;
+}
+
+/**
+ * The broadcasting inner product of `Dot`, for operands of which at least one
+ * is a LIST OF POINTS: one number per point, mirroring the interpreter's
+ * point-list broadcast.
+ *
+ * Which operand is the list is decided by the COMPILER, from the static
+ * type, and arrives as `aList`/`bList`. It cannot be read from the run-time
+ * value: a list of points and a single point are both arrays, and an EMPTY
+ * list of points has no first element to tell them apart, so sniffing the
+ * nesting read `[]` as one point and answered NaN where the interpreter
+ * answers `[]`.
+ *
+ * A point operand is lifted over the list; the flipped order answers the same
+ * list, since the inner product is symmetric on a real target. Two lists of
+ * points are paired element by element, so two empty lists answer the empty
+ * list too.
+ *
+ * A mismatch in the number of points, or in the width of a pair of points,
+ * yields NaN — the convention the whole linear-algebra runtime uses for the
+ * interpreter's `incompatible-dimensions`. So does an operand the type called
+ * a list that is not an array at run time.
+ */
+function pointdot(a: any, b: any, aList: boolean, bList: boolean): any {
+  const inner = (p: number[], q: number[]): number => {
+    if (!Array.isArray(p) || !Array.isArray(q) || p.length !== q.length)
+      return NaN;
+    let s = 0;
+    for (let i = 0; i < p.length; i++) s += p[i] * q[i];
+    return s;
+  };
+  if (aList && !Array.isArray(a)) return NaN;
+  if (bList && !Array.isArray(b)) return NaN;
+  if (aList && bList)
+    return a.length === b.length
+      ? a.map((p: number[], i: number) => inner(p, b[i]))
+      : NaN;
+  if (aList) return a.map((p: number[]) => inner(p, b));
+  if (bList) return b.map((q: number[]) => inner(a, q));
+  return inner(a, b);
 }
 
 /**
@@ -9615,6 +9872,11 @@ const SYS_HELPERS = {
   // `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
   // vector·matrix → vector, matrix·matrix → matrix.
   matmul,
+  // The broadcasting `Dot` over a LIST OF POINTS — one inner product per
+  // point. Separate from `matmul` because an array of points and an array of
+  // matrix rows are the same run-time shape but contract differently. The
+  // last two arguments say which operand the static type called a list.
+  pointdot,
   // Interpreter-faithful `Multiply` over a mix of scalars and (possibly
   // nested) real arrays whose collection-ness was not statically provable —
   // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
@@ -10145,7 +10407,16 @@ const SYS_HELPERS = {
   kurtosis: oneDatumOk(kurtosis),
   skewness: oneDatumOk(skewness),
   mode: oneDatumOk(mode),
-  quartiles: oneDatumOk(quartiles),
+  // `Quartiles` is the one reducer of the family whose answer is not a
+  // scalar, so its absent answer is not the bare `NaN` the others use: the
+  // interpreter answers the triple `(NaN, NaN, NaN)` (the `absentAnswer` its
+  // `collectData` call passes), which compiles to a three-element array. A
+  // fresh array per call — the caller may hold on to it.
+  quartiles: oneDatumOk(quartiles, (): [number, number, number] => [
+    Number.NaN,
+    Number.NaN,
+    Number.NaN,
+  ]),
   interquartileRange: oneDatumOk(interquartileRange),
   covariance,
   populationCovariance,
@@ -11492,11 +11763,22 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       collectionEqualityOperand: isCollectionEqualityOperandJS,
       // Absence capability (§3.F): numeric absence is `NaN`; the object axis is
       // `undefined`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
+      //
+      // The numeric test reads `undefined` as absent as well as `NaN`
+      // (2026-09-22). Two kinds of absent read reach it: a WRITTEN absence
+      // symbol, which lowers to the object null `undefined` so that an absent
+      // list cell stays distinct from a `NaN` cell (see the absence-symbol
+      // branch of `BaseCompiler._compileInner`), and a `vars` key the caller
+      // left out, which reads `undefined` too. `Number.isNaN(undefined)` is
+      // `false`, so the operand is coalesced to `NaN` before the test; the
+      // operand is parenthesized because `??` may not be mixed with an
+      // unparenthesized `&&`/`||` and it is spliced from arbitrary code.
       absence: {
         numeric: {
           make: () => 'Number.NaN',
-          isAbsent: (x) => `Number.isNaN(${x})`,
-          coalesce: (x, d) => `((_c) => Number.isNaN(_c) ? ${d} : _c)(${x})`,
+          isAbsent: (x) => `Number.isNaN((${x}) ?? Number.NaN)`,
+          coalesce: (x, d) =>
+            `((_c) => Number.isNaN(_c ?? Number.NaN) ? ${d} : _c)(${x})`,
         },
         object: {
           nullLiteral: 'undefined',

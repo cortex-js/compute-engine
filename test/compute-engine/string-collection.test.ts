@@ -439,6 +439,91 @@ describe('string-preserving operators', () => {
     expect(empty.string).toBe('');
   });
 
+  test('`RandomChoice` of a string is a string built from the source characters', () => {
+    // Ruled 2026-09-22: `RandomChoice` draws WITH replacement, so its result
+    // is a MULTISET over the source's own characters. The elements are still
+    // the source's own, so the string-preservation rule applies and a string
+    // source answers a string, exactly as `Take("abc", 2)` does. The call is
+    // impure, so the assertions are on the characters DRAWN, never on a
+    // particular ordering.
+    const drawn = ce.box(['RandomChoice', str('abcdef'), 5]);
+    expect(drawn.type.toString()).toBe('string');
+    const v = drawn.evaluate();
+    expect(v.type.toString()).toBe('string');
+    expect(v.string!).toHaveLength(5);
+    for (const c of v.string!) expect('abcdef').toContain(c);
+
+    // Replacement is what distinguishes it from `RandomSample`: a count
+    // larger than the source is legal and still answers a string.
+    const over = ce.box(['RandomChoice', str('ab'), 6]).evaluate();
+    expect(over.type.toString()).toBe('string');
+    expect(over.string!).toHaveLength(6);
+
+    // Drawing nothing from a string is the empty STRING, not an empty list.
+    const empty = ce.box(['RandomChoice', str('abc'), 0]).evaluate();
+    expect(empty.type.toString()).toBe('string');
+    expect(empty.string).toBe('');
+
+    // A count the engine cannot read leaves the call unevaluated, and the
+    // static type still promises a string.
+    expect(ce.box(['RandomChoice', str('abc'), 'm']).type.toString()).toBe(
+      'string'
+    );
+  });
+
+  test('a seeded `RandomChoice` over a string draws exactly as it does over its characters', () => {
+    // The string form must consume the same draws, in the same order, as the
+    // list form over `Characters(s)`: same seed, same characters, only the
+    // result KIND differs. Each `WithRandomSeed` frame replays from draw 0.
+    const fromString = ce
+      .box(['WithRandomSeed', 42, ['RandomChoice', str('abcdef'), 5]])
+      .evaluate();
+    const fromCharacters = ce
+      .box([
+        'WithRandomSeed',
+        42,
+        ['StringJoin', ['RandomChoice', ['Characters', str('abcdef')], 5]],
+      ])
+      .evaluate();
+    expect(fromString.string).toBe(fromCharacters.string);
+
+    // The same seed replays, so the value is reproducible.
+    const again = ce
+      .box(['WithRandomSeed', 42, ['RandomChoice', str('abcdef'), 5]])
+      .evaluate();
+    expect(again.string).toBe(fromString.string);
+  });
+
+  test('the single draw of a string is a CHARACTER, like the single-element accessors', () => {
+    // The family's single-draw form is `Random(xs)`, and one grapheme cluster
+    // of a string is a `character` — the same answer `First` and `At` give.
+    // `RandomChoice` always takes a count, and a counted draw is a string.
+    expect(ce.box(['Random', str('abc')]).type.toString()).toBe('character');
+    const one = ce.box(['Random', str('abc')]).evaluate();
+    expect(one.type.toString()).toBe('character');
+    expect('abc').toContain(one.string!);
+
+    const counted = ce.box(['RandomChoice', str('abc'), 1]).evaluate();
+    expect(counted.type.toString()).toBe('string');
+    expect(counted.string!).toHaveLength(1);
+  });
+
+  test('`RandomChoice` leaves its LIST and INTERVAL arms alone', () => {
+    // The string arm must not swallow the general arm: it is spelled as a
+    // bounded type variable, so an operand that is not a string keeps the
+    // list result, shaped by the literal count.
+    const fromList = ce.box(['RandomChoice', ['List', 1, 2, 3], 5]);
+    expect(fromList.type.toString()).toBe('vector<integer^5>');
+    const lv = fromList.evaluate();
+    expect(lv.operator).toBe('List');
+    expect(lv.ops).toHaveLength(5);
+    for (const x of lv.ops!) expect([1, 2, 3]).toContain(x.re);
+
+    expect(
+      ce.box(['RandomChoice', ['Interval', 0, 1], 3]).type.toString()
+    ).toBe('vector<real^3>');
+  });
+
   test('the promotions leave their LIST arms alone', () => {
     expect(ce.box(['DeleteAt', ['List', 1, 2, 3], 1]).type.toString()).toBe(
       'list<integer>'

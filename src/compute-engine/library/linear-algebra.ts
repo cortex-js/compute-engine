@@ -75,6 +75,11 @@ const MAX_SIZE_EAGER_TENSOR = 10000;
  *  same bound `Distance`'s broadcast uses. */
 const MAX_POINT_LIST_NORM = 10000;
 
+/** The most points `Dot` broadcasts over (one inner product per point). Beyond
+ *  it the operator stays symbolic rather than materialize an unbounded list —
+ *  the same bound `Norm`'s point-list broadcast uses. */
+const MAX_POINT_LIST_DOT = 10000;
+
 /**
  * Whether some component of a norm has an infinite magnitude, which makes the
  * norm `+∞` whatever the other components are — a NaN component included.
@@ -725,6 +730,155 @@ function pointListInnerProductPairs(
   }
   if (collectionCount === 0) return undefined;
   return as.map((a, i): [Expression, Expression] => [a, bs[i]]);
+}
+
+/**
+ * Is this operand a LIST of points, as opposed to a point whose own
+ * coordinates are points?
+ *
+ * A TUPLE is excluded even when its element type is a tuple, because the rest
+ * of the engine reads `((1, 2), (3, 4))` as ONE point with nested
+ * coordinates: `Norm` flattens it into a single four-component vector and
+ * `PointX` of it is the coordinate `(1, 2)`. Reading the same operand as two
+ * points here would make `Dot` disagree with both.
+ */
+function isPointListNotPointOperand(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  return !isTupleOperand(d, engine) && isPointListOperand(d, engine);
+}
+
+/**
+ * One descriptor for the POINT held in each element of a list-of-points
+ * operand — the element type of `list<tuple<…>>` — or `undefined` when that
+ * element type cannot be read.
+ *
+ * The descriptor is synthetic (it stands for a type, not for an expression),
+ * so the component readers fall back to the tuple TYPE's elements, which is
+ * the only evidence a list element offers: the elements of a list are not
+ * operands of the list expression.
+ */
+function pointListElementDescriptor(
+  d: OperandDescriptor
+): OperandDescriptor | undefined {
+  const elt = d.facts.elementType ?? collectionElementType(resolveType(d.type));
+  if (elt === undefined) return undefined;
+  return describeType(elt);
+}
+
+/**
+ * The points of a list-of-points operand, ready to be read component by
+ * component, or `undefined` when the list is not a value this operator can
+ * walk now.
+ *
+ * A valueless operand (a symbol declared `list<tuple<number, number>>` and
+ * never assigned), an unbounded one, and one longer than
+ * {@link MAX_POINT_LIST_DOT} all answer `undefined`, so the operator stays
+ * symbolic instead of materializing a list it cannot bound. An element that
+ * is not a point with accessible components answers `undefined` for the same
+ * reason.
+ *
+ * Being finite with a known count is NOT proof that the walk can supply the
+ * elements. A symbol declared `list<tuple<number, number>^2>` and never
+ * assigned has count 2 and an iterator that yields nothing, and `Take(P, 2)`
+ * of it inherits both — so a walk that yields no element is not evidence of
+ * an EMPTY list, and `Dot(Take(P, 2), (1, 2))` answered `[]` where it must
+ * stay symbolic. The enumerability facet is asked first, for the operands
+ * that decide it, and the walk is counted against `count` afterwards, so a
+ * SHORT walk stays symbolic too. (The same rule as `collectData`'s
+ * `enumerationDeclinedAfterWalk`, `library/collections.ts`.)
+ */
+function pointListPoints(x: Expression): ReadonlyArray<Expression> | undefined {
+  if (x.isFiniteCollection !== true) return undefined;
+  const count = x.count;
+  if (count === undefined || count > MAX_POINT_LIST_DOT) return undefined;
+  if (x.isEnumerableCollection === false) return undefined;
+  const points: Expression[] = [];
+  for (const pt of x.each()) {
+    if (pointComponents(pt) === undefined) return undefined;
+    points.push(pt);
+  }
+  if (points.length !== count) return undefined;
+  return points;
+}
+
+/**
+ * The inner product of a LIST OF POINTS against a point, or against another
+ * list of points — one number per point — or `undefined` when this is not
+ * that product.
+ *
+ * `Dot` broadcasts over a list of points (user ruling of 2026-09-22). This is
+ * the `PointList` spelling of the product the tuple spelling already answers:
+ * `PointList(1, L)` with `L` a list of numbers is a LIST of points, where
+ * `(1, L)` is one point whose coordinates broadcast, and the two spellings
+ * must agree. A point operand is lifted over the list, as a scalar is lifted
+ * over a collection; two lists of points pair element by element, and a
+ * length mismatch is `incompatible-dimensions` (the lifted-operator rule of
+ * `docs/BROADCAST-MODEL.md`), as is a pair of points of different widths.
+ *
+ * Every component must be a number literal, the strictness
+ * {@link pointListInnerProductPairs} uses: a point with a symbolic component
+ * leaves the whole operator symbolic, exactly as `Dot((x, 2), (3, 4))`
+ * already does, rather than build a list of sums that cannot reduce.
+ */
+function pointListDotProduct(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (ops.length !== 2) return undefined;
+  // A TUPLE is a point, even when its coordinates are themselves points
+  // ({@link isPointListNotPointOperand} says why), so only a non-tuple
+  // collection of points is a list here.
+  const isList = ops.map((op) => !isTuple(op) && isPointListValue(op));
+  if (!isList[0] && !isList[1]) return undefined;
+
+  // Each side is read as either a list of points or a single point. A side
+  // that is neither — a vector, a matrix, a symbolic point — leaves the
+  // product to the routes below.
+  const sides: Array<ReadonlyArray<Expression> | undefined> = [];
+  for (let i = 0; i < 2; i++) {
+    if (isList[i]) {
+      const points = pointListPoints(ops[i]);
+      if (points === undefined) return undefined;
+      sides.push(points);
+    } else {
+      if (pointComponents(ops[i]) === undefined) return undefined;
+      sides.push(undefined);
+    }
+  }
+
+  const counts = sides.map((s) => s?.length);
+  if (
+    counts[0] !== undefined &&
+    counts[1] !== undefined &&
+    counts[0] !== counts[1]
+  )
+    return ce.error('incompatible-dimensions', `${counts[0]} vs ${counts[1]}`);
+  const n = counts[0] ?? counts[1]!;
+
+  const results: Expression[] = [];
+  for (let i = 0; i < n; i++) {
+    const as = pointComponents(sides[0]?.[i] ?? ops[0]);
+    const bs = pointComponents(sides[1]?.[i] ?? ops[1]);
+    if (as === undefined || bs === undefined) return undefined;
+    if (as.length !== bs.length)
+      return ce.error(
+        'incompatible-dimensions',
+        `${as.length} vs ${bs.length}`
+      );
+    if (![...as, ...bs].every((c) => isNumber(c))) return undefined;
+    results.push(
+      ce
+        .function(
+          'Add',
+          as.map((a, k) => ce.function('Multiply', [a, bs[k]]))
+        )
+        .evaluate({ numericApproximation })
+    );
+  }
+  return ce.function('List', results);
 }
 
 /**
@@ -1773,7 +1927,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // product and is rejected at canonicalization (Tycho item 158). The
       // type language has no variadic tuple, so the bare `tuple` param does
       // the admission (the `Norm` pattern) and the handlers narrow.
-      signature: '(matrix|vector|tuple, matrix|vector|tuple) -> value',
+      //
+      // `list<tuple>` — a LIST OF POINTS — is admitted for the same reason:
+      // `Dot` broadcasts over it, one inner product per point (user ruling of
+      // 2026-09-22). A list of points whose coordinates are not numbers is
+      // admitted at boxing by that param and then kept at the wide `value` by
+      // the handlers, which is what `tuple` already does for a point with a
+      // non-numeric component.
+      signature:
+        '(matrix|vector|tuple|list<tuple>, matrix|vector|tuple|list<tuple>) -> value',
       // The result is a collection only for matrix-ish and point-list
       // operands, and the static type stays the wide `value` for a matrix
       // product — which the facet's type fallthrough misread as a definite
@@ -1816,7 +1978,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       //    and `broadcastableInnerProductType` derives the claim under that
       //    clamp.
       //
-      // 3. Everything else keeps the wide `value`: a matrix product, a vector
+      // 3. A LIST OF POINTS against a point, or against another list of
+      //    points. The inner product broadcasts over the list — one number
+      //    per point — so the result is `list<T>`, where `T` is the inner
+      //    product of one element point against the other operand. This is
+      //    the `PointList` spelling of tier 2: `PointList(1, L)` is a list of
+      //    points where `(1, L)` is one point with broadcasting coordinates,
+      //    and the two spellings answer the same list (user ruling of
+      //    2026-09-22). Both element points must be provably numeric, so a
+      //    list of string pairs keeps the wide `value`.
+      //
+      // 4. Everything else keeps the wide `value`: a matrix product, a vector
       //    paired with a broadcastable tuple, two tuples of different
       //    lengths, and above all a tuple with a component the engine cannot
       //    prove numeric. An undeclared symbol could be a string or a nested
@@ -1840,6 +2012,33 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (t !== undefined)
             return BoxedType.forResult(t, engine._typeResolver);
         }
+        // A list of points against a point, or against another list of
+        // points. Each side contributes ONE point to the element product:
+        // the element type of a point list, and the operand itself
+        // otherwise. A mismatch in the number of points or in the width of
+        // the points is `incompatible-dimensions`, which the evaluate
+        // handler reports; the claim here stays `list<…>` either way.
+        const listOfPoints = [a, b].map((d) =>
+          isPointListNotPointOperand(d, engine)
+        );
+        if (listOfPoints[0] || listOfPoints[1]) {
+          const points = [a, b].map((d, i) =>
+            listOfPoints[i] ? pointListElementDescriptor(d) : d
+          );
+          if (
+            points.every(
+              (d) => d !== undefined && isNumericTupleOperand(d)
+            )
+          )
+            return BoxedType.forResult(
+              {
+                kind: 'list',
+                elements:
+                  innerProductType(points[0]!, points[1]!, derive) ?? 'number',
+              },
+              engine._typeResolver
+            );
+        }
         return BoxedType.forResult('value', engine._typeResolver);
       },
       // `Dot` is Mathematica's `.`: it reduces to the inner product for two
@@ -1858,6 +2057,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               pairs.map(([x, y]) => ce.function('Multiply', [x, y]))
             )
             .evaluate({ numericApproximation });
+
+        // A LIST OF POINTS — `PointList(1, L)` with `L` a list, or a literal
+        // `[(1, 2), (3, 4)]` — broadcasts: one inner product per point. A
+        // list of points is not a tensor, so `MatrixMultiply` below would
+        // either refuse it or read it as a matrix, whose product against a
+        // point is a different answer in the `Dot(q, P)` and `Dot(P, Q)`
+        // orders.
+        const broadcast = pointListDotProduct(ce, ops, numericApproximation);
+        if (broadcast !== undefined) return broadcast;
+        // A point list the broadcast could not walk — a valueless operand, a
+        // lazy one, or one whose coordinates are not numbers — stays
+        // symbolic. `MatrixMultiply` below reads a nested collection as a
+        // matrix, and a list of points is not one, so it would answer
+        // `incompatible-type` on an application that is merely undecided.
+        if (ops.some((op) => !isTuple(op) && isPointListValue(op)))
+          return undefined;
 
         // Lower each fixed numeric tuple operand to its component vector;
         // `MatrixMultiply` does not accept tuples (and supplies the

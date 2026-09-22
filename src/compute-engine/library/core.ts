@@ -75,6 +75,7 @@ import {
   objectLayoutOwnsField,
   objectFieldStore,
   literalRange,
+  joinCharacters,
   range,
   rangeLast,
 } from './collections.js';
@@ -206,7 +207,11 @@ import {
   shallowApplicationEffects,
 } from '../boxed-expression/effects-of.js';
 import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
-import { canEnumerateOperand, isTupleShapedType } from '../collection-utils.js';
+import {
+  canEnumerateOperand,
+  isEnumerableSource,
+  isTupleShapedType,
+} from '../collection-utils.js';
 import { numericDerivativeOfApply } from './calculus.js';
 import {
   isNumber,
@@ -1621,11 +1626,19 @@ function randomElementType(domain: OperandDescriptor): Type {
  *
  * The element type is the SAME as `Random` gives a single draw
  * (`randomElementType`) — a `RandomChoice` cell is a `Random` draw, so
- * `RandomChoice(Interval(0,1), 3)` is `list<real^3>`. */
+ * `RandomChoice(Interval(0,1), 3)` is `list<real^3>`.
+ *
+ * A STRING domain answers `string` instead (ruled 2026-09-22): the draws come
+ * from the string's own characters, so the result is a string, exactly as
+ * `Take("abc", 2)` is (`docs/STRING_ROADMAP.md`, "String preservation rule").
+ * The string result carries NO length dimension, even for a literal count:
+ * rejoining the drawn grapheme clusters can compose or split clusters, so the
+ * character count of the result is not always `k`. */
 function randomListType(
   domain: OperandDescriptor | undefined,
   kOp: OperandDescriptor | undefined
 ): Type {
+  if (domain !== undefined && isSubtype(domain.type, 'string')) return 'string';
   // Built STRUCTURALLY, not by serializing the element type into a `list<…>`
   // string and reparsing it: the element type may name a user-declared type,
   // which a resolver-less `parseType()` cannot read back.
@@ -2856,9 +2869,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     IsMissing: {
       description:
-        'True if the value is ABSENT — the `Missing` symbol, or a `NaN` ' +
-        'number (regardless of provenance). R’s `is.na` (`TRUE` for both `NA` ' +
-        'and `NaN`). There is no NaN-specific test operator (R’s `is.nan`).',
+        'True if the value is ABSENT — the `Missing` or `Undefined` symbol, ' +
+        'or a `NaN` number (regardless of provenance). R’s `is.na` (`TRUE` ' +
+        'for both `NA` and `NaN`). There is no NaN-specific test operator ' +
+        '(R’s `is.nan`).',
       complexity: 500,
       signature: '(any) -> boolean',
       evaluate: ([x], { engine: ce }) =>
@@ -2867,9 +2881,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Coalesce: {
       description:
-        'Return the first operand that is not ABSENT (`Missing` or `NaN`), ' +
-        'evaluated left-to-right. If every operand is absent, the last ' +
-        'operand’s value is returned verbatim (still absent).',
+        'Return the first operand that is not ABSENT (`Missing`, ' +
+        '`Undefined` or `NaN`), evaluated left-to-right. If every operand ' +
+        'is absent, the last operand’s value is returned verbatim (still ' +
+        'absent).',
       complexity: 500,
       // Lazy so operands are evaluated on demand (short-circuit) rather than
       // all up front. Per the documented lazy-operator trap, a lazy operator
@@ -2913,7 +2928,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         for (let i = 0; i < ops.length; i++) {
           const v = ops[i].evaluate({ numericApproximation });
           last = v;
-          // Skip an absent operand (`Missing` or `NaN`).
+          // Skip an absent operand (`Missing`, `Undefined` or `NaN`).
           if (isAbsentValue(v)) continue;
           // An operand whose absence cannot be decided (it still carries free
           // variables) leaves the expression partially unevaluated from here
@@ -6532,12 +6547,31 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: [
         'RandomChoice(domain, k): a list of k independent draws from ' +
           '`domain`, with replacement. `k` may exceed the size of the ' +
-          'domain — that is what replacement means.',
+          'domain — that is what replacement means. Choosing from a string ' +
+          'yields a string.',
       ],
       // `k` is typed `number`, not `integer`: a caller who computes a count
       // (`Count(xs)/2`, a fitted value, `4N` for a slider `N`) should not have
       // to round it first. It is rounded on evaluation.
-      signature: '(collection<any> | set<real>, number) random -> list<any>',
+      //
+      // The LEADING arm is the string-preservation rule (ruled 2026-09-22):
+      // every draw is one of the source string's own characters, so the
+      // result is a string, exactly as `Take("abc", 2)` is
+      // (`docs/STRING_ROADMAP.md`, "String preservation rule"). Replacement
+      // makes the result a MULTISET over those characters rather than a
+      // subset, which changes nothing here: the elements are still the
+      // source's own. Re-segmentation caveat: rejoining the drawn characters
+      // can merge or split grapheme clusters, so the result may hold a
+      // different number of characters than `k`.
+      //
+      // Spelled as a BOUNDED type variable (`T where T: string`), never the
+      // ground type `string`: an `unknown`- or `any`-typed operand refutes no
+      // arm, so a ground `string` parameter would win most-specific-wins on
+      // every untyped operand and claim `string` for a call that usually
+      // returns a list. A bounded variable with no call-site binding does not.
+      // Same spelling as `RandomSample` (`library/statistics.ts`).
+      signature:
+        '((T, number) random -> T where T: string) & ((collection<any> | set<real>, number) random -> list<any>)',
       type: ([domain, k], context) =>
         BoxedType.forResult(
           randomListType(domain, k),
@@ -6559,7 +6593,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const k = randomCount(ce, kOp);
         if (k === null) return undefined;
         if (typeof k !== 'number') return k;
-        if (k === 0) return ce.function('List', []);
+        // The string arm, here and at the return below: the draws are the
+        // source string's own characters, so the result is a string (ruled
+        // 2026-09-22; `docs/STRING_ROADMAP.md`, "String preservation rule").
+        // `RandomChoice` is eager and has no lazy collection handlers, so the
+        // join happens here rather than in
+        // `evaluateStringPreservingCollection`. Drawing nothing from a string
+        // is the EMPTY STRING, not an empty list.
+        if (k === 0)
+          return isString(domain) ? ce.string('') : ce.function('List', []);
 
         // EXACTLY `k` draws, in output order — and zero if the selection bails
         // after drawing (a lazy view that shrank makes `at()` return
@@ -6582,6 +6624,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             if (x === undefined) return undefined;
             elements.push(x);
           }
+          // A string source is an INDEXED collection, so it reaches this arm
+          // and never the `sequential` one above. Its drawn characters are
+          // rejoined into a string (see the `k === 0` comment).
+          if (isString(domain)) return joinCharacters(ce, elements);
           return ce.function('List', elements);
         });
       },
@@ -7638,11 +7684,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     // Converts arguments interpreted in a specified format to a string.
     StringFrom: {
       description:
-        'Create a string by converting its arguments to a string and joining them.',
+        'StringFrom(value, format?): create a string from `value`. With no ' +
+        'format, a number or a list of numbers is read as Unicode scalar ' +
+        'values (`StringFrom(65)` is `"A"`), and any other value is printed ' +
+        '(`StringFrom(True)` is `"True"`). The formats are `"default"` ' +
+        '(print the value), `"unicode-scalars"`, `"utf-8"` and `"utf-16"`.',
       signature: '(any, format:string?) -> string',
       evaluate: ([value, format], { engine }) => {
         if (value === undefined) return engine.string('');
-        const fmt = (isString(format) ? format.string : undefined) ?? 'default';
+        let fmt = (isString(format) ? format.string : undefined) ?? 'default';
+
+        // When the caller gives NO format operand, a number or a list of
+        // numbers is read as Unicode scalar values instead of being printed:
+        // `StringFrom(65)` is `"A"` and `StringFrom([127467, 127479])` is the
+        // flag of France. Every other value — a string, a boolean, a symbol,
+        // an expression, a type value — keeps the printed form. An explicit
+        // format, `"default"` included, is not affected, so
+        // `StringFrom(128287, "default")` is still `"128287"`. A format
+        // operand that is not a string also keeps the printed form.
+        // (User decision of 2026-09-22.)
+        if (format === undefined && isUnicodeScalarSource(value))
+          fmt = 'unicode-scalars';
 
         if (fmt === 'default') {
           // A TYPE VALUE converts to its canonical text — the inverse of
@@ -8237,4 +8299,52 @@ function capabilityDenied(
   capability: keyof EffectHandlers
 ): Expression {
   return ce.error(['capability-denied', capability]);
+}
+
+/**
+ * True when `StringFrom` with NO format operand reads `expr` as Unicode
+ * scalar values (code points) instead of printing it: a number, or a finite
+ * list whose elements are all numbers. (User decision of 2026-09-22.)
+ *
+ * The collection test is on the LIST shape, not on `isIndexedCollection`: a
+ * tuple carries the coordinates of a point in this engine, so a tuple of two
+ * numbers must keep printing as `(65, 66)` and must not silently turn into
+ * `"AB"`. A list with no finite count is refused as well, because the decode
+ * reads every element.
+ *
+ * A list whose elements cannot be REACHED yet is refused too, and for the
+ * same reason the materializer refuses one: a walk over a source that has no
+ * elements available yields nothing, which is indistinguishable from a walk
+ * over an empty list. `Take(xs, 2)` for a declared but unassigned `xs` is a
+ * finite list by its type, so without the enumerability test
+ * `StringFrom(Take(xs, 2))` answered the EMPTY STRING and lost the
+ * unresolved expression. The walk is checked against the known element count
+ * for the same reason: a walk that ends early did not supply the elements
+ * either.
+ *
+ * Only a number that CAN be a code point takes the implicit default: a
+ * finite integer that is not negative. `NaN`, an infinity, a non-integer and
+ * a complex number are not code points, so with no format they keep the
+ * printed form (`"NaN"`, `"1.5"`, `"(1 + 2i)"`). An integer above U+10FFFF
+ * or a surrogate is handed to the `"unicode-scalars"` code all the same, so
+ * the implicit default and the explicit format answer the same thing for it.
+ */
+function isUnicodeScalarSource(expr: Expression): boolean {
+  if (isNumber(expr)) return isCodePointCandidate(expr);
+  if (!expr.type.matches('list<any>')) return false;
+  if (expr.isFiniteCollection !== true) return false;
+  if (!isEnumerableSource(expr)) return false;
+  let n = 0;
+  for (const x of expr.each()) {
+    if (!isNumber(x) || !isCodePointCandidate(x)) return false;
+    n += 1;
+  }
+  const count = expr.count;
+  if (count !== undefined && n < count) return false;
+  return true;
+}
+
+/** A finite, non-negative integer: the only number that can be a code point. */
+function isCodePointCandidate(x: Expression): boolean {
+  return x.isInteger === true && x.isFinite === true && x.re >= 0;
 }

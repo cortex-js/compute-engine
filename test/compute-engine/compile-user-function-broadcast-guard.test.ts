@@ -273,19 +273,20 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     });
     // The consumer of a function value may hand the callee a nested element,
     // so the value reference is shape-aware. `complex` is a DECLARED scalar
-    // parameter, and the interpreter refuses such a callback over a nested
-    // element (`Map(Q, [[1, 2], [3, 4]])` answers an incompatible-type
-    // error), so the reference takes the GUARDING form `$s`, which projects
-    // an array to NaN. It wraps the coercing shim, so a scalar element still
-    // reaches the body coerced.
-    expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$s)');
+    // parameter, and since the user ruling of 2026-09-22 the interpreter
+    // BROADCASTS such a callback over a nested element (`Map(Q, [[1, 2],
+    // [3, 4]])` maps `Q` over each row), so the reference takes the
+    // broadcasting form `$b`. It wraps the coercing shim, so a scalar element
+    // still reaches the body coerced.
+    expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$b)');
     // The shim temporaries are numbered after the two the complex product in
     // `Q`'s own body takes (`2x` binds each factor to a hygienic temporary).
     expect(r?.preamble).toContain(
       'const _fn_Q$v = (_tv3) => _fn_Q(_SYS.cplx(_tv3));'
     );
     expect(r?.preamble).toContain(
-      'const _fn_Q$s = (_tv4) => Array.isArray(_tv4) ? NaN : _fn_Q$v(_tv4);'
+      'const _fn_Q$b = (_tv4) => Array.isArray(_tv4) ? ' +
+        '_SYS.bcastFn(_fn_Q$v, _tv4) : _fn_Q$v(_tv4);'
     );
     expect(r?.run?.({})).toEqual([2, 4, 6]);
     expect(

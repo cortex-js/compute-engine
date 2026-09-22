@@ -1392,7 +1392,12 @@ Rejected, with `protocol-conformance-target-invalid`:
 - `type alias` names — aliases are structural and transparent. The
   diagnostic steers: "Use a nominal type (`type Pt`) to conform to protocol
   `Comparable`. Structural types (`type alias`) cannot conform to
-  protocols."
+  protocols." One exception (decided 2026-09-22): the name of a SUM type
+  (`type shape = circle | square`) is accepted, and `type shape is Area { … }`
+  desugars to one conformance edge per variant with `Self` bound to the
+  variant; a variant the sum gains in a later program receives the block
+  too, and a variant that already conforms on its own is reported as the
+  duplicate it is (`src/epsil/docs/protocols.md`, "Conforming a sum type").
 
 To declare a conformance, the type has to be known:
 

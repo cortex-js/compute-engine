@@ -468,7 +468,13 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
     const t = jsTarget.createTarget();
     expect(typeof t.absence.numeric.make).toBe('function');
     expect(t.absence.numeric.make()).toBe('Number.NaN');
-    expect(t.absence.numeric.isAbsent('v')).toBe('Number.isNaN(v)');
+    // The numeric test reads `undefined` as absent as well as `NaN`
+    // (2026-09-22): a written absence symbol lowers to the object null, and an
+    // unsupplied `vars` key reads `undefined` too, so the operand is coalesced
+    // to `NaN` before the test.
+    expect(t.absence.numeric.isAbsent('v')).toBe(
+      'Number.isNaN((v) ?? Number.NaN)'
+    );
     expect(t.absence.object.nullLiteral).toBe('undefined');
   });
 

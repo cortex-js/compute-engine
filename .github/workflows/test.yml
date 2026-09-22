@@ -105,6 +105,16 @@ jobs:
       - name: MathNet parser corpus regression gate
         run: npx --yes tsx docs/mathnet/scripts/check-corpus.ts
 
+      # Serialize->parse round-trip gate over the same corpus: every case that
+      # parses clean must re-parse from its own serialization to the same
+      # expression (`ce.parse(t.latex).isSame(t)`). Known failures live in
+      # docs/mathnet/roundtrip-exceptions.json; the script exits 1 on a failure
+      # that is not listed there and on a listed failure whose detail changed,
+      # so a serializer regression cannot land silently. Refresh the list with
+      # `npm run check:roundtrip -- --update` after reviewing the change.
+      - name: MathNet serialize/parse round-trip gate
+        run: npx --yes tsx docs/mathnet/scripts/check-roundtrip.ts
+
   lint:
     runs-on: ubuntu-latest
 

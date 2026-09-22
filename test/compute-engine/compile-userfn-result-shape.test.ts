@@ -527,38 +527,43 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
     ).toBe('[[2,4],[6,8]]');
   });
 
-  test('a DECLARED scalar parameter refuses a row instead of broadcasting', () => {
+  test('a DECLARED scalar parameter broadcasts over a row as well', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(['Function', ['Multiply', 2, 't'], 't'] as any));
     ce.declare('f', '(number) -> number');
     ce.assign('f', ce.box(['Function', ['g', 'x'], 'x'] as any));
 
-    // A row is not a number, so the interpreter puts an incompatible-type
-    // error in the callback's place rather than mapping `f` over the row.
+    // A callback whose parameters are all scalar is applied element-wise to a
+    // collection element, whether its parameter is DECLARED `number` or left
+    // open (user ruling of 2026-09-22).
     expect(
       ce
         .box(['Map', 'f', ['List', ['List', 1, 2], ['List', 3, 4]]])
         .evaluate()
         .toString()
-    ).toContain('incompatible-type');
-    // That error is in the expression, which makes it invalid, so a source
-    // whose elements are provably rows fails closed and the interpreter —
-    // which reports the error — evaluates it.
-    const declined = build(ce, [
+    ).toBe('[[2,4],[6,8]]');
+    // Nothing puts an error in the callback's place any more, so a source
+    // whose elements are provably rows compiles and answers the same values.
+    const literalSource = build(ce, [
       'Map',
       'f',
       ['List', ['List', 1, 2], ['List', 3, 4]],
     ]);
-    expect(declined.success).toBe(false);
+    expect(literalSource.success).toBe(true);
+    expect(literalSource.run({})).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
 
-    // A caller-supplied source has no static element shape, so the refusal is
-    // spelled at run time: an element that is an array projects to NaN, the
-    // compiled spelling of an error value, and a scalar element is unchanged.
+    // A caller-supplied source has no static element shape, so the broadcast
+    // is spelled at run time: the value reference tests each element and takes
+    // `_SYS.bcastFn` for one that is an array.
     ce.declare('xs', 'list');
     const r = build(ce, ['Map', 'f', 'xs']);
-    expect(r.code).toContain('_fn_f$s');
+    expect(r.code).toContain('_fn_f$b');
     expect(r.preamble).toContain(
-      'const _fn_f$s = (_tv1) => Array.isArray(_tv1) ? NaN : _fn_f(_tv1);'
+      'const _fn_f$b = (_tv1) => Array.isArray(_tv1) ? ' +
+        '_SYS.bcastFn(_fn_f, _tv1) : _fn_f(_tv1);'
     );
     expect(
       r.run({
@@ -567,11 +572,14 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
           [3, 4],
         ],
       })
-    ).toEqual([NaN, NaN]);
+    ).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
     expect(r.run({ xs: [1, 2] })).toEqual([2, 4]);
 
-    // Applying such a function DIRECTLY still broadcasts, which is the
-    // interpreter's own asymmetry between an application and a callback.
+    // The DIRECT application answers the same, which is the behavior the
+    // callback position was made to match.
     expect(
       ce
         .box(['f', ['List', ['List', 1, 2], ['List', 3, 4]]])

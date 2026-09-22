@@ -547,7 +547,20 @@ export function refutingFact(
     }
     if (subject === undefined || subject.def.disposed) continue;
 
-    const substituted = fact.subs({ [subject.symbol]: value });
+    // A restriction (`7 {a > 0}`) holds its value operand when the condition
+    // is true and the absence marker when it is false. A fact is a claim
+    // about the value the symbol HOLDS, so it is asked of that operand.
+    // Substituting the whole restriction left the condition's own unknowns in
+    // the result, which the undecided test below then skipped: `assume(x = 5)`
+    // accepted `x := 7 {a > 0}` while it refused the identical ungated `7`.
+    // Stacked restrictions canonicalize into one `When`, but a value that was
+    // not canonicalized can still nest, so walk to the innermost operand.
+    // (2026-09-22)
+    let candidate = value;
+    while (isFunction(candidate, 'When') && candidate.ops.length === 2)
+      candidate = candidate.op1;
+
+    const substituted = fact.subs({ [subject.symbol]: candidate });
     if (substituted.unknowns.length !== 0) continue;
     // An equality is decided ARITHMETICALLY rather than by evaluation, so that
     // `x = 1` and a candidate `2/2` agree.

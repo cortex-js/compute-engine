@@ -265,6 +265,16 @@ list:
   waits for Phase 2, because it is not just an arm but a role change —
   it becomes THE variadic string concatenation (see "`Join` vs.
   `StringJoin`" in the Operations Review).
+- **Drawing WITH replacement is element-preserving too (ruled 2026-09-22).**
+  `RandomChoice(domain, k)` draws `k` times with replacement, so its result
+  is a MULTISET over the source's elements rather than a subset. The
+  elements are still the source's own, which is what the rule asks, so a
+  string source answers a string: `RandomChoice("abc", 5)` is a
+  five-character string, exactly as `Take("abc", 2)` is `"ab"`. The count
+  carries no static length promise, because rejoining the drawn clusters
+  can merge or split them (constraint 3). The family's SINGLE-draw form is
+  `Random(xs)`, and it answers a `character` for a string source — the same
+  answer the single-element accessors `First` and `At` give.
 - **Element-TRANSFORMING higher-order operators — permanently list-out.**
   `Map`, `FlatMap`, `Scan`, `Zip` return `list` for string input, always —
   even for a character→character callback. There is no type-level rule for
@@ -523,7 +533,7 @@ String-specific operators today:
 | Construction / concatenation | `String` (coercing interpolation join), `StringJoin` (strict: non-string operand stays symbolic), `Text` (like `String`, but unwraps `Annotated` — the LaTeX text-mode carrier) |
 | Splitting | `StringSplit(s, sep?)` (no `sep`: split on Unicode White_Space runs, dropping empties; with `sep`: JS `split` semantics, empties kept; `sep = ""`: split into grapheme clusters) |
 | Views | `Characters`/`GraphemeClusters`, `UnicodeScalars`, `Utf16`, `Utf8` |
-| Numeric ↔ string | `IntegerString(n, base?)`, `DigitsFrom(s, base?)`, `BaseForm`, `StringFrom(x, format?)` (from `utf-8`/`utf-16`/`unicode-scalars` integer collections) |
+| Numeric ↔ string | `IntegerString(n, base?)`, `DigitsFrom(s, base?)`, `BaseForm`, `StringFrom(x, format?)` (from `utf-8`/`utf-16`/`unicode-scalars` integer collections; with no `format`, a number or a list of numbers is read as Unicode scalars and any other argument is printed) |
 | LaTeX | `LatexString`, `Latex`, `Parse` |
 
 Two defects found during this review were FIXED 2026-08-14 (user ruling:
@@ -1158,6 +1168,18 @@ count is bounded by the subject length).
      `string` for a string source. Still awaiting a ruling (ROADMAP): inner
      strings for `Chunk`/`Partition`/`ChunkBy`/`SlidingWindow`/
      `Permutations`/`Combinations`; `Tally`'s values half.
+   - **`RandomChoice` promoted 2026-09-22**, on the user ruling that drawing
+     with replacement is element-preserving (see the preservation rule
+     above). `RandomChoice(s, k)` answers a `string` built from the drawn
+     characters, `RandomChoice(s, 0)` is `""`, and a list source is
+     unchanged. Under one seed the string form draws exactly what the list
+     form over `Characters(s)` draws, in the same order, so
+     `RandomChoice("abc", 5)` equals
+     `StringJoin(RandomChoice(Characters("abc"), 5))`. The JavaScript target
+     segments, draws and re-joins, matching the interpreter value for value
+     and draw for draw; GLSL/WGSL throw (no indexing) and Python fails
+     closed, both unchanged. `Random(s)` — the single-draw form — keeps
+     answering a `character`.
    - Two Phase-1-induced regressions surfaced and were fixed by their
      owners in the same round: the Epsil pipe stage `xs |> Fold(Join,
      header)` placed the piped value in the wrong slot once a string fit a

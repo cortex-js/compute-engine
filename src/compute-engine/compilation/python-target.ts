@@ -41,7 +41,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
-import { isPointListValue } from '../collection-utils.js';
+import { isPointListValue, isTuple } from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
@@ -2624,7 +2624,26 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Linear algebra
-  Dot: 'np.dot',
+  // A LIST of points is one inner product PER POINT in the interpreter (user
+  // ruling of 2026-09-22). `np.dot` spells that contraction for a list of
+  // points on the LEFT only: `np.dot(q, P)` is the row-vector product and
+  // `np.dot(P, Q)` is the matrix product, both of which answer something
+  // else. Fail closed rather than emit a wrong answer behind `success: true`,
+  // as the `Norm` handler below does for the same shape.
+  Dot: (args, compile) => {
+    if (args[0] == null || args[1] == null)
+      throw new Error('Dot: missing argument');
+    // A TUPLE is a point even when its coordinates are points — the
+    // interpreter flattens `((1, 2), (3, 4))` into one four-component vector
+    // — so only a non-tuple collection of points is a list here.
+    if (args.some((a) => !isTuple(a) && isPointListValue(a)))
+      throw new Error(
+        'Dot: a list of points has no single numpy spelling — `np.dot` ' +
+          'contracts it as a matrix, but the interpreter answers one inner ' +
+          'product per point. Fail closed (D6).'
+      );
+    return `np.dot(${compile(args[0])}, ${compile(args[1])})`;
+  },
   Cross: 'np.cross',
   // A STRING norm type (`Norm(v, "Infinity")`, `Norm(m, "Frobenius")`) is
   // spelled differently by numpy — `np.linalg.norm(v, "Infinity")` is a
@@ -3650,18 +3669,30 @@ export class PythonTarget implements LanguageTarget<Expression> {
       preamble: '',
       // Absence capability (§3.F): numeric absence is `math.nan`; the object
       // axis is `None`. Consumed by `IsMissing`/`Coalesce`/Kleene `Equal` (P3).
+      //
+      // The numeric test reads `None` as absent as well as `math.nan`
+      // (2026-09-22). A WRITTEN absence symbol (`Missing`, `Undefined`) lowers
+      // to the object null `None` — see the absence-symbol branch of
+      // `BaseCompiler._compileInner` — and `math.isnan(None)` raises a
+      // `TypeError`, so the `is None` test comes first and short-circuits. The
+      // operand is bound to a lambda parameter so it is evaluated once.
       absence: {
         numeric: {
           make: () => 'math.nan',
-          isAbsent: (x) => `math.isnan(${x})`,
+          isAbsent: (x) => `(lambda _c: _c is None or math.isnan(_c))(${x})`,
           coalesce: (x, d) =>
-            `(lambda _c: ${d} if math.isnan(_c) else _c)(${x})`,
+            `(lambda _c: ${d} if (_c is None or math.isnan(_c)) else _c)(${x})`,
         },
         object: {
           nullLiteral: 'None',
           isAbsent: (x) => `(${x} is None)`,
           coalesce: (x, d) => `(${d} if ${x} is None else ${x})`,
         },
+        // A written `Missing` is `math.nan` here, not `None`: numpy raises
+        // on `None` (`np.cos(None)`, `np.median([1, None, 3])`) where the
+        // interpreter answers `NaN`, and the collection-equality helper of
+        // this target is a strict boolean either way (decided 2026-09-22).
+        writtenSymbol: 'numeric',
       },
       // A Python Block is a bare statement sequence (like GLSL/WGSL), never a
       // JS IIFE. Fail closed (D6) if such a block is spliced as a sub-operand.

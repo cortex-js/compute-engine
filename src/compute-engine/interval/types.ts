@@ -49,12 +49,17 @@ export interface Interval {
  *   keeps naming the operand of the kernel that found the jump, never an
  *   operand of the outer operation.
  *   When jumps from different operands combine (`floor(x) + atan2(y, x)`),
- *   the propagated `at` is the smallest of the operands' `at` values
- *   compared as plain numbers (`earliestJump`, `util.ts`); it locates the
- *   break only when every contributing jump is in the same coordinate. The
- *   result names no axis of the EXPRESSION, so a consumer that subdivides
- *   along `at` must know from the expression which variable each kernel's
- *   operand is.
+ *   the propagated location is the one with the smallest `at`, compared as
+ *   plain numbers, with the `atOperand` and the `continuity` of that jump
+ *   (`earliestJump`, `util.ts`). It locates ONE break: a jump that is later,
+ *   in that coordinate or in another one, is not reported. When two jumps
+ *   claim the same smallest `at` in DIFFERENT coordinates — the jump of
+ *   `floor(y)` at `y = 0` and the jump of `atan2(y, x)` at `x = 0` are both
+ *   the number `0` — the result carries no location at all, because the
+ *   number alone does not say which coordinate it is a value in. A location
+ *   names no axis of the EXPRESSION, so a consumer that subdivides along
+ *   `at` must know from the expression which variable each kernel's operand
+ *   is.
  *   Every operation propagates a jump: `floor(x) - 3` over `[0.5, 1.5]` is
  *   `singular` with `value: [-3, -2]`, still carrying floor's `at`.
  * - `partial`: Valid interval with domain clipping info

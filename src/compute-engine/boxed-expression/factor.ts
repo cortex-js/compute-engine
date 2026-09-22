@@ -15,6 +15,8 @@ import {
 } from './polynomials.js';
 import { asSmallInteger } from './numerics.js';
 import { expand } from './expand.js';
+import { hasVolatileDigest } from './utils.js';
+import { cycleDetectionCount } from './cycle-guard.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -764,12 +766,139 @@ function extractMonomialContent(
 }
 
 /**
+ * One memoized `factor()` answer.
+ *
+ * `input` is kept so that a lookup which lands on a digest can confirm the
+ * expression is really the one that was factored: two symbols of the same
+ * name digest alike whatever they are bound to (that is the documented
+ * `digest` contract), while `isSame()` compares the binding. A shadowed name
+ * — the index of a `Sum` and an outer symbol of the same name, both live at
+ * once — is therefore told apart here and not served the other one's answer.
+ *
+ * `generation` is `ce._cacheGeneration()` at the time of the computation.
+ * `factor()` reads facts about its operands (`isPositive`, `isInfinity`,
+ * `isNonNegative`, through `toNumericValue()` and `Product`), and those
+ * answers move when an assumption is made or withdrawn, so an entry made
+ * under one generation must not be served under another.
+ */
+type FactorMemoEntry = {
+  generation: number;
+  input: Expression;
+  output: Expression;
+};
+
+/**
+ * The `factor()` answers computed for each engine, keyed by the digest of the
+ * factored expression.
+ *
+ * Why this memo exists: `factor()` and `BoxedExpression.toNumericValue()` are
+ * mutually recursive — `toNumericValue()` of a sum factors it, and `factor()`
+ * of a sum reads `toNumericValue()` of every term — so factoring a nested
+ * quotient walks the expression as a TREE. The engine does not share
+ * structure between the nodes it builds: `toNumericValue()`'s `Divide` branch,
+ * `together()` and `Product.asRationalExpression()` each build a fresh node
+ * for a sub-quotient they have already seen, so the same sub-quotient is
+ * factored again at every place it occurs, and the number of factorizations
+ * grows exponentially with the nesting depth. Measured 2026-09-22 on the
+ * witness of `test/compute-engine/factor-nested-quotients.test.ts`, the
+ * function `√(x+√(x+√(x+√(x+x))))`: its second derivative factored 20,678
+ * expressions where 51 are distinct, and its third 1,166,395 where 1,091 are.
+ *
+ * Keyed by DIGEST rather than by node identity for exactly that reason: the
+ * repeated sub-quotients are equal structures held in different objects, so a
+ * memo on the node itself misses most of them.
+ *
+ * The map is per engine (digests are comparable across engines, definitions
+ * are not) and holds at most `MAX_FACTOR_MEMO_ENTRIES` answers, each of which
+ * keeps its expressions alive until the entry is replaced or the engine dies.
+ */
+const FACTOR_MEMO = new WeakMap<object, Map<string, FactorMemoEntry>>();
+
+/**
+ * How many answers one engine's `factor()` memo holds before it is emptied
+ * and refilled. The memo lives for the engine's lifetime, so without a bound
+ * it would grow with every distinct expression the engine ever factors.
+ * Emptying the whole map, rather than evicting the oldest entry, keeps a hit
+ * at one map read — the same treatment, and for the same reason, as the
+ * function-application memo (`MAX_APPLICATION_MEMO_RESULTS` in
+ * `function-utils.ts`).
+ */
+export const MAX_FACTOR_MEMO_ENTRIES = 4096;
+
+/**
+ * How many expressions this process has actually factored — the calls that
+ * the memo did not answer. Monotonic for the lifetime of the process, so a
+ * test reads it before and after a computation and asserts on the
+ * difference. It is a count of WORK, which is what the nested-quotient
+ * guard in `test/compute-engine/factor-nested-quotients.test.ts` pins:
+ * an assertion on elapsed time would measure the machine instead.
+ */
+let _factorMisses = 0;
+
+/** See {@link _factorMisses}. */
+export function factorComputationCount(): number {
+  return _factorMisses;
+}
+
+/**
  * Return an expression factored as a product.
  * - 2x + 4 -> 2(x + 2)
  * - 2x < 4 -> x < 2
  * - (2x) * (2y) -> 4xy
+ *
+ * Memoized per engine — see {@link FACTOR_MEMO}.
  */
 export function factor(expr: Expression): Expression {
+  const ce = expr.engine;
+  // The digest is read first: reading it is also what marks a node that sits
+  // above a mutable object as volatile.
+  const key = expr.digest;
+
+  // An expression with a mutable object below it is not memoized. Its digest
+  // is a snapshot of the object's contents rather than a key of the
+  // expression, and an entry holding it would keep the object alive for as
+  // long as the entry lives (the same rule `cachedValue()` applies to its
+  // payloads in `cache.ts`).
+  if (hasVolatileDigest(expr)) {
+    _factorMisses += 1;
+    return factorUncached(expr);
+  }
+
+  const generation = ce._cacheGeneration();
+  let entries = FACTOR_MEMO.get(ce);
+  if (entries === undefined) {
+    entries = new Map();
+    FACTOR_MEMO.set(ce, entries);
+  } else {
+    const entry = entries.get(key);
+    if (
+      entry !== undefined &&
+      entry.generation === generation &&
+      entry.input.isSame(expr)
+    )
+      return entry.output;
+  }
+
+  _factorMisses += 1;
+  const cyclesBefore = cycleDetectionCount();
+  const result = factorUncached(expr);
+
+  // The settled-only gate. Factoring reads facts about its operands
+  // (`isPositive`, `isNonNegative`), and a symbol whose binding is recursive
+  // answers such a question fail-closed while the query that would settle it
+  // is still on the stack. That answer is provisional — the same query run
+  // outside the window can legitimately answer something else — so a result
+  // built on one is returned but not stored. The lazy-value memo in
+  // `boxed-function.ts` refuses to freeze such a result for the same reason.
+  if (cycleDetectionCount() !== cyclesBefore) return result;
+
+  if (entries.size >= MAX_FACTOR_MEMO_ENTRIES) entries.clear();
+  entries.set(key, { generation, input: expr, output: result });
+  return result;
+}
+
+/** The body of {@link factor}, without the memo. */
+function factorUncached(expr: Expression): Expression {
   const h = expr.operator;
   if (isFunction(expr) && isRelationalOperator(h)) {
     let lhs = Product.from(expr.op1);

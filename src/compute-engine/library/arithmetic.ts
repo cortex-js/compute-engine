@@ -12,6 +12,7 @@ import {
   checkNumericArgs,
   absentScalarMarker,
   hasAbsentScalarOperand,
+  isAbsentScalarSymbol,
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
 import {
@@ -1774,7 +1775,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // a broadcast over the list, and the absent point lands in each
           // cell through the collection kernel instead.
           if (
-            evaluated.some((x) => isSymbol(x, 'Missing')) &&
+            evaluated.some(isAbsentScalarSymbol) &&
             evaluated.some((x) => isTuple(x)) &&
             !evaluated.some((x) => isNonTupleCollectionOperand(x))
           )
@@ -4274,7 +4275,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // points, and that error outranks the absence: `mulTuples` reports
           // it, as it did before this arm existed.
           if (
-            evaluated.some((x) => isSymbol(x, 'Missing')) &&
+            evaluated.some(isAbsentScalarSymbol) &&
             evaluated.filter((x) => isTuple(x)).length === 1 &&
             !evaluated.some((x) => isNonTupleCollectionOperand(x))
           )
@@ -6502,8 +6503,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([a, b], { engine: ce, numericApproximation }) => {
         // An absent point absorbs: a distance is numeric, so the marker is
         // `NaN` (§3.C) — substituted here because the §3.E gate defers to the
-        // collection operand (see `missingBehavior` above).
-        if (isSymbol(a, 'Missing') || isSymbol(b, 'Missing')) return ce.NaN;
+        // collection operand (see `missingBehavior` above). Both symbols that
+        // name an absent datum are read here (user ruling of 2026-09-22); the
+        // same two names are tested by `isAbsentScalarSymbol`
+        // (`boxed-expression/validate.ts`).
+        if (
+          isSymbol(a, 'Missing') ||
+          isSymbol(b, 'Missing') ||
+          isSymbol(a, 'Undefined') ||
+          isSymbol(b, 'Undefined')
+        )
+          return ce.NaN;
         const pa = pointOperand(a);
         const pb = pointOperand(b);
         // Point-to-point: the scalar distance.

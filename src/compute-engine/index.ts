@@ -760,6 +760,15 @@ export class ComputeEngine implements IComputeEngine {
           pendingReason: c._pendingReason,
         })),
         declaredByStatement: r.declaredByStatement,
+        // The whole-SUM conformances, copied because the list is pushed to in
+        // place: the pre-pass registers `type <sum> is P` and this thunk undoes
+        // its edges, so the remembered statement must go with them — left
+        // behind, it would hand its block to a variant a later declaration of
+        // that sum adds, on the strength of a statement that was rolled back.
+        sumConformances:
+          r._sumConformances === undefined
+            ? undefined
+            : [...r._sumConformances],
         // REDEFINITION DISCIPLINE — the protocol mirror of the type registry's
         // `declOrigin` snapshot: the pre-pass registers a `protocol` statement
         // and this thunk undoes it, so a leaked stamp would make the
@@ -814,6 +823,12 @@ export class ComputeEngine implements IComputeEngine {
           if (e.pendingReason === undefined) delete e.c._pendingReason;
           else e.c._pendingReason = e.pendingReason;
         }
+        // The remembered whole-sum statements (see the snapshot above).
+        // Silent, like the `_implOrigin` restore: they select nothing a boxed
+        // expression could have read — they are consulted only when a sum is
+        // re-declared with a new variant.
+        if (s.sumConformances === undefined) delete r._sumConformances;
+        else r._sumConformances = s.sumConformances;
         // A record that vanished from the table but is still captured keeps
         // its restored fields — the type-registry contract.
         if (!(r.name in registry)) {

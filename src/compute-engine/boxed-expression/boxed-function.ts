@@ -213,6 +213,7 @@ import {
 } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
 import { isScalarType } from './function-literal.js';
+import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
@@ -1211,10 +1212,64 @@ export class BoxedFunction
 
   get isValid(): boolean {
     if (this._isValid !== undefined) return this._isValid;
-    this._isValid =
-      this._operator !== 'Error' &&
-      (this._numericStore !== undefined || this._ops.every((x) => x?.isValid));
-    return this._isValid;
+
+    // A node is valid when it is not an `Error` and every operand is valid,
+    // which is settled bottom-up with an explicit stack rather than by
+    // recursion: the read is as deep as the expression nests, and a
+    // left-nested chain is as deep as the input is long. Measured 2026-09-22,
+    // reading this on a raw-boxed 5 000-term `1-2-3-…` chain overflowed the
+    // stack. The per-node answer is memoized in `_isValid` as it is settled
+    // (below and above), so the walk visits each node once; the scan position
+    // is kept on the frame so an operator with many operands is not rescanned
+    // from the start after each one.
+    //
+    // Operands are settled left to right and the scan stops at the first
+    // invalid one, which is what the `every()` this replaced did. A function
+    // operand is settled by this walk rather than by its own getter, so this
+    // assumes no subclass of `BoxedFunction` overrides `isValid`; none does
+    // today, and none is derived from it at all.
+    const stack: { node: BoxedFunction; index: number }[] = [
+      { node: this, index: 0 },
+    ];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const node = frame.node;
+      if (node._isValid !== undefined) {
+        stack.pop();
+        continue;
+      }
+      if (node._operator === 'Error') {
+        node._isValid = false;
+        stack.pop();
+        continue;
+      }
+      if (node._numericStore !== undefined) {
+        node._isValid = true;
+        stack.pop();
+        continue;
+      }
+      let descended = false;
+      while (frame.index < node._ops.length) {
+        const op = node._ops[frame.index];
+        // Only a function node's validity depends on a whole subtree; every
+        // other kind answers without descending.
+        if (op instanceof BoxedFunction && op._isValid === undefined) {
+          stack.push({ node: op, index: 0 });
+          descended = true;
+          break;
+        }
+        if (!op?.isValid) {
+          node._isValid = false;
+          break;
+        }
+        frame.index += 1;
+      }
+      if (descended) continue;
+      if (node._isValid === undefined) node._isValid = true;
+      stack.pop();
+    }
+
+    return this._isValid!;
   }
 
   /** Note: if the expression is not canonical, this will return a canonical
@@ -7275,47 +7330,11 @@ export function paramsAreScalar(
   const sigType = isOperatorDefinition(source)
     ? source.signature?.type
     : source;
-  if (!sigType || typeof sigType === 'string') return true;
-  // A multi-clause definition's signature is the INTERSECTION of its clause
-  // arms (`((0) -> integer) & ((n: unknown) -> number)`). Its parameters are
-  // scalar only if EVERY arm's are: one clause declaring a collection
-  // parameter (`f(xs: list<number>) = …`) consumes the whole collection, so
-  // no call may broadcast over it and hand that clause an element instead.
-  if (sigType.kind === 'intersection')
-    return sigType.types.every((t) => paramsAreScalar(t));
-  if (sigType.kind !== 'signature') return true;
-  const args = [
-    ...(sigType.args ?? []),
-    ...(sigType.optArgs ?? []),
-    ...(sigType.variadicArg ? [sigType.variadicArg] : []),
-  ];
-  // A QUANTIFIED parameter is read at its declared bound (§4.5): `T:
-  // indexed_collection` can only ever denote a collection, so `(T) -> T` binds
-  // its argument WHOLE exactly as the ground `(indexed_collection) -> …` does,
-  // and no site may lift/thread over it. An unbounded variable keeps the scalar
-  // default, and a ground signature (no `typeParams`) is untouched.
-  return args.every((arg) => {
-    const t = substituteDeclaredBounds(sigType.typeParams, arg.type);
-    // A FUNCTION-typed parameter is a higher-order CALLBACK slot: its argument
-    // is a function, never a collection, so it can never itself be broadcast
-    // over — and it must not veto broadcasting of the OTHER parameters. This
-    // predicate is all-or-nothing across the parameter list, so without the
-    // exemption a single `(A) -> B` annotation silently switched off
-    // broadcasting for every parameter of the function: `map(f, t.children)`
-    // stopped mapping the moment `f` was annotated.
-    //
-    // The INFERENCE path already takes exactly this position — see
-    // `inferredCollectionParameterType` (effects-inference.ts), which exempts
-    // "a function-typed one (a higher-order callback slot)" so the
-    // `broadcastable<T>` lift keeps firing. Before this, a DECLARED `(A) -> B`
-    // parameter disagreed with an INFERRED one of the same shape.
-    //
-    // A COLLECTION-typed parameter deliberately still vetoes: it consumes a
-    // whole collection, and suppressing the lift is what keeps a nested
-    // collection argument from being descended into elementwise.
-    if (isSubtype(t, 'function')) return true;
-    return isScalarType(t);
-  });
+  if (!sigType) return true;
+  // The type-only reading lives in a leaf module because the callback
+  // admission in `boxed-expression/validate.ts` needs it too, and that module
+  // cannot import this one (this one imports it).
+  return signatureParamsAreScalar(sigType);
 }
 
 /**

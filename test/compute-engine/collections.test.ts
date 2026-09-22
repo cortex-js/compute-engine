@@ -1356,6 +1356,108 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
     expect(e.operator).toEqual('Ordering');
   });
 
+  // A permutation of N elements has N entries. When the sort order cannot be
+  // decided, `Ordering` must stay unevaluated, exactly as `Sort` does: an
+  // empty or short index list is a wrong count, not a decline. Added
+  // 2026-09-22.
+  describe('Ordering declines an undecided order, like Sort', () => {
+    // Each element is a list. A list is not an ordered value, so the keys
+    // `2[5]`, `2[1]` and `2[3]` cannot be compared.
+    const listsOfOne: Expression = [
+      'List',
+      ['List', 5],
+      ['List', 1],
+      ['List', 3],
+    ];
+    const doubleKey: Expression = ['Function', ['Multiply', 2, 'x'], 'x'];
+
+    test('a key with incomparable values leaves Ordering unevaluated', () => {
+      const e = engine.box(['Ordering', listsOfOne, doubleKey]).evaluate();
+      expect(e.operator).toEqual('Ordering');
+      // `Sort` over the same input declines the same way.
+      const s = engine.box(['Sort', listsOfOne, doubleKey]).evaluate();
+      expect(s.operator).toEqual('Sort');
+    });
+
+    test('a key with comparable values still answers the permutation', () => {
+      expect(
+        engine
+          .box(['Ordering', ['List', 3, 1, 2], doubleKey])
+          .evaluate()
+          .toString()
+      ).toBe('[2,3,1]');
+    });
+
+    test('a NaN key leaves Ordering unevaluated, like Sort', () => {
+      // NaN is not equal to, less than, or greater than NaN, so no pair of
+      // keys can be ordered.
+      const nanKey: Expression = ['Function', 'NaN', 'x'];
+      const e = engine.box(['Ordering', ['List', 3, 1, 2], nanKey]).evaluate();
+      expect(e.operator).toEqual('Ordering');
+      const s = engine.box(['Sort', ['List', 3, 1, 2], nanKey]).evaluate();
+      expect(s.operator).toEqual('Sort');
+    });
+
+    test('a Missing key for ONE element leaves both operators unevaluated', () => {
+      // `Missing` compares neither equal to nor less than the number 5, so
+      // the first key cannot be placed.
+      const key: Expression = [
+        'Function',
+        ['At', ['List', 'Missing', 5, 6], 'x'],
+        'x',
+      ];
+      const e = engine.box(['Ordering', ['List', 1, 2, 3], key]).evaluate();
+      expect(e.operator).toEqual('Ordering');
+      const s = engine.box(['Sort', ['List', 1, 2, 3], key]).evaluate();
+      expect(s.operator).toEqual('Sort');
+    });
+
+    test('a NaN key for ONE element leaves both operators unevaluated', () => {
+      const key: Expression = [
+        'Function',
+        ['At', ['List', 'NaN', 5, 6], 'x'],
+        'x',
+      ];
+      const e = engine.box(['Ordering', ['List', 1, 2, 3], key]).evaluate();
+      expect(e.operator).toEqual('Ordering');
+      const s = engine.box(['Sort', ['List', 1, 2, 3], key]).evaluate();
+      expect(s.operator).toEqual('Sort');
+    });
+
+    test('a Missing key for EVERY element ties, so both operators answer', () => {
+      // The key comparison uses `.isEqual()`, which answers `true` for two
+      // `Missing` values. All the keys therefore tie, and the sort is stable,
+      // so the elements keep their original positions. What this test pins is
+      // that `Ordering` agrees with `Sort`, not that two absent values are
+      // the same value: the `Equal` operator calls such a pair UNDECIDED.
+      const missingKey: Expression = ['Function', 'Missing', 'x'];
+      expect(
+        engine
+          .box(['Ordering', ['List', 3, 1, 2], missingKey])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2,3]');
+      expect(
+        engine
+          .box(['Sort', ['List', 3, 1, 2], missingKey])
+          .evaluate()
+          .toString()
+      ).toBe('[3,1,2]');
+    });
+
+    test('with no key, Ordering answers the identity permutation because Sort answers the list unchanged', () => {
+      // The no-key comparison treats an undecided pair as "greater" instead
+      // of declining, so `Sort` returns the list unchanged over incomparable
+      // elements. The identity permutation is the matching answer.
+      expect(engine.box(['Sort', listsOfOne]).evaluate().toString()).toBe(
+        '[[5],[1],[3]]'
+      );
+      expect(engine.box(['Ordering', listsOfOne]).evaluate().toString()).toBe(
+        '[1,2,3]'
+      );
+    });
+  });
+
   test('Find over an infinite Range still streams and returns the first match', () => {
     // Streaming capability must not regress: Find short-circuits on the first
     // matching element without walking the whole (infinite) collection.

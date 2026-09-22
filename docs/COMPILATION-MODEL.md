@@ -325,40 +325,28 @@ callee whatever element the source holds, and an element can itself be a
 collection: a row of a matrix. So a function whose parameters are all scalar
 is handed out as a wrapper instead of the bare name — one closure per
 function, emitted next to the function itself, which tests its arguments with
-`Array.isArray`. There are three forms of it, and which one a function gets
-follows what the INTERPRETER does with a collection element at that callback:
+`Array.isArray`. Whether a function gets that wrapper follows what the
+INTERPRETER does with a collection element at that callback:
 
-- A function whose parameters are typed `unknown` — every signature the engine
-  infers from a body, whatever the body computes — is applied ELEMENT-WISE by
-  the interpreter: `Map(f, [[1, 2], [3, 4]])` over `f(x) := 2x` answers
+- A function whose parameters are all scalar is applied ELEMENT-WISE by the
+  interpreter: `Map(f, [[1, 2], [3, 4]])` over `f(x) := 2x` answers
   `[[2, 4], [6, 8]]`. It is handed out as a broadcasting wrapper (`_fn_f$b`)
-  that dispatches through `_SYS.bcastFn`.
-- A function whose parameters are typed as DEFINITE scalars — which in
-  practice means a declared signature such as `(number) -> number` — is
-  REFUSED by the interpreter at that position: the same map answers
-  `Map(Error(ErrorCode("incompatible-type", …)), …)`, because a row is not a
-  number. It is handed out as a guarding wrapper (`_fn_f$s`) that projects an
-  array argument to NaN, which is how the compiled routes spell an error
-  value. That guard is the run-time half only: when the source's element type
-  is provably a collection, the error is already in the expression, which
-  makes it invalid, so the compile declines and the interpreter reports the
-  error. (Applying such a function DIRECTLY still broadcasts — `f([1, 2])` is
-  `[2, 4]` — which is an asymmetry of the interpreter between an application
-  and a callback position, and the compiled routes keep it.) One case divides
-  the two routes: a source only SOME of whose elements are collections. The
-  interpreter reads the element type of the whole source, finds a union that
-  a scalar satisfies, and broadcasts each collection element, so
-  `[[1, 2], 3]` answers `[[2, 4], 6]`; the guard tests one element at a time
-  and answers `[NaN, 6]`. There is no static element type to decline on
-  there, and a per-element test cannot reconstruct the type of the source.
+  that dispatches through `_SYS.bcastFn`. The parameter TYPES make no
+  difference here: a declared signature such as `(number) -> number`
+  broadcasts exactly as an inferred `unknown` one does, which is the user
+  ruling of 2026-09-22. Before that ruling the interpreter refused a
+  declared-scalar callback at a callback position, and such a function was
+  handed out as a second, guarding wrapper (`_fn_f$s`) that projected an array
+  argument to NaN. Both halves now broadcast, so the two routes also agree on
+  a source only SOME of whose elements are collections: `[[1, 2], 3]` answers
+  `[[2, 4], 6]` compiled and interpreted alike.
 - A function with a parameter that is not scalar at all keeps the bare
   reference, because the interpreter binds its arguments whole as well.
 
-A MULTI-CLAUSE function is handed out through the same wrapper, chosen by the
-same two rules read over the whole clause set: a clause that binds a
-collection, a tuple or a nominal value whole keeps the bare dispatcher, and a
-clause set whose every parameter is a definite scalar guards where the others
-broadcast. Its wrapper takes a REST parameter, where a single-clause one takes
+A MULTI-CLAUSE function is handed out through the same wrapper, under the same
+rule read over the whole clause set: a clause that binds a collection, a tuple
+or a nominal value whole keeps the bare dispatcher, and every other clause set
+broadcasts. Its wrapper takes a REST parameter, where a single-clause one takes
 a fixed parameter list, because the dispatcher selects its clause on the number
 of arguments. That is safe because every consumer this compiler emits applies a
 function value through an arrow of the arity it means to pass — `(_x) => _f(_x)`

@@ -11,7 +11,10 @@ import {
   checkSameUnitRedefinition,
   isSameStatementReRegistration,
 } from './declaration-origin.js';
-import { resettleTypeConformances } from './engine-protocols.js';
+import {
+  refreshSumConformances,
+  resettleTypeConformances,
+} from './engine-protocols.js';
 import {
   functionResult,
   hasFunctionSignature,
@@ -48,6 +51,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
+  presentedValueType,
   refineDeclaredPlaceholders,
   signatureEffects,
   stripArrowEffects,
@@ -1592,6 +1596,19 @@ export function declareSumType(
       name: v.name,
       typeParams: (subsets.get(v.name) ?? []).map((p) => p.name),
     }));
+
+    // A conformance declared for the SUM as a whole (`type shape is Area { … }`)
+    // is one edge per variant, so a re-declaration that ADDS a variant must
+    // give the new variant its edge too — the batch re-run of ruling P47 for
+    // the sum spelling (user ruling of 2026-09-22). Inside the `try`, and
+    // after the variant list is written, so a failure rolls the whole
+    // statement back and so the re-run reads the list this declaration
+    // settled.
+    refreshSumConformances(
+      ce,
+      name,
+      variants.map((v) => v.name)
+    );
   } catch (e) {
     rollback();
     throw e;
@@ -2865,7 +2882,16 @@ function assertAssignableValueDef(
   const proven = provenTypeNode(ce, def);
   if (proven !== undefined) {
     const provenType = ce.type(proven);
-    if (!value.type.matches(provenType))
+    // The constraint is asked of the type the value PRESENTS: an assumption
+    // says what the symbol is when it has a value, and absence is a state
+    // every type can take (ruled 2026-09-09). So the `missing` arm is removed
+    // first, and a number literal held through a restriction is read back —
+    // `5 {a > 0}` types `integer | missing`, which inhabits no range, while
+    // the 5 it holds does. Without this, `assume(v > 3)` refused
+    // `v := 5 {a > 0}` while accepting the identical ungated `5`. A value
+    // whose presented type still fails is refused here exactly as the ungated
+    // one is, with the same message. (2026-09-22)
+    if (!presentedValueType(ce, value).matches(provenType))
       throw assumptionRefusalError(id, value, provenType, undefined);
   }
 

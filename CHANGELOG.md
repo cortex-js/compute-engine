@@ -2,6 +2,68 @@
 
 ### Behavior Changes
 
+- The `Undefined` symbol is now read exactly like `Missing` by the comparison
+  operators and the logical connectives, and by the handlers that own their
+  absence semantics (ruled 2026-09-22). `Equal(Undefined, 1)` answers the
+  absence marker instead of a confident `False`; `Equal([1, Undefined], 1)`
+  marks the absent position and answers `[True, Missing]`;
+  `And(Undefined, True)`, `Not(Undefined)`, `Implies`, `Nand` and `Nor` answer
+  the marker; `First(Undefined)` and `Last(Undefined)` answer `Missing` instead
+  of an `incompatible-type` error; and `Distance(Undefined, (1, 1))` answers
+  `NaN`. The shader `At` lowering reads the two absence symbols alike as well.
+- **A callback whose parameters are all scalar now BROADCASTS over a collection
+  element, instead of refusing it** (ruled 2026-09-22). With
+  `ce.declare('f', '(number) -> number')` and `f := x ↦ 2x`, the direct call
+  `f([1, 2])` has always answered `[2, 4]`: a scalar parameter is applied
+  element-wise to a collection argument. A callback position is an application
+  too, so `Map(f, [[1, 2], [3, 4]])` now applies `f` to each row, which
+  broadcasts, and answers `[[2, 4], [6, 8]]`. It used to answer
+  `Map(Error(ErrorCode("incompatible-type", "(vector<integer^2>) any -> unknown", "(number) -> number")), …)`,
+  because the element check compared the ROW type against the parameter type.
+  The same map over an untyped lambda — `Map(x ↦ 2x, [[1, 2], [3, 4]])` —
+  already broadcast, so the two spellings now agree. The broadcast descends to
+  the leaves, so a rank-3 source answers a rank-3 result, and a source with a
+  declared type (`xs: list<list<number>>`) behaves the same as a literal one.
+  The admission is shared by the lazy callback family and changes `Map`,
+  `FlatMap`, `Reduce`, `Fold`, `Scan`, `MaxBy`, `MinBy`, `ArgMax` and `ArgMin` —
+  in each case to what the equivalent untyped lambda already answered. A
+  reducer's ACCUMULATOR slot is not descended into, because no element of the
+  source reaches it: only an element position broadcasts. It stops where the
+  run-time broadcast stops: a tuple is an atomic value bound whole, a string is
+  a text atom rather than a list of characters, and a set supplies no positions
+  to zip, so `Map(h, [[1, 2], [3, 4]])` with
+  `h: (tuple<number, number>) -> number` and `Map(s, [[1, 2], [3, 4]])` with
+  `s: (string) -> string` keep the `incompatible-type` error. A slot that needs
+  a SCALAR answer keeps its error too, because a broadcast callback answers a
+  collection: `Filter`, `Any`, `All`, `CountIf`, `TakeWhile` and `DropWhile` all
+  require a `boolean` predicate, and a broadcast predicate answers
+  `list<boolean>`. The EAGER validation route takes the same decision, so
+  `Sort`, `Ordering`, `GroupBy` and `ChunkBy` admit a declared-scalar callback
+  over a nested source too, each answering what the equivalent untyped lambda
+  already answered. The compiled JavaScript route agrees with the interpreter: a
+  function value whose parameters are all scalar is now always handed to its
+  consumer through the broadcasting wrapper (`_fn_f$b`), where a declared-scalar
+  signature used to take a guarding wrapper that answered `NaN` for an element
+  that is itself a collection.
+- **Breaking**: `StringFrom(value)` with NO `format` operand now reads a finite
+  non-negative integer, or a list of such integers, as Unicode scalar values
+  instead of printing it (ruled 2026-09-22). A number that cannot be a code
+  point — `NaN`, an infinity, a non-integer, a negative number, a complex number
+  — keeps the printed form. `StringFrom(128287)` is `"🔟"`,
+  `StringFrom([127467, 127479])` is `"🇫🇷"` and `StringFrom(65)` is `"A"`; they
+  answered `"128287"`, `"[127467,127479]"` and `"65"` before. Every other
+  argument keeps the printed form: a string, a boolean, a symbol, an expression,
+  a type value. An explicit format is unchanged, so
+  `StringFrom(128287, "default")` is still `"128287"` — that is how you ask for
+  the decimal text of a number. A tuple of numbers is NOT decoded, because a
+  tuple carries the coordinates of a point: `StringFrom((65, 66))` is still
+  `"(65, 66)"`. A list whose elements are not all numbers is printed, not
+  refused: `StringFrom([x])` is `"[x]"`. The empty list decodes to the empty
+  string, where it printed `"[]"` before. An integer that is not a valid Unicode
+  scalar value answers exactly what the explicit `"unicode-scalars"` format
+  answers for it today: one above U+10FFFF is an `internal-error`
+  (`String.fromCodePoint` throws), a lone surrogate becomes U+FFFD REPLACEMENT
+  CHARACTER.
 - **Breaking**: a whole-collection `Equal` or `NotEqual` whose element recursion
   meets a pair with no answer is now UNDECIDED (ruled 2026-09-21). The answer is
   the marker the absence contract already uses: `Missing` in the interpreter
@@ -81,7 +143,40 @@
   answer `[1, 2]`. The pairing constructors are unchanged — `PointList` and
   `Zip` still pair up to the shorter input.
 
+- **`RandomChoice` of a string now answers a string.** `RandomChoice("abc", 5)`
+  returned a list of five characters; it now returns a five-character string,
+  and `RandomChoice("abc", 0)` returns `""` instead of the empty list. Drawing
+  with replacement takes the source's own characters, so the result is a string,
+  exactly as `Take("abc", 2)` is `"ab"` (the string-preservation rule of
+  `docs/STRING_ROADMAP.md`, joining `RandomShuffle`, `RandomSample` and
+  `DeleteAt`). The declared signature says so, with a `string` arm ahead of the
+  list arm. Migration: wrap the call in `Characters(...)` to get the list back,
+  or draw from `Characters(s)` instead of from `s`. A list, `Range`, `Interval`
+  or `Set` source is unchanged, and `Random(s)` — one draw — still answers a
+  `character`, like `First(s)` and `At(s, 1)`. Under one seed the string form
+  consumes the same draws, in the same order, as the list form over
+  `Characters(s)`, so `RandomChoice("abc", 5)` equals
+  `StringJoin(RandomChoice(Characters("abc"), 5))`. Compiled JavaScript now
+  compiles a string source (it declined before) and answers the same string as
+  the interpreter; the GPU and Python targets still fail closed.
+
 ### Improvements
+
+- **Factoring a nested quotient takes near-linear time.** `factor()` and
+  `BoxedExpression.toNumericValue()` are mutually recursive — the numeric value
+  of a sum factors it, and factoring a sum reads the numeric value of every term
+  — and the engine builds a fresh node for each sub-quotient it produces, so the
+  same sub-quotient was factored again at every place it occurred. The number of
+  factorizations grew exponentially with the nesting depth: the second
+  derivative of `√(x+√(x+√(x+√(x+x))))` factored 20,678 expressions, and the
+  third 1,166,395. `factor()` now keeps its answers in a memo, one per engine,
+  keyed on the digest of the expression: the same two derivatives factor 51 and
+  1,091 expressions, and the third derivative takes half the time it took (11.0
+  s → 5.4 s, measured on one machine). Results are unchanged — an answer is
+  served only when it was computed for the same engine, under the same
+  assumptions, and for an expression that is `isSame` as the one asked about,
+  which is what tells two occurrences of a shadowed name apart (a symbol digests
+  as its name, whatever it is bound to).
 
 - **The common functions of one number over a large list of machine numbers are
   computed on doubles, at machine precision.** `Sin`, `Cos`, `Tan`, `Cot`,
@@ -214,6 +309,152 @@
 
 ### Resolved Issues
 
+- **A deep expression no longer exhausts the stack while it is boxed.**
+  `ce.parse('1-2-3-…-N')` threw `RangeError: Maximum call stack size exceeded`
+  past about 500 terms, because the LaTeX parser returns a left-nested
+  `Subtract(Subtract(Subtract(1, 2), 3), …)` and boxing recursed once per level
+  of it. The same limit reached any deep expression, whatever produced it: a
+  `Sin` nest stopped at about 1 170 levels, and canonicalizing an
+  already-raw-boxed chain at about 700. Past 200 levels, boxing now stops
+  recursing and boxes the rest of the expression with an explicit work stack —
+  the operands bottom-up, each node then built from operands that are boxed
+  already — so the stack depth no longer follows the depth of the input. A 5
+  000-term chain and a 2 000-deep `Sin` nest box, canonicalize and evaluate; a
+  chain of 40 000 terms boxed from MathJSON does too. Nothing about the result
+  changes: the same expression comes back either way, whether it is boxed
+  canonically, raw or in a partial form. Three walks outside boxing had the same
+  defect and are fixed the same way: the post-parse error scan and
+  continuation-range normalization, and the validity of a function node (which
+  overflowed the first time it was read on a deep raw-boxed chain). `(((…x…)))`
+  stays bounded for reasons of its own, unchanged by this work: the parser's
+  grammar recursion stops at about 1 870 levels, and below that `Delimiter` —
+  which holds its operand and canonicalizes it from inside its own handler —
+  stops at about 1 000.
+- **A written absence symbol now compiles to a value instead of a free
+  variable.** A literal `Missing` in a compiled expression used to lower to the
+  free-symbol read `_.Missing`, so `compile(Missing)` reported
+  `freeSymbols: ["Missing"]` and every absence test ran against whatever the
+  caller happened to bind: compiled `IsMissing(Missing)` answered `false`,
+  `Coalesce(Missing, 2)` answered `undefined` and `Median([1, Missing, 3])`
+  answered `3`, where the interpreter answers `True`, `2` and `NaN`. Both
+  absence symbols — `Missing` and `Undefined` — now lower to the target's
+  object-domain null (`undefined` on JavaScript), and the targets with no object
+  axis (GLSL, WGSL, the interval target) lower them to their numeric marker; the
+  Python target spells the numeric marker `math.nan` too, because numpy raises
+  on `None` and its collection-equality helper is a strict boolean either way.
+  The object null rather than the numeric marker, because a list cell holding
+  the numeric marker is a number that equals nothing, which the whole-collection
+  equality rule must keep distinct from an absent cell:
+  `Equal([1, Missing], [1, Missing])` still answers the undecided marker while
+  `Equal([1, NaN], [1, NaN])` still answers `false`. The numeric absence test of
+  the JavaScript and Python targets reads the object null as absent as well as
+  `NaN`, which also means an `IsMissing` over a `vars` key the caller left out
+  now answers `true`. A `Missing` in a numeric slot is unchanged: compiled
+  `Cos(Missing)` and `Missing + 1` still answer `NaN`. GLSL and WGSL still
+  decline to DISCHARGE absence (`IsMissing`, `Coalesce`), because fast-math
+  cannot guarantee that `isnan` survives there.
+- **`Ordering` stays unevaluated when the sort order cannot be decided.** With a
+  sort key whose values cannot be compared, `Ordering` answered the empty list:
+  `Ordering([[5], [1], [3]], x \mapsto 2x)` gave `[]`, although a permutation of
+  three elements has three entries. The same happened for a key that answers
+  `NaN` for every element. `Ordering` now stays unevaluated in both cases, which
+  is the answer `Sort` already gives for the same input. A key whose values can
+  be compared still answers the permutation, and the forms with no key are
+  unchanged: `Ordering([[5], [1], [3]])` answers the identity permutation
+  `[1, 2, 3]`, which matches `Sort([[5], [1], [3]])` answering the list
+  unchanged. A key that answers `Missing` for one element only also leaves both
+  operators unevaluated, because `Missing` compares neither equal to nor less
+  than a number. A key that answers `Missing` for EVERY element is unchanged:
+  the key comparison uses `.isEqual()`, which answers `true` for two `Missing`
+  values, so all the keys tie and the elements keep their positions.
+- **`Dot` broadcasts over a list of points** (ruled 2026-09-22). A point list
+  has two spellings and they now answer the same list. With `L: list<number>`,
+  `Dot((1, L), (3, 4))` — one point whose coordinates broadcast — already typed
+  and evaluated the inner product element by element; the `PointList` spelling
+  `Dot(PointList(1, L), PointList(3, 4))` is a LIST of points against a point,
+  which had no arm and reported `incompatible-type` at boxing. `Dot` now lifts a
+  point over a list of points in either order — `Dot(P, q)` and `Dot(q, P)` both
+  answer `list<number>`, one inner product per point — and pairs two lists of
+  points element by element. A different number of points, or a pair of points
+  of different widths, is `incompatible-dimensions`. The rule holds on the type
+  handler, under `evaluate()` and `.N()`, and on the compiled JavaScript route,
+  which lowers the broadcast through a new `_SYS.pointdot` helper: an array of
+  points and an array of matrix rows are the same run-time shape but contract
+  differently, so matrix multiplication cannot serve both. Unchanged: `Dot` of
+  two points and of two vectors is still a number, and `Dot` of two matrices is
+  still the matrix product. A point list against a plain vector or a matrix has
+  no arm — it types `value` and stays symbolic, and the compiled route refuses
+  it rather than answer a list the type does not describe. A TUPLE of points, as
+  opposed to a list of them, is still one point with nested coordinates, which
+  is how `Norm` and `PointX` read it. The GPU targets still refuse a point list
+  whose length is only known at run time (a point value there has scalar
+  components), and the Python target now refuses a point-list operand instead of
+  emitting an `np.dot` contraction that answers something else in two of the
+  three orders.
+- **A sum type can conform to a protocol under its own name** (ruled
+  2026-09-22). `type shape is Area { … }`, where `shape` is a sum
+  (`type shape = circle(r: number) | square(s: number)`), was rejected with
+  `protocol-conformance-target-invalid`: the sum sugar registers the sum's name
+  as a transparent alias of its variants, and an alias cannot conform. The
+  spelling now DESUGARS to one conformance per variant, with `Self` bound to the
+  variant in each — the same thing as writing the block once per variant — so
+  `Area.area(circle(2))`, `c.area()` and compiled dispatch all find the
+  implementation, and the registry, the specificity order and the compile tier
+  keep seeing only variant edges. A variant the sum gains in a LATER program
+  (`type shape = … | triangle`, which is `type-redefinition` inside ONE program)
+  is given the same implementation as it is declared, while a variant with an
+  implementation of its own keeps it. A sum block for a variant that already has
+  one in the same batch is the existing `protocol-implementation-duplicate`,
+  naming the variant, and registers nothing at all. A variant that is not a
+  legal conformance target — one re-declared as a `type alias` in a later
+  program, say — rejects the whole statement with a message naming both the
+  variant and the sum. Two spellings are unchanged and still take the alias
+  rejection: a GENERIC sum, whose variants each carry only the type parameters
+  their own payload uses, and the host API `ce.declareProtocolImplementation()`,
+  which is not the statement route.
+- **A gated value binds wherever its ungated value binds.** A restriction such
+  as `5\{a>0\}` holds the number 5 when its condition is true and the absence
+  marker when it is false, but its type says only `integer | missing` — a type
+  handler's result is widened back to ordinary types, so the literal `5` is
+  erased. Both checks at an assignment then refused the value although the
+  identical ungated `5` was accepted: `ce.assume(ce.parse('v > 3'))` followed by
+  `ce.assign('v', ce.parse('5\{a>0\}'))` threw "refused by the assumptions in
+  force, which require the type `real<3<..>`", and
+  `ce.declare('e', 'integer<3<..>')` followed by the same assignment threw
+  "`integer | missing` is not compatible with `integer<4..>`". Both now bind,
+  and `v` and `e` evaluate to the gated value. The two checks read the type the
+  value PRESENTS: the `missing` arm is removed — absence is a state every type
+  can take — and a number literal held through a restriction is read back off
+  the operand. A gated value that does NOT satisfy the constraint is still
+  refused, with the same message as its ungated value: `v := 1\{a>0\}` under
+  `v > 3`, and `e := 2\{a>0\}` against `integer<3<..>`. The facts in force are
+  asked of the held operand too, so `ce.assume(ce.parse('x = 5'))` now refuses
+  `x := 7\{a>0\}` as it refuses `x := 7`; before, the condition's own unknown
+  left every fact undecided and the value bound. A list-broadcast restriction
+  (`[10,20,30]\{[1,2,3]>2\}`, typing `list<integer | missing>`) is unaffected:
+  its held operand describes one cell, not the whole value, so it keeps its own
+  type. One further change follows from the same reading: a bare `Missing` now
+  binds to a symbol an assumption constrains, as it already bound to a symbol
+  with a declared type.
+- **A call whose argument applies the head itself is read as a call, however
+  many factors follow it.** `f(yf(x))` was `f` applied to `y·f(x)`, but
+  `f(yf(x))(x+y)` collapsed to the flat product `Multiply(f, y, x + y, f(x))` —
+  the outer application was lost, and the same happened for any trailing factor
+  (`f(yf(x))z`, `f(f(x))(x+y)`). The juxtaposition reader settles the
+  multiply-versus-apply question from the head's definition, and the inner
+  `f(x)` is what declares `f` a function; the two-operand route canonicalizes
+  the argument list before it reads that definition, while the multi-operand
+  route read it first and never looked again. It now settles the reading a
+  second time, once the arguments are canonicalized. The product reading for a
+  head that is still without type information is unchanged: `q(2q)` and
+  `x y(2y)` stay products. The flat product also failed the serialize-parse
+  round trip, because an explicit `\times` at the symbol/group seam made the
+  bare `f` factor an operand of `Multiply`, whose signature is
+  `(number*) -> number`.
+- **The serialize-parse round-trip gate now runs in CI.**
+  `npm run check:roundtrip` was the last step of the `ci:corpus-pipeline` script
+  but had no step in `.github/workflows/test.yml`, so no server ever ran it. It
+  is now a step of the `corpus-pipeline` job, after the parser corpus gate.
 - **`Undefined` in a numeric slot answers `NaN`, as `Missing` does.** The
   `Undefined` symbol names a value that does not exist, and a program or a host
   can write it for such a value. In a numeric slot it stayed symbolic —
@@ -222,14 +463,45 @@
   reads both absence symbols the same way, so `Cos(Undefined)`, `2 · Undefined`,
   `1 / Undefined` and `Sqrt(Undefined)` are `NaN` under `evaluate()`, under
   `N()` and under `evaluateAsync()`, and an `Undefined` cell of a list under an
-  element-wise head is `NaN` at that position, as a `Missing` cell is. Outside a
-  numeric slot `Undefined` is unchanged: it still evaluates to itself, its type
-  is still `unknown`, and `IsMissing`, `Coalesce` and the statistics reducers
-  still read it as an ordinary value. Note for a host: the masking operator
-  `When` answers `Missing`, and its result type carries a `missing` arm — for a
-  `number` value `When(x, x > 0)` is typed `missing | number`, not `number` — so
-  a probe that tests `matches('number')` on a restriction row sees the absence
-  arm and must strip it before it decides.
+  element-wise head is `NaN` at that position, as a `Missing` cell is. A bare
+  `Undefined` still evaluates to itself and its type is still `unknown`; for the
+  operators that own their absence semantics, see the entry below. Note for a
+  host: the masking operator `When` answers `Missing`, and its result type
+  carries a `missing` arm — for a `number` value `When(x, x > 0)` is typed
+  `missing | number`, not `number` — so a probe that tests `matches('number')`
+  on a restriction row sees the absence arm and must strip it before it decides.
+- **`Undefined` is absent for the operators that own their absence semantics
+  too.** Every operator declared `missingBehavior: 'handle'` decides for itself
+  what an absent operand or element means. Those operators read only the
+  `Missing` symbol (and a `NaN`) as absent, so `Mean([1, Undefined, 3])` stayed
+  symbolic while `Mean([1, Missing, 3])` answered `NaN`, and a host that wrote
+  `Undefined` for a value it does not have got a different answer from a host
+  that wrote `Missing` for the same row. An `Undefined` element or operand is
+  now absent in the same way as a `Missing` one, and answers the same:
+  `Mean([1, Undefined, 3])`, `Median`, `Variance`, `StandardDeviation`,
+  `Max`/`Min`, `Quantile` and `Covariance` over data with an `Undefined` datum
+  are `NaN`; `IsMissing(Undefined)` is `True`; `Coalesce(Undefined, 2)` is `2`;
+  a chained `At` absorbs an `Undefined` base or index; and `Count` and `Tally`
+  count an `Undefined` cell exactly as they count a `Missing` one. An absent
+  operand beside a POINT makes the point absent for both symbols too, so
+  `Undefined + (1, 1, 1)` and `Undefined · (1, 1, 1)` are `Missing` where the
+  first stayed symbolic and the second scaled each coordinate into its own
+  `Undefined`. The compiled JavaScript lane needed no change and now agrees with
+  the interpreter on every such row: `Undefined` is a declared engine symbol, so
+  a row written with it carries no free symbol and the compiler folds it to the
+  interpreter's own answer. (A literal `Missing` compiles as a FREE symbol
+  instead, which is why `Median([1, Missing, 3])`, `IsMissing(Missing)` and
+  `Coalesce(Missing, 2)` still compile to `3`, `false` and `undefined` against
+  the interpreter's `NaN`, `True` and `2` — a gap in the lowering of the
+  `Missing` symbol that predates this ruling and is recorded in `ROADMAP.md`.)
+  Unchanged in the interpreter: a bare `Undefined` evaluates to itself, its
+  declared type is still `unknown`, and the relational operators (`Equal`,
+  `Less`, …) and the boolean connectives (`And`, `Or`, `Not`) still read
+  `Undefined` as an ordinary value in their SCALAR arm, because that arm tests
+  the `Missing` symbol by name on its own Kleene route — `Equal(Undefined, 1)`
+  is `False` where `Equal(Missing, 1)` is `Missing`, and `And(Undefined, True)`
+  answers `Undefined` where `And(Missing, True)` answers `Missing`. Their
+  whole-collection arm already read both symbols alike at the 2026-09-21 ruling.
 - **`Round` rounds a half AWAY FROM ZERO at every precision.** At machine
   precision (`ce.precision = 'machine'`) the value of a half came from
   JavaScript `Math.round`, which rounds a half toward `+∞`: `Round(-0.5)` was

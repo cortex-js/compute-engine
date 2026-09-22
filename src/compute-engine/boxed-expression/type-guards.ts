@@ -50,13 +50,43 @@ export function isSymbol(
 }
 
 /**
- * True when a value is an absence MARKER — the `Missing` symbol or a `NaN`
- * number — regardless of provenance (I6). This is the value-level test the
- * missing-value runtime gate and chained-`At` absorption use
- * (`docs/TYPE-SYSTEM.md`).
+ * Is this expression one of the two SYMBOLS that stand for an absent value —
+ * `Missing` or `Undefined`?
+ *
+ * `Missing` is the position-preserving absent datum of `docs/ERROR-MODEL.md`
+ * §1. `Undefined` is the symbol the engine writes for a value that does not
+ * exist, and a user can write it directly. The two names are read as the same
+ * absence everywhere the engine tests for one (user rulings of 2026-09-21 for
+ * the numeric absence gate, 2026-09-22 for the operators that own their
+ * absence semantics). `Undefined` keeps its own meaning otherwise: its
+ * declared type is still `unknown`, and a bare `Undefined` evaluates to
+ * itself.
+ *
+ * This is the single choke point both absence tests share: `isAbsentValue`
+ * below, which adds a `NaN` arm on top of it, and `isAbsentScalarSymbol`
+ * (`boxed-expression/validate.ts`), which is this predicate under the name
+ * the numeric absence gate reads it by — that gate deliberately has no `NaN`
+ * arm, because a `NaN` operand already propagates through numeric evaluation
+ * natively and some operators give a literal `NaN` a bespoke meaning.
+ */
+export function isAbsentSymbol(expr: Expression | null | undefined): boolean {
+  return isSymbol(expr, 'Missing') || isSymbol(expr, 'Undefined');
+}
+
+/**
+ * True when a value is an absence MARKER — an absence symbol (`Missing` or
+ * `Undefined`) or a `NaN` number — regardless of provenance (I6). This is the
+ * value-level test the missing-value runtime gate and chained-`At` absorption
+ * use (`docs/TYPE-SYSTEM.md`).
+ *
+ * It is also the test the operators that OWN their absence semantics run —
+ * the ones declared `missingBehavior: 'handle'`, such as the statistics
+ * reducers, `Min`/`Max`, `Coalesce` and `IsMissing`. So
+ * `Mean([1, Undefined, 3])` is `NaN` exactly as `Mean([1, Missing, 3])` is,
+ * and `Coalesce(Undefined, 2)` is `2` (user ruling of 2026-09-22).
  */
 export function isAbsentValue(expr: Expression | null | undefined): boolean {
-  return isSymbol(expr, 'Missing') || (isNumber(expr) && expr.isNaN === true);
+  return isAbsentSymbol(expr) || (isNumber(expr) && expr.isNaN === true);
 }
 
 export function isFunction(

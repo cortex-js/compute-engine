@@ -57,6 +57,7 @@ import type {
   ProtocolHostHandler,
   ProtocolMembersInput,
   ProtocolRecord,
+  SumConformanceRecord,
 } from './types-engine.js';
 import type { Expression, ObjectInterface } from './types-expression.js';
 import type {
@@ -959,6 +960,24 @@ export function declareConformance(
     records.push(record);
   }
 
+  // A SUM type is a transparent ALIAS of its variants, so it cannot conform
+  // itself. The whole-sum spelling desugars instead — one ordinary edge per
+  // variant, each with `Self` bound to that variant — which is exactly what
+  // writing the block once per variant does. A CONDITIONAL conformance is not
+  // desugared: each variant carries its own subset of the sum's type
+  // parameters, so the head pattern of the `where` clause has no per-variant
+  // spelling; it keeps the alias rejection below. (User ruling of 2026-09-22.)
+  if (options?.where === undefined) {
+    const desugared = declareSumConformance(
+      ce,
+      targetSource,
+      records,
+      impl,
+      options
+    );
+    if (desugared !== undefined) return desugared;
+  }
+
   // The target arrives as type-expression source, like `DeclareType`'s body. A
   // conditional target is parsed with its clause, which binds the head's
   // variables.
@@ -1184,6 +1203,162 @@ export function declareConformance(
   }
 
   return null;
+}
+
+/**
+ * The variant names of the sugar-declared sum `name`, or `null` when a
+ * conformance of `name` is not a whole-sum conformance to desugar.
+ *
+ * A GENERIC sum is excluded: each variant is declared with the subset of the
+ * sum's type parameters that occurs in its own payload (`leaf` takes none
+ * while `node<T>` takes one), so `type tree<T> is P` has no single per-variant
+ * spelling. Such a target falls through to the ordinary alias rejection.
+ */
+function desugarableSumVariants(
+  ce: IComputeEngine,
+  name: string
+): string[] | null {
+  const record = ce._typeRegistry[name];
+  const variants = record?._sumVariants;
+  if (record === undefined || variants === undefined) return null;
+  if (record.typeParams !== undefined && record.typeParams.length > 0)
+    return null;
+  if (variants.some((v) => v.typeParams.length > 0)) return null;
+  return variants.map((v) => v.name);
+}
+
+/**
+ * Register the conformance of a SUM type as one edge per variant, or return
+ * `undefined` when `targetSource` does not name a sum whose conformance
+ * desugars (the caller then takes the ordinary single-target route).
+ *
+ * On success the statement is also REMEMBERED on each protocol record, so a
+ * variant the sum gains in a later batch receives the same implementation
+ * block — see {@link refreshSumConformances}. A later statement with no block
+ * keeps the remembered block: it re-asserts the conformance rather than
+ * withdrawing its implementation.
+ *
+ * Like every conformance registration, this is all-or-nothing: the variant
+ * list is checked before anything is registered, and a failure on one variant
+ * restores the protocol registry to the state it had on entry.
+ */
+function declareSumConformance(
+  ce: IComputeEngine,
+  targetSource: string,
+  records: readonly ProtocolRecord[],
+  impl: Record<string, Expression | JSImplementation> | undefined,
+  options?: { block?: Expression; fromStatementRoute?: boolean }
+): Expression | null | undefined {
+  const variants = desugarableSumVariants(ce, targetSource);
+  if (variants === null) return undefined;
+
+  const protocolNames = records.map((r) => r.name);
+
+  // Every variant must itself be a legal conformance target. A variant is a
+  // nominal type when the sum declares it, but a LATER program may re-declare
+  // that name — as a transparent alias, say — while the sum's variant list
+  // still names it. The whole spelling is then rejected, naming the variant
+  // that cannot conform: the single-target message names neither the variant
+  // nor the sum, and on this route both are needed to find the problem.
+  for (const variant of variants) {
+    let target: Type;
+    try {
+      target = parseType(variant, ce._typeResolver);
+    } catch {
+      return ce.error([
+        'protocol-conformance-target-invalid',
+        `the variant \`${variant}\` of the sum type \`${targetSource}\` is not a known type`,
+      ]);
+    }
+    const problem = conformanceTargetProblem(target, variant, protocolNames);
+    if (problem !== null)
+      return ce.error([
+        'protocol-conformance-target-invalid',
+        `the conformance target \`${targetSource}\` is a sum type, and its variant \`${variant}\` cannot conform: ${problem}`,
+      ]);
+  }
+
+  const restore = ce._protocolRegistryRollbackPoint();
+  for (const variant of variants) {
+    // The block is passed UNGROUNDED to each variant: `declareConformance`
+    // binds `Self` to the target it is registering, which is what makes the
+    // whole-sum spelling equivalent to writing the block once per variant.
+    const failure = declareConformance(ce, variant, protocolNames, impl, {
+      ...options,
+      where: undefined,
+    });
+    if (failure !== null) {
+      restore();
+      return failure;
+    }
+  }
+
+  for (const record of records) {
+    const entries = (record._sumConformances ??= []);
+    const at = entries.findIndex((e) => e.sum === targetSource);
+    // A statement with no block (`type shape is Area` on its own) asserts the
+    // conformance again; it does not withdraw an implementation given
+    // earlier. Overwriting the remembered entry with an empty one would leave
+    // the existing variant edges untouched but give every variant the sum
+    // gains LATER a pending, implementation-less edge. A statement that does
+    // carry a block replaces the remembered one, as a re-declaration must.
+    if (at >= 0 && impl === undefined && options?.block === undefined) continue;
+    const remembered: SumConformanceRecord = { sum: targetSource };
+    if (impl !== undefined) remembered.impl = impl;
+    if (options?.block !== undefined) remembered.block = options.block;
+    if (at < 0) entries.push(remembered);
+    else entries[at] = remembered;
+  }
+
+  return null;
+}
+
+/**
+ * Carry the whole-sum conformances of `sumName` to the variants it has just
+ * gained — the batch re-run of ruling P47 for the sum spelling.
+ *
+ * Called by `declareSumType` after a re-declaration has settled the new
+ * variant list. A variant that already has an edge for the protocol is left
+ * alone, whatever its implementation: an author who implemented one variant
+ * individually keeps that block.
+ *
+ * Throws on a registration that fails, so the re-declaration of the sum rolls
+ * back atomically (its caller snapshots the protocol registry for exactly
+ * this).
+ */
+export function refreshSumConformances(
+  ce: IComputeEngine,
+  sumName: string,
+  variants: readonly string[]
+): void {
+  for (const record of Object.values(ce._protocolRegistry)) {
+    const entry = record._sumConformances?.find((e) => e.sum === sumName);
+    if (entry === undefined) continue;
+    for (const variant of variants) {
+      if (record.conformances.some((c) => c.targetKey === variant)) continue;
+      const failure = declareConformance(
+        ce,
+        variant,
+        [record.name],
+        entry.impl,
+        {
+          block: entry.block,
+        }
+      );
+      if (failure !== null)
+        throw Error(
+          `The sum type "${sumName}" gained the variant "${variant}", and re-running its conformance to the protocol "${record.name}" failed: ${failure.toString()}`
+        );
+      // The block was authored in an earlier batch, and this registration only
+      // carries it to a variant the sum has just gained. Left stamped with the
+      // CURRENT batch, a re-declaration of the whole-sum conformance later in
+      // that same batch would be read as a second block for the pair and
+      // reported as `protocol-implementation-duplicate` — which is what a
+      // notebook cell that grows the sum and restates its conformance does.
+      const edge = record.conformances.find((c) => c.targetKey === variant);
+      if (edge !== undefined) delete edge._implOrigin;
+    }
+  }
 }
 
 /** A DECLARED effect contract that a conformance registration has falsified —

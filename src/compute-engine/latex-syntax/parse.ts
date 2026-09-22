@@ -4265,13 +4265,27 @@ function isDelimiterCommand(parser: Parser): boolean {
   return false;
 }
 
-/** Return true if `expr` is, or contains anywhere, an `Error` node. */
+/** Return true if `expr` is, or contains anywhere, an `Error` node.
+ *
+ * The tree is walked with an explicit stack instead of by recursion. It is as
+ * deep as the input nests, and a left-nested chain is as deep as the input is
+ * long: measured 2026-09-22, the recursive form of this walk overflowed the
+ * stack on a 5 000-term `1-2-3-…` subtraction chain, which parses and boxes
+ * without trouble otherwise. The answer is a single boolean, so the order the
+ * stack visits the operands in does not matter. */
 function containsError(expr: MathJsonExpression | null | undefined): boolean {
-  if (expr === null || expr === undefined) return false;
-  const op = operator(expr);
-  if (op === 'Error') return true;
-  if (op === '') return false;
-  return operands(expr).some((x) => containsError(x));
+  const pending: (MathJsonExpression | null | undefined)[] = [expr];
+  while (pending.length > 0) {
+    const x = pending.pop();
+    if (x === null || x === undefined) continue;
+    const op = operator(x);
+    if (op === 'Error') return true;
+    if (op === '') continue;
+    // Pushed one by one: a spread would pass every operand as an argument,
+    // and a node of a parsed flat sum can have tens of thousands of them.
+    for (const operand of operands(x)) pending.push(operand);
+  }
+  return false;
 }
 
 /**

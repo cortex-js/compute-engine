@@ -1370,6 +1370,17 @@ export interface CompileTarget<Expr = unknown> {
       isAbsent: (x: TargetSource) => TargetSource;
       coalesce: (x: TargetSource, d: TargetSource) => TargetSource;
     };
+    /**
+     * How a WRITTEN absence symbol (`Missing`, `Undefined`) is spelled when
+     * the target has both axes. The default is the object null, which keeps
+     * an absent list cell distinct from a `NaN` cell for the collection
+     * equality rule. A target whose numeric library raises on its null (the
+     * Python target: `np.cos(None)` is a `TypeError`) and whose
+     * collection-equality helper cannot express the distinction anyway
+     * declares `'numeric'` and spells the numeric marker instead (decided
+     * 2026-09-22).
+     */
+    writtenSymbol?: 'object' | 'numeric';
   };
 
   /**
