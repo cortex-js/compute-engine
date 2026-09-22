@@ -409,6 +409,22 @@ describe('a coordinate of a large written-out list of points', () => {
     expect(elements(z)[3]).toBe('x');
   });
 
+  // `PointX(C)` is not a collection before it is evaluated, so `Sum` takes
+  // its form with a body and no indexing set, which evaluates the body and
+  // folds the value. A value that is a list of machine numbers is summed on
+  // its doubles there too.
+  test('Sum of a coordinate', () => {
+    let total = 0;
+    for (const x of FLOATS) total += x;
+    expect(ce.box(['Sum', ['PointX', 'C']]).evaluate().re).toBe(total);
+    expect(ce.box(['Sum', ['PointX', 'C']]).N().re).toBe(total);
+    let integers = 0;
+    for (const k of INTEGERS) integers += k;
+    const sumY = ce.box(['Sum', ['PointY', 'C']]).evaluate();
+    expect(sumY.re).toBe(integers);
+    expect(sumY.isInteger).toBe(true);
+  });
+
   test('the reduction of coordinate arithmetic', () => {
     const expected = Math.min(1, ...FLOATS2.map((z) => 2 - 2 * z));
     expect(
@@ -416,5 +432,28 @@ describe('a coordinate of a large written-out list of points', () => {
         .box(['Min', 1, ['Subtract', 2, ['Multiply', 2, ['PointZ', 'C']]]])
         .evaluate().re
     ).toBe(expected);
+  });
+});
+
+describe('the doubles of a list (`array`)', () => {
+  // A machine float holds its value as a double, which is read directly. A
+  // big-number float is admitted only when a double holds the same value,
+  // which is decided by boxing the double and comparing.
+  test('machine floats, also those that arithmetic produced', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    expect(ce.box(['List', 0.1, 2.5, -3]).array).toEqual([0.1, 2.5, -3]);
+    const computed = ce.box(['List', ['Add', 0.1, 0.2], 1]).evaluate();
+    expect(computed.array).toEqual([0.1 + 0.2, 1]);
+    expect(computed.isMachineNumeric).toBe(true);
+  });
+
+  test('a big-number float with more digits than a double is not admitted', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 30;
+    const third = ce.box(['Divide', 1, 3]).N();
+    const list = ce.function('List', [third, ce.number(1)]);
+    expect(list.array).toBeUndefined();
+    expect(list.isMachineNumeric).toBe(false);
   });
 });

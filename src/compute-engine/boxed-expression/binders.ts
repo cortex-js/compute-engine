@@ -571,6 +571,15 @@ export function evaluateInOwnBindings(
   // exists to prevent. `rewriteWithBinders` does descend into dictionary values.
   if (isNumber(value)) return evaluated();
 
+  // Written-out data (a list of numbers, a list of points) holds numbers
+  // only, so it has no symbol to protect either. The walk below visited every
+  // element of such a list at every use of the symbol that holds it: 13% of
+  // `(2 − 2·PointZ(C)).N()` for a `C` of ten thousand points. Whether a node
+  // is written-out data is computed once per node (`_isLiteralData`), and a
+  // dictionary is never one, so the unsound shortcut described above is not
+  // taken here.
+  if (isFunction(value) && value._isLiteralData()) return evaluated();
+
   let env: Map<string, BoxedDefinition> | undefined;
   rewriteWithBinders(value, (sym, shadowed) => {
     const name = sym.symbol;

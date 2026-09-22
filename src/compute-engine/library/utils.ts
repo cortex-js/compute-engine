@@ -2498,7 +2498,8 @@ export function* reduceBigOp<T>(
   body: Expression,
   indexes: ReadonlyArray<Expression>,
   fn: BigOpTermCallback<T>,
-  initial: T
+  initial: T,
+  foldValue?: (collection: Expression) => T | undefined
 ): Generator<
   | T
   | typeof NON_ENUMERABLE_DOMAIN
@@ -2537,6 +2538,11 @@ export function* reduceBigOp<T>(
     const value = body.evaluate();
     if (value.isCollection) {
       if (value.isFiniteCollection !== true) return NON_ENUMERABLE_DOMAIN;
+      // The caller can fold the evaluated collection as a whole (`Sum` adds
+      // the doubles of a list of machine numbers); `undefined` means that it
+      // does not, and the elements are folded one by one.
+      const folded = foldValue?.(value);
+      if (folded !== undefined) return folded;
       return yield* reduceCollectionOrDecline(value, fn, initial);
     }
     // A body that is DEFINITELY collection-typed but carries no value — a

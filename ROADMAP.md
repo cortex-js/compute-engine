@@ -621,12 +621,6 @@ computed at once on doubles at machine precision (`machineBroadcast`,
   depends on an order the kernel does not reproduce. Reading that order from
   `add()` (`boxed-expression/arithmetic-add.ts`) would let the kernel follow
   it.
-- **A symbol that holds a list of points is walked at every use**:
-  `evaluateInOwnBindings` (`boxed-expression/binders.ts`) walks the stored
-  value with `rewriteWithBinders` to find free symbols, 13% of
-  `(2 − 2·PointZ(C)).N()` over ten thousand points. A written-out list of
-  number tuples holds no symbol; the fast path there covers a number literal
-  only.
 - **Above machine precision** nothing changed: every element is a
   `BigDecimal` computation, about 12 µs.
 
@@ -635,7 +629,7 @@ computed at once on doubles at machine precision (`machineBroadcast`,
 Found while looking at `Min(1, 2 − 2·PointZ(C))` over ten thousand points, the
 colour row of the Tycho corpus document `s8ishknvhe`, which Tycho interprets
 today (the row declines to compile, see the entry for that document). At
-machine precision that expression is now 8 ms under `evaluate()` (it was
+machine precision that expression is now 5 ms under `evaluate()` (it was
 219 ms on 2026-09-20): written-out data evaluates to itself, the coordinates
 are read into a list of unboxed doubles, the arithmetic runs on doubles, and
 `Min` scans them. What is left:
@@ -645,8 +639,6 @@ are read into a list of unboxed doubles, the arithmetic runs on doubles, and
   `array` of a list of such floats is also slow to build (8–15 ms), because
   each float is a big-number value that is checked by boxing its machine
   value again (`machineNumberOf`).
-- **Under `N()` the same expression is 18 ms**: the symbol `C` is walked at
-  every use (see the entry on element-wise functions).
 - Smaller, measured and not built: on the JavaScript target `Min(1, L)`
   copies its operand (`[1, ...L]`) and `Min(L, M)` copies both (0.22 ms
   against 0.07 ms for `Min(L)` at ten thousand elements); a seeded `reduce`

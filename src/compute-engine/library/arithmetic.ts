@@ -6857,7 +6857,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               }
               return sumAccumulate(acc, term, numeric);
             },
-            engine.Zero
+            engine.Zero,
+            // A body that evaluates to a list of machine numbers
+            // (`Sum(PointX(C))`) is summed on its doubles: `machineSum`.
+            (collection) => {
+              const total = machineListTotal(collection);
+              return total === undefined ? undefined : engine.number(total);
+            }
           ),
           engine._timeRemaining,
           engine._deadlineFrame
@@ -7754,17 +7760,28 @@ function machineSum(operand: Expression): number | Expression | undefined {
   const declined =
     evaluated?.isFiniteCollection === true ? evaluated : undefined;
   const list = machineListOf(evaluated ?? operand);
-  if (list === undefined || !isMachineDoubleList(list)) return declined;
+  if (list === undefined) return declined;
+  return machineListTotal(list) ?? declined;
+}
+
+/**
+ * The sum of the doubles of `list`, when `list` is a `List` of machine
+ * numbers at machine precision (`isMachineDoubleList`) and the doubles give
+ * the value the element-by-element fold gives: see `machineSum` for the
+ * rules. `undefined` otherwise.
+ */
+function machineListTotal(list: Expression): number | undefined {
+  if (!isMachineDoubleList(list)) return undefined;
   const values = list.array;
-  const frame = operand.engine._deadlineFrame;
+  const frame = list.engine._deadlineFrame;
   let total = 0;
   for (let i = 0; i < values.length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE) checkDeadline(frame);
     const v = values[i];
-    if (!Number.isFinite(v)) return declined;
+    if (!Number.isFinite(v)) return undefined;
     total += v;
     if (Number.isInteger(total) && !Number.isSafeInteger(total))
-      return declined;
+      return undefined;
   }
   return total === 0 ? 0 : total;
 }

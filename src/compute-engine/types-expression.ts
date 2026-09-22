@@ -2998,6 +2998,13 @@ export interface FunctionInterface {
    * The public view is `array`.
    */
   readonly _numericStore: readonly number[] | undefined;
+  /**
+   * Internal. Is this node written-out DATA: a canonical `List` or `Tuple`
+   * bound to the standard library whose every element is a number literal,
+   * or such a `List` or `Tuple` in turn? Such a node holds no symbol and
+   * evaluates to itself. The answer is computed once per node.
+   */
+  _isLiteralData(): boolean;
   readonly op1: Expression;
   readonly op2: Expression;
   readonly op3: Expression;

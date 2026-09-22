@@ -706,8 +706,16 @@ function addTensors(
   const tensors: Tensor<TensorDataType>[] = [];
   const scalars: Expression[] = [];
 
-  for (const op of ops) {
-    const evaluated = op.evaluate();
+  // This kernel is for a sum of two or more tensors (see the decline for a
+  // lone tensor below). The operands are counted before any is packed:
+  // packing a list of ten thousand numbers to find that it is the only
+  // tensor cost more than the element-wise route that then adds it.
+  const values = ops.map((op) => op.evaluate());
+  let tensorCount = 0;
+  for (const value of values) if (isTensorValue(value)) tensorCount += 1;
+  if (tensorCount < 2) return undefined;
+
+  for (const evaluated of values) {
     if (isTensorValue(evaluated)) {
       const packed = packTensor(ce, evaluated);
       // A tensor-VALUED operand that fails to pack (non-kernel-admissible

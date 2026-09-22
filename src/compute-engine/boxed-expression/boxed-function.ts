@@ -2578,7 +2578,10 @@ export class BoxedFunction
    * the engine. Any evaluation option other than `numericApproximation`
    * takes the general route.
    */
-  private _isLiteralData(options?: Partial<EvaluateOptions>): boolean {
+  _isLiteralData(options?: Partial<EvaluateOptions>): boolean {
+    // A list that holds its numbers unboxed is data under every option, and
+    // the walk below would read its operands, which boxes every number.
+    if (this._numericStore !== undefined) return true;
     if (this._operator !== 'List' && this._operator !== 'Tuple') return false;
     let numeric = false;
     if (options !== undefined)

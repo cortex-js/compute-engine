@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **A symbol that holds a large list of numbers or of points costs nothing to
+  read.** Each use of such a symbol walked the whole stored value to look for
+  symbols to protect, 1.2 ms for ten thousand points, although written-out
+  data holds numbers only. The walk is skipped for written-out data. Reading a
+  coordinate (`PointX`, `PointY`, `PointZ`) out of such a list boxed every
+  machine float a second time to check that a double holds it; a machine
+  float IS a double, and it is now read directly. `Sum` of a body that
+  evaluates to a list of machine numbers (`Sum(PointX(C))`) adds its doubles,
+  as `Sum(L)` does. Measured over ten thousand points at machine precision,
+  both versions interleaved in one process, under `evaluate()` and `N()`:
+  `PointZ(C)` 3.8 → 0.8 ms, `Sum(PointX(C))` 10.8 → 2.5 ms,
+  `Sum(2·PointZ(C))` 11.2 → 3.1 ms, `Min(1, 2 − 2·PointZ(C))` 7.2 → 4.8 ms
+  (`N()`: 15.5 → 6.6 ms), `Length(C)` 1.2 → 0.03 ms. The values are unchanged.
 - **Arithmetic over large lists of machine numbers is computed on doubles, at
   machine precision.** Above a hundred elements `2·L`, `L + 1`, `L + M`,
   `L·M` and `−L` answered a lazy `Map`, whose elements the interpreter

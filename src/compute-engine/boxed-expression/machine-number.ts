@@ -32,6 +32,13 @@ export function machineNumberOf(target: Expression): number | undefined {
   if (typeof nv === 'number') return nv;
   if (nv.im !== 0) return undefined;
   if (nv.isExact) return exactDoubleValue(nv);
+  // A machine float holds its value AS a double (`decimal` is a JavaScript
+  // number; a big-number float holds a `BigDecimal` there), so the double is
+  // the value and there is nothing to compare. The general test below boxes
+  // the double again to compare it, about 0.3 µs a number, which was a third
+  // of the time of reading a coordinate out of ten thousand points.
+  const stored = (nv as { decimal?: unknown }).decimal;
+  if (typeof stored === 'number') return stored;
   const x = target.re;
   return target.engine.number(x).isSame(target) ? x : undefined;
 }
