@@ -382,15 +382,19 @@
   points and an array of matrix rows are the same run-time shape but contract
   differently, so matrix multiplication cannot serve both. Unchanged: `Dot` of
   two points and of two vectors is still a number, and `Dot` of two matrices is
-  still the matrix product. A point list against a plain vector or a matrix has
-  no arm — it types `value` and stays symbolic, and the compiled route refuses
-  it rather than answer a list the type does not describe. A TUPLE of points, as
-  opposed to a list of them, is still one point with nested coordinates, which
-  is how `Norm` and `PointX` read it. The GPU targets still refuse a point list
-  whose length is only known at run time (a point value there has scalar
-  components), and the Python target now refuses a point-list operand instead of
-  emitting an `np.dot` contraction that answers something else in two of the
-  three orders.
+  still the matrix product. An empty list against a point answers `[]` on the
+  interpreter too, whether written or the held value of a symbol declared as a
+  list of points: such a value types `list<never>` and carries no point, so the
+  arm reads emptiness itself; two empty lists stay symbolic, because they may be
+  two empty vectors (the number 0) as well as two empty point lists. A point
+  list against a plain vector or a matrix has no arm — it types `value` and
+  stays symbolic, and the compiled route refuses it rather than answer a list
+  the type does not describe. A TUPLE of points, as opposed to a list of them,
+  is still one point with nested coordinates, which is how `Norm` and `PointX`
+  read it. The GPU targets still refuse a point list whose length is only known
+  at run time (a point value there has scalar components), and the Python target
+  now refuses a point-list operand instead of emitting an `np.dot` contraction
+  that answers something else in two of the three orders.
 - **A sum type can conform to a protocol under its own name** (ruled
   2026-09-22). `type shape is Area { … }`, where `shape` is a sum
   (`type shape = circle(r: number) | square(s: number)`), was rejected with

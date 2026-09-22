@@ -243,19 +243,6 @@ the interpreter reads it as a point list; the point-list broadcast of 2026-09-22
 excludes a tuple operand on all three routes and pins the exclusion
 (`test/compute-engine/dot-point-list-broadcast.test.ts`).
 
-### `Dot` of a point list that is EMPTY stays an inert `MatrixMultiply` in the interpreter (OPEN — found 2026-09-22 by the review of the point-list broadcast)
-
-With `P` declared `list<tuple<number, number>>` and assigned `[]`,
-`Dot(P, (3, 4))` evaluates to `MatrixMultiply([], [3, 4])` where the compiled
-route, which reads the declared type, answers `[]`; the literal
-`Dot([], (3, 4))` is the same inert `MatrixMultiply`. The evaluate handler sees
-only the EVALUATED operand, whose value is typed `list<never>`, so
-`isPointListValue` (`collection-utils.ts`) has no point evidence to read; the
-declaration lives on the operand before evaluation. Closing it means letting the
-`Dot` handler read the operand's static type (a lazy operand, or the descriptor
-the type handler already answers `list<number>` from) when the value is empty.
-Small; one input shape.
-
 ### Interval target: a piecewise whose condition does not depend on the interval variable is hulled over both arms, even on a point interval (OPEN — Tycho ask, reported 2026-09-22 by the Tycho session `tycho-d6`)
 
 Row 9 of the Desmos document `neyret/qm6cgwyusu`:

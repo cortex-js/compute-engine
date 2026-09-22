@@ -28,6 +28,7 @@ import {
   isNumericTuple,
   isPointListValue,
   isTuple,
+  isTextAtom,
 } from '../collection-utils.js';
 import {
   Expression,
@@ -789,6 +790,22 @@ function pointListElementDescriptor(
  * SHORT walk stays symbolic too. (The same rule as `collectData`'s
  * `enumerationDeclinedAfterWalk`, `library/collections.ts`.)
  */
+/**
+ * A finite, enumerable indexed collection that holds no element. A text atom
+ * is excluded: a string is an indexed collection of characters, but it stays
+ * atomic under every lift (`isBroadcastableCollection`, `collection-utils.ts`),
+ * so an empty string is not an empty list of points.
+ */
+function isEmptyIndexedList(x: Expression): boolean {
+  return (
+    !isTextAtom(x) &&
+    x.isIndexedCollection === true &&
+    x.isFiniteCollection === true &&
+    x.isEnumerableCollection !== false &&
+    x.count === 0
+  );
+}
+
 function pointListPoints(x: Expression): ReadonlyArray<Expression> | undefined {
   if (x.isFiniteCollection !== true) return undefined;
   const count = x.count;
@@ -831,6 +848,25 @@ function pointListDotProduct(
   // A TUPLE is a point, even when its coordinates are themselves points
   // ({@link isPointListNotPointOperand} says why), so only a non-tuple
   // collection of points is a list here.
+  // An EMPTY list against a tuple point answers the empty list. The held
+  // value of a symbol declared as a list of points and holding no points
+  // types `list<never>`: the declaration stays on the symbol and is not
+  // carried by the value this handler receives, so the point-list predicate
+  // below has no point to read. A `Dot` of an empty list against a point has
+  // no products to sum, so `[]` is its only answer, and it is the answer the
+  // type handler promises for the declared symbol and the compiled route
+  // delivers (decided 2026-09-22). Two empty lists are NOT decided here: they
+  // may be two empty point lists (`[]`) or two empty vectors (the number 0),
+  // and nothing in the values tells which, so that product stays symbolic.
+  const isEmptyList = ops.map((op) => !isTuple(op) && isEmptyIndexedList(op));
+  if (isEmptyList[0] !== isEmptyList[1]) {
+    const other = isEmptyList[0] ? ops[1] : ops[0];
+    if (isTuple(other) && pointComponents(other) !== undefined)
+      return ce.function('List', []);
+    return undefined;
+  }
+  if (isEmptyList[0] && isEmptyList[1]) return undefined;
+
   const isList = ops.map((op) => !isTuple(op) && isPointListValue(op));
   if (!isList[0] && !isList[1]) return undefined;
 
@@ -2025,11 +2061,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const points = [a, b].map((d, i) =>
             listOfPoints[i] ? pointListElementDescriptor(d) : d
           );
-          if (
-            points.every(
-              (d) => d !== undefined && isNumericTupleOperand(d)
-            )
-          )
+          if (points.every((d) => d !== undefined && isNumericTupleOperand(d)))
             return BoxedType.forResult(
               {
                 kind: 'list',

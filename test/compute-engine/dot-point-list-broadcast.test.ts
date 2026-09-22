@@ -61,9 +61,9 @@ describe('Dot over a list of points', () => {
     });
 
     test('.N() of the PointList spelling gives the same list', () => {
-      expect(
-        engine().box(['Dot', POINT_LIST, POINT]).N().toString()
-      ).toBe('[7,11]');
+      expect(engine().box(['Dot', POINT_LIST, POINT]).N().toString()).toBe(
+        '[7,11]'
+      );
     });
 
     test('an inexact coordinate numericizes under .N()', () => {
@@ -177,7 +177,9 @@ describe('Dot over a list of points', () => {
       const tuple = ce.box(['Dot', ['Tuple', 1, 'L'], TUPLE_POINT]);
       expect(pointList.type.matches('list<number>')).toBe(true);
       expect(tuple.type.matches('list<number>')).toBe(true);
-      expect(pointList.evaluate().toString()).toBe('Dot(PointList(1, L), (3, 4))');
+      expect(pointList.evaluate().toString()).toBe(
+        'Dot(PointList(1, L), (3, 4))'
+      );
       expect(tuple.evaluate().toString()).toBe('Dot((1, L), (3, 4))');
     });
 
@@ -319,10 +321,13 @@ describe('Dot over a list of points', () => {
       const ce = new ComputeEngine();
       ce.declare('L', 'list<number>');
       ce.declare('M', 'list<number>');
-      const r = compile(ce.box(['Dot', ['PointList', 1, 'L'], ['PointList', 1, 'M']]), {
-        fallback: false,
-        constantFold: false,
-      });
+      const r = compile(
+        ce.box(['Dot', ['PointList', 1, 'L'], ['PointList', 1, 'M']]),
+        {
+          fallback: false,
+          constantFold: false,
+        }
+      );
       expect(r.success).toBe(true);
       expect(r.run!({ L: [1, 2], M: [1, 2, 3] } as any)).toBeNaN();
     });
@@ -348,6 +353,60 @@ describe('Dot over a list of points', () => {
         [19, 22],
         [43, 50],
       ]);
+    });
+
+    describe('an EMPTY point list answers the empty list in the interpreter', () => {
+      // The held value of a symbol declared as a list of points and holding
+      // no points types `list<never>`: the declaration is not carried by the
+      // value the evaluate handler receives, so the point-list predicate has
+      // no point to read. The arm reads emptiness itself, so the interpreter
+      // answers the `[]` the type handler promises and the compiled route
+      // delivers, instead of an inert `MatrixMultiply([], (3, 4))`.
+      test('a declared point list assigned the empty list', () => {
+        const ce = new ComputeEngine();
+        ce.declare('P', 'list<tuple<number, number>>');
+        ce.assign('P', ce.box(['List']));
+        const e = ce.box(['Dot', 'P', TUPLE_POINT]);
+        expect(e.type.toString()).toBe('list<number>');
+        expect(e.evaluate().toString()).toBe('[]');
+        expect(ce.box(['Dot', TUPLE_POINT, 'P']).evaluate().toString()).toBe(
+          '[]'
+        );
+      });
+
+      test('a written empty list against a point', () => {
+        const ce = new ComputeEngine();
+        expect(
+          ce
+            .box(['Dot', ['List'], TUPLE_POINT])
+            .evaluate()
+            .toString()
+        ).toBe('[]');
+      });
+
+      // Two empty lists may be two empty point lists (`[]`) or two empty
+      // vectors (the number 0); nothing in the values decides, so the
+      // product stays symbolic.
+      test('two empty lists stay symbolic', () => {
+        const ce = new ComputeEngine();
+        const r = ce.box(['Dot', ['List'], ['List']]).evaluate();
+        expect(r.operator).not.toBe('List');
+        expect(r.isNumberLiteral).not.toBe(true);
+      });
+
+      // A string is an indexed collection of characters, but it stays atomic
+      // under every lift, so an empty string is not an empty list of points.
+      test('an empty string is not an empty point list', () => {
+        const ce = new ComputeEngine();
+        const r = ce.box(['Dot', { str: '' }, TUPLE_POINT]).evaluate();
+        expect(r.operator).not.toBe('List');
+      });
+
+      test('an empty list against a plain vector is not a point product', () => {
+        const ce = new ComputeEngine();
+        const r = ce.box(['Dot', ['List'], ['List', 1, 2]]).evaluate();
+        expect(r.operator).not.toBe('List');
+      });
     });
 
     describe('an EMPTY point list answers the empty list', () => {
@@ -381,7 +440,12 @@ describe('Dot over a list of points', () => {
 
       test('the same lowering still answers the products when points arrive', () => {
         expect(
-          emptyRun(['Dot', 'P', TUPLE_POINT], { P: [[1, 1], [1, 2]] })
+          emptyRun(['Dot', 'P', TUPLE_POINT], {
+            P: [
+              [1, 1],
+              [1, 2],
+            ],
+          })
         ).toEqual([7, 11]);
       });
 
@@ -444,9 +508,9 @@ describe('Dot over a list of points', () => {
       const taken = ce.box(['Take', 'P', 2]);
       expect(taken.isFiniteCollection).toBe(true);
       expect(taken.count).toBe(2);
-      expect(ce.box(['Dot', ['Take', 'P', 2], ['Tuple', 1, 2]]).evaluate().operator).toBe(
-        'Dot'
-      );
+      expect(
+        ce.box(['Dot', ['Take', 'P', 2], ['Tuple', 1, 2]]).evaluate().operator
+      ).toBe('Dot');
     });
 
     test('the unassigned point list itself stays symbolic', () => {
