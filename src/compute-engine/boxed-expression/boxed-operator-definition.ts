@@ -68,6 +68,7 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
 import { journalDefinitionRecord } from './boxed-value-definition.js';
+import { refineDeclaredPlaceholders } from './effects-inference.js';
 
 const OPERATOR_DEF_KEYS = new Set([
   // Base
@@ -621,6 +622,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     configurable: true,
     get(this: _BoxedOperatorDefinition): BoxedType {
       this._refreshDerivedEffects();
+      if (this._signatureSkeleton !== undefined) return this._deriveSignature();
       return this._signature;
     },
     set(this: _BoxedOperatorDefinition, value: BoxedType) {
@@ -635,6 +637,97 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       this._setSignature(() => value);
     },
   };
+
+  /** The declared signature as written, when it has `unknown` slots
+   * (`hasSignaturePlaceholder`) and this definition holds a user lambda
+   * assigned under it. The signature this definition reports is then
+   * derived on each read: the stored signature with the skeleton's
+   * placeholder slots refined again from the lambda's CURRENT type
+   * (`refineDeclaredPlaceholders`), so the result slot follows the body when
+   * a head that the body calls is bound later. Set only by the assignment
+   * that installs the lambda (`engine-declarations.ts`); an explicit
+   * signature write through {@link _update} clears it. `undefined` for every
+   * other definition.
+   * @internal */
+  _signatureSkeleton: Type | undefined = undefined;
+
+  /** Memo of {@link _deriveSignature}, keyed on the identities of the stored
+   * signature, the skeleton and the lambda's type object. It is not state,
+   * so a checkpoint does not capture it: a restore that changes any key
+   * makes the memo miss. */
+  private _signatureMemo:
+    | {
+        stored: BoxedType;
+        skeleton: Type;
+        lambdaType: BoxedType;
+        type: BoxedType;
+      }
+    | undefined = undefined;
+
+  /** True while {@link _deriveSignature} reads the lambda's type. A
+   * transient re-entrancy guard, not state. */
+  private _derivingSignature = false;
+
+  private _deriveSignature(): BoxedType {
+    const stored = this._signature;
+    const skeleton = this._signatureSkeleton;
+    const literal = this._lambdaLiteral;
+    if (
+      skeleton === undefined ||
+      literal === undefined ||
+      !this._isLambda ||
+      this.inferredSignature ||
+      this._derivingSignature
+    )
+      return stored;
+    // A recursive body reads this signature while the lambda's type is
+    // computed. The re-entrant read gets the stored signature and is not
+    // memoized, so the cycle stops after one level.
+    let lambdaType: BoxedType;
+    this._derivingSignature = true;
+    try {
+      lambdaType = literal.type;
+    } finally {
+      this._derivingSignature = false;
+    }
+    const memo = this._signatureMemo;
+    if (
+      memo !== undefined &&
+      memo.stored === stored &&
+      memo.skeleton === skeleton &&
+      memo.lambdaType === lambdaType
+    )
+      return memo.type;
+    const t = stored.type;
+    let type = stored;
+    if (
+      typeof t === 'object' &&
+      t.kind === 'signature' &&
+      typeof skeleton === 'object' &&
+      skeleton.kind === 'signature' &&
+      (t.args?.length ?? 0) === (skeleton.args?.length ?? 0)
+    ) {
+      // Put the placeholders back into the stored signature, which keeps the
+      // effect specifier the definition maintains, then refine them again
+      // from the lambda.
+      const base: FunctionSignature = {
+        ...t,
+        result: skeleton.result === 'unknown' ? 'unknown' : t.result,
+      };
+      if (t.args !== undefined)
+        base.args = t.args.map((a, i) =>
+          skeleton.args?.[i]?.type === 'unknown' ? { ...a, type: 'unknown' } : a
+        );
+      // When the lambda gives no evidence for a slot, the slot reads
+      // `unknown` again: the answer is `base`, never an older refinement.
+      type = new BoxedType(
+        refineDeclaredPlaceholders(base, lambdaType.type),
+        this.engine._typeResolver
+      );
+    }
+    this._signatureMemo = { stored, skeleton, lambdaType, type };
+    return type;
+  }
 
   /** Write this definition's signature, deriving it with the assumptions
    * hidden.
@@ -1150,6 +1243,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       inferredSignature: this.inferredSignature,
       _isLambda: this._isLambda,
       _lambdaLiteral: this._lambdaLiteral,
+      _signatureSkeleton: this._signatureSkeleton,
       evaluate: this.evaluate,
       evaluateAsync: this.evaluateAsync,
       readsRandomFrame: this.readsRandomFrame,
@@ -1172,6 +1266,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       inferredSignature: boolean;
       _isLambda: boolean;
       _lambdaLiteral: Expression | undefined;
+      _signatureSkeleton: Type | undefined;
       evaluate: _BoxedOperatorDefinition['evaluate'];
       evaluateAsync: _BoxedOperatorDefinition['evaluateAsync'];
       readsRandomFrame: boolean;
@@ -1190,6 +1285,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.inferredSignature = s.inferredSignature;
     this._isLambda = s._isLambda;
     this._lambdaLiteral = s._lambdaLiteral;
+    this._signatureSkeleton = s._signatureSkeleton;
     this.evaluate = s.evaluate;
     this.evaluateAsync = s.evaluateAsync;
     this.readsRandomFrame = s.readsRandomFrame;
@@ -1259,6 +1355,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // COPIED, not aliased: provenance is appended to in place.
       _typeProvenance: this._typeProvenance?.slice(),
       _derivedSignature: this._derivedSignature,
+      _signatureSkeleton: this._signatureSkeleton,
       _isLambda: this._isLambda,
       _lambdaLiteral: this._lambdaLiteral,
       _isMultiClause: this._isMultiClause,
@@ -1330,6 +1427,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.inferredSignature = s.inferredSignature;
     this._typeProvenance = s._typeProvenance;
     this._derivedSignature = s._derivedSignature;
+    this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._isLambda = s._isLambda;
     this._lambdaLiteral = s._lambdaLiteral;
     this._isMultiClause = s._isMultiClause;
@@ -1517,6 +1615,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         );
       }
       this.signature = newSig;
+      this._signatureSkeleton = undefined;
 
       if ('inferredSignature' in def)
         this.inferredSignature = def.inferredSignature as boolean;

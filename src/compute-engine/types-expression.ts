@@ -162,6 +162,11 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _placeholderSkeleton: Type | undefined;
 
+  /** Declared signature skeleton for a signature with `unknown` slots —
+   * mirror of the member documented in `types-definitions.ts`.
+   * @internal */
+  _signatureSkeleton: Type | undefined;
+
   /** Element-refinement write that preserves `_placeholderSkeleton` —
    * mirror of the member documented in `types-definitions.ts`.
    * @internal */
@@ -390,6 +395,10 @@ interface BoxedOperatorDefinition
    * pinned signature was derived from an annotated function literal at assign
    * time, not declared by the author. @internal */
   _derivedSignature: boolean;
+  /** Declared signature skeleton of a lambda assigned under a signature with
+   * `unknown` slots — mirror of the member documented in
+   * `types-definitions.ts`. @internal */
+  _signatureSkeleton: Type | undefined;
   signature: BoxedType;
   /** Fact-blind signature write — mirror of the member documented in
    * `types-definitions.ts`.

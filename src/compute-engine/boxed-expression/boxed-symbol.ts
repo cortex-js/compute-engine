@@ -1034,6 +1034,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // every later read of the symbol's type fails on it (the symbol-type
         // branch below wraps for the same reason).
         symbolDef.operator.signature = this.engine.type(t);
+        // An explicit retype replaces the declaration, so a signature
+        // skeleton kept from an earlier declaration must not refine it.
+        symbolDef.operator._signatureSkeleton = undefined;
       } else {
         // We are changing a symbol to a function.
         // `type-write`, not `redefine`: this caller bumps NOTHING today (the

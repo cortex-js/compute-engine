@@ -347,6 +347,25 @@ export function refineDeclaredPlaceholders(declared: Type, value: Type): Type {
 }
 
 /**
+ * True when {@link refineDeclaredPlaceholders} can move a slot of `t`: `t` is
+ * a plain fixed-arity ground signature and at least one of its top-level
+ * parameter slots or its result slot is `unknown`.
+ *
+ * A declaration of this shape is a SIGNATURE SKELETON. The value definition
+ * keeps it as written and derives the refined signature from the current
+ * function value on every read, so the refinement follows the body instead
+ * of recording the body's type at the moment of the first assignment.
+ */
+export function hasSignaturePlaceholder(t: Type): boolean {
+  if (typeof t !== 'object' || t.kind !== 'signature') return false;
+  if (isPolymorphicType(t)) return false;
+  if ((t.optArgs?.length ?? 0) > 0) return false;
+  if (t.variadicArg !== undefined) return false;
+  if (t.result === 'unknown') return true;
+  return (t.args ?? []).some((a) => a.type === 'unknown');
+}
+
+/**
  * The MIRROR of {@link refineDeclaredPlaceholders}, deliberately NARROWER: a
  * VALUE's placeholder `unknown` slot adopts the expected signature's slot
  * only when that slot is a TOP type (`any` — adopting `unknown` is a no-op).

@@ -32,7 +32,11 @@ import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isFunction, isNumber } from './type-guards.js';
-import { matchesDeclaredTypeAxes } from './effects-inference.js';
+import {
+  hasSignaturePlaceholder,
+  matchesDeclaredTypeAxes,
+  refineDeclaredPlaceholders,
+} from './effects-inference.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
@@ -176,6 +180,32 @@ export class _BoxedValueDefinition
    * `list<integer>`, while `a = ["x"]` re-refines. `undefined` for
    * every other declaration. */
   _placeholderSkeleton: Type | undefined = undefined;
+
+  /** The declared function signature as written, when it has `unknown`
+   * slots (`hasSignaturePlaceholder`), such as `(unknown) -> unknown`. An
+   * `unknown` slot is a placeholder, not a contract, so the signature this
+   * definition reports is DERIVED on each read: the skeleton refined from
+   * the current type of the stored function value
+   * (`refineDeclaredPlaceholders`). Thus the result slot follows the body.
+   * When a head that the body calls is bound after this assignment, the
+   * reported result changes with the body's type, as it does for a symbol
+   * declared with the bare `function` type. Each new assignment is checked
+   * against the skeleton, not against an earlier refinement. `undefined`
+   * for every other declaration. Read only while `inferredType` is false:
+   * an inferred signature is revised by `_reviseInferredType` instead. */
+  _signatureSkeleton: Type | undefined = undefined;
+
+  /** Memo of the signature derived from `_signatureSkeleton`, keyed on the
+   * identities of the skeleton and of the stored value's type object. It is
+   * not state, so a checkpoint does not capture it: a restore that changes
+   * either key makes the memo miss. */
+  private _signatureMemo:
+    | { skeleton: Type; valueType: BoxedType; type: BoxedType }
+    | undefined = undefined;
+
+  /** True while `_deriveSignature` reads the stored value's type. A
+   * transient re-entrancy guard, not state. */
+  private _derivingSignature = false;
 
   // History of writes to this definition's type (see `TypeProvenanceEntry`
   // in `types-definitions.ts` and the phase-1 design in
@@ -323,6 +353,7 @@ export class _BoxedValueDefinition
       this.inferredType = def.inferred ?? false;
       if (!this.inferredType && isConstructorPlaceholderType(type))
         this._placeholderSkeleton = type;
+      if (hasSignaturePlaceholder(type)) this._signatureSkeleton = type;
     }
 
     this.effectsDeclared = def.effectsDeclared ?? false;
@@ -565,6 +596,11 @@ export class _BoxedValueDefinition
       _defValue: this._defValue,
       inferredType: this.inferredType,
       _isSelfReferential: this._isSelfReferential,
+      // The two skeletons are written by the same type setter as `_type`, so
+      // a restore without them would leave a skeleton that no longer
+      // matches the restored type.
+      _placeholderSkeleton: this._placeholderSkeleton,
+      _signatureSkeleton: this._signatureSkeleton,
       // Effects annotation provenance rides in the tuple: the typed-`let`
       // upgrade writes it alongside `type`/`inferredType`
       // (`docs/EFFECTS-MODEL.md`, rollback
@@ -597,9 +633,13 @@ export class _BoxedValueDefinition
         | undefined;
       inferredType: boolean;
       _isSelfReferential: boolean;
+      _placeholderSkeleton: Type | undefined;
+      _signatureSkeleton: Type | undefined;
       effectsDeclared: boolean;
     };
     this._type = s._type;
+    this._placeholderSkeleton = s._placeholderSkeleton;
+    this._signatureSkeleton = s._signatureSkeleton;
     this._value = s._value;
     this._defValue = s._defValue;
     this.inferredType = s.inferredType;
@@ -649,6 +689,7 @@ export class _BoxedValueDefinition
       _type: this._type,
       inferredType: this.inferredType,
       _placeholderSkeleton: this._placeholderSkeleton,
+      _signatureSkeleton: this._signatureSkeleton,
       // COPIED, not aliased: provenance is appended to in place, so a
       // snapshot sharing the array would grow with the writes it exists to
       // undo and restore the post-write history.
@@ -695,6 +736,7 @@ export class _BoxedValueDefinition
     this._type = s._type as typeof this._type;
     this.inferredType = s.inferredType as boolean;
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
+    this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._typeProvenance = s._typeProvenance as
       | TypeProvenanceEntry[]
       | undefined;
@@ -729,7 +771,45 @@ export class _BoxedValueDefinition
     const t = this._type;
     if (t === undefined || t === null)
       return this.storedValue?.type ?? BoxedType.unknown;
+    if (this._signatureSkeleton !== undefined && !this.inferredType)
+      return this._deriveSignature(t, this._signatureSkeleton);
     return this._reviseInferredType(t);
+  }
+
+  /** The signature skeleton refined from the stored value's CURRENT type.
+   * Nothing is written. The value is a function literal, or a symbol that
+   * names a function (`f := g`). The value's type is itself a memo that a
+   * new binding of a head it calls invalidates, so this reading follows that
+   * binding. Without a value (declared, not yet assigned) the recorded type
+   * is the answer.
+   *
+   * A recursive body reads its own definition's type while its type is
+   * computed. The re-entrant read gets the recorded type and is not
+   * memoized, so the cycle stops after one level. */
+  private _deriveSignature(recorded: BoxedType, skeleton: Type): BoxedType {
+    const v = this.storedValue;
+    if (v === undefined || this._derivingSignature) return recorded;
+    let valueType: BoxedType;
+    this._derivingSignature = true;
+    try {
+      valueType = v.type;
+    } finally {
+      this._derivingSignature = false;
+    }
+    const memo = this._signatureMemo;
+    if (
+      memo !== undefined &&
+      memo.skeleton === skeleton &&
+      memo.valueType === valueType
+    )
+      return memo.type;
+    const refined = refineDeclaredPlaceholders(skeleton, valueType.type);
+    const type =
+      refined === recorded.type
+        ? recorded
+        : new BoxedType(refined, this._engine._typeResolver);
+    this._signatureMemo = { skeleton, valueType, type };
+    return type;
   }
 
   /**
@@ -909,6 +989,16 @@ export class _BoxedValueDefinition
     this._placeholderSkeleton = isConstructorPlaceholderType(this._type.type)
       ? this._type.type
       : undefined;
+    // The same rule for a signature skeleton: a write of a signature with
+    // `unknown` slots (re)establishes it, any other write clears it. The
+    // skeleton is not gated on `inferredType` here, because some callers
+    // write the type first and clear `inferredType` after the write
+    // (`symbol.type = …`, the typed `let` upgrade); `declaredType` reads the
+    // skeleton only when the type is not inferred.
+    this._signatureSkeleton = hasSignaturePlaceholder(this._type.type)
+      ? this._type.type
+      : undefined;
+    this._signatureMemo = undefined;
 
     // Are we resetting the type/value?
     if (this._type.isUnknown) {

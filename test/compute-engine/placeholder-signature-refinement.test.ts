@@ -160,6 +160,158 @@ describe('refinement is per-position', () => {
   });
 });
 
+describe('the refined signature follows the body', () => {
+  // The refined signature is DERIVED from the stored function value on every
+  // read, and each assignment refines the declaration as written. Before,
+  // the first assignment stored the body's type of that moment, so the
+  // result of `phi` below stayed `broadcastable<number>` (a `c_1` call with
+  // no body yet could be a list) after `c_1` was bound. The same
+  // definitions then typed differently depending on their order, and the
+  // JavaScript compile of `2 cos(phi(x))` failed.
+  const PHI =
+    '(x) \\mapsto 2\\pi\\operatorname{mod}(\\sin(10^4x)10^4,1)+c_1(x)';
+  const C1 = '(i) \\mapsto v i t';
+
+  function definePhi(
+    ce: ComputeEngine,
+    spelling: 'string' | 'object' | 'declare-with-value',
+    c1First: boolean
+  ): void {
+    ce.declare('c_1', 'function');
+    if (c1First) ce.assign('c_1', ce.parse(C1));
+    if (spelling === 'declare-with-value')
+      ce.declare('phi', { type: '(unknown) -> unknown', value: ce.parse(PHI) });
+    else {
+      if (spelling === 'string') ce.declare('phi', '(unknown) -> unknown');
+      else ce.declare('phi', { signature: '(unknown) -> unknown' });
+      ce.assign('phi', ce.parse(PHI));
+    }
+    if (!c1First) ce.assign('c_1', ce.parse(C1));
+  }
+
+  test.each(['string', 'object', 'declare-with-value'] as const)(
+    '%s declaration: a head bound AFTER the assignment refines the result',
+    (spelling) => {
+      const ce = freshEngine();
+      definePhi(ce, spelling, false);
+      expect(ce.box('phi').type.toString()).toBe('(unknown) -> number');
+      expect(ce.box(['phi', 'x']).type.toString()).toBe('number');
+      expect(ce.parse('\\phi(x)').type.toString()).toBe('number');
+    }
+  );
+
+  test('the order of the two definitions does not change the types', () => {
+    const early = freshEngine();
+    definePhi(early, 'object', true);
+    const late = freshEngine();
+    definePhi(late, 'object', false);
+    expect(late.box('phi').type.toString()).toBe(
+      early.box('phi').type.toString()
+    );
+  });
+
+  test('before the head is bound, the result is still the wide one', () => {
+    const ce = freshEngine();
+    ce.declare('c_1', 'function');
+    ce.declare('phi', '(unknown) -> unknown');
+    ce.assign('phi', ce.parse(PHI));
+    expect(ce.box('phi').type.toString()).toBe(
+      '(unknown) -> broadcastable<number>'
+    );
+  });
+
+  test('a re-assignment refines the declaration, not the earlier refinement', () => {
+    const ce = freshEngine();
+    ce.declare('f', '(unknown) -> unknown');
+    ce.assign('f', ce.parse('(x) \\mapsto x + 1'));
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> number');
+    ce.assign('f', ce.parse('(x) \\mapsto [x, x]'));
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> vector<2>');
+    expect(ce.box(['f', 2]).evaluate().toString()).toBe('[2,2]');
+  });
+
+  test('a value assigned later to a free symbol of the body refines the result', () => {
+    // Before, `f` kept `-> number` while `f(2)` evaluated to a list.
+    const ce = freshEngine();
+    ce.declare('f', '(unknown) -> unknown');
+    ce.assign('f', ce.parse('(x) \\mapsto 1 + a x'));
+    ce.assign('a', ce.parse('[1,2,3]'));
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> list<number>');
+    expect(ce.box(['f', 2]).evaluate().toString()).toBe('[3,5,7]');
+  });
+
+  test('a concrete declared slot stays the contract', () => {
+    const ce = freshEngine();
+    ce.declare('c', 'function');
+    ce.declare('g', '(number) -> unknown');
+    ce.assign('g', ce.parse('(x) \\mapsto 1 + c(x)'));
+    ce.assign('c', ce.parse('(i) \\mapsto 2i'));
+    expect(ce.box('g').type.toString()).toBe('(number) -> number');
+  });
+
+  test('a named function assigned under the declaration refines it', () => {
+    const ce = freshEngine();
+    ce.declare('sq', '(number) -> number');
+    ce.assign('sq', ce.parse('(x) \\mapsto x^2'));
+    ce.declare('f', '(unknown) -> unknown');
+    ce.assign('f', ce.symbol('sq'));
+    expect(ce.box('f').type.toString()).toBe('(number) -> number');
+    expect(ce.box(['f', 3]).evaluate().toString()).toBe('9');
+  });
+
+  test('a recursive body types and evaluates on both definition kinds', () => {
+    const ce = freshEngine();
+    ce.declare('fact', '(unknown) -> unknown');
+    ce.assign(
+      'fact',
+      ce.parse(
+        '(n) \\mapsto \\operatorname{If}(n \\le 1, 1, n \\cdot \\operatorname{fact}(n-1))'
+      )
+    );
+    expect(ce.box('fact').type.toString().startsWith('(unknown) -> ')).toBe(
+      true
+    );
+    expect(ce.box(['fact', 5]).evaluate().toString()).toBe('120');
+    ce.declare('k', {
+      signature: '(unknown) -> unknown',
+      evaluate: ce.parse('(x) \\mapsto x'),
+    });
+    ce.assign(
+      'k',
+      ce.parse('(n) \\mapsto \\operatorname{If}(n \\le 1, 1, n \\cdot k(n-1))')
+    );
+    expect(ce.box(['k', 5]).evaluate().toString()).toBe('120');
+  });
+
+  test('an explicit retype replaces the skeleton of an operator definition', () => {
+    const ce = freshEngine();
+    ce.declare('k', {
+      signature: '(unknown) -> unknown',
+      evaluate: ce.parse('(x) \\mapsto x'),
+    });
+    ce.assign('k', ce.parse('(x) \\mapsto 2x'));
+    ce.box('k').type = ce.type('(integer) -> integer');
+    expect(ce.box('k').type.toString()).toBe('(integer) -> integer');
+  });
+
+  test('a lambda-backed operator definition follows its body too', () => {
+    // `declare(…, { signature, evaluate })` installs an operator definition
+    // that holds the lambda; an assignment keeps that representation.
+    const ce = freshEngine();
+    ce.declare('c', 'function');
+    ce.declare('k', {
+      signature: '(unknown) -> unknown',
+      evaluate: ce.parse('(x) \\mapsto x + 1'),
+    });
+    ce.assign('k', ce.parse('(x) \\mapsto 1 + c(x)'));
+    expect(ce.box(['k', 'x']).type.toString()).toBe('broadcastable<number>');
+    ce.assign('c', ce.parse('(i) \\mapsto 2i'));
+    expect(ce.box(['k', 'x']).type.toString()).toBe('number');
+    ce.assign('k', ce.parse('(x) \\mapsto [x, x]'));
+    expect(ce.box(['k', 'x']).type.toString()).toBe('vector<2>');
+  });
+});
+
 describe('`any` stays a contract', () => {
   test('a body that cannot accept every value is refused', () => {
     const ce = freshEngine();

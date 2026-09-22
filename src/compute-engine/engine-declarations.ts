@@ -51,6 +51,7 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
+  hasSignaturePlaceholder,
   presentedValueType,
   refineDeclaredPlaceholders,
   signatureEffects,
@@ -2063,7 +2064,17 @@ export function declareFn(
         );
         valueDef = { ...valueDef, value: reconciled };
       }
-      if (declaredType !== declaredType0)
+      // A declaration with `unknown` slots installs AS WRITTEN: the value
+      // definition keeps it as its signature skeleton and derives the
+      // refined signature from the stored value on each read
+      // (`_signatureSkeleton`). Installing the refinement instead would
+      // replace the placeholders with the body's type at this moment, and a
+      // head that the body calls and that is bound later could not change
+      // it.
+      if (
+        declaredType !== declaredType0 &&
+        !hasSignaturePlaceholder(declaredType0)
+      )
         valueDef = { ...valueDef, type: ce.type(declaredType) };
     }
     ce._declareSymbolValue(id, valueDef, scope);
@@ -2281,7 +2292,13 @@ export function assignFn(
       // `(tuple<…>) -> unknown`) still shows an `unknown` result here — only
       // the post-ascription `reconciled` carries the sharpened result, so a
       // second pass runs below once `reconciled` exists.
-      const declaredType0 = def.value.type;
+      // A signature skeleton (`_signatureSkeleton`) is the contract that the
+      // new literal refines. The type the definition reports is the
+      // skeleton refined from the PREVIOUS value, so refining from it would
+      // find no placeholder left, and a re-assignment could not re-refine.
+      const skeleton = def.value._signatureSkeleton;
+      const declaredType0 =
+        skeleton !== undefined ? ce.type(skeleton) : def.value.type;
       let declaredType = refineDeclaredType(ce, declaredType0, literal.type);
 
       // A generic declaration DOES take a function-literal body (the
@@ -2341,7 +2358,11 @@ export function assignFn(
         )
       )
         throw declaredTypeError(id, reconciled, declaredType);
-      if (declaredType !== declaredType0) def.value.type = declaredType;
+      // With a skeleton the refined signature is derived from the stored
+      // value on each read, so nothing is written: writing it would clear
+      // the skeleton.
+      if (declaredType !== declaredType0 && skeleton === undefined)
+        def.value.type = declaredType;
       ce._setSymbolValue(id, reconciled);
       return ce;
     }
@@ -2450,7 +2471,15 @@ export function assignFn(
         // broadcast flag below are computed from the concrete type. Two
         // passes, for the same reason as there: only the post-ascription
         // `reconciled` carries a pass-through body's sharpened result.
-        const declaredType0 = def.operator.signature;
+        // A lambda installed earlier under a declaration with `unknown`
+        // slots reports a signature derived from that lambda
+        // (`_signatureSkeleton`). The new literal refines the skeleton, not
+        // that derived signature, which has no placeholder left.
+        const opSkeleton = def.operator._signatureSkeleton;
+        const declaredType0 =
+          opSkeleton !== undefined
+            ? ce.type(opSkeleton)
+            : def.operator.signature;
         let declaredType = refineDeclaredType(ce, declaredType0, literal.type);
 
         // G11 — see the value-slot route above. The literal then installs as a
@@ -2546,17 +2575,30 @@ export function assignFn(
               callableAfter: true,
             });
           }
+          // Keep the declaration's placeholders, so that the reported
+          // signature follows the lambda (`_signatureSkeleton`). Set after
+          // the install, because an explicit signature write clears it.
+          if (hasSignaturePlaceholder(declaredType0.type)) {
+            const installed = ce.lookupDefinition(id);
+            if (installed !== undefined && isOperatorDef(installed))
+              installed.operator._signatureSkeleton = declaredType0.type;
+          }
           return ce;
         }
 
         // Store the reconciled literal as a VALUE under the declared signature
         // — the SAME representation the string-form (value-slot) declaration
         // produces. This makes the two spellings observably identical: `f(3)`
-        // type-errors against the declared param.
+        // type-errors against the declared param. A declaration with
+        // `unknown` slots installs as written, and becomes the value
+        // definition's signature skeleton, as on the declare route.
+        const installedType = hasSignaturePlaceholder(declaredType0.type)
+          ? declaredType0.type
+          : declaredType.type;
         if (shadowBuiltin) {
           ce._declareSymbolValue(id, {
             value: reconciled,
-            type: declaredType.type,
+            type: installedType,
             effectsDeclared,
           });
           return ce;
@@ -2568,7 +2610,7 @@ export function assignFn(
           const callableBefore = defIsCallableShaped(def);
           updateDef(ce, id, def, {
             value: reconciled,
-            type: declaredType.type,
+            type: installedType,
             effectsDeclared,
           });
           ce._noteStateEvent({

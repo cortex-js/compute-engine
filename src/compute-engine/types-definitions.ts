@@ -1737,6 +1737,15 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _placeholderSkeleton: Type | undefined;
 
+  /** When the declaration's type was a function signature with `unknown`
+   * slots (such as `(unknown) -> unknown`), the signature as written. The
+   * signature that `type` reports is then derived on each read, by refining
+   * this skeleton from the current type of the stored function value, and
+   * each assignment is checked against the skeleton. `undefined` for every
+   * other declaration.
+   * @internal */
+  _signatureSkeleton: Type | undefined;
+
   /** Install an element refinement of the placeholder skeleton without
    * disturbing `_placeholderSkeleton` (the public `type` setter maintains
    * the skeleton on every explicit write and would clear it).
@@ -2457,6 +2466,13 @@ export interface BoxedOperatorDefinition
    * author's declaration.
    * @internal */
   _derivedSignature: boolean;
+
+  /** When a user lambda was assigned under a declared signature with
+   * `unknown` slots, that signature as written. The reported `signature` is
+   * then derived on each read from the lambda's current type. `undefined`
+   * for every other definition.
+   * @internal */
+  _signatureSkeleton: Type | undefined;
 
   /** The type of the arguments and return value of this function */
   signature: BoxedType;

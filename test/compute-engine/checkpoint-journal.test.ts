@@ -214,10 +214,14 @@ describe('funnel 2 — type writes', () => {
     const w = inWindow(ce, () => {
       (def as { value: { type: unknown } }).value.type = ce.type('string');
     });
-    expect((def as { value: { type: { toString(): string } } }).value.type.toString()).toBe('string');
+    expect(
+      (def as { value: { type: { toString(): string } } }).value.type.toString()
+    ).toBe('string');
 
     restore(ce, w);
-    expect((def as { value: { type: { toString(): string } } }).value.type.toString()).toBe('integer');
+    expect(
+      (def as { value: { type: { toString(): string } } }).value.type.toString()
+    ).toBe('integer');
   });
 
   test('a retype to `unknown` — which also wipes the value — is rewound whole', () => {
@@ -226,7 +230,9 @@ describe('funnel 2 — type writes', () => {
     // hook records the coupled tuple rather than `_type` alone.
     const ce = new ComputeEngine();
     executeEpsil(ce, 'u = 7');
-    const def = ce.lookupDefinition('u') as { value: { type: any; value: any } };
+    const def = ce.lookupDefinition('u') as {
+      value: { type: any; value: any };
+    };
 
     const w = inWindow(ce, () => {
       def.value.type = ce.type('unknown');
@@ -580,6 +586,12 @@ describe('snapshot completeness — the drift guard', () => {
     // it was computed from and on `_writeVersion`, so a restore that moves
     // either one retires it, and a stale entry can never be served.
     '_effectiveType',
+    // A memo of the signature derived from `_signatureSkeleton`, keyed on
+    // the skeleton and on the stored value's type object: a restore that
+    // moves either one makes it miss.
+    '_signatureMemo',
+    // A re-entrancy guard of `_deriveSignature`, true only during the call.
+    '_derivingSignature',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([
@@ -591,13 +603,20 @@ describe('snapshot completeness — the drift guard', () => {
     // restores that same object (the memo still answers for it) or another
     // one (the memo misses and recomputes), so it needs no snapshot.
     '_resolvedMissingBehaviorMemo',
+    // The same for the signature derived from `_signatureSkeleton`: keyed on
+    // `_signature`, the skeleton and the lambda's type object.
+    '_signatureMemo',
+    // A re-entrancy guard of `_deriveSignature`, true only during the call.
+    '_derivingSignature',
   ]);
 
   test('every mutable field of a value definition is in its snapshot', () => {
     const ce = new ComputeEngine();
     ce.assign('drift', ce.number(1));
     const def = ce.lookupDefinition('drift') as { value: any };
-    const captured = new Set(Object.keys(def.value._checkpointSnapshot() as object));
+    const captured = new Set(
+      Object.keys(def.value._checkpointSnapshot() as object)
+    );
     const missing = Object.getOwnPropertyNames(def.value).filter(
       (f) => !captured.has(f) && !VALUE_DEF_EXCLUSIONS.has(f)
     );

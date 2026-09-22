@@ -309,6 +309,28 @@
 
 ### Resolved Issues
 
+- **A function declared with `unknown` slots now reports the type its body has
+  NOW, not the type the body had when it was first assigned.** With
+  `ce.declare('phi', '(unknown) -> unknown')`, `phi := x ↦ 1 + c(x)` and a `c`
+  that is declared but not yet defined, the result of `phi` is
+  `broadcastable<number>`, because `c(x)` could still be a list. After
+  `c := i ↦ 2i`, `phi` used to keep `(unknown) -> broadcastable<number>`, so
+  the same definitions typed differently depending on their order, and the
+  JavaScript compile of `2\cos(\phi(x))` failed ("cannot compile scalar
+  arithmetic over a list-valued operand"). A symbol declared with the bare
+  `function` type already followed its body. Now `phi` reports
+  `(unknown) -> number` as soon as `c` is defined, and `phi(x)` types
+  `number`. The declared signature with its `unknown` slots is kept, and the
+  reported signature is derived from the current function value on each read.
+  This also corrects two related results: a re-assignment now refines the
+  declaration again (`f := x ↦ x + 1` then `f := x ↦ [x, x]` reports
+  `(unknown) -> vector<2>`; before, the second assignment was checked against
+  the `-> number` of the first), and a free symbol of the body that is assigned
+  a list later (`f := x ↦ 1 + a x`, then `a := [1, 2, 3]`) now reports
+  `(unknown) -> list<number>` instead of `-> number` for a call that evaluates
+  to a list. A concrete declared slot (`(number) -> unknown`) stays the
+  contract. The same applies to a definition declared with
+  `{ signature, evaluate }` whose lambda is later re-assigned.
 - **A deep expression no longer exhausts the stack while it is boxed.**
   `ce.parse('1-2-3-…-N')` threw `RangeError: Maximum call stack size exceeded`
   past about 500 terms, because the LaTeX parser returns a left-nested

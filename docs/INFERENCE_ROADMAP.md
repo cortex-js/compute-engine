@@ -23,7 +23,7 @@ That pair is already ruled and implemented at two granularities
 | Granularity | Placeholder behavior today | Mechanism |
 |---|---|---|
 | Whole symbol | `x: unknown` narrows from use, exactly like an undeclared symbol | the movability gate `inferredType \|\| type.isUnknown` (`assignValue` in `engine-declarations.ts`, mirrored wherever "can a use move this type?" is asked) |
-| Signature slot | `f: (unknown) -> unknown` has each slot refined per-position by the assigned definition, and the refined signature is persisted | `refineDeclaredPlaceholders` (`boxed-expression/effects-inference.ts`), run at the three install routes and in `matchesDeclaredTypeAxes` |
+| Signature slot | `f: (unknown) -> unknown` has each slot refined per-position by the assigned definition. The declaration as written is kept as the signature skeleton, and the refined signature is derived from the current function value on each read, so it follows the body (a head the body calls that is bound later changes the result) and each re-assignment refines the skeleton again | `refineDeclaredPlaceholders` (`boxed-expression/effects-inference.ts`), run at the three install routes and in `matchesDeclaredTypeAxes`; `_signatureSkeleton` on the value and operator definitions |
 | **Constructor argument** | **`list<unknown>` (= bare `list`) — the element slot NEVER refines** | none — this roadmap |
 
 The missing third row is a granularity gap, not a semantic disagreement: the
@@ -261,11 +261,13 @@ spelling by definition.
   list-ness, nothing more; hardening would make the annotated symbol
   stricter than the unannotated one, which is the anti-pattern the 08-15
   ruling exists to prevent ("a placeholder declaration was strictly more
-  restrictive than no declaration"). Note this deliberately DIVERGES from
-  the signature precedent, where the refined signature persists and governs
-  — divergence justified because a function's refined signature is
-  re-derived on every body re-assignment anyway, which is the same
-  observable behavior as re-refinement.
+  restrictive than no declaration"). The signature slot now behaves the
+  same way. The note that stood here said a refined signature "is
+  re-derived on every body re-assignment anyway"; that was false as
+  measured on 2026-09-22 — the first refinement replaced the placeholders,
+  so a re-assignment had nothing left to refine, and a head bound after the
+  assignment could not change the result. The signature skeleton
+  (`_signatureSkeleton`) fixed both.
 - **R2 — Element only, or dimensions too?** `a: list` + `[1,2,3]`:
   `list<integer>` (element only, rank and length stay open) or the
   value's full `vector<integer^3>`? _Recommendation: element only._
