@@ -2450,6 +2450,21 @@ readonly op3: Expression;
 
 </MemberCard>
 
+<MemberCard>
+
+##### FunctionInterface.\_isLiteralData() {#_isliteraldata}
+
+```ts
+_isLiteralData(): boolean
+```
+
+Internal. Is this node written-out DATA: a canonical `List` or `Tuple`
+bound to the standard library whose every element is a number literal,
+or such a `List` or `Tuple` in turn? Such a node holds no symbol and
+evaluates to itself. The answer is computed once per node.
+
+</MemberCard>
+
 ### StringInterface {#stringinterface}
 
 Narrowed interface for string expressions.
@@ -9685,6 +9700,31 @@ Conformances are add-only (monotone); only their implementations replace.
 
 <MemberCard>
 
+### SumConformanceRecord {#sumconformancerecord}
+
+```ts
+type SumConformanceRecord = {
+  sum: string;
+  impl: Record<string, Expression | JSImplementation>;
+  block: Expression;
+};
+```
+
+A whole-SUM conformance, as the author wrote it: `type shape is Area { … }`
+where `shape` is a sum type (user ruling of 2026-09-22).
+
+The statement itself registers one ordinary edge per variant — a sum names a
+transparent alias of its variants, and an alias cannot conform — so this
+record is bookkeeping, not an edge: it is what lets a variant the sum gains
+in a LATER batch receive the same implementation block. The block is kept as
+the author wrote it, BEFORE `Self` is bound: each variant's edge substitutes
+`Self` with its own target, so the substituted block of one variant is the
+wrong body for another.
+
+</MemberCard>
+
+<MemberCard>
+
 ### ProtocolRecord {#protocolrecord}
 
 ```ts
@@ -9693,6 +9733,7 @@ type ProtocolRecord = {
   members: Record<string, ProtocolMember>;
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
+  _sumConformances: SumConformanceRecord[];
   _declOrigin: DeclarationOrigin;
 };
 ```
