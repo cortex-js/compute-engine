@@ -56,12 +56,19 @@ describe('P2 round-trips: toMathJson exclude for number literals (#1)', () => {
 });
 
 describe('P2 round-trips: exact large power LaTeX (#2)', () => {
-  // `.latex` of `1e300` is the compact `10^{300}`, which re-parses as
-  // `Power(10, 300)` rather than a single number literal. That is accepted
+  // `.latex` of an exact `10^{300}` is the compact `10^{300}`, which re-parses
+  // as `Power(10, 300)` rather than a single number literal. That is accepted
   // behavior: there is no compact LaTeX literal for such a magnitude, and the
   // *value* round-trips through evaluation.
   test('latex is compact 10^{300}', () => {
-    expect(ce.box(1e300).latex).toBe('10^{300}');
+    expect(ce.box({ num: '1e300' }).latex).toBe('10^{300}');
+  });
+  // The double `1e300` is not 10^300: boxing it holds the exact value of the
+  // double, and `.latex` writes that value, not the double's shortest text.
+  test('latex of the double 1e300 is its exact value', () => {
+    expect(ce.box(1e300).latex).toMatch(
+      /^1\\,000\\,000\\,000\\,000\\,000\\,052\\,504/
+    );
   });
   test('value is preserved through parse + evaluate', () => {
     const roundtrip = ce.parse(ce.box(1e300).latex).N();
@@ -148,7 +155,9 @@ describe('P2 parse/serialize: double superscript is an error (#7)', () => {
     expect(ce.parse('2^3^4').isValid).toBe(false);
   });
   test('the explicit nesting x^{2^3} still works', () => {
-    expect(ce.parse('2^{3^4}').evaluate().json).toBe(2 ** 81);
+    expect(ce.parse('2^{3^4}').evaluate().json).toEqual({
+      num: '2417851639229258349412352',
+    });
   });
 });
 

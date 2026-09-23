@@ -90,7 +90,10 @@
   parser, a person or an AI agent reading the output) got the wrong one. Such
   integers now serialize as `{ "num": "1152921504606846976" }`. A number is
   written as a JSON number only when both the double and its text are
-  exactly the value (`1e+22` still is).
+  exactly the value (`1e+22` still is). The LaTeX serialization, which
+  formats the MathJSON number, is corrected too: `2^{100}` was displayed as
+  `12\,676\,506\,002\,282\,294\cdot10^{14}` and `2^{60}` as
+  `1\,152\,921\,504\,606\,847\,000`; both are now their exact digits.
 
   **Notice for consumers of the non-canonical MathJSON pipeline contract:**
   this changes one byte-identical round trip. A JSON number is a double, and
@@ -99,7 +102,9 @@
   different integer; it is now `{ "num": "1000000000000000019884624838656" }`.
   A JSON number input whose text is its exact value (`42`, `3.14`, `1e+22`)
   still round-trips byte for byte. To keep `10^30` exact, write it as
-  `{ "num": "1e30" }`.
+  `{ "num": "1e30" }`. Likewise, `ce.box(1e300).latex` was `10^{300}` and
+  is now the exact value of the double, 1000000000000000052504…; the
+  `.latex` of an exact `{ "num": "1e300" }` is still `10^{300}`.
 - The documentation of `isEqual()` said that an identity in the free
   variables, such as `(x+1)^2` vs `x^2+2x+1`, is `true`. `isEqual()`
   attempts no identity proof, and such a comparison is `undefined`: the
