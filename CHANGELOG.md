@@ -75,6 +75,17 @@
 
 ### Resolved Issues
 
+- An expression boxed before a use narrowed the type of one of its symbols
+  kept the type it had computed with the wider type. For example, after
+  `l = List(x)` and a use `Mod(x, 2)` that makes `x` `real`, `l.type` stayed
+  `vector<1>` where a new `List(x)` has the type `vector<real^1>`. A
+  narrowing now updates the cached types once the type computation that
+  caused it ends. As a consequence, the result type of some inferred
+  signatures is now the one a fresh computation gives: `v ↦ v[1] + 1` has the
+  type `(v: indexed_collection<number>) -> number` (it read
+  `-> broadcastable<number>`), and a function whose value is a list has a
+  list result type.
+
 - Compiled `Cot`, `Coth`, `Round`, `Fract`, `Haversine` and the odd real
   root now compute their operand once. They computed it two or three times,
   so an operand that draws a random number (`Cot(Random())`) used a

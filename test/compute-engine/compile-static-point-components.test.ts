@@ -104,8 +104,11 @@ describe('point arithmetic fans out by the width of the tuple type', () => {
     // whatever `x` and `y` hold. It used to compile to `_SYS.bcast` and run to
     // `[3.3, 3.7]`.
     const ce = newEngine();
+    // Once the types of `x` and `y` are up to date, the sum is found invalid
+    // before its lowering ("Cannot compile invalid expression: …
+    // incompatible-type").
     expect(() => compile(ce.parse('(x,y)+3'), { fallback: false })).toThrow(
-      /cannot compile/
+      /cannot compile/i
     );
     expect(compile(ce.parse('(x,y)+3')).success).toBe(false);
     expect(ce.parse('(x,y)+3').subs({ x: 0.3, y: 0.7 }).N().operator).toBe(

@@ -119,26 +119,22 @@ soundness check" on 2026-09-23) left the list: the check failed, and it needs
 a design first (entry "Every call of a user function invalidates every
 generation-keyed cache").
 
-1. **An expression keeps its old type after inference narrows one of its
-   symbols.** A wrong (outdated) type, pre-existing. Needs a finer invalidation
-   rule; medium. Entry: "An expression keeps its old type after inference
-   narrows one of its symbols".
-2. **Large-list evaluation, what is left:** a power of `e` and the inverse
+1. **Large-list evaluation, what is left:** a power of `e` and the inverse
    trigonometric functions under `evaluate()`, a division by an exact rational
    (`L / 3`), `Norm` of a lazy `Map`. Each is a small kernel or guard; the gains
    are 20 to 40 times on the shapes they cover. Entries: "Element-wise
    arithmetic over a large list: what is still interpreted per element", "`Norm`
    of a lazy collection stays unevaluated".
-3. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
+2. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
    chain under complex mode) and the interval constant-list fan-out cap.
    Consumer-visible declines; medium size. Entries: "The Tycho corpus document
    `s8ishknvhe`: what stays open after the mixed-cell and pole round",
    "Coordinate projection through point arithmetic: what stays open".
-4. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
+3. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
    object for the whole sum instead of a new `Add` at each step. Slow, not
    wrong; medium. Entry: "Slow operations and slow tests found by a review of
    the slowest test files".
-5. **A new all-states Tycho baseline** on the next release, to measure the
+4. **A new all-states Tycho baseline** on the next release, to measure the
    large-list and codegen work on real documents. Entry: "Code-generation census
    on CE 0.128.13: ranked candidates".
 
@@ -567,21 +563,6 @@ compiles when its point list `C_c` is declared
    whatever the hardware answers for `0.0 / 0.0`. The kernels of the JavaScript
    runtime were checked at an exact zero argument only, which is the one pole a
    floating-point argument reaches exactly.
-
-### An expression keeps its old type after inference narrows one of its symbols (OPEN, caching design — found 2026-09-22)
-
-Example: `l = ce.box(['List', 'x'])` has the type `vector<1>`. After a use
-narrows `x` to `real` (`ce.box(['Mod', 'x', 2]).evaluate()` does), `l.type`
-is still `vector<1>`, while a new `ce.box(['List', 'x'])` has the type
-`vector<real^1>`. A value-type
-inference write (`BoxedSymbol` inference, `inference` state event with
-`valueType: true`) advances no cache axis on purpose: it can run while `_type`
-and `_sgn` are being computed, and advancing their axis there would
-invalidate that computation recursively (`axisMaskOf` in
-`engine-configuration-lifecycle.ts`). A fix needs a finer rule, for example a
-per-definition dependency stamp checked by the expression type cache (the
-definition already has `_writeVersion`), or an invalidation deferred until
-the running type computation ends.
 
 ### Every call of a user function invalidates every generation-keyed cache (OPEN, caching design — found 2026-09-22)
 

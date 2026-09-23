@@ -161,6 +161,16 @@ describe('axisMaskOf: the parity dispatch table, row by row', () => {
       { kind: 'inference', valueType: true },
       mask(false, false, false),
     ],
+    // inference-settled: the deferred half of a value-type inference. The
+    // lifecycle sends it when no cached computation is running
+    // (`runWhenIdle`, `src/common/computation-depth.ts`), so the types and
+    // signs cached before the narrowing are recomputed. It advances only the
+    // axis those caches key on.
+    [
+      'inference settled',
+      { kind: 'inference-settled' },
+      mask(true, false, false),
+    ],
     // config: G+M+E (tolerance, jit, reset, type-statement rollback).
     ['config', { kind: 'config' }, mask(true, true, true)],
     // object-store: a mutable object's field write moves NOTHING (ruled

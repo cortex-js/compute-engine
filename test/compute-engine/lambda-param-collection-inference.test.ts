@@ -656,8 +656,11 @@ describe('callee defined after caller', () => {
         ).toString()
       ).toContain('a(t)');
       // ...and `mixed` binds its list argument WHOLE (`clean` sees the list;
-      // only the scalar-parameter `a` broadcasts inside).
-      expect(signatureIn(ce, 'mixed')).toBe('(list<number>) -> number');
+      // only the scalar-parameter `a` broadcasts inside). The result is a
+      // list, as the evaluation below shows: `2·a(t)` is a list and
+      // `clean(t)` a number. (The signature read `-> number` while it kept
+      // the type computed before `t` was narrowed.)
+      expect(signatureIn(ce, 'mixed')).toBe('(list<number>) -> list<number>');
       expect(
         ce
           .box(['mixed', ['List', 3, 4, 5]])

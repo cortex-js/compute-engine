@@ -631,10 +631,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // use of an already-inferred symbol. `narrow`/`widen` are
         // reference-preserving when nothing changes, so `===` is the test.
         if (inferred.type === def.value.type.type) return true;
-        // State event: the zero-mask value-branch inference (design §2b) —
-        // a binding can go `unknown` → effect-bearing signature here with
-        // no counter advance; future axes subscribe to the event.
-        this.engine._noteStateEvent({ kind: 'inference', valueType: true });
         // Rollback journal (family 1): snapshot the coupled type/value
         // slots BEFORE the write — the post-write channel below carries
         // only from/to types and cannot capture them. Restore is verbatim
@@ -643,7 +639,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         if (rollbackFrame !== undefined) {
           const target = def.value;
           const slots = target._typeSlotSnapshot();
-          rollbackFrame.record({ undo: () => target._restoreTypeSlots(slots) });
+          rollbackFrame.record({
+            undo: () => {
+              target._restoreTypeSlots(slots);
+              // The wider type is back: the types cached while the narrowed
+              // one was in force are outdated, as after the write itself.
+              this.engine._noteStateEvent({
+                kind: 'inference',
+                valueType: true,
+              });
+            },
+          });
         }
         def.value._setType(() => inferred);
         // A type this method writes is INFERRED, never a contract. Without
@@ -661,6 +667,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // above only lets a write through when the type is already inferred
         // or still `unknown`.
         def.value.inferredType = true;
+        // State event: a value-type inference (design §2b). It is sent AFTER
+        // the write, because the cache advance it causes can run at once
+        // (`noteStateEvent`): a type read and cached between an earlier
+        // advance and the write would keep the old type of the symbol under
+        // the new generation.
+        this.engine._noteStateEvent({ kind: 'inference', valueType: true });
         // Single emission point for the write's passive observers: the
         // provenance history, the fresh-inference set (unknown → concrete
         // during a boxing, for the fresh-matrix-inference repair), and the

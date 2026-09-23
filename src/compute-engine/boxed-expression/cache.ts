@@ -12,6 +12,7 @@ import {
   objectDepsValid,
   type ObjectDeps,
 } from './object-deps.js';
+import { asComputation } from '../../common/computation-depth.js';
 import { containsObject } from './object-walk.js';
 import { isExpression } from './type-guards.js';
 
@@ -291,7 +292,7 @@ export function cachedValue<T>(
   beginObjectDeps();
   let result: T;
   try {
-    result = fn();
+    result = asComputation(fn);
   } catch (e) {
     // A failed computation commits nothing: put the key back, so the next
     // call retries rather than serving a value from an older generation under

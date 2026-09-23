@@ -141,8 +141,11 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
     ce.box(['Assign', 'h', AT_BODY]).evaluate();
 
     // The parameter slot is no longer `unknown`, so `paramsAreScalar` is false.
+    // The result type is the one of the refined elements, `number` (it read
+    // `broadcastable<number>` while the arrow kept the type computed before
+    // the refinement).
     expect(ce.box('h').type.toString()).toBe(
-      '(indexed_collection<number>) -> broadcastable<number>'
+      '(indexed_collection<number>) -> number'
     );
     // Before the fix this was `[h(3),h(4)]`.
     expect(ce.box(['h', ['List', 3, 4]]).evaluate().toString()).toBe('7');

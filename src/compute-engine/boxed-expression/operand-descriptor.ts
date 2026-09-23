@@ -16,6 +16,7 @@ import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
 import { asRational } from './numerics.js';
 import { numberLiteralTierType } from './literal-tier.js';
 import { COUNT_STATS } from '../../common/cache-stats.js';
+import { asComputation } from '../../common/computation-depth.js';
 import {
   functionLiteralBody,
   functionLiteralParameterName,
@@ -702,7 +703,19 @@ export function guardedTypeHandlerCall<T>(
   operator: string,
   call: () => T
 ): T {
-  if (!PURITY_GUARD_ENABLED) return call();
+  // A type handler call is a computation for `runWhenIdle`: a value-type
+  // inference it causes advances a cache axis only when it returns.
+  if (!PURITY_GUARD_ENABLED) return asComputation(call);
+  // The whole guarded call is one computation, so a deferred advance runs
+  // after the comparison below, not inside the window it checks.
+  return asComputation(() => guardedCall(engine, operator, call));
+}
+
+function guardedCall<T>(
+  engine: ComputeEngine,
+  operator: string,
+  call: () => T
+): T {
   const any = engine._anyVersion;
   const semantic = engine._semanticVersion;
   const world = engine._worldVersion;

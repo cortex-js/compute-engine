@@ -3,6 +3,7 @@ import {
   type ConfigurationChangeListener,
 } from '../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../common/cache-stats.js';
+import { runWhenIdle } from '../common/computation-depth.js';
 
 type ResetHooks = {
   refreshNumericConstants: () => void;
@@ -38,6 +39,8 @@ export type StateEvent =
     }
   | { kind: 'assumption' } // assume / forget
   | { kind: 'inference'; symbolSignature?: boolean; valueType?: boolean }
+  /** The deferred half of a value-type inference: see `noteStateEvent`. */
+  | { kind: 'inference-settled' }
   | { kind: 'config' } // precision, tolerance, angularUnit, jit, reset, type-statement redefinition
   /** A mutable-object field write, invalidated through per-object versions. */
   | { kind: 'object-store' };
@@ -71,6 +74,9 @@ export function callableAxisSelects(e: StateEvent): boolean {
       return !e.scratch && (e.callable || e.shadowsCallable);
     case 'object-store':
       // A field store changes no declaration, binding, or signature.
+      return false;
+    case 'inference-settled':
+      // The `inference` event it follows already selected this axis.
       return false;
   }
 }
@@ -165,6 +171,11 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       return { any: true, semantic: true, world: true };
     case 'config':
       return { any: true, semantic: true, world: true };
+    case 'inference-settled':
+      // Types and signs cached before a value-type inference narrowed a
+      // symbol are outdated; see `noteStateEvent`. Only the axis that the
+      // `_type` and `_sgn` caches key on advances, as for a `type-write`.
+      return { any: true, semantic: false, world: false };
     case 'object-store':
       // Field-derived cache entries carry `(object, version)` dependencies and
       // revalidate independently of engine-wide versions. The diagnostic flag
@@ -184,6 +195,8 @@ export class EngineConfigurationLifecycle {
   private _ephemeralWriteDepth = 0;
   private _factSuppressionDepth = 0;
   private _scratchDeclarationScopes: object[] = [];
+  /** A deferred `inference-settled` advance is waiting (`noteStateEvent`). */
+  private _inferencePending = false;
   private _tracker = new ConfigurationChangeTracker();
 
   get anyVersion(): number {
@@ -229,6 +242,20 @@ export class EngineConfigurationLifecycle {
    * event, and the dispatch functions decide which versions advance.
    */
   noteStateEvent(e: StateEvent): void {
+    // A value-type inference changes the type of a symbol that expressions
+    // built earlier have cached types from (`l = List(x)` keeps `vector<1>`
+    // after a use narrows `x` to `real`). It cannot advance the `any` axis
+    // where it happens: it happens while a `_type` or `_sgn` is computed, and
+    // the advance would make that computation stale at once. So the advance
+    // runs when no cached computation is running (`runWhenIdle`).
+    if (e.kind === 'inference' && e.valueType && !this._inferencePending) {
+      // One advance covers every inference made before it runs.
+      this._inferencePending = true;
+      runWhenIdle(() => {
+        this._inferencePending = false;
+        this.noteStateEvent({ kind: 'inference-settled' });
+      });
+    }
     const m = axisMaskOf(e);
     if (m.any) this._anyVersion += 1;
     if (m.semantic) this._semanticVersion += 1;
