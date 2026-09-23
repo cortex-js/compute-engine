@@ -3,12 +3,16 @@ module.exports = {
   verbose: false,
   preset: 'ts-jest',
   testEnvironment: 'node',
-  // Six workers is the measured optimum on the 8-core development machine
-  // (4 performance + 4 efficiency cores). A continuous-integration runner
-  // has 4 cores: six workers there made tests with a time limit run about
-  // eight times slower than alone and fail. `CI` is set by GitHub Actions;
-  // `'100%'` is one worker per core.
-  maxWorkers: process.env.CI ? '100%' : 6,
+  // Twelve workers on the 18-core development machine (Apple M5 Max, 6 + 12
+  // cores with no efficiency cores). Measured full-suite times: 163 s with
+  // 6 workers, 88 s with 12, 84 s with 16, 89 s with 18. More than 12 workers
+  // gives almost nothing, because the slowest test files take 45–52 s alone
+  // and 75–83 s under contention, and they set the minimum run time. Twelve
+  // also leaves 6 cores for the other sessions that share the machine.
+  // A continuous-integration runner has 4 cores: six workers there made
+  // tests with a time limit run about eight times slower than alone and
+  // fail. `CI` is set by GitHub Actions; `'100%'` is one worker per core.
+  maxWorkers: process.env.CI ? '100%' : 12,
   collectCoverageFrom: ['src/**/*.ts', '!<rootDir>/node_modules/'],
   coverageReporters: ['lcov'],
   coverageDirectory: '../coverage',

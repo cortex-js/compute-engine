@@ -1,3 +1,5 @@
+## [Unreleased]
+
 ## 0.133.0 _2026-09-22_
 
 ### Behavior Changes
@@ -314,16 +316,16 @@
   `ce.declare('phi', '(unknown) -> unknown')`, `phi := x ↦ 1 + c(x)` and a `c`
   that is declared but not yet defined, the result of `phi` is
   `broadcastable<number>`, because `c(x)` could still be a list. After
-  `c := i ↦ 2i`, `phi` used to keep `(unknown) -> broadcastable<number>`, so
-  the same definitions typed differently depending on their order, and the
+  `c := i ↦ 2i`, `phi` used to keep `(unknown) -> broadcastable<number>`, so the
+  same definitions typed differently depending on their order, and the
   JavaScript compile of `2\cos(\phi(x))` failed ("cannot compile scalar
   arithmetic over a list-valued operand"). A symbol declared with the bare
   `function` type already followed its body. Now `phi` reports
-  `(unknown) -> number` as soon as `c` is defined, and `phi(x)` types
-  `number`. The declared signature with its `unknown` slots is kept, and the
-  reported signature is derived from the current function value on each read.
-  This also corrects two related results: a re-assignment now refines the
-  declaration again (`f := x ↦ x + 1` then `f := x ↦ [x, x]` reports
+  `(unknown) -> number` as soon as `c` is defined, and `phi(x)` types `number`.
+  The declared signature with its `unknown` slots is kept, and the reported
+  signature is derived from the current function value on each read. This also
+  corrects two related results: a re-assignment now refines the declaration
+  again (`f := x ↦ x + 1` then `f := x ↦ [x, x]` reports
   `(unknown) -> vector<2>`; before, the second assignment was checked against
   the `-> number` of the first), and a free symbol of the body that is assigned
   a list later (`f := x ↦ 1 + a x`, then `a := [1, 2, 3]`) now reports
@@ -667,10 +669,10 @@ Rubi integrator + Fungrim identities loaded (`loadIntegrationRules` /
 
 The $\sqrt6\,x+\sqrt2\,x$ row reads about 5× higher than in the 0.128.10 tables
 (290× against 57×) for every engine, SymPy (12× against 3.2×) and math.js (90×
-against 17×) included. The cause is Mathematica: it took about 5× longer on
-this case in this run. Compared with the release before it, measured in the
-same run, the current build is 1.24× faster on this row — the same small gain
-as in 0.128.10.
+against 17×) included. The cause is Mathematica: it took about 5× longer on this
+case in this run. Compared with the release before it, measured in the same run,
+the current build is 1.24× faster on this row — the same small gain as in
+0.128.10.
 
 Across the cases both solve, Compute Engine is a **median 3.8× faster than
 Mathematica** (up to 2313×) — in the browser, not a proprietary kernel.

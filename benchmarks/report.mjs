@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { cpus, totalmem } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -215,6 +216,9 @@ function runOne(tool, kase) {
 
 function getVersions() {
   const v = { node: process.version };
+  // Absolute times depend on the machine, so record it: a time measured on
+  // one machine must not be compared with a time measured on another.
+  v.machine = `${cpus()[0]?.model ?? '?'}, ${cpus().length} cores, ${Math.round(totalmem() / 2 ** 30)} GiB`;
   try { v.ceCurrent = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version; } catch {}
   try { v.ceCurrentSha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch {}
   v.cePublished = PUBLISHED_VERSION;
@@ -400,6 +404,8 @@ w(`| SymPy | \`${versions.sympy || '?'}\` | Python ${versions.python || '?'} |`)
 w(`| math.js | \`${versions.mathjs || '?'}\` | Node ${versions.node} |`);
 w(`| NumPy | \`${versions.numpy || '?'}\` | Python ${versions.python || '?'} |`);
 w(`| Wolfram (Mathematica) | \`${versions.wolfram || '?'}\` | \`wolframscript\` kernel |`);
+w();
+w(`Machine: ${versions.machine || 'not recorded'}.`);
 w();
 
 // Methodology

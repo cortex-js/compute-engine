@@ -1,8 +1,9 @@
 # Shared-box protocol
 
 Several Claude sessions work on this machine at once, across two repos
-(`compute-engine` and the `tycho` consumer), on 8 cores. This document is the
-coordination protocol. Every rule in it was learned from experience; none of
+(`compute-engine` and the `tycho` consumer), on 18 cores (Apple M5 Max,
+since 2026-09-22; 8 cores before). This document is the coordination
+protocol. Every rule in it was learned from experience; none of
 it is expensive.
 
 **Revised 2026-08-17 (user-ratified).** The first version of this protocol
@@ -61,7 +62,7 @@ Two command details that are load-bearing (both found by review, not in use):
   task ends.
 - **Test runs in a worktree need no lock for correctness** — nobody else
   writes there, so a run cannot be torn. The CPU rules (§2) still apply in
-  full: a worktree suite burns the same six workers.
+  full: a worktree suite burns the same twelve workers.
 - **Apply early, apply often.** Checkpoints are measured in hours, not days:
   a long-lived worktree drifts from the tree everyone else is advancing, and
   the reconciliation debt compounds. Hot files (snapshot files,
@@ -88,14 +89,17 @@ edited directly in the shared tree — then §4 applies in full.
 
 ## 2. CPU: cap the workers, take the lock
 
-`config/jest.config.cjs` sets **`maxWorkers: 6` unconditionally**. There is
-no "light" jest invocation: a targeted three-file run fans out exactly like a
-full suite. Selecting fewer test files does not reduce load.
+`config/jest.config.cjs` sets **`maxWorkers: 12`** outside continuous
+integration. There is no "light" jest invocation: a targeted three-file run
+fans out exactly like a full suite. Selecting fewer test files does not reduce
+load. The targeted-run budgets below (2 workers for one file, 4 for several)
+were raised from 1 and 2 by the user on 2026-09-22, after the move to 18
+cores.
 
 | Situation | Command |
 | --- | --- |
-| Single file | `npx jest --config ./config/jest.config.cjs -w 1 -- <path>` |
-| Several files | `npx jest --config ./config/jest.config.cjs -w 2 -- <paths>` |
+| Single file | `npx jest --config ./config/jest.config.cjs -w 2 -- <path>` |
+| Several files | `npx jest --config ./config/jest.config.cjs -w 4 -- <paths>` |
 | Full suite | take the lock, then run normally |
 
 `npm run typecheck` is single-shot and fine at any time. The whole-`src/`

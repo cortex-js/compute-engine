@@ -2,6 +2,7 @@ import { engine as ce } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { GCProfiler } from 'v8';
 
 /**
  * Performance benchmarks for the compilation system
@@ -85,15 +86,43 @@ describePerf('COMPILATION PERFORMANCE', () => {
     return visits;
   }
 
-  // Helper to measure memory (approximation)
+  /**
+   * Return the number of heap bytes that `fn` allocates.
+   *
+   * The heap growth across `fn` alone is not usable: it depends on how many
+   * collections run during `fn`, and that depends on the size of the young
+   * generation, which V8 sets from the memory of the machine. For the same
+   * 100 compilations, the growth was 2–4.6MB on an 8-core development machine
+   * and anywhere from −21MB to +19MB on an 18-core machine with 64GB. The
+   * `GCProfiler` reports the heap use before and after each collection, so
+   * the allocation is the growth plus the bytes that each collection freed.
+   * This value stays within ±10% for any young-generation size (checked with
+   * `--max-semi-space-size` from 1 to 64). It includes garbage and retained
+   * memory, so a budget on it catches both a leak and an allocation blowup.
+   */
   function measureMemory(fn: () => any): number {
-    if (global.gc) {
-      global.gc();
-    }
-    const before = process.memoryUsage().heapUsed;
+    // The first calls of a compiler allocate much more (one-time caches and
+    // tables), so warm up before measuring: the result must not depend on
+    // which tests ran before this one.
     fn();
-    const after = process.memoryUsage().heapUsed;
-    return after - before;
+    const profiler = new GCProfiler();
+    profiler.start();
+    let growth: number;
+    let freed = 0;
+    try {
+      const before = process.memoryUsage().heapUsed;
+      fn();
+      growth = process.memoryUsage().heapUsed - before;
+    } finally {
+      // Stop the profiler also when `fn` throws, so it does not stay active
+      // for the rest of the test run.
+      const collections = profiler.stop()?.statistics ?? [];
+      for (const { beforeGC, afterGC } of collections)
+        freed +=
+          beforeGC.heapStatistics.usedHeapSize -
+          afterGC.heapStatistics.usedHeapSize;
+    }
+    return growth + freed;
   }
 
   describe('Simple Expressions', () => {
@@ -130,7 +159,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
 
       // Measure evaluation time
       const evalTime = benchmark(() => {
-        expr.evaluate({ x: testData.x, y: testData.y, z: testData.z }).numericValue;
+        expr.subs({ x: testData.x, y: testData.y, z: testData.z }).N().re;
       }, 10000);
 
       // Measure compiled execution time
@@ -161,7 +190,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
 
       const compiled = compile(expr);
       const evalTime = benchmark(() => {
-        expr.evaluate({ x: 2.5 }).numericValue;
+        expr.subs({ x: 2.5 }).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {
@@ -190,7 +219,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       const testData = { x: 1, y: 2, z: 3 };
 
       const evalTime = benchmark(() => {
-        expr.evaluate(testData).numericValue;
+        expr.subs(testData).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {
@@ -219,7 +248,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       const testData = { x: 5, y: 6, z: 7, a: 1, b: 2, c: 3 };
 
       const evalTime = benchmark(() => {
-        expr.evaluate(testData).numericValue;
+        expr.subs(testData).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {
@@ -251,7 +280,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       const compiled = compile(expr);
 
       const evalTime = benchmark(() => {
-        expr.evaluate({ x: 1.1 }).numericValue;
+        expr.subs({ x: 1.1 }).N().re;
       }, 1000);
 
       const compiledTime = benchmark(() => {
@@ -286,7 +315,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       }
 
       const evalTime = benchmark(() => {
-        expr.evaluate(testData).numericValue;
+        expr.subs(testData).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {
@@ -399,7 +428,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
           Add: ['customAdd', 11],
         },
         functions: {
-          customAdd: (a: number, b: number) => a + b,
+          customAdd: (a, b) => (a as number) + (b as number),
         },
       });
 
@@ -445,17 +474,13 @@ describePerf('COMPILATION PERFORMANCE', () => {
       log(`  Memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
       log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
-      // Should be reasonable (< 8MB for 100 compilations). The budget needs
-      // headroom over the observed range: jest doesn't expose `global.gc`,
-      // so `measureMemory` can't force a collection and the heap delta
-      // includes ambient garbage (2–4.6MB observed depending on machine
-      // load; the published 0.73.0 package measures ~1.4MB for this same
-      // loop under plain node, and the CSE harvest adds ~0.85MB of
-      // TRANSIENT allocation — retained memory verified identical with
-      // `--expose-gc`, ~4–7KB per 100 compiles, cse on or off). This
-      // guards against leaks (an order-of-magnitude blowup), not
-      // byte-level drift.
-      expect(memory).toBeLessThan(8 * 1024 * 1024);
+      // 100 compilations allocate 14–17MB (about 150KB each): about 14MB
+      // when the whole file runs, about 17MB when this test runs alone. Nearly
+      // all of it is garbage: after a forced collection, about 350KB stays,
+      // and that is V8 machine code for the generated functions, not engine
+      // objects. The budget has 25–50% headroom. It guards against a leak or
+      // an allocation blowup, not against small changes.
+      expect(memory).toBeLessThan(21 * 1024 * 1024);
     });
 
     it('should measure memory usage of GLSL compilation', () => {
@@ -471,14 +496,15 @@ describePerf('COMPILATION PERFORMANCE', () => {
       log(`  GLSL memory for 100 compilations: ${(memory / 1024).toFixed(2)} KB`);
       log(`  Per compilation: ${(memory / 100 / 1024).toFixed(2)} KB`);
 
-      // Same leak-guard-not-drift-guard contract as above: ~1.3–1.5MB
-      // observed under load with the (transient) naming-context inventory
-      // included. History: briefly read ~6.1MB when GPU_FUNCTIONS hit
-      // exactly 128 entries and the per-call `{...GPU_FUNCTIONS, ...}`
-      // merge in getFunctions() crossed V8's fast-property cliff into
-      // dictionary mode (~45KB/compile of rehash garbage, no retention);
-      // fixed by memoizing the merged table on the target instance.
-      expect(memory).toBeLessThan(4 * 1024 * 1024);
+      // Same contract as above: 100 compilations allocate 6.2–6.8MB (the
+      // whole file, or this test alone). The budget must still catch an
+      // earlier defect: when GPU_FUNCTIONS reached exactly 128 entries, the
+      // per-call `{...GPU_FUNCTIONS, ...}` merge in getFunctions() put the
+      // merged object into V8's slow
+      // dictionary mode, which added about 45KB of rehash garbage per
+      // compilation (about 4.5MB per 100). Memoizing the merged table on the
+      // target instance fixed it. That defect would measure 10.7–11.3MB.
+      expect(memory).toBeLessThan(9 * 1024 * 1024);
     });
   });
 
@@ -497,7 +523,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       const testData = { x_1: 0, y_1: 0, x_2: 3, y_2: 4 };
 
       const evalTime = benchmark(() => {
-        expr.evaluate(testData).numericValue;
+        expr.subs(testData).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {
@@ -525,7 +551,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       const testData = { a: 1, b: -5, c: 6 };
 
       const evalTime = benchmark(() => {
-        expr.evaluate(testData).numericValue;
+        expr.subs(testData).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {
@@ -553,7 +579,7 @@ describePerf('COMPILATION PERFORMANCE', () => {
       const testData = { u: 10, a: 9.8, t: 2 };
 
       const evalTime = benchmark(() => {
-        expr.evaluate(testData).numericValue;
+        expr.subs(testData).N().re;
       }, 10000);
 
       const compiledTime = benchmark(() => {

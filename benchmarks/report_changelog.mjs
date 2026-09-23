@@ -250,7 +250,8 @@ if (symSpeedups.length) {
 w(`<sub>Measured ${(results.generated || '').slice(0, 10)} · ` +
   `Compute Engine \`${versions.ceCurrent || '?'}\`${versions.ceCurrentSha ? ` @ \`${versions.ceCurrentSha}\`` : ''} (current build) · ` +
   `published \`${PUB_VERSION}\` · ` +
-  `SymPy \`${versions.sympy || '?'}\` · math.js \`${versions.mathjs || '?'}\` · Mathematica \`${versions.wolfram || '?'}\` · Node \`${versions.node || '?'}\`. ` +
+  `SymPy \`${versions.sympy || '?'}\` · math.js \`${versions.mathjs || '?'}\` · Mathematica \`${versions.wolfram || '?'}\` · Node \`${versions.node || '?'}\`` +
+  `${versions.machine ? ` · ${versions.machine}` : ''}. ` +
   'Correctness is verified numerically against an independent `mpmath` reference, never another tool. ' +
   'Reproduce with `npm run build production && ./venv/bin/python3 benchmarks/gen_cases.py && ' +
   'node benchmarks/report.mjs && node benchmarks/report_changelog.mjs`.');
