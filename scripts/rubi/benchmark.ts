@@ -94,6 +94,10 @@ type ProblemResult = {
   result?: string;
   detail?: string;
   ms: number;
+  /** --rubi mode: the steps the driver spent (`DriverStats.steps`) and the
+   * time the driver call took, before verification. */
+  steps?: number;
+  intMs?: number;
 };
 
 // Deterministic PRNG (mulberry32), same role as scripts/fungrim/sample.ts.
@@ -206,6 +210,8 @@ function runProblem(
   rubi?: { ce: ComputeEngine; driver: RubiDriver }
 ): ProblemResult {
   const start = Date.now();
+  let steps: number | undefined;
+  let intMs: number | undefined;
   const done = (
     outcome: Outcome,
     extra: Partial<ProblemResult> = {}
@@ -215,6 +221,7 @@ function runProblem(
     source: p.source,
     outcome,
     ms: Date.now() - start,
+    ...(steps !== undefined ? { steps, intMs } : {}),
     ...extra,
   });
 
@@ -224,10 +231,17 @@ function runProblem(
 
   try {
     const f = ce.expr(p.integrand as any);
-    const result = rubi
-      ? (rubi.driver.int(f, p.variable) ??
-        ce.function('Integrate', [f, ce.symbol(p.variable)]))
-      : ce.expr(['Integrate', p.integrand as any, p.variable]).evaluate();
+    let result: BoxedExpression;
+    if (rubi) {
+      const tInt = Date.now();
+      rubi.driver.stats.steps = undefined;
+      result =
+        rubi.driver.int(f, p.variable) ??
+        ce.function('Integrate', [f, ce.symbol(p.variable)]);
+      intMs = Date.now() - tInt;
+      steps = rubi.driver.stats.steps;
+    } else
+      result = ce.expr(['Integrate', p.integrand as any, p.variable]).evaluate();
 
     if (containsOperator(result, 'Integrate'))
       return done('unsolved', { result: result.toString() });
@@ -633,7 +647,9 @@ function main(): void {
       );
     rubi = {
       ce,
-      driver: new RubiDriver(ce, rules, { timeLimitMs: 15_000 }),
+      // The shipped limits: the step budget decides, the 30 s limit is the
+      // wall-clock guard of `loadIntegrationRules`.
+      driver: new RubiDriver(ce, rules, { timeLimitMs: 30_000 }),
     };
   }
 

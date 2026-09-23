@@ -1156,6 +1156,19 @@ export interface IComputeEngine {
   ): T;
 
   /**
+   * Run `fn` in a span with a wall-clock limit (`ms`), a step budget
+   * (`steps`), or both. A step budget bounds an internal search on every
+   * machine at the same point, so its result does not depend on the speed or
+   * the load of the machine. A spent budget throws a timeout
+   * `CancellationError` with the span's `label` as its attribution.
+   * @internal
+   */
+  _withBudget<T>(
+    limit: { ms?: number; steps?: number; label?: string },
+    fn: () => T
+  ): T;
+
+  /**
    * The host capabilities of this engine: the handlers the library operators
    * use to reach the host. `Print` and `Input` use `effects.console`.
    *

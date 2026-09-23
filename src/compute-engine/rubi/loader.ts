@@ -25,9 +25,18 @@ import { compileRuleDocs, type CompileResult } from './compile.js';
 import { RubiDriver, type IntStepRecord } from './driver.js';
 
 export interface IntegrationRulesLoadOptions {
-  /** Per-integral wall-clock budget for the rule driver, in milliseconds.
-   * Default 10000. Bounds each `Integrate` call so a pathological integrand
-   * cannot hang. */
+  /** Per-integral step budget of the rule driver (default `RUBI_STEP_BUDGET`,
+   * 300,000): a non-negative integer, or `Infinity` for no budget (the
+   * wall-clock limit then decides). This budget decides when the driver gives up on an integrand,
+   * so the answer is the same on every machine: an integral that needs more
+   * steps stays unevaluated everywhere. A step is one deadline check of the
+   * engine: an entry of the rule recursion, one rule tried, 1024 steps of the
+   * rule matcher, a checkpoint of the engine code a rule runs. */
+  stepBudget?: number;
+  /** Per-integral wall-clock limit of the rule driver, in milliseconds
+   * (default 30000). Only a guard against a hang in code that does not count
+   * steps: the step budget, not this limit, normally decides when the driver
+   * gives up. */
   timeLimitMs?: number;
 }
 
@@ -65,8 +74,20 @@ export function loadIntegrationRules(
   const compiled = result.rules;
   const skipped = result.skipped;
 
+  const stepBudget = options?.stepBudget;
+  if (
+    stepBudget !== undefined &&
+    !(
+      stepBudget === Infinity ||
+      (Number.isInteger(stepBudget) && stepBudget >= 0)
+    )
+  )
+    throw new RangeError(
+      `loadIntegrationRules: stepBudget must be a non-negative integer or Infinity, not ${stepBudget}`
+    );
   const driver = new RubiDriver(ce, compiled, {
-    timeLimitMs: options?.timeLimitMs ?? 10_000,
+    timeLimitMs: options?.timeLimitMs ?? 30_000,
+    stepBudget,
   });
 
   ce._integrationProvider = (

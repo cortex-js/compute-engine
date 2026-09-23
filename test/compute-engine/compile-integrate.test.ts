@@ -302,9 +302,9 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
       const engine = new ComputeEngine();
       const expr = engine.parse('\\int_0^1 x^2 \\, dx');
       const reason = new Error('aborted by the user');
-      const original = engine.withTimeLimit.bind(engine);
+      const original = engine._withBudget.bind(engine);
       const spy = jest
-        .spyOn(engine, 'withTimeLimit')
+        .spyOn(engine, '_withBudget')
         .mockImplementation(((options: unknown, fn: () => unknown) => {
           if ((options as { label?: string }).label === 'compile:antiderivative')
             throw new CancellationError({ cause: reason });

@@ -220,6 +220,7 @@ import { isPureComputedEffects } from '../../common/type/effects.js';
 import {
   CancellationError,
   checkDeadline,
+  checkDeadlineEvery,
   iterationLimitCancellationCount,
 } from '../../common/interruptible.js';
 import {
@@ -241,12 +242,6 @@ const DEFAULT_MATERIALIZATION: [number, number] = [5, 5] as const;
  * object's field must not drag an `isEmpty` that read nothing into being
  * invalidated with it. */
 type FacetEntry<T> = { value: T; objectDeps?: ObjectDeps };
-
-/** Tick counter for the cooperative deadline checkpoint in
- * `_computeValue`/`_computeValueAsync`. Module-scoped (shared across
- * engines): the check reads the owning engine's deadline, the counter only
- * paces how often `Date.now()` is consulted. */
-let _evalTick = 0;
 
 /** Count of provisional (re-entrant) `_effectsOf` reads — see the cycle note
  * on `_effectsOf`. A computation that consumed one must not be frozen into
@@ -4304,8 +4299,7 @@ export class BoxedFunction
       // the tree at every nesting level — never reaches them: without this
       // check such an evaluation exhausts the heap instead of honoring an
       // enclosing `withTimeLimit` span's deadline.
-      if ((++_evalTick & 0x3ff) === 0)
-        checkDeadline(this.engine._deadlineFrame);
+      checkDeadlineEvery(this.engine._deadlineFrame, 0x3ff);
 
       if (!this._def) return this;
       if (!this.isValid) {
@@ -5190,8 +5184,7 @@ export class BoxedFunction
   ): () => Promise<Expression> {
     return async () => {
       // Cooperative deadline checkpoint — see `_computeValue`.
-      if ((++_evalTick & 0x3ff) === 0)
-        checkDeadline(this.engine._deadlineFrame);
+      checkDeadlineEvery(this.engine._deadlineFrame, 0x3ff);
 
       if (!this._def) return this;
       if (!this.isValid) {

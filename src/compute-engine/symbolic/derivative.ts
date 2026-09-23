@@ -1,5 +1,8 @@
 import { apply } from '../function-utils.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  checkDeadlineEvery,
+} from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import type { Expression, ExpressionInput } from '../global-types.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
@@ -29,13 +32,6 @@ import {
  * should never approach this limit.
  */
 const MAX_DIFFERENTIATION_DEPTH = 100;
-
-// Differentiation can blow up in WIDTH, not just depth: the product/chain
-// rules square the expression size at each order, so an r-th symbolic
-// derivative (e.g. of LambertW — REVIEW.md G8, Fungrim 8e8a59) can allocate
-// gigabytes building one expression while staying well under the depth
-// limit. Check the engine deadline periodically across recursive calls.
-let differentiateCallCount = 0;
 
 /**
  * Maximum size, in expression nodes, of a result the symbolic
@@ -875,9 +871,12 @@ function differentiateNode(
     return undefined;
   }
 
-  // Guard against runaway expression growth (see differentiateCallCount)
-  if ((++differentiateCallCount & 0xff) === 0)
-    checkDeadline(expr.engine._deadlineFrame);
+  // Differentiation can blow up in WIDTH, not just depth: the product and
+  // chain rules square the expression size at each order, so an r-th
+  // symbolic derivative (of LambertW, for example) can allocate gigabytes
+  // building one expression while staying well under
+  // MAX_DIFFERENTIATION_DEPTH. So check the engine deadline every 256 calls.
+  checkDeadlineEvery(expr.engine._deadlineFrame, 0xff);
 
   const ce = expr.engine;
 

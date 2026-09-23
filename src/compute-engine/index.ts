@@ -1676,21 +1676,50 @@ export class ComputeEngine implements IComputeEngine {
   ): T {
     const ms = typeof limit === 'number' ? limit : limit.ms;
     const label = typeof limit === 'number' ? undefined : limit.label;
+    return this._withBudget({ ms, label }, fn);
+  }
 
+  /**
+   * Run `fn` in a span with a wall-clock limit (`ms`), a step budget
+   * (`steps`, see `StepBudget` in `common/interruptible.ts`), or both. With
+   * neither, the span only adds its label. `withTimeLimit` is this with
+   * `ms` alone.
+   *
+   * A step budget makes the point where an internal search gives up
+   * independent of the machine, so its result is too: use it, not `ms`, to
+   * bound a search whose result changes when it gives up. Keep a large `ms`
+   * beside it only as a guard against a hang in code that does not count
+   * steps.
+   *
+   * Spans nest: the effective deadline is the earliest one, and a step
+   * counts against every active budget.
+   *
+   * @internal
+   */
+  _withBudget<T>(
+    limit: { ms?: number; steps?: number; label?: string },
+    fn: () => T
+  ): T {
+    const { ms, steps, label } = limit;
     const prevFrame = this._runtimeState.deadlineFrame;
-    const own = Date.now() + ms;
+    const own = ms === undefined ? Infinity : Date.now() + ms;
     const spans = [
       ...(prevFrame?.spans ?? []),
       ...(label !== undefined ? [label] : []),
     ];
+    const budgets =
+      steps === undefined
+        ? prevFrame?.budgets
+        : [...(prevFrame?.budgets ?? []), { left: steps, owner: label, spans }];
 
     // Nesting stays `min()`: if an enclosing span's deadline is already at or
     // before our own, it remains the effective one (and keeps its owner);
     // otherwise this span's deadline wins.
-    const frame =
+    const frame: DeadlineFrame =
       prevFrame !== undefined && prevFrame.at <= own
         ? { at: prevFrame.at, owner: prevFrame.owner, spans }
         : { at: own, owner: label, spans };
+    if (budgets !== undefined) frame.budgets = budgets;
 
     this._runtimeState.deadlineFrame = frame;
     try {

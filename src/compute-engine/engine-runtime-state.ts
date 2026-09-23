@@ -1,5 +1,6 @@
 import {
   CancellationError,
+  frameExpired,
   type DeadlineFrame,
 } from '../common/interruptible.js';
 import type { RandomSeedFrame } from './numerics/random.js';
@@ -109,6 +110,9 @@ export class EngineRuntimeState {
 
   get timeRemaining(): number {
     if (this._deadlineFrame === undefined) return Number.POSITIVE_INFINITY;
+    // A spent step budget leaves no time either: a loop driven by this value
+    // (`run(gen, ce._timeRemaining)`) must stop as `checkDeadline` would.
+    if (frameExpired(this._deadlineFrame)) return 0;
     return this._deadlineFrame.at - Date.now();
   }
 
@@ -121,8 +125,6 @@ export class EngineRuntimeState {
   }
 
   shouldContinueExecution(): boolean {
-    return (
-      this._deadlineFrame === undefined || this._deadlineFrame.at >= Date.now()
-    );
+    return !frameExpired(this._deadlineFrame);
   }
 }

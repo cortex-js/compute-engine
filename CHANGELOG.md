@@ -2,6 +2,20 @@
 
 ### Behavior Changes
 
+- **Symbolic integration gives up at the same point on every machine.** The
+  Rubi integration rules (`loadIntegrationRules`) and the compiler's attempt
+  to find a closed form for an `Integrate` now stop after a number of steps,
+  not after a time. Before, the same integral could close on a fast machine
+  and stay unevaluated (or compile to numeric quadrature) on a slow or loaded
+  one. The rule driver has 300,000 steps per integral (new option
+  `stepBudget` of `loadIntegrationRules`); the compiler has 300,000 steps per
+  integral and 600,000 per compilation. The wall-clock limits remain only as
+  a guard against a hang: `timeLimitMs` of `loadIntegrationRules` now
+  defaults to 30 s (it was 10 s), and the compiler's attempt has 30 s per
+  integral and per compilation (it was 2 s and 4 s). An integrand that spends
+  its time in code that does not count steps can therefore run up to 30 s
+  before it stays unevaluated.
+
 - **A caller's deadline now propagates out of `compile()` and the
   integration components.** A `CancellationError` from an expired `ce.withTimeLimit` span
   (or an abort signal, an iteration limit or a recursion limit) is no longer

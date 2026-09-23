@@ -104,6 +104,7 @@ import { asRational } from '../boxed-expression/numerics.js';
 import {
   isTimeoutCancellation,
   throwIfCallerCancellation,
+  type StepBudget,
 } from '../../common/interruptible.js';
 import {
   functionLiteralBoundNames,
@@ -15951,7 +15952,9 @@ export class BaseCompiler {
   }
 
   /**
-   * Wall-clock budget for one `Integrate` node's antiderivative-first attempt.
+   * Step budget for one `Integrate` node's antiderivative-first attempt (a
+   * step is one `checkDeadline` call on the engine frame; see `StepBudget` in
+   * `common/interruptible.ts`).
    *
    * The attempt is an **optimization** — every integral it declines still
    * compiles, via the caller's numeric emitter (quadrature on the JavaScript
@@ -15966,40 +15969,68 @@ export class BaseCompiler {
    * still preempts this budget — this can only shorten, never extend, a
    * caller's bound.
    *
-   * Sized against the slowest symbolic resolution in the compile-integrate
-   * suite (~200 ms on a warm engine), with ~10× headroom for slow CI, so no
+   * The budget counts steps, not milliseconds. With a wall-clock budget the
+   * same integral compiled to its closed form on a fast machine and to
+   * numeric quadrature on a slow or loaded one, so the compiled code, and its
+   * values, depended on the machine. A step budget stops the search at the
+   * same point on every machine. A large wall-clock limit
+   * ({@link ANTIDERIVATIVE_ATTEMPT_HANG_MS}) stays beside it only as a guard
+   * against a hang in code that does not count steps.
+   *
+   * Sized against the steps of the symbolic resolutions in the
+   * compile-integrate suite and the Rubi benchmark, with headroom, so no
    * integral that legitimately closes is pushed onto the numeric path.
    */
-  private static readonly ANTIDERIVATIVE_ATTEMPT_BUDGET_MS = 2000;
+  private static readonly ANTIDERIVATIVE_ATTEMPT_STEPS = 300_000;
+
+  /** The wall-clock guard of one attempt: see
+   *  {@link ANTIDERIVATIVE_ATTEMPT_STEPS}. */
+  private static readonly ANTIDERIVATIVE_ATTEMPT_HANG_MS = 30_000;
+
+  /** The wall-clock guard of all the attempts of one compilation. An attempt
+   *  that spends its time in code that does not count steps (a polynomial
+   *  GCD on coefficients with thousands of digits) can use its whole hang
+   *  limit while spending few steps, so the step pool alone would not keep
+   *  a compilation with many such integrals short. This guard can decide
+   *  which integrals get a closed form only when the attempts of one
+   *  compilation spend 30 s in total, a case that does not reach the step
+   *  pool first unless each step is slow: there the result can still depend
+   *  on the machine. */
+  private static readonly ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
+
+  /** Remaining wall-clock guard of the current compilation — see
+   *  {@link ANTIDERIVATIVE_COMPILATION_HANG_MS}. */
+  private static antiderivativeHangMsLeft =
+    BaseCompiler.ANTIDERIVATIVE_COMPILATION_HANG_MS;
 
   /** The per-attempt budget in force: the constant above, unless a test
    *  shortened it with {@link setAntiderivativeAttemptBudgetForTesting}. */
-  private static antiderivativeAttemptBudgetMs =
-    BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS;
+  private static antiderivativeAttemptSteps =
+    BaseCompiler.ANTIDERIVATIVE_ATTEMPT_STEPS;
 
   /**
-   * Shorten the per-attempt budget, or restore it when called with no
-   * argument. For tests only: a test of what follows a timeout needs a search
-   * that times out on every machine, and quickly.
+   * Shorten the per-attempt step budget, or restore it when called with no
+   * argument. For tests only: a test of what follows a spent budget needs a
+   * search that spends it, and quickly.
    */
-  static setAntiderivativeAttemptBudgetForTesting(ms?: number): void {
-    BaseCompiler.antiderivativeAttemptBudgetMs =
-      ms ?? BaseCompiler.ANTIDERIVATIVE_ATTEMPT_BUDGET_MS;
+  static setAntiderivativeAttemptBudgetForTesting(steps?: number): void {
+    BaseCompiler.antiderivativeAttemptSteps =
+      steps ?? BaseCompiler.ANTIDERIVATIVE_ATTEMPT_STEPS;
   }
 
   /**
-   * Shared wall-clock budget for ALL antiderivative-first attempts in one
+   * Shared step budget for ALL antiderivative-first attempts in one
    * outermost compilation.
    *
    * The per-node budget above bounds one attempt, but an emission can carry
    * hundreds of `Integrate` nodes — a macro-expanded consumer document
-   * produced 728 in one expression (Tycho item 226) — and a fresh 2 s span
-   * per node lets the aggregate reach nodes × 2 s before the numeric
+   * produced 728 in one expression (Tycho item 226) — and a fresh budget
+   * per node lets the aggregate reach nodes × the budget before the numeric
    * fallback. Since the attempt is purely an optimization, the attempts
-   * share this pool: each consumes the wall-clock it actually spends, and
+   * share this pool: each consumes the steps it actually spends, and
    * once the pool is dry every remaining integral in the compilation skips
-   * straight to its numeric emitter. Sized for a handful of hard (≈200 ms)
-   * legitimate resolutions plus dozens of ordinary (≈ms) ones.
+   * straight to its numeric emitter. Sized for a handful of hard legitimate
+   * resolutions plus dozens of ordinary ones.
    *
    * Reset at each DEPTH-0 entry of `BaseCompiler.compile` — the boundary
    * every route crosses: `compileRoot` (raw custom targets),
@@ -16013,24 +16044,26 @@ export class BaseCompiler {
    * keeps each statement's compile time bounded exactly as one expression's
    * is.
    */
-  private static readonly ANTIDERIVATIVE_COMPILATION_BUDGET_MS = 4000;
+  private static readonly ANTIDERIVATIVE_COMPILATION_STEPS = 600_000;
 
   /** Remaining shared antiderivative budget for the current compilation —
-   *  see {@link ANTIDERIVATIVE_COMPILATION_BUDGET_MS}. Module state is safe:
+   *  see {@link ANTIDERIVATIVE_COMPILATION_STEPS}. Module state is safe:
    *  compilation is synchronous and single-threaded. */
-  private static antiderivativeBudgetLeftMs =
-    BaseCompiler.ANTIDERIVATIVE_COMPILATION_BUDGET_MS;
+  private static antiderivativeStepsLeft =
+    BaseCompiler.ANTIDERIVATIVE_COMPILATION_STEPS;
 
   /**
    * Start a fresh compilation's shared budgets — today just the
    * antiderivative pool. Called from ONE place: the depth-0 boundary of
    * `BaseCompiler.compile`, which every compilation route crosses (see
-   * {@link ANTIDERIVATIVE_COMPILATION_BUDGET_MS} for why no shallower entry
+   * {@link ANTIDERIVATIVE_COMPILATION_STEPS} for why no shallower entry
    * covers them all).
    */
   static resetSharedCompilationBudgets(): void {
-    BaseCompiler.antiderivativeBudgetLeftMs =
-      BaseCompiler.ANTIDERIVATIVE_COMPILATION_BUDGET_MS;
+    BaseCompiler.antiderivativeStepsLeft =
+      BaseCompiler.ANTIDERIVATIVE_COMPILATION_STEPS;
+    BaseCompiler.antiderivativeHangMsLeft =
+      BaseCompiler.ANTIDERIVATIVE_COMPILATION_HANG_MS;
   }
 
   /**
@@ -16269,7 +16302,7 @@ export class BaseCompiler {
    * `∫₀ˣ f(t) dt` whose closed form is a function of the free bound `x` — that
    * straight-line expression is returned, so each sample costs ~µs instead of a
    * full numeric integration. The symbolic attempt runs under its own
-   * {@link ANTIDERIVATIVE_ATTEMPT_BUDGET_MS} span (tightened further by an
+   * {@link ANTIDERIVATIVE_ATTEMPT_STEPS} span (tightened further by an
    * enclosing span, never extended), so a non-elementary integrand degrades to
    * the caller's numeric emitter rather than hanging. Skipped when the integral
    * references a `vars`-mapped symbol, which must survive to run time as a live
@@ -16301,10 +16334,14 @@ export class BaseCompiler {
     // operands would keep the caller's scope. The closed form outlives the
     // scope: the caller's `compile()` resolves its free symbols by name against
     // the target's bindings.
-    // The compilation-wide pool is consumed by wall-clock actually spent, so
+    // The compilation-wide pool is consumed by the steps actually spent, so
     // hundreds of nodes cannot each arm a fresh full span — once the pool is
     // dry, remaining integrals go straight to their numeric emitter.
-    if (BaseCompiler.antiderivativeBudgetLeftMs <= 0) return undefined;
+    if (
+      BaseCompiler.antiderivativeStepsLeft <= 0 ||
+      BaseCompiler.antiderivativeHangMsLeft <= 0
+    )
+      return undefined;
 
     // An attempt that timed out in this engine state is not repeated — see
     // `antiderivativeTimeouts`.
@@ -16331,20 +16368,34 @@ export class BaseCompiler {
         return undefined;
     }
 
+    const grantedSteps = Math.min(
+      BaseCompiler.antiderivativeAttemptSteps,
+      BaseCompiler.antiderivativeStepsLeft
+    );
+    BaseCompiler.antiderivativeAttemptCount += 1;
+    // The budget object of this attempt's span, read inside the span: after
+    // the attempt, `left` tells how many steps it spent and whether it ran
+    // out.
+    let budget: StepBudget | undefined;
     const grantedMs = Math.min(
-      BaseCompiler.antiderivativeAttemptBudgetMs,
-      BaseCompiler.antiderivativeBudgetLeftMs
+      BaseCompiler.ANTIDERIVATIVE_ATTEMPT_HANG_MS,
+      BaseCompiler.antiderivativeHangMsLeft
     );
     let elapsedMs = 0;
-    BaseCompiler.antiderivativeAttemptCount += 1;
-    //
     // eslint-disable-next-line no-restricted-globals
     const attemptStart = performance.now();
     engine.pushScope();
     try {
-      closed = engine.withTimeLimit(
-        { ms: grantedMs, label: 'compile:antiderivative' },
-        () => engine.function('Integrate', ops).evaluate()
+      closed = engine._withBudget(
+        {
+          ms: grantedMs,
+          steps: grantedSteps,
+          label: 'compile:antiderivative',
+        },
+        () => {
+          budget = engine._deadlineFrame?.budgets?.at(-1);
+          return engine.function('Integrate', ops).evaluate();
+        }
       );
     } catch (e) {
       // Non-elementary / deadline: the caller falls back to numeric
@@ -16369,10 +16420,24 @@ export class BaseCompiler {
       throwIfCallerCancellation(e, engine._deadlineFrame);
     } finally {
       engine.popScope();
+      const spent = grantedSteps - Math.max(0, budget?.left ?? 0);
+      BaseCompiler.antiderivativeStepsLeft -= spent;
       // eslint-disable-next-line no-restricted-globals
       elapsedMs = performance.now() - attemptStart;
-      BaseCompiler.antiderivativeBudgetLeftMs -= elapsedMs;
+      BaseCompiler.antiderivativeHangMsLeft -= elapsedMs;
     }
+    // The attempt ran out of steps, or used its whole wall-clock guard. The
+    // second case is read from the clock, as the only record of a search that
+    // spends its time in code that counts few steps: without it, every later
+    // compilation of the integral would repeat a 30 s search. Nine tenths
+    // count as the whole, because the deadline is kept on a millisecond clock
+    // and can fire before this finer clock reads the full guard. A guard
+    // shortened by the compilation pool is not a record: it says little about
+    // the integral.
+    const ranOut =
+      (budget !== undefined && budget.left < 0) ||
+      (grantedMs === BaseCompiler.ANTIDERIVATIVE_ATTEMPT_HANG_MS &&
+        elapsedMs >= 0.9 * grantedMs);
 
     const usable =
       closed !== undefined &&
@@ -16380,17 +16445,16 @@ export class BaseCompiler {
       closed.isValid &&
       closed.isNaN !== true;
 
-    // A timeout is read from the clock, not from the error: the search does
-    // not always end by throwing the cancellation of this span. A rule that
-    // runs out of time is skipped and the search goes on to the next, so an
-    // attempt can use its whole budget and still return an unevaluated
-    // integral. Nine tenths of the budget counts as the whole: the deadline
-    // is kept on a millisecond clock, so it can fire a fraction of a
-    // millisecond before this finer clock reads the full budget.
+    // A spent budget is read from the budget object, not from the error: the
+    // search does not always end by throwing the cancellation of this span.
+    // A step can be counted inside code that catches the error and goes on
+    // (a rule that fails is skipped), so an attempt can spend its whole
+    // budget and still return an unevaluated integral. A budget stays spent
+    // once spent, so `left` below zero is exact.
     if (
       !usable &&
-      elapsedMs >= 0.9 * grantedMs &&
-      grantedMs === BaseCompiler.antiderivativeAttemptBudgetMs
+      ranOut &&
+      grantedSteps === BaseCompiler.antiderivativeAttemptSteps
     ) {
       const stamp = BaseCompiler.antiderivativeStateStamp(engine);
       let record = BaseCompiler.antiderivativeTimeouts.get(engine);

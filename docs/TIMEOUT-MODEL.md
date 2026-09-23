@@ -133,6 +133,36 @@ and fall back when that child expires. If the enclosing span expires first, the
 operator must propagate the cancellation rather than treating it as permission
 to continue with a fallback.
 
+### 7.4 Step budgets
+
+A wall-clock sub-budget makes a RESULT depend on the machine: an internal
+search that gives up after 2 s closes an integral on a fast machine and leaves
+it unevaluated on a slow or loaded one. An internal search whose result
+changes when it gives up therefore uses a step budget
+(`engine._withBudget({ steps, ms, label }, fn)`, internal):
+
+- A step is one call of `checkDeadline` with the engine frame. The frame
+  holds the step budgets of the active spans (`DeadlineFrame.budgets`), and
+  each call counts one step against each of them.
+- A spent budget throws the same error as an expired labelled span: a timeout
+  `CancellationError` with the span's label as its attribution (message "Step
+  budget exhausted"). So the rules of §2 apply unchanged: the code that armed
+  the budget falls back, and every catch block inside the span throws the
+  error again, because the frame it sees is spent. A spent budget stays
+  spent, so a catch block that ignores the error meets it again at the next
+  step.
+- Stride counters that amortize the check (`checkDeadlineEvery`) keep their
+  count on the frame, not in a module-level variable. So the steps of a span
+  do not depend on the work that ran before it.
+- A large `ms` stays beside the steps, only as a guard against a hang in code
+  that does not count steps. Such code exists: a polynomial GCD whose
+  big-decimal coefficients grow to thousands of digits spends seconds between
+  two steps. There the wall-clock guard still decides.
+
+The Rubi integration driver (300,000 steps per integral, 30 s guard) and the
+compiler's closed-form attempt of `Integrate` (300,000 steps per attempt,
+600,000 per compilation, 30 s guard) use step budgets.
+
 ## 8. Migration result
 
 The deadline-stack migration is complete:

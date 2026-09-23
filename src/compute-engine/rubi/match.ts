@@ -18,25 +18,35 @@
 // optionals — this is how `(a_.+b_.*x_)^m_.` matches bare `x`.
 
 import type { Expr as Expression } from './types.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  checkDeadlineEvery,
+  type DeadlineFrame,
+} from '../../common/interruptible.js';
 import { isSymbol } from '../boxed-expression/type-guards.js';
 import { sameBindingDef } from '../boxed-expression/binders.js';
 
 // Deadline plumbing. The backtracking AC matcher (mAC) can blow up
-// combinatorially on products with many factors — this is the dominant
-// source of RubiDriver.int overrunning its timeLimitMs (the dispatch loop
-// only checks the deadline between rules, not inside a single rule's match).
-// matchAll publishes an absolute deadline (ms) here; every match step
-// strided-checks it and throws CancellationError when exceeded, which the
-// driver's int() catches → the problem becomes a bounded `unsolved`.
+// combinatorially on products with many factors, and the dispatch loop only
+// checks the deadline between rules, not inside a single rule's match.
+// matchAll publishes the deadline here — the engine's deadline frame, whose
+// step budget counts one step every 1024 match steps — and every match step
+// strided-checks it; a spent budget or an expired time throws
+// CancellationError, which the driver's int() catches → the problem becomes
+// a bounded `unsolved`. A plain timestamp is still accepted for a caller
+// with no engine frame; only that case uses the module-level `_matchTick`.
 // Module-level state is safe: the matcher is single-threaded and each
 // matchAll call runs to completion (or throws) before the next, and the
 // previous value is restored in a finally.
-let _matchDeadline: number | undefined = undefined;
+let _matchDeadline: number | DeadlineFrame | undefined = undefined;
 let _matchTick = 0;
 function tickDeadline(): void {
-  // amortize Date.now() over 1024 steps (same stride as the engine loops)
-  if ((++_matchTick & 0x3ff) === 0) checkDeadline(_matchDeadline);
+  // amortize Date.now() over 1024 steps (same stride as the engine loops).
+  // A frame keeps its own counter, so the step count of a step budget does
+  // not depend on the matches that ran before this span.
+  if (typeof _matchDeadline === 'object')
+    checkDeadlineEvery(_matchDeadline, 0x3ff);
+  else if ((++_matchTick & 0x3ff) === 0) checkDeadline(_matchDeadline);
 }
 
 export type Pat =
@@ -73,7 +83,7 @@ export function matchAll(
   expr: Expression,
   x: Expression,
   cap = 8,
-  deadline?: number
+  deadline?: number | DeadlineFrame
 ): Env[] {
   const envs: Env[] = [];
   const env: Env = new Map();

@@ -114,43 +114,31 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 The entries below are the ones judged worth starting next, most valuable first.
 Each links to its own entry further down, which holds the detail. The ranking
 weighs what a consumer sees (a wrong value first, then a slow one) against the
-size of the work. Items 1 and 2 were decided by the user on 2026-09-23 (both
-"yes") and tabled until after an OS update.
+size of the work. The user-function cache item (decided "yes, after a
+soundness check" on 2026-09-23) left the list: the check failed, and it needs
+a design first (entry "Every call of a user function invalidates every
+generation-keyed cache").
 
-1. **Replace the internal time budgets with step budgets (user decision
-   2026-09-23: yes).** The Rubi driver and the compiler's closed-form
-   antiderivative attempt stop on the wall clock, so the same input gives a
-   closed form on a fast machine and quadrature on a slow or loaded one. Use
-   step budgets and size caps; keep a large wall-clock limit only against a
-   hang; recalibrate with the Rubi benchmark on a quiet machine, because the
-   solved counts will change. About a day. Entry: "Internal time budgets make
-   compiled code and integrals depend on the machine".
-2. **Make parameter declarations of a user-function call stop invalidating all
-   caches (user decision 2026-09-23: yes, after a soundness check).** First show
-   that a value that outlives the activation cannot make a cached result wrong
-   when the declaration advances no cache axis (`scratch`); then change it and
-   measure. Medium. Entry: "Every call of a user function invalidates every
-   generation-keyed cache".
-3. **An expression keeps its old type after inference narrows one of its
+1. **An expression keeps its old type after inference narrows one of its
    symbols.** A wrong (outdated) type, pre-existing. Needs a finer invalidation
    rule; medium. Entry: "An expression keeps its old type after inference
    narrows one of its symbols".
-4. **Large-list evaluation, what is left:** a power of `e` and the inverse
+2. **Large-list evaluation, what is left:** a power of `e` and the inverse
    trigonometric functions under `evaluate()`, a division by an exact rational
    (`L / 3`), `Norm` of a lazy `Map`. Each is a small kernel or guard; the gains
    are 20 to 40 times on the shapes they cover. Entries: "Element-wise
    arithmetic over a large list: what is still interpreted per element", "`Norm`
    of a lazy collection stays unevaluated".
-5. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
+3. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
    chain under complex mode) and the interval constant-list fan-out cap.
    Consumer-visible declines; medium size. Entries: "The Tycho corpus document
    `s8ishknvhe`: what stays open after the mixed-cell and pole round",
    "Coordinate projection through point arithmetic: what stays open".
-6. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
+4. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
    object for the whole sum instead of a new `Add` at each step. Slow, not
    wrong; medium. Entry: "Slow operations and slow tests found by a review of
    the slowest test files".
-7. **A new all-states Tycho baseline** on the next release, to measure the
+5. **A new all-states Tycho baseline** on the next release, to measure the
    large-list and codegen work on real documents. Entry: "Code-generation census
    on CE 0.128.13: ranked candidates".
 
@@ -583,8 +571,9 @@ compiles when its point list `C_c` is declared
 ### An expression keeps its old type after inference narrows one of its symbols (OPEN, caching design — found 2026-09-22)
 
 Example: `l = ce.box(['List', 'x'])` has the type `vector<1>`. After a use
-narrows `x` to `real`, `l.type` is still `vector<1>`, while a new
-`ce.box(['List', 'x'])` has the type `vector<real^1>`. A value-type
+narrows `x` to `real` (`ce.box(['Mod', 'x', 2]).evaluate()` does), `l.type`
+is still `vector<1>`, while a new `ce.box(['List', 'x'])` has the type
+`vector<real^1>`. A value-type
 inference write (`BoxedSymbol` inference, `inference` state event with
 `valueType: true`) advances no cache axis on purpose: it can run while `_type`
 and `_sgn` are being computed, and advancing their axis there would
@@ -605,38 +594,45 @@ point. A declaration into an activation scope could be marked `scratch`
 (advances no axis), but a value can outlive its activation, which is the
 soundness question discussed in the `declare` case of `axisMaskOf`
 (`engine-configuration-lifecycle.ts`). User decision (2026-09-23): yes,
-make activation declarations `scratch` once the soundness check passes; then
-measure: this is most of the remaining
-time of `item-284-derivative-compile-cost.test.ts`.
+make activation declarations `scratch` once the soundness check passes.
 
-### Internal time budgets make compiled code and integrals depend on the machine (OPEN, design — found 2026-09-22)
+Soundness check (2026-09-23): it FAILS. With every activation declaration
+marked `scratch`, three tests of `lambda-param-collection-inference.test.ts`
+overflow the stack: `countdown(xs)` with the body
+`if Length(xs) == 0 { 0 } else { 1 + countdown(Rest(xs)) }`, and the two
+mutual-recursion tests. The body node `Length(xs) == 0` is shared by every
+call, and its value cache is keyed on the generation; with no advance per
+call, the second call reads the first call's answer (4), so the base case is
+never reached. The type and sign of a body SYMBOL are safe (its definition is
+fixed when it is boxed), but a cached answer of a compound body node can read
+the call's values through `_contextValue()`. Other probes (sign-dependent
+bodies with alternating signs, `Simplify`, `D`, `N`, `Integrate` in a body, a
+returned closure) gave the same answers with and without the change, and the
+rest of the suite passed. The gain is also smaller than expected:
+`item-284-derivative-compile-cost.test.ts` took 20.6 s instead of 22.9 s
+(one run each, under load). A sound version needs the caches of a body node
+to depend on the call: for example a per-activation stamp in the key of the
+value and facet caches of a node that reads a parameter, or an axis that
+only activation declarations advance.
 
-Two components choose their own wall-clock budget, and when it expires the
-ANSWER changes, not only the speed. So the same input gives a different
-result on a faster or slower machine, or under load:
+### Big-decimal coefficients grow to thousands of digits in the polynomial GCD of a Rubi simplification (OPEN, performance — found 2026-09-23)
 
-- The Rubi rule driver: a budget per top-level `Integrate` (10 s by default
-  from `loadIntegrationRules`, 30 s in `rubi/driver.ts` when the option is
-  missing), per-rule and per-match checks, and two `min(remaining, 5000)` ms
-  slices (the rational fallback and `cleanExpansionResult`). On expiry the
-  integral stays unevaluated or unsimplified. The "Driver-determinism
-  residual" note in the Rubi section below describes the same problem.
-- The compiler's attempt to find an antiderivative before it emits numeric
-  quadrature (`base-compiler.ts`: 2 s per attempt, 4 s shared by all
-  `Integrate` nodes in one compilation). On expiry the compiled code uses
-  `_SYS.integrate` instead of the closed form. The timeout record then marks
-  the integral as "timed out" when 90% of the granted time was used, and
-  every later compilation skips the attempt.
-
-User decision (2026-09-23): yes, do this. Proposed direction: replace these
-budgets with step budgets (the driver
-already counts `stats.calls` and `_matchTick`; the native antiderivative
-needs a step counter), and size caps instead of the time slices. Keep a large
-wall-clock limit only as protection against a hang. The counts of solved
-integrals will change, so recalibrate with the Rubi benchmark protocol on a
-quiet machine. Existing count-based limits to copy: `foldCostEstimate`
-(`base-compiler.ts`), `LIMIT_PROBE_ITERATION_BUDGET` (`numeric.ts`),
-`SCAN_NODE_BUDGET` (`interior-pole.ts`).
+The Rubi driver and the compiler's closed-form attempt now give up after a
+number of steps (`StepBudget`, `docs/TIMEOUT-MODEL.md` §7.4), with a 30 s
+wall-clock guard only against a hang. On seeded samples of Rubi chapters 1 to
+7 (1,400 problems), 8 unsolved problems still reach the 30 s guard, because
+they spend their time in code that counts few steps; their result is still
+decided by the clock. Example: `∫ 1/(2+3x⁴)² dx` (Rubi test 1.1.3.2 #703)
+reaches the 30 s guard after about 6,000 steps. The profile: a `simplify` inside the
+driver's `safeSimplify` runs `cancelCommonFactors` → `polynomialGCD` →
+`polynomialDivide`, whose coefficients are big decimals with significands of
+about 10,000 bits (3,000 digits). Sums and products of big decimals keep every
+digit, so the remainders of the Euclidean loop grow, and reading the type of
+such a literal calls `BigDecimal.toNumber()`, which prints the whole
+significand (12.8 s of the 15 s). Open questions: why an exact integrand gives
+big-decimal coefficients at all, and whether the GCD should round them to the
+working precision or refuse inexact coefficients. Fixing this would also let
+the wall-clock guard go back to a shorter value.
 
 ### Slow operations and slow tests found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
 
@@ -3535,15 +3531,17 @@ removes; closes Bondarenko **#9**, CE+R/F 20 → 21/35; two-pass so R31 stays
 byte-identical, inert off-family via the Euler branch of
 `hasNestedRadicalCandidate`).
 
-**Driver-determinism residual (2026-07-18):** route selection still has
-wall-clock-sensitive seams (budget-relative simplify slices
-`min(remaining, 5000)`, `ce._timeRemaining` guards) — under extreme synthetic
-load heavy families can still flake between solved and inert. The principled
-follow-up is O(nodes) pre-filters / absolute caps on speculative sub-routes,
-replacing budget-relative slicing. (Two independent budgets trap:
-`loadIntegrationRules(ce, { timeLimitMs })` (default 10 s) is independent of any
-`withTimeLimit` span — a heavy test must raise the loader budget and arm a long
-enough span.)
+**Driver determinism (2026-09-23):** the driver gives up after a step budget
+(300,000 steps per integral, `RUBI_STEP_BUDGET`), not after a time, and its
+two sub-searches (the native rational fallback, the clean-up simplify) have
+step budgets of their own. On seeded samples of chapters 1 to 7 the outcomes
+of all 1,400 problems were the same as under the former time budgets, and the
+step counts were the same from run to run under different loads. What still
+depends on the clock is listed in the entry "Big-decimal coefficients grow to
+thousands of digits in the polynomial GCD of a Rubi simplification". (Two
+independent budgets trap: `loadIntegrationRules(ce, { stepBudget,
+timeLimitMs })` is independent of any `withTimeLimit` span — a heavy test must
+raise the loader budget and arm a long enough span.)
 
 **Benchmark protocol.**
 `npx tsx scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine" --sample 120 --seed 5 --report /tmp/x.json`.
@@ -4060,7 +4058,13 @@ ledger, B13). Each entry's acceptance test already exists:
   loses ~8 digits (endpoint cancellation; per-case skip in
   `mpmath-kernels.test.ts`); `ζ(−0.5)` ~4 ulp (tolerance-relaxed); bignum
   `Complex` components truncated at canonicalization regardless of precision
-  (`canonical-form.test.ts` `@fixme`); one `Multiply` inexact case where the
+  (`canonical-form.test.ts` `@fixme`), and for the same reason every complex
+  result of `N()` has machine precision whatever `ce.precision` is: at the
+  default 21 digits `N(√2)` is `1.4142135623730950488` but `N(√−2)` is
+  `1.4142135623730951i`, and `N(ln(−2))` has 16 digits in each part (the
+  imaginary part of a numeric value is a JavaScript number, and complex
+  arithmetic runs on doubles; found 2026-09-23, not documented in the
+  numerical-evaluation guide); one `Multiply` inexact case where the
   big-precision path is worse than machine evaluate (`arithmetic.test.ts`
   `@fixme`).
 - **Misc:** SymPy-interop literal parses `0`/`0e0`

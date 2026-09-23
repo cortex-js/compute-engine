@@ -30,15 +30,19 @@ export type CancellationCause =
  *    span that owns `at`). `undefined` for an unlabelled span.
  *  - `spans`: labels of all active spans, outermost first. Unlabelled spans
  *    contribute nothing.
+ *  - `budgets`: the step budgets of the active spans that have one,
+ *    outermost first (see `StepBudget`).
  */
 export interface DeadlineFrame {
   at: number;
   owner?: string;
   spans: string[];
+  budgets?: StepBudget[];
   /**
-   * Scratch counter for a strided deadline check, owned by whichever walk is
-   * amortizing its `Date.now()` calls (today: the canonicalization walk in
-   * `boxed-expression/box.ts`).
+   * Scratch counter for a strided deadline check (`checkDeadlineEvery`, and
+   * the canonicalization walk in `boxed-expression/box.ts`). Several walks
+   * share it; each checks when the counter reaches a multiple of its stride,
+   * and every stride is a power of two.
    *
    * It lives on the FRAME rather than in a module-level variable so the stride
    * counts the nodes of the span that armed it, and only those. A module-level
@@ -48,10 +52,42 @@ export interface DeadlineFrame {
    * engine being checked at that moment has no frame armed. The check is then
    * a no-op and the engine that DOES have a budget waits up to another full
    * stride, so the residual overrun is not the one stride the walk claims.
-   * A frame is created per `withTimeLimit` span, so per-frame ticking makes
-   * that bound exact, at the cost of one property access.
+   * A frame is created per span (`withTimeLimit`, `_withBudget`), so
+   * per-frame ticking makes that bound exact, at the cost of one property
+   * access.
    */
   tick?: number;
+}
+
+/**
+ * A budget of steps, armed by an internal span (`engine._withBudget`).
+ *
+ * A wall-clock budget makes a result depend on the speed and the load of the
+ * machine: the same integral closes on a fast machine and stays unevaluated on
+ * a slow one. A step budget does not. Each call of `checkDeadline` with a
+ * frame that holds this budget is one step, so the same computation on the
+ * same engine state spends the same number of steps on every machine.
+ *
+ * A nested span shares the object with its parent, so a step counts against
+ * every budget that is active. When `left` goes below zero, `checkDeadline`
+ * throws a timeout `CancellationError` with the budget's `owner` as its
+ * attribution, the same error the expiry of a labelled `withTimeLimit` span
+ * gives. So the code that armed the budget can catch it and fall back, and
+ * every other catch block lets it through (`throwIfCallerCancellation`).
+ * Once spent, a budget stays spent: each later check throws again.
+ */
+export interface StepBudget {
+  left: number;
+  readonly owner?: string;
+  readonly spans: string[];
+}
+
+/** Has the time of `frame` passed, or has one of its step budgets been
+ * spent? Reads the budgets without counting a step. */
+export function frameExpired(frame: DeadlineFrame | undefined): boolean {
+  if (frame === undefined) return false;
+  if (Date.now() >= frame.at) return true;
+  return frame.budgets?.some((b) => b.left < 0) ?? false;
 }
 
 /**
@@ -125,9 +161,9 @@ export class CancellationError<T = unknown> extends Error {
  *
  * Call this periodically from long-running loops that cannot be expressed
  * as generators (where `run()`/`runAsync()` would apply). In tight loops,
- * amortize the `Date.now()` cost with a stride counter:
- *
- *    if ((++count & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+ * amortize the cost with `checkDeadlineEvery(ce._deadlineFrame, 0x3ff)`,
+ * which keeps its counter on the frame (a module-level counter would make
+ * the step count of a step budget depend on earlier work).
  */
 export function checkDeadline(
   deadline: number | DeadlineFrame | undefined
@@ -147,6 +183,42 @@ export function checkDeadline(
       spans: deadline.spans,
     });
   }
+  if (typeof deadline === 'number' || deadline.budgets === undefined) return;
+  // One step against every active budget. When more than one is spent, the
+  // outermost one owns the error, as the earliest deadline does for time.
+  let spent: StepBudget | undefined;
+  for (const b of deadline.budgets) {
+    b.left -= 1;
+    if (b.left < 0 && spent === undefined) spent = b;
+  }
+  if (spent !== undefined)
+    throw new CancellationError({
+      cause: 'timeout',
+      message: 'Step budget exhausted',
+      attribution: spent.owner,
+      // All the spans active now, as for an expired time.
+      spans: deadline.spans,
+    });
+}
+
+/**
+ * Call `checkDeadline(frame)` once every `mask + 1` calls (`mask` is a power
+ * of two minus one, such as `0x3ff`), to amortize its cost in a hot loop.
+ *
+ * The counter is the frame's `tick`, not a module-level variable. A frame is
+ * created per span, so the checks fall at the same points of the work of a
+ * span whatever ran before it. That keeps the step count of a step budget
+ * (`StepBudget`) the same on every run of the same computation.
+ */
+export function checkDeadlineEvery(
+  frame: DeadlineFrame | undefined,
+  mask: number
+): void {
+  if (
+    frame !== undefined &&
+    ((frame.tick = (frame.tick ?? 0) + 1) & mask) === 0
+  )
+    checkDeadline(frame);
 }
 
 /**
@@ -199,7 +271,9 @@ export function throwIfCallerCancellation(
 ): void {
   if (!(e instanceof Error && e.name === 'CancellationError')) return;
   if (!isTimeoutCancellation(e)) throw e;
-  checkDeadline(frame);
+  // Read the frame first: `checkDeadline` counts a step against its budgets,
+  // which a test of the frame must not do.
+  if (frameExpired(frame)) checkDeadline(frame);
 }
 
 /**

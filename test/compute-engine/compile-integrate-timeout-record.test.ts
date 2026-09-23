@@ -3,7 +3,7 @@
  * engine state it read is unchanged.
  *
  * Compiling an `Integrate` first searches for a closed form, under a
- * wall-clock budget, and emits numeric integration when the search fails. A
+ * step budget, and emits numeric integration when the search fails. A
  * document compiles the same integral several times — once per target, and
  * again inside each helper that holds it — and every compilation repeated the
  * search to its limit (the Tycho corpus document `thpezd39zq`: five
@@ -38,16 +38,9 @@ function compiled(
 }
 
 describe('A symbolic integration attempt that timed out', () => {
-  // A budget of ZERO makes every search time out, whatever the clocks read.
-  // The deadline is `Date.now() + budget` and the check is `now >= deadline`,
-  // so the first check of the search cancels it; and the compiler counts an
-  // attempt as timed out when it used nine tenths of its budget, which is
-  // nine tenths of zero. A small positive budget would not do: the deadline
-  // is kept on a millisecond clock and can fire before the finer clock the
-  // compiler reads has counted nine tenths of it. The search for this
-  // integrand completes, without a closed form, in about a tenth of a second,
-  // so a budget large enough to be safe from the rounding no longer times
-  // out.
+  // A budget of ZERO steps makes every search run out at its first step, the
+  // deadline check the antiderivative makes on entry, and the compiler
+  // records an attempt whose own budget ran out.
   beforeAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting(0));
   afterAll(() => BaseCompiler.setAntiderivativeAttemptBudgetForTesting());
 

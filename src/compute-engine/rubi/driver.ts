@@ -79,6 +79,30 @@ import { toTimesPower, recanonicalize } from './normal-form.js';
 
 const MAX_DEPTH = 40;
 
+/**
+ * The step budget of one top-level `int()` call, and of the two bounded
+ * sub-searches inside it (the native rational fallback and the clean-up
+ * simplification of an expansion result). A step is one `checkDeadline`
+ * call on the engine frame: one `intRec` entry, one rule tried, 1024 steps
+ * of the rule matcher, and the checkpoints of the engine code a rule calls.
+ *
+ * A step budget, not a wall-clock budget, decides when the search gives up,
+ * so the same integrand gives the same answer on a fast machine, a slow one
+ * and a loaded one. The wall-clock limit (`timeLimitMs`) stays only as a
+ * guard against a hang in code that does not count steps.
+ */
+//
+// Calibrated with the Rubi benchmark (`scripts/rubi/benchmark.ts`, which
+// reports the steps of each problem) on seeded samples of chapters 1 to 7:
+// the most steps a solved integral took was about 130,000 (p99 66,000). The
+// two sub-budgets are about what their former 5 s slices allowed.
+export const RUBI_STEP_BUDGET = 300_000;
+const NATIVE_FALLBACK_STEP_BUDGET = 100_000;
+const CLEAN_EXPANSION_STEP_BUDGET = 100_000;
+/** The wall-clock guard of each sub-search, the former 5 s slice: only code
+ * that counts few steps (a polynomial GCD on big coefficients) reaches it. */
+const SUB_SEARCH_HANG_MS = 5000;
+
 // RUBI_DEBUG_FLOAT: report the first rule whose result contains an inexact
 // machine-float literal while its integrand was float-free (i.e. the rule
 // that INTRODUCES the float, not one that propagates it).
@@ -253,6 +277,9 @@ export type DriverStats = {
   failures: number;
   /** match attempts that passed the matcher but failed later, with stage */
   trace: { id: string; stage: string; depth: number }[];
+  /** The steps the last top-level `int()` call spent (see
+   * `RUBI_STEP_BUDGET`). */
+  steps?: number;
 };
 
 /** Decide whether a caught error at a Rubi span (labelled `localLabel`) is a
@@ -283,7 +310,6 @@ export function isRubiOwnedCancellation(
 
 export class RubiDriver {
   private readonly memo = new Map<string, Expression | null>();
-  private deadline = Infinity;
   // Re-entry guard for the native rational fallback: it integrates via
   // `ce.Integrate.evaluate()`, which (when the integration provider is the
   // loader's driver) calls back into this driver — without this flag a rational
@@ -328,6 +354,9 @@ export class RubiDriver {
     private readonly rules: CompiledRule[],
     private readonly options: {
       timeLimitMs?: number;
+      /** The step budget of one top-level call (default
+       * `RUBI_STEP_BUDGET`). */
+      stepBudget?: number;
       trace?: boolean;
       /** @internal Force the legacy full-scan dispatch (root-operator
        * prescreen only), bypassing the skeleton screen. Overrides the
@@ -436,7 +465,6 @@ export class RubiDriver {
     if (reentrant) this.suppressRecording++;
     this.activeCalls++;
     if (!reentrant) {
-      this.deadline = Date.now() + (this.options.timeLimitMs ?? 30_000);
       // Bound the memo to a single top-level call: it is a per-call cache +
       // cycle guard, not a cross-call one (rules don't consult assumptions
       // today, but if they did, a stale pre-assumption result could be
@@ -462,7 +490,7 @@ export class RubiDriver {
       e !== null && this.trigActive
         ? cleanTrig(this.ce, activateTrig(this.ce, e))
         : e;
-    try {
+    const body = (): Expression | null => {
       const result = this.intRec(integrand, variable, 0);
       // Fold the stray `ln(e)` (= `Log[ExponentialE]`, from Chapter-2 rules
       // that emit `Log[F]` with base F = e) and any `e^(0·…)` the rule RHSs
@@ -476,7 +504,7 @@ export class RubiDriver {
       // back to the engine's native antiderivative: it does complete
       // partial-fraction integration (factor Q over ℚ, then linear and
       // irreducible-quadratic decomposition) that the ported Rubi rational
-      // rules don't yet cover. Bounded by the same wall-clock budget. This
+      // rules don't yet cover. Bounded by a step budget of its own. This
       // rules+native coexistence is exactly how `loadIntegrationRules` is
       // meant to ship.
       this.suppressRecording++;
@@ -493,6 +521,30 @@ export class RubiDriver {
           'integrate.partial-fractions'
         );
       return nf;
+    };
+    try {
+      // A re-entrant call runs in the budget of the outer call. A top-level
+      // call opens the `rubi:integrate` span: its step budget decides when
+      // the search gives up, and its wall-clock limit only guards against a
+      // hang. The `catch` below runs outside that span, so it can tell
+      // Rubi's own spent budget from a caller's.
+      if (reentrant) return body();
+      return this.ce._withBudget(
+        {
+          ms: this.options.timeLimitMs ?? 30_000,
+          steps: this.options.stepBudget ?? RUBI_STEP_BUDGET,
+          label: 'rubi:integrate',
+        },
+        () => {
+          const budget = this.ce._deadlineFrame?.budgets?.at(-1);
+          const start = budget?.left ?? 0;
+          try {
+            return body();
+          } finally {
+            this.stats.steps = start - (budget?.left ?? 0);
+          }
+        }
+      );
     } catch (e) {
       // An engine deadline firing inside evaluate()/simplify(), or the
       // matcher's own deadline (see match.ts), surfaces as a
@@ -503,19 +555,26 @@ export class RubiDriver {
       // host/plugin bundle split, and `constructor.name` is mangled by
       // minification.
       //
-      // Only a timeout of Rubi's own time budget becomes "no result". The
-      // time budget of the rule matcher (`this.deadline`, given to
-      // `matchAll`) gives an error with no attribution. When the time span
-      // that encloses this call has expired, the timeout belongs to that
-      // span: `checkDeadline` throws its cancellation. This also covers an
-      // unlabelled caller span, whose error has no attribution either. In a
-      // re-entrant call from the native fallback, the enclosing span is the
-      // `rubi:native-fallback` span, and its own catch handles the error.
+      // Only a spent budget of Rubi's own `rubi:integrate` span becomes "no
+      // result". When the span that encloses this call has expired, the
+      // timeout belongs to that span: `throwIfCallerCancellation` throws its
+      // cancellation. This also covers an unlabelled caller span, whose
+      // error has no attribution. In a re-entrant call from the native
+      // fallback, this `catch` runs inside the `rubi:native-fallback` span,
+      // so a spent budget of that span is thrown again, to its own catch;
+      // what that call keeps as "no result" is only an error with no
+      // attribution whose span has not expired.
       if (e instanceof Error && e.name === 'CancellationError') {
         // A cancellation that is not a timeout (an abort, an iteration or
         // recursion limit) is also thrown again.
         throwIfCallerCancellation(e, this.ce._deadlineFrame);
-        if (!isRubiOwnedCancellation(e, 'rubi:native-fallback')) throw e;
+        if (
+          !isRubiOwnedCancellation(
+            e,
+            reentrant ? 'rubi:native-fallback' : 'rubi:integrate'
+          )
+        )
+          throw e;
         return null;
       }
       throw e;
@@ -534,8 +593,8 @@ export class RubiDriver {
 
   /** Engine-native antiderivative fallback for a rational integrand the Rubi
    * rule set didn't close (see int()). Returns null when the integrand is
-   * not a rational function of `variable`, the wall-clock budget is spent,
-   * or the native integrator can't close it either (result still inert). */
+   * not a rational function of `variable`, its budget is spent, or the
+   * native integrator can't close it either (result still inert). */
   private nativeRationalFallback(
     integrand: Expression,
     variable: string
@@ -551,19 +610,22 @@ export class RubiDriver {
     // keeps the wins and bounds the cost.
     if (integrand.unknowns.some((u) => u !== variable)) return null;
     const ce = this.ce;
-    const remainingMs = this.deadline - Date.now();
-    if (remainingMs <= 0) return null;
     const x = ce.symbol(variable);
-    // bound the native evaluation — evaluations inside the span throw a
-    // CancellationError once its deadline passes. A native success on a
-    // rational is sub-second; the long runs are failures (high-degree numeric
-    // denominators it can't factor), so cap well under the driver budget
-    // to avoid burning the full window on a dead end.
-    const budgetMs = Math.max(1, Math.min(remainingMs, 5000));
+    // Bound the native evaluation with a step budget of its own: a native
+    // success on a rational is quick; the long runs are failures
+    // (high-degree numeric denominators it cannot factor), so the budget is
+    // well under the driver budget, to avoid spending all of it on a dead
+    // end. The steps also count against the `rubi:integrate` budget. The
+    // 5 s limit is a guard against the factoring code, which counts few
+    // steps; it keeps the former worst case of this fallback.
     this.inNativeFallback = true;
     try {
-      return ce.withTimeLimit(
-        { ms: budgetMs, label: 'rubi:native-fallback' },
+      return ce._withBudget(
+        {
+          ms: SUB_SEARCH_HANG_MS,
+          steps: NATIVE_FALLBACK_STEP_BUDGET,
+          label: 'rubi:native-fallback',
+        },
         () => {
           const F = ce.function('Integrate', [integrand, x]).evaluate();
           if (containsIntegrate(F)) return null;
@@ -596,15 +658,10 @@ export class RubiDriver {
     const ce = this.ce;
     this.stats.calls++;
     if (depth > MAX_DEPTH) return null;
-    // The driver keeps its own wall-clock budget per top-level int() call
-    // (`this.deadline`, load-bearing). Also honor any enclosing `withTimeLimit`
-    // span deadline armed on the engine, so a caller's tighter bound stops the
-    // recursion too. The enclosing span is checked first: when it has
-    // expired, its cancellation is thrown, because only the span that expired
-    // can decide to continue with a fallback. When only Rubi's own budget has
-    // expired, the result is "no result".
+    // One step of the `rubi:integrate` budget, and a check of every
+    // enclosing span. A spent budget throws; `int()` changes Rubi's own
+    // into "no result".
     checkDeadline(ce._deadlineFrame);
-    if (Date.now() > this.deadline) return null;
 
     // The integrand as it ENTERS this call — before the trig deactivation /
     // normal-form pipeline below rewrites it. Step records use `Integrate(entry)`
@@ -716,8 +773,8 @@ export class RubiDriver {
     // top-level call in int() only covers depth 0). The trig-substitution
     // rules (4.7.5 #15–#34) substitute a trig variable away and leave an
     // ALGEBRAIC sub-integral (e.g. ∫cos·g(sin) → ∫g(t) dt) that no Chapter-4
-    // rule can close; this lets that sub-integral resolve. Bounded by the
-    // driver deadline and the re-entry guard; can only turn null → solved.
+    // rule can close; this lets that sub-integral resolve. Bounded by its
+    // step budget and the re-entry guard; can only turn null → solved.
     if (result === null && depth > 0) {
       this.suppressRecording++;
       try {
@@ -838,7 +895,6 @@ export class RubiDriver {
       : this.candidatesFor(integrand.operator);
     const dispatch = (envCap: number): Expression | null => {
       for (const rule of candidates) {
-        if (Date.now() > this.deadline) return null;
         if (noSkeleton) {
           // legacy path: root-operator prescreen only (A/B baseline)
           if (rule.rootOp !== null && rule.rootOp !== integrand.operator)
@@ -857,12 +913,23 @@ export class RubiDriver {
             }
           if (skip) continue;
         }
+        // One step for each rule that reaches the matcher. A rule that the
+        // prescreen above rejects costs nothing, so the count does not
+        // depend on the dispatch mode or on rules that cannot apply.
+        checkDeadline(ce._deadlineFrame);
         // conditions participate in matching: enumerate alternative
         // assignments (factor-role swaps etc.) and try conditions per env.
-        // Pass the driver deadline so a single rule's combinatorial match
-        // (multi-factor products) can't overrun timeLimitMs — matchAll
-        // throws CancellationError, which int() catches → bounded unsolved.
-        const envs = matchAll(rule.pat, integrand, x, envCap, this.deadline);
+        // Pass the engine frame so a single rule's combinatorial match
+        // (multi-factor products) counts its steps against the budget —
+        // matchAll throws CancellationError, which int() catches → bounded
+        // unsolved.
+        const envs = matchAll(
+          rule.pat,
+          integrand,
+          x,
+          envCap,
+          ce._deadlineFrame
+        );
         for (const env of envs) {
           // bindings may hold synthetic normal-form subtrees —
           // re-canonicalize before conditions and RHS construction
@@ -2026,28 +2093,28 @@ export class RubiDriver {
    * FIRST (it collapses the huge expansion to a handful of terms in ~ms),
    * THEN fold `ln(e)` on the now-small result — the fold rebuilds (and so
    * re-canonicalizes, dropping the `·1`) cheaply once the form is small.
-   * Bounded by a slice of the driver budget so a pathological simplify can't
+   * Bounded by a step budget of its own so a pathological simplify can't
    * overrun. */
   private cleanExpansionResult(F: Expression): Expression {
     const ce = this.ce;
-    const remainingMs = this.deadline - Date.now();
     let simplified = F;
-    if (remainingMs > 0) {
-      const budgetMs = Math.max(1, Math.min(remainingMs, 5000));
-      try {
-        simplified = ce.withTimeLimit(
-          { ms: budgetMs, label: 'rubi:clean-expansion' },
-          () => F.simplify()
-        );
-      } catch (e) {
-        // A cancellation that is not a timeout (an abort, an iteration or
-        // recursion limit) is thrown again. An expired enclosing span owns the
-        // timeout, even when that span has no label (its error then has no
-        // attribution, as Rubi's own errors).
-        throwIfCallerCancellation(e, ce._deadlineFrame);
-        if (!isRubiOwnedCancellation(e, 'rubi:clean-expansion')) throw e;
-        // deadline hit — keep the unsimplified form
-      }
+    try {
+      simplified = ce._withBudget(
+        {
+          ms: SUB_SEARCH_HANG_MS,
+          steps: CLEAN_EXPANSION_STEP_BUDGET,
+          label: 'rubi:clean-expansion',
+        },
+        () => F.simplify()
+      );
+    } catch (e) {
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit) is thrown again. An expired enclosing span owns the
+      // timeout, even when that span has no label (its error then has no
+      // attribution, as Rubi's own errors).
+      throwIfCallerCancellation(e, ce._deadlineFrame);
+      if (!isRubiOwnedCancellation(e, 'rubi:clean-expansion')) throw e;
+      // budget spent — keep the unsimplified form
     }
     return foldLnExponentialE(ce, simplified);
   }
