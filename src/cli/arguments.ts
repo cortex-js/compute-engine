@@ -5,6 +5,7 @@ import type {
   CliOptions,
   DiagnosticsFormat,
   DocOptions,
+  InputFormat,
   McpOptions,
   OutputMode,
 } from './types.js';
@@ -33,6 +34,8 @@ export function parseCliArguments(
         'version': { type: 'boolean', short: 'v' },
         'json': { type: 'boolean' },
         'epsil': { type: 'boolean' },
+        'latex': { type: 'boolean' },
+        'from': { type: 'string' },
         'fancy-symbols': { type: 'boolean' },
         'diagnostics': { type: 'string' },
         'no-color': { type: 'boolean' },
@@ -51,13 +54,15 @@ export function parseCliArguments(
     throw new CliUsageError('Expected at most one Epsil source file.');
   if (evalSource !== undefined && positionals.length > 0)
     throw new CliUsageError('The --eval option cannot be used with a file.');
-  if (values.json === true && values.epsil === true)
+  const outputs = (['json', 'epsil', 'latex'] as const).filter(
+    (x) => values[x] === true
+  );
+  if (outputs.length > 1)
     throw new CliUsageError(
-      'The --json and --epsil output options are mutually exclusive.'
+      'The --json, --epsil and --latex output options are mutually exclusive.'
     );
 
-  const outputMode: OutputMode =
-    values.json === true ? 'json' : values.epsil === true ? 'epsil' : 'value';
+  const outputMode: OutputMode = outputs[0] ?? 'value';
   // The Unicode notations are a property of the Epsil source output: the
   // value mode prints the engine's own textual form and the JSON mode is
   // MathJSON, so the flag has no effect there and is refused rather than
@@ -71,6 +76,7 @@ export function parseCliArguments(
     help: values.help === true,
     version: values.version === true,
     outputMode,
+    inputFormat: parseInputFormat(values.from),
     fancySymbols: values['fancy-symbols'] === true,
     diagnosticsFormat: parseDiagnosticsFormat(values.diagnostics),
     color: values['no-color'] !== true && env.NO_COLOR === undefined,
@@ -278,6 +284,12 @@ function parseDocLimit(value: string | undefined): number {
   if (!/^\d+$/.test(value) || Number(value) < 1)
     throw new CliUsageError('--limit must be a positive integer.');
   return Math.min(Number(value), 100);
+}
+
+function parseInputFormat(value: unknown): InputFormat {
+  if (value === undefined || value === 'epsil') return 'epsil';
+  if (value === 'latex') return 'latex';
+  throw new CliUsageError('The --from option must be "epsil" or "latex".');
 }
 
 function parseTimeLimit(value: string | undefined): number {

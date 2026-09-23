@@ -48,6 +48,13 @@
   `serialize` accepts `format: "latex"` to write LaTeX instead of Epsil.
   LaTeX parse errors are reported as diagnostics. Every `evaluate` result now
   also includes a `latex` form of the value, ready to display.
+- **The `epsil` command speaks LaTeX.** `--from latex` evaluates a single
+  LaTeX expression (from `--eval`, a file, standard input or the REPL)
+  instead of an Epsil program, and `--latex` writes the result as LaTeX:
+  `epsil --from latex --latex -e '\frac{1}{2}+\frac{1}{3}'` prints
+  `\frac{5}{6}`. A LaTeX parse error quotes the LaTeX fragment where the
+  parser stopped (``unexpected operator at `+` ``) instead of its Epsil
+  spelling.
 
 - `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly
   before it approximates it, and no longer approximates an operand twice.

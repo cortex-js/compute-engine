@@ -73,6 +73,9 @@ describe('Epsil CLI arguments', () => {
     expect(() => parseCliArguments(['--json', '--epsil'])).toThrow(
       CliUsageError
     );
+    expect(() => parseCliArguments(['--latex', '--json'])).toThrow(
+      CliUsageError
+    );
     expect(() => parseCliArguments(['--time-limit', '-1'])).toThrow(
       CliUsageError
     );
@@ -121,6 +124,62 @@ describe('Epsil CLI fancy symbols', () => {
     const { io, stdout } = makeIo();
     expect(await main(['--epsil', '-e', 'Sqrt(3) + x^2'], io)).toBe(0);
     expect(stdout()).toBe('x ^ 2 + Sqrt(3)\n');
+  });
+});
+
+describe('Epsil CLI LaTeX', () => {
+  test('parses the LaTeX input and output options', () => {
+    expect(parseCliArguments(['--latex'], {})).toMatchObject({
+      outputMode: 'latex',
+      inputFormat: 'epsil',
+    });
+    expect(parseCliArguments(['--from', 'latex'], {}).inputFormat).toBe(
+      'latex'
+    );
+    expect(parseCliArguments(['--from', 'epsil'], {}).inputFormat).toBe(
+      'epsil'
+    );
+    expect(() => parseCliArguments(['--from', 'tex'], {})).toThrow(
+      CliUsageError
+    );
+  });
+
+  test('--latex writes the result as LaTeX', async () => {
+    const { io, stdout } = makeIo();
+    expect(await main(['--latex', '-e', 'Sqrt(8) / 2'], io)).toBe(0);
+    expect(stdout()).toBe('\\sqrt{2}\n');
+  });
+
+  test('--from latex evaluates a LaTeX expression', async () => {
+    const { io, stdout } = makeIo();
+    expect(
+      await main(['--from', 'latex', '-e', '\\int_0^1 x^2\\,dx'], io)
+    ).toBe(0);
+    expect(stdout()).toBe('1/3\n');
+  });
+
+  test('--from latex combines with every output mode', async () => {
+    const latex = makeIo();
+    expect(
+      await main(
+        ['--from', 'latex', '--latex', '-e', '\\frac{1}{2}+\\frac{1}{3}'],
+        latex.io
+      )
+    ).toBe(0);
+    expect(latex.stdout()).toBe('\\frac{5}{6}\n');
+
+    const json = makeIo();
+    expect(
+      await main(['--from', 'latex', '--json', '-e', '\\sqrt{8}'], json.io)
+    ).toBe(0);
+    expect(JSON.parse(json.stdout())).toEqual(['Multiply', 2, ['Sqrt', 2]]);
+  });
+
+  test('reports a LaTeX parse error, quoting the LaTeX', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['--from', 'latex', '-e', '1+'], io)).toBe(1);
+    expect(stdout()).toBe('');
+    expect(stderr()).toContain('unexpected operator at `+`');
   });
 });
 

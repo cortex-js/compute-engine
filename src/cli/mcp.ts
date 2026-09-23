@@ -6,7 +6,6 @@ import {
   type ServerResponse,
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { performance } from 'node:perf_hooks';
 
 import { ComputeEngine, serializeEpsil, version } from '../epsil.js';
 import type { BoxedExpression } from '../compute-engine.js';
@@ -15,7 +14,6 @@ import {
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
-import { isTimeoutCancellation } from '../common/interruptible.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
@@ -581,9 +579,8 @@ class McpServer {
     let output: string[] = [];
     let diagnostics: unknown[];
     if (format === 'latex') {
-      const evaluated = evaluateLatex(session, source);
-      result = evaluated.result;
-      diagnostics = evaluated.diagnostics;
+      result = session.evaluateLatex(source);
+      diagnostics = latexDiagnostics(result.value.errors);
     } else {
       ({ result, output } = evaluateWithConsoleCaptured(session, source));
       diagnostics = result.diagnostics.map((x) => diagnosticToJson(x, source));
@@ -687,54 +684,11 @@ class McpServer {
   }
 }
 
-/**
- * Evaluate a single LaTeX expression under the session's deadline. A deadline
- * breach becomes an error value, as it does for an Epsil program. LaTeX parse
- * errors are reported as diagnostics; when the parse is clean, the timeout or
- * the errors of the evaluated value are reported instead.
- */
-function evaluateLatex(
-  session: EpsilSession,
-  latex: string
-): { result: EvaluationResult; diagnostics: LatexDiagnostic[] } {
-  const start = performance.now();
-  const ce = session.engine;
-  const parsed = ce.parse(latex);
-  let value: BoxedExpression;
-  let timeout: LatexDiagnostic | undefined;
-  try {
-    value =
-      session.timeLimit > 0
-        ? ce.withTimeLimit({ ms: session.timeLimit, label: 'epsil:mcp' }, () =>
-            parsed.evaluate()
-          )
-        : parsed.evaluate();
-  } catch (error) {
-    if (!isTimeoutCancellation(error)) throw error;
-    const message = error instanceof Error ? error.message : 'Timeout exceeded';
-    value = ce.box(['Error', { str: message }, { str: 'timeout' }]);
-    timeout = { severity: 'error', code: 'timeout', message };
-  }
-  const parseDiagnostics = latexDiagnostics(parsed.errors);
-  return {
-    result: {
-      source: latex,
-      value,
-      diagnostics: [],
-      elapsedMs: performance.now() - start,
-    },
-    diagnostics:
-      parseDiagnostics.length > 0
-        ? parseDiagnostics
-        : timeout !== undefined
-          ? [timeout]
-          : latexDiagnostics(value.errors),
-  };
-}
-
-/** A LaTeX diagnostic. The error expressions do not carry source offsets, so
- * unlike an Epsil diagnostic it has no location: `latex` is the fragment the
- * parser stopped at, when there is one. */
+/** A diagnostic for a LaTeX source, derived from an error expression: a
+ * LaTeX parse error, a timeout, or an error of the evaluated value. The error
+ * expressions do not carry source offsets, so unlike an Epsil diagnostic it
+ * has no location: `latex` is the fragment the parser stopped at, when there
+ * is one. */
 interface LatexDiagnostic {
   severity: 'error';
   code: string;
@@ -747,6 +701,14 @@ function latexDiagnostics(
 ): LatexDiagnostic[] {
   return errors.map((error) => {
     const [first, ...rest] = isFunction(error) ? error.ops : [];
+    // A timeout is `["Error", message, "timeout"]`, the error value of a
+    // deadline breach.
+    if (isString(rest[0]) && rest[0].string === 'timeout')
+      return {
+        severity: 'error',
+        code: 'timeout',
+        message: isString(first) ? first.string : 'Timeout exceeded',
+      };
     const code = (isString(first) ? first.string : undefined) ?? 'error';
     const where = rest.find((x) => isFunction(x, 'LatexString'));
     const fragment =
