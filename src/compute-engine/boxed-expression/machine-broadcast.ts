@@ -14,6 +14,34 @@ import { checkDeadline } from '../../common/interruptible.js';
 export const DEADLINE_STRIDE = 0xffff;
 
 /**
+ * The double of an exact rational literal that is not an integer (`1/3`,
+ * `-5/7`), computed as the interpreter computes it when it meets a float: the
+ * quotient of the numerator and the denominator as doubles. `undefined` for
+ * any other operand, and for a numerator or a denominator past the safe
+ * integers, whose conversion to a double would already round.
+ */
+function rationalScalarOf(op: Expression): number | undefined {
+  if (!isNumber(op)) return undefined;
+  const nv = op.numericValue;
+  if (typeof nv === 'number') return undefined;
+  const exact = nv as {
+    isExact?: boolean;
+    radical?: number;
+    im?: number;
+    rational?: [number | bigint, number | bigint];
+  };
+  if (exact.isExact !== true || exact.radical !== 1 || exact.im !== 0)
+    return undefined;
+  const [n, d] = exact.rational ?? [0, 1];
+  const nn = Number(n);
+  const dd = Number(d);
+  if (!Number.isSafeInteger(nn) || !Number.isSafeInteger(dd) || dd === 0)
+    return undefined;
+  if (Number.isInteger(nn / dd)) return undefined;
+  return nn / dd;
+}
+
+/**
  * Element-wise arithmetic over lists of machine numbers, computed on doubles.
  *
  * Above a hundred elements a broadcast answers a lazy `Map`, and every
@@ -33,7 +61,9 @@ export const DEADLINE_STRIDE = 0xffff;
  * - **Operands.** Each operand is a `List` of machine numbers
  *   (`isMachineNumeric`: no exact rational such as `1/2`, no radical, no
  *   complex number, no symbol, no nested list), a symbol whose value is such a
- *   list, or a machine number. All the lists have the same length (the caller
+ *   list, or a machine number; in a sum or a product of two operands, also an
+ *   exact rational scalar (see `rationalScalarOf`). All the lists have the
+ *   same length (the caller
  *   reported a length disagreement before). Every value is finite, so that no
  *   `0 · ∞`, `∞ − ∞` or `NaN` is decided here.
  * - **Machine precision only.** A cell with a float operand is computed by
@@ -84,7 +114,26 @@ export function machineBroadcast(
 
   let length: number | undefined = undefined;
   const columns: (readonly number[] | number)[] = [];
+  // An exact rational scalar (`L / 3` is `Multiply(1/3, L)`) is admitted in a
+  // sum or a product of TWO operands. With a float, the interpreter turns the
+  // rational into its double and makes one operation: `x·(p/q)` and
+  // `x + (p/q)` (measured on 16,000 cells each at machine precision). With an
+  // integer it answers an exact rational (`(1/3)·2` is `2/3`), which a double
+  // does not hold, so a cell with an integer declines (see the loop below).
+  let rationalScalar = false;
   for (const op of ops) {
+    if (
+      ops.length === 2 &&
+      (operator === 'Add' || operator === 'Multiply') &&
+      machineListOf(op) === undefined
+    ) {
+      const q = rationalScalarOf(op);
+      if (q !== undefined) {
+        rationalScalar = true;
+        columns.push(q);
+        continue;
+      }
+    }
     const list = machineListOf(op);
     if (list !== undefined) {
       const values = list.array;
@@ -115,6 +164,9 @@ export function machineBroadcast(
       // An integer past the safe range is an exact big integer in the
       // interpreter, which the double does not hold.
       if (Number.isInteger(x) && !Number.isSafeInteger(x)) return undefined;
+      // An integer with an exact rational: an exact rational result.
+      if (rationalScalar && typeof column !== 'number' && Number.isInteger(x))
+        return undefined;
       cell[c] = x;
     }
     const r =
@@ -141,16 +193,17 @@ export function machineBroadcast(
  * `evaluate()` and under `N()`; a kernel whose head takes another route on
  * some input declines that input:
  *
- * - `routes`: `'N'` for a head whose `evaluate()` recognizes special
- *   arguments and answers an exact value for them: the inverse trigonometric
- *   functions (`Arcsin(0.5)` is `π/6`), and a power of `e` (`√e` for the
- *   exponent `0.5`). Under `N()` every such head computes the primitive.
+ * - `routes`: `'N'` for a kernel used under `N()` only (the power of the
+ *   numeric `e`, whose base exists only on that route); `'both'` otherwise.
  * - `avoid`: the arguments that `evaluate()` recognizes, for a head that
- *   computes the primitive on every other argument. The trigonometric
- *   functions answer an exact value for a float within `1e-12` of a special
- *   angle (`Sin(3.141592653589793)` is `0`, `Cos(π/3)` is `1/2`, and a tiny
- *   argument is a special angle too: `Sin(1e-300)` is `0`): see
- *   `nearSpecialAngle`.
+ *   computes the primitive on every other argument; it receives the engine
+ *   tolerance. The trigonometric functions answer an exact value for a float
+ *   within `1e-12` of a special angle (`Sin(3.141592653589793)` is `0`,
+ *   `Cos(π/3)` is `1/2`, and a tiny argument is a special angle too:
+ *   `Sin(1e-300)` is `0`): see `nearSpecialAngle`. The inverse
+ *   trigonometric functions answer an exact angle within the engine
+ *   tolerance of a special value (`Arcsin(0.5)` is `π/6`): see
+ *   `nearSpecialValue`. A power of `e` answers `√e` for the exponent `0.5`.
  * - `integers`: whether an integer element is admitted under `evaluate()`.
  *   `Sinh(1)` and `Sqrt(2)` are exact there, `|−3|`, `⌊2.5⌋` and `3^2`
  *   are the integers the primitive gives. Under `N()` an integer element is
@@ -168,7 +221,7 @@ interface MachineFunctionKernel {
   routes: 'both' | 'N';
   integers: boolean;
   domain?: (x: number) => boolean;
-  avoid?: (x: number) => boolean;
+  avoid?: (x: number, tolerance: number) => boolean;
   bound?: number;
   angle?: boolean;
 }
@@ -194,6 +247,30 @@ function nearSpecialAngle(x: number): boolean {
   const step = Math.PI / 120;
   const r = theta % step;
   return r <= 1e-9 || step - r <= 1e-9;
+}
+
+/**
+ * Is `x` a value that `evaluate()` of an inverse trigonometric function may
+ * answer an exact angle for? The recognizer (`constructibleValuesInverse`,
+ * `boxed-expression/trigonometry.ts`) answers `π·n/d` when `x` is within the
+ * engine tolerance (`ce.chop`, `1e-10` by default) of the sine, cosine or
+ * tangent of such an angle, and the angles of its table are multiples of
+ * `π/120` (see `nearSpecialAngle`). So the angle `inverse(x)` is rounded to
+ * the nearest multiple of `π/120`, and `x` is compared with the forward
+ * function of that angle, with a tolerance ten times wider than the
+ * recognizer's (and at least `1e-9`). An argument this test accepts and the
+ * recognizer does not takes the general route, which computes the same
+ * primitive.
+ */
+function nearSpecialValue(
+  x: number,
+  tolerance: number,
+  inverse: (x: number) => number,
+  forward: (a: number) => number
+): boolean {
+  const step = Math.PI / 120;
+  const angle = Math.round(inverse(x) / step) * step;
+  return Math.abs(forward(angle) - x) <= Math.max(1e-9, 10 * tolerance);
 }
 
 const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
@@ -243,20 +320,31 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
     avoid: nearSpecialAngle,
     bound: POLE_BOUND,
   },
-  Arctan: { apply: Math.atan, routes: 'N', integers: false, angle: true },
+  Arctan: {
+    apply: Math.atan,
+    routes: 'both',
+    integers: false,
+    angle: true,
+    avoid: (x, tolerance) =>
+      nearSpecialValue(x, tolerance, Math.atan, Math.tan),
+  },
   Arcsin: {
     apply: Math.asin,
-    routes: 'N',
+    routes: 'both',
     integers: false,
     angle: true,
     domain: (x) => x >= -1 && x <= 1,
+    avoid: (x, tolerance) =>
+      nearSpecialValue(x, tolerance, Math.asin, Math.sin),
   },
   Arccos: {
     apply: Math.acos,
-    routes: 'N',
+    routes: 'both',
     integers: false,
     angle: true,
     domain: (x) => x >= -1 && x <= 1,
+    avoid: (x, tolerance) =>
+      nearSpecialValue(x, tolerance, Math.acos, Math.cos),
   },
   Sinh: { apply: Math.sinh, routes: 'both', integers: false },
   Cosh: { apply: Math.cosh, routes: 'both', integers: false },
@@ -310,9 +398,10 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
  * the exact integer the primitive gives; a negative `k` gives an exact
  * rational, and a non-integer `k` a value the interpreter may keep exact. A
  * non-integer `k` needs a non-negative base (a negative base has a complex
- * value), and a negative `k` a non-zero base (the pole is `~oo`). A power of `e` is `Math.exp` (the same primitive as
- * `Exp(x).evaluate()`), under `N()` only: `evaluate()` keeps `e^2` and
- * answers `√e` for `e^0.5`.
+ * value), and a negative `k` a non-zero base (the pole is `~oo`). A power of
+ * `e` is `Math.exp` (the same primitive as `Exp(x).evaluate()`); under
+ * `evaluate()` an integer exponent (`e^2` stays exact) and `0.5` (`√e`)
+ * decline.
  */
 function powerKernel(
   ce: Expression['engine'],
@@ -323,6 +412,20 @@ function powerKernel(
   const [base, exponent] = ops;
   if (numericApproximation && base === ce.E.N())
     return [{ apply: Math.exp, routes: 'N', integers: true }, exponent];
+  // `Exp(x)` is canonically `Power(e, x)`. Under `evaluate()` the interpreter
+  // keeps `e^k` exact for an integer `k` (excluded by `integers: false`) and
+  // answers `√e` for `0.5`; every other float gives the float `Math.exp`
+  // gives (measured on a grid of 1,000 values).
+  if (!numericApproximation && isSymbol(base, 'ExponentialE'))
+    return [
+      {
+        apply: Math.exp,
+        routes: 'both',
+        integers: false,
+        avoid: (x) => x === 0.5,
+      },
+      exponent,
+    ];
   const k = machineNumberOf(exponent);
   if (
     k === undefined ||
@@ -408,7 +511,11 @@ function machineFunctionBroadcast(
     if (!Number.isFinite(x)) return undefined;
     if (!admitsIntegers && Number.isInteger(x)) return undefined;
     if (kernel.domain !== undefined && !kernel.domain(x)) return undefined;
-    if (!numericApproximation && kernel.avoid !== undefined && kernel.avoid(x))
+    if (
+      !numericApproximation &&
+      kernel.avoid !== undefined &&
+      kernel.avoid(x, ce.tolerance)
+    )
       return undefined;
     const r = kernel.apply(x);
     if (!Number.isFinite(r)) return undefined;

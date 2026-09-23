@@ -56,6 +56,14 @@
 
 ### Improvements
 
+- More element-wise operations over a large list of machine numbers are
+  computed at once on doubles at machine precision, with the values the
+  element-by-element evaluation gives: a sum or a product with an exact
+  rational (`L / 3`, `L + 1/3`), and `Exp`, `Arcsin`, `Arccos` and `Arctan`
+  under `evaluate()` (they were computed at once only under `N()`). A list
+  with an element that `evaluate()` answers exactly for (`Exp(0.5)` is `√e`,
+  `Arcsin(0.5)` is `π/6`) keeps the lazy form.
+
 - `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly
   before it approximates it, and no longer approximates an operand twice.
   `.N()` of a polynomial in Horner form of degree 12 makes 24 evaluations
@@ -74,6 +82,12 @@
   matched, and each call computed and simplified the derivative again.
 
 ### Resolved Issues
+
+- `Norm` of a lazy collection is now computed. Above a hundred elements a
+  broadcast answers a lazy `Map`, so `Norm(Sin(L))` was a number for a list of
+  fifty numbers and stayed unevaluated for a thousand. A finite collection of
+  scalars that is not a tensor (a lazy `Map`, a `Range`) is now read element
+  by element, as `Sum` and `Max` read it.
 
 - An expression boxed before a use narrowed the type of one of its symbols
   kept the type it had computed with the wider type. For example, after

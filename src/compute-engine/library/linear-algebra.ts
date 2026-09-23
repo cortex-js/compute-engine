@@ -76,6 +76,23 @@ const MAX_SIZE_EAGER_TENSOR = 10000;
  *  same bound `Distance`'s broadcast uses. */
 const MAX_POINT_LIST_NORM = 10000;
 
+/** The most elements `Norm` reads from a collection that is not a tensor (a
+ *  lazy `Map`, a `Range`). Beyond it the operator stays symbolic rather than
+ *  box an unbounded number of elements. */
+const MAX_LAZY_NORM_ELEMENTS = 100_000;
+
+/** The sum of `terms`, in groups: one `add(...terms)` of more than about a
+ *  hundred thousand terms overflows the call stack, because the terms are
+ *  passed as arguments. */
+function addAll(terms: Expression[]): Expression {
+  const GROUP = 4096;
+  if (terms.length <= GROUP) return add(...terms);
+  const partial: Expression[] = [];
+  for (let i = 0; i < terms.length; i += GROUP)
+    partial.push(add(...terms.slice(i, i + GROUP)));
+  return addAll(partial);
+}
+
 /** The most points `Dot` broadcasts over (one inner product per point). Beyond
  *  it the operator stays symbolic rather than materialize an unbounded list —
  *  the same bound `Norm`'s point-list broadcast uses. */
@@ -2956,8 +2973,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (normType === 1) {
             // L1 norm: sum of absolute values (one n-ary `add()` — an
             // incremental accumulator is quadratic in the element count)
-            const sum = add(
-              ...elements.map((el) => ce.expr(['Abs', el]).evaluate())
+            const sum = addAll(
+              elements.map((el) => ce.expr(['Abs', el]).evaluate())
             );
             // Honor `.N()`: the exact form only under plain evaluate().
             return sum.evaluate({ numericApproximation });
@@ -2965,8 +2982,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           if (normType === 2) {
             // L2 norm: sqrt of sum of squares
-            const sumSq = add(
-              ...elements.map((el) => {
+            const sumSq = addAll(
+              elements.map((el) => {
                 const absEl = ce.expr(['Abs', el]).evaluate();
                 return absEl.mul(absEl);
               })
@@ -3010,8 +3027,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // General Lp norm: (Σ|xi|^p)^(1/p)
           if (typeof normType === 'number' && normType > 0) {
             const p = normType;
-            const sumPow = add(
-              ...elements.map((el) => {
+            const sumPow = addAll(
+              elements.map((el) => {
                 const absEl = ce.expr(['Abs', el]).evaluate();
                 return ce.expr(['Power', absEl, p]).evaluate();
               })
@@ -3059,6 +3076,34 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // shape, so `isTensorValue` refuses it and the application stayed
         // inert on a question it can decide.
         if (x.isFiniteCollection === true && x.count === 0) return ce.Zero;
+
+        // A finite collection that is not a tensor — a lazy `Map`, which is
+        // what a broadcast over more than a hundred elements answers, or a
+        // `Range` — is read element by element, as `Sum`, `Max` and `Mean`
+        // read it. Without this the answer depended on the size of the list:
+        // `Norm(Sin(L))` was a number for fifty elements and stayed
+        // unevaluated for a thousand. A flat collection of scalars is read as
+        // a vector. A collection whose elements are all collections is read
+        // as a matrix when they are rows that make one (a lazy `Map` over the
+        // rows of a matrix), as the eager broadcast of a short list gives a
+        // matrix.
+        if (!isTensorValue(x) && x.isFiniteCollection === true) {
+          if (x.count === undefined || x.count > MAX_LAZY_NORM_ELEMENTS)
+            return undefined;
+          const elements: Expression[] = [];
+          for (const el of x.each()) elements.push(el);
+          if (elements.every((el) => !el.isCollection))
+            return vectorNorm(elements);
+          if (!elements.every((el) => el.isCollection)) return undefined;
+          const matrix = ce.function(
+            'List',
+            elements.map((el) => el.evaluate())
+          );
+          if (!isTensorValue(matrix)) return undefined;
+          return ce
+            .function('Norm', [matrix, ...ops.slice(1)])
+            .evaluate({ numericApproximation });
+        }
 
         if (!isTensorValue(x)) return undefined;
         const xTensor = packTensor(ce, x);

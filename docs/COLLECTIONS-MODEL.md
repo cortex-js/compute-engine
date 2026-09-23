@@ -65,8 +65,12 @@ took before.
 - **Operands.** A `List` for which `isMachineNumeric` is true, a symbol whose
   value is such a list, or a machine number. An exact rational (`1/2`), a
   radical, a complex number, a symbol or a nested list among the elements
-  declines. Every value must be finite: `0 · ∞`, `∞ − ∞` and `NaN` are decided
-  by the interpreter.
+  declines. An exact rational SCALAR is admitted in a sum or a product of two
+  operands (`L / 3` is `Multiply(1/3, L)`): with a float the interpreter
+  makes one operation with the double of the rational, `x·(p/q)` or
+  `x + (p/q)` (measured on 16,000 cells each); a list that holds an integer
+  declines, because `(1/3)·2` is the exact `2/3`. Every value must be finite:
+  `0 · ∞`, `∞ − ∞` and `NaN` are decided by the interpreter.
 - **Heads.** `Add` and `Multiply` of two or more operands, `Negate`, and a
   scalar times a vector on the tensor route (`scaleMachineVector`). One
   operation on two doubles is correctly rounded in any order; with three or
@@ -77,9 +81,9 @@ took before.
   changes.
 - **Functions of one number.** `Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`,
   `Sinh`, `Cosh`, `Tanh`, `Ln`, `Sqrt`, `Abs`, `Floor`, `Ceil`, `Round`,
-  `Power` with a machine-number exponent, and under `N()` only `Arctan`,
-  `Arcsin`, `Arccos` and a power of `e` (`machine-broadcast.ts`,
-  `FUNCTION_KERNELS`). Each kernel is the `Math` primitive the scalar route
+  `Power` with a machine-number exponent, `Arctan`, `Arcsin`, `Arccos` and a
+  power of `e` (`machine-broadcast.ts`, `FUNCTION_KERNELS`). Each kernel is
+  the `Math` primitive the scalar route
   computes for a machine float, measured bit for bit on 3,000 random floats
   per head under both routes. `Round` is the one head whose kernel is not a
   bare `Math` primitive: a half rounds AWAY FROM ZERO (`Round(-0.5)` is
@@ -93,10 +97,14 @@ took before.
   value past a million in magnitude for `Tan` and its relatives (the pole
   `~oo`), a float within `1e-9` of a special angle for a trigonometric head
   under `evaluate()` (the recognizer answers an exact value within `1e-12`),
-  an angular unit other than radians, and a non-finite result. `Log` and
-  `Lb` (canonically `Log(x, 2)`), and `Log(x, 10)`, compute `Math.log10`
-  and `Math.log2`, the primitives of the `N()` route; another base has no
-  kernel. A division by an exact rational (`L / 3`) has no kernel.
+  under `evaluate()` a value whose inverse trigonometric function is an
+  exact angle (within ten times the engine tolerance, and at least `1e-9`, of
+  the sine, cosine or tangent of a multiple of `π/120`; the recognizer answers
+  within the engine tolerance, `1e-10` by default) and the exponent
+  `0.5` of `e` (`e^0.5` is `√e`), an angular unit other than radians, and a
+  non-finite result. `Log` and `Lb` (canonically `Log(x, 2)`), and
+  `Log(x, 10)`, compute `Math.log10` and `Math.log2`, the primitives of the
+  `N()` route; another base has no kernel.
 - **Reductions of a body.** `Sum(…).N()` of a body with no indexing set
   first evaluates the body on the numeric route and adds the doubles when
   the value is a finite list of machine numbers, so that `Sum(Exp(L)).N()`

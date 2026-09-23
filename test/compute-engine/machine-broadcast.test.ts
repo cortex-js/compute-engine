@@ -361,13 +361,13 @@ describe('functions of one machine number on doubles', () => {
     ['Arcsin', 'U', UNIT],
     ['Arccos', 'U', UNIT],
     ['Exp', 'S', SMALL],
-  ] as const)(
-    '%s under N() only: evaluate() recognizes special arguments',
-    (head, symbol, source) => {
-      sameAsScalar([head, symbol], source, 'N', (x) => [head, x]);
-      expect(ce.box([head, symbol]).evaluate().operator).toBe('Map');
-    }
-  );
+  ] as const)('%s under N() and under evaluate()', (head, symbol, source) => {
+    sameAsScalar([head, symbol], source, 'N', (x) => [head, x]);
+    // Under evaluate() too: the arguments that evaluate() recognizes
+    // (`Exp(0.5)` is `√e`, `Arcsin(0.5)` is `π/6`) are declined one by one
+    // (`avoid`), and these lists hold none of them.
+    sameAsScalar([head, symbol], source, 'evaluate', (x) => [head, x]);
+  });
 
   test.each([2, 3, 7, -2, -5, 1.5])('a power with the exponent %s', (k) => {
     const source = k === 1.5 ? POSITIVE : FLOATS;
@@ -685,5 +685,150 @@ describe('the asynchronous Sum answers as the synchronous one', () => {
       .box(['Sum', ['Exp', ['Divide', 'L', 100]]])
       .evaluateAsync({ numericApproximation: true });
     expect(async.json).toEqual(sync.json);
+  });
+});
+
+describe('an exact rational scalar, a power of e and the inverse trigonometric functions', () => {
+  // Each value is compared with the same operation on the scalar element,
+  // which never takes the eager route.
+  const same = (
+    ce: ComputeEngine,
+    list: Expression,
+    scalar: (x: number) => unknown
+  ) => {
+    const els = [...list.each()];
+    FLOATS.forEach((x, i) =>
+      expect(els[i].isSame(ce.box(scalar(x) as any).evaluate())).toBe(true)
+    );
+  };
+
+  test('L / 3 and L + 1/3 compute on doubles', () => {
+    const ce = machineEngine();
+    const div = ce.box(['Divide', 'L', 3]).evaluate();
+    expect(isUnboxedList(div)).toBe(true);
+    same(ce, div, (x) => ['Divide', x, 3]);
+    const add = ce.box(['Add', 'L', ['Rational', 1, 3]]).evaluate();
+    expect(isUnboxedList(add)).toBe(true);
+    same(ce, add, (x) => ['Add', x, ['Rational', 1, 3]]);
+  });
+
+  test('an exact rational with an integer element declines', () => {
+    // `(1/3)·2` is the exact `2/3`, which a double does not hold.
+    const ce = machineEngine();
+    expect(ce.box(['Divide', 'K', 3]).evaluate().operator).toBe('Map');
+    // One integer among floats is enough.
+    ce.declare('F', { value: ce.box(['List', ...FLOATS, 2]) });
+    expect(ce.box(['Divide', 'F', 3]).evaluate().operator).toBe('Map');
+    // A radical is exact too, and declines.
+    expect(ce.box(['Multiply', ['Sqrt', 2], 'L']).evaluate().operator).toBe(
+      'Map'
+    );
+  });
+
+  test('Exp and the inverse trigonometric functions under evaluate()', () => {
+    const ce = machineEngine();
+    ce.declare('U', {
+      value: ce.box(['List', ...FLOATS.map((x) => x / 101)]),
+    });
+    for (const [head, source] of [
+      ['Exp', 'M'],
+      ['Arctan', 'L'],
+      ['Arcsin', 'U'],
+      ['Arccos', 'U'],
+    ] as const) {
+      const r = ce.box([head, source]).evaluate();
+      expect([head, isUnboxedList(r)]).toEqual([head, true]);
+      const values =
+        source === 'L'
+          ? FLOATS
+          : source === 'M'
+            ? FLOATS2
+            : FLOATS.map((x) => x / 101);
+      const els = [...r.each()];
+      values.forEach((x, i) =>
+        expect(els[i].isSame(ce.box([head, x]).evaluate())).toBe(true)
+      );
+    }
+  });
+
+  test('a value evaluate() answers exactly keeps the lazy form', () => {
+    const ce = machineEngine();
+    // `Exp(0.5)` is `√e`; `Arcsin(0.5)` is `π/6`; `Arctan(1)` is `π/4` — a
+    // float within 1e-10 of such a value is recognized too.
+    for (const [head, special] of [
+      ['Exp', 0.5],
+      ['Arcsin', 0.5],
+      ['Arccos', Math.SQRT1_2],
+      ['Arctan', 1 - 1e-12],
+      // Near ±1 the angle moves fastest with the argument.
+      ['Arcsin', 1 - 1e-11],
+      ['Arccos', -1 + 1e-11],
+    ] as const) {
+      ce.declare('S', { value: ce.box(['List', ...FLOATS2, special]) });
+      const lazy = ce.box([head, 'S']).evaluate();
+      expect([head, lazy.operator]).toEqual([head, 'Map']);
+      expect([...lazy.each()].pop()!.json).toEqual(
+        ce.box([head, special]).evaluate().json
+      );
+      ce.forget('S');
+    }
+  });
+});
+
+describe('Norm of a lazy collection', () => {
+  test('the answer does not depend on the size of the list', () => {
+    for (const n of [50, 1000]) {
+      const ce = new ComputeEngine();
+      const xs = Array.from({ length: n }, (_, i) => (i % 7) * 0.3 + 0.1);
+      ce.declare('W', { value: ce.box(['List', ...xs]) });
+      const expected = Math.sqrt(xs.reduce((a, x) => a + Math.sin(x) ** 2, 0));
+      const r = ce.box(['Norm', ['Sin', 'W']]).N();
+      expect(r.isNumberLiteral).toBe(true);
+      expect(r.re).toBeCloseTo(expected, 10);
+    }
+  });
+
+  test('a lazy collection of rows is read as a matrix, at any size', () => {
+    for (const n of [50, 150]) {
+      const ce = new ComputeEngine();
+      ce.declare('R', {
+        value: ce.box([
+          'List',
+          ...Array.from({ length: n }, (_, i) => ['List', i, 1]),
+        ]),
+      });
+      // Σ (2i)² + 2² over the rows, the Frobenius norm of 2·R.
+      let sumSq = 0;
+      for (let i = 0; i < n; i++) sumSq += 4 * i * i + 4;
+      const r = ce.box(['Norm', ['Multiply', 2, 'R']]).N();
+      expect(r.re).toBeCloseTo(Math.sqrt(sumSq), 8);
+    }
+  });
+
+  test('a collection past the limit stays symbolic; below it, no overflow', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Norm', ['Range', 1, 200000]]).evaluate().operator).toBe(
+      'Norm'
+    );
+    const n = 50000;
+    expect(ce.box(['Norm', ['Range', 1, n]]).N().re).toBeCloseTo(
+      Math.sqrt((n * (n + 1) * (2 * n + 1)) / 6),
+      4
+    );
+  });
+});
+
+describe('the inverse trigonometric guard follows the engine tolerance', () => {
+  test('a wider tolerance widens what evaluate() recognizes', () => {
+    // The recognizer compares within `ce.tolerance`: with 1e-6, `0.5000001`
+    // is the special value 0.5, and `Arcsin` of it is `π/6`.
+    const ce = machineEngine();
+    ce.tolerance = 1e-6;
+    ce.declare('T', { value: ce.box(['List', ...FLOATS2, 0.5000001]) });
+    const r = ce.box(['Arcsin', 'T']).evaluate();
+    expect(r.operator).toBe('Map');
+    expect([...r.each()].pop()!.json).toEqual(
+      ce.box(['Arcsin', 0.5000001]).evaluate().json
+    );
   });
 });
