@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-21.
+**Last updated:** 2026-09-23.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -109,30 +109,63 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Next items to pick up, ranked (2026-09-21)
+### Next items to pick up, ranked (2026-09-23)
 
 The entries below are the ones judged worth starting next, most valuable first.
 Each links to its own entry further down, which holds the detail. The ranking
 weighs what a consumer sees (a wrong value first, then a slow one) against the
-size of the work.
+size of the work. Items 4 and 5 were decided by the user on 2026-09-23 (both
+"yes") and tabled until after an OS update.
 
 1. **Compiled `Tan`, `Cot`, `Sec` and `Csc` have no pole.** A value difference
    between the interpreter and compiled code, which the compiled lazy `Map` now
    exposes for a list that holds a pole. Small: one guard in the JavaScript
    target's kernels. Entry: "Compiled `Tan`, `Cot`, `Sec` and `Csc` have no
    pole".
-2. **Large-list evaluation, what is left:** a power of `e` and the inverse
+2. **Numeric integration cut short by a deadline does not say so.** Gauss-Kronrod
+   and Monte Carlo return a less accurate number with no visible mark, and an
+   already-expired deadline can give `converged: true`. Report a partial result
+   the way `FindFit` does (`timedOut: true`). Small. Entry: "Internal time
+   budgets make compiled code and integrals depend on the machine" (last
+   paragraph).
+3. **About 20 bare `catch` blocks in the compilation targets can absorb a
+   caller's deadline.** Check each one and add `throwIfCallerCancellation()`
+   where a cancellation can reach it. Small to medium. Entry: "Bare `catch`
+   blocks in the compilation targets can absorb a caller's deadline".
+4. **Replace the internal time budgets with step budgets (user decision
+   2026-09-23: yes).** The Rubi driver and the compiler's closed-form
+   antiderivative attempt stop on the wall clock, so the same input gives a
+   closed form on a fast machine and quadrature on a slow or loaded one. Use
+   step budgets and size caps; keep a large wall-clock limit only against a
+   hang; recalibrate with the Rubi benchmark on a quiet machine, because the
+   solved counts will change. About a day. Entry: "Internal time budgets make
+   compiled code and integrals depend on the machine".
+5. **Make parameter declarations of a user-function call stop invalidating all
+   caches (user decision 2026-09-23: yes, after a soundness check).** First show
+   that a value that outlives the activation cannot make a cached result wrong
+   when the declaration advances no cache axis (`scratch`); then change it and
+   measure. Medium. Entry: "Every call of a user function invalidates every
+   generation-keyed cache".
+6. **An expression keeps its old type after inference narrows one of its
+   symbols.** A wrong (outdated) type, pre-existing. Needs a finer invalidation
+   rule; medium. Entry: "An expression keeps its old type after inference
+   narrows one of its symbols".
+7. **Large-list evaluation, what is left:** a power of `e` and the inverse
    trigonometric functions under `evaluate()`, a division by an exact rational
    (`L / 3`), `Norm` of a lazy `Map`. Each is a small kernel or guard; the gains
    are 20 to 40 times on the shapes they cover. Entries: "Element-wise
    arithmetic over a large list: what is still interpreted per element", "`Norm`
    of a lazy collection stays unevaluated".
-3. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
+8. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
    chain under complex mode) and the interval constant-list fan-out cap.
    Consumer-visible declines; medium size. Entries: "The Tycho corpus document
    `s8ishknvhe`: what stays open after the mixed-cell and pole round",
    "Coordinate projection through point arithmetic: what stays open".
-4. **A new all-states Tycho baseline** on the next release, to measure the
+9. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
+   object for the whole sum instead of a new `Add` at each step. Slow, not
+   wrong; medium. Entry: "Slow operations and slow tests found by a review of
+   the slowest test files".
+10. **A new all-states Tycho baseline** on the next release, to measure the
    large-list and codegen work on real documents. Entry: "Code-generation census
    on CE 0.128.13: ranked candidates".
 
@@ -598,8 +631,9 @@ at several points computes and simplifies the derivative again at each
 point. A declaration into an activation scope could be marked `scratch`
 (advances no axis), but a value can outlive its activation, which is the
 soundness question discussed in the `declare` case of `axisMaskOf`
-(`engine-configuration-lifecycle.ts`). Decide whether activation
-declarations may be `scratch`, then measure: this is most of the remaining
+(`engine-configuration-lifecycle.ts`). User decision (2026-09-23): yes,
+make activation declarations `scratch` once the soundness check passes; then
+measure: this is most of the remaining
 time of `item-284-derivative-compile-cost.test.ts`.
 
 ### Internal time budgets make compiled code and integrals depend on the machine (OPEN, design — found 2026-09-22)
@@ -621,7 +655,8 @@ result on a faster or slower machine, or under load:
   the integral as "timed out" when 90% of the granted time was used, and
   every later compilation skips the attempt.
 
-Proposed direction: replace these budgets with step budgets (the driver
+User decision (2026-09-23): yes, do this. Proposed direction: replace these
+budgets with step budgets (the driver
 already counts `stats.calls` and `_matchTick`; the native antiderivative
 needs a step counter), and size caps instead of the time slices. Keep a large
 wall-clock limit only as protection against a hang. The counts of solved
