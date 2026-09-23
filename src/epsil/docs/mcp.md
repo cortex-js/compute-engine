@@ -142,16 +142,36 @@ and monitoring.
 
 | Tool        | Purpose                                                        |
 | :---------- | :------------------------------------------------------------- |
-| `evaluate`  | Run an Epsil program and return its value — as display text, Epsil source, and [MathJSON](/epsil/implementation/) — along with any diagnostics; `fancySymbols: true` writes the Epsil source with the Unicode notations (`√x`, `x²`, `×`, `⩽`, …) |
+| `evaluate`  | Run an Epsil program and return its value — as display text, Epsil source, LaTeX, and [MathJSON](/epsil/implementation/) — along with any diagnostics; `format: "latex"` evaluates a single LaTeX expression instead; `fancySymbols: true` writes the Epsil source with the Unicode notations (`√x`, `x²`, `×`, `⩽`, …) |
 | `check`     | Validate a program without evaluating it; `effects: true` adds the inferred effects of each top-level function |
 | `doc`       | Look up a library function by name, or search the library by keywords |
-| `parse`     | Convert Epsil source to MathJSON                              |
-| `serialize` | Convert MathJSON to Epsil source; `fancySymbols: true` for the Unicode notations |
+| `parse`     | Convert Epsil source, or LaTeX with `format: "latex"`, to MathJSON |
+| `serialize` | Convert MathJSON to Epsil source, or to LaTeX with `format: "latex"`; `fancySymbols: true` for the Unicode notations |
 
 The server also publishes the [language card for AI agents](/epsil/for-agents/)
 as a resource (`epsil://docs/for-agents`), and its setup instructions tell
 the assistant to read it before writing Epsil — so the assistant learns the
 language's syntax and idioms on its own.
+
+## Formulas in LaTeX
+
+An assistant often has a formula in LaTeX already: from a paper, from the
+conversation, or from a math editor. It does not need to translate it into
+Epsil first. `evaluate` and `parse` accept `format: "latex"`, and then take a
+single LaTeX expression instead of a program:
+
+```json
+{ "source": "\\int_0^1 x^2\\,dx", "format": "latex" }
+```
+
+The result has the same shape as for an Epsil program: `value`, `epsil`,
+`latex` and `mathjson`, with `diagnostics` listing any LaTeX parse error and
+the fragment where it occurred. In the other direction, `serialize` with
+`format: "latex"` writes a MathJSON expression as LaTeX, and every
+`evaluate` result includes a `latex` form of the value, ready to display.
+
+For anything with several steps or definitions, an Epsil program is still
+the better fit.
 
 ## Trying It Out
 
@@ -162,6 +182,7 @@ mention Epsil if it doesn't reach for the tools on its own:
   to 100."_
 - _"Solve x³ − 6x² + 11x − 6 = 0 exactly with Epsil."_
 - _"What does the Epsil function `reduce` do?"_
+- _"Evaluate `\int_0^\infty e^{-x^2}\,dx` with Epsil."_
 
 The assistant writes a small Epsil program, runs it with the `evaluate`
 tool, and reports the result — exact fractions, radicals, and symbolic

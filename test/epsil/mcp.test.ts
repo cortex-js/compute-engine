@@ -354,6 +354,103 @@ describe('MCP server tools', () => {
     expect(checked.result.isError).toBe(true);
   });
 
+  test('evaluate includes a LaTeX form of the value', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', { source: '1/2 + 1' }),
+    ]);
+    expect(payload(response).latex).toBe('\\frac{3}{2}');
+  });
+
+  test('evaluate accepts a LaTeX expression', async () => {
+    const [integral, sum] = await runServer([
+      callTool(1, 'evaluate', {
+        source: '\\int_0^1 x^2\\,dx',
+        format: 'latex',
+      }),
+      callTool(2, 'evaluate', {
+        source: '\\sum_{k=1}^{10} \\frac{1}{k^2}',
+        format: 'latex',
+      }),
+    ]);
+    const result = payload(integral);
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('1/3');
+    expect(result.epsil).toBe('1 / 3');
+    expect(result.latex).toBe('\\frac{1}{3}');
+    expect(result.mathjson).toEqual(['Rational', 1, 3]);
+    expect(result.diagnostics).toEqual([]);
+    expect(payload(sum).mathjson).toEqual(['Rational', 1968329, 1270080]);
+  });
+
+  test('evaluate reports LaTeX parse errors as diagnostics', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', { source: '1+', format: 'latex' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toEqual([
+      {
+        severity: 'error',
+        code: 'unexpected-operator',
+        message: 'unexpected-operator: "+"',
+        latex: '+',
+      },
+    ]);
+  });
+
+  test('evaluate applies the deadline to a LaTeX expression', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', {
+        source: '\\sum_{k=1}^{10^{9}} \\frac{1}{k^2}',
+        format: 'latex',
+        timeLimit: 100,
+      }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'timeout',
+    });
+  });
+
+  test('parse converts LaTeX to MathJSON as written', async () => {
+    const [clean, broken] = await runServer([
+      callTool(1, 'parse', { source: '\\frac{1}{2}+x', format: 'latex' }),
+      callTool(2, 'parse', { source: '\\frac{1}', format: 'latex' }),
+    ]);
+    const result = payload(clean);
+    expect(result.ok).toBe(true);
+    expect(result.mathjson).toEqual(['Add', ['Divide', 1, 2], 'x']);
+    expect(result.diagnostics).toEqual([]);
+    const failed = payload(broken);
+    expect(failed.ok).toBe(false);
+    expect(failed.diagnostics[0]).toMatchObject({ code: 'missing' });
+  });
+
+  test('serialize converts MathJSON to LaTeX', async () => {
+    const [response] = await runServer([
+      callTool(1, 'serialize', {
+        mathjson: ['Divide', 1, ['Sqrt', 'x']],
+        format: 'latex',
+      }),
+    ]);
+    expect(payload(response)).toEqual({ latex: '\\frac{1}{\\sqrt{x}}' });
+  });
+
+  test('an unknown format is refused as a tool error', async () => {
+    const responses = await runServer([
+      callTool(1, 'evaluate', { source: '1', format: 'tex' }),
+      callTool(2, 'parse', { source: '1', format: 'tex' }),
+      callTool(3, 'serialize', { mathjson: 1, format: 'tex' }),
+    ]);
+    for (const response of responses) {
+      expect(response.result.isError).toBe(true);
+      expect(response.result.content[0].text).toContain('format');
+    }
+  });
+
   test('rejects an unknown tool as a protocol error', async () => {
     const [response] = await runServer([callTool(1, 'bogus', {})]);
     expect(response.error.code).toBe(-32602);

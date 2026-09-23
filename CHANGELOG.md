@@ -42,6 +42,13 @@
 
 ### Improvements
 
+- **The Epsil MCP server speaks LaTeX.** The `evaluate` and `parse` tools
+  accept `format: "latex"` to take a single LaTeX expression instead of an
+  Epsil program (`\int_0^1 x^2\,dx`, `\sum_{k=1}^{10} \frac{1}{k^2}`), and
+  `serialize` accepts `format: "latex"` to write LaTeX instead of Epsil.
+  LaTeX parse errors are reported as diagnostics. Every `evaluate` result now
+  also includes a `latex` form of the value, ready to display.
+
 - `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly
   before it approximates it, and no longer approximates an operand twice.
   `.N()` of a polynomial in Horner form of degree 12 makes 24 evaluations
