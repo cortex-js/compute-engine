@@ -50,7 +50,6 @@ describe('CONTRACT 2a: box(json, {canonical:false}).json structural fidelity', (
     ['int', 42],
     ['neg int', -3],
     ['float', 3.14],
-    ['big float', 1e30],
     ['rational-ish Divide', ['Divide', 1, 3]],
     ['Rational head', ['Rational', 1, 3]],
     ['symbol', 'x'],
@@ -113,6 +112,19 @@ describe('CONTRACT 2a: box(json, {canonical:false}).json structural fidelity', (
     expect(J(out)).toBe(
       J(['Dictionary', ['Tuple', "'a'", 1], ['Tuple', "'b'", 2]])
     );
+  });
+
+  // A JSON number is a double: `1e30` boxes to the exact value of that double,
+  // 1000000000000000019884624838656, which the text `1e+30` does not denote.
+  // It serializes as that integer, so that a reader parsing JSON integers
+  // exactly gets the value the engine holds. (A number is written as a JSON
+  // number only when both the double and its text are exactly the value.)
+  test('an integer double whose text is inexact → exact num string', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(1e30, { canonical: false }).json).toEqual({
+      num: '1000000000000000019884624838656',
+    });
+    expect(ce.box(1e22, { canonical: false }).json).toBe(1e22);
   });
 
   test('{num:"NaN"} normalizes to "NaN" symbol', () => {

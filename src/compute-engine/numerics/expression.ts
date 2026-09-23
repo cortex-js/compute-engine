@@ -1,6 +1,7 @@
 import type { MathJsonExpression } from '../../math-json.js';
 import { isNumberExpression, isNumberObject } from '../../math-json/utils.js';
 import { bigint } from './bigint.js';
+import { isExactJsonNumber } from './numeric-bignum.js';
 import { numberToString } from './strings.js';
 
 export function bigintValue(
@@ -49,15 +50,12 @@ export function numberToExpression(
   if (num >= Number.MIN_SAFE_INTEGER && num <= Number.MAX_SAFE_INTEGER)
     return Number(num);
 
-  // Only use the machine-number shorthand when the float is *exactly* equal to
-  // the integer. A string-display comparison is unsound: e.g.
-  // `Number(10n ** 23n).toString() === '1e+23'` is true because
-  // `Number.prototype.toString()` returns the shortest uniquely-identifying
-  // decimal, yet the float ≠ 10^23. Emitting that float as a JSON number would
-  // corrupt the value on reconstruction. `BigInt(n)` of an integral float is
-  // its exact value, so equality guarantees losslessness.
+  // Only use the machine-number shorthand when both the float and its JSON
+  // text are exactly the integer: `2 ** 60` is an exact float written
+  // `1152921504606847000`, and `Number(10n ** 23n)` is written `1e+23` but is
+  // not 10^23. `10 ** 22`, an exact float written `1e+22`, qualifies.
   const n = Number(num);
-  if (Number.isFinite(n) && BigInt(n) === num) return n;
+  if (isExactJsonNumber(n, num)) return n;
 
   return { num: numberToString(num) };
 }

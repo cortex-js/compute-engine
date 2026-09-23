@@ -60,6 +60,30 @@ export function isInMachineRange(d: BigNum): boolean {
   const orderOfMagnitude = digits + d.exponent - 1;
   if (orderOfMagnitude >= 309 || orderOfMagnitude <= -308) return false;
 
-  // Exact round-trip test: representable iff it survives float64 conversion.
-  return d.eq(new BigDecimal(d.toNumber()));
+  // Exact round-trip test: representable iff it survives float64 conversion,
+  // as a double and as JSON text.
+  return isExactJsonNumber(d.toNumber(), d);
+}
+
+/**
+ * Whether the double `n` can stand for `value` as a JSON number: both the
+ * double and its JSON text — its shortest round-tripping decimal, as
+ * `JSON.stringify()` and `String()` write it — are exactly `value`.
+ *
+ * Either can hold without the other. `2 ** 60` is exactly 1152921504606846976,
+ * but is written `1152921504606847000`: a reader that parses JSON integers
+ * exactly (Python, a big-number JSON parser, a person) would get the wrong
+ * value. `Number(10n ** 23n)` is written `1e+23`, but the double is not 10^23:
+ * a JavaScript reader would get the wrong value. Such a number must be
+ * serialized as a `{ num: "…" }` string instead.
+ */
+export function isExactJsonNumber(
+  n: number,
+  value: BigDecimal | bigint
+): boolean {
+  if (!Number.isFinite(n)) return false;
+  const exact = typeof value === 'bigint' ? new BigDecimal(value) : value;
+  // `new BigDecimal(n)` converts an integer double exactly, and any other
+  // double through its text; `String(n)` is the text in both cases.
+  return exact.eq(new BigDecimal(n)) && exact.eq(new BigDecimal(String(n)));
 }

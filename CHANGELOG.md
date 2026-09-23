@@ -81,6 +81,29 @@
 
 ### Resolved Issues
 
+- **Large integers keep their exact digits in MathJSON.** An integer beyond
+  the safe range whose value a double represents exactly, such as `2^60` or
+  `2^100`, was serialized as a JSON number whose text is a different
+  integer: `ce.parse('2^{60}').evaluate().json` was `1152921504606847000`
+  instead of `1152921504606846976`. A JavaScript reader recovered the value,
+  but a reader that parses JSON integers exactly (Python, a big-number JSON
+  parser, a person or an AI agent reading the output) got the wrong one. Such
+  integers now serialize as `{ "num": "1152921504606846976" }`. A number is
+  written as a JSON number only when both the double and its text are
+  exactly the value (`1e+22` still is).
+
+  **Notice for consumers of the non-canonical MathJSON pipeline contract:**
+  this changes one byte-identical round trip. A JSON number is a double, and
+  `ce.box(1e30, { canonical: false })` holds its exact value,
+  1000000000000000019884624838656. Its `.json` was `1e+30`, which denotes a
+  different integer; it is now `{ "num": "1000000000000000019884624838656" }`.
+  A JSON number input whose text is its exact value (`42`, `3.14`, `1e+22`)
+  still round-trips byte for byte. To keep `10^30` exact, write it as
+  `{ "num": "1e30" }`.
+- The documentation of `isEqual()` said that an identity in the free
+  variables, such as `(x+1)^2` vs `x^2+2x+1`, is `true`. `isEqual()`
+  attempts no identity proof, and such a comparison is `undefined`: the
+  documentation now says so, and points to `isIdenticallyEqual()`.
 - Compiled `Cot`, `Coth`, `Round`, `Fract`, `Haversine` and the odd real
   root now compute their operand once. They computed it two or three times,
   so an operand that draws a random number (`Cot(Random())`) used a
