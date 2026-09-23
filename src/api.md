@@ -14616,7 +14616,8 @@ Does **not** evaluate expressions — purely structural.
 `ce.parse('1+x', {form: 'raw'}).isSame(ce.parse('x+1', {form: 'raw'}))` is `false`.
 
 See `expr.is()` for a smart check with numeric evaluation fallback,
-and `expr.isEqual()` for full mathematical equality.
+`expr.isEqual()` for value equality, and `expr.isIdenticallyEqual()` to
+prove an identity in the free variables.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -14711,17 +14712,19 @@ isEqual(other): boolean | undefined
 Mathematical equality (strong equality), that is the value
 of this expression and the value of `other` are numerically equal.
 
-Both expressions are evaluated and the result is compared numerically.
-
-Numbers whose difference is less than `engine.tolerance` are
-considered equal. This tolerance is set when the `engine.precision` is
-changed to be such that the last two digits are ignored.
+An expression without free variables is evaluated numerically, and the
+two values are compared. Numbers whose difference is less than
+`engine.tolerance` are considered equal. This tolerance is set when the
+`engine.precision` is changed to be such that the last two digits are
+ignored.
 
 Evaluating the expressions may be expensive. Other options to consider
 to compare two expressions include:
 - `expr.isSame(other)` for a fast exact structural comparison (no evaluation)
 - `expr.is(other)` for a smart check that tries structural first, then
   numeric evaluation fallback for constant expressions
+- `expr.isIdenticallyEqual(other)` to prove an identity in the free
+  variables, such as `(x+1)^2` vs `x^2+2x+1`
 
 **Examples**
 
@@ -14740,12 +14743,17 @@ console.log(expr.is(4)); // true
 
 **Free variables — "truth under constraints" semantics.** When either
 expression has free variables, equality means "could these be equal
-under the current (and possible) constraints?": a fact in the
-assumptions database (`ce.assume(...)`) can decide it, an identity that
-holds for all values (`(x+1)^2` vs `x^2+2x+1`) is `true`, and anything
-else — including `x` vs `2`, or `x+1` vs `5`, which an assumption such
-as `x = 4` could make true — is `undefined`, never a definitive
-`false`.
+under the current (and possible) constraints?". The result is `true`
+when the two canonical forms are structurally the same (`x+1` vs `1+x`),
+and a fact in the assumptions database (`ce.assume(...)`) can decide it
+either way: after `ce.assume(ce.parse('x = 4'))`, `x+1` vs `5` is
+`true` and `x` vs `3` is `false`. Anything else is `undefined`, never a
+definitive `false` — including `x` vs `2`, which an assumption could
+make true.
+
+No identity proof is attempted: `(x+1)^2` vs `x^2+2x+1`, and even
+`x+x` vs `2x`, are `undefined`. Use `expr.isIdenticallyEqual()` to prove
+that two expressions are equal for every value of their free variables.
 
 ####### other
 
