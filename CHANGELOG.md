@@ -28,7 +28,8 @@
   compiler folds for a GPU target benefits in the same way.
 - Finding a like term in a sum is now a hash lookup, not a scan of all the
   terms: `Sum(sin(i), i, 1, 1000).evaluate()` takes about 0.7 s (it took
-  about 11 s).
+  about 11 s), and `Expand((x+y+z+1)^32)` (6,545 terms) is about 2.7 times
+  faster.
 - `NIntegrate` and the Monte Carlo route of numeric integration no longer
   build a string key and look up a cache for each random sample: 10⁷ samples
   of `x²` take about 0.4 s (about 3.6 s before).

@@ -4845,7 +4845,8 @@ type: BoxedType;
 The type known in the CURRENT state: declaredType narrowed by
 everything the assumptions in force prove about this definition. Reading
 it is what makes a fact visible; nothing derived from it may be STORED
-(see declaredType).
+(see declaredType). Writing it reports a `type-write` state
+event, so cached results that read this type are computed again.
 
 </MemberCard>
 

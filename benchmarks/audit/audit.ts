@@ -319,11 +319,11 @@ w('- **CE issues found:** none on correctness. Previously-flagged gaps are now f
   '$x^n-1$ returns polynomial factors (B4); and indefinite integration of fractional-power / erf / Fresnel / Si–Ci / ' +
   'radical integrands (B2).');
 w('- **Performance gap:** dense **multivariate expansion** — $(x+y+z+1)^{32}$ (6,545 terms, case E5) is correct but ' +
-  '~2–4× slower than SymPy and two orders of magnitude slower than Mathematica. Binomial powers ($(a+b)^{80}$, E7, ' +
-  '~4× faster than SymPy) and the Gaussian-integer power (E8) are ahead; the Gaussian-*rational* power (E9, exact ' +
-  'components over $4^{1000}$) runs ~2× behind SymPy.');
+  '~1.3× slower than SymPy and two orders of magnitude slower than Mathematica. Binomial powers ($(a+b)^{80}$, E7, ' +
+  '~1.4× faster than SymPy) and the Gaussian-integer power (E8, ~7×) are ahead; the Gaussian-*rational* power (E9, ' +
+  'exact components over $4^{1000}$) runs ~2× behind SymPy.');
 w('- **Where CE leads:** it solves GCD, expansion, simplification and limits, and is **markedly faster** ' +
-  'than SymPy on most of them — e.g. simplification ~0.2 ms vs ~4 ms, $(a+b)^{80}$ ~4 ms vs ~22 ms.');
+  'than SymPy on most of them — e.g. rational simplification ~20× faster, low-degree expansion ~2.5× faster.');
 w('- **Scope:** hand-authored cases across operations. The **Wester** suite is wired in separately ' +
   '(`wester.ts` → `REPORT-wester.md`, via the Mathematica files + `wl-parser`); the **Bondarenko** integration ' +
   'set (35, local) is wired in too (`bondarenko.ts` → `REPORT-bondarenko.md`).');
