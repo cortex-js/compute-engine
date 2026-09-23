@@ -562,28 +562,45 @@ compiles when its point list `C_c` is declared
    runtime were checked at an exact zero argument only, which is the one pole a
    floating-point argument reaches exactly.
 
-### A caller's deadline becomes a quiet "no result" in four places (OPEN, timeouts — found 2026-09-22)
+### Bare `catch` blocks in the compilation targets can absorb a caller's deadline (OPEN, timeouts — found 2026-09-22)
 
-`docs/TIMEOUT-MODEL.md` says that a caller's `withTimeLimit` deadline must
-propagate as a `CancellationError`. A component may turn only a timeout of
-its OWN time span into a fallback. These four places catch every
-`CancellationError`, so a caller's expired deadline becomes an ordinary
-"no result", and work continues after the caller's budget is gone:
+`docs/TIMEOUT-MODEL.md` says a caller's `withTimeLimit` deadline must
+propagate. `compile()`, the `fallback: true` catch of each target, the
+compiler's antiderivative attempt, the Rubi driver and `safeSimplify` now
+follow this rule: each calls `throwIfEnclosingTimeout()`
+(`common/interruptible.ts`) or `checkDeadline()` before it falls back.
+`src/compute-engine/compilation/` still has about 20 other bare `catch {}`
+blocks that were not checked. A caller's timeout that reaches one of them
+becomes a local fallback, and the compilation continues after the deadline.
+Check each one: add the same call where a timeout can reach it.
 
-- `rubi/driver.ts`, the top-level `catch` near line 501: it returns `null`
-  for every `CancellationError` and does not check whose span expired. The
-  check exists in the same file (`isRubiOwnedCancellation`, near line 269).
-- `rubi/driver.ts`, `intRec` near lines 580–581: when `ce._deadline` has
-  passed, it returns `null` instead of throwing.
-- `rubi/rubi-utils.ts`, `safeSimplify` near lines 466–475: a bare `catch`
-  returns the unsimplified form, and that form is then stored in the
-  per-call simplify cache.
-- `compilation/base-compiler.ts`, the bare `catch {}` around the span named
-  `compile:antiderivative` (near line 16341): an enclosing caller span that
-  expires there becomes a quiet fallback to numeric quadrature.
+### An expression keeps its old type after inference narrows one of its symbols (OPEN, caching design — found 2026-09-22)
 
-The fifth site of this kind, in `stochastic-equal.ts`, was fixed on
-2026-09-22.
+Example: `l = ce.box(['List', 'x'])` has the type `vector<1>`. After a use
+narrows `x` to `real`, `l.type` is still `vector<1>`, while a new
+`ce.box(['List', 'x'])` has the type `vector<real^1>`. A value-type
+inference write (`BoxedSymbol` inference, `inference` state event with
+`valueType: true`) advances no cache axis on purpose: it can run while `_type`
+and `_sgn` are being computed, and advancing their axis there would
+invalidate that computation recursively (`axisMaskOf` in
+`engine-configuration-lifecycle.ts`). A fix needs a finer rule, for example a
+per-definition dependency stamp checked by the expression type cache (the
+definition already has `_writeVersion`), or an invalidation deferred until
+the running type computation ends.
+
+### Every call of a user function invalidates every generation-keyed cache (OPEN, caching design — found 2026-09-22)
+
+`invoke` → `declareParameterActivation` declares the function's parameters
+in a new activation scope, and the `declare` state event advances the `any`
+cache axis. So any value cached against `ce._cacheGeneration()` misses after
+any user-function call in between. Example: `Apply(Derivative(f, 3), x).N()`
+at several points computes and simplifies the derivative again at each
+point. A declaration into an activation scope could be marked `scratch`
+(advances no axis), but a value can outlive its activation, which is the
+soundness question discussed in the `declare` case of `axisMaskOf`
+(`engine-configuration-lifecycle.ts`). Decide whether activation
+declarations may be `scratch`, then measure: this is most of the remaining
+time of `item-284-derivative-compile-cost.test.ts`.
 
 ### Internal time budgets make compiled code and integrals depend on the machine (OPEN, design — found 2026-09-22)
 
@@ -618,43 +635,38 @@ integration short, the result is a less accurate number with no visible
 mark (only `converged: false` inside the result object, or a larger error
 estimate). `FindFit` already reports `timedOut: true`; the numeric
 integrators should report a partial result the same way.
+A related case: when the deadline has already expired before the starting
+panels are built, `adaptiveQuadrature` uses one panel for the whole interval
+and can report `converged: true` for that estimate.
 
-### Four engine slowdowns found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
+### Slow operations and slow tests found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
 
-Together these make up about a third of the full test suite's work, and each
-also slows the same operation for users:
+The sample cache of complex integrands, the NaN stop in adaptive quadrature,
+the derivative cache, the nested-quadrature test budget, the GLSL loop
+test, the Rubi rule-pack loads in tests and the Monte Carlo cost of
+`derived-substreams.test.ts` were fixed on 2026-09-22. What stays open:
 
-- **The sample cache of a complex integrand costs more than it saves.**
-  `numericIntegrandParts` (`library/calculus.ts`, near line 307) builds a
-  string key and does a `Map` lookup for every sample, also after the size
-  cap stops new entries. The Monte Carlo route draws new random points for
-  the imaginary part, so it never hits the cache. 1e7 samples of `x*x`:
-  9.7 s through the wrapper, 0.13 s direct. `NIntegrate` on a finite
-  interval uses Monte Carlo with 1e7 samples, so it is affected everywhere
-  (`derived-substreams.test.ts`, `measurement.test.ts`,
-  `compile-integrate.test.ts`).
-- **Adaptive quadrature does not stop on NaN.** An integrand that is NaN
-  everywhere uses the full panel budget (about 32,000 evaluations) and
-  returns `estimate: 0, error: 0, divergent: false` — a wrong value, not
-  only a slow one. In a nested integral, each outer node repeats the full
-  inner stall (`compile-integrate.test.ts`, about 97 s for one test).
-- **The derivative cache never hits.** The stored result in
-  `symbolic/derivative.ts` (near line 549) is keyed on
-  `ce._cacheGeneration()`, which moves during each call, so the next call
-  computes and simplifies again: `derivative(f, 3)` three times takes
-  4.3 s, 1.5 s, 1.5 s.
-- **`evaluate()` of a symbolic `Sum` grows faster than linear.** 106, 181,
-  868 ms for n = 100, 200, 400, about 8.7 s at 1000. `sumAccumulate`
-  (`library/arithmetic.ts`) adds each term with a linear scan for a like
-  term. `.N()` of the same sum takes 3–7 ms.
-
-Test-side problems found at the same time: `compile-glsl-structures.test.ts`
-(the `Sum(sin i, 1..1000)` loop test omits `NO_FOLD`, so the compiler folds
-the sum to a number and the test checks nothing),
-`compile-integrate-nested-budget.test.ts` (uses up the real budget of
-`1 << 25` evaluations; a test setter for the budget would prove the same
-property in milliseconds), and the two `integration-rules*.test.ts` files
-(they load the Rubi rule pack about 36 times, about 1 s each).
+- **`evaluate()` of a symbolic `Sum` is still quadratic.** Finding a like
+  term is now a hash lookup (`Terms` in `arithmetic-add.ts`), and `.N()` of
+  a sum no longer evaluates the operands of `Add`/`Multiply` exactly first,
+  so `Sum(sin i, i, 1, 1000).evaluate()` takes about 0.7 s (it took 11 s).
+  But each step of the sum still builds a new `Add` of all the terms so far,
+  which `toNumericValue()` factors, `Terms` expands and `canonicalAdd` sorts
+  again. A linear fix keeps one `Terms` object for the whole sum; that
+  changes the value `reduceBigOp` (`library/utils.ts`) passes between steps.
+- **Compiled complex arithmetic is about 10 times slower inside jest than
+  under tsx.** One `_SYS.cpow(Math.E, {re: 0, im: x})` call takes about
+  1.5 µs in jest and 0.15 µs under tsx, probably because jest runs the code
+  in a separate `vm` realm. `measurement.test.ts` makes 2 × 1e7 such calls
+  and takes about 40 s.
+- **The adaptive quadrature stops when all panels are NaN, there are at
+  least 16, and a bisection gave two NaN children** (`ALL_BAD_STOP_PANELS`
+  and `mustStopAllBad` in `numerics/gauss-kronrod.ts`). Isolated removable
+  singularities move to panel boundaries when their panel is bisected, so
+  they still converge, also when there is one at the center of each of the
+  16 starting panels. An integrand that is finite only on a region narrower than
+  1/16 of the interval now answers NaN where the old loop could find a
+  finite value. No test covers this case.
 
 ### Compiled `Tan`, `Cot`, `Sec` and `Csc` have no pole (OPEN, compilation — found 2026-09-21)
 

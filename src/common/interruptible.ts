@@ -170,6 +170,39 @@ export function isTimeoutCancellation(e: unknown): boolean {
 }
 
 /**
+ * Throw when `e` is a cancellation that the caller must receive.
+ *
+ * Call this at the start of a `catch` block that changes an error into a
+ * fallback result. Only the timeout of a time budget that the failed code
+ * owns can become a fallback (see `isTimeoutCancellation`). So:
+ *
+ * - A `CancellationError` that is not a timeout (an abort signal, an
+ *   iteration limit, a recursion-depth limit) is thrown again. The error is
+ *   identified by its name, not by `instanceof`, because a plugin bundle has
+ *   its own copy of the class.
+ * - A timeout is thrown when `frame` has expired. `frame` is the deadline
+ *   frame in effect around the code that failed (`engine._deadlineFrame`,
+ *   read in the `catch` block, after any inner span has closed). Then the
+ *   timeout belongs to the enclosing span (the caller), and `checkDeadline`
+ *   throws the cancellation of that frame, with its attribution. An
+ *   unlabelled span gives an error with no attribution, so the attribution of
+ *   `e` alone cannot identify the caller's span. The expiry time of the frame
+ *   can.
+ *
+ * In all other cases (an error that is not a cancellation, or a timeout
+ * while `frame` has not expired) this returns, and the caller continues with
+ * its fallback.
+ */
+export function throwIfCallerCancellation(
+  e: unknown,
+  frame: DeadlineFrame | undefined
+): void {
+  if (!(e instanceof Error && e.name === 'CancellationError')) return;
+  if (!isTimeoutCancellation(e)) throw e;
+  checkDeadline(frame);
+}
+
+/**
  * Ambient deadline for nested numeric routines.
  *
  * Compiled functions (`_SYS.integrate`, `_SYS.limit`, …) have no access to

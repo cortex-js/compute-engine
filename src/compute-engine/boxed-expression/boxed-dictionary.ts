@@ -318,7 +318,17 @@ export class BoxedDictionary
   // default options and serializes dictionary entries via `serializeJson()`.
 
   get hash(): number {
-    return hashCode('Dictionary' + JSON.stringify(this._keyValues));
+    // Two dictionaries that are `isSame` must have the same hash, because
+    // hash consumers (like-term lookup in `Terms`, pattern matching) put
+    // expressions in buckets by hash and then compare with `isSame` only
+    // inside a bucket. `isSame` ignores the order of the entries and compares
+    // the values with `isSame`, so the keys are sorted here and each value
+    // contributes its own hash (not its serialization: `1/2` and `0.5` are
+    // `isSame` but serialize differently).
+    let h = hashCode('Dictionary');
+    for (const key of this.keys.sort())
+      h = ((h << 1) ^ hashCode(key) ^ this._keyValues[key].hash) | 0;
+    return h;
   }
 
   get digest(): string {

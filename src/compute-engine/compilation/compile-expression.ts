@@ -10,6 +10,7 @@ import type {
   StorageHint,
 } from './types.js';
 import { BaseCompiler } from './base-compiler.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
@@ -346,6 +347,11 @@ export function compile<
       R
     >;
   } catch (e) {
+    // A cancellation that is not a timeout (an abort, an iteration or
+    // recursion limit), or a timeout of an expired enclosing span, belongs
+    // to the caller: it is thrown again, not changed into a fallback
+    // (docs/TIMEOUT-MODEL.md §2).
+    throwIfCallerCancellation(e, expr.engine._deadlineFrame);
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
       console.warn(

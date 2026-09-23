@@ -17,6 +17,10 @@ import type { Expr as Expression } from './types.js';
 import { replayIntRecords } from './explain-trace.js';
 
 import { matchAll } from './match.js';
+import {
+  checkDeadline,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 import type { CompiledRule } from './compile.js';
 import {
   build,
@@ -498,7 +502,22 @@ export class RubiDriver {
       // constructor): `instanceof CancellationError` fails across the
       // host/plugin bundle split, and `constructor.name` is mangled by
       // minification.
-      if (e instanceof Error && e.name === 'CancellationError') return null;
+      //
+      // Only a timeout of Rubi's own time budget becomes "no result". The
+      // time budget of the rule matcher (`this.deadline`, given to
+      // `matchAll`) gives an error with no attribution. When the time span
+      // that encloses this call has expired, the timeout belongs to that
+      // span: `checkDeadline` throws its cancellation. This also covers an
+      // unlabelled caller span, whose error has no attribution either. In a
+      // re-entrant call from the native fallback, the enclosing span is the
+      // `rubi:native-fallback` span, and its own catch handles the error.
+      if (e instanceof Error && e.name === 'CancellationError') {
+        // A cancellation that is not a timeout (an abort, an iteration or
+        // recursion limit) is also thrown again.
+        throwIfCallerCancellation(e, this.ce._deadlineFrame);
+        if (!isRubiOwnedCancellation(e, 'rubi:native-fallback')) throw e;
+        return null;
+      }
       throw e;
     } finally {
       // Restore the outer call's state clobbered by this re-entry (see the
@@ -557,6 +576,11 @@ export class RubiDriver {
         }
       );
     } catch (e) {
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit) is thrown again. An expired enclosing span owns the
+      // timeout, even when that span has no label (its error then has no
+      // attribution, as Rubi's own errors).
+      throwIfCallerCancellation(e, ce._deadlineFrame);
       if (isRubiOwnedCancellation(e, 'rubi:native-fallback')) return null;
       throw e;
     } finally {
@@ -575,12 +599,12 @@ export class RubiDriver {
     // The driver keeps its own wall-clock budget per top-level int() call
     // (`this.deadline`, load-bearing). Also honor any enclosing `withTimeLimit`
     // span deadline armed on the engine, so a caller's tighter bound stops the
-    // recursion too.
-    if (
-      Date.now() > this.deadline ||
-      (ce._deadline !== undefined && Date.now() > ce._deadline)
-    )
-      return null;
+    // recursion too. The enclosing span is checked first: when it has
+    // expired, its cancellation is thrown, because only the span that expired
+    // can decide to continue with a fallback. When only Rubi's own budget has
+    // expired, the result is "no result".
+    checkDeadline(ce._deadlineFrame);
+    if (Date.now() > this.deadline) return null;
 
     // The integrand as it ENTERS this call — before the trig deactivation /
     // normal-form pipeline below rewrites it. Step records use `Integrate(entry)`
@@ -2016,6 +2040,11 @@ export class RubiDriver {
           () => F.simplify()
         );
       } catch (e) {
+        // A cancellation that is not a timeout (an abort, an iteration or
+        // recursion limit) is thrown again. An expired enclosing span owns the
+        // timeout, even when that span has no label (its error then has no
+        // attribution, as Rubi's own errors).
+        throwIfCallerCancellation(e, ce._deadlineFrame);
         if (!isRubiOwnedCancellation(e, 'rubi:clean-expansion')) throw e;
         // deadline hit — keep the unsimplified form
       }

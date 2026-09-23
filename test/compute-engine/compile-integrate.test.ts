@@ -1,6 +1,8 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { CancellationError } from '../../src/common/interruptible';
 import {
   adaptiveQuadrature,
   initialPanelsForDimensions,
@@ -235,38 +237,113 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     // A high-power integrand's symbolic-antiderivative attempt expands
     // `(trinomial)^p` into a multinomial (`C(p+2,2)` terms) and scans the
     // integration rule set against it — unboundedly slow. The compile-time
-    // attempt is bounded by the `withTimeLimit` span: `evaluate()` now
-    // checkpoints its power expansion (`expandPower`) and rule scan
-    // (`matchAnyRules`) against
-    // the deadline, so compilation degrades to quadrature instead of hanging.
+    // attempt runs in its own time span (`compile:antiderivative`):
+    // `evaluate()` checkpoints its power expansion (`expandPower`) and rule
+    // scan (`matchAnyRules`) against the deadline, so when that span expires,
+    // compilation degrades to quadrature instead of hanging.
     // (Tycho item 8, 2026-07-15.)
+    // Only the expiry of the attempt's OWN span is the fallback case, so the
+    // test shortens that budget and has no enclosing span. The deadline of an
+    // enclosing caller span propagates as a `CancellationError`
+    // (docs/TIMEOUT-MODEL.md §7.3; see the next test).
     // The checkpoint itself is pinned deterministically elsewhere: the
     // "Symbolic integration (power expansion / rule scan)" block in
     // `test/compute-engine/timeout.test.ts` asserts that the same integrand
     // throws `CancellationError` under a span — an outcome unreachable
     // without the checkpoints, since an unchecked expansion simply runs to
     // completion. What this test adds is the compile-level OUTCOME. The jest
-    // per-test timeout is a deliberately generous hang backstop (the compile
-    // takes ~1.2 s on an idle machine) and must not be tightened toward the
-    // observed duration: elapsed time under parallel test load measures the
-    // machine, not the engine.
-    test('high-power integrand degrades to quadrature at the deadline', () => {
+    // per-test timeout is a deliberately generous hang backstop and must not
+    // be tightened toward the observed duration: elapsed time under parallel
+    // test load measures the machine, not the engine.
+    test('high-power integrand degrades to quadrature when its own attempt budget expires', () => {
       const engine = new ComputeEngine();
-      const r = engine.withTimeLimit(
-        { ms: 500, label: 'test:high-power-integrand' },
-        () =>
-          compile(
-            engine.parse(
-              '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
-            )
-          )
+      const expr = engine.parse(
+        '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
       );
+      BaseCompiler.setAntiderivativeAttemptBudgetForTesting(50);
+      let r: ReturnType<typeof compile>;
+      try {
+        r = compile(expr);
+      } finally {
+        BaseCompiler.setAntiderivativeAttemptBudgetForTesting();
+      }
       expect(r.success).toBe(true);
       // Fell back to quadrature rather than baking a closed form.
       expect(r.code).toContain('_SYS.integrate(');
       // The compiled quadrature runner still produces a finite value.
       expect(Number.isFinite(r.run() as number)).toBe(true);
     }, 30000);
+
+    // A caller's deadline is not a fallback case for the compiler: `compile()`
+    // must not change it into an interpreter fallback (`success: false`). The
+    // span has already expired (`ms: 0`), so the outcome is deterministic.
+    test('an expired caller span propagates out of compile()', () => {
+      const engine = new ComputeEngine();
+      const expr = engine.parse(
+        '\\int_{-15}^{15} (2 + \\sin(3y) + \\cos(\\pi^2 y))^{60} \\, dy'
+      );
+      let thrown: unknown;
+      try {
+        engine.withTimeLimit({ ms: 0, label: 'test:caller' }, () =>
+          compile(expr)
+        );
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(CancellationError);
+      expect((thrown as CancellationError).attribution).toBe('test:caller');
+    });
+
+    // Only a timeout can become a fallback. An abort (a `CancellationError`
+    // whose `cause` is the reason of the abort signal) must reach the caller.
+    // A synchronous compile does not read an abort signal, so the test makes
+    // the antiderivative attempt throw the error that an abort gives.
+    test('an aborted antiderivative attempt propagates out of compile()', () => {
+      const engine = new ComputeEngine();
+      const expr = engine.parse('\\int_0^1 x^2 \\, dx');
+      const reason = new Error('aborted by the user');
+      const original = engine.withTimeLimit.bind(engine);
+      const spy = jest
+        .spyOn(engine, 'withTimeLimit')
+        .mockImplementation(((options: unknown, fn: () => unknown) => {
+          if ((options as { label?: string }).label === 'compile:antiderivative')
+            throw new CancellationError({ cause: reason });
+          return original(options as never, fn as never);
+        }) as never);
+      let thrown: unknown;
+      try {
+        compile(expr);
+      } catch (e) {
+        thrown = e;
+      } finally {
+        spy.mockRestore();
+      }
+      expect(thrown).toBeInstanceOf(CancellationError);
+      expect((thrown as CancellationError).cause).toBe(reason);
+    });
+
+    // A recursion-depth limit is a cancellation that is not a timeout, so it
+    // must reach the caller: `compile()` does not change it into a fallback
+    // to quadrature or to the interpreter, also with `fallback: true` (the
+    // default). `r` has no base case, and the antiderivative attempt of the
+    // integrand evaluates `r(3)`.
+    test('a recursion-depth limit propagates out of compile()', () => {
+      const engine = new ComputeEngine();
+      engine.recursionLimit = 64;
+      engine.declare('r', 'function');
+      engine.parse('r(x) := r(x-1) + 1').evaluate();
+      const expr = engine.parse('\\int_0^1 x^2 + r(3) \\, dx');
+      let thrown: unknown;
+      try {
+        compile(expr, { fallback: true });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(CancellationError);
+      expect((thrown as CancellationError).cause).toBe(
+        'recursion-depth-exceeded'
+      );
+    });
 
     // The item-8 bound above only fires when the CALLER arms a span. Since
     // `ce.timeLimit` was retired, a compile with no enclosing span ran the
@@ -564,6 +641,118 @@ describe('non-finite integrand fails fast (Tycho item 96)', () => {
     // so a low sample count is the probe bailing out early rather than the
     // instrumentation missing the call.
     expect(counts.quadrature).toBeGreaterThan(0);
+    // The quadrature stops when no panel is finite. Before, it kept
+    // halving the first NaN panel until the panel was too narrow to split:
+    // 1,710 evaluations on [-10, 10].
+    expect(counts.quadrature).toBeLessThan(1000);
+  });
+
+  test('adaptive quadrature of an integrand that is NaN everywhere answers NaN and stops early', () => {
+    // Before the fix, the loop kept halving the first NaN panel toward 0
+    // until the panel was too narrow to split (32,340 evaluations), and
+    // answered `estimate: 0, error: 0`, a wrong value.
+    let evals = 0;
+    const r = adaptiveQuadrature(
+      () => {
+        evals += 1;
+        return NaN;
+      },
+      0,
+      1
+    );
+    expect(Number.isNaN(r.estimate)).toBe(true);
+    expect(Number.isNaN(r.error)).toBe(true);
+    expect(r.converged).toBe(false);
+    expect(r.divergent).toBe(false);
+    expect(evals).toBeLessThan(1000);
+  });
+
+  test('a NaN inner integral makes the outer level stop early too', () => {
+    // Each outer node runs one inner quadrature. The inner level answers NaN,
+    // so every outer panel is NaN and the outer level must not keep bisecting
+    // them: before the fix this was about 32,000² evaluations (49 s).
+    let evals = 0;
+    const inner = () =>
+      adaptiveQuadrature(
+        () => {
+          evals += 1;
+          return NaN;
+        },
+        0,
+        1
+      ).estimate;
+    const r = adaptiveQuadrature(inner, 0, 1);
+    expect(Number.isNaN(r.estimate)).toBe(true);
+    expect(evals).toBeLessThan(100_000);
+  });
+
+  test('a removable singularity in a single starting panel is still integrated', () => {
+    // With one starting panel, the NaN at the center node makes EVERY panel
+    // bad. The loop must bisect once (the singular point then lies on a
+    // panel boundary, not on a node) instead of answering NaN.
+    const r = adaptiveQuadrature((x) => Math.sin(x) / x, -1, 1, {
+      initialPanels: 1,
+    });
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(1.8921661407343662, 12);
+  });
+
+  test('two removable singularities that make every starting panel bad are still integrated', () => {
+    // With two starting panels on [-2, 2], the centers are x = -1 and x = 1,
+    // where (x²-1)/(x²-1) is NaN. Every panel is bad, but only because of two
+    // isolated points: one bisection of each panel moves the point to a
+    // panel boundary. The loop must not stop with NaN.
+    const r = adaptiveQuadrature((x) => (x * x - 1) / (x * x - 1), -2, 2, {
+      initialPanels: 2,
+    });
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(4, 12);
+  });
+
+  test('removable singularities at the centers of two starting panels on [0, 1]', () => {
+    const r = adaptiveQuadrature(
+      (x) => (x - 0.25) / (x - 0.25) + (x - 0.75) / (x - 0.75),
+      0,
+      1,
+      { initialPanels: 2 }
+    );
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(2, 12);
+  });
+
+  test('removable singularities at the centers of all 16 default starting panels', () => {
+    // On [0, 16], u/u with u = x - floor(x) - 0.5 is NaN at x = 0.5, 1.5, …,
+    // 15.5 (the centers of the 16 default starting panels) and 1 everywhere
+    // else. Every starting panel is bad, but one bisection of each panel
+    // moves its point to a panel boundary. The loop must not stop with NaN.
+    const r = adaptiveQuadrature(
+      (x) => {
+        const u = x - Math.floor(x) - 0.5;
+        return u / u;
+      },
+      0,
+      16
+    );
+    expect(r.converged).toBe(true);
+    expect(r.estimate).toBeCloseTo(16, 12);
+  });
+
+  test('an integrand that is NaN everywhere stops early from a single starting panel', () => {
+    // One starting panel is bisected until there are 16 panels, all bad,
+    // then the loop stops: 15 + 15 × 30 = 465 evaluations.
+    let evals = 0;
+    const r = adaptiveQuadrature(
+      () => {
+        evals += 1;
+        return NaN;
+      },
+      0,
+      1,
+      { initialPanels: 1 }
+    );
+    expect(Number.isNaN(r.estimate)).toBe(true);
+    expect(r.converged).toBe(false);
+    expect(evals).toBeLessThan(1000);
   });
 
   test('a genuine endpoint singularity is still integrated', () => {

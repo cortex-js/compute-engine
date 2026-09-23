@@ -876,7 +876,7 @@ export class BoxedFunction
       const signature = def.signature;
       rollbackFrame.record({
         undo: () => {
-          def.signature = signature;
+          def._setSignature(() => signature);
           def._resyncEffects();
         },
       });
@@ -885,10 +885,11 @@ export class BoxedFunction
     // If the signature was inferred, refine it by narrowing the result
     if (def.signature.is('function')) {
       journalSignature();
-      def.signature = new BoxedType(
+      const next = new BoxedType(
         { kind: 'signature', result: t },
         this.engine._typeResolver
       );
+      def._setSignature(() => next);
     } else if (isSignatureType(def.signature.type)) {
       // Preserve the argument information when updating the result type
       const oldSig = def.signature.type;
@@ -918,7 +919,8 @@ export class BoxedFunction
       if (oldSig.typeParams !== undefined)
         nextSig.typeParams = oldSig.typeParams;
       journalSignature();
-      def.signature = new BoxedType(nextSig, this.engine._typeResolver);
+      const next = new BoxedType(nextSig, this.engine._typeResolver);
+      def._setSignature(() => next);
     }
 
     // The signature OBJECT was replaced. Re-attach the definition's effect set

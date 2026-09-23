@@ -1,6 +1,7 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 const glsl = new GLSLTarget();
 
@@ -225,13 +226,29 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     });
 
     it('never emits a spliced `return _acc; +`', () => {
-      let code = '';
-      try {
-        code = glsl.compile(ce.box(['Add', bigSum, 1])).code;
-      } catch {
-        /* fail-closed is an acceptable path too */
-      }
+      // `NO_FOLD` is necessary: without it the constant sum folds to a float
+      // literal, no loop is emitted, and the check below has nothing to test.
+      const code = glsl.compile(ce.box(['Add', bigSum, 1]), NO_FOLD).code;
+      expect(code).toContain('for (int i = 1; i <= 1000; i++)');
       expect(code).not.toMatch(/return\s+\w+;\s*\+/);
+    });
+
+    it('folds a constant loop-form Sum to a float literal (GLSL and WGSL)', () => {
+      // With folding on, the compiler evaluates the constant subtree with
+      // `.N()` and emits one float literal. The value of Σ sin(i), i = 1..1000,
+      // is 0.8139696340731652 in double precision. In `1 + Σ…` the sum is an
+      // operand of `Add`, which must evaluate it numerically too: an exact
+      // evaluation of the 1000 symbolic terms took seconds.
+      const wgsl = new WGSLTarget();
+      for (const target of [glsl, wgsl]) {
+        expect(target.compile(ce.box(bigSum)).code).toBe('0.8139696');
+        expect(target.compile(ce.box(['Add', bigSum, 1])).code).toBe(
+          '1.8139696'
+        );
+        expect(target.compile(ce.box(['Add', ['Sqrt', 2], 1])).code).toBe(
+          '2.4142137'
+        );
+      }
     });
 
     it('still compiles a loop-form Sum as a top-level function body', () => {

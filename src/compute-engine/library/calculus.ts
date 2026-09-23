@@ -61,7 +61,11 @@ import {
   limit,
   LIMIT_PROBE_ITERATION_BUDGET,
 } from '../numerics/numeric.js';
-import { derivative, differentiate } from '../symbolic/derivative.js';
+import {
+  derivative,
+  differentiate,
+  memoizedDerivativeResult,
+} from '../symbolic/derivative.js';
 import {
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
@@ -89,7 +93,6 @@ import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
-import { CancellationError } from '../../common/interruptible.js';
 
 /**
  * The highest order the `D(f, {x, n})` spelling expands into `n` repeated
@@ -271,6 +274,13 @@ type IntegrandParts = {
    * operator name (`D`) used as a variable — has no numeric value, and the
    * integral must stay symbolic rather than answer `NaN`. */
   sawNumeric: () => boolean;
+  /** The same part (`re` or `im`) without the sample cache. Monte Carlo must
+   * use it: its points are random and do not repeat, so each lookup misses,
+   * and with 10⁷ samples the string keys and lookups cost much more than a
+   * cheap compiled integrand. */
+  uncached: (
+    part: (...args: number[]) => number
+  ) => (...args: number[]) => number;
 };
 
 function numericIntegrandParts(
@@ -301,9 +311,11 @@ function numericIntegrandParts(
   // first and the imaginary part in a second pass over (mostly) the same
   // sample points. Keep the computed pairs so the second pass does not
   // re-evaluate an expensive integrand (a nested integral, a special
-  // function) at a point the first pass already visited. The cache is
-  // bounded: a Monte-Carlo pass can take 10⁷ samples, which must not be
-  // retained — past the cap, points are evaluated without caching.
+  // function) at a point the first pass already visited. A Monte-Carlo pass
+  // of a single integral reads the integrand through `uncached` instead. The
+  // cache is bounded: an iterated integral can evaluate the integrand at very
+  // many points, which must not all be retained — past the cap, points are
+  // evaluated without caching.
   const MAX_CACHED_SAMPLES = 1 << 16;
   const cache = new Map<string, [re: number, im: number]>();
   const at = (args: number[]): [re: number, im: number] => {
@@ -314,11 +326,22 @@ function numericIntegrandParts(
     if (cache.size < MAX_CACHED_SAMPLES) cache.set(key, pair);
     return pair;
   };
+  // The real part is read in the first pass, which does not revisit a point,
+  // so once the cache is full a lookup there can only miss: skip the key and
+  // the lookup. The imaginary pass still looks up, because the first
+  // `MAX_CACHED_SAMPLES` points of the first pass are in the cache.
+  const re = (...args: number[]) =>
+    cache.size >= MAX_CACHED_SAMPLES ? parts(raw(...args))[0] : at(args)[0];
+  const im = (...args: number[]) => at(args)[1];
+  const reUncached = (...args: number[]) => parts(raw(...args))[0];
+  const imUncached = (...args: number[]) => parts(raw(...args))[1];
   return {
-    re: (...args) => at(args)[0],
-    im: (...args) => at(args)[1],
+    re,
+    im,
     sawImaginary: () => imaginary,
     sawNumeric: () => numeric,
+    uncached: (part) =>
+      part === re ? reUncached : part === im ? imUncached : part,
   };
 }
 
@@ -478,6 +501,16 @@ function nIntegrateMultiple(
   // outer quadrature node — so per-level allocation would also make the tag
   // depend on how many nodes the outer level happened to use.
   const draw = ce._substream(mixTags(f.hash, ...limits.map((l) => l.hash)));
+  // The number of Monte Carlo estimates that are running now. While one runs,
+  // the integrand is read at points that come from random draws: the points
+  // of that level, and the quadrature nodes of the inner levels, which move
+  // with each random outer value. The second pass (the imaginary part) does
+  // not visit these points again, because it continues the same stream and
+  // gets new draws. So a cache lookup of such a point can only miss, and the
+  // points would also fill the bounded cache, after which the quadrature
+  // nodes of the first pass are no longer kept for the second pass. Read the
+  // integrand without the cache while this count is not zero.
+  let sampling = 0;
   const integrateDim = (dim: number): { estimate: number; error: number } => {
     // Inner-level error accumulated over this level-invocation's quadrature
     // nodes (the recursion is strictly sequential, so plain locals suffice).
@@ -486,7 +519,8 @@ function nIntegrateMultiple(
     const g = (t: number): number => {
       argv[slots[dim]] = t;
       outerVals[dim] = t;
-      if (dim === last) return jsf(...argv);
+      if (dim === last)
+        return sampling > 0 ? integrand.uncached(jsf)(...argv) : jsf(...argv);
       const r = integrateDim(dim + 1);
       if (Number.isFinite(r.error)) {
         innerErrSum += r.error;
@@ -539,9 +573,14 @@ function nIntegrateMultiple(
     // quadrature result: sampling it would be both less accurate and, since
     // every inner level re-runs per outer node, far more expensive.
     if (quadratureBeatsMonteCarlo(gk, 1e4)) return inflate(gk);
-    return inflate(
-      monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw)
-    );
+    sampling++;
+    try {
+      return inflate(
+        monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw)
+      );
+    } finally {
+      sampling--;
+    }
   };
 
   // The reported uncertainty is the outermost level's error estimate, inflated
@@ -1558,53 +1597,61 @@ volumes
         // - the hole is renamed to a real parameter, so no `_` reaches the
         //   serializers (the `()\mapsto…` mis-rendering) or the
         //   `denotesFunction` wildcard gate.
+        //
+        // The whole arm is memoized: lifting the closed form into a literal
+        // declares its parameter, and that declaration makes the cache of
+        // `derivative()` miss on the next request (see
+        // `memoizedDerivativeResult`).
         if (orders.length <= 1) {
-          const r = derivative(op, orders[0] ?? 1);
-          if (r === undefined) return undefined;
-          // Order 0 (or an already-lifted result) is the function itself.
-          if (isFunction(r, 'Function')) return r;
-          // An INCOMPLETE closed form — a `D` the symbolic differentiator
-          // could not resolve is left inside the body, such as the
-          // derivative of the norm of a point-valued function inside the
-          // quotient rule for `t ↦ f'(t)/|f'(t)|` — is no closed form: the
-          // node stays inert, so an application of it stays an `Apply` and
-          // `N()` answers it through the stencil fallback
-          // (`numericDerivativeOfApply`), as the compiled JavaScript target
-          // already does for the same application. Returned bare or lifted
-          // into a function literal instead, the residue reached every
-          // consumer as a symbolic `D(…)` that no route could numericize.
-          // (Checked before the `Derivative`-carrying case below: such a
-          // body may hold a legitimate `Apply(Derivative(f, 2), t)` beside
-          // the unresolved `D`.)
-          if (holdsUnresolvedD(r)) return undefined;
-          if (r.operator === 'Derivative' || r.has('Derivative')) return r;
+          const order = orders[0] ?? 1;
+          return memoizedDerivativeResult(op, order, () => {
+            const r = derivative(op, order);
+            if (r === undefined) return undefined;
+            // Order 0 (or an already-lifted result) is the function itself.
+            if (isFunction(r, 'Function')) return r;
+            // An INCOMPLETE closed form — a `D` the symbolic differentiator
+            // could not resolve is left inside the body, such as the
+            // derivative of the norm of a point-valued function inside the
+            // quotient rule for `t ↦ f'(t)/|f'(t)|` — is no closed form: the
+            // node stays inert, so an application of it stays an `Apply` and
+            // `N()` answers it through the stencil fallback
+            // (`numericDerivativeOfApply`), as the compiled JavaScript target
+            // already does for the same application. Returned bare or lifted
+            // into a function literal instead, the residue reached every
+            // consumer as a symbolic `D(…)` that no route could numericize.
+            // (Checked before the `Derivative`-carrying case below: such a
+            // body may hold a legitimate `Apply(Derivative(f, 2), t)` beside
+            // the unresolved `D`.)
+            if (holdsUnresolvedD(r)) return undefined;
+            if (r.operator === 'Derivative' || r.has('Derivative')) return r;
 
-          // A named-parameter function literal: the derivative was taken with
-          // respect to its own (first) parameter, so the body is already in
-          // terms of the named parameters — preserve the signature.
-          if (isFunction(op, 'Function')) {
-            const params = op.ops.slice(1);
-            if (
-              params.length > 0 &&
-              params.every((p) => functionLiteralParameterName(p) !== '')
-            )
-              // `ce.function()` (not `_fn`): the canonical handler wraps the
-              // body in the scoped Block that `makeLambda` requires.
-              return ce.function('Function', [r, ...params]);
-          }
+            // A named-parameter function literal: the derivative was taken with
+            // respect to its own (first) parameter, so the body is already in
+            // terms of the named parameters — preserve the signature.
+            if (isFunction(op, 'Function')) {
+              const params = op.ops.slice(1);
+              if (
+                params.length > 0 &&
+                params.every((p) => functionLiteralParameterName(p) !== '')
+              )
+                // `ce.function()` (not `_fn`): the canonical handler wraps the
+                // body in the scoped Block that `makeLambda` requires.
+                return ce.function('Function', [r, ...params]);
+            }
 
-          // Otherwise the body is in terms of the hole `_` (an operator
-          // symbol such as `Sin`): rename the hole to a fresh parameter that
-          // collides with no free variable or binder name of the body.
-          let name = 'x';
-          if (r.has(name) || collectBinderNames(r).has(name)) {
-            let i = 1;
-            while (r.has(`x_${i}`) || collectBinderNames(r).has(`x_${i}`))
-              i += 1;
-            name = `x_${i}`;
-          }
-          const param = ce.symbol(name);
-          return ce.function('Function', [r.subs({ _: param }), param]);
+            // Otherwise the body is in terms of the hole `_` (an operator
+            // symbol such as `Sin`): rename the hole to a fresh parameter that
+            // collides with no free variable or binder name of the body.
+            let name = 'x';
+            if (r.has(name) || collectBinderNames(r).has(name)) {
+              let i = 1;
+              while (r.has(`x_${i}`) || collectBinderNames(r).has(`x_${i}`))
+                i += 1;
+              name = `x_${i}`;
+            }
+            const param = ce.symbol(name);
+            return ce.function('Function', [r.subs({ _: param }), param]);
+          });
         }
 
         // Multi-index: mixed partial of a multivariate function. For a known
@@ -2299,7 +2346,7 @@ volumes
             }
 
             const mce = monteCarloEstimate(
-              jsf,
+              integrand.uncached(jsf),
               lower,
               upper,
               compiled?.success ? 1e7 : 1e4,
@@ -2392,7 +2439,11 @@ volumes
                 // A cancellation (deadline/interrupt) thrown inside the provider
                 // must propagate — swallowing it would turn a timeout into a
                 // silent fall-through to the built-in antiderivative.
-                if (e instanceof CancellationError) throw e;
+                // The name is checked instead of `instanceof`: a provider from
+                // a plugin bundle (the Rubi integration rules) throws its own
+                // copy of the `CancellationError` class.
+                if (e instanceof Error && e.name === 'CancellationError')
+                  throw e;
                 antideriv = null;
               }
             }
@@ -2592,7 +2643,7 @@ volumes
             if (osc) return osc.estimate;
           }
           return monteCarloEstimate(
-            jsf,
+            integrand.uncached(jsf),
             lower,
             upper,
             compiled?.success ? 1e7 : 1e4,

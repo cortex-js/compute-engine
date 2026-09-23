@@ -1707,9 +1707,9 @@ function joinAssignmentEvidence(
     frame.record({ undo: () => target._restoreTypeSlots(slots) });
   }
   const wasCallable = containsSignatureArm(recorded.type);
-  def.value.type = ce.type(next);
+  def.value._setType(() => ce.type(next));
   // The `_type` expression caches key on the engine's `any` axis, which a
-  // bare definition-type write does not advance: without the event, an
+  // `_setType()` write does not advance: without the event, an
   // expression typed before this join — a lambda body canonicalized earlier
   // in the same block — keeps its stale narrower type for the rest of the
   // generation.
@@ -3831,7 +3831,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               const slots = target._typeSlotSnapshot();
               frame.record({ undo: () => target._restoreTypeSlots(slots) });
             }
-            def.value.type = ce.type('function');
+            const wasCallable = containsSignatureArm(def.value.type.type);
+            def.value._setType(() => ce.type('function'));
+            // Report the write, as the same retype on the `Assign` route
+            // does: `_setType()` advances no cache axis, so without the
+            // event an expression typed before this write keeps its
+            // outdated type.
+            ce._noteStateEvent({
+              kind: 'type-write',
+              callableBefore: wasCallable,
+              callableAfter: true,
+            });
           }
         }
         // Loosen the target while the clause body canonicalizes: a recursive
@@ -4185,9 +4195,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               frame.record({ undo: () => target._restoreTypeSlots(slots) });
             }
             const wasCallable = containsSignatureArm(def.value.type.type);
-            def.value.type = ce.type('function');
+            def.value._setType(() => ce.type('function'));
             // The `_type` expression caches key on the engine's `any` axis,
-            // which a bare definition-type write does not advance: without
+            // which a `_setType()` write does not advance: without
             // the event, an expression typed before this write keeps its
             // stale type for the rest of the generation.
             ce._noteStateEvent({
@@ -5031,7 +5041,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               const effectsBefore = effectsContractStateOf(
                 existingValueDef.value
               );
-              existingValueDef.value.type = ce.type(type!);
+              existingValueDef.value._setType(() => ce.type(type!));
               existingValueDef.value.inferredType = false;
               existingValueDef.value.effectsDeclared = effectsDeclared;
               recordEffectsTransition(

@@ -943,11 +943,27 @@ export class _BoxedValueDefinition
       throw new Error(
         `The type of "${this.name}" was set to a function. Use "_setType()" to compute a type inside the write's fact-blind bracket.`
       );
+    const callableBefore = containsSignatureArm(this._type?.type);
     this._setType(() => t);
+    // Report the write, so that values cached against the engine's cache
+    // generation (the `_type` and `_sgn` caches of expressions that read
+    // this type) are computed again. `_setType()` reports no event, because
+    // each internal caller reports its own event. A refused write throws
+    // before this point and reports nothing.
+    this._engine._noteStateEvent({
+      kind: 'type-write',
+      callableBefore,
+      callableAfter: containsSignatureArm(this._type!.type),
+    });
   }
 
   /** Write this definition's declared type, deriving it with the assumptions
    * hidden.
+   *
+   * This method reports no state event. The caller must report the event
+   * that fits the write (`type-write`, `inference`, or none when a value
+   * write that follows advances the cache axes). The public `type` setter
+   * reports a `type-write` event.
    *
    * The thunk runs inside the bracket together with the write itself, so both
    * the type stored and the decisions that chose it are a function of the

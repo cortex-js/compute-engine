@@ -25,9 +25,11 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { compileJetDerivative } from '../../src/compute-engine/compilation/jet-derivative';
 import { derivative } from '../../src/compute-engine/symbolic/derivative';
+import { BoxedFunction } from '../../src/compute-engine/boxed-expression/boxed-function';
 
 const RADICAL = 'f(x):=\\sqrt{x+\\sqrt{x+\\sqrt{x+\\sqrt{x+x}}}}';
 
@@ -42,8 +44,9 @@ function engineWith(definition: string): ComputeEngine {
 /**
  * One engine for every test on the four-deep radical. The reference values
  * come from the interpreter's symbolic route, which costs seconds per order
- * on this body; a fresh engine per test would pay that again each time, and
- * the memo under test is exactly what makes the repeats free.
+ * on this body. A fresh engine per test would pay that again each time. On
+ * one engine, the differentiation steps are memoized per function literal,
+ * and `interpreted()` computes each closed form only once.
  */
 const radical = engineWith(RADICAL);
 radical.declare('e', 'real');
@@ -61,13 +64,31 @@ function compiled(ce: ComputeEngine, order: number, to = 'javascript') {
   };
 }
 
+/** The closed form of the n-th derivative of `f`, per engine and order. */
+const closedForms = new WeakMap<ComputeEngine, Map<number, Expression>>();
+
 /** The interpreter's value of the n-th derivative of `f` at `x`. */
 function interpreted(
   ce: ComputeEngine,
   order: number,
   x: number
 ): { re: number; im: number } {
-  const v = ce.box(['Apply', ['Derivative', 'f', order], x]).N();
+  // The closed form is computed once per order and then applied at each
+  // point. Applying `Derivative(f, n)` directly at each point is slower: each
+  // application of a function declares its parameter, which advances the
+  // engine's cache generation, so the next request for `Derivative(f, n)`
+  // does the closing `simplify()` of the derivative again.
+  let byOrder = closedForms.get(ce);
+  if (byOrder === undefined) {
+    byOrder = new Map();
+    closedForms.set(ce, byOrder);
+  }
+  let closedForm = byOrder.get(order);
+  if (closedForm === undefined) {
+    closedForm = ce.box(['Derivative', 'f', order]).evaluate();
+    byOrder.set(order, closedForm);
+  }
+  const v = ce.function('Apply', [closedForm, ce.number(x)]).N();
   return { re: v.re, im: v.im };
 }
 
@@ -460,23 +481,28 @@ describe('applied derivative: the memoised closed form', () => {
 
   test('a type written onto a free symbol of the body invalidates the cached form', () => {
     // The closing `simplify()` of an order-2 derivative reads declared types:
-    // `sin(πb)` is zero for an integer `b`. Writing a type advances the
-    // engine's `any` invalidation axis but NOT its semantic one, so an entry
-    // guarded on the semantic version alone kept answering `6x·sin(πb)`
-    // after the write.
+    // `sin(πb)` is zero for an integer `b`, so the cached `6x·sin(πb)` must
+    // not answer after the write.
+    //
+    // The write goes through the symbol's `type` setter. That setter first
+    // retracts the assumptions about `b`, which advances every axis, so the
+    // whole cache entry is dropped. A write to `valueDefinition.type`
+    // reports no state event and advances no axis, so no cache sees it. No
+    // public write was found that advances the `any` axis alone and also
+    // changes this derivative.
     const ce = new ComputeEngine();
     ce.declare('b', 'real');
     ce.parse('f(x):=x^3\\sin(b\\pi)').evaluate();
     expect(ce.box(['Derivative', 'f', 2]).evaluate().toString()).toEqual(
       expect.stringContaining('sin')
     );
-    ce.box('b').valueDefinition!.type = ce.type('integer');
+    ce.box('b').type = 'integer';
 
     // The same sequence with nothing cached, for the reference answer.
     const cold = new ComputeEngine();
     cold.declare('b', 'real');
     cold.parse('f(x):=x^3\\sin(b\\pi)').evaluate();
-    cold.box('b').valueDefinition!.type = cold.type('integer');
+    cold.box('b').type = 'integer';
 
     const after = ce.box(['Derivative', 'f', 2]).evaluate().toString();
     expect(after).not.toEqual(expect.stringContaining('sin'));
@@ -506,6 +532,83 @@ describe('applied derivative: the memoised closed form', () => {
     // check separates them.)
     expect(viaLiteral.toString()).toBe(viaSymbol.toString());
   });
+
+  // A cache hit is observed by counting calls of `simplify()`: an order-2
+  // or higher derivative that is computed again ends with one `simplify()`.
+  // Object identity is not a sufficient signal, because a computation
+  // that is done again can return the same object.
+  function simplifyCalls(run: () => void): number {
+    const spy = jest.spyOn(BoxedFunction.prototype, 'simplify');
+    try {
+      run();
+      return spy.mock.calls.length;
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  test('a repeated derivative of a function symbol is served from the cache', () => {
+    // Before the fix, the lookup came after `derivative()` evaluated `f(_)`.
+    // That call declares the parameter of `f` and advances the cache
+    // generation, so each repeat did the closing `simplify()` again.
+    const ce = engineWith('f(x):=\\sin(x^2+x)\\cos(x)+x^3');
+    const f = ce.box('f');
+    const first = derivative(f, 3);
+    let second: unknown;
+    expect(simplifyCalls(() => (second = derivative(f, 3)))).toBe(0);
+    expect(second).toBe(first);
+  });
+
+  test('a repeated Derivative evaluation is served from the cache', () => {
+    // The `Derivative` handler lifts the closed form into a new function
+    // literal, and that declaration advances the cache generation after
+    // `derivative()` recorded its result.
+    const ce = engineWith('f(x):=\\sin(x^2+x)\\cos(x)+x^3');
+    const first = ce.box(['Derivative', 'f', 3]).evaluate();
+    let second: unknown;
+    expect(
+      simplifyCalls(() => (second = ce.box(['Derivative', 'f', 3]).evaluate()))
+    ).toBe(0);
+    expect(second).toBe(first);
+  });
+
+  // Each route is checked on its own engine and alone, because a call on
+  // one route can advance the cache generation and hide an outdated answer
+  // on the other route.
+  const routes: [string, (ce: ComputeEngine) => string][] = [
+    ['derivative()', (ce) => derivative(ce.box('f'), 2)!.toString()],
+    [
+      'Derivative evaluation',
+      (ce) => ce.box(['Derivative', 'f', 2]).evaluate().toString(),
+    ],
+  ];
+
+  test.each(routes)(
+    'a type write is not served from the cache (%s)',
+    (_name, run) => {
+      // `sin(πb)` is zero for an integer `b`, so the closing `simplify()`
+      // must run again after the write.
+      const ce = new ComputeEngine();
+      ce.declare('b', 'real');
+      ce.parse('f(x):=x^3\\sin(b\\pi)').evaluate();
+      expect(run(ce)).toEqual(expect.stringContaining('sin'));
+      ce.box('b').type = 'integer';
+      let after = '';
+      expect(simplifyCalls(() => (after = run(ce)))).toBeGreaterThan(0);
+      expect(after).not.toEqual(expect.stringContaining('sin'));
+    }
+  );
+
+  test.each(routes)(
+    'a new definition is not served from the cache (%s)',
+    (_name, run) => {
+      const ce = new ComputeEngine();
+      ce.parse('f(x):=x^3').evaluate();
+      expect(run(ce)).toEqual(expect.stringMatching(/6 ?\*? ?(x|_)/));
+      ce.parse('f(x):=x^5').evaluate();
+      expect(run(ce)).toEqual(expect.stringMatching(/20 ?\*? ?(x|_)\^3/));
+    }
+  );
 });
 
 describe('applied derivative: the value shape of the emitted code', () => {

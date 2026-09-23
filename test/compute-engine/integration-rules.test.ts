@@ -4,6 +4,29 @@ import { compileRuleDocs } from '../../src/compute-engine/rubi/compile';
 import { RubiDriver } from '../../src/compute-engine/rubi/driver';
 import { CancellationError } from '../../src/common/interruptible';
 
+// Loading the rule pack takes about one second for each engine, because it
+// boxes every rule pattern in canonical form. So the tests that only
+// integrate share one engine for each driver time limit, instead of one
+// engine each. This is safe because no such test assigns or declares a
+// symbol, changes the precision, or uses a symbol as a Boolean. The symbol
+// types that the engine infers in one test stay for the later tests; that is
+// the only state the tests share. The tests that examine the load itself
+// (the report, the cache, the state before the load) keep a new engine each.
+// A block must get a shared engine from this function and must not call
+// `loadIntegrationRules` on it: describe bodies run before the tests, so a
+// second load would replace the driver (and its time limit) for all the
+// blocks that share the engine.
+const engines = new Map<number, ComputeEngine>();
+function rubiEngine(timeLimitMs = 10_000): ComputeEngine {
+  let ce = engines.get(timeLimitMs);
+  if (!ce) {
+    ce = new ComputeEngine();
+    loadIntegrationRules(ce, { timeLimitMs });
+    engines.set(timeLimitMs, ce);
+  }
+  return ce;
+}
+
 describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   test('loads the bundled Chapter-1 corpus', () => {
     const ce = new ComputeEngine();
@@ -222,8 +245,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // ── SYM P2-27: rule-driven outputs are folded clean (no stray ln(e)) even
   // before a user simplify(). ──
   test('Chapter-2 exponential output has no stray ln(e)/·1 clutter', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const F = ce.parse('\\int \\frac{e^{2x}}{x^3} \\, dx').evaluate();
     const s = F.toString();
     expect(s).not.toContain('ln(e)');
@@ -234,8 +256,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   });
 
   describe('integrates algebraic integrands via Integrate.evaluate()', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -261,11 +282,10 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // ExpandIntegrand and the 1.1.3.2 split (see rubi-utils ExpandIntegrand
   // guard). D-verify by differentiating and sampling at fixed parameter values.
   describe('symbolic quartic-denominator rationals (R25)', () => {
-    const ce = new ComputeEngine();
     // The two-quartic product case runs 5–8.5 s idle — right against the 10 s
     // default driver budget under worker contention, so raise both budgets
     // (same convention as the other heavy describes).
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
     const verify = (latex: string, params: Record<string, number>) => {
       const integrand = ce.parse(latex);
       let F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -301,8 +321,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   });
 
   describe('integrates the (a+b cos+c sin) trig family (Chapter-4 pilot)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -326,8 +345,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   });
 
   describe('bare trig-power reduction (cosine has no Rubi chapter)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -351,8 +369,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // (default-on since R12) routes pure-cot integrands onto them — the tan/cot
   // mirror of the 4.5 sec→csc routing. All D-verified against the integrand.
   describe('integrates the tangent family (Chapter-4 §4.3)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -383,8 +400,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // `1/sin` before a csc-binomial rule can match. R13 keeps the reflected csc
   // raw so the 4.5.1 csc-binomial rule family closes them. D-verified.
   describe('integrates the secant binomial family (Chapter-4 §4.5, R13)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string, subs: Record<string, number> = {}) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -406,8 +422,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   });
 
   describe('integrates exponential integrands (Chapter 2)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -432,8 +447,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   });
 
   describe('integrates hyperbolic integrands (Chapter 6)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -461,8 +475,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // #14). All D-verified against the integrand. These all go inert without the
   // Chapter-3 bundle walk (verified by reverting ch3Dir), so they exercise it.
   describe('integrates the logarithm family (Chapter-3)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     // Verify by finite-differencing F.N() (not symbolic D[F]): the PolyLog
     // cases have an inert symbolic derivative (Derivative[PolyLog,…] does not
     // numericize) but F.N() itself is numerically evaluable, so the numeric
@@ -554,8 +567,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // terms have an inert symbolic derivative but F.N() is numerically
   // evaluable, so the numeric derivative of F is the robust check.
   describe('closes the Chapter-2 → Chapter-3 → Chapter-8 PolyLog chain', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -596,7 +608,6 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // antiderivative carries PolyLog/complex-Log terms whose symbolic derivative
   // does not numericize). Concrete integer params avoid the reserved `e`/`i`.
   describe('closes the single-angle trig-rational family (Chapter-4, R17)', () => {
-    const ce = new ComputeEngine();
     // The poly³×trig-rational by-parts chains take 1–2.5 s each and are slow
     // under ts-jest — same convention as the other heavy describes in this
     // file. (Verified 2026-07-10: not a regression — A/B timing against the
@@ -607,7 +618,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     // Integrate — no
     // CancellationError. Under full-suite worker contention the ~2 s chain
     // can stretch past 10 s, so the heavy describes raise BOTH budgets.
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -651,8 +662,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // / complex-Si terms numericize but do not admit a symbolic derivative).
   // Concrete integer params avoid the reserved `e`/`i`.
   describe('closes complex-Si / reciprocal-arg families (Chapter-4, R18)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -684,11 +694,44 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   test('the built-in antiderivative still handles non-Rubi integrands', () => {
     // The provider returns null for a Gaussian (outside Chapter 1), so the
     // built-in antiderivative runs and produces Erf.
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const F = ce.parse('\\int e^{-x^2} \\, dx').evaluate();
     expect(F.has('Integrate')).toBe(false);
     expect(F.toString()).toContain('Erf');
+  });
+
+  // A recursion-depth limit is a cancellation that is not a timeout, so Rubi
+  // must not change it into "no closed form": it reaches the caller of the
+  // integration provider and of `Integrate`. `r` has no base case. The rule
+  // driver evaluates the coefficient `r(3)` when it collects the polynomial
+  // factors of the integrand. The test uses its own engine, because it
+  // declares a function and changes the recursion limit.
+  test('a recursion-depth limit inside a Rubi rewrite reaches the caller', () => {
+    const ce = new ComputeEngine();
+    loadIntegrationRules(ce);
+    ce.recursionLimit = 64;
+    ce.declare('r', 'function');
+    ce.parse('r(x) := r(x-1) + 1').evaluate();
+    const expectRecursionLimit = (fn: () => unknown) => {
+      let thrown: unknown;
+      try {
+        fn();
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(CancellationError);
+      expect((thrown as CancellationError).cause).toBe(
+        'recursion-depth-exceeded'
+      );
+    };
+    // The provider runs only the rule driver (and its native rational
+    // fallback), so this shows that the error leaves Rubi.
+    expectRecursionLimit(() =>
+      (ce as any)._integrationProvider(ce.parse('\\frac{1}{r(3) + x^2}'), 'x')
+    );
+    expectRecursionLimit(() =>
+      ce.parse('\\int \\frac{1}{r(3) + x^2} \\, dx').evaluate()
+    );
   });
 
   test('default engine (no rules loaded) is unchanged', () => {
@@ -710,8 +753,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // PolyLog[2,±i·x] whose symbolic derivative is inert but whose F.N() is
   // numerically evaluable.
   describe('integrates the inverse-trig family (Chapter-5, R20)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -755,8 +797,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // that closes to the hyperbolic cosine/sine integral Chi/Shi (exercising the
   // new Shi/Chi kernels end-to-end). Verified by finite-differencing F.N().
   describe('integrates the inverse-hyperbolic family (Chapter-7, R21)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
     const verify = (latex: string, xs = [0.31, 0.52, 0.73, 1.42, 2.3]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();

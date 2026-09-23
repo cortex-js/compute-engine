@@ -48,6 +48,10 @@ interface Panel {
   b: number;
   value: number;
   error: number;
+  /** The number of bisections that produced this panel from a starting
+   * panel: 0 for a starting panel, and one more than the parent for a child.
+   * Set by the adaptive loop, not by `gk15`. */
+  depth?: number;
 }
 
 /**
@@ -166,6 +170,12 @@ function panelIsBad(p: Panel): boolean {
  * `initialPanelsForDimensions`.
  */
 const INITIAL_PANELS = 16;
+
+/** The minimum number of panels, all non-finite, that stops the adaptive
+ * loop of `adaptiveFinite` with a `NaN` result. The loop also requires that a
+ * bisection gave two non-finite children. See `mustStopAllBad` in
+ * `adaptiveFinite`. */
+const ALL_BAD_STOP_PANELS = 16;
 
 /**
  * The per-level starting-panel count for a `dimensions`-deep iterated integral,
@@ -411,18 +421,59 @@ function adaptiveFinite(
 
   const tolerance = () => Math.max(atol, rtol * Math.abs(totalValue));
 
+  // True when no panel is finite.
+  const allPanelsBad = () => badPanels === panels.length;
+  // True when a bisection gave two bad children. A non-finite value at one
+  // point (a removable singularity such as `(x²-1)/(x²-1)` at x = ±1) makes
+  // at most one panel bad, because a point is a node of at most one panel.
+  // When a bad panel is bisected, a point at its center goes to the shared
+  // boundary of the two children, which is not a node of either child. A
+  // point at another node of the parent is, in general, not a node of a
+  // child. So two bad children show non-finite values at new points, not
+  // only the isolated point that made the parent bad.
+  let refinementFailed = false;
+  // True when the loop must stop with a `NaN` result: no panel is finite,
+  // there are at least `ALL_BAD_STOP_PANELS` panels, and a bisection gave
+  // two bad children. Without this stop, all errors are infinite and the
+  // loop would keep halving panels until they are too narrow to split (more
+  // than 30,000 evaluations).
+  //
+  // "No panel is finite" alone is not enough evidence: k isolated points can
+  // make k panels bad. For example, on [0, 16] with the 16 default starting
+  // panels, `u/u` with `u = x - floor(x) - 0.5` is NaN at the center of each
+  // starting panel and 1 everywhere else. The failed bisection is the
+  // evidence that such points do not give. When all panels are bad, the loop
+  // bisects a panel with the smallest depth first (see the selection below),
+  // so the first bisection moves the point at the center of a starting panel
+  // to a boundary, and that panel becomes finite. The panel count increases
+  // by one at each bisection, so a loop that starts with fewer than
+  // `ALL_BAD_STOP_PANELS` panels bisects up to this count before it stops.
+  const mustStopAllBad = () =>
+    refinementFailed && panels.length >= ALL_BAD_STOP_PANELS && allPanelsBad();
+
   while (panels.length < maxIntervals) {
     if (badPanels === 0 && totalError <= tolerance()) break;
+    if (mustStopAllBad()) break;
     // Deadline check per bisection — same salvage semantics as the
     // initial-panel loop above (item 183). One check per panel is ample:
     // each iteration costs two GK15 evaluations (30 integrand calls), so
     // the overshoot past the deadline is bounded by a single bisection.
     if (deadline !== undefined && Date.now() >= deadline) break;
 
-    // Pick the panel with the largest (or non-finite) error.
+    // Pick the panel with the largest (or non-finite) error. When all panels
+    // are bad, all errors are infinite: pick the first panel with the
+    // smallest depth. Otherwise the loop bisects the same starting panel
+    // again and again (after a bisection, the left child takes the index of
+    // its parent), and never bisects the other starting panels.
     let worst = 0;
-    for (let i = 1; i < panels.length; i++)
-      if (errorKey(panels[i].error) > errorKey(panels[worst].error)) worst = i;
+    if (allPanelsBad()) {
+      for (let i = 1; i < panels.length; i++)
+        if ((panels[i].depth ?? 0) < (panels[worst].depth ?? 0)) worst = i;
+    } else {
+      for (let i = 1; i < panels.length; i++)
+        if (errorKey(panels[i].error) > errorKey(panels[worst].error))
+          worst = i;
+    }
 
     const iv = panels[worst];
     const mid = 0.5 * (iv.a + iv.b);
@@ -435,6 +486,8 @@ function adaptiveFinite(
 
     const left = gk15(f, iv.a, mid);
     const right = gk15(f, mid, iv.b);
+    left.depth = right.depth = (iv.depth ?? 0) + 1;
+    if (panelIsBad(left) && panelIsBad(right)) refinementFailed = true;
 
     removePanel(iv);
     addPanel(left);
@@ -462,6 +515,17 @@ function adaptiveFinite(
       break;
     }
   }
+
+  // No panel has a finite value, so the totals (which skip bad panels) hold
+  // 0, and 0 is not the value of the integral. Report NaN, the same result
+  // as a NaN bound. This is also true when the loop stopped for another
+  // reason before a bisection failed: the panel budget (for example
+  // `maxIntervals` not larger than the number of starting panels, so the
+  // loop does not bisect) or the deadline. Then an integrand with removable
+  // singularities at the node of each starting panel also gives NaN,
+  // because no finite value is known.
+  if (allPanelsBad())
+    return { estimate: NaN, error: NaN, converged: false, divergent: false };
 
   const converged =
     !divergent &&
@@ -498,7 +562,17 @@ function adaptiveFinite(
  * symmetric cancellation of an odd integrand), each half receiving half the
  * panel budget and the combined result re-checked against the tolerance;
  * `a === b` is 0; `a > b` negates the swapped result; a `NaN` bound yields a
- * non-converged `NaN` estimate.
+ * non-converged `NaN` estimate. An integrand that is non-finite at every node
+ * of every panel also yields a non-converged `NaN` estimate (and `NaN` error):
+ * the loop stops when no panel is finite, there are at least 16 panels
+ * (fewer starting panels are bisected up to 16 first), and a bisection gave
+ * two non-finite children. An integrand that is non-finite only at some
+ * isolated nodes (removable singularities, such as `(x²-1)/(x²-1)` on
+ * [-2, 2], or one point at the center of each of the 16 starting panels) is
+ * still integrated, even when every starting panel is bad: the bad panels
+ * are bisected until their nodes miss the singular points. If the panel
+ * budget or the deadline stops the loop before any panel is finite, the
+ * estimate is also `NaN`.
  */
 export function adaptiveQuadrature(
   f: (x: number) => number,

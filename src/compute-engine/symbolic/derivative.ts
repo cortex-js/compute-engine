@@ -440,6 +440,11 @@ type DerivativeChainCache = {
     string,
     Map<number, { generation: number; value: Expression | undefined }>
   >;
+  /** The `generation` of the finished result that {@link derivative} last
+   * returned from this entry, from the cache or newly recorded. It is
+   * `undefined` until `derivative()` returns such a result.
+   * `memoizedDerivativeResult` reads it. */
+  lastFinishedGeneration?: number;
 };
 
 /**
@@ -470,6 +475,88 @@ function derivativeChainKey(fn: Expression): Expression | undefined {
     if (isFunction(literal, 'Function')) return literal;
   }
   return undefined;
+}
+
+/**
+ * The finished result of order `order` for `subKey` in `cache`, or
+ * `undefined` when there is none. A finished result is returned only when it
+ * was simplified under the engine state in force now (see the comment of
+ * `DerivativeChainCache`). The `value` of the returned record can be
+ * `undefined`: that is a cached decline.
+ */
+function finishedDerivative(
+  ce: Expression['engine'],
+  cache: DerivativeChainCache | undefined,
+  subKey: string,
+  order: number
+): { generation: number; value: Expression | undefined } | undefined {
+  const finished = cache?.results.get(subKey)?.get(order);
+  if (finished === undefined) return undefined;
+  if (finished.generation !== ce._cacheGeneration()) return undefined;
+  return finished;
+}
+
+/**
+ * Memoize the result of `compute`, the univariate arm of the `Derivative`
+ * evaluate handler, per function literal, route and order.
+ *
+ * The {@link derivative} cache alone cannot serve that handler. The handler
+ * wraps the closed form in a new `Function` literal, and canonicalizing that
+ * literal declares its parameter, which advances the engine's cache
+ * generation AFTER `derivative()` recorded its result. The next request then
+ * sees a newer generation and does the closing `simplify()` again. This
+ * memo records the generation after `compute` returns, so the lift is part
+ * of the state the entry describes.
+ *
+ * The entry is recorded only when every write that advanced the generation
+ * during `compute` is a write that `derivative()` itself accepts, or a write
+ * of the lift. That is the case when, during `compute`, `derivative()`
+ * returned a finished result of this entry at a generation equal to or
+ * newer than the generation before `compute`: `derivative()` recorded that
+ * result AFTER its own writes, and after it `compute` only lifts the
+ * closed form into a function literal, which runs no user code. When
+ * `derivative()` did not return such a result (it declined, or the order is
+ * 0), or the semantic version moved during `compute`, a write of other code
+ * (an impure function body, an inference that retypes a free symbol) can be
+ * in the gap, and the entry is recorded only when the generation did not
+ * move at all.
+ *
+ * The entry is read BEFORE `compute` runs, for the reason given on
+ * `derivativeChainCache`. The sub-keys `result:apply` and `result:body`
+ * cannot collide with the sub-keys of {@link derivative}, which start with
+ * `apply:` or `body:`.
+ */
+export function memoizedDerivativeResult(
+  fn: Expression,
+  order: number,
+  compute: () => Expression | undefined
+): Expression | undefined {
+  const cacheKey = derivativeChainKey(fn);
+  if (cacheKey === undefined) return compute();
+  const ce = fn.engine;
+  const cache = derivativeChainCache(ce, cacheKey);
+  const subKey = isSymbol(fn) ? 'result:apply' : 'result:body';
+  const finished = finishedDerivative(ce, cache, subKey, order);
+  if (finished !== undefined) return finished.value;
+  const before = ce._cacheGeneration();
+  cache.lastFinishedGeneration = undefined;
+  const value = compute();
+  const after = ce._cacheGeneration();
+  // See the comment of this function for the rule. `derivativeChains` holds
+  // a new entry when the semantic version moved during `compute`.
+  const differentiated = cache.lastFinishedGeneration;
+  const accounted =
+    derivativeChains.get(cacheKey) === cache &&
+    differentiated !== undefined &&
+    differentiated >= before;
+  if (!accounted && after !== before) return value;
+  let byOrder = cache.results.get(subKey);
+  if (byOrder === undefined) {
+    byOrder = new Map();
+    cache.results.set(subKey, byOrder);
+  }
+  byOrder.set(order, { generation: after, value });
+  return value;
 }
 
 /**
@@ -518,6 +605,23 @@ export function derivative(
   // rather than from a body. See the sub-key below.
   let appliedForm = false;
   if (isSymbol(fn) && fn.operatorDefinition) {
+    // Look up a finished result BEFORE the normalization below. The
+    // normalization evaluates `f(_)`, and that call declares the parameter of
+    // `f` in a new activation scope. The declaration advances the engine's
+    // cache generation, so a lookup made after it never matches the
+    // generation that the previous call recorded, and each call does the
+    // closing `simplify()` again. The sub-key of this route is `apply:_`,
+    // which is the sub-key the lookup below computes, except when `f(_)`
+    // evaluates to a function literal. Then this lookup finds nothing and
+    // the lookup below applies.
+    if (cacheKey !== undefined) {
+      const earlyCache = derivativeChainCache(ce, cacheKey);
+      const early = finishedDerivative(ce, earlyCache, 'apply:_', order);
+      if (early !== undefined) {
+        earlyCache.lastFinishedGeneration = early.generation;
+        return early.value;
+      }
+    }
     // We have, e.g. fn = 'Sin"
     fn = apply(ce.symbol(fn.symbol), [ce.symbol('_')]);
     appliedForm = true;
@@ -546,11 +650,11 @@ export function derivative(
   // respect to `_`, which is a different chain from the application `f(_)`
   // the symbol route builds, under the same variable name.
   const subKey = appliedForm ? `apply:${v}` : `body:${v}`;
-  const finished = cache?.results.get(subKey)?.get(originalOrder);
-  // A finished result also has to have been simplified under the engine state
-  // in force now — see the cache type's comment.
-  if (finished !== undefined && finished.generation === ce._cacheGeneration())
+  const finished = finishedDerivative(ce, cache, subKey, originalOrder);
+  if (finished !== undefined) {
+    cache!.lastFinishedGeneration = finished.generation;
     return finished.value;
+  }
 
   // The chain of raw iterates, extended in place: an order already computed
   // for this literal is the starting point, so `f'''` costs one
@@ -585,10 +689,9 @@ export function derivative(
     // The generation is read AFTER the simplify: that is the state the result
     // describes, and the simplify itself can advance the axis (it pushes and
     // pops scopes).
-    byOrder.set(originalOrder, {
-      generation: ce._cacheGeneration(),
-      value: result,
-    });
+    const generation = ce._cacheGeneration();
+    byOrder.set(originalOrder, { generation, value: result });
+    cache.lastFinishedGeneration = generation;
   }
   return result;
 }

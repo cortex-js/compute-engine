@@ -1,5 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { CancellationError } from '../../src/common/interruptible';
+import { loadIntegrationRules } from '../../src/integration-rules';
+import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
+import { RubiDriver } from '../../src/compute-engine/rubi/driver';
+import {
+  installCaches,
+  zeroQ,
+} from '../../src/compute-engine/rubi/rubi-utils';
 
 /**
  * Regression tests for WP-2.11 / EX-14 (P0-19): a family of bignum
@@ -378,5 +385,206 @@ describe('WP-2.11 / EX-14: controls (must remain correct/fast, unaffected)', () 
     const r = ce.box(['Gamma', 170]).N();
     expect(r.isFinite).toBe(true);
     expect(r.re).toBeCloseTo(4.269068009004705e304, -290);
+  });
+});
+
+/**
+ * A caller's `withTimeLimit` deadline must reach the caller as a
+ * `CancellationError`. A component can change a timeout into a fallback result
+ * only when the time span that expired is a span that the component opened
+ * itself (`docs/TIMEOUT-MODEL.md` §2 and §7.3).
+ *
+ * Each test enters the component directly, with the input built outside the
+ * span, so that the first deadline check happens inside the component. An
+ * already-expired span (`ms: 0`) makes the result deterministic.
+ */
+describe('A caller deadline propagates through components with a fallback', () => {
+  /** Run `fn` and return the `CancellationError` it throws, or `undefined`. */
+  function cancellationOf(fn: () => unknown): CancellationError | undefined {
+    try {
+      fn();
+    } catch (e) {
+      if (e instanceof CancellationError) return e;
+      throw e;
+    }
+    return undefined;
+  }
+
+  describe('Rubi rule driver', () => {
+    const rubiCe = new ComputeEngine();
+    loadIntegrationRules(rubiCe);
+    const provide = (latex: string) => {
+      const integrand = rubiCe.parse(latex);
+      return () => rubiCe._integrationProvider!(integrand, 'x');
+    };
+
+    it('the recursion throws the caller cancellation (non-rational integrand)', () => {
+      // No native fallback applies to `x e^x`, so only the check at the start
+      // of each recursion step can see the expired caller deadline.
+      const run = provide('xe^x');
+      const e = cancellationOf(() =>
+        rubiCe.withTimeLimit({ ms: 0, label: 'test:caller' }, run)
+      );
+      expect(e?.cause).toBe('timeout');
+      expect(e?.attribution).toBe('test:caller');
+    });
+
+    it('the top-level driver call does not change a caller cancellation to "no result"', () => {
+      const run = provide('\\frac{1}{x^2+1}');
+      const e = cancellationOf(() =>
+        rubiCe.withTimeLimit({ ms: 0, label: 'test:caller' }, run)
+      );
+      expect(e?.attribution).toBe('test:caller');
+    });
+
+    it('an unlabelled caller span also propagates', () => {
+      // The error of an unlabelled span has no attribution, the same as the
+      // error of the rule matcher's own time budget.
+      const run = provide('\\frac{1}{x^2+1}');
+      const e = cancellationOf(() => rubiCe.withTimeLimit(0, run));
+      expect(e?.cause).toBe('timeout');
+    });
+
+    it('the driver answers normally outside a caller span', () => {
+      expect(provide('\\frac{1}{x^2+1}')()?.toString()).toBe('arctan(x)');
+    });
+
+    // The two Rubi sub-spans are called directly on a driver with no rules.
+    // An unlabelled caller span gives an error with no attribution, the same
+    // as Rubi's own errors, so only the expiry of the caller frame shows that
+    // the timeout is the caller's.
+    it('the native fallback span lets an unlabelled caller span propagate', () => {
+      const driver = new RubiDriver(rubiCe, []);
+      const integrand = rubiCe.parse('\\frac{1}{x^2+1}');
+      const e = cancellationOf(() =>
+        rubiCe.withTimeLimit(0, () =>
+          (driver as any).nativeRationalFallback(integrand, 'x')
+        )
+      );
+      expect(e?.cause).toBe('timeout');
+    });
+
+    it('the clean-expansion span lets an unlabelled caller span propagate', () => {
+      const driver = new RubiDriver(rubiCe, []);
+      const F = rubiCe.parse('(x+1)^2 - x^2');
+      const e = cancellationOf(() =>
+        rubiCe.withTimeLimit(0, () => (driver as any).cleanExpansionResult(F))
+      );
+      expect(e?.cause).toBe('timeout');
+      // Outside a caller span, the result is simplified as before.
+      expect((driver as any).cleanExpansionResult(F).toString()).toBe(
+        '2x + 1'
+      );
+    });
+  });
+
+  describe('Integrate evaluation with a plugin provider', () => {
+    it('a cancellation from a copy of the class in another bundle propagates', () => {
+      // A plugin bundle has its own copy of the `CancellationError` class, so
+      // its errors are not `instanceof` the class of the engine.
+      const pce = new ComputeEngine();
+      const foreign = new Error('Timeout exceeded');
+      foreign.name = 'CancellationError';
+      pce._integrationProvider = () => {
+        throw foreign;
+      };
+      const integral = pce.parse('\\int x\\,dx');
+      let thrown: unknown;
+      try {
+        integral.evaluate();
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBe(foreign);
+    });
+  });
+
+  describe('Rubi bounded simplification (zeroQ)', () => {
+    const zce = new ComputeEngine();
+    const d = zce.parse('(x+1)^2 - x^2 - 2x - 1');
+
+    it('throws the caller cancellation and does not cache the result', () => {
+      const simplify = new Map();
+      installCaches({ zeroQ: new Map(), simplify });
+      try {
+        const e = cancellationOf(() =>
+          zce.withTimeLimit({ ms: 0, label: 'test:caller' }, () => zeroQ(d))
+        );
+        expect(e?.attribution).toBe('test:caller');
+        expect(simplify.size).toBe(0);
+      } finally {
+        installCaches(undefined);
+      }
+    });
+
+    it('a cancellation that is not the caller one gives the unsimplified form, not cached', () => {
+      // A cancellation from a time budget inside the simplification, while
+      // the enclosing span is still open, is not the caller's.
+      const x = zce.parse('\\sin(x)^2 + \\cos(x)^2 - 1');
+      const inner = new CancellationError({ cause: 'timeout' });
+      const probe = Object.create(x, {
+        simplify: {
+          value: () => {
+            throw inner;
+          },
+        },
+      });
+      const simplify = new Map();
+      const zeroQCache = new Map();
+      installCaches({ zeroQ: zeroQCache, simplify });
+      try {
+        expect(() => zeroQ(probe)).not.toThrow();
+        expect(simplify.size).toBe(0);
+        expect(zeroQCache.size).toBe(0);
+      } finally {
+        installCaches(undefined);
+      }
+    });
+  });
+
+  describe('compiler closed-form integral attempt', () => {
+    const integral = (ce: ComputeEngine) =>
+      ce.box(['Integrate', ['Multiply', 2, 'x'], ['Tuple', 'x', 0, 't']]);
+
+    it('throws the caller cancellation instead of falling back to quadrature', () => {
+      const ce = new ComputeEngine();
+      ce.declare('t', 'real');
+      const target = ce._getCompilationTarget('javascript')!;
+      const args = integral(ce).ops!;
+      const e = cancellationOf(() =>
+        ce.withTimeLimit({ ms: 0, label: 'test:caller' }, () =>
+          BaseCompiler.closedFormIntegral(args, target)
+        )
+      );
+      expect(e?.attribution).toBe('test:caller');
+    });
+
+    it('an unlabelled caller span also propagates', () => {
+      const ce = new ComputeEngine();
+      ce.declare('t', 'real');
+      const target = ce._getCompilationTarget('javascript')!;
+      const args = integral(ce).ops!;
+      const e = cancellationOf(() =>
+        ce.withTimeLimit(0, () => BaseCompiler.closedFormIntegral(args, target))
+      );
+      expect(e?.cause).toBe('timeout');
+    });
+
+    it('a timeout of its own span still falls back (returns undefined)', () => {
+      const ce = new ComputeEngine();
+      ce.declare('t', 'real');
+      const target = ce._getCompilationTarget('javascript')!;
+      const args = integral(ce).ops!;
+      BaseCompiler.setAntiderivativeAttemptBudgetForTesting(0);
+      try {
+        expect(
+          ce.withTimeLimit({ ms: 60_000, label: 'test:caller' }, () =>
+            BaseCompiler.closedFormIntegral(args, target)
+          )
+        ).toBeUndefined();
+      } finally {
+        BaseCompiler.setAntiderivativeAttemptBudgetForTesting();
+      }
+    });
   });
 });

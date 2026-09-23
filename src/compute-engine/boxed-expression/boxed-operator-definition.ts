@@ -635,6 +635,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           `The signature of "${this.name}" was set to a function. Use "_setSignature()" to compute a signature inside the write's fact-blind bracket.`
         );
       this._setSignature(() => value);
+      // Report the write, so that values cached against the engine's cache
+      // generation (the type of an application of this operator) are
+      // computed again. `_setSignature()` reports no event, because each
+      // internal caller reports its own event. The definition stays an
+      // operator definition, so it is callable before and after the write.
+      this.engine._noteStateEvent({
+        kind: 'type-write',
+        callableBefore: true,
+        callableAfter: true,
+      });
     },
   };
 
@@ -738,6 +748,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.4). The thunk
    * runs inside the bracket with the write, so the derivation and the write
    * see the same, fact-free, state.
+   *
+   * This method reports no state event: the caller reports the event that
+   * fits the write. The public `signature` setter reports a `type-write`
+   * event.
    * @internal */
   _setSignature(thunk: () => BoxedType): void {
     this.engine._withoutFacts(() => {
@@ -756,11 +770,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     if (def.signature) {
       this.inferredSignature = false;
-      this.signature = new BoxedType(
+      const signature = new BoxedType(
         normalizeSignatureField(def.signature),
         ce._typeResolver
       );
-    } else this.signature = new BoxedType('(any*) -> unknown');
+      this._setSignature(() => signature);
+    } else {
+      const signature = new BoxedType('(any*) -> unknown');
+      this._setSignature(() => signature);
+    }
 
     this._update(def);
   }
@@ -1140,7 +1158,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     const next: FunctionSignature = { ...t };
     if (effects === undefined) delete next.effects;
     else next.effects = effects;
-    this.signature = new BoxedType(next, this.engine._typeResolver);
+    this._setSignature(() => new BoxedType(next, this.engine._typeResolver));
   }
 
   /**
@@ -1281,7 +1299,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // would keep re-deriving — or stop re-deriving — against the literal the
     // rollback just discarded.
     this._deriveEffects = s._deriveEffects;
-    this.signature = s.signature;
+    this._setSignature(() => s.signature);
     this.inferredSignature = s.inferredSignature;
     this._isLambda = s._isLambda;
     this._lambdaLiteral = s._lambdaLiteral;
@@ -1614,7 +1632,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           `Operator Definition "${this.name}": signature "${newSig}" does not match "${oldSig}"`
         );
       }
-      this.signature = newSig;
+      this._setSignature(() => newSig);
       this._signatureSkeleton = undefined;
 
       if ('inferredSignature' in def)

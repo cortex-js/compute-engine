@@ -1464,3 +1464,22 @@ describe('SPACED MULTI-WORD UNITS', () => {
     ]);
   });
 });
+
+describe('N() of a sum of quantities', () => {
+  // `.N()` gives a float result. The operands of the sum are evaluated
+  // numerically, so the magnitude of the sum is a machine float, not the
+  // exact rational 2/3.
+  test('the magnitude of (1/3 m + 1/3 m).N() is a float', () => {
+    const expr = engine.box([
+      'Add',
+      ['Quantity', ['Rational', 1, 3], 'm'],
+      ['Quantity', ['Rational', 1, 3], 'm'],
+    ]);
+    const result = expr.N();
+    expect(result.operator).toBe('Quantity');
+    // An exact magnitude would serialize as `["Rational", 2, 3]`.
+    expect(typeof result.op1.json).toBe('number');
+    expect(result.op1.json as number).toBeCloseTo(2 / 3, 15);
+    expect(result.op2.json).toBe('m');
+  });
+});

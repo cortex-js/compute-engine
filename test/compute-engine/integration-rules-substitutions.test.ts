@@ -4,6 +4,27 @@ import { compileRuleDocs } from '../../src/compute-engine/rubi/compile';
 import { RubiDriver } from '../../src/compute-engine/rubi/driver';
 import { CancellationError } from '../../src/common/interruptible';
 
+// Loading the rule pack takes about one second for each engine, because it
+// boxes every rule pattern in canonical form. So the describe blocks share
+// one engine for each driver time limit, instead of one engine each. This is
+// safe because no test assigns or declares a symbol in the global scope of
+// the engine, changes its precision, or uses a symbol as a Boolean. The
+// symbol types that the engine infers in one test stay for the later tests;
+// that is the only state the tests share. A block must get its engine from
+// this function and must not call `loadIntegrationRules` itself: describe
+// bodies run before the tests, so a second load would replace the driver (and
+// its time limit) for all the blocks that share the engine.
+const engines = new Map<number, ComputeEngine>();
+function rubiEngine(timeLimitMs = 10_000): ComputeEngine {
+  let ce = engines.get(timeLimitMs);
+  if (!ce) {
+    ce = new ComputeEngine();
+    loadIntegrationRules(ce, { timeLimitMs });
+    engines.set(timeLimitMs, ce);
+  }
+  return ce;
+}
+
 // Second half of the Rubi rule-driver suite — the reduction and
 // substitution families (R22 and later). Split from
 // `integration-rules.test.ts` so the two ~2-minute halves can run on
@@ -21,8 +42,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // (the PolyLog[2, ±E^(2i·arcsin)] results have inert symbolic D but evaluable
   // F.N()); sampled inside |x|<1 (arcsin/√(1−x²) real domain).
   describe('the arcsin (d+e·x²)^p trig-subproblem bridge (Chapter-5, R22)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
     const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -82,8 +102,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // Sin→SinIntegral) via the R15 Si/Ci fallback. Verified by finite-
   // differencing F.N() (sampled inside |x|<1, the arcsin real domain).
   describe('the InvTrig^n multiple-angle → CosIntegral reduction (Chapter-5, R23)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
     const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -136,8 +155,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // finite-differencing F.N(). Concrete integer params (a=2,b=3,c=1) avoid the
   // reserved `e`/`i`; the |x|<1 arcsin domain sets the sample points.
   describe('poly × same-angle trig-product reduction (Chapter-5, R27)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -197,8 +215,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // forms, so these are D-verified by central-differencing F.N() (with symbolic
   // parameters fixed to numeric values keeping the radicand positive).
   describe('mixed-parity poly-numerator × binomial-radical split (1.1.3, R28a)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
     // several sample points, substituting `params` (fixed so a+b·xⁿ > 0).
@@ -292,8 +309,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // (complex principal value — R28b), so they are D-verified on Re of a
   // central-differenced F.N() with symbolic parameters fixed positive.
   describe('algebraic-in-hyperbolic substitution (Chapter-6, R29)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     // Integrate `latex` over x and central-difference Re(F.N()) == integrand at
     // several sample points, substituting `params` (fixed so the radicands are
@@ -360,8 +376,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // (complex principal value off one branch — R28b), so they are D-verified on
   // Re of a central-differenced F.N() with symbolic parameters fixed.
   describe('rational-in-hyperbolic cyclotomic-factored substitution (Chapter-6, R30)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     const verify = (
       latex: string,
@@ -430,8 +445,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // case accordingly. Heavy PolyLog family: both budgets raised (see R30 above),
   // and each test carries an explicit generous jest timeout.
   describe('poly × single-angle-hyperbolic → single-exponential (Chapter-6, R8)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 60_000 });
+    const ce = rubiEngine(60_000);
 
     // Integrate `latex` over x and central-difference F.N() == integrand at
     // several sample points, substituting `params` (fixed so the radicands are
@@ -512,8 +526,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // `withTimeLimit` span is unbounded); every case goes INERT under
   // `RUBI_NO_R31=1`.
   describe('nested-radical substitution fallback (Bondarenko, R31)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     // `NO_R31` is captured at module load. Under `RUBI_NO_R31=1` the rung is
     // disabled and none of these close, so skip the closure tests (the gate test
@@ -611,8 +624,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // radical to a √-of-linear the existing Lever A then removes. Gated by
   // `RUBI_NO_R32` for a clean A/B toggle.
   describe('Euler-substitution lever (Bondarenko #9, R32)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     const NO_R32 = process.env.RUBI_NO_R32 !== undefined;
     const closureTest = NO_R32 ? test.skip : test;
@@ -660,8 +672,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // respect to any variable not literally named `x`. The driver now binds
   // `env['x']` to the real integration variable before RHS construction.
   describe('integration variable other than x (R26A)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     // Integrate `latex` (parsed over variable `v`) and numerically D-verify
     // F'(v) == integrand at several sample points, substituting any extra
@@ -758,8 +769,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // D-verified at concrete (a,b) — the corpus grader mis-scores some
   // symbolic-parameter antiderivatives, so we differentiate F back here.
   describe('symbolic-coefficient reciprocal-hyperbolic closure (Chapter-6, R26B)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce, { timeLimitMs: 30_000 });
+    const ce = rubiEngine(30_000);
 
     // Close ∫1/(a+b·F(v)) symbolically, then D-verify F'(v) == integrand at
     // concrete (a,b) over several sample points.
@@ -832,8 +842,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // lim_{y→∞} F(y) (exp decay beats polynomial growth; Erf(∞)=1), yielding an
   // exact closed form instead of NaN.
   describe('improper-integral endpoint at ∞ (poly × exp decay)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
 
     test('∫ₓ^∞ y^(3/2) e^(−y/2) dy → exact closed form (χ²-tail k=5)', () => {
       const F = ce.parse('\\int_x^\\infty y^{3/2} e^{-y/2} dy').evaluate();
@@ -875,8 +884,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // It now closes to an ArcTanh/Ln form. The test completing at all proves the
   // hang is gone; the assertion pins the closure.
   describe('symbolic-coefficient rational integrand (was a hang)', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
 
     test('∫₀ˣ (u−a)/(b₂u²+b₁u+b₀) du closes', () => {
       const F = ce
@@ -898,8 +906,7 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // `F.has('Integrate')` true, with nothing pointing at the cause. These two
   // pins name it instead. ──
   describe('SPEC: the integration variable is matched by binding', () => {
-    const ce = new ComputeEngine();
-    loadIntegrationRules(ce);
+    const ce = rubiEngine();
 
     test('the provider receives an integrand bound to the driver’s own `x`', () => {
       // Compared IN the provider's own context: that is where the driver mints

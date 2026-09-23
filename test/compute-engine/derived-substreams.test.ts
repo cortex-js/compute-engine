@@ -19,23 +19,31 @@ import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/u
  *    false alarm the next time anyone touches a hash. (`deriveSubstream`
  *    itself IS pinned, for fixed literal inputs, in `random-vectors.test.ts`.)
  *
- * 2. THIS FILE HAS A ~10s BUDGET, and a real Monte-Carlo integral costs
- *    SECONDS: once the integrand compiles the sample budget is 1e7, so
- *    `∫₀¹ sin(1/x) dx` alone is 2–4s, and an iterated (multi-limit) integral
- *    that falls back to Monte Carlo runs the inner estimator once per outer
- *    quadrature node — effectively unbounded. Never put one in a test here.
+ * 2. A real Monte-Carlo integral costs SECONDS: once the integrand compiles
+ *    the sample budget is 1e7 for EACH part of the integrand (the real part,
+ *    then the imaginary part when there is one), so `∫₀¹ sin(1/x) dx` alone
+ *    is 2–4s, and an iterated (multi-limit) integral that falls back to Monte
+ *    Carlo runs the inner estimator once per outer quadrature node —
+ *    effectively unbounded. Never put one in a test here.
  *
- *    The cheap witness used instead is an integrand that is non-finite
- *    EVERYWHERE (`√(−1−x²)` in real machine arithmetic): quadrature fails, the
- *    estimator is reached and derives its sub-stream, then the 32-sample
- *    viability probe bails and returns NaN — ~150ms instead of ~4s. The
- *    sub-stream wiring is fully exercised; only the sampling loop is skipped.
- *    Its NaN result is the point, not a defect.
+ *    The cheap witness used instead is `CHEAP`, `∫₀¹ √(−1−x²) dx`. Its
+ *    compiled integrand is complex (purely imaginary), and the deterministic
+ *    quadrature integrates it in 240 evaluations for each part, in a few
+ *    milliseconds, to about `1.148i`. The `Integrate` route derives its
+ *    sub-stream BEFORE the quadrature runs, so the sub-stream wiring is
+ *    exercised and no sample is drawn.
  *
- *    A SMOOTH integrand may now be completed for real: `∫₀¹ x² dx` samples
- *    1e7 points in ~0.5s (the deferred-estimator block at the end does this
- *    three times). It is only the pathological ones — no closed form, poor
- *    convergence — that stay out. The whole file is ~7s.
+ *    `NIntegrate` always samples, so its test uses an integrand whose samples
+ *    are complex and never finite (see that test): each of the two passes
+ *    stops at the 32-sample viability probe. A finite complex integrand, such
+ *    as `√(−1−x)`, draws 1e7 samples for each part, about 25s under jest,
+ *    because one sample of the compiled complex integrand costs about 1µs in
+ *    jest's `vm` context, about ten times its cost under `tsx`.
+ *
+ *    A SMOOTH real integrand may be completed for real: `∫₀¹ x² dx` samples
+ *    1e7 points in about 1.3s under jest (the deferred-estimator block at the
+ *    end does this three times). It is only the pathological ones — no closed
+ *    form, poor convergence — that stay out. The whole file is about 5s.
  *
  * 2b. If an estimator test suddenly costs TENS of seconds, suspect
  *    `Math.imul`, not the engine. V8 lowers `Math.imul(...)` to one machine
@@ -276,6 +284,14 @@ describe('Integrate / NIntegrate derive a sub-stream', () => {
   });
 
   it('NIntegrate derives one too', () => {
+    // `NIntegrate` always samples, and does not take a sample count. To keep
+    // this test cheap, the integrand is `√(−1−x)·e^(e^(e^(10+x)))`: the triple
+    // exponential overflows to +∞, so each compiled sample is complex with a
+    // NaN real part and an infinite imaginary part. Because the samples are
+    // complex, both passes run (the real part, then the imaginary part), and
+    // the test still shows that the two passes use one sub-stream. Because no
+    // sample is finite, each pass stops at the 32-sample viability probe.
+    // With `√(−1−x)` alone, each pass drew 1e7 samples (about 25 s in jest).
     const tags = tagsUsed((e) =>
       e
         .box([
@@ -283,7 +299,15 @@ describe('Integrate / NIntegrate derive a sub-stream', () => {
           1,
           [
             'NIntegrate',
-            ['Function', ['Sqrt', ['Subtract', -1, 'x']], 'x'],
+            [
+              'Function',
+              [
+                'Multiply',
+                ['Sqrt', ['Subtract', -1, 'x']],
+                ['Exp', ['Exp', ['Exp', ['Add', 10, 'x']]]],
+              ],
+              'x',
+            ],
             0,
             1,
           ],
@@ -361,7 +385,7 @@ describe('stochasticEqual replays a seeded verdict', () => {
 describe('Real Monte-Carlo sampling replays (SLOW — skipped)', () => {
   // The end-to-end witness from §1 of the design doc, on a genuinely sampled
   // integral. Each evaluation is 2–4s (1e7 samples), so it is skipped to keep
-  // this file inside its ~10s budget. Un-skip to verify by hand after touching
+  // this file fast. Un-skip to verify by hand after touching
   // the estimator, the sub-stream primitive, or the tag derivation.
   it.skip('∫₀¹ sin(1/x) dx reproduces under one seed and differs under another', () => {
     const seeded = (seed: number): string =>

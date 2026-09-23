@@ -1756,7 +1756,8 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * bracket: the thunk and the write both run with the assumptions hidden, so
    * neither the stored type nor the decisions that chose it can carry a fact
    * that a later `forget()` retracts. The public {@link type} setter delegates
-   * here.
+   * here, then reports a `type-write` state event. This method reports no
+   * event: internal callers report their own.
    * @internal */
   _setType(thunk: () => Type | TypeString | BoxedType): void;
 
@@ -1820,7 +1821,8 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
   /** The type known in the CURRENT state: {@link declaredType} narrowed by
    * everything the assumptions in force prove about this definition. Reading
    * it is what makes a fact visible; nothing derived from it may be STORED
-   * (see {@link declaredType}). */
+   * (see {@link declaredType}). Writing it reports a `type-write` state
+   * event, so cached results that read this type are computed again. */
   type: BoxedType;
 
   /** The type this definition DECLARES — its contract, built from the
@@ -2480,7 +2482,9 @@ export interface BoxedOperatorDefinition
   /** Write the signature, deriving it inside the write's fact-blind bracket:
    * the thunk and the write both run with the assumptions hidden, so a stored
    * arrow never encodes a proof the next `forget()` retracts. The public
-   * {@link signature} setter delegates here.
+   * {@link signature} setter delegates here, then reports a `type-write`
+   * state event. This method reports no event: internal callers report
+   * their own.
    * @internal */
   _setSignature(thunk: () => BoxedType): void;
 

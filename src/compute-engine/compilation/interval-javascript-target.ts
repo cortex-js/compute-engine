@@ -45,6 +45,7 @@ import {
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 
 import {
   BaseCompiler,
@@ -3256,8 +3257,13 @@ function compileIntervalIntegrate(
       // Parenthesize: the closed form can be a low-precedence expression,
       // whereas it is spliced as an atomic operand.
       closedCode = `(${compile(closed)})`;
-    } catch {
+    } catch (e) {
       // Unlowerable head: the enclosure emitter below stands alone.
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit), or a timeout of an expired enclosing span, belongs
+      // to the caller: it is thrown again, not changed into a fallback
+      // (docs/TIMEOUT-MODEL.md §2).
+      throwIfCallerCancellation(e, closed.engine._deadlineFrame);
     }
   }
 
@@ -4565,6 +4571,11 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit), or a timeout of an expired enclosing span, belongs
+      // to the caller: it is thrown again, not changed into a fallback
+      // (docs/TIMEOUT-MODEL.md §2).
+      throwIfCallerCancellation(e, expr.engine._deadlineFrame);
       if (options.fallback !== true) throw e;
       return this.buildIntervalFallback(expr, (e as Error).message, options);
     }
@@ -4874,6 +4885,11 @@ function compileToIntervalTarget(
             )
           : BaseCompiler.compileCseRoot(expr, target);
   } catch (e) {
+    // A cancellation that is not a timeout (an abort, an iteration or
+    // recursion limit), or a timeout of an expired enclosing span, belongs
+    // to the caller: it is thrown again, not reported as a failure
+    // (docs/TIMEOUT-MODEL.md §2).
+    throwIfCallerCancellation(e, expr.engine._deadlineFrame);
     // Expression contains operators/functions not supported by the interval
     // target. Report failure so the caller can fall back to another target,
     // preserving the reason so `compile()` can surface it (this path does not

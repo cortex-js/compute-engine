@@ -7,6 +7,7 @@ import {
   recordGPUCounter,
 } from './gpu-value-facts.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
   isFunction,
@@ -11757,6 +11758,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     } catch (e) {
       // Default: throw. With `fallback: true`, return the documented
       // `success: false` shape with an interpreter-backed `run`.
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit), or a timeout of an expired enclosing span, belongs
+      // to the caller: it is thrown again, not changed into a fallback
+      // (docs/TIMEOUT-MODEL.md §2).
+      throwIfCallerCancellation(e, expr.engine._deadlineFrame);
       if (options.fallback !== true) throw e;
       const error = (e as Error).message;
       console.warn(

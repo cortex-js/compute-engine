@@ -13,6 +13,7 @@
 import type { Expr as Expression, Json } from './types.js';
 import type { IComputeEngine as ComputeEngine } from '../types-engine.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 
 import { expand } from '../boxed-expression/expand.js';
 
@@ -458,6 +459,12 @@ export function getActiveCaches(): Ctx['caches'] | undefined {
   return activeCaches;
 }
 
+/** How many times `safeSimplify` returned an unsimplified form because a
+ * cancellation cut the simplification short. A caller that caches a value
+ * derived from `safeSimplify` (such as `zeroQ`) compares this count before
+ * and after, and does not cache when it changed. */
+let safeSimplifyCancellations = 0;
+
 function safeSimplify(e: Expression): Expression {
   if (leafCount(e) > SIMPLIFY_LEAF_CAP) return e;
   const key = activeCaches ? e.toString() : '';
@@ -465,17 +472,37 @@ function safeSimplify(e: Expression): Expression {
   if (cached !== undefined) return cached;
   const t0 = Date.now();
   let r: Expression;
+  let cancelled = false;
   try {
     r = e.simplify();
-  } catch {
+  } catch (err) {
     // Deadline exceeded (CancellationError): fall back to the
     // unsimplified expression — same fail-closed behavior as the leaf cap.
+    //
+    // A timeout of the time span that encloses this call is not ours to
+    // absorb: `checkDeadline` throws the cancellation of that span, so that
+    // the span owner (the caller, or a Rubi span with its own catch) decides.
+    // A cancellation labelled by a span that is not a Rubi span is also
+    // thrown again. The name is checked instead of `instanceof`, because a
+    // plugin bundle has its own copy of the `CancellationError` class. A
+    // cancellation that is not a timeout (an abort, an iteration or
+    // recursion limit) is thrown again too.
+    if (err instanceof Error && err.name === 'CancellationError') {
+      throwIfCallerCancellation(err, e.engine._deadlineFrame);
+      const attribution = (err as { attribution?: string }).attribution;
+      if (attribution !== undefined && !attribution.startsWith('rubi:'))
+        throw err;
+      cancelled = true;
+      safeSimplifyCancellations += 1;
+    }
     r = e;
   }
   const ms = Date.now() - t0;
   if (ms > 1000 && process.env.RUBI_DEBUG)
     console.error(`slow simplify ${ms}ms: ${e.toString().slice(0, 120)}`);
-  activeCaches?.simplify.set(key, r);
+  // A result that a cancellation cut short depends on the time that was
+  // left, so it is not cached: a later call with more time can simplify it.
+  if (!cancelled) activeCaches?.simplify.set(key, r);
   return r;
 }
 
@@ -495,6 +522,7 @@ export function zeroQ(d: Expression): boolean {
   const cached = activeCaches?.zeroQ.get(key);
   if (cached !== undefined) return cached;
   let result = false;
+  const cancellationsBefore = safeSimplifyCancellations;
   const s = safeSimplify(d);
   if (s.isSame(0)) result = true;
   else {
@@ -502,7 +530,10 @@ export function zeroQ(d: Expression): boolean {
     if (isNumber(n) && typeof n.re === 'number' && typeof n.im === 'number')
       result = Math.abs(n.re) < 1e-12 && Math.abs(n.im) < 1e-12;
   }
-  activeCaches?.zeroQ.set(key, result);
+  // Do not cache a result computed from a simplification that a cancellation
+  // cut short.
+  if (safeSimplifyCancellations === cancellationsBefore)
+    activeCaches?.zeroQ.set(key, result);
   return result;
 }
 

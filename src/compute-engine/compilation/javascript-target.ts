@@ -507,7 +507,10 @@ import {
 } from '../numerics/value-scaled-caps.js';
 import { interval } from '../numerics/interval.js';
 import { withRandomSeedFrame } from '../boxed-expression/utils.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 
 import {
   BaseCompiler,
@@ -9348,6 +9351,12 @@ function machineReal(v: unknown): number {
  */
 const NESTED_QUADRATURE_BUDGET = 1 << 25;
 
+/** The nested budget in force: the constant above, unless a test made it
+ *  smaller with `JavaScriptTarget.setNestedQuadratureBudgetForTesting`. The
+ *  compiled code does not contain the budget: `enterIntegral` reads this
+ *  variable each time an outermost integral starts. */
+let nestedQuadratureBudget = NESTED_QUADRATURE_BUDGET;
+
 /** Number of `_SYS.integrate` activations currently on the call stack. Zero at
  *  every outermost entry — module state is safe here because compiled code runs
  *  synchronously on one thread. */
@@ -9378,8 +9387,15 @@ function budgetedIntegrand(f: (x: number) => number): (x: number) => number {
  * and must then run its work inside `try { … } finally { activeIntegrals--; }`.
  */
 function enterIntegral(): boolean {
-  if (activeIntegrals === 0) nestedEvalsLeft = NESTED_QUADRATURE_BUDGET;
-  else if (nestedEvalsLeft <= 0) return false;
+  if (activeIntegrals === 0) nestedEvalsLeft = nestedQuadratureBudget;
+  else if (nestedEvalsLeft <= 0) {
+    // A refusal answers `NaN` to an enclosing quadrature, so the counter must
+    // also show exhaustion. If a nested integral used the budget to exactly
+    // zero, the counter is not yet negative. Then the enclosing integral does
+    // not see that it has refused values, and returns a wrong finite estimate.
+    nestedEvalsLeft = -1;
+    return false;
+  }
   activeIntegrals++;
   return true;
 }
@@ -11694,6 +11710,20 @@ export class ComputeEngineFunctionLiteral extends Function {
  * JavaScript language target implementation
  */
 export class JavaScriptTarget implements LanguageTarget<Expression> {
+  /**
+   * Set the nested-quadrature evaluation budget, or restore the default
+   * (`NESTED_QUADRATURE_BUDGET`) when called with no argument. For tests only:
+   * a test that the budget is enforced, shared and re-armed must use it up,
+   * and with the default size that takes tens of seconds. The new value
+   * applies from the next outermost integral, also in functions that were
+   * compiled before the call.
+   *
+   * @internal
+   */
+  static setNestedQuadratureBudgetForTesting(evaluations?: number): void {
+    nestedQuadratureBudget = evaluations ?? NESTED_QUADRATURE_BUDGET;
+  }
+
   getOperators(): CompiledOperators {
     return JAVASCRIPT_OPERATORS;
   }
@@ -11889,6 +11919,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // By default a failure throws (the low-level contract). When the caller
       // opts in with `fallback: true`, surface the documented `success: false`
       // shape with an interpreter-backed `run` instead of throwing.
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit), or a timeout of an expired enclosing span, belongs
+      // to the caller: it is thrown again, not changed into a fallback
+      // (docs/TIMEOUT-MODEL.md §2).
+      throwIfCallerCancellation(e, expr.engine._deadlineFrame);
       if (options.fallback !== true) throw e;
       const error = (e as Error).message;
       console.warn(
@@ -15047,8 +15082,13 @@ function compileIntegrate(
       // (e.g. an `Add`), whereas the caller splices this handler's result as
       // an atomic operand (like the `_SYS.integrate(…)` call it replaces).
       return `(${compile(closed)})`;
-    } catch {
+    } catch (e) {
       // Unlowerable head: fall through to quadrature below.
+      // A cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit), or a timeout of an expired enclosing span, belongs
+      // to the caller: it is thrown again, not changed into a fallback
+      // (docs/TIMEOUT-MODEL.md §2).
+      throwIfCallerCancellation(e, closed.engine._deadlineFrame);
     }
   }
 

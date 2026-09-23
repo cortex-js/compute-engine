@@ -645,7 +645,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           const slots = target._typeSlotSnapshot();
           rollbackFrame.record({ undo: () => target._restoreTypeSlots(slots) });
         }
-        def.value.type = inferred;
+        def.value._setType(() => inferred);
         // A type this method writes is INFERRED, never a contract. Without
         // this the `type.isUnknown` arm of the guard above turned a guess
         // into a hard declaration: a binding created as
@@ -706,13 +706,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           const signature = target.signature;
           rollbackFrame.record({
             undo: () => {
-              target.signature = signature;
+              target._setSignature(() => signature);
               target._resyncEffects();
             },
           });
         }
         // The function signature was modified
-        def.operator.signature = newType;
+        def.operator._setSignature(() => newType);
         // Signature inference mutates a SHARED operator definition in place: a
         // semantic change other expressions may depend on.
         this.engine._noteStateEvent({
@@ -1033,7 +1033,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // `signature` slot has no `matches`, `toString` or `type` member, so
         // every later read of the symbol's type fails on it (the symbol-type
         // branch below wraps for the same reason).
-        symbolDef.operator.signature = this.engine.type(t);
+        const signature = this.engine.type(t);
+        symbolDef.operator._setSignature(() => signature);
         // An explicit retype replaces the declaration, so a signature
         // skeleton kept from an earlier declaration must not refine it.
         symbolDef.operator._signatureSkeleton = undefined;
@@ -1070,7 +1071,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           callableBefore: before,
           callableAfter: containsSignatureArm(t as Type),
         });
-        symbolDef.value.type = this.engine.type(t);
+        // `_setType()`, not the public setter: the event above reports this
+        // write, and the public setter would report a second one.
+        const type = this.engine.type(t);
+        symbolDef.value._setType(() => type);
         // An explicit retype through this public setter is a DECLARATION,
         // not a guess: clear the inferred marker so nothing downstream —
         // in particular the read-time revision of inferred types
@@ -1488,8 +1492,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * a dereference cut short by a cycle, whose result is provisional.
    *
    * Only the two option sets the evaluator uses are cached (a plain
-   * `evaluate()` and `evaluate({ numericApproximation: true })`), as separate
-   * entries — and the `N()` read of `_N` as a third, since it resolves the
+   * `evaluate()`, which `{ numericApproximation: false }` also selects, and
+   * `evaluate({ numericApproximation: true })`), as separate entries — and the `N()` read of `_N` as a third, since it resolves the
    * value's names through the ambient chain where this route reads the
    * value's own bindings; any other option set goes uncached.
    */
@@ -1497,10 +1501,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     value: Expression,
     options?: Partial<EvaluateOptions>
   ): Expression {
+    // An option set whose only key is `numericApproximation` is one of the
+    // two cached forms: `true` is the numeric entry, and `false` or
+    // `undefined` is the same evaluation as no options (several handlers
+    // pass `{ numericApproximation }` through unchanged). Any other key
+    // takes the uncached dereference.
     const numeric = options?.numericApproximation === true;
     if (
       options !== undefined &&
-      Object.keys(options).some((k) => k !== 'numericApproximation' || !numeric)
+      Object.keys(options).some((k) => k !== 'numericApproximation')
     )
       return this._dereference(value, options);
     return this._memoizedStoredValue(value, numeric ? 1 : 0, () =>

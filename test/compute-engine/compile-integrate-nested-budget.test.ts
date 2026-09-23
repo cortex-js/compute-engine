@@ -34,13 +34,24 @@
  * it, because a synchronous JavaScript call cannot be interrupted from outside.
  * So the generous timeouts below are labels, not backstops: a run that reaches
  * its assertions at all has already shown the bound holds.
+ *
+ * The tests set a smaller budget, `TEST_BUDGET`, with
+ * `JavaScriptTarget.setNestedQuadratureBudgetForTesting`. The properties they
+ * test (the budget is enforced, shared by all nested levels, and re-armed at
+ * each outermost entry) do not depend on its size, and with the default size
+ * the tests that use up the budget take tens of seconds.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 import * as GaussKronrodModule from '../../src/compute-engine/numerics/gauss-kronrod';
 
 const ce = new ComputeEngine();
+
+/** The nested budget for these tests: 2¹⁶ evaluations. A two-level nest of
+ *  the tests below needs 3600, so it stays well inside this budget. */
+const TEST_BUDGET = 1 << 16;
 
 /** Compile a definite integral to a real-valued runner, with the emitted code
  *  for the assertions that pin WHICH lowering is under test. */
@@ -107,6 +118,48 @@ function byReferenceChain(): string {
 }
 
 describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
+  beforeEach(() =>
+    JavaScriptTarget.setNestedQuadratureBudgetForTesting(TEST_BUDGET)
+  );
+  afterEach(() => JavaScriptTarget.setNestedQuadratureBudgetForTesting());
+
+  test('the budget is read at run time, not written into the compiled code', () => {
+    // The function is compiled before each budget change, so each result
+    // below shows the budget in force when the function RUNS. The two-level
+    // nest needs 3600 nested evaluations (60 outer evaluations, each a full
+    // inner quadrature of 60): a budget of 1000 refuses part of them, and
+    // `TEST_BUDGET` and the default do not.
+    const latex = '\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx';
+    const r = compileReal(latex);
+    const expected = ce.parse(latex).N().re;
+
+    JavaScriptTarget.setNestedQuadratureBudgetForTesting(1000);
+    expect(Number.isNaN(r.run())).toBe(true);
+
+    JavaScriptTarget.setNestedQuadratureBudgetForTesting(TEST_BUDGET);
+    expect(r.run()).toBeCloseTo(expected, 8);
+
+    JavaScriptTarget.setNestedQuadratureBudgetForTesting();
+    expect(r.run()).toBeCloseTo(expected, 8);
+  });
+
+  test('a budget used up to exactly zero still gives NaN', () => {
+    // Each inner quadrature of this nest uses 60 evaluations, so a budget of
+    // 3000 is used to exactly zero by the 50th inner integral. The inner
+    // integrals after it are refused and answer `NaN`. The outer integral
+    // must then answer `NaN` too, not an estimate made from the values that
+    // were not refused (0.6686 here, against the true 0.8615).
+    const r = compileReal('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx');
+    // The count of 60 per inner integral is what makes 3000 an exact
+    // boundary: 60 outer evaluations plus 60 × 60 inner ones. If the panel
+    // sizing changes, this count changes, and the budget below must change
+    // with it.
+    expect(countQuadratureEvals(() => r.run())).toBe(60 + 60 * 60);
+
+    JavaScriptTarget.setNestedQuadratureBudgetForTesting(3000);
+    expect(Number.isNaN(r.run())).toBe(true);
+  });
+
   test('a single integral is untouched by the budget', () => {
     // The `vars` mapping forbids folding a live runtime input into a baked
     // closed form, which is what keeps this on the quadrature emitter — the
@@ -140,7 +193,7 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
 
   test('by-reference composition is bounded: the innermost level answers NaN', () => {
     // Four levels of quadrature want ~3.3·10⁹ integrand evaluations. The
-    // budget cuts the nested work after ~3.4·10⁷ and the innermost integral
+    // budget cuts the nested work after `TEST_BUDGET` and the innermost integral
     // answers `NaN`, which the enclosing quadratures carry outward — so the
     // pin is that this returns at all, with a value that does not pretend to
     // be an estimate.
@@ -181,7 +234,8 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
     // The samples of an OUTERMOST integral are free — `budgetedIntegrand`
     // charges an evaluation only while another integral is already running —
     // so all 10⁷ are drawn and the estimate stands. (Charging them would
-    // exhaust a 2²⁵ budget a third of the way through and answer `NaN`.)
+    // exhaust the budget before the end and answer `NaN`: the default 2²⁵
+    // a third of the way through, `TEST_BUDGET` in the first 1 %.)
     const r = compileReal('\\int_0^1 e^{-k x^2}\\,dx', {
       quadrature: 'monte-carlo',
       vars: { k: '_.k' },
@@ -212,8 +266,9 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
     });
     expect(r.code).toContain('_SYS.integrateMC(');
 
-    // Measured ~5 s: the budget's 3.4·10⁷ nested evaluations, then the
-    // remaining samples answered without integrating. As everywhere in this
+    // The budget's nested evaluations (`TEST_BUDGET` here, 3.4·10⁷ by
+    // default, measured ~5 s), then the remaining samples answered without
+    // integrating. As everywhere in this
     // file the verdict is the VALUE — that the call returns at all is what the
     // accounting buys, and the timeout is a label, not a backstop.
     expect(Number.isNaN(r.run({ s: 0 }))).toBe(true);

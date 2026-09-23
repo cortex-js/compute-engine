@@ -1,5 +1,69 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A caller's deadline now propagates out of `compile()` and the
+  integration components.** A `CancellationError` from an expired `ce.withTimeLimit` span
+  (or an abort signal, an iteration limit or a recursion limit) is no longer
+  turned into an ordinary "no result". `compile()` of an expression with an
+  `Integrate` inside an expired span now throws, where it returned
+  `success: false`; the Rubi integration driver, its simplification step and
+  the compiler's closed-form antiderivative attempt re-throw it, where they
+  returned no result or fell back to numeric quadrature. A component still
+  falls back when only its OWN time budget expires (for example the
+  compiler's antiderivative attempt, which then emits quadrature code). The
+  `Integrate` handler also recognizes a `CancellationError` thrown by a
+  plugin bundle's copy of the class.
+- `.N()` of a sum or product of quantities with exact magnitudes now gives a
+  float magnitude, like every other `.N()` result:
+  `(1/3 m + 1/3 m).N()` is `0.6666… m`, not `2/3 m`.
+
+### Improvements
+
+- `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly
+  before it approximates it, and no longer approximates an operand twice.
+  `.N()` of a polynomial in Horner form of degree 12 makes 24 evaluations
+  (it made more than 16 million), and `(1 + Σ_{i=1}^{1000} sin i).N()` takes
+  about 12 ms (it took about 0.9 s). A constant sub-expression that the
+  compiler folds for a GPU target benefits in the same way.
+- Finding a like term in a sum is now a hash lookup, not a scan of all the
+  terms: `Sum(sin(i), i, 1, 1000).evaluate()` takes about 0.7 s (it took
+  about 11 s).
+- `NIntegrate` and the Monte Carlo route of numeric integration no longer
+  build a string key and look up a cache for each random sample: 10⁷ samples
+  of `x²` take about 0.4 s (about 3.6 s before).
+- A repeated derivative of the same function (`Derivative(f, n)`) is now
+  read from the cache; before, the cache never
+  matched, and each call computed and simplified the derivative again.
+
+### Resolved Issues
+
+- `isIdenticallyEqual` sometimes answered `undefined` for a true identity
+  such as `(x+y)² ≡ x²+2xy+y²` (about 0.6% of calls). At random sample points
+  where `x ≈ −y`, machine-float cancellation in the expanded form was larger
+  than the tolerance. A disagreement of the compiled values is now checked
+  again at engine precision before it counts.
+- Adaptive quadrature of an integrand that is NaN everywhere returned `0`
+  after about 32,000 evaluations. It now returns `NaN` quickly. In a nested
+  integral, an inner level that is NaN everywhere no longer makes the outer
+  level use its whole budget. Isolated removable singularities still
+  integrate.
+- A compiled nested integral that used its evaluation budget exactly to zero
+  returned a wrong finite value; it now returns `NaN`, like any other use of
+  the whole budget.
+- Writing a symbol's type through its definition
+  (`expr.valueDefinition.type = …`) or an operator's signature
+  (`def.operator.signature = …`) did not tell the engine, so an expression
+  whose type was already computed kept its old type. Both writes now report
+  the change.
+- The hash of a dictionary depended on the order of its keys, so two
+  dictionaries that are `isSame` could have different hashes, and like terms
+  that held them did not always combine. The hash no longer depends on the
+  key order.
+- The description of `Timing` said it returns seconds, and its signature put
+  the result first. It returns the time first, in microseconds, then the
+  value; the description and the signature now say so.
+
 ## 0.133.0 _2026-09-22_
 
 ### Behavior Changes

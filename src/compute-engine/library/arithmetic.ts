@@ -111,12 +111,12 @@ import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 import {
   canonicalAdd,
   add,
-  addN,
+  addNEvaluated,
   absorbScalarsIntoCells,
 } from '../boxed-expression/arithmetic-add.js';
 import {
   mulFactored,
-  mulN,
+  mulNEvaluated,
   canonicalDivide,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
@@ -1752,7 +1752,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
         // `Add` is `lazy`, so the driver did NOT evaluate the operands —
         // this map is the (single) operand evaluation, not a re-evaluation.
-        const evaluated = ops.map((x) => x.evaluate());
+        // Under a numeric approximation the operands are evaluated
+        // numerically too: the numeric branch below gives `addNEvaluated`
+        // this numeric value (or the raw operand, for a number literal or a
+        // symbol), never the exact value, and an exact evaluation can cost
+        // much more than a numeric one (the exact value of a `Sum` of 1000
+        // symbolic terms, where `.N()` adds 1000 floats). Without a numeric
+        // approximation the call has no options: `evaluate()` with no
+        // options is the form that the memo of a symbol's stored value
+        // accepts.
+        const evaluated = ops.map((x) =>
+          numericApproximation
+            ? x.evaluate({ numericApproximation: true })
+            : x.evaluate()
+        );
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
         // The driver's missing-value gate saw the operands UNEVALUATED
@@ -1798,23 +1811,35 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementAdd(engine!, evaluated);
           return numericApproximation ? r?.N() : r;
         }
-        // For an IMPURE operand, pass its evaluated form: re-evaluating it
-        // inside `addN`'s numericization would repeat its side effects — a
-        // framed `Random()` consumed two draw indices under `N()` and one
-        // under `evaluate()`, breaking the draw-consumption contract. An
-        // impure operand evaluates to a drawn VALUE (literals), which is safe
-        // to hand on. A PURE operand keeps the raw path: its re-evaluation is
-        // free of side effects, `addN`'s number-literal gate keeps fractions
-        // exact until the final fold (late rounding, e.g.
-        // `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`),
-        // and — decisive — a SELF-REFERENTIAL frame binding (`t → t + 1`,
-        // Tycho item 46) makes the pure operand's evaluated form loop, both
-        // through this handler's re-entry and through the type-level
-        // `isFinite` → value → `type` cycle; the substitute-once guard lives
-        // on the raw symbol's own `.N()` path.
+        // Only a pure number literal or a pure symbol goes to
+        // `addNEvaluated` raw, to be numericized there. Every other operand
+        // goes as its numeric value from the map above, marked as already
+        // numeric, so it is not numericized again.
+        // - A function operand is evaluated once. When `addN` numericized
+        //   the raw operand again, each nested `Add` or `Multiply` evaluated its
+        //   operands two or three times, and the cost grew by that factor at
+        //   each level (a polynomial in Horner form of degree 12 made about
+        //   17 million evaluations).
+        // - An IMPURE operand passes its evaluated form, so its side effects
+        //   run once: a framed `Random()` consumed two draw indices under
+        //   `N()` and one under `evaluate()`, which broke the rule that each
+        //   evaluation consumes one draw.
+        // - A number literal passes raw: `addNEvaluated` keeps a fraction
+        //   exact until the final fold (late rounding, e.g.
+        //   `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`).
+        // - A symbol passes raw: a SELF-REFERENTIAL frame binding
+        //   (`t → t + 1`, Tycho item 46) makes the evaluated form of the
+        //   symbol loop, through the re-entry of this handler and through the
+        //   type-level `isFinite` → value → `type` cycle. The guard that
+        //   substitutes the value only once is on the `.N()` of the raw
+        //   symbol.
         if (numericApproximation) {
-          const r = addN(
-            ...ops.map((op, i) => (op.isPure ? op : evaluated[i]))
+          const raw = ops.map(
+            (op) => op.isPure === true && (isNumber(op) || isSymbol(op))
+          );
+          const r = addNEvaluated(
+            ops.map((op, i) => (raw[i] ? op : evaluated[i])),
+            raw.map((x) => !x)
           );
           // An operand may only have BECOME a Quantity or Measurement through
           // `addN`'s numericization, past the `evaluated` checks above
@@ -4254,7 +4279,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
         // `Multiply` is `lazy`, so the driver did NOT evaluate the operands —
         // this map is the (single) operand evaluation, not a re-evaluation.
-        const evaluated = ops.map((x) => x.evaluate());
+        // Under a numeric approximation the operands are evaluated
+        // numerically, for the reasons given in `Add`.
+        const evaluated = ops.map((x) =>
+          numericApproximation
+            ? x.evaluate({ numericApproximation: true })
+            : x.evaluate()
+        );
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
         // See the matching note in `Add`: `Multiply` is lazy, so the driver's
@@ -4298,14 +4329,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const r = measurementMultiply(engine!, evaluated);
           return numericApproximation ? r?.N() : r;
         }
-        // Impure operands pass their evaluated form so their side effects run
-        // once; pure operands keep the raw, substitute-once-guarded path
-        // (Tycho item 46) — see the matching comment in `Add`. `mulN` keeps a
-        // product of sums FACTORED exactly as `mulFactored` does below — the
-        // two routes must agree on shape, differing only in floats.
+        // Only a pure number literal or a pure symbol passes raw; every other
+        // operand passes its numeric value, so it is evaluated once and its
+        // side effects run once — see the matching comment in `Add`.
+        // `mulNEvaluated` keeps a product of sums FACTORED exactly as
+        // `mulFactored` does below — the two routes must agree on shape,
+        // differing only in floats.
         if (numericApproximation) {
-          const r = mulN(
-            ...ops.map((op, i) => (op.isPure ? op : evaluated[i]))
+          const raw = ops.map(
+            (op) => op.isPure === true && (isNumber(op) || isSymbol(op))
+          );
+          const r = mulNEvaluated(
+            ops.map((op, i) => (raw[i] ? op : evaluated[i])),
+            raw.map((x) => !x)
           );
           // See the matching comment in `Add` (Tycho item 101).
           return (

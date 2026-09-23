@@ -102,6 +102,10 @@ import {
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import {
+  isTimeoutCancellation,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
+import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
   functionLiteralParameterName,
@@ -16339,9 +16343,27 @@ export class BaseCompiler {
         { ms: grantedMs, label: 'compile:antiderivative' },
         () => engine.function('Integrate', ops).evaluate()
       );
-    } catch {
+    } catch (e) {
       // Non-elementary / deadline: the caller falls back to numeric
       // integration.
+      //
+      // Only a timeout of the `compile:antiderivative` span itself allows the
+      // fallback. A timeout labelled by a different span belongs to an
+      // enclosing span, and is thrown again. An unlabelled enclosing span
+      // gives no attribution, so `throwIfCallerCancellation` also examines
+      // the enclosing frame (the frame in effect after `withTimeLimit`
+      // returns) and throws its cancellation when it has expired. A
+      // cancellation that is not a timeout (an abort, an iteration or
+      // recursion limit) is thrown again too.
+      if (isTimeoutCancellation(e)) {
+        const attribution = (e as { attribution?: string }).attribution;
+        if (
+          attribution !== undefined &&
+          attribution !== 'compile:antiderivative'
+        )
+          throw e;
+      }
+      throwIfCallerCancellation(e, engine._deadlineFrame);
     } finally {
       engine.popScope();
       // eslint-disable-next-line no-restricted-globals

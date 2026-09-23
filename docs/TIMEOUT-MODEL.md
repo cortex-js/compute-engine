@@ -26,6 +26,20 @@ it.
 gracefully only when its own child span owns the expiration; it must propagate
 an expiration attributed to an enclosing caller.
 
+Only a timeout can become a fallback. A `CancellationError` that is not a
+timeout — an abort signal, an iteration limit (`iteration-limit-exceeded`), or
+the recursion-depth limit of user functions (`recursion-depth-exceeded`) —
+always propagates to the caller. The catch blocks that change an error into a
+fallback call `throwIfCallerCancellation()` (`src/common/interruptible.ts`)
+first. So:
+
+- `compile()` throws such a cancellation. It does not change it into
+  quadrature code (for the antiderivative attempt of `Integrate`) or into the
+  interpreter fallback, also when `fallback: true` (the default).
+- `Integrate` throws such a cancellation when it comes from the Rubi rule
+  driver (`RubiDriver.int()`, and `safeSimplify()` in the rule helpers). Rubi
+  does not change it into "no closed form".
+
 The useful rule is:
 
 > Budgets compose; scoped configuration shadows.
@@ -131,7 +145,9 @@ Implementation chronology and the original loop census remain in Git history.
 Iteration and recursion limits are intentionally configuration values rather
 than compositional deadlines. They protect a construct or call shape, and an
 operator may turn a local limit breach into an ordinary error value before the
-program continues.
+program continues. A fallback for a timeout (§2) does not catch such a breach:
+the `compile()` fallback and the "no closed form" result of Rubi let it
+propagate.
 
 Do not infer deadline semantics from a count-based cap:
 

@@ -589,6 +589,28 @@ describe('Dictionary structural equality (RT-P1-2)', () => {
     expect(d(['a', 1], ['b', 2]).isSame(d(['b', 2], ['a', 1]))).toBe(true);
   });
 
+  test('dictionaries that are isSame have the same hash', () => {
+    // Hash consumers put expressions in buckets by hash and compare with
+    // `isSame` only inside a bucket, so `isSame` must imply an equal hash.
+    const a = d(['a', 1], ['b', 2]);
+    const b = d(['b', 2], ['a', 1]);
+    expect(a.isSame(b)).toBe(true);
+    expect(a.hash).toBe(b.hash);
+    const half = d(['a', ['Rational', 1, 2]]);
+    const float = d(['a', 0.5]);
+    expect(half.isSame(float)).toBe(true);
+    expect(half.hash).toBe(float.hash);
+  });
+
+  test('like terms that hold reordered dictionaries combine in a sum', () => {
+    const f = (dict: ReturnType<typeof d>) => engine.function('f', [dict]);
+    const sum = engine.function('Add', [
+      f(d(['a', 1], ['b', 2])),
+      f(d(['b', 2], ['a', 1])),
+    ]);
+    expect(sum.evaluate().toString()).toBe('2f({"a" -> 1, "b" -> 2})');
+  });
+
   test('a differing value makes them not isSame', () => {
     expect(d(['a', 1], ['b', 2]).isSame(d(['a', 1], ['b', 99]))).toBe(false);
   });

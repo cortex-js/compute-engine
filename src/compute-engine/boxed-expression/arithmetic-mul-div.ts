@@ -2001,13 +2001,27 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
 }
 
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
+  return mulNEvaluated(xs);
+}
+
+/**
+ * The same as `mulN`, but a factor `xs[i]` with `numeric[i] === true` is
+ * already the result of a numeric evaluation, and it is not numericized
+ * again. The `Multiply` evaluate handler uses this: it has already evaluated
+ * its operands numerically, and a second numeric evaluation of each operand
+ * made the cost of nested sums and products double at each level.
+ */
+export function mulNEvaluated(
+  xs: ReadonlyArray<Expression>,
+  numeric?: ReadonlyArray<boolean>
+): Expression {
   console.assert(xs.length > 0);
   // A single factor is its own product, floated. `mulTuples` combines the
   // scalar factors with a recursive call and `mulTensors` buckets a numeric
   // tuple as a scalar, so `N([0, 1/3] · (1, 0))` reached `mulN((1, 0))`,
   // whose tuple branch then called `mulN()` with NO factors and crashed on
   // `xs[0]` — the short-circuit `mul` has always had.
-  if (xs.length === 1) return xs[0].N();
+  if (xs.length === 1) return numeric?.[0] ? xs[0] : xs[0].N();
   const ce = xs[0].engine;
   // Ellipsis fold barrier: stay inert for a notational product.
   if (xs.some((x) => isContinuationOperand(x)))
@@ -2066,7 +2080,7 @@ export function mulN(...xs: ReadonlyArray<Expression>): Expression {
       tupleInert = true;
     }
   }
-  xs = xs.map((x) => x.N());
+  xs = xs.map((x, i) => (numeric?.[i] ? x : x.N()));
   // Post-evaluation re-dispatch (Tycho item 52): an operand may only have
   // BECOME a collection through the numeric evaluation above (`Mod(L,11)`
   // over a list `L` → a lazy `Map`) — the raw-operand dispatches missed it

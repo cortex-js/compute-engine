@@ -517,6 +517,30 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
 }
 
 export function addN(...xs: ReadonlyArray<Expression>): Expression {
+  return addNEvaluated(xs);
+}
+
+/**
+ * The same as `addN`, but an operand `xs[i]` with `numeric[i] === true` is
+ * already the result of a numeric evaluation, and it is not numericized
+ * again. The `Add` evaluate handler uses this: it has already evaluated its
+ * operands numerically, and a second numeric evaluation of each operand
+ * made the cost of nested sums and products double at each level.
+ *
+ * The other operands are numericized once, with `.N()`, and the terms are
+ * not numericized again after that. So a term can stay exact in one case:
+ * when the `.N()` of a symbol returns the symbol's value WITHOUT
+ * numericizing it. `BoxedSymbol._N` does this for a call-frame value that
+ * mentions the symbol itself (a self-referential binding), to stop an
+ * infinite recursion. That guard is a backstop: in the usual routes, the
+ * lookup of the value skips the call frame and the value is numericized.
+ * Do not add a second `.N()` of every term to cover this case: that second
+ * `.N()` is what made the cost of nested sums double at each level.
+ */
+export function addNEvaluated(
+  xs: ReadonlyArray<Expression>,
+  numeric?: ReadonlyArray<boolean>
+): Expression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
@@ -555,7 +579,9 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   const hasTensors = xs.some((x) => isTensorValue(x));
   if (!unresolvedTerm && hasTensors) {
     // Evaluate tensors numerically
-    xs = xs.map((x) => (isTensorValue(x) ? x.evaluate() : x.N()));
+    xs = xs.map((x, i) =>
+      numeric?.[i] ? x : isTensorValue(x) ? x.evaluate() : x.N()
+    );
     const r = addTensors(xs[0].engine, xs);
     if (r) return r;
   }
@@ -594,7 +620,9 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
   }
 
   // Don't N() the number literals (fractions) to avoid losing precision
-  xs = xs.map((x) => (isNumber(x) ? x.evaluate() : x.N()));
+  xs = xs.map((x, i) =>
+    numeric?.[i] ? x : isNumber(x) ? x.evaluate() : x.N()
+  );
 
   // Post-evaluation re-dispatch (Tycho item 52): an operand may only have
   // BECOME a collection through the numeric evaluation above (`Mod(L,11)`
@@ -640,7 +668,11 @@ export function addN(...xs: ReadonlyArray<Expression>): Expression {
     if (xs.some((x) => isTuple(x))) return addTuples(xs[0].engine, xs, true);
   }
 
-  return new Terms(xs[0].engine, xs).N();
+  // Every operand is now the result of a numeric evaluation, so `Terms.N()`
+  // does not numericize the terms again. A value that the self-referential
+  // backstop of `BoxedSymbol._N` returns without numericizing it stays as it
+  // is (see the comment of this function).
+  return new Terms(xs[0].engine, xs).N(true);
 }
 
 /**
@@ -825,6 +857,13 @@ function addTensors(
 export class Terms {
   private engine: ComputeEngine;
   private terms: { coef: NumericValue[]; term: Expression }[] = [];
+  /** The indexes in `terms` of the entries whose `term` has a given hash, in
+   * increasing order. `find` reads only the entries with the hash of its
+   * argument, so finding a like term does not scan all the terms. This is
+   * correct because two expressions that are `isSame` have the same hash.
+   * Entries with the same hash that are not `isSame` (a hash collision) are
+   * told apart by the `isSame` test in `find`. */
+  private index = new Map<number, number[]>();
 
   constructor(ce: ComputeEngine, terms: ReadonlyArray<Expression>) {
     this.engine = ce;
@@ -847,11 +886,18 @@ export class Terms {
       // type only), so a `complex` type test — which is what this guard used —
       // no longer selects it. An infinity with a non-zero imaginary part is
       // exactly the undirected one: a real ±∞ has `im === 0`.
-      if (term.isInfinity && isNumber(term) && term.im !== 0) {
+      // `isNumber` is tested first: it is cheap, and `isInfinity` on a
+      // function expression computes the type of the whole expression.
+      if (isNumber(term) && term.isInfinity && term.im !== 0) {
         this.terms = [{ term: ce.ComplexInfinity, coef: [] }];
         return;
       }
-      if (term.isNaN || isSymbol(term, 'Undefined')) {
+      // A function expression never answers `isNaN === true` (it answers
+      // `false` or `undefined`), and for it the question computes the type
+      // of the whole expression. So it is not asked of a function: for an
+      // `Add` of many terms, that type walk made each addition cost as much
+      // as the number of terms.
+      if ((!isFunction(term) && term.isNaN) || isSymbol(term, 'Undefined')) {
         this.terms = [{ term: ce.NaN, coef: [] }];
         return;
       }
@@ -892,7 +938,7 @@ export class Terms {
       // We have a numeric value. Keep it in the terms,
       // so that "1+sqrt(3)" remains exact.
       const ce = this.engine;
-      this.terms.push({ coef: [], term: ce.number(coef) });
+      this.push({ coef: [], term: ce.number(coef) });
       return;
     }
 
@@ -919,14 +965,39 @@ export class Terms {
 
     // This is a new term: just add it
     console.assert(!isNumber(term) || term.isSame(1));
-    this.terms.push({ coef: [coef], term });
+    this.push({ coef: [coef], term });
   }
 
+  /** Add an entry at the end of `terms`, and record its index in `index`. */
+  private push(entry: { coef: NumericValue[]; term: Expression }): void {
+    const h = entry.term.hash;
+    const bucket = this.index.get(h);
+    if (bucket) bucket.push(this.terms.length);
+    else this.index.set(h, [this.terms.length]);
+    this.terms.push(entry);
+  }
+
+  /** The index of the first entry whose `term` is `isSame` as `term`, or -1.
+   * The bucket holds its indexes in increasing order, so the result is the
+   * same as a linear scan of `terms`. */
   private find(term: Expression): number {
-    return this.terms.findIndex((x) => x.term.isSame(term));
+    const bucket = this.index.get(term.hash);
+    if (!bucket) return -1;
+    for (const i of bucket) if (this.terms[i].term.isSame(term)) return i;
+    return -1;
   }
 
-  N(): Expression {
+  /** The numeric value of the sum.
+   *
+   * When `termsAreNumeric` is true, the caller states that each operand given
+   * to the constructor is already the result of a numeric evaluation. Then a
+   * term (an operand, or a part of an operand such as `x` in `2x`) is not
+   * numericized again. Numericizing it again evaluated each nested sum or
+   * product one more time at each level of nesting, so the cost doubled at
+   * each level. A term that is not numeric stays as it is: see
+   * `addNEvaluated` for the one case (the self-referential backstop of
+   * `BoxedSymbol._N`) where an operand can be not fully numeric. */
+  N(termsAreNumeric = false): Expression {
     const ce = this.engine;
 
     const terms = this.terms;
@@ -949,9 +1020,10 @@ export class Terms {
 
         if (sum.isZero) continue;
 
-        if (sum.eq(1)) rest.push(term.N());
-        else if (sum.eq(-1)) rest.push(term.N().neg());
-        else rest.push(term.N().mul(ce.expr(sum)));
+        const termN = termsAreNumeric ? term : term.N();
+        if (sum.eq(1)) rest.push(termN);
+        else if (sum.eq(-1)) rest.push(termN.neg());
+        else rest.push(termN.mul(ce.expr(sum)));
       }
     }
 

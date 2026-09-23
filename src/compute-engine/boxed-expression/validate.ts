@@ -3277,7 +3277,7 @@ function repairFreshMatrixInference(
       const slots = target._typeSlotSnapshot();
       frame.record({ undo: () => target._restoreTypeSlots(slots) });
     }
-    def.value.type = ce.type('matrix');
+    def.value._setType(() => ce.type('matrix'));
     // Freeze the contextual assignment during re-canonicalization so the
     // numeric fast path cannot immediately narrow it back to `real`.
     def.value.inferredType = false;

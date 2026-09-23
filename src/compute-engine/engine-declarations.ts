@@ -2209,7 +2209,7 @@ export function assignFn(
         if (!ce.lookupDefinition(id)) ce.symbol(id);
         const selfDef = ce.lookupDefinition(id);
         if (selfDef && isValueDef(selfDef) && selfDef.value.inferredType)
-          selfDef.value.type = ce.type('function');
+          selfDef.value._setType(() => ce.type('function'));
         // Serialize WITH `sourceOffsets` (`.json` drops them): this re-box
         // otherwise erased every recursive function body's source positions,
         // which is what the debugger's body breakpoints map statements back
@@ -2362,7 +2362,7 @@ export function assignFn(
       // value on each read, so nothing is written: writing it would clear
       // the skeleton.
       if (declaredType !== declaredType0 && skeleton === undefined)
-        def.value.type = declaredType;
+        def.value._setType(() => declaredType);
       ce._setSymbolValue(id, reconciled);
       return ce;
     }
@@ -2855,7 +2855,7 @@ function deriveAndWriteAssignedType(
         callableAfter: armAfter,
       });
     const previousType = valueDef.type;
-    valueDef.type = ce.type(adopted);
+    valueDef._setType(() => ce.type(adopted));
     // A placeholder that has now taken a type from its value is in exactly
     // the state the no-declaration route produces, so it must carry the
     // same marker: later uses may refine it, and `assertAssignableValueDef`
