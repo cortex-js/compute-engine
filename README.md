@@ -190,8 +190,8 @@ claude mcp add epsil -- npx -y @cortex-js/compute-engine mcp
 ```
 
 The server exposes `evaluate`, `check`, `doc`, `parse`, and `serialize` tools,
-and serves a machine-verified language card so the assistant can learn Epsil on
-its own. It also has a native Streamable HTTP transport for ChatGPT and other
+and serves machine-verified cards so the assistant can learn Epsil, and the
+Compute Engine JavaScript API, on its own. It also has a native Streamable HTTP transport for ChatGPT and other
 URL-based clients:
 
 ```sh

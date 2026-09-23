@@ -55,6 +55,12 @@
   `\frac{5}{6}`. A LaTeX parse error quotes the LaTeX fragment where the
   parser stopped (``unexpected operator at `+` ``) instead of its Epsil
   spelling.
+- **A Compute Engine card for AI agents.** A condensed guide for agents
+  writing JavaScript or TypeScript with the library: creating expressions,
+  exact and numeric evaluation, symbolic operations, comparison, assumptions,
+  compilation, time limits, and a table of common traps. Every example is
+  executed by the test suite. The Epsil MCP server serves it as a resource
+  (`epsil://docs/compute-engine-api`), and its instructions point to it.
 
 - `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly
   before it approximates it, and no longer approximates an operand twice.

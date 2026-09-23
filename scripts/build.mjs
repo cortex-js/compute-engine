@@ -307,11 +307,20 @@ await Promise.all(builds);
 await Promise.all([
   chmod('./dist/esm/cli/epsil.js', 0o755),
   chmod('./dist/esm-min/cli/epsil.js', 0o755),
-  // The agent-facing language card is served by `epsil mcp` as a resource;
-  // the CLI resolves it relative to its own bundle.
+  // The agent-facing cards (the Epsil language card and the Compute Engine
+  // API card) are served by `epsil mcp` as resources; the CLI resolves them
+  // relative to its own bundle.
   copyFile('./src/epsil/docs/for-agents.md', './dist/esm/cli/for-agents.md'),
   copyFile(
     './src/epsil/docs/for-agents.md',
     './dist/esm-min/cli/for-agents.md'
+  ),
+  copyFile(
+    './src/compute-engine/docs/for-agents.md',
+    './dist/esm/cli/compute-engine-for-agents.md'
+  ),
+  copyFile(
+    './src/compute-engine/docs/for-agents.md',
+    './dist/esm-min/cli/compute-engine-for-agents.md'
   ),
 ]);

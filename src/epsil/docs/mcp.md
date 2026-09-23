@@ -153,6 +153,11 @@ as a resource (`epsil://docs/for-agents`), and its setup instructions tell
 the assistant to read it before writing Epsil — so the assistant learns the
 language's syntax and idioms on its own.
 
+A second resource, `epsil://docs/compute-engine-api`, is the
+[Compute Engine card for AI agents](/compute-engine/for-agents/): a guide to
+the JavaScript API for an assistant writing code that uses the
+`@cortex-js/compute-engine` library. The setup instructions point to it too.
+
 ## Formulas in LaTeX
 
 An assistant often has a formula in LaTeX already: from a paper, from the

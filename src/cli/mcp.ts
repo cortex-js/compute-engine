@@ -20,7 +20,7 @@ import { CliUsageError, parseMcpArguments } from './arguments.js';
 import { checkSource, effectSummaryToJson, parseSource } from './check.js';
 import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
-import type { CliIo } from './io.js';
+import type { AgentCard, CliIo } from './io.js';
 import { makeEpsilSession } from './session.js';
 import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
 
@@ -42,6 +42,7 @@ import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
  */
 
 const CARD_URI = 'epsil://docs/for-agents';
+const API_CARD_URI = 'epsil://docs/compute-engine-api';
 const MAX_HTTP_BODY_BYTES = 1024 * 1024;
 
 /** Newest first; `initialize` echoes the client's version when supported. */
@@ -55,7 +56,7 @@ const STREAMABLE_HTTP_PROTOCOL_VERSIONS = new Set(
   PROTOCOL_VERSIONS.filter((x) => x !== '2024-11-05')
 );
 
-const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display.`;
+const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display. To write JavaScript or TypeScript code that uses the Compute Engine library (@cortex-js/compute-engine), read the API card resource (${API_CARD_URI}) first.`;
 
 const TOOLS = [
   {
@@ -170,14 +171,26 @@ const TOOLS = [
   },
 ];
 
-const CARD_RESOURCE = {
-  uri: CARD_URI,
-  name: 'epsil-language-card',
-  title: 'Epsil language card',
-  description:
-    'A compact guide to the Epsil language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Epsil.',
-  mimeType: 'text/markdown',
-};
+const RESOURCES = [
+  {
+    card: 'epsil',
+    uri: CARD_URI,
+    name: 'epsil-language-card',
+    title: 'Epsil language card',
+    description:
+      'A compact guide to the Epsil language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Epsil.',
+    mimeType: 'text/markdown',
+  },
+  {
+    card: 'compute-engine',
+    uri: API_CARD_URI,
+    name: 'compute-engine-api-card',
+    title: 'Compute Engine API card',
+    description:
+      'A compact guide for agents writing JavaScript or TypeScript with the Compute Engine library: creating expressions, exact and numeric evaluation, symbolic operations, comparison, compilation and the common traps. Read this before writing code that uses @cortex-js/compute-engine.',
+    mimeType: 'text/markdown',
+  },
+] as const;
 
 function sourceFormatSchema(): Record<string, unknown> {
   return {
@@ -323,7 +336,7 @@ async function runMcpHttp(
  */
 export function createMcpHttpServer(
   options: McpOptions,
-  loadCard?: () => Promise<string>
+  loadCard?: (card: AgentCard) => Promise<string>
 ): Server {
   return createMcpHttpServerForDispatcher(
     new McpServer(options.timeLimit, loadCard),
@@ -440,7 +453,7 @@ class HttpTransportError extends Error {
 class McpServer {
   constructor(
     private timeLimit: number,
-    private loadCard?: () => Promise<string>
+    private loadCard?: (card: AgentCard) => Promise<string>
   ) {}
 
   /** Handle one incoming message (or batch) and return the responses. */
@@ -514,15 +527,18 @@ class McpServer {
       case 'tools/call':
         return this.callTool(args);
       case 'resources/list':
-        return { resources: [CARD_RESOURCE] };
+        return {
+          resources: RESOURCES.map(({ card: _card, ...resource }) => resource),
+        };
       case 'resources/templates/list':
         return { resourceTemplates: [] };
       case 'resources/read': {
-        if (args.uri !== CARD_URI)
+        const resource = RESOURCES.find((x) => x.uri === args.uri);
+        if (resource === undefined)
           throw new McpError(-32002, `Resource not found: ${args.uri}`);
-        const text = await (this.loadCard ?? defaultLoadCard)();
+        const text = await (this.loadCard ?? defaultLoadCard)(resource.card);
         return {
-          contents: [{ uri: CARD_URI, mimeType: 'text/markdown', text }],
+          contents: [{ uri: resource.uri, mimeType: 'text/markdown', text }],
         };
       }
       default:
@@ -886,13 +902,13 @@ function displayHost(host: string): string {
   return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
-/** Locate the language card when the caller did not supply a loader (the
- * installed CLI resolves it relative to its own bundle; see `epsil.ts`).
- * This fallback covers running from a checkout of the repository. */
-async function defaultLoadCard(): Promise<string> {
+/** Locate a card when the caller did not supply a loader (the installed CLI
+ * resolves it relative to its own bundle; see `epsil.ts`). This fallback
+ * covers running from a checkout of the repository. */
+async function defaultLoadCard(card: AgentCard): Promise<string> {
   try {
-    return await readFile('src/epsil/docs/for-agents.md', 'utf8');
+    return await readFile(`src/${card}/docs/for-agents.md`, 'utf8');
   } catch {
-    throw new McpError(-32002, `Resource not available: ${CARD_URI}`);
+    throw new McpError(-32002, `Resource not available: the ${card} card`);
   }
 }

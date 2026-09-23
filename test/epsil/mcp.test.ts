@@ -8,7 +8,7 @@ import { createMcpHttpServer } from '../../src/cli/mcp';
 /** Run `epsil mcp` over a scripted stdin and return the JSON responses. */
 async function runServer(
   requests: unknown[],
-  options?: { loadCard?: () => Promise<string>; raw?: string[] }
+  options?: { loadCard?: (card: string) => Promise<string>; raw?: string[] }
 ): Promise<any[]> {
   let out = '';
   let err = '';
@@ -458,31 +458,55 @@ describe('MCP server tools', () => {
 });
 
 describe('MCP server resources', () => {
-  test('lists and reads the language card', async () => {
-    const loadCard = async () => '# Epsil card fixture';
+  test('lists and reads the language and API cards', async () => {
+    const loadCard = async (card: string) => `# ${card} card fixture`;
     const responses = await runServer(
       [
         request(1, 'resources/list'),
         request(2, 'resources/read', { uri: 'epsil://docs/for-agents' }),
-        request(3, 'resources/read', { uri: 'epsil://bogus' }),
+        request(3, 'resources/read', {
+          uri: 'epsil://docs/compute-engine-api',
+        }),
+        request(4, 'resources/read', { uri: 'epsil://bogus' }),
       ],
       { loadCard }
     );
-    expect(responses[0].result.resources).toHaveLength(1);
-    expect(responses[0].result.resources[0]).toMatchObject({
-      uri: 'epsil://docs/for-agents',
+    const resources = responses[0].result.resources;
+    expect(resources.map((x: any) => x.uri)).toEqual([
+      'epsil://docs/for-agents',
+      'epsil://docs/compute-engine-api',
+    ]);
+    for (const resource of resources) {
+      expect(resource.mimeType).toBe('text/markdown');
+      expect(resource.card).toBeUndefined();
+    }
+    expect(responses[1].result.contents[0].text).toBe('# epsil card fixture');
+    expect(responses[2].result.contents[0]).toEqual({
+      uri: 'epsil://docs/compute-engine-api',
       mimeType: 'text/markdown',
+      text: '# compute-engine card fixture',
     });
-    expect(responses[1].result.contents[0].text).toBe('# Epsil card fixture');
-    expect(responses[2].error.code).toBe(-32002);
+    expect(responses[3].error.code).toBe(-32002);
   });
 
-  test('serves the real card from a repository checkout', async () => {
+  test('serves the real cards from a repository checkout', async () => {
     // No loadCard injected: the default reads from the working directory.
-    const [response] = await runServer([
+    const [epsil, api] = await runServer([
       request(1, 'resources/read', { uri: 'epsil://docs/for-agents' }),
+      request(2, 'resources/read', { uri: 'epsil://docs/compute-engine-api' }),
     ]);
-    expect(response.result.contents[0].text).toContain('Epsil');
+    expect(epsil.result.contents[0].text).toContain('# Epsil for AI Agents');
+    expect(api.result.contents[0].text).toContain(
+      '# Compute Engine for AI Agents'
+    );
+  });
+
+  test('the instructions point to both cards', async () => {
+    const [response] = await runServer([request(1, 'initialize', {})]);
+    expect(response.result.instructions).toContain('epsil://docs/for-agents');
+    expect(response.result.instructions).toContain(
+      'epsil://docs/compute-engine-api'
+    );
   });
 });
 

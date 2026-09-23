@@ -2,26 +2,32 @@
 
 import { readFile } from 'node:fs/promises';
 
+import type { AgentCard } from './io.js';
 import { main } from './main.js';
+
+// Each card ships beside the CLI bundle (`dist/*/cli/`); the second
+// candidate covers running the CLI from source with tsx.
+const CARD_FILES: Record<AgentCard, [bundled: string, source: string]> = {
+  'epsil': ['./for-agents.md', '../epsil/docs/for-agents.md'],
+  'compute-engine': [
+    './compute-engine-for-agents.md',
+    '../compute-engine/docs/for-agents.md',
+  ],
+};
 
 process.exitCode = await main(process.argv.slice(2), {
   stdin: process.stdin,
   stdout: process.stdout,
   stderr: process.stderr,
   env: process.env,
-  // The language card ships beside the CLI bundle (`dist/*/cli/`); the
-  // second candidate covers running the CLI from source with tsx.
-  loadCard: async () => {
-    for (const candidate of [
-      new URL('./for-agents.md', import.meta.url),
-      new URL('../epsil/docs/for-agents.md', import.meta.url),
-    ]) {
+  loadCard: async (card) => {
+    for (const candidate of CARD_FILES[card]) {
       try {
-        return await readFile(candidate, 'utf8');
+        return await readFile(new URL(candidate, import.meta.url), 'utf8');
       } catch {
         // Try the next location.
       }
     }
-    throw new Error('The language card (for-agents.md) was not found.');
+    throw new Error(`The ${card} card for agents was not found.`);
   },
 });
