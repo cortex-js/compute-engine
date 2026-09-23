@@ -6962,9 +6962,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Timing: {
       description:
-        '`Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation',
+        '`Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value. `Timing(expr, n)` evaluates `expr` n times (at least 3), drops the fastest and the slowest run, and returns the mean time of the others',
       signature:
-        '(value, repeat: integer?) -> tuple<result:value, time:number>',
+        '(value, repeat: integer?) -> tuple<time:number, result:value>',
       // `lazy` so the handler receives the RAW operand: `Timing` must time
       // the evaluation itself. As a non-lazy operator the driver evaluated
       // the operand *before* the handler, so the handler was timing a

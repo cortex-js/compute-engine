@@ -139,7 +139,7 @@ To search the library by concept rather than by name, use
 | `symbol` | `Symbol` | `function` | Construct a new symbol with a name formed by concatenating the arguments |
 | `tail` | `Tail` | `(any) -> collection` | Return the tail of an expression, the operands of the expression |
 | — | `Text` | `(any*) -> string` | A sequence of strings, annotated expressions and other Text expressions |
-| `timing` | `Timing` | `(value, repeat: integer?) -> tuple<result: value, time: number>` | `Timing(expr)` evaluates `expr` and return a `Pair` of the number of second elapsed for the evaluation, and the value of the evaluation |
+| `timing` | `Timing` | `(value, repeat: integer?) -> tuple<time: number, result: value>` | `Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value. |
 | `to` | `To` | `(any, any) -> nothing` | Action arrow / mapping (`a \to b`) — opaque typed head. |
 | `toLowerCase` | `ToLowerCase` | `(string) -> string` | ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings. |
 | `toUpperCase` | `ToUpperCase` | `(string) -> string` | ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. |

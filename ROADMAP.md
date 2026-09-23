@@ -562,21 +562,99 @@ compiles when its point list `C_c` is declared
    runtime were checked at an exact zero argument only, which is the one pole a
    floating-point argument reaches exactly.
 
-### `(x+y)² ≡ x²+2xy+y²` answered `undefined` in a full test run (OPEN, load-sensitive — observed 2026-09-20 and again 2026-09-21)
+### A caller's deadline becomes a quiet "no result" in four places (OPEN, timeouts — found 2026-09-22)
 
-`test/compute-engine/stochastic-equal.test.ts`, "multi-variable: (x+y)² =
-x²+2xy+y²": `isIdenticallyEqual` answered `undefined` where the test expects
-`true`, once, in a full suite run with six workers while another single process
-was compiling beside it. The same file then passed five times out of five alone
-in that tree and three out of three on the unchanged tree. The expression holds
-no integral, and the change under test in that run was in the symbolic
-integrator, so the two are not connected. `stochasticEqual` unwinds on a
-deadline (`CancellationError`), so a time budget that expires under load is the
-first thing to check; the sample points come from derived random sub-streams, so
-a different draw is the second. Observed a second time on 2026-09-21, in a
-six-worker full run on a box at load 3, and the file passed alone again (7 of
-7); two occurrences under load and none alone point at the deadline, not the
-draw.
+`docs/TIMEOUT-MODEL.md` says that a caller's `withTimeLimit` deadline must
+propagate as a `CancellationError`. A component may turn only a timeout of
+its OWN time span into a fallback. These four places catch every
+`CancellationError`, so a caller's expired deadline becomes an ordinary
+"no result", and work continues after the caller's budget is gone:
+
+- `rubi/driver.ts`, the top-level `catch` near line 501: it returns `null`
+  for every `CancellationError` and does not check whose span expired. The
+  check exists in the same file (`isRubiOwnedCancellation`, near line 269).
+- `rubi/driver.ts`, `intRec` near lines 580–581: when `ce._deadline` has
+  passed, it returns `null` instead of throwing.
+- `rubi/rubi-utils.ts`, `safeSimplify` near lines 466–475: a bare `catch`
+  returns the unsimplified form, and that form is then stored in the
+  per-call simplify cache.
+- `compilation/base-compiler.ts`, the bare `catch {}` around the span named
+  `compile:antiderivative` (near line 16341): an enclosing caller span that
+  expires there becomes a quiet fallback to numeric quadrature.
+
+The fifth site of this kind, in `stochastic-equal.ts`, was fixed on
+2026-09-22.
+
+### Internal time budgets make compiled code and integrals depend on the machine (OPEN, design — found 2026-09-22)
+
+Two components choose their own wall-clock budget, and when it expires the
+ANSWER changes, not only the speed. So the same input gives a different
+result on a faster or slower machine, or under load:
+
+- The Rubi rule driver: a budget per top-level `Integrate` (10 s by default
+  from `loadIntegrationRules`, 30 s in `rubi/driver.ts` when the option is
+  missing), per-rule and per-match checks, and two `min(remaining, 5000)` ms
+  slices (the rational fallback and `cleanExpansionResult`). On expiry the
+  integral stays unevaluated or unsimplified. The "Driver-determinism
+  residual" note in the Rubi section below describes the same problem.
+- The compiler's attempt to find an antiderivative before it emits numeric
+  quadrature (`base-compiler.ts`: 2 s per attempt, 4 s shared by all
+  `Integrate` nodes in one compilation). On expiry the compiled code uses
+  `_SYS.integrate` instead of the closed form. The timeout record then marks
+  the integral as "timed out" when 90% of the granted time was used, and
+  every later compilation skips the attempt.
+
+Proposed direction: replace these budgets with step budgets (the driver
+already counts `stats.calls` and `_matchTick`; the native antiderivative
+needs a step counter), and size caps instead of the time slices. Keep a large
+wall-clock limit only as protection against a hang. The counts of solved
+integrals will change, so recalibrate with the Rubi benchmark protocol on a
+quiet machine. Existing count-based limits to copy: `foldCostEstimate`
+(`base-compiler.ts`), `LIMIT_PROBE_ITERATION_BUDGET` (`numeric.ts`),
+`SCAN_NODE_BUDGET` (`interior-pole.ts`).
+
+Also: when the user's deadline cuts Gauss-Kronrod quadrature or Monte Carlo
+integration short, the result is a less accurate number with no visible
+mark (only `converged: false` inside the result object, or a larger error
+estimate). `FindFit` already reports `timedOut: true`; the numeric
+integrators should report a partial result the same way.
+
+### Four engine slowdowns found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
+
+Together these make up about a third of the full test suite's work, and each
+also slows the same operation for users:
+
+- **The sample cache of a complex integrand costs more than it saves.**
+  `numericIntegrandParts` (`library/calculus.ts`, near line 307) builds a
+  string key and does a `Map` lookup for every sample, also after the size
+  cap stops new entries. The Monte Carlo route draws new random points for
+  the imaginary part, so it never hits the cache. 1e7 samples of `x*x`:
+  9.7 s through the wrapper, 0.13 s direct. `NIntegrate` on a finite
+  interval uses Monte Carlo with 1e7 samples, so it is affected everywhere
+  (`derived-substreams.test.ts`, `measurement.test.ts`,
+  `compile-integrate.test.ts`).
+- **Adaptive quadrature does not stop on NaN.** An integrand that is NaN
+  everywhere uses the full panel budget (about 32,000 evaluations) and
+  returns `estimate: 0, error: 0, divergent: false` — a wrong value, not
+  only a slow one. In a nested integral, each outer node repeats the full
+  inner stall (`compile-integrate.test.ts`, about 97 s for one test).
+- **The derivative cache never hits.** The stored result in
+  `symbolic/derivative.ts` (near line 549) is keyed on
+  `ce._cacheGeneration()`, which moves during each call, so the next call
+  computes and simplifies again: `derivative(f, 3)` three times takes
+  4.3 s, 1.5 s, 1.5 s.
+- **`evaluate()` of a symbolic `Sum` grows faster than linear.** 106, 181,
+  868 ms for n = 100, 200, 400, about 8.7 s at 1000. `sumAccumulate`
+  (`library/arithmetic.ts`) adds each term with a linear scan for a like
+  term. `.N()` of the same sum takes 3–7 ms.
+
+Test-side problems found at the same time: `compile-glsl-structures.test.ts`
+(the `Sum(sin i, 1..1000)` loop test omits `NO_FOLD`, so the compiler folds
+the sum to a number and the test checks nothing),
+`compile-integrate-nested-budget.test.ts` (uses up the real budget of
+`1 << 25` evaluations; a test setter for the budget would prove the same
+property in milliseconds), and the two `integration-rules*.test.ts` files
+(they load the Rubi rule pack about 36 times, about 1 s each).
 
 ### Compiled `Tan`, `Cot`, `Sec` and `Csc` have no pole (OPEN, compilation — found 2026-09-21)
 

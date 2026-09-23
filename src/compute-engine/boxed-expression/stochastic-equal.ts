@@ -29,6 +29,10 @@ const WELL_KNOWN_POINTS = [
 ];
 const NUM_RANDOM = 41;
 const RANDOM_RANGE = 1000;
+// The maximum number of sample points, per call, at which a disagreement of
+// the compiled (machine-float) values is checked again at engine precision.
+// See `testPoint` in `stochasticEqual`.
+const MAX_PRECISE_RECHECKS = 3;
 
 type ComplexValue = { re: number; im: number };
 
@@ -36,7 +40,8 @@ type ComplexValue = { re: number; im: number };
  * Stochastic equality check: evaluate both expressions at random sample points
  * and compare results (both real and imaginary parts). Returns `true` if they
  * agree at all informative points, `false` if they disagree, or `undefined`
- * if no informative points were found.
+ * if no informative points were found or a disagreement could not be
+ * confirmed at engine precision.
  */
 export function stochasticEqual(
   a: Expression,
@@ -85,25 +90,57 @@ export function stochasticEqual(
     evalB ?? ((vars: Record<string, number>) => subsEval(b, vars));
 
   let informativeCount = 0;
+  let preciseRechecks = 0;
 
-  const testPoint = (vars: Record<string, number>): false | undefined => {
+  // `'unconfirmed'`: the compiled values disagree at this point, and no
+  // check at engine precision is left (see below). The caller then returns
+  // `undefined` for the whole call.
+  const testPoint = (
+    vars: Record<string, number>
+  ): false | 'unconfirmed' | undefined => {
     let va: ComplexValue;
     let vb: ComplexValue;
     try {
       va = doEvalA(vars);
       vb = doEvalB(vars);
-    } catch {
-      return undefined; // skip on error
+    } catch (e) {
+      // A deadline expiry must unwind, as for the compile step above. Any
+      // other error skips the point.
+      if (e instanceof CancellationError) throw e;
+      return undefined;
+    }
+
+    // Machine floats can disagree where the exact values agree. Example:
+    // `(x+y)^2` and `x^2+2xy+y^2` at x = 765.99, y = -767.09. The second form
+    // adds terms near 1e6 to get a result near 1, so its rounding error
+    // (about 1e-10) is larger than the tolerance, which is scaled by the
+    // result, not by the terms. When a compiled evaluator was used, evaluate
+    // that side again at this point at engine precision, and use that
+    // comparison instead. A real disagreement needs one such check, because
+    // the loop stops at the first confirmed disagreement. The number of
+    // checks is limited, because each one is much slower than a compiled
+    // evaluation. When no check is left, the disagreement is not confirmed,
+    // and the caller answers `undefined` instead of `false`, so that
+    // `compare.ts` can try its symbolic proof.
+    if (
+      (evalA || evalB) &&
+      !hasNaN(va) &&
+      !hasNaN(vb) &&
+      !componentsAgree(va, vb, tolerance)
+    ) {
+      if (preciseRechecks >= MAX_PRECISE_RECHECKS) return 'unconfirmed';
+      preciseRechecks += 1;
+      try {
+        if (evalA) va = subsEval(a, vars);
+        if (evalB) vb = subsEval(b, vars);
+      } catch (e) {
+        if (e instanceof CancellationError) throw e;
+        return undefined;
+      }
     }
 
     // If either value has a NaN component, skip — likely a singularity/pole
-    if (
-      Number.isNaN(va.re) ||
-      Number.isNaN(va.im) ||
-      Number.isNaN(vb.re) ||
-      Number.isNaN(vb.im)
-    )
-      return undefined;
+    if (hasNaN(va) || hasNaN(vb)) return undefined;
 
     // Check real parts
     const reResult = compareComponent(va.re, vb.re, tolerance);
@@ -125,6 +162,7 @@ export function stochasticEqual(
     for (const u of unknowns) vars[u] = v;
     const result = testPoint(vars);
     if (result === false) return false;
+    if (result === 'unconfirmed') return undefined;
   }
 
   // Test random points (independent value per unknown).
@@ -143,10 +181,27 @@ export function stochasticEqual(
     for (const u of unknowns) vars[u] = (draw() - 0.5) * 2 * RANDOM_RANGE;
     const result = testPoint(vars);
     if (result === false) return false;
+    if (result === 'unconfirmed') return undefined;
   }
 
   if (informativeCount === 0) return undefined;
   return true;
+}
+
+function hasNaN(v: ComplexValue): boolean {
+  return Number.isNaN(v.re) || Number.isNaN(v.im);
+}
+
+/** Return `false` if the two values disagree in either component. */
+function componentsAgree(
+  a: ComplexValue,
+  b: ComplexValue,
+  tolerance: number
+): boolean {
+  return (
+    compareComponent(a.re, b.re, tolerance) !== false &&
+    compareComponent(a.im, b.im, tolerance) !== false
+  );
 }
 
 /** Normalize a compiled result (number or ComplexResult) to { re, im }. */
