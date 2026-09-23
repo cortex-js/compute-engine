@@ -114,14 +114,10 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 The entries below are the ones judged worth starting next, most valuable first.
 Each links to its own entry further down, which holds the detail. The ranking
 weighs what a consumer sees (a wrong value first, then a slow one) against the
-size of the work. Items 2 and 3 were decided by the user on 2026-09-23 (both
+size of the work. Items 1 and 2 were decided by the user on 2026-09-23 (both
 "yes") and tabled until after an OS update.
 
-1. **About 20 bare `catch` blocks in the compilation targets can absorb a
-   caller's deadline.** Check each one and add `throwIfCallerCancellation()`
-   where a cancellation can reach it. Small to medium. Entry: "Bare `catch`
-   blocks in the compilation targets can absorb a caller's deadline".
-2. **Replace the internal time budgets with step budgets (user decision
+1. **Replace the internal time budgets with step budgets (user decision
    2026-09-23: yes).** The Rubi driver and the compiler's closed-form
    antiderivative attempt stop on the wall clock, so the same input gives a
    closed form on a fast machine and quadrature on a slow or loaded one. Use
@@ -129,32 +125,32 @@ size of the work. Items 2 and 3 were decided by the user on 2026-09-23 (both
    hang; recalibrate with the Rubi benchmark on a quiet machine, because the
    solved counts will change. About a day. Entry: "Internal time budgets make
    compiled code and integrals depend on the machine".
-3. **Make parameter declarations of a user-function call stop invalidating all
+2. **Make parameter declarations of a user-function call stop invalidating all
    caches (user decision 2026-09-23: yes, after a soundness check).** First show
    that a value that outlives the activation cannot make a cached result wrong
    when the declaration advances no cache axis (`scratch`); then change it and
    measure. Medium. Entry: "Every call of a user function invalidates every
    generation-keyed cache".
-4. **An expression keeps its old type after inference narrows one of its
+3. **An expression keeps its old type after inference narrows one of its
    symbols.** A wrong (outdated) type, pre-existing. Needs a finer invalidation
    rule; medium. Entry: "An expression keeps its old type after inference
    narrows one of its symbols".
-5. **Large-list evaluation, what is left:** a power of `e` and the inverse
+4. **Large-list evaluation, what is left:** a power of `e` and the inverse
    trigonometric functions under `evaluate()`, a division by an exact rational
    (`L / 3`), `Norm` of a lazy `Map`. Each is a small kernel or guard; the gains
    are 20 to 40 times on the shapes they cover. Entries: "Element-wise
    arithmetic over a large list: what is still interpreted per element", "`Norm`
    of a lazy collection stays unevaluated".
-6. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
+5. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
    chain under complex mode) and the interval constant-list fan-out cap.
    Consumer-visible declines; medium size. Entries: "The Tycho corpus document
    `s8ishknvhe`: what stays open after the mixed-cell and pole round",
    "Coordinate projection through point arithmetic: what stays open".
-7. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
+6. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
    object for the whole sum instead of a new `Add` at each step. Slow, not
    wrong; medium. Entry: "Slow operations and slow tests found by a review of
    the slowest test files".
-8. **A new all-states Tycho baseline** on the next release, to measure the
+7. **A new all-states Tycho baseline** on the next release, to measure the
    large-list and codegen work on real documents. Entry: "Code-generation census
    on CE 0.128.13: ranked candidates".
 
@@ -583,18 +579,6 @@ compiles when its point list `C_c` is declared
    whatever the hardware answers for `0.0 / 0.0`. The kernels of the JavaScript
    runtime were checked at an exact zero argument only, which is the one pole a
    floating-point argument reaches exactly.
-
-### Bare `catch` blocks in the compilation targets can absorb a caller's deadline (OPEN, timeouts — found 2026-09-22)
-
-`docs/TIMEOUT-MODEL.md` says a caller's `withTimeLimit` deadline must
-propagate. `compile()`, the `fallback: true` catch of each target, the
-compiler's antiderivative attempt, the Rubi driver and `safeSimplify` now
-follow this rule: each calls `throwIfEnclosingTimeout()`
-(`common/interruptible.ts`) or `checkDeadline()` before it falls back.
-`src/compute-engine/compilation/` still has about 20 other bare `catch {}`
-blocks that were not checked. A caller's timeout that reaches one of them
-becomes a local fallback, and the compilation continues after the deadline.
-Check each one: add the same call where a timeout can reach it.
 
 ### An expression keeps its old type after inference narrows one of its symbols (OPEN, caching design — found 2026-09-22)
 

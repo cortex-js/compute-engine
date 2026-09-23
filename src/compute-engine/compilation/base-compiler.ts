@@ -14454,7 +14454,10 @@ export class BaseCompiler {
           expr.subs(values),
           target
         )?.value;
-      } catch {
+      } catch (e) {
+        // A caller's cancellation propagates; any other error leaves the
+        // term undecided.
+        throwIfCallerCancellation(e, expr.engine._deadlineFrame);
         result = undefined;
       }
     }
@@ -25226,6 +25229,9 @@ export class BaseCompiler {
                 )
               );
             } catch (e) {
+              // A handler is caller code, which can evaluate: a caller's
+              // cancellation propagates.
+              throwIfCallerCancellation(e, engine._deadlineFrame);
               hasCustomCompile = e === OPERAND_READ;
             }
           } else {
@@ -25265,7 +25271,10 @@ export class BaseCompiler {
               hasCustomCompile = claims(
                 handler(probeArgs, compileOperand, context)
               );
-            } catch {
+            } catch (e) {
+              // As in the probe above: a caller's cancellation propagates,
+              // and any other error means the handler claims nothing.
+              throwIfCallerCancellation(e, engine._deadlineFrame);
               hasCustomCompile = false;
             }
           }
@@ -25676,8 +25685,11 @@ export class BaseCompiler {
     try {
       if (compileTarget)
         refs = BaseCompiler.analyzeReferences(expr, compileTarget, varsKeys);
-    } catch {
-      /* keep the empty analysis */
+    } catch (e) {
+      // The analysis runs the compile handlers of custom operators, which
+      // can evaluate: a caller's cancellation propagates. Any other error
+      // keeps the empty analysis.
+      throwIfCallerCancellation(e, ce._deadlineFrame);
     }
 
     // A function literal (lambda) uses the positional `lambda` calling
@@ -26412,8 +26424,12 @@ export class BaseCompiler {
         let code: TargetSource;
         try {
           code = BaseCompiler.compile(nodes[0], target);
-        } catch {
+        } catch (e) {
           discardCompiled();
+          // A caller's cancellation propagates (the `finally` below removes
+          // the overrides installed so far); any other error drops the
+          // candidate.
+          throwIfCallerCancellation(e, nodes[0].engine._deadlineFrame);
           continue;
         }
         // Code that is ALREADY a bare name needs no binding of its own: the

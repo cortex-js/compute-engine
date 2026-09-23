@@ -23,7 +23,11 @@
   could even give a result from one panel reported as converged.
 - A caller's timeout that reaches the compilation of `D`, `ND` or
   `Derivative` now propagates. Before, it turned into the numeric derivative
-  fallback or into a declined compilation.
+  fallback or into a declined compilation. The same is true for the other
+  compilation steps that catch an error and continue: the closed-form
+  derivative, the constant fold of a term in an unrolled loop, the reference
+  analysis (which runs the `compile` handlers of custom operators), and the
+  binding of a loop-invariant term.
 - `.N()` of a sum or product of quantities with exact magnitudes now gives a
   float magnitude, like every other `.N()` result:
   `(1/3 m + 1/3 m).N()` is `0.6666… m`, not `2/3 m`.

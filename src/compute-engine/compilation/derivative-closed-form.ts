@@ -1,5 +1,6 @@
 import type { Expression } from '../global-types.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 
 /** Resolve a derivative without changing the caller's declarations. */
 export function derivativeClosedForm(
@@ -21,7 +22,10 @@ export function derivativeClosedForm(
     // Differentiation uses the engine's angular convention; emitted kernels
     // use radians, including for the new trigonometric nodes in this result.
     return rewriteAngularUnit(value);
-  } catch {
+  } catch (e) {
+    // A caller's timeout, an abort or an iteration limit propagates; only an
+    // ordinary evaluation error means "no closed form".
+    throwIfCallerCancellation(e, ce._deadlineFrame);
     return undefined;
   } finally {
     ce.popScope();
