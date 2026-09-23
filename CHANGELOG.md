@@ -17,6 +17,14 @@
 - `.N()` of a sum or product of quantities with exact magnitudes now gives a
   float magnitude, like every other `.N()` result:
   `(1/3 m + 1/3 m).N()` is `0.6666… m`, not `2/3 m`.
+- Compiled `Tan`, `Cot`, `Sec` and `Csc` of a real argument now answer the
+  pole where the interpreter answers `~oo`: when the magnitude of the value
+  is more than a million. The JavaScript target answers `Infinity` and the
+  Python target `np.inf`. Before, compiled code answered a large finite
+  number: `Tan(1.5707963267948966)` was `16331239353195370`. A lazy `Map`
+  over more than a hundred elements, which is compiled under `N()`, now
+  answers `~oo` for such an element, and also for `1/x` at `0` (it answered
+  `+oo`).
 
 ### Improvements
 
@@ -39,6 +47,10 @@
 
 ### Resolved Issues
 
+- Compiled `Cot`, `Coth`, `Round`, `Fract`, `Haversine` and the odd real
+  root now compute their operand once. They computed it two or three times,
+  so an operand that draws a random number (`Cot(Random())`) used a
+  different draw for each use.
 - `isIdenticallyEqual` sometimes answered `undefined` for a true identity
   such as `(x+y)² ≡ x²+2xy+y²` (about 0.6% of calls). At random sample points
   where `x ≈ −y`, machine-float cancellation in the expanded form was larger

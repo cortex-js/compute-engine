@@ -27716,19 +27716,13 @@ export class BaseCompiler {
     // Check if `x` is a simple value (like a number or a simple symbol)
     const isSimple = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(x) || /^[0-9]+$/.test(x);
 
-    if (isSimple) {
-      // Inline the body if `x` is simple
-      return new Function('x', `return \`${body}\`;`)(x);
-    } else {
-      // Generate an IIFE if `x` is a complex expression
-      const t = BaseCompiler.tempVar(target);
-      return new Function(
-        'x',
-        `return \`(() => { const ${t} = \${x}; return ${body.replace(
-          /\\\${x}/g,
-          t
-        )}; })()\`;`
-      )(x);
-    }
+    // Inline the body if `x` is simple
+    if (isSimple) return body.split('${x}').join(x);
+
+    // Bind `x` to a temporary once when it is a complex expression, so that
+    // it is computed once: an operand that draws a random number must draw
+    // only one, and each use in `body` must read that same draw.
+    const t = BaseCompiler.tempVar(target);
+    return `(() => { const ${t} = ${x}; return ${body.split('${x}').join(t)}; })()`;
   }
 }

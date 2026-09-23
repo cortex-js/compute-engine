@@ -1374,6 +1374,21 @@ def _ce_indexof(_l, _v):
  * intended. A 0-dimensional ndarray is treated as a scalar too (`len()` on one
  * raises `TypeError`).
  */
+/**
+ * The pole rule of `Tan`, `Cot`, `Sec` and `Csc`: a value with a magnitude
+ * of more than a million is taken to be a pole and becomes `np.inf`, the
+ * value that stands for the unsigned pole `~oo`. This is the rule of the
+ * interpreter (`boxed-expression/trigonometry.ts`); without it `np.tan` of a
+ * float near `π/2` gives a large finite number. `np.where` applies the rule
+ * to each element of an array, and `[()]` makes the result of a scalar
+ * argument a scalar again. The value is bound to the parameter of an inline
+ * lambda, so it is computed once, and the code needs no module-level helper
+ * (a bare lambda from `compileLambda` cannot carry one).
+ */
+function pythonPole(value: string): string {
+  return `(lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(${value})`;
+}
+
 const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
     def _ce_ord_len(_x):
         if isinstance(_x, np.ndarray):
@@ -2240,7 +2255,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.tan(${compile(args[0])})`;
-    return `np.tan(${compile(args[0])})`;
+    return pythonPole(`np.tan(${compile(args[0])})`);
   },
   Arcsin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -2277,18 +2292,24 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Arcosh: 'np.arccosh',
   Artanh: 'np.arctanh',
 
-  // Reciprocal trigonometric functions
+  // Reciprocal trigonometric functions. A real argument gets the pole rule of
+  // `pythonPole`; a complex argument does not, as in the interpreter, whose
+  // complex kernels keep a large finite value.
   Cot: ([x], compile) => {
     if (x === null) throw new Error('Cot: no argument');
-    return `(np.cos(${compile(x)}) / np.sin(${compile(x)}))`;
+    if (BaseCompiler.isComplexValued(x))
+      return `(np.cos(${compile(x)}) / np.sin(${compile(x)}))`;
+    return pythonPole(`1 / np.tan(${compile(x)})`);
   },
   Csc: ([x], compile) => {
     if (x === null) throw new Error('Csc: no argument');
-    return `(1 / np.sin(${compile(x)}))`;
+    if (BaseCompiler.isComplexValued(x)) return `(1 / np.sin(${compile(x)}))`;
+    return pythonPole(`1 / np.sin(${compile(x)})`);
   },
   Sec: ([x], compile) => {
     if (x === null) throw new Error('Sec: no argument');
-    return `(1 / np.cos(${compile(x)}))`;
+    if (BaseCompiler.isComplexValued(x)) return `(1 / np.cos(${compile(x)}))`;
+    return pythonPole(`1 / np.cos(${compile(x)})`);
   },
 
   // Inverse trigonometric (reciprocal)

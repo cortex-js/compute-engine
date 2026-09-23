@@ -26,8 +26,8 @@ export interface MapAutoCompileStats {
   /** Elements that fell back to the interpreter (non-numeric input row,
    * ABI failure). */
   elementFallbacks: number;
-  /** Compiled results that were NaN (or complex with a NaN part) and were
-   * re-evaluated through the interpreter (review 14). */
+  /** Compiled results that were NaN or infinite (or complex with such a
+   * part) and were re-evaluated through the interpreter. */
   nanDoubleChecks: number;
 }
 

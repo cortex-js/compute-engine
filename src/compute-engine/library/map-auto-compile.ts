@@ -780,8 +780,12 @@ export function mapAutoCompileRunner(
     // result re-evaluates through the interpreter: a genuinely-NaN element
     // pays double evaluation (correct either way); a domain-crossing element
     // gets the interpreter's complex value.
+    // An infinite result re-evaluates through the interpreter too: a real
+    // double cannot tell `+oo` from the unsigned pole `~oo`, which is the
+    // interpreter's value of `1/0` and of `Tan` at `π/2` (the compiled code
+    // answers `Infinity` for both).
     if (typeof r === 'number') {
-      if (Number.isNaN(r)) {
+      if (!Number.isFinite(r)) {
         _mapAutoCompileStats.nanDoubleChecks++;
         return fallback();
       }
@@ -809,7 +813,7 @@ export function mapAutoCompileRunner(
       const re = (r as { re: unknown }).re;
       const im = (r as { im: unknown }).im;
       if (typeof re === 'number' && typeof im === 'number') {
-        if (Number.isNaN(re) || Number.isNaN(im)) {
+        if (!Number.isFinite(re) || !Number.isFinite(im)) {
           _mapAutoCompileStats.nanDoubleChecks++;
           return fallback();
         }

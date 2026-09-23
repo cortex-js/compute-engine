@@ -416,6 +416,10 @@ import {
   centeredDiffHigherOrder,
   centeredDiffHigherOrderVector,
   SMALL_INTEGER,
+  tanWithPole,
+  cotWithPole,
+  secWithPole,
+  cscWithPole,
 } from '../numerics/numeric.js';
 import {
   parseColor,
@@ -3316,11 +3320,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Cot: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.ccot', compile(x));
-    return BaseCompiler.inlineExpression(
-      target,
-      'Math.cos(${x}) / Math.sin(${x})',
-      compile(x)
-    );
+    return `_SYS.cot(${compile(x)})`;
   },
   Coth: ([x], compile, target) => {
     if (x === null) throw new Error('Coth: no argument');
@@ -3336,7 +3336,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Csc: no argument');
     if (BaseCompiler.isComplexValued(x))
       return complexUnary(target, '_SYS.ccsc', compile(x));
-    return `1 / Math.sin(${compile(x)})`;
+    return `_SYS.csc(${compile(x)})`;
   },
   Csch: ([x], compile, target) => {
     if (x === null) throw new Error('Csch: no argument');
@@ -6055,7 +6055,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (arg === null) throw new Error('Sec: no argument');
     if (BaseCompiler.isComplexValued(arg))
       return complexUnary(target, '_SYS.csec', compile(arg));
-    return `1 / Math.cos(${compile(arg)})`;
+    return `_SYS.sec(${compile(arg)})`;
   },
   Sech: (args, compile, target) => {
     const arg = args[0];
@@ -6127,7 +6127,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ctan', compile(args[0]));
-    return `Math.tan(${compile(args[0])})`;
+    return `_SYS.tan(${compile(args[0])})`;
   },
   Tanh: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -9608,6 +9608,12 @@ const SYS_HELPERS = {
   // Fixed exponents avoid repeated base evaluation and the general power
   // kernel. Keep multiplication order explicit for small real powers.
   pow2: (x: number) => x * x,
+  // `Tan`, `Cot`, `Sec` and `Csc` of a real argument answer the pole
+  // (`Infinity`) where the interpreter answers `~oo`: see `tanWithPole`.
+  tan: tanWithPole,
+  cot: cotWithPole,
+  sec: secWithPole,
+  csc: cscWithPole,
   pow3: (x: number) => x * x * x,
   // The fractional part under the floored convention, the value of
   // `Mod(x, 1)`. The trailing `% 1` maps the one case where the subtraction

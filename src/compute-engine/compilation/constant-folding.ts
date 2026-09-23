@@ -15,7 +15,15 @@ import {
 import { BaseCompiler } from './base-compiler.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
-import { chop, factorial, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
+import {
+  chop,
+  factorial,
+  ROUNDOFF_TOLERANCE,
+  tanWithPole,
+  cotWithPole,
+  secWithPole,
+  cscWithPole,
+} from '../numerics/numeric.js';
 import { gamma } from '../numerics/special-functions.js';
 import { Complex } from 'complex-esm';
 
@@ -1105,6 +1113,13 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
     'Math.min': variadicFold(Math.min),
     'Math.max': variadicFold(Math.max),
     '_SYS.pow2': unaryFold((x) => x * x),
+    // The pole-guarded trigonometric routines call the same functions as the
+    // runtime, so a folded literal is the value the call would return. A pole
+    // is `Infinity`, which is not finite, so that call is not folded.
+    '_SYS.tan': unaryFold(tanWithPole),
+    '_SYS.cot': unaryFold(cotWithPole),
+    '_SYS.sec': unaryFold(secWithPole),
+    '_SYS.csc': unaryFold(cscWithPole),
     '_SYS.pow3': unaryFold((x) => x * x * x),
     '_SYS.pow4': unaryFold((x) => {
       const s = x * x;

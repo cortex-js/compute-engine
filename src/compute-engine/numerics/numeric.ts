@@ -329,6 +329,27 @@ export function factorial2(n: number): number {
   return result;
 }
 
+/**
+ * The machine-precision values of `Tan`, `Cot`, `Sec` and `Csc`, with the
+ * interpreter's pole rule: when the magnitude of the value is more than a
+ * million, the argument is taken to be a pole and the value is `Infinity`,
+ * the double that stands for the unsigned pole `~oo`. Without this rule, a
+ * float near `π/2` gives a large finite number (`Math.tan(π/2)` is
+ * `16331239353195370`). The formulas and the bound are the ones of the
+ * interpreter (`boxed-expression/trigonometry.ts`), so that compiled code
+ * and `.N()` give the same value.
+ */
+const TRIG_POLE_BOUND = 1e6;
+
+function trigPole(y: number): number {
+  return y > TRIG_POLE_BOUND || y < -TRIG_POLE_BOUND ? Infinity : y;
+}
+
+export const tanWithPole = (x: number): number => trigPole(Math.tan(x));
+export const cotWithPole = (x: number): number => trigPole(1 / Math.tan(x));
+export const secWithPole = (x: number): number => trigPole(1 / Math.cos(x));
+export const cscWithPole = (x: number): number => trigPole(1 / Math.sin(x));
+
 export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
   if (typeof n === 'number' && Math.abs(n) <= tolerance) return 0;
   return n;

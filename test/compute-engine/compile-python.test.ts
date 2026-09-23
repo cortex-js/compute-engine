@@ -55,7 +55,10 @@ describe('PYTHON TARGET', () => {
     it('should compile multiple trig functions', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y) + \\tan(z)');
       const code = python.compile(expr).code;
-      expect(code).toBe('np.sin(x) + np.cos(y) + np.tan(z)');
+      // `Tan` answers the pole `np.inf` past a magnitude of a million.
+      expect(code).toBe(
+        'np.sin(x) + np.cos(y) + (lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(np.tan(z))'
+      );
     });
 
     it('should compile exponential and logarithm', () => {
