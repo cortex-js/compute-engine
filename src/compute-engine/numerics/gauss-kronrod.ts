@@ -15,8 +15,10 @@
  */
 
 import {
+  checkDeadline,
   getAmbientDeadline,
   withAmbientDeadline,
+  type DeadlineFrame,
 } from '../../common/interruptible.js';
 
 // GK15 abscissae on [-1, 1], positive half only (symmetric about 0).
@@ -343,7 +345,7 @@ function adaptiveFinite(
   atol: number,
   maxIntervals: number,
   initialPanels: number,
-  deadline: number | undefined
+  deadline: number | DeadlineFrame | undefined
 ): {
   estimate: number;
   error: number;
@@ -387,15 +389,14 @@ function adaptiveFinite(
     Math.min(Math.floor(initialPanels), Math.floor(maxIntervals))
   );
   for (let i = 0; i < n; i++) {
-    // Deadline check per panel (Tycho item 183): a panel is ≥15 integrand
+    // Deadline check per panel: a panel is at least 15 integrand
     // evaluations, and for an ITERATED integral each evaluation is itself a
-    // full inner quadrature — before this check, a nested oscillatory
-    // integral under a 1 s `withTimeLimit` ran for minutes (unbounded by
-    // any JS-side budget, since the kernel never yields). The break
-    // SALVAGES: the panels built so far stand, `converged` stays false, and
-    // the caller reports the partial result the way the Monte-Carlo
-    // fallback already does at its deadline.
-    if (deadline !== undefined && Date.now() >= deadline) break;
+    // full inner quadrature, so without this check a nested oscillatory
+    // integral under a 1 s `withTimeLimit` ran for minutes. An expired
+    // deadline throws the timeout: the deadline belongs to the caller, and a
+    // partial sum of panels is not the value of the integral
+    // (`docs/TIMEOUT-MODEL.md` §2).
+    checkDeadline(deadline);
     const lo = i === 0 ? a : a + ((b - a) * i) / n;
     const hi = i === n - 1 ? b : a + ((b - a) * (i + 1)) / n;
     if (!(lo < hi)) {
@@ -454,11 +455,10 @@ function adaptiveFinite(
   while (panels.length < maxIntervals) {
     if (badPanels === 0 && totalError <= tolerance()) break;
     if (mustStopAllBad()) break;
-    // Deadline check per bisection — same salvage semantics as the
-    // initial-panel loop above (item 183). One check per panel is ample:
-    // each iteration costs two GK15 evaluations (30 integrand calls), so
-    // the overshoot past the deadline is bounded by a single bisection.
-    if (deadline !== undefined && Date.now() >= deadline) break;
+    // Deadline check per bisection, as in the initial-panel loop above. Each
+    // iteration costs two GK15 evaluations (30 integrand calls), so the
+    // overshoot past the deadline is bounded by a single bisection.
+    checkDeadline(deadline);
 
     // Pick the panel with the largest (or non-finite) error. When all panels
     // are bad, all errors are infinite: pick the first panel with the
@@ -521,7 +521,7 @@ function adaptiveFinite(
   // as a NaN bound. This is also true when the loop stopped for another
   // reason before a bisection failed: the panel budget (for example
   // `maxIntervals` not larger than the number of starting panels, so the
-  // loop does not bisect) or the deadline. Then an integrand with removable
+  // loop does not bisect). Then an integrand with removable
   // singularities at the node of each starting panel also gives NaN,
   // because no finite value is known.
   if (allPanelsBad())
@@ -571,8 +571,11 @@ function adaptiveFinite(
  * [-2, 2], or one point at the center of each of the 16 starting panels) is
  * still integrated, even when every starting panel is bad: the bad panels
  * are bisected until their nodes miss the singular points. If the panel
- * budget or the deadline stops the loop before any panel is finite, the
- * estimate is also `NaN`.
+ * budget stops the loop before any panel is finite, the estimate is also
+ * `NaN`.
+ *
+ * An expired deadline throws a timeout `CancellationError`; there is no
+ * partial result.
  */
 export function adaptiveQuadrature(
   f: (x: number) => number,
@@ -583,16 +586,14 @@ export function adaptiveQuadrature(
     atol?: number;
     maxIntervals?: number;
     initialPanels?: number;
-    /** Absolute timestamp (ms) after which the adaptive loop stops
-     * subdividing and SALVAGES the partial result (`converged: false`,
-     * the accumulated estimate and error bound stand — same in-band
-     * behavior as the Monte-Carlo fallback at its deadline). When omitted,
-     * the AMBIENT deadline is inherited — this is how a nested integral
-     * reached through compiled code (`_SYS.integrate` has no engine
-     * access) stays bounded by the outer `withTimeLimit` span (Tycho
-     * item 183: a nested oscillatory integral under a 1 s limit ran for
-     * minutes because no level of the quadrature ever checked). */
-    deadline?: number;
+    /** The deadline, as an absolute timestamp (ms) or as the engine's
+     * deadline frame (`engine._deadlineFrame`, which gives the thrown error
+     * the label of the span). When it expires, the loop throws a timeout
+     * `CancellationError`. When omitted, the AMBIENT deadline is inherited:
+     * this is how a nested integral reached through compiled code
+     * (`_SYS.integrate` has no engine access) stays bounded by the outer
+     * `withTimeLimit` span. */
+    deadline?: number | DeadlineFrame;
   }
 ): {
   estimate: number;

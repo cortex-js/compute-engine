@@ -3,6 +3,7 @@ import { primeFactors } from './primes.js';
 import {
   checkDeadline,
   getAmbientDeadline,
+  type DeadlineFrame,
 } from '../../common/interruptible.js';
 
 // Number of significant digits for Decimal
@@ -541,7 +542,7 @@ function reliableLimitSamples(
   f: (x: number) => number,
   x0: number,
   step: number,
-  deadline?: number
+  deadline?: number | DeadlineFrame
 ): number {
   const CONTRACT = 0.125; // must match extrapolate()'s default contract
   const MAX = 60;
@@ -630,7 +631,7 @@ export function limit(
   f: (x: number) => number,
   x: number,
   dir = 1,
-  deadline?: number
+  deadline?: number | DeadlineFrame
 ): number {
   // A call reached through compiled code (`_SYS.limit`) has no deadline of
   // its own: inherit the ambient one (see interruptible.ts).

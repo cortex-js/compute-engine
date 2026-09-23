@@ -114,20 +114,14 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 The entries below are the ones judged worth starting next, most valuable first.
 Each links to its own entry further down, which holds the detail. The ranking
 weighs what a consumer sees (a wrong value first, then a slow one) against the
-size of the work. Items 3 and 4 were decided by the user on 2026-09-23 (both
+size of the work. Items 2 and 3 were decided by the user on 2026-09-23 (both
 "yes") and tabled until after an OS update.
 
-1. **Numeric integration cut short by a deadline does not say so.** Gauss-Kronrod
-   and Monte Carlo return a less accurate number with no visible mark, and an
-   already-expired deadline can give `converged: true`. Report a partial result
-   the way `FindFit` does (`timedOut: true`). Small. Entry: "Internal time
-   budgets make compiled code and integrals depend on the machine" (last
-   paragraph).
-2. **About 20 bare `catch` blocks in the compilation targets can absorb a
+1. **About 20 bare `catch` blocks in the compilation targets can absorb a
    caller's deadline.** Check each one and add `throwIfCallerCancellation()`
    where a cancellation can reach it. Small to medium. Entry: "Bare `catch`
    blocks in the compilation targets can absorb a caller's deadline".
-3. **Replace the internal time budgets with step budgets (user decision
+2. **Replace the internal time budgets with step budgets (user decision
    2026-09-23: yes).** The Rubi driver and the compiler's closed-form
    antiderivative attempt stop on the wall clock, so the same input gives a
    closed form on a fast machine and quadrature on a slow or loaded one. Use
@@ -135,32 +129,32 @@ size of the work. Items 3 and 4 were decided by the user on 2026-09-23 (both
    hang; recalibrate with the Rubi benchmark on a quiet machine, because the
    solved counts will change. About a day. Entry: "Internal time budgets make
    compiled code and integrals depend on the machine".
-4. **Make parameter declarations of a user-function call stop invalidating all
+3. **Make parameter declarations of a user-function call stop invalidating all
    caches (user decision 2026-09-23: yes, after a soundness check).** First show
    that a value that outlives the activation cannot make a cached result wrong
    when the declaration advances no cache axis (`scratch`); then change it and
    measure. Medium. Entry: "Every call of a user function invalidates every
    generation-keyed cache".
-5. **An expression keeps its old type after inference narrows one of its
+4. **An expression keeps its old type after inference narrows one of its
    symbols.** A wrong (outdated) type, pre-existing. Needs a finer invalidation
    rule; medium. Entry: "An expression keeps its old type after inference
    narrows one of its symbols".
-6. **Large-list evaluation, what is left:** a power of `e` and the inverse
+5. **Large-list evaluation, what is left:** a power of `e` and the inverse
    trigonometric functions under `evaluate()`, a division by an exact rational
    (`L / 3`), `Norm` of a lazy `Map`. Each is a small kernel or guard; the gains
    are 20 to 40 times on the shapes they cover. Entries: "Element-wise
    arithmetic over a large list: what is still interpreted per element", "`Norm`
    of a lazy collection stays unevaluated".
-7. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
+6. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
    chain under complex mode) and the interval constant-list fan-out cap.
    Consumer-visible declines; medium size. Entries: "The Tycho corpus document
    `s8ishknvhe`: what stays open after the mixed-cell and pole round",
    "Coordinate projection through point arithmetic: what stays open".
-8. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
+7. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
    object for the whole sum instead of a new `Add` at each step. Slow, not
    wrong; medium. Entry: "Slow operations and slow tests found by a review of
    the slowest test files".
-9. **A new all-states Tycho baseline** on the next release, to measure the
+8. **A new all-states Tycho baseline** on the next release, to measure the
    large-list and codegen work on real documents. Entry: "Code-generation census
    on CE 0.128.13: ranked candidates".
 
@@ -659,15 +653,6 @@ integrals will change, so recalibrate with the Rubi benchmark protocol on a
 quiet machine. Existing count-based limits to copy: `foldCostEstimate`
 (`base-compiler.ts`), `LIMIT_PROBE_ITERATION_BUDGET` (`numeric.ts`),
 `SCAN_NODE_BUDGET` (`interior-pole.ts`).
-
-Also: when the user's deadline cuts Gauss-Kronrod quadrature or Monte Carlo
-integration short, the result is a less accurate number with no visible
-mark (only `converged: false` inside the result object, or a larger error
-estimate). `FindFit` already reports `timedOut: true`; the numeric
-integrators should report a partial result the same way.
-A related case: when the deadline has already expired before the starting
-panels are built, `adaptiveQuadrature` uses one panel for the whole interval
-and can report `converged: true` for that estimate.
 
 ### Slow operations and slow tests found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
 

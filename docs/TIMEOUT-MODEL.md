@@ -39,6 +39,11 @@ first. So:
 - `Integrate` throws such a cancellation when it comes from the Rubi rule
   driver (`RubiDriver.int()`, and `safeSimplify()` in the rule helpers). Rubi
   does not change it into "no closed form".
+- Numeric integration (`Integrate(...).N()`, `NIntegrate`, and the compiled
+  `_SYS.integrate`) throws the timeout when the deadline expires during
+  adaptive quadrature or Monte Carlo sampling. It does not return the partial
+  sum of the panels or samples computed so far, because that number has no
+  mark that it is incomplete (user decision 2026-09-23).
 
 The useful rule is:
 

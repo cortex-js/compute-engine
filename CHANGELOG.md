@@ -14,6 +14,16 @@
   compiler's antiderivative attempt, which then emits quadrature code). The
   `Integrate` handler also recognizes a `CancellationError` thrown by a
   plugin bundle's copy of the class.
+- **Numeric integration now throws the caller's timeout.** When the deadline
+  of a `ce.withTimeLimit` span expires during `Integrate(...).N()`,
+  `NIntegrate` or a compiled integral, the `CancellationError` of that span
+  is thrown, with its label. Before, adaptive quadrature and Monte Carlo
+  sampling returned the partial result computed so far: a less accurate
+  number with no mark that it was incomplete. An already expired deadline
+  could even give a result from one panel reported as converged.
+- A caller's timeout that reaches the compilation of `D`, `ND` or
+  `Derivative` now propagates. Before, it turned into the numeric derivative
+  fallback or into a declined compilation.
 - `.N()` of a sum or product of quantities with exact magnitudes now gives a
   float magnitude, like every other `.N()` result:
   `(1/3 m + 1/3 m).N()` is `0.6666… m`, not `2/3 m`.

@@ -17,10 +17,10 @@
  *
  */
 import {
-  CancellationError,
   checkDeadline,
   getAmbientDeadline,
   withAmbientDeadline,
+  type DeadlineFrame,
 } from '../../common/interruptible.js';
 
 /**
@@ -57,8 +57,9 @@ function roundEstimateToError(
  * from the ambient `WithRandomSeed` frame that consumes NO indices from it, so
  * a seeded integral replays without shifting a sibling `Random()` draw. It has
  * to be a sub-stream rather than `ce._random` because the sampling loop below
- * is deadline-truncated — charging its samples to the frame would make replay
- * depend on wall-clock time. See
+ * can stop at a deadline (an internal sub-budget can catch that timeout and
+ * continue), so charging its samples to the frame would make replay depend
+ * on wall-clock time. See
  * `docs/RANDOMNESS-MODEL.md`.
  *
  * The 32-sample all-non-finite probe draws from the same source, deliberately:
@@ -70,7 +71,7 @@ export function monteCarloEstimate(
   a: number,
   b: number,
   n = 1e5,
-  deadline?: number,
+  deadline?: number | DeadlineFrame,
   draw: () => number = Math.random
 ): { estimate: number; error: number } {
   // Nested integration: a call reached through compiled code (e.g. the
@@ -132,29 +133,13 @@ export function monteCarloEstimate(
     for (let i = 0; i < n; i++) {
       // Check every 64 samples: cheap integrands pay ~Date.now()/64 per
       // sample; expensive integrands (e.g. nested integrals) overshoot the
-      // deadline by at most 64 samples — and a nested deadline-aware call
-      // aborts the very next sample anyway via the ambient deadline.
-      if (
-        (i & 0x3f) === 0 &&
-        deadline !== undefined &&
-        Date.now() >= deadline
-      ) {
-        // Out of time. Monte Carlo degrades gracefully: an estimate from
-        // the samples taken so far (with its larger error) is more useful
-        // than an error — but with no samples at all, give up.
-        if (i === 0) checkDeadline(deadline);
-        break;
-      }
-      let val: number;
-      try {
-        val = sampler();
-      } catch (err) {
-        // A nested deadline-aware routine (e.g. an inner integral) ran out
-        // of time: stop sampling and use what we have. With no samples at
-        // all, propagate the cancellation.
-        if (err instanceof CancellationError && taken > 0) break;
-        throw err;
-      }
+      // deadline by at most 64 samples, and a nested deadline-aware call
+      // throws at the next sample anyway through the ambient deadline. An
+      // expired deadline throws the timeout: the deadline belongs to the
+      // caller, and the mean of the samples taken so far is not the
+      // requested estimate (`docs/TIMEOUT-MODEL.md` §2).
+      if ((i & 0x3f) === 0) checkDeadline(deadline);
+      const val = sampler();
       sum += val;
       sumSq += val * val;
       taken++;

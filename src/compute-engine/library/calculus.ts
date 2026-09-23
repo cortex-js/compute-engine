@@ -48,6 +48,7 @@ import {
   lookupApplicable,
 } from '../function-utils.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
 import {
   adaptiveQuadrature,
@@ -558,11 +559,11 @@ function nIntegrateMultiple(
     // it so the floor applies to the whole iterated integral, not each level.
     const gk = adaptiveQuadrature(g, lower, upper, {
       initialPanels: initialPanelsForDimensions(limits.length),
-      // Item 183: every level of an iterated integral checks the span
-      // deadline (per panel) and salvages its partial result — one full
-      // inner quadrature runs per outer node, so an unchecked level made
-      // the whole nest unboundable by any JS-side budget.
-      deadline: ce._deadline,
+      // Every level of an iterated integral checks the span deadline (per
+      // panel) and throws the timeout when it expires: one full inner
+      // quadrature runs per outer node, so an unchecked level made the whole
+      // nest unboundable by any JS-side budget.
+      deadline: ce._deadlineFrame,
     });
     if (gk.converged && Number.isFinite(gk.estimate)) return inflate(gk);
     // A level diagnosed as divergent has no finite value: propagate NaN rather
@@ -576,7 +577,7 @@ function nIntegrateMultiple(
     sampling++;
     try {
       return inflate(
-        monteCarloEstimate(g, lower, upper, 1e4, ce._deadline, draw)
+        monteCarloEstimate(g, lower, upper, 1e4, ce._deadlineFrame, draw)
       );
     } finally {
       sampling--;
@@ -1006,7 +1007,10 @@ function compileDerivative(
     // into the emitted code.
     if (!node.isPure) return undefined;
     value = node.evaluate();
-  } catch {
+  } catch (e) {
+    // A caller's timeout, an abort or an iteration limit propagates; only
+    // an ordinary evaluation error falls back.
+    throwIfCallerCancellation(e, ce._deadlineFrame);
     return fallback();
   } finally {
     ce.popScope();
@@ -1034,7 +1038,8 @@ function compileDerivative(
     // with `evaluate()`. Same reason `prepareUserFunctionBody` rewrites an
     // emitted function-literal body.
     return compile(rewriteAngularUnit(value)) || undefined;
-  } catch {
+  } catch (e) {
+    throwIfCallerCancellation(e, ce._deadlineFrame);
     // The closed form contains a head this target cannot lower (`Digamma` on
     // glsl, say). Decline rather than let the inner error escape: a
     // per-operator handler runs BEFORE the target's function table, so
@@ -1114,7 +1119,8 @@ function compileNumericDerivativeFallback(
     return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, 1${shapeArgument(
       lit
     )})(${compile(args[1])})`;
-  } catch {
+  } catch (e) {
+    throwIfCallerCancellation(e, ce._deadlineFrame);
     // The body contains a head the target cannot lower — same contract as
     // the closed-form branch: decline, never let the inner error escape.
     return undefined;
@@ -2307,11 +2313,15 @@ volumes
             const bInf = !isFinite(upper);
             if (aInf !== bInf) {
               const osc = bInf
-                ? integrateSemiInfiniteOscillatory(jsf, lower, ce._deadline)
+                ? integrateSemiInfiniteOscillatory(
+                    jsf,
+                    lower,
+                    ce._deadlineFrame
+                  )
                 : integrateSemiInfiniteOscillatory(
                     (t) => jsf(-t),
                     -upper,
-                    ce._deadline
+                    ce._deadlineFrame
                   );
               if (osc) return { estimate: osc.estimate, error: osc.error };
             }
@@ -2326,13 +2336,13 @@ volumes
             // for an expensive integrand (an inner quadrature, a compiled model)
             // those samples cost minutes.
             if (compiled?.success) {
-              // `deadline`: bounds the adaptive loop (per-panel check, partial
-              // salvage) AND is re-published as the ambient deadline so an
+              // `deadline`: bounds the adaptive loop (a per-panel check that
+              // throws the timeout) AND is re-published as the ambient deadline so an
               // integrand that is itself an integral — interpreted, or compiled
               // to `_SYS.integrate`, which has no engine access — inherits it
               // (Tycho item 183).
               const gk = adaptiveQuadrature(jsf, lower, upper, {
-                deadline: ce._deadline,
+                deadline: ce._deadlineFrame,
               });
               // A diagnosed divergence has no finite value. Monte Carlo would
               // still return one — a mean of samples that never saw the
@@ -2350,7 +2360,7 @@ volumes
               lower,
               upper,
               compiled?.success ? 1e7 : 1e4,
-              ce._deadline,
+              ce._deadlineFrame,
               draw
             );
             // KNOWN LIMITATION (CORRECTNESS_FINDINGS #29 / C15): the reported
@@ -2634,11 +2644,15 @@ volumes
           const bInf = !isFinite(upper);
           if (aInf !== bInf) {
             const osc = bInf
-              ? integrateSemiInfiniteOscillatory(jsf, lower, engine._deadline)
+              ? integrateSemiInfiniteOscillatory(
+                  jsf,
+                  lower,
+                  engine._deadlineFrame
+                )
               : integrateSemiInfiniteOscillatory(
                   (t) => jsf(-t),
                   -upper,
-                  engine._deadline
+                  engine._deadlineFrame
                 );
             if (osc) return osc.estimate;
           }
@@ -2647,7 +2661,7 @@ volumes
             lower,
             upper,
             compiled?.success ? 1e7 : 1e4,
-            engine._deadline,
+            engine._deadlineFrame,
             draw
           ).estimate;
         };

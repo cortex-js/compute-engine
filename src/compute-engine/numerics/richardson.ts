@@ -21,6 +21,7 @@ import {
   checkDeadline,
   getAmbientDeadline,
   withAmbientDeadline,
+  type DeadlineFrame,
 } from '../../common/interruptible.js';
 
 export interface ExtrapolateOptions {
@@ -31,7 +32,9 @@ export interface ExtrapolateOptions {
   rtol?: number; // relative tolerance
   maxeval?: number; // maximum number of function evaluations
   breaktol?: number; // break if error increases by more than this factor
-  deadline?: number; // absolute timestamp (ms): abort with CancellationError when reached
+  // An absolute timestamp (ms) or a deadline frame: abort with a
+  // CancellationError when it is reached.
+  deadline?: number | DeadlineFrame;
 }
 
 // function norm(arr: NumberArray): number {

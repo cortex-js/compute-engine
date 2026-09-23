@@ -143,9 +143,10 @@ The stochastic **estimators** — Monte-Carlo integration, the sampled equality
 probe — are `drawsRandom: false` for the same reason, and deliberately so.
 They replay under a frame, but through a *derived sub-stream*: a private
 counter seeded from the frame that consumes **none** of its indices (see §7).
-An integral may take 1e7 samples and its sampling loop is deadline-truncated,
-so charging them to the frame would both shift every later `Random()` draw and
-make replay depend on wall-clock time. Because a completed estimate owes the
+An integral may take 1e7 samples and its sampling loop can stop at a deadline
+(an internal sub-budget can catch that timeout and continue), so charging them
+to the frame would both shift every later `Random()` draw and make replay
+depend on wall-clock time. Because a completed estimate owes the
 frame nothing, it must not pin one. One consequence worth knowing: the same
 integral samples the same points wherever it sits in a frame, so `∫f - ∫f` is
 exactly `0` under a seed.

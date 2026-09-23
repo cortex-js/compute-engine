@@ -1,6 +1,7 @@
 import {
   checkDeadline,
   getAmbientDeadline,
+  type DeadlineFrame,
 } from '../../common/interruptible.js';
 
 /**
@@ -21,7 +22,7 @@ import {
 export function integrateSemiInfiniteOscillatory(
   f: (x: number) => number,
   a: number,
-  deadline?: number
+  deadline?: number | DeadlineFrame
 ): { estimate: number; error: number } | null {
   deadline ??= getAmbientDeadline();
   const MAX_LOBES = 2000;
@@ -81,7 +82,7 @@ function nextSignChange(
   f: (x: number) => number,
   x: number,
   hint: number | undefined,
-  deadline: number | undefined
+  deadline: number | DeadlineFrame | undefined
 ): number | null {
   // Scan in small steps relative to the local oscillation scale. Lobes can
   // shrink (sin x²) or stay constant (sin x), so scan a fraction of the hint
@@ -127,9 +128,12 @@ function bisectZero(
   fa: number,
   xb: number,
   fb: number,
-  deadline: number | undefined
+  deadline: number | DeadlineFrame | undefined
 ): number {
   for (let i = 0; i < 80; i++) {
+    // Each step evaluates `f` once, which can be expensive (a nested
+    // integral), so check the deadline at each step.
+    checkDeadline(deadline);
     if (xb - xa <= 1e-14 * (1 + Math.abs(xa))) break;
     const xm = 0.5 * (xa + xb);
     const fm = f(xm);
@@ -142,7 +146,6 @@ function bisectZero(
       fb = fm;
     }
   }
-  void deadline;
   return 0.5 * (xa + xb);
 }
 
@@ -152,7 +155,7 @@ function adaptiveSimpson(
   a: number,
   b: number,
   tol: number,
-  deadline: number | undefined
+  deadline: number | DeadlineFrame | undefined
 ): number {
   const fa = f(a);
   const fb = f(b);
@@ -172,7 +175,7 @@ function recurse(
   whole: number,
   tol: number,
   depth: number,
-  deadline: number | undefined
+  deadline: number | DeadlineFrame | undefined
 ): number {
   const m = 0.5 * (a + b);
   const lm = 0.5 * (a + m);

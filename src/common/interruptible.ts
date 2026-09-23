@@ -211,16 +211,21 @@ export function throwIfCallerCancellation(
  * extrapolation) publishes its deadline here while it runs; a nested call
  * reached through compiled code inherits it. Single-threaded execution
  * makes the save/restore discipline safe.
+ *
+ * The deadline is an absolute timestamp or a `DeadlineFrame`. A frame keeps
+ * the label of its `withTimeLimit` span, so a nested call that finds the
+ * deadline expired throws a `CancellationError` with that label, as a call
+ * given the frame directly does.
  */
-let ambientDeadline: number | undefined = undefined;
+let ambientDeadline: number | DeadlineFrame | undefined = undefined;
 
-export function getAmbientDeadline(): number | undefined {
+export function getAmbientDeadline(): number | DeadlineFrame | undefined {
   return ambientDeadline;
 }
 
 /** Run `fn` with the ambient deadline set to `deadline`. */
 export function withAmbientDeadline<T>(
-  deadline: number | undefined,
+  deadline: number | DeadlineFrame | undefined,
   fn: () => T
 ): T {
   const saved = ambientDeadline;

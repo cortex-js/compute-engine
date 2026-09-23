@@ -251,18 +251,14 @@ describe('TIMEOUT', () => {
       ).toThrow(CancellationError);
     });
 
-    it('returns a partial estimate when the deadline passes mid-run', () => {
-      // 1e8 samples take well over 20ms: the deadline passes mid-run and
-      // the estimate from the samples taken so far is still returned.
+    it('throws when the deadline passes mid-run', () => {
+      // 1e8 samples take well over 20ms, so the deadline passes mid-run. The
+      // timeout belongs to the caller: the mean of the samples taken so far
+      // is not returned as the estimate (user decision 2026-09-23).
       const deadline = Date.now() + 20;
-      const { estimate } = monteCarloEstimate(
-        (x) => x * x,
-        0,
-        1,
-        1e8,
-        deadline
-      );
-      expect(estimate).toBeCloseTo(1 / 3, 1);
+      expect(() =>
+        monteCarloEstimate((x) => x * x, 0, 1, 1e8, deadline)
+      ).toThrow(CancellationError);
     });
 
     it('completes without a deadline', () => {
