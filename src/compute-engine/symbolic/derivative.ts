@@ -1,8 +1,5 @@
 import { apply } from '../function-utils.js';
-import {
-  checkDeadline,
-  checkDeadlineEvery,
-} from '../../common/interruptible.js';
+import { checkDeadlineEvery } from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import type { Expression, ExpressionInput } from '../global-types.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
