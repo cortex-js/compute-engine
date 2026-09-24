@@ -1784,6 +1784,222 @@ describe('Norm', () => {
     expect(result.re).toBeCloseTo(5.4772, 3);
   });
 
+  // The order 2 of a matrix is the SPECTRAL norm, the largest singular value
+  // √(λ_max(Aᴴ A)). The expected values below were checked against
+  // `np.linalg.norm(A, 2)` and against the square root of the largest
+  // `Eigenvalues(Aᴴ A)`.
+  describe('order 2 of a matrix is the spectral norm', () => {
+    const A: Expression = ['List', ['List', 1, 2], ['List', 3, 2]];
+
+    it('a 2×2 matrix has an exact closed form', () => {
+      // Aᵀ A = [[10, 8], [8, 8]], eigenvalues 9 ± √65.
+      const e = ce.expr(['Norm', A, 2]);
+      expect(e.evaluate().toString()).toMatchInlineSnapshot(
+        `sqrt(9 + sqrt(65))`
+      );
+      expect(e.N().re).toBeCloseTo(4.130648586880582, 12);
+      // The default and "Frobenius" stay the Frobenius norm, √18.
+      expect(ce.expr(['Norm', A]).evaluate().toString()).toBe('3sqrt(2)');
+      expect(
+        ce
+          .expr(['Norm', A, { str: 'Frobenius' }])
+          .evaluate()
+          .toString()
+      ).toBe('3sqrt(2)');
+    });
+
+    it('a non-square matrix with two rows has an exact closed form', () => {
+      // A Aᵀ = [[14, 32], [32, 77]]: t = 91, det = 54.
+      const e = ce.expr(['Norm', m23_n, 2]);
+      expect(e.evaluate().toString()).toMatchInlineSnapshot(
+        `sqrt(1/2 * (91 + sqrt(8065)))`
+      );
+      expect(e.N().re).toBeCloseTo(9.508032000695724, 12);
+      // The transpose has the same singular values.
+      const t: Expression = [
+        'List',
+        ['List', 1, 4],
+        ['List', 2, 5],
+        ['List', 3, 6],
+      ];
+      expect(ce.expr(['Norm', t, 2]).N().re).toBeCloseTo(9.508032000695724, 12);
+    });
+
+    it('a rank-deficient matrix', () => {
+      // [[1, 2], [2, 4]] has rank 1: its only nonzero singular value is 5.
+      expect(
+        ce
+          .expr(['Norm', ['List', ['List', 1, 2], ['List', 2, 4]], 2])
+          .evaluate()
+          .toString()
+      ).toBe('5');
+    });
+
+    it('a diagonal matrix is its largest modulus, and a row or column is a vector', () => {
+      expect(
+        ce
+          .expr(['Norm', ['List', ['List', 3, 0], ['List', 0, -4]], 2])
+          .evaluate()
+          .toString()
+      ).toBe('4');
+      expect(
+        ce
+          .expr(['Norm', ['List', ['List', 1, 2, 3]], 2])
+          .evaluate()
+          .toString()
+      ).toBe('sqrt(14)');
+      expect(
+        ce
+          .expr(['Norm', ['List', ['List', 1], ['List', 2], ['List', 2]], 2])
+          .evaluate()
+          .toString()
+      ).toBe('3');
+    });
+
+    it('a complex matrix uses the conjugate transpose', () => {
+      // [[1, i], [0, 1]]: Aᴴ A = [[1, i], [-i, 2]], eigenvalues (3 ± √5)/2,
+      // so the norm is the golden ratio.
+      const e = ce.expr([
+        'Norm',
+        ['List', ['List', 1, ['Complex', 0, 1]], ['List', 0, 1]],
+        2,
+      ]);
+      expect(e.N().re).toBeCloseTo((1 + Math.sqrt(5)) / 2, 12);
+      // A 3×3 complex matrix takes the numeric solver.
+      const c = ce.expr([
+        'Norm',
+        [
+          'List',
+          ['List', ['Complex', 1, 2], 1, 0],
+          ['List', 0, 1, ['Complex', 0, -1]],
+          ['List', 2, 0, 1],
+        ],
+        2,
+      ]);
+      expect(c.N().re).toBeCloseTo(3.1645278402341166, 12);
+    });
+
+    it('a 3×3 exact matrix stays symbolic under evaluate() and is numeric under N()', () => {
+      const B: Expression = [
+        'List',
+        ['List', 1, 2, 3],
+        ['List', 4, 5, 6],
+        ['List', 7, 8, 10],
+      ];
+      expect(ce.expr(['Norm', B, 2]).evaluate().operator).toBe('Norm');
+      expect(ce.expr(['Norm', B, 2]).N().re).toBeCloseTo(
+        17.412505166808597,
+        12
+      );
+      // An inexact entry makes evaluate() numeric too.
+      const Bf: Expression = [
+        'List',
+        ['List', 1.5, 2, 3],
+        ['List', 4, 5, 6],
+        ['List', 7, 8, 10],
+      ];
+      expect(ce.expr(['Norm', Bf, 2]).evaluate().re).toBeCloseTo(
+        17.462840961033514,
+        12
+      );
+    });
+
+    it('a symbolic entry stays unevaluated; infinity and NaN entries', () => {
+      expect(
+        ce
+          .expr(['Norm', ['List', ['List', 'xSpectral', 2], ['List', 3, 2]], 2])
+          .evaluate().operator
+      ).toBe('Norm');
+      expect(
+        ce
+          .expr([
+            'Norm',
+            ['List', ['List', 'PositiveInfinity', 2], ['List', 3, 2]],
+            2,
+          ])
+          .evaluate()
+          .toString()
+      ).toBe('+oo');
+      expect(
+        ce
+          .expr(['Norm', ['List', ['List', 'NaN', 2], ['List', 3, 2]], 2])
+          .evaluate()
+          .toString()
+      ).toBe('NaN');
+    });
+
+    it('entries far from 1 do not overflow or underflow under N()', () => {
+      // The expected values were checked against `np.linalg.norm(A, 2)`.
+      const cases: [Expression, number][] = [
+        [['List', ['List', 1e200, 1], ['List', 1, 1e200]], 1e200],
+        [['List', ['List', 1e-200, 0], ['List', 0, 1e-200]], 1e-200],
+        [
+          ['List', ['List', 1e-170, 2e-170], ['List', 3e-170, 4e-170]],
+          5.464985704219043e-170,
+        ],
+      ];
+      for (const [matrix, expected] of cases)
+        expect(ce.expr(['Norm', matrix, 2]).N().re / expected).toBeCloseTo(
+          1,
+          12
+        );
+    });
+
+    it('an exact entry below the machine range is not zero', () => {
+      // The machine value of 10^-400 is 0. The entry must still count as
+      // nonzero, and the largest entry must be found by an exact comparison.
+      const small = (k: number): Expression => ['Power', 10, k];
+      // Two nonzero entries in one row: not a diagonal matrix. The norm is
+      // √2 · 10^-400, not 10^-400.
+      const row = ce
+        .expr([
+          'Norm',
+          ['List', ['List', small(-400), small(-400)], ['List', 0, 0]],
+          2,
+        ])
+        .evaluate();
+      expect(
+        ce
+          .function('Power', [row, ce.number(2)])
+          .evaluate()
+          .isSame(ce.expr(['Multiply', 2, small(-800)]).evaluate())
+      ).toBe(true);
+      // A diagonal matrix: the largest entry wins in either position.
+      for (const diagonal of [
+        ['List', ['List', small(-401), 0], ['List', 0, small(-400)]],
+        ['List', ['List', small(-400), 0], ['List', 0, small(-401)]],
+      ] as Expression[])
+        expect(
+          ce
+            .expr(['Norm', diagonal, 2])
+            .evaluate()
+            .isSame(ce.expr(small(-400)).evaluate())
+        ).toBe(true);
+      // An exact radical below the machine range is compared exactly too:
+      // √2 · 10^-400 > 10^-400 wins in either position.
+      const radical: Expression = ['Multiply', ['Sqrt', 2], small(-400)];
+      for (const diagonal of [
+        ['List', ['List', radical, 0], ['List', 0, small(-400)]],
+        ['List', ['List', small(-400), 0], ['List', 0, radical]],
+      ] as Expression[])
+        expect(
+          ce
+            .expr(['Norm', diagonal, 2])
+            .evaluate()
+            .isSame(ce.expr(radical).evaluate())
+        ).toBe(true);
+    });
+
+    it('the order 2 of a vector is still the Euclidean norm', () => {
+      expect(
+        ce
+          .expr(['Norm', ['List', 3, 4], 2])
+          .evaluate()
+          .toString()
+      ).toBe('5');
+    });
+  });
+
   // Matrix L1 norm (max column sum)
   it('should compute the L1 norm of a matrix', () => {
     // [[1, 2], [3, 4]]
@@ -3580,5 +3796,92 @@ describe('Norm — the Frobenius norm at rank 3', () => {
     expect(eng.expr(['Norm', t]).N().re).toBeCloseTo(Math.sqrt(204), 10);
     // An operator norm has no rank-3 reading here and stays inert.
     expect(eng.expr(['Norm', t, 1]).evaluate().operator).toBe('Norm');
+  });
+});
+
+describe('Norm order 1 and order ∞ of exact entries outside the float64 range', () => {
+  // The largest line is chosen from machine sums, but the result is the
+  // EXACT sum of that line. Lines whose machine sums overflow, underflow to
+  // 0, or tie must then be ordered by their exact sums.
+  const eng = new ComputeEngine();
+  const big = (k: number, c = 1): Expression =>
+    c === 1 ? ['Power', 10, k] : ['Multiply', c, ['Power', 10, k]];
+  const diag = (a: Expression, b: Expression): Expression => [
+    'List',
+    ['List', a, 0],
+    ['List', 0, b],
+  ];
+  const cases: [string, Expression, Expression, string][] = [
+    ['overflow', big(400), big(400, 2), '2\\cdot10^{400}'],
+    ['a tie of the machine sums', big(20), ['Add', big(20), 1], '10^{20}+1'],
+    ['underflow', big(-400), big(-400, 2), '2\\cdot10^{-400}'],
+  ];
+  for (const [label, a, b, expected] of cases) {
+    const want = eng.box(eng.parse(expected).json).evaluate();
+    for (const order of [1, 'PositiveInfinity'] as const) {
+      it(`${label}, order ${order}, box route`, () => {
+        const result = eng.box(['Norm', diag(a, b), order]).evaluate();
+        expect(result.isSame(want)).toBe(true);
+      });
+    }
+    it(`${label}, order 1 and ∞, parse route`, () => {
+      const m = `\\begin{pmatrix}${eng.box(a).latex} & 0\\\\ 0 & ${eng.box(b).latex}\\end{pmatrix}`;
+      for (const sub of ['1', '\\infty']) {
+        const result = eng.parse(`\\Vert ${m}\\Vert_${sub}`).evaluate();
+        expect(result.isSame(want)).toBe(true);
+      }
+    });
+  }
+  it('a machine matrix still uses the machine sums', () => {
+    expect(
+      eng
+        .box(['Norm', diag(1.5, 2.5), 1])
+        .evaluate()
+        .re
+    ).toBe(2.5);
+    expect(
+      eng
+        .box(['Norm', ['List', ['List', 1.5, -3.25], ['List', 0.5, 1]], 'PositiveInfinity'])
+        .evaluate()
+        .re
+    ).toBe(4.75);
+  });
+});
+
+describe('Float kernels decline an entry a float64 cannot hold', () => {
+  // The exact `10^400` reads as +Infinity and a nonzero `10^-400` reads as 0
+  // in a machine matrix: the LU, QR and eigenvalue kernels would return NaN
+  // or a wrong answer. The application stays unevaluated instead.
+  const eng = new ComputeEngine();
+  const m2 = (x: Expression): Expression => [
+    'List',
+    ['List', x, 1],
+    ['List', 1, 1],
+  ];
+  for (const op of ['LUDecomposition', 'QRDecomposition']) {
+    for (const x of [
+      ['Power', 10, 400],
+      ['Power', 10, -400],
+    ] as Expression[]) {
+      it(`${op} of ${JSON.stringify(x)}`, () => {
+        expect(eng.box([op, m2(x)]).evaluate().operator).toBe(op);
+      });
+    }
+  }
+  it('Eigenvalues of a 3×3 matrix with a 10^400 entry', () => {
+    const m: Expression = [
+      'List',
+      ['List', ['Power', 10, 400], 1, 0],
+      ['List', 1, 1, 0],
+      ['List', 0, 0, 2],
+    ];
+    expect(eng.box(['Eigenvalues', m]).evaluate().operator).toBe(
+      'Eigenvalues'
+    );
+  });
+  it('a matrix in the float64 range still decomposes', () => {
+    expect(eng.box(['LUDecomposition', m2(2)]).evaluate().operator).not.toBe(
+      'LUDecomposition'
+    );
   });
 });

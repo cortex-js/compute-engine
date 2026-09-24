@@ -424,13 +424,9 @@ import {
 import {
   parseColor,
   rgbToOklch,
-  oklchToRgb,
   rgbToOklab,
   oklabToOklch,
   oklchToOklab,
-  rgbToHsl,
-  hslToRgb,
-  rgbToHsv,
   hsvToRgb,
   oklabDeltaE,
   apca,
@@ -440,6 +436,14 @@ import {
   DIVERGING_PALETTES,
 } from '@arnog/colors';
 import type { HexColor } from '@arnog/colors';
+import {
+  readColorChannels,
+  hslToRgb255,
+  oklabToRgb255,
+  oklchToRgb255,
+  rgb255ToHsl,
+  rgb255ToHsv,
+} from '../numerics/color-conversion.js';
 import {
   gamma,
   gammaln,
@@ -510,6 +514,7 @@ import {
   MAX_MATRIX_POWER_EXPONENT,
 } from '../numerics/value-scaled-caps.js';
 import { interval } from '../numerics/interval.js';
+import { spectralNorm } from '../numerics/linear-algebra.js';
 import { withRandomSeedFrame } from '../boxed-expression/utils.js';
 import {
   checkDeadline,
@@ -5162,22 +5167,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // dispatch (`compileStaticInnerProduct`).
     const inner = BaseCompiler.compileStaticInnerProduct(args, target);
     if (inner !== undefined) return inner;
+    // `compileStaticInnerProduct` declines a complex operand, and
+    // `_SYS.matmul` is real-only.
+    assertRealEntries('Dot', args);
     return `_SYS.matmul(${collArg('Dot', args[0], compile, 1)}, ${collArg('Dot', args[1], compile, 2)})`;
   },
   MatrixMultiply: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('MatrixMultiply: missing argument');
+    assertRealEntries('MatrixMultiply', args);
     return `_SYS.matmul(${collArg('MatrixMultiply', args[0], compile, 1)}, ${collArg('MatrixMultiply', args[1], compile, 2)})`;
   },
   Cross: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Cross: missing argument');
+    assertRealEntries('Cross', args);
     return `_SYS.cross(${collArg('Cross', args[0], compile, 1)}, ${collArg('Cross', args[1], compile, 2)})`;
   },
   // Norm accepts a scalar (absolute value) or a collection: 2-norm /
   // Frobenius by default, vector p-norm or matrix 1-/∞-operator norm with a
   // numeric second operand (`"Frobenius"` is the default; any other named
-  // norm fails closed).
+  // norm fails closed). The order 2 of a matrix is the spectral norm, which
+  // `_SYS.norm` computes at run time, so the order can be a run-time value.
   Norm: (args, compile, target) => {
     if (args[0] == null) throw new Error('Norm: missing argument');
     // A point with a broadcasting (non-tuple collection) component is one
@@ -5308,15 +5319,35 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.transpose(${collArg('Transpose', args[0], compile)})`;
   },
-  Determinant: (args, compile) =>
-    `_SYS.det(${collArg('Determinant', args[0], compile)})`,
+  Determinant: (args, compile) => {
+    assertRealEntries('Determinant', args);
+    return `_SYS.det(${collArg('Determinant', args[0], compile)})`;
+  },
   // A singular matrix yields NaN (the interpreter stays inert — no numeric
   // equivalent on a real target).
-  Inverse: (args, compile) =>
-    `_SYS.inv(${collArg('Inverse', args[0], compile)})`,
+  Inverse: (args, compile) => {
+    assertRealEntries('Inverse', args);
+    return `_SYS.inv(${collArg('Inverse', args[0], compile)})`;
+  },
   Trace: (args, compile) => {
     if (args.length > 1)
       throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
+    // The trace reads only the diagonal, so a literal matrix is checked on
+    // its diagonal entries: `Trace([[x, i], [1, 2]])` is real and compiles.
+    // Any other operand is checked whole.
+    const m = args[0];
+    const rows =
+      m !== undefined &&
+      isFunction(m, 'List') &&
+      m.ops.every((r) => isFunction(r, 'List'))
+        ? m.ops
+        : undefined;
+    if (rows !== undefined)
+      assertRealEntries(
+        'Trace',
+        rows.map((r, i) => (isFunction(r) ? r.ops[i] : undefined))
+      );
+    else assertRealEntries('Trace', args);
     return `_SYS.trace(${collArg('Trace', args[0], compile)})`;
   },
   // Transpose + element-wise complex conjugate. Explicit axes do not compile.
@@ -5373,13 +5404,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `MatrixPower: an exponent past ${MAX_MATRIX_POWER_EXPONENT} stays ` +
           'symbolic in the interpreter. Fail closed (D6).'
       );
+    assertRealEntries('MatrixPower', [args[0]]);
     return `_SYS.matpow(${collArg('MatrixPower', args[0], compile)}, ${compile(
       args[1]
     )})`;
   },
   // Reduced row echelon form (Gauss–Jordan).
-  RowReduce: (args, compile) =>
-    `_SYS.rref(${collArg('RowReduce', args[0], compile)})`,
+  RowReduce: (args, compile) => {
+    assertRealEntries('RowReduce', args);
+    return `_SYS.rref(${collArg('RowReduce', args[0], compile)})`;
+  },
   // CE `Rank` is the TENSOR rank — the number of axes (scalar 0, vector 1,
   // matrix 2, …), NOT the linear-algebra (row) rank. It is the nesting depth of
   // the compiled value, so it lowers for any operand (a scalar gives 0).
@@ -6938,6 +6972,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (vec-only); this JS handler works on plain arrays of any length.
   Distance: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Distance: need two points');
+    assertRealEntries('Distance', [a, b]);
     return `_SYS.distance(${compile(a)}, ${compile(b)})`;
   },
   // Block-scoped seeding. A prologue pushes a frame onto the SAME per-engine
@@ -7003,6 +7038,29 @@ const isComplexZero = (z: { re: number; im: number }): boolean =>
  */
 function complexModulus(z: ComplexResult): number {
   return z.im === 0 ? Math.abs(z.re) : Math.hypot(z.re, z.im);
+}
+
+/**
+ * `|v|` for one entry of a vector or a matrix that `_SYS.norm` reads: a
+ * plain number, or a `{re, im}` object, which is how compiled code holds a
+ * complex entry (`[x, i]` lowers to `[x, { re: 0, im: 1 }]`). A value with
+ * an infinite part has the magnitude `+∞`, as `_SYS.cabs` answers. Anything
+ * else — a nested array where a scalar was expected — is NaN.
+ */
+function entryModulus(v: unknown): number {
+  if (typeof v === 'number') return Math.abs(v);
+  if (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as ComplexResult).re === 'number' &&
+    typeof (v as ComplexResult).im === 'number'
+  ) {
+    const z = v as ComplexResult;
+    if (Math.abs(z.re) === Infinity || Math.abs(z.im) === Infinity)
+      return Infinity;
+    return complexModulus(z);
+  }
+  return NaN;
 }
 
 /**
@@ -7250,8 +7308,8 @@ function normalizeAlpha(a: number | undefined): number | undefined {
   return a;
 }
 
-/** Are all three color channels finite numbers? The interpreter's
- * `readColorExpr` (`library/colors.ts`) admits a color only when they are. */
+/** Are all three channels finite numbers? A conversion result whose channels
+ * are not is the non-finite color (`nonFiniteColor`). */
 function finiteChannels(c0: number, c1: number, c2: number): boolean {
   return Number.isFinite(c0) && Number.isFinite(c1) && Number.isFinite(c2);
 }
@@ -7307,7 +7365,8 @@ const COLOR_SHAPE =
   "'rgb', 'hsv', 'hsl', 'oklab' — or a CSS color string. A bare numeric array is a LIST, " +
   'not a color.';
 
-/** The compiled value of a color with a non-finite channel: the `NaN`
+/** The compiled value of a color whose channels `readColorChannels` refuses
+ * (a `NaN`, or an infinite value in a channel that is not clamped): the `NaN`
  * channels, the numeric projection of the interpreter's `incompatible-type`
  * error, in the space the answering helper names and keeping the alpha slot
  * when one was given. */
@@ -7362,7 +7421,8 @@ function asCompiledColor(input: unknown): CompiledColor {
  *
  * The conversion is chosen from the value's own space: a color already in
  * sRGB is scaled, never routed through OKLCh, so `AsRgb(AsRgb(c))` answers
- * `AsRgb(c)` channel for channel instead of taking a second gamut clip.
+ * `AsRgb(c)` channel for channel, without the rounding error of a round
+ * trip through OKLCh.
  */
 function toRgb255(input: unknown): {
   r: number;
@@ -7383,29 +7443,42 @@ function toRgb255(input: unknown): {
   }
   const c = asCompiledColor(input);
   const alpha = c.alpha;
-  // A non-finite color stays non-finite. The conversions below compute a hue
-  // from `max`/`min` comparisons, and every comparison with `NaN` is false,
-  // so without this test an HSV `NaN` color came back as a finite red.
-  if (!finiteChannels(c.c0, c.c1, c.c2))
+  // The channels are read by the rule the interpreter applies
+  // (`readColorChannels`): HSV/HSL saturation, value and lightness are
+  // clamped into [0, 1], and an infinite channel that is not clamped is
+  // refused. A value built by a constructor has already been read so, but a
+  // color value from a `vars` input has not. Channels the rule refuses make
+  // the non-finite color, and it stays non-finite: the conversions
+  // below compute a hue from `max`/`min` comparisons, and every comparison
+  // with `NaN` is false, so without this test an HSV `NaN` color came back
+  // as a finite red.
+  const channels = readColorChannels(c.space, c.c0, c.c1, c.c2);
+  if (channels === undefined)
     return alpha !== undefined
       ? { r: NaN, g: NaN, b: NaN, alpha }
       : { r: NaN, g: NaN, b: NaN };
+  const [c0, c1, c2] = channels;
+  // The conversions do not round: the channels stay on the 0-255 scale as
+  // real numbers, so `AsRgb(Hsv(30, 1, 1))` has a green channel of 0.5, not
+  // 127/255 (`numerics/color-conversion.ts`). They do no gamut mapping
+  // either: an OKLCh color outside the sRGB gamut converts to extended sRGB
+  // channels, below 0 or above 255.
   let rgb: { r: number; g: number; b: number };
   switch (c.space) {
     case 'rgb':
-      rgb = { r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255 };
+      rgb = { r: c0 * 255, g: c1 * 255, b: c2 * 255 };
       break;
     case 'hsv':
-      rgb = hsvToRgb(c.c0, c.c1, c.c2);
+      rgb = hsvToRgb(c0, c1, c2);
       break;
     case 'hsl':
-      rgb = hslToRgb(c.c0, c.c1, c.c2);
+      rgb = hslToRgb255(c0, c1, c2);
       break;
     case 'oklab':
-      rgb = oklchToRgb(oklabToOklch({ L: c.c0, a: c.c1, b: c.c2 }));
+      rgb = oklabToRgb255({ L: c0, a: c1, b: c2 });
       break;
     case 'oklch':
-      rgb = oklchToRgb({ L: c.c0, C: c.c1, H: c.c2 });
+      rgb = oklchToRgb255({ L: c0, C: c1, H: c2 });
       break;
     default:
       // Unreachable: `asCompiledColor` admits only the five spellings, each
@@ -7432,24 +7505,29 @@ function toOklch(input: unknown): {
 } {
   const c = asCompiledColor(input);
   const alpha = c.alpha;
-  if (!finiteChannels(c.c0, c.c1, c.c2))
-    return { L: NaN, C: NaN, H: NaN, alpha };
+  // The channels are read by `readColorChannels`, the interpreter's rule:
+  // HSV/HSL saturation, value and lightness are clamped into [0, 1], and a
+  // `NaN` or an infinite channel that is not clamped makes the `NaN` color. A color value from a `vars`
+  // input has not been through a constructor, so the rule is applied here.
+  const channels = readColorChannels(c.space, c.c0, c.c1, c.c2);
+  if (channels === undefined) return { L: NaN, C: NaN, H: NaN, alpha };
+  const [c0, c1, c2] = channels;
   let oklch: { L: number; C: number; H: number };
   switch (c.space) {
     case 'oklab':
-      oklch = oklabToOklch({ L: c.c0, a: c.c1, b: c.c2 });
+      oklch = oklabToOklch({ L: c0, a: c1, b: c2 });
       break;
     case 'rgb':
-      oklch = rgbToOklch({ r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255 });
+      oklch = rgbToOklch({ r: c0 * 255, g: c1 * 255, b: c2 * 255 });
       break;
     case 'hsv':
-      oklch = rgbToOklch(hsvToRgb(c.c0, c.c1, c.c2));
+      oklch = rgbToOklch(hsvToRgb(c0, c1, c2));
       break;
     case 'hsl':
-      oklch = rgbToOklch(hslToRgb(c.c0, c.c1, c.c2));
+      oklch = rgbToOklch(hslToRgb255(c0, c1, c2));
       break;
     case 'oklch':
-      oklch = { L: c.c0, C: c.c1, H: c.c2 };
+      oklch = { L: c0, C: c1, H: c2 };
       break;
     default:
       // Unreachable: `asCompiledColor` admits only the five spellings, each
@@ -7585,7 +7663,7 @@ const colorHelpers = {
         return `rgb(${r} ${g} ${b})`;
       }
       case 'hsl': {
-        const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+        const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
         const h = Math.round(hsl.h * 10) / 10;
         const s = Math.round(hsl.s * 1000) / 10;
         const l = Math.round(hsl.l * 1000) / 10;
@@ -7688,12 +7766,12 @@ const colorHelpers = {
         result = [rgb.r / 255, rgb.g / 255, rgb.b / 255];
         break;
       case 'hsl': {
-        const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+        const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
         result = [hsl.h, hsl.s, hsl.l];
         break;
       }
       case 'hsv': {
-        const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+        const hsv = rgb255ToHsv(rgb.r, rgb.g, rgb.b);
         result = [hsv.h, hsv.s, hsv.v];
         break;
       }
@@ -7841,13 +7919,16 @@ const colorHelpers = {
     const tag = name === 'lab' ? 'oklab' : name;
     if (!COMPILED_COLOR_SPACES.has(tag))
       throw new Error(`Unknown color space: ${space}`);
-    if (!finiteChannels(c0, c1, c2))
+    // The channels are read by the rule of the named space, as the
+    // interpreter reads them (`readColorChannels`).
+    const channels = readColorChannels(tag as CompiledColorSpace, c0, c1, c2);
+    if (channels === undefined)
       return nonFiniteColor(alpha, tag as CompiledColorSpace);
     return mkColor(
       tag as CompiledColorSpace,
-      c0,
-      c1,
-      c2,
+      channels[0],
+      channels[1],
+      channels[2],
       normalizeAlpha(alpha)
     );
   },
@@ -7856,42 +7937,56 @@ const colorHelpers = {
   // Color constructors. Each accepts components in its colorspace's natural
   // units and returns a color value in the canonical OKLCh space.
   //
-  // A NON-FINITE channel yields the `NaN` color. The interpreter's
-  // `readColorExpr` (`library/colors.ts`) rejects an infinite or `NaN`
-  // channel with `incompatible-type`, and `NaN` is that error's projection
-  // on a numeric target. An infinite value or saturation used to be CLAMPED
-  // into `[0, 1]` by the sRGB conversion, so `Hsv(90, 1, ~oo)` compiled to
-  // the same finite color as `Hsv(90, 1, 1)` while the interpreter refused
-  // it (Tycho item 243). A finite out-of-range channel still clamps, on
-  // both routes. Alpha is separate: a non-finite alpha reads as opaque on
-  // both routes (`normalizeAlpha`).
+  // The channels are read by `readColorChannels`, the rule the
+  // interpreter's `readColorExpr` (`library/colors.ts`) also applies, so the
+  // two routes admit and refuse the same colors:
+  //
+  // - `Rgb` channels are EXTENDED sRGB. A finite channel outside [0, 1] is a
+  //   color outside the sRGB gamut and is kept: no clamp, and no gamut
+  //   mapping in any conversion. The sRGB transfer function is
+  //   sign-extended, so a negative channel converts to OKLCh and back.
+  // - HSV saturation and value and HSL saturation and lightness are clamped
+  //   into [0, 1], an infinite one included (+Infinity reads as 1 and
+  //   -Infinity as 0): HSV and HSL describe only the sRGB gamut. So
+  //   `Hsv(90, 1, +oo)` is the color of `Hsv(90, 1, 1)`.
+  // - A `NaN` channel, or an infinite channel that is not clamped (an sRGB
+  //   channel, a hue, an OKLab/OKLCh channel), yields the `NaN` color, the
+  //   projection on a numeric target of the interpreter's
+  //   `incompatible-type` error.
+  //
+  // Alpha is separate: a non-finite alpha reads as opaque on both routes
+  // (`normalizeAlpha`).
   // -----------------------------------------------------------------------
   rgb(r: number, g: number, b: number, alpha?: number): CompiledColor {
-    if (!finiteChannels(r, g, b)) return nonFiniteColor(alpha);
+    const ch = readColorChannels('rgb', r, g, b);
+    if (ch === undefined) return nonFiniteColor(alpha);
     // Inputs are 0-1 sRGB; `rgbToOklch` expects 0-255 channels.
-    const c = rgbToOklch({ r: r * 255, g: g * 255, b: b * 255 });
+    const c = rgbToOklch({ r: ch[0] * 255, g: ch[1] * 255, b: ch[2] * 255 });
     return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
   hsv(h: number, s: number, v: number, alpha?: number): CompiledColor {
-    if (!finiteChannels(h, s, v)) return nonFiniteColor(alpha);
-    const rgb = hsvToRgb(h, s, v);
+    const ch = readColorChannels('hsv', h, s, v);
+    if (ch === undefined) return nonFiniteColor(alpha);
+    const rgb = hsvToRgb(ch[0], ch[1], ch[2]);
     const c = rgbToOklch(rgb);
     return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
   hsl(h: number, s: number, l: number, alpha?: number): CompiledColor {
-    if (!finiteChannels(h, s, l)) return nonFiniteColor(alpha);
-    const rgb = hslToRgb(h, s, l);
-    const c = rgbToOklch({ r: rgb.r, g: rgb.g, b: rgb.b });
+    const ch = readColorChannels('hsl', h, s, l);
+    if (ch === undefined) return nonFiniteColor(alpha);
+    const c = rgbToOklch(hslToRgb255(ch[0], ch[1], ch[2]));
     return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
   oklab(L: number, a: number, b: number, alpha?: number): CompiledColor {
-    if (!finiteChannels(L, a, b)) return nonFiniteColor(alpha);
-    const c = oklabToOklch({ L, a, b });
+    const ch = readColorChannels('oklab', L, a, b);
+    if (ch === undefined) return nonFiniteColor(alpha);
+    const c = oklabToOklch({ L: ch[0], a: ch[1], b: ch[2] });
     return mkColor('oklch', c.L, c.C, c.H, normalizeAlpha(alpha));
   },
   oklch(L: number, C: number, H: number, alpha?: number): CompiledColor {
-    if (!finiteChannels(L, C, H)) return nonFiniteColor(alpha);
-    return mkColor('oklch', L, C, H, normalizeAlpha(alpha));
+    const ch = readColorChannels('oklch', L, C, H);
+    if (ch === undefined) return nonFiniteColor(alpha);
+    return mkColor('oklch', ch[0], ch[1], ch[2], normalizeAlpha(alpha));
   },
 
   /**
@@ -7936,9 +8031,9 @@ const colorHelpers = {
     const rgb = toRgb255(input);
     return mkColor('rgb', rgb.r / 255, rgb.g / 255, rgb.b / 255, rgb.alpha);
   },
-  // `rgbToHsv` and `rgbToHsl` compute the hue from `max`/`min` comparisons,
-  // and every comparison with `NaN` is false, so a non-finite color came out
-  // of `asHsv` as `[0, NaN, NaN]` — a hue of zero, which is red. The four
+  // `rgb255ToHsv` and `rgb255ToHsl` compute the hue from `max`/`min`
+  // comparisons, and every comparison with `NaN` is false, so a non-finite
+  // color came out of `asHsv` with a hue of zero, which is red. The four
   // other conversions answer the `NaN` triple for the same input, and that
   // triple is what the interpreter's `incompatible-type` rejection projects
   // to on this target, so the guard is explicit here rather than left to the
@@ -7947,14 +8042,14 @@ const colorHelpers = {
     const rgb = toRgb255(input);
     if (!finiteChannels(rgb.r, rgb.g, rgb.b))
       return nonFiniteColor(rgb.alpha, 'hsv');
-    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+    const hsv = rgb255ToHsv(rgb.r, rgb.g, rgb.b);
     return mkColor('hsv', hsv.h, hsv.s, hsv.v, rgb.alpha);
   },
   asHsl(input: unknown): CompiledColor {
     const rgb = toRgb255(input);
     if (!finiteChannels(rgb.r, rgb.g, rgb.b))
       return nonFiniteColor(rgb.alpha, 'hsl');
-    const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
     return mkColor('hsl', hsl.h, hsl.s, hsl.l, rgb.alpha);
   },
   asOklab(input: unknown): CompiledColor {
@@ -9920,8 +10015,10 @@ const SYS_HELPERS = {
   // list (the `list<tuple<…>> | tuple<…>` union a point-consuming document
   // function declares): the shape is only known at run time, so dispatch on
   // it here the way `evaluate()` dispatches on the operand's kind — a number
-  // is `Math.abs`, a complex object its modulus, an array of numbers a POINT
-  // (its norm), and an array of arrays a point list (one norm per point). An
+  // is `Math.abs`, a complex object its modulus, an array of scalars a POINT
+  // (its norm; a scalar is a number or a `{re, im}` object, whose modulus
+  // `_SYS.norm` reads), and an array of arrays a point list (one norm per
+  // point). An
   // EMPTY array is an empty point LIST — the interpreter answers the empty
   // list for it, not the norm of no components (which is 0).
   //
@@ -9939,7 +10036,14 @@ const SYS_HELPERS = {
     if (typeof x === 'number') return Math.abs(x);
     if (Array.isArray(x)) {
       if (x.length === 0) return [];
-      if (x.every((v) => typeof v === 'number')) return SYS_HELPERS.norm(x);
+      if (
+        x.every(
+          (v) =>
+            typeof v === 'number' ||
+            (typeof v === 'object' && v !== null && !Array.isArray(v))
+        )
+      )
+        return SYS_HELPERS.norm(x);
       return x.map((v) => SYS_HELPERS.absShape(v));
     }
     if (
@@ -9952,14 +10056,21 @@ const SYS_HELPERS = {
   },
   // Norm: |x| for a scalar; the 2-norm (Frobenius for a matrix) by default.
   // With an explicit p: for a vector the p-norm (Σ|xᵢ|^p)^(1/p), p =
-  // Infinity → max |xᵢ|; for a matrix the operator norms the interpreter
-  // implements — p = 1 → max column abs sum, p = Infinity → max row abs
-  // sum. Other matrix p-norms (e.g. the spectral 2-norm, which needs an
-  // SVD) yield NaN.
+  // Infinity → max |xᵢ|; for a matrix p = 1 → max column abs sum, p = 2 →
+  // the spectral norm (the largest singular value, from `spectralNorm()`),
+  // p = Infinity → max row abs sum. Every other matrix p yields NaN. Above
+  // rank 2 the order 2 is the Frobenius norm, as in the interpreter: the
+  // spectral norm is a matrix norm only.
+  //
+  // Every order except the matrix order 2 reads an entry only through its
+  // magnitude |xᵢ| (`entryModulus`), so a complex entry — a `{re, im}`
+  // object — takes part like the interpreter's `Abs` of it: `‖[2, i]‖` is
+  // √5. The matrix order 2 reads the real and imaginary parts of each entry. Before, the
+  // arithmetic below met the object itself and every order answered NaN.
   norm: (x: unknown, p?: number): number => {
     if (typeof x === 'number') return Math.abs(x);
-    if (!Array.isArray(x)) return NaN;
-    const flat = x.flat(Infinity) as number[];
+    if (!Array.isArray(x)) return entryModulus(x);
+    const flat = (x.flat(Infinity) as unknown[]).map(entryModulus);
     // An infinite entry makes the norm `+∞` whatever the other entries are, a
     // NaN entry included: `|±∞|` is `+∞`, and it dominates every sum and every
     // maximum below. The test must be explicit because the accumulators cannot
@@ -9974,17 +10085,60 @@ const SYS_HELPERS = {
     const hasInfiniteEntry = flat.some(
       (v) => v === Infinity || v === -Infinity
     );
-    if (Array.isArray(x[0]) && p !== undefined) {
-      const m = x as number[][];
-      // The matrix orders below are the max column sum and the max row sum;
-      // any other one is NaN whatever the entries are.
-      if (p !== 1 && p !== Infinity) return NaN;
+    // A rank ≥ 3 tensor with the order 2 takes the vector branch below: the
+    // entry-wise sum of squares over every cell, the Frobenius norm.
+    if (
+      Array.isArray(x[0]) &&
+      p !== undefined &&
+      !(p === 2 && Array.isArray(x[0][0]))
+    ) {
+      const m = x as unknown[][];
+      // The matrix orders below are the max column sum, the spectral norm
+      // and the max row sum; any other one is NaN whatever the entries are.
+      if (p !== 1 && p !== 2 && p !== Infinity) return NaN;
       if (hasInfiniteEntry) return Infinity;
+      // The spectral norm needs the real and imaginary parts of each entry,
+      // not only its modulus. A NaN entry makes the norm NaN, as in the
+      // interpreter (`spectralMatrixNorm`, `library/linear-algebra.ts`); the
+      // infinite entries are already decided above. A ragged matrix, or an
+      // entry that is not a number, has no spectral norm, so it is NaN too.
+      if (p === 2) {
+        const n = m[0].length;
+        const re: number[][] = [];
+        const im: number[][] = [];
+        for (const row of m) {
+          if (!Array.isArray(row) || row.length !== n) return NaN;
+          const rowRe: number[] = [];
+          const rowIm: number[] = [];
+          for (const v of row) {
+            let a: number;
+            let b: number;
+            if (typeof v === 'number') {
+              a = v;
+              b = 0;
+            } else if (
+              typeof v === 'object' &&
+              v !== null &&
+              typeof (v as ComplexResult).re === 'number' &&
+              typeof (v as ComplexResult).im === 'number'
+            ) {
+              a = (v as ComplexResult).re;
+              b = (v as ComplexResult).im;
+            } else return NaN;
+            if (Number.isNaN(a) || Number.isNaN(b)) return NaN;
+            rowRe.push(a);
+            rowIm.push(b);
+          }
+          re.push(rowRe);
+          im.push(rowIm);
+        }
+        return spectralNorm(re, im);
+      }
       if (p === 1) {
         let best = 0;
         for (let j = 0; j < m[0].length; j++) {
           let s = 0;
-          for (let i = 0; i < m.length; i++) s += Math.abs(m[i][j]);
+          for (let i = 0; i < m.length; i++) s += entryModulus(m[i][j]);
           best = Math.max(best, s);
         }
         return best;
@@ -9993,7 +10147,7 @@ const SYS_HELPERS = {
         let best = 0;
         for (const row of m) {
           let s = 0;
-          for (const v of row) s += Math.abs(v);
+          for (const v of row) s += entryModulus(v);
           best = Math.max(best, s);
         }
         return best;
@@ -12809,6 +12963,26 @@ function emitLazyStream(
   if (op === 'Rest')
     return `_SYS.dropIter(${emitLazyStream(source, compile)}, 1)`;
   throw new Error(`${op}: not a lazily-compilable infinite collection`);
+}
+
+/**
+ * Fail closed (D6) when a linear-algebra operand may hold a complex entry.
+ * The `_SYS` helpers behind `Dot`, `MatrixMultiply`, `Cross`, `Determinant`,
+ * `Inverse`, `Trace`, `MatrixPower`, `RowReduce` and `Distance` do real
+ * arithmetic on the entries, and a `{re, im}` entry makes them answer NaN
+ * (or throw) where the interpreter answers a complex value: `Dot([2, i],
+ * [1, i])` is `1` there. The interpreter evaluates such an application.
+ */
+function assertRealEntries(
+  kind: string,
+  args: ReadonlyArray<Expression | undefined>
+): void {
+  for (const arg of args)
+    if (arg !== undefined && BaseCompiler.mayHoldComplexElement(arg))
+      throw new Error(
+        `${kind}: the target's lowering does real arithmetic on the entries ` +
+          `and cannot represent a complex entry. Fail closed (D6).`
+      );
 }
 
 /**

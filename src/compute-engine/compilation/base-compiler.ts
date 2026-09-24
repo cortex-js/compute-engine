@@ -1569,6 +1569,24 @@ export function statementBodyHead(
 type ElementLane = boolean | 'mixed' | undefined;
 
 /**
+ * A user function's body with each argument of one call replaced by a
+ * stand-in symbol, built by `BaseCompiler.userCallStandIns`. The stand-ins
+ * are named apart from every name of the body and of the call site, so the
+ * body can be analyzed with the caller's bindings hidden while each argument
+ * keeps the lane it has at the call site.
+ */
+type UserCallStandIns = {
+  /** The body with the stand-ins substituted for the parameters. */
+  body: Expression;
+  /** Stand-ins for a value that is a plain number at the call site. */
+  real: string[];
+  /** Stand-ins for a scalar that is a `{re, im}` object at the call site. */
+  complex: string[];
+  /** Stand-ins described by their static type only (not a scalar). */
+  typed: string[];
+};
+
+/**
  * One entry of `BaseCompiler._unrolledIndexValues`: the integer value each
  * index of an unrolled `Sum`/`Product` term holds (or its loop lower bound),
  * the names an inner binder
@@ -3616,11 +3634,18 @@ export class BaseCompiler {
    * number (`Math.abs(0.5 * {re,im} + -1)`, `NaN` everywhere: item 190's
    * exact witness).
    *
-   * Without the opt-in this answers only when some lane IS complex, and
-   * declines (`undefined`) otherwise: the default carve-out keeps a merely
-   * promotable body on the real kernel, so for every other default-path call
-   * the ordinary type-based answer already agrees with the emission, and the
-   * decline keeps that emission byte-identical.
+   * Without promotion (the `strict` discipline, which the shader targets
+   * always use) this answers only `true` — when the body is complex without
+   * any promotion — and declines (`undefined`) otherwise. A body such as
+   * `h(s) := s + i` is complex under every discipline, but a call `h(t)`
+   * of a function declared `(unknown) -> unknown` types `number`. Before
+   * this answer, consumers read that call as a real number: `1 - h(t)`
+   * emitted `-_fn_h(t) + 1` (`NaN` in JavaScript, where `_fn_h` returns
+   * `{re, im}`), and a shader point `(t, h(t))` emitted
+   * `vec2(t, _fn_h(t))`, which kept only the real part. A `false` verdict
+   * is still a decline, so a merely promotable body stays on the real
+   * kernel and every other call keeps its type-based answer and its
+   * byte-identical emission.
    *
    * The parameters are shielded during the body analysis, exactly as for a
    * `Function` literal operand (`binderParts`) — with the complex-lane ones
@@ -3632,7 +3657,11 @@ export class BaseCompiler {
     visited: Set<string>
   ): boolean | undefined {
     const op = expr.operator;
-    if (typeof op !== 'string' || visited.has(op)) return undefined;
+    if (typeof op !== 'string') return undefined;
+    if (visited.has(op)) {
+      BaseCompiler._userCallRecursionDeclines += 1;
+      return undefined;
+    }
     const literal = BaseCompiler.userFunctionLiteral(expr.engine, op);
     if (literal === undefined) return undefined;
     const body = literal.ops[0];
@@ -3654,15 +3683,20 @@ export class BaseCompiler {
     // collection (`[√(t−1), 1]` types `vector<number^2>`), while
     // `isPossiblyCollectionTyped` catches the merely POSSIBLE ones — a
     // `broadcastable<T>` or top-typed body, for which the former is false.
-    if (body.type.matches('collection<any>') || isPossiblyCollectionTyped(body))
-      return undefined;
+    // The test is applied to the body that is analyzed: the generic body
+    // here, or the body with a written point substituted below.
+    const mayBeCollection = (e: Expression): boolean =>
+      e.type.matches('collection<any>') || isPossiblyCollectionTyped(e);
+    const bodyMayBeCollection = mayBeCollection(body);
     // The parameters are shielded — bound as declared, never read through
     // the engine — the same binding the emitted definition compiles under,
     // so this verdict describes the value the call actually returns.
-    // The body is looked through only under a PROMOTING discipline: a radical
-    // inside `a(t) := √(t−1)` promotes THERE, and the call's wide result type
-    // would otherwise report it real (item 190's witness). Under strict
-    // shapes without promotion the type-based answer below is exact.
+    // Under a PROMOTING discipline the body's verdict is the answer in both
+    // directions: a radical inside `a(t) := √(t−1)` promotes THERE, and the
+    // call's wide result type would otherwise report it real (item 190's
+    // witness). Without promotion only a `true` verdict is used
+    // (`onlyComplex`): a body that is complex without promotion returns a
+    // complex value whatever the call's declared type says.
     // A written-out point argument with a complex-shaped coordinate never
     // reaches the emitted definition, which reads coordinates as real
     // numbers: the call is inlined instead (`tryCompileUserFunction`), and
@@ -3674,29 +3708,140 @@ export class BaseCompiler {
     // (`"[object Object]1"`), and a blanket complex reading of
     // `1 + h((x, i·x))` with `h(P) = P.x` read `.re` off the plain number
     // `x` (`NaN`); the substituted verdict gets both right.
+    //
+    // A written point argument also narrows a parameter the definition
+    // leaves broad. With `p(P) := P.x + k`, `P` types
+    // `collection<any> | tuple`, so the generic body is possibly a
+    // collection and is not classifiable. But the call `p((x, 1))` is
+    // emitted through a call-shape specialization whose `P` is the point
+    // (`trySpecializedUserCall`), and that body is a scalar: with
+    // a global `k := i` it returns `{re, im}`. The analysis must read the
+    // same specialized body, so the point is substituted there too. Before,
+    // the call was read as the real number its `unknown` result type
+    // suggests, and `p((x, 1)) + 1` emitted `_fn_p…(…) + 1`, which the
+    // JavaScript runtime computed as the string `"[object Object]1"`.
     let analyzed: Expression = body;
-    if (BaseCompiler.writtenPointWithComplexCoordinateAt(expr.ops) >= 0) {
-      const substitution: Record<string, Expression> = {};
-      literal.ops.slice(1).forEach((p, i) => {
-        const name = functionLiteralParameterName(p);
-        const arg = expr.ops[i];
-        if (name !== undefined && arg !== undefined)
-          substitution[name] = BaseCompiler.throughTyped(arg);
-      });
-      analyzed = body.subs(substitution);
-    } else if (!BaseCompiler.promotionActive) return undefined;
-    const mask = BaseCompiler.userCallMask(literal);
+    let onlyComplex = false;
+    let standIns: UserCallStandIns | undefined;
+    const complexPoint =
+      BaseCompiler.writtenPointWithComplexCoordinateAt(expr.ops) >= 0;
+    if (
+      complexPoint ||
+      (bodyMayBeCollection &&
+        expr.ops.some((a) => BaseCompiler.isWrittenPointArg(a)))
+    ) {
+      standIns = BaseCompiler.userCallStandIns(literal, expr.ops);
+      if (standIns === undefined) return undefined;
+      analyzed = standIns.body;
+      if (mayBeCollection(analyzed)) return undefined;
+      // A real-coordinate point reaches the specialized definition, not an
+      // inlined body. Its verdict is used under the same rule as the plain
+      // body's.
+      if (!complexPoint && !BaseCompiler.promotionActive) onlyComplex = true;
+    } else if (bodyMayBeCollection) return undefined;
+    else if (!BaseCompiler.promotionActive) onlyComplex = true;
+    // Without promotion the analysis of the plain body reads only the body
+    // and the function's own parameter mask, never the call site, so one
+    // verdict per function serves every call of it in this compilation.
+    // Without this memo, each call site analyzed the body again, and a graph
+    // of functions that each call the previous one twice cost much more. A
+    // body with the arguments substituted depends on the call site, so its
+    // verdict is not stored.
+    const memo = BaseCompiler._strictUserCallVerdicts;
+    const memoize =
+      onlyComplex && standIns === undefined && BaseCompiler._compileDepth > 0;
+    if (memoize) {
+      const known = memo.get(op);
+      if (known !== undefined) return known ? true : undefined;
+    }
+    const parameterMask = BaseCompiler.userCallMask(literal);
+    const mask =
+      standIns === undefined
+        ? parameterMask
+        : {
+            real: [...parameterMask.real, ...standIns.real],
+            shielded: [
+              ...parameterMask.shielded,
+              ...standIns.real,
+              ...standIns.complex,
+              ...standIns.typed,
+            ],
+            complex: [...parameterMask.complex, ...standIns.complex],
+          };
     const nextVisited = new Set(visited);
     nextVisited.add(op);
     const prevVisited = BaseCompiler._userCallVisited;
     BaseCompiler._userCallVisited = nextVisited;
+    const declinesBefore = BaseCompiler._userCallRecursionDeclines;
     try {
-      return BaseCompiler.withBinderMask(mask, () =>
-        BaseCompiler.isComplexValued(analyzed)
-      );
+      const analyze = () =>
+        BaseCompiler.withBinderMask(mask, () =>
+          BaseCompiler.isComplexValued(analyzed)
+        );
+      // The emitted definition is a module-level function, so no binding of
+      // the CALLER is visible in its body: the body is analyzed with every
+      // caller binding hidden (`withCallerBindingsHidden`). Otherwise, with a
+      // global `k := i` and `h(s) := s + k` called inside `Σ_{k=1}^{3} h(x)`,
+      // the body's `k` was read as the real loop index, the call was read as
+      // real, and the JavaScript sum concatenated the `{re, im}` objects as
+      // strings. A substituted body is analyzed the same way: its arguments
+      // are stand-in symbols whose lanes were decided in the caller's
+      // context (`userCallStandIns`), so they need no caller binding.
+      const verdict = BaseCompiler.withCallerBindingsHidden(analyze);
+      // A verdict reached while a recursive call was declined depends on
+      // which functions were already being analyzed, so it is not stored.
+      if (memoize && BaseCompiler._userCallRecursionDeclines === declinesBefore)
+        memo.set(op, verdict);
+      return onlyComplex && !verdict ? undefined : verdict;
     } finally {
       BaseCompiler._userCallVisited = prevVisited;
     }
+  }
+
+  /**
+   * Run `fn` — an analysis of a user function's BODY — with every binding of
+   * the call site hidden.
+   *
+   * The emitted `_fn_…` definition is a module-level function, so inside its
+   * body a name refers to the function's own parameters or to the engine,
+   * never to a name the caller binds. The analysis must read the body the
+   * same way, or its verdict describes a different value than the one the
+   * definition returns. The caller's bindings live in four places, and all
+   * four are hidden for the duration:
+   * - the `Block` local frames (`_localComplex`, `_localVector`), replaced by
+   *   an empty frame;
+   * - the compile context's bound variables (`_boundVarsCtx`): a loop index,
+   *   a lambda parameter, a broadcast element;
+   * - the names shielded by an enclosing binder under analysis
+   *   (`_binderShield`): a `Sum`/`Product` index, a `Function` parameter;
+   * - the index values of the unrolled `Sum`/`Product` terms in progress
+   *   (`_unrolledIndexValues`).
+   *
+   * The analysis runs in a fresh complexness memo layer (pushed by
+   * `withLocalShapeFrame`), so no answer computed here reaches the caller's
+   * context, and no answer of the caller's context is reused here.
+   */
+  private static withCallerBindingsHidden<T>(fn: () => T): T {
+    return BaseCompiler.withLocalShapeFrame(
+      new Map(),
+      new Map(),
+      () => {
+        const savedBoundCtx = BaseCompiler._boundVarsCtx;
+        const savedShield = BaseCompiler._binderShield;
+        const savedIndexValues = BaseCompiler._unrolledIndexValues;
+        BaseCompiler._boundVarsCtx = undefined;
+        BaseCompiler._binderShield = [];
+        BaseCompiler._unrolledIndexValues = [];
+        try {
+          return fn();
+        } finally {
+          BaseCompiler._boundVarsCtx = savedBoundCtx;
+          BaseCompiler._binderShield = savedShield;
+          BaseCompiler._unrolledIndexValues = savedIndexValues;
+        }
+      },
+      true
+    );
   }
 
   /**
@@ -3721,6 +3866,23 @@ export class BaseCompiler {
 
   /** Heads already being looked through by `isComplexValuedUserCall`. */
   private static _userCallVisited: Set<string> = new Set();
+
+  /**
+   * How many times a look-through into a user function body declined because
+   * its head was already being analyzed (recursion). Every site that tests
+   * `_userCallVisited` increments it: `isComplexValuedUserCall`,
+   * `withCollectionElements`, `elementsRealByConstruction`, and the
+   * `Apply(Derivative(f), …)` arm of `isComplexValued`. Compared
+   * before and after an analysis to know whether its verdict may be stored.
+   */
+  private static _userCallRecursionDeclines = 0;
+
+  /**
+   * The body verdict of `isComplexValuedUserCall` without promotion, per
+   * function name. Cleared with the complexness memo
+   * (`_invalidateComplexMemo`), so it never outlives one compilation.
+   */
+  private static _strictUserCallVerdicts = new Map<string, boolean>();
 
   /**
    * The VALUE expression of a user function's stored body, with the wrappers
@@ -3800,8 +3962,11 @@ export class BaseCompiler {
       return fn(collection.ops);
     if (!isFunction(collection)) return undefined;
     const op = collection.operator;
-    if (typeof op !== 'string' || BaseCompiler._userCallVisited.has(op))
+    if (typeof op !== 'string') return undefined;
+    if (BaseCompiler._userCallVisited.has(op)) {
+      BaseCompiler._userCallRecursionDeclines += 1;
       return undefined;
+    }
     const literal = BaseCompiler.userFunctionLiteral(collection.engine, op);
     if (literal === undefined) return undefined;
     const body = BaseCompiler.collectionConstructorBody(literal.ops[0]);
@@ -3815,7 +3980,11 @@ export class BaseCompiler {
     const prevVisited = BaseCompiler._userCallVisited;
     BaseCompiler._userCallVisited = nextVisited;
     try {
-      return BaseCompiler.withBinderMask(mask, () => fn(body.ops));
+      // The body is analyzed as the emitted module-level definition reads
+      // it, without the call site's bindings (see `withCallerBindingsHidden`).
+      return BaseCompiler.withCallerBindingsHidden(() =>
+        BaseCompiler.withBinderMask(mask, () => fn(body.ops))
+      );
     } finally {
       BaseCompiler._userCallVisited = prevVisited;
     }
@@ -4039,6 +4208,23 @@ export class BaseCompiler {
       index.type.matches('collection<any>') ||
       index.isCollection === true ||
       isPossiblyCollectionTyped(index)
+    );
+  }
+
+  /**
+   * Whether the collection operand `a` may hold a `{re, im}` object at some
+   * position at run time: its type has a complex leaf (`list<complex>`,
+   * `matrix<complex>`), an element that can be identified is complex-valued
+   * (`[x, i]`, a user function whose body is `[s, i]`), or the operand as a
+   * whole reads complex. A target helper that does real arithmetic on the
+   * entries (`_SYS.matmul`, `_SYS.det`) must not receive such an operand:
+   * it would answer NaN behind `success: true`.
+   */
+  static mayHoldComplexElement(a: Expression): boolean {
+    return (
+      BaseCompiler.typeHasComplexLeaf(compilationType(a)) ||
+      BaseCompiler.hasAnyComplexElement(a) ||
+      BaseCompiler.isComplexValued(a)
     );
   }
 
@@ -11565,7 +11751,9 @@ export class BaseCompiler {
     // the element-level analysis; this arm differs only in asking about the
     // body as a whole, because a body such as `[-y, x] / (x² + y²)` computes
     // its collection rather than writing one out.
-    if (typeof h === 'string' && !BaseCompiler._userCallVisited.has(h)) {
+    if (typeof h === 'string' && BaseCompiler._userCallVisited.has(h))
+      BaseCompiler._userCallRecursionDeclines += 1;
+    else if (typeof h === 'string') {
       const literal = BaseCompiler.userFunctionLiteral(coll.engine, h);
       const body =
         literal === undefined
@@ -11577,9 +11765,14 @@ export class BaseCompiler {
         const prevVisited = BaseCompiler._userCallVisited;
         BaseCompiler._userCallVisited = nextVisited;
         try {
-          return BaseCompiler.withBinderMask(
-            BaseCompiler.userCallMask(literal),
-            () => BaseCompiler.elementsRealByConstruction(body)
+          // The body is read as the emitted module-level definition reads
+          // it, without the call site's bindings (see
+          // `withCallerBindingsHidden`).
+          return BaseCompiler.withCallerBindingsHidden(() =>
+            BaseCompiler.withBinderMask(
+              BaseCompiler.userCallMask(literal),
+              () => BaseCompiler.elementsRealByConstruction(body)
+            )
           );
         } finally {
           BaseCompiler._userCallVisited = prevVisited;
@@ -14554,6 +14747,7 @@ export class BaseCompiler {
    * `_boundVarsCtx` sync — so no new call site has to remember.
    */
   private static _invalidateComplexMemo(): void {
+    BaseCompiler._strictUserCallVerdicts = new Map();
     BaseCompiler._complexMemoStack = [new WeakMap()];
     BaseCompiler._elementLaneMemoStack = [new WeakMap()];
   }
@@ -15228,6 +15422,9 @@ export class BaseCompiler {
         head !== undefined && isSymbol(head) ? head.symbol : undefined;
       const recursing =
         guard !== undefined && BaseCompiler._userCallVisited.has(guard);
+      // A skipped analysis is a verdict cut short by recursion, which must
+      // not be stored as the verdict of the enclosing call.
+      if (recursing) BaseCompiler._userCallRecursionDeclines += 1;
       if (!recursing) {
         if (guard !== undefined) BaseCompiler._userCallVisited.add(guard);
         try {
@@ -20727,6 +20924,99 @@ export class BaseCompiler {
   private static throughTyped(a: Expression): Expression {
     while (isFunction(a, 'Typed')) a = a.op1;
     return a;
+  }
+
+  /**
+   * Whether `a` is a point written out at the call site: a `Tuple`, or a
+   * `PointList` of scalars, possibly under a `Typed` ascription. Its
+   * coordinates are the operands, one per position.
+   */
+  private static isWrittenPointArg(a: Expression): boolean {
+    const t = BaseCompiler.throughTyped(a);
+    return (
+      (isFunction(t, 'Tuple') || isFunction(t, 'PointList')) &&
+      BaseCompiler.isSinglePointArg(t)
+    );
+  }
+
+  /** Counter for the names of the stand-ins of `userCallStandIns`. */
+  private static _standInCount = 0;
+
+  /**
+   * The body of the user function `literal` with the arguments `args` of one
+   * call replaced by stand-in symbols, for the analysis of that call
+   * (`isComplexValuedUserCall`). Returns `undefined` when an argument has no
+   * sound stand-in.
+   *
+   * The analysis must read the body without the caller's bindings: a free
+   * symbol of the body names a global, even when the caller binds the same
+   * name (a `Sum` index `k` around a call of `p(P) := P.x + k`). But the
+   * arguments name the caller's variables and must be read WITH the
+   * caller's bindings. Substituting the arguments themselves mixes the two
+   * kinds of names in one expression. So each argument is analyzed here, in
+   * the caller's context, and replaced by a fresh symbol that carries the
+   * result:
+   * - a written point becomes a `Tuple` of stand-ins, one per coordinate, so
+   *   an accessor such as `P.x` still reads one coordinate;
+   * - a coordinate or a scalar argument becomes a stand-in with the
+   *   argument's type, bound complex when the argument is complex-valued,
+   *   real otherwise;
+   * - any other argument becomes a stand-in with the argument's type only.
+   *   If such an argument is complex-valued, its type may not say so (a list
+   *   literal `[x, i]` types `list<number>`), so there is no sound stand-in.
+   *
+   * Each stand-in is declared in a scope that is popped at once
+   * (`typedTemp`), so the engine's scopes do not change.
+   */
+  private static userCallStandIns(
+    literal: Expression & FunctionInterface,
+    args: ReadonlyArray<Expression>
+  ): UserCallStandIns | undefined {
+    const ce = literal.engine;
+    const params = literal.ops.slice(1);
+    if (params.length !== args.length) return undefined;
+    const body = literal.ops[0];
+    if (body === undefined) return undefined;
+    const result: UserCallStandIns = {
+      body,
+      real: [],
+      complex: [],
+      typed: [],
+    };
+    // A counter value whose name is already a symbol of the body or of an
+    // argument is skipped, so a stand-in never captures an existing name.
+    const taken = new Set([...body.symbols, ...args.flatMap((a) => a.symbols)]);
+    const standIn = (
+      value: Expression,
+      lane: boolean | 'typed'
+    ): Expression => {
+      let name: string;
+      do name = `_ce_arg${++BaseCompiler._standInCount}`;
+      while (taken.has(name));
+      if (lane === 'typed') result.typed.push(name);
+      else if (lane) result.complex.push(name);
+      else result.real.push(name);
+      return BaseCompiler.typedTemp(ce, name, value.type.type);
+    };
+    const substitution: Record<string, Expression> = {};
+    for (const [i, p] of params.entries()) {
+      const name = functionLiteralParameterName(p);
+      if (name === undefined) return undefined;
+      const arg = BaseCompiler.throughTyped(args[i]);
+      if (BaseCompiler.isWrittenPointArg(arg) && isFunction(arg)) {
+        substitution[name] = ce.function(
+          'Tuple',
+          arg.ops.map((c) => standIn(c, BaseCompiler.isComplexValued(c)))
+        );
+      } else if (BaseCompiler.provablyScalarArg(arg)) {
+        substitution[name] = standIn(arg, BaseCompiler.isComplexValued(arg));
+      } else {
+        if (BaseCompiler.isComplexValued(arg)) return undefined;
+        substitution[name] = standIn(arg, 'typed');
+      }
+    }
+    result.body = body.subs(substitution);
+    return result;
   }
 
   private static isSinglePointArg(a: Expression): boolean {

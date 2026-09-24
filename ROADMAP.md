@@ -114,27 +114,17 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 The entries below are the ones judged worth starting next, most valuable first.
 Each links to its own entry further down, which holds the detail. The ranking
 weighs what a consumer sees (a wrong value first, then a slow one) against the
-size of the work. The user-function cache item (decided "yes, after a
-soundness check" on 2026-09-23) left the list: the check failed, and it needs
-a design first (entry "Every call of a user function invalidates every
-generation-keyed cache").
+size of the work. The user-function cache item (decided "yes, after a soundness
+check" on 2026-09-23) left the list: the check failed, and it needs a design
+first (entry "Every call of a user function invalidates every generation-keyed
+cache").
 
-1. **Large-list evaluation, what is left:** a power of `e` and the inverse
-   trigonometric functions under `evaluate()`, a division by an exact rational
-   (`L / 3`), `Norm` of a lazy `Map`. Each is a small kernel or guard; the gains
-   are 20 to 40 times on the shapes they cover. Entries: "Element-wise
-   arithmetic over a large list: what is still interpreted per element", "`Norm`
-   of a lazy collection stays unevaluated".
-2. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
+1. **The Tycho corpus document `s8ishknvhe`, what stays open** (the `Hsv` gate
    chain under complex mode) and the interval constant-list fan-out cap.
    Consumer-visible declines; medium size. Entries: "The Tycho corpus document
    `s8ishknvhe`: what stays open after the mixed-cell and pole round",
    "Coordinate projection through point arithmetic: what stays open".
-3. **`evaluate()` of a symbolic `Sum` is still quadratic.** Keep one `Terms`
-   object for the whole sum instead of a new `Add` at each step. Slow, not
-   wrong; medium. Entry: "Slow operations and slow tests found by a review of
-   the slowest test files".
-4. **A new all-states Tycho baseline** on the next release, to measure the
+2. **A new all-states Tycho baseline** on the next release, to measure the
    large-list and codegen work on real documents. Entry: "Code-generation census
    on CE 0.128.13: ranked candidates".
 
@@ -201,6 +191,13 @@ the census compiles every row on every target.
   route's canonical reading (OKLCh on the compiled targets): its shape is
   unknowable at compile time. Documented in the handler comments and pinned; no
   better answer exists without a runtime tag on colour values.
+- On `glsl`/`wgsl`, `Oklch(∞, 0.1, 30)` and `AsOklch` of it keep the raw
+  channels `(Inf, 0.1, 30)`: the shader `Oklch`/`AsOklch` lowerings pass the
+  channels through without the finiteness check the other routes apply, where an
+  infinite L is an error (interpreter) or the NaN colour (javascript). Any later
+  sRGB or OKLab conversion gives NaN, so no wrong colour is drawn, but the raw
+  value is not the NaN colour (OPEN, route parity — found 2026-09-23). The fix
+  is a check in those two lowerings; it changes many emitted-code pins.
 
 ### What the rulings of 2026-09-21 left open (OPEN — recorded 2026-09-22 when the six rulings landed)
 
@@ -377,6 +374,66 @@ expected effect on the corpus.
   linear in its length. The alternative is to document the returned enclosure as
   read-only and drop the copy. Today no in-repo consumer writes to a returned
   enclosure. The copy stays until ruled otherwise.
+
+### JavaScript target: adding two point lists of different lengths throws a `TypeError` (OPEN — found 2026-09-23 while fixing Tycho item 307)
+
+With `L_1 = [1, 2, 3]`, `L_2 = [4, 5]` and `A = [0.1, 0.2, 0.3]`,
+`Min(PointX(Add(PointList(L_1, L_2), Multiply(1/20, PointList(Cos(A), Sin(A))))))`
+compiles on `javascript`, but the compiled function throws
+`TypeError: _SYS.bcast(...).map is not a function`. The first `PointList` has
+two points and the second has three. The interpreter answers
+`Error("incompatible-dimensions", "3 vs 2")` and `interval-js` answers the
+absence marker. The probable cause: `_SYS.bcast` returns `NaN` on a length
+mismatch, and the generated code then calls `.map` on it. The compiled code must
+answer the same absence the interpreter's error projects to, not throw.
+
+### JavaScript target: calls that now decline instead of compiling (OPEN, compile gap — found 2026-09-23)
+
+With `k := i` and `p: (unknown) -> unknown`, `p(P) := P.x + k`: `p((x, 1)) + 1`,
+`\sum_{k} (k + p((x, 1)))` and a `Block` local `k` beside `p((x, 1))` decline
+with "Add: … list-valued operand", because the call keeps the
+`broadcastable<number>` type of the generic body. Before 2026-09-23 they
+compiled to a wrong value (string concatenation), so the decline is correct, but
+the call could compile: the emitted definition is the point-specialized one,
+whose result is a complex scalar. Also, `\sum_{k=1}^{3} p((x, \sqrt{x-5}))`
+declines in `auto` mode (inlining refuses because the body's `k` would be
+captured by the index); strict mode compiles it.
+
+### `simplify()` and `Expand` give floats for a radical times a complex number (OPEN, ruling — found 2026-09-23)
+
+`evaluate()` keeps `√3·(1 + i) + 1` exact since 2026-09-23 (`1 + √3 + √3 i`),
+but `simplify()` of it, `simplify()` of `√2(1 + i) + √2(1 − i)` (`2.8284…`;
+`evaluate()` gives `2√2`), and `Expand(π(1 + i))` give floats. Cause:
+`BoxedFunction.toNumericValue()` for `Multiply` (`boxed-function.ts`) folds the
+coefficients into one numeric value, and one exact numeric value cannot hold
+`√3 + √3 i`. `Add` requires the coefficient to carry every literal
+(`console.assert` in `arithmetic-add.ts`), so the factor cannot stay in the
+non-numeric rest. Options: (a) change the `toNumericValue`/`Add` contract so a
+coefficient can be an exact product that is not one numeric value; (b) accept
+that `simplify()` and `Expand` are inexact for these values and document it.
+
+### `Max(π, 3)` stays unevaluated (OPEN — found 2026-09-23)
+
+`Max(π, 3)` and `Min(π, 3)` evaluate to themselves, while `Max(√2, 1)` is
+`√2`; `.N()` gives the right numbers. Present on HEAD `d70e788d`. The value is
+not wrong, but the order of `π` and `3` is known (`exactOrder` decides it), so
+the application could evaluate to `π`.
+
+### GPU targets: a host cannot learn that a free symbol must be bound as a `vec2` (OPEN, ruling — found 2026-09-23 while reviewing Tycho item 308)
+
+With `f: (complex) -> complex`, a use `f(x)` of an undeclared `x` infers
+`x: complex`, as the inference rule for a symbol with no value says. On `glsl`
+and `wgsl` a complex value is a `vec2`, so `f(x)` compiles to `_fn_f(x)` and the
+host must bind `x` as a `vec2`. The compile result lists `freeSymbols: ["x"]`
+without types, so a host cannot learn this; if it binds a `float`, the driver
+rejects the shader. (The JavaScript target accepts a number or a `{re, im}`
+object at run time, so it has no such problem.) Options: (1) report the shader
+type of each free symbol in the compile result; (2) on the GPU targets, keep a
+free symbol whose type is only INFERRED `complex` as a real `float`, and lift it
+at each complex use; (3) keep the behavior and document it. If nothing is
+decided, a host that binds such a symbol as a `float` gets a shader that does
+not compile. (A DECLARED real argument to a complex parameter is lifted to
+`vec2(x, 0.0)` since 2026-09-23.)
 
 ### A point argument with a complex-valued coordinate declines where the interpreter answers a real number (OPEN — found 2026-09-15 in the Tycho corpus document `neyret/hpr2q4kles`)
 
@@ -566,112 +623,87 @@ compiles when its point list `C_c` is declared
 
 ### Every call of a user function invalidates every generation-keyed cache (OPEN, caching design — found 2026-09-22)
 
-`invoke` → `declareParameterActivation` declares the function's parameters
-in a new activation scope, and the `declare` state event advances the `any`
-cache axis. So any value cached against `ce._cacheGeneration()` misses after
-any user-function call in between. Example: `Apply(Derivative(f, 3), x).N()`
-at several points computes and simplifies the derivative again at each
-point. A declaration into an activation scope could be marked `scratch`
-(advances no axis), but a value can outlive its activation, which is the
-soundness question discussed in the `declare` case of `axisMaskOf`
-(`engine-configuration-lifecycle.ts`). User decision (2026-09-23): yes,
-make activation declarations `scratch` once the soundness check passes.
+`invoke` → `declareParameterActivation` declares the function's parameters in a
+new activation scope, and the `declare` state event advances the `any` cache
+axis. So any value cached against `ce._cacheGeneration()` misses after any
+user-function call in between. Example: `Apply(Derivative(f, 3), x).N()` at
+several points computes and simplifies the derivative again at each point. A
+declaration into an activation scope could be marked `scratch` (advances no
+axis), but a value can outlive its activation, which is the soundness question
+discussed in the `declare` case of `axisMaskOf`
+(`engine-configuration-lifecycle.ts`). User decision (2026-09-23): yes, make
+activation declarations `scratch` once the soundness check passes.
 
-Soundness check (2026-09-23): it FAILS. With every activation declaration
-marked `scratch`, three tests of `lambda-param-collection-inference.test.ts`
-overflow the stack: `countdown(xs)` with the body
+Soundness check (2026-09-23): it FAILS. With every activation declaration marked
+`scratch`, three tests of `lambda-param-collection-inference.test.ts` overflow
+the stack: `countdown(xs)` with the body
 `if Length(xs) == 0 { 0 } else { 1 + countdown(Rest(xs)) }`, and the two
-mutual-recursion tests. The body node `Length(xs) == 0` is shared by every
-call, and its value cache is keyed on the generation; with no advance per
-call, the second call reads the first call's answer (4), so the base case is
-never reached. The type and sign of a body SYMBOL are safe (its definition is
-fixed when it is boxed), but a cached answer of a compound body node can read
-the call's values through `_contextValue()`. Other probes (sign-dependent
-bodies with alternating signs, `Simplify`, `D`, `N`, `Integrate` in a body, a
-returned closure) gave the same answers with and without the change, and the
-rest of the suite passed. The gain is also smaller than expected:
-`item-284-derivative-compile-cost.test.ts` took 20.6 s instead of 22.9 s
-(one run each, under load). A sound version needs the caches of a body node
-to depend on the call: for example a per-activation stamp in the key of the
-value and facet caches of a node that reads a parameter, or an axis that
-only activation declarations advance.
+mutual-recursion tests. The body node `Length(xs) == 0` is shared by every call,
+and its value cache is keyed on the generation; with no advance per call, the
+second call reads the first call's answer (4), so the base case is never
+reached. The type and sign of a body SYMBOL are safe (its definition is fixed
+when it is boxed), but a cached answer of a compound body node can read the
+call's values through `_contextValue()`. Other probes (sign-dependent bodies
+with alternating signs, `Simplify`, `D`, `N`, `Integrate` in a body, a returned
+closure) gave the same answers with and without the change, and the rest of the
+suite passed. The gain is also smaller than expected:
+`item-284-derivative-compile-cost.test.ts` took 20.6 s instead of 22.9 s (one
+run each, under load). A sound version needs the caches of a body node to depend
+on the call: for example a per-activation stamp in the key of the value and
+facet caches of a node that reads a parameter, or an axis that only activation
+declarations advance.
 
 ### Big-decimal coefficients grow to thousands of digits in the polynomial GCD of a Rubi simplification (OPEN, performance — found 2026-09-23)
 
 The Rubi driver and the compiler's closed-form attempt now give up after a
 number of steps (`StepBudget`, `docs/TIMEOUT-MODEL.md` §7.4), with a 30 s
-wall-clock guard only against a hang. On seeded samples of Rubi chapters 1 to
-7 (1,400 problems), 8 unsolved problems still reach the 30 s guard, because
-they spend their time in code that counts few steps; their result is still
-decided by the clock. Example: `∫ 1/(2+3x⁴)² dx` (Rubi test 1.1.3.2 #703)
-reaches the 30 s guard after about 6,000 steps. The profile: a `simplify` inside the
-driver's `safeSimplify` runs `cancelCommonFactors` → `polynomialGCD` →
+wall-clock guard only against a hang. On seeded samples of Rubi chapters 1 to 7
+(1,400 problems), 8 unsolved problems still reach the 30 s guard, because they
+spend their time in code that counts few steps; their result is still decided by
+the clock. Example: `∫ 1/(2+3x⁴)² dx` (Rubi test 1.1.3.2 #703) reaches the 30 s
+guard after about 6,000 steps. The profile: a `simplify` inside the driver's
+`safeSimplify` runs `cancelCommonFactors` → `polynomialGCD` →
 `polynomialDivide`, whose coefficients are big decimals with significands of
 about 10,000 bits (3,000 digits). Sums and products of big decimals keep every
 digit, so the remainders of the Euclidean loop grow, and reading the type of
-such a literal calls `BigDecimal.toNumber()`, which prints the whole
-significand (12.8 s of the 15 s). Open questions: why an exact integrand gives
-big-decimal coefficients at all, and whether the GCD should round them to the
-working precision or refuse inexact coefficients. Fixing this would also let
-the wall-clock guard go back to a shorter value.
+such a literal calls `BigDecimal.toNumber()`, which prints the whole significand
+(12.8 s of the 15 s). Open questions: why an exact integrand gives big-decimal
+coefficients at all, and whether the GCD should round them to the working
+precision or refuse inexact coefficients. Fixing this would also let the
+wall-clock guard go back to a shorter value.
+
+### At machine precision, `N()` of an `Add` that holds the pole spells it as a number (OPEN, consistency — found 2026-09-23)
+
+With `ce.precision = 'machine'`, `Add(1.5, 2.5, ComplexInfinity)` evaluates to
+the symbol `ComplexInfinity` under `evaluate()`, but to the number
+`["Complex", "PositiveInfinity", "PositiveInfinity"]` under `N()`. At the
+default precision both routes give the symbol. The two spellings print the same
+(`~oo`) and mean the same value, but the MathJSON differs, and a comparison of
+the two routes by their MathJSON fails. `Sum` normalizes its result to the
+symbol (`finishSum`, `library/arithmetic.ts`), which keeps its former answer;
+other callers of `Add` see the number. The fix is one spelling for the pole on
+every route, probably in the boxing of a complex number whose two parts are
+infinite.
 
 ### Slow operations and slow tests found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
 
-The sample cache of complex integrands, the NaN stop in adaptive quadrature,
-the derivative cache, the nested-quadrature test budget, the GLSL loop
-test, the Rubi rule-pack loads in tests and the Monte Carlo cost of
+The sample cache of complex integrands, the NaN stop in adaptive quadrature, the
+derivative cache, the nested-quadrature test budget, the GLSL loop test, the
+Rubi rule-pack loads in tests and the Monte Carlo cost of
 `derived-substreams.test.ts` were fixed on 2026-09-22. What stays open:
 
-- **`evaluate()` of a symbolic `Sum` is still quadratic.** Finding a like
-  term is now a hash lookup (`Terms` in `arithmetic-add.ts`), and `.N()` of
-  a sum no longer evaluates the operands of `Add`/`Multiply` exactly first,
-  so `Sum(sin i, i, 1, 1000).evaluate()` takes about 0.7 s (it took 11 s).
-  But each step of the sum still builds a new `Add` of all the terms so far,
-  which `toNumericValue()` factors, `Terms` expands and `canonicalAdd` sorts
-  again. A linear fix keeps one `Terms` object for the whole sum; that
-  changes the value `reduceBigOp` (`library/utils.ts`) passes between steps.
-- **Compiled complex arithmetic is about 10 times slower inside jest than
-  under tsx.** One `_SYS.cpow(Math.E, {re: 0, im: x})` call takes about
-  1.5 µs in jest and 0.15 µs under tsx, probably because jest runs the code
-  in a separate `vm` realm. `measurement.test.ts` makes 2 × 1e7 such calls
-  and takes about 40 s.
-- **The adaptive quadrature stops when all panels are NaN, there are at
-  least 16, and a bisection gave two NaN children** (`ALL_BAD_STOP_PANELS`
-  and `mustStopAllBad` in `numerics/gauss-kronrod.ts`). Isolated removable
-  singularities move to panel boundaries when their panel is bisected, so
-  they still converge, also when there is one at the center of each of the
-  16 starting panels. An integrand that is finite only on a region narrower than
-  1/16 of the interval now answers NaN where the old loop could find a
-  finite value. No test covers this case.
-
-### `Norm` of a lazy collection stays unevaluated (OPEN, evaluation — found 2026-09-21)
-
-`Norm` reads its operand as a tensor, and a lazy `Map` is not one. Above a
-hundred elements a broadcast answers a lazy `Map`, so the answer depends on the
-SIZE of the list: with `L` a list of fifty numbers `Norm(Sin(L))` is a number,
-and with a thousand numbers it is `Norm(Map(x ↦ Sin(x), L))`, unevaluated, under
-`evaluate()` and under `N()`. `Norm(L)` itself is a number at both sizes.
-`Norm(2·L)` and `Norm(L + M)` are numbers at machine precision when `L` and `M`
-hold machine numbers, because that arithmetic is no longer lazy; above machine
-precision, and for every function head, they stay unevaluated. The other
-reducers (`Sum`, `Max`, `Mean`, `Variance`) walk a finite lazy collection;
-`Norm` should too.
-
-### Element-wise arithmetic over a large list: what is still interpreted per element (OPEN, evaluation performance — measured 2026-09-21)
-
-Element-wise `Add`, `Multiply`, `Negate` and the common functions of one number
-over lists of machine numbers are computed at once on doubles at machine
-precision (`machineBroadcast`, `boxed-expression/machine-broadcast.ts`; the rule
-is in `docs/COLLECTIONS-MODEL.md`, "Lists of machine numbers"), and `Sum`, `Max`
-and `Min` fold the doubles. Over ten thousand elements `Sum(Sin(L))` went from
-58 ms to 2 ms. What is left on the lazy `Map`, about 4.5 µs per element:
-
-- **A power of `e` and the inverse trigonometric functions under `evaluate()`**:
-  `Exp(0.5)` is `√e`, `Arcsin(0.5)` is `π/6`. A guard like the one for the
-  special angles of `Sin` would need the exact set of values the recognizer
-  (`constructibleValuesInverse`) answers for.
-- **A division by an exact rational**: `L / 3` is canonically
-  `Multiply(Rational(1, 3), L)`, and an exact scalar declines.
+- **Compiled complex arithmetic is about 10 times slower inside jest than under
+  tsx.** One `_SYS.cpow(Math.E, {re: 0, im: x})` call takes about 1.5 µs in jest
+  and 0.15 µs under tsx, probably because jest runs the code in a separate `vm`
+  realm. `measurement.test.ts` makes 2 × 1e7 such calls and takes about 40 s.
+- **The adaptive quadrature stops when all panels are NaN, there are at least
+  16, and a bisection gave two NaN children** (`ALL_BAD_STOP_PANELS` and
+  `mustStopAllBad` in `numerics/gauss-kronrod.ts`). Isolated removable
+  singularities move to panel boundaries when their panel is bisected, so they
+  still converge, also when there is one at the center of each of the 16
+  starting panels. An integrand that is finite only on a region narrower than
+  1/16 of the interval now answers NaN where the old loop could find a finite
+  value. No test covers this case.
 
 ### Reductions over ten thousand elements: what is left outside the interpreter's arithmetic (OPEN, evaluation performance — measured 2026-09-20, revised 2026-09-21)
 
@@ -3513,16 +3545,16 @@ byte-identical, inert off-family via the Euler branch of
 `hasNestedRadicalCandidate`).
 
 **Driver determinism (2026-09-23):** the driver gives up after a step budget
-(300,000 steps per integral, `RUBI_STEP_BUDGET`), not after a time, and its
-two sub-searches (the native rational fallback, the clean-up simplify) have
-step budgets of their own. On seeded samples of chapters 1 to 7 the outcomes
-of all 1,400 problems were the same as under the former time budgets, and the
-step counts were the same from run to run under different loads. What still
-depends on the clock is listed in the entry "Big-decimal coefficients grow to
-thousands of digits in the polynomial GCD of a Rubi simplification". (Two
-independent budgets trap: `loadIntegrationRules(ce, { stepBudget,
-timeLimitMs })` is independent of any `withTimeLimit` span — a heavy test must
-raise the loader budget and arm a long enough span.)
+(300,000 steps per integral, `RUBI_STEP_BUDGET`), not after a time, and its two
+sub-searches (the native rational fallback, the clean-up simplify) have step
+budgets of their own. On seeded samples of chapters 1 to 7 the outcomes of all
+1,400 problems were the same as under the former time budgets, and the step
+counts were the same from run to run under different loads. What still depends
+on the clock is listed in the entry "Big-decimal coefficients grow to thousands
+of digits in the polynomial GCD of a Rubi simplification". (Two independent
+budgets trap: `loadIntegrationRules(ce, { stepBudget, timeLimitMs })` is
+independent of any `withTimeLimit` span — a heavy test must raise the loader
+budget and arm a long enough span.)
 
 **Benchmark protocol.**
 `npx tsx scripts/rubi/benchmark.ts --rubi "data/rubi/corpus/4 Trig functions" --chapter "4 Trig functions/4.1 Sine" --sample 120 --seed 5 --report /tmp/x.json`.

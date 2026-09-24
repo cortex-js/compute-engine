@@ -192,9 +192,12 @@ describe('the inner product of two static-width points is written out', () => {
     expect(compiled(ce, '\\operatorname{Dot}(V, W)').code).toBe(
       '_SYS.matmul(_.V, _.W)'
     );
+    // A complex component is not written out, and the run-time dispatch
+    // `_SYS.matmul` is real-only: at `Q = (i, 1)` it answered NaN, where the
+    // interpreter answers `2 + i`. So the product fails closed.
     const cplx = newEngine({ Q: 'tuple<complex, complex>' });
-    expect(compiled(cplx, '\\operatorname{Dot}(Q, (1, 2))').code).toBe(
-      '_SYS.matmul(_.Q, [1, 2])'
+    expect(() => compiled(cplx, '\\operatorname{Dot}(Q, (1, 2))')).toThrow(
+      /Dot: .*cannot represent a complex entry/
     );
   });
 });

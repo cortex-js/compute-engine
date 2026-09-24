@@ -115,6 +115,7 @@ import {
   absorbScalarsIntoCells,
 } from '../boxed-expression/arithmetic-add.js';
 import {
+  exactComplexProductAsSum,
   mulFactored,
   mulNEvaluated,
   canonicalDivide,
@@ -316,6 +317,7 @@ import {
   isContinuationOperand,
   isAbsentValue,
 } from '../boxed-expression/type-guards.js';
+import { exactOrder } from '../boxed-expression/compare.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
@@ -4359,6 +4361,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Internal callers keep `mul()`, whose distribution several
         // normalization paths need to reach a fixpoint — see `mulFactored`.
         const result = mulFactored(...evaluated);
+        // A product of exact number literals that is still a `Multiply` has a
+        // value that one exact literal cannot hold, such as `√2·(1 + i)`
+        // (see `Product.foldIntoCoefficient`). Write it as the sum of its
+        // exact real and imaginary parts, `√2 + √2·i`.
+        if (isFunction(result, 'Multiply')) {
+          const sum = exactComplexProductAsSum(engine!, result.ops);
+          if (sum !== undefined) return sum;
+        }
         // D2: see the matching comment in `Add` — an inexact (float) operand
         // numericizes the whole product even when mixed with an exact
         // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
@@ -7597,6 +7607,24 @@ function evaluateAbs(
   // inside a function application is not a foldable constant; see the D2
   // comment on `Add`.)
   if (arg.isConstant) {
+    // |z·w| = |z|·|w| for all complex z and w. Take the modulus of each
+    // factor of a constant product, so that |π·i| is π and |π·(1 + i)| is
+    // π·√2. The square root of the squared modulus below cannot give these
+    // results, because `evaluate()` does not reduce `√(π²)` to `π`. This
+    // applies only to a constant product: `evaluate()` does not take the
+    // factors out of `|2x|` (only `simplify()` does), so `|x·i|` stays as it is.
+    if (isFunction(arg, 'Multiply')) {
+      const factors: Expression[] = [];
+      for (const factor of arg.ops) {
+        const f = evaluateAbs(factor, numericApproximation);
+        if (f === undefined) break;
+        factors.push(f);
+      }
+      if (factors.length === arg.ops.length)
+        return ce
+          .function('Multiply', factors)
+          .evaluate({ numericApproximation });
+    }
     const zn = arg.N();
     const zre = zn.re;
     const zim = zn.im;
@@ -7609,9 +7637,15 @@ function evaluateAbs(
           ce.function('Multiply', [b, b]),
         ]);
         const mVal = expand(m).evaluate();
-        if (isNumber(mVal) && mVal.im === 0 && mVal.isNonNegative === true) {
+        // The squared modulus is a number literal (`|1 + √2·i|²` is 3) or a
+        // real constant expression (`|e + π·i|²` is `e² + π²`, and the
+        // result is `√(e² + π²)`).
+        const isRealConstant = isNumber(mVal)
+          ? mVal.im === 0
+          : mVal.isConstant && mVal.type.matches('real');
+        if (isRealConstant && mVal.isNonNegative === true) {
           const modSq = zre * zre + zim * zim;
-          const mn = mVal.re;
+          const mn = isNumber(mVal) ? mVal.re : mVal.N().re;
           if (
             Number.isFinite(mn) &&
             Math.abs(mn - modSq) <= 1e-10 * (1 + Math.abs(modSq))
@@ -7791,8 +7825,8 @@ function processMinMaxItem(
   // collections (`docs/STRING_ROADMAP.md`, design constraint 5).
   if (isTextAtom(item)) return [undefined, [item]];
 
-  // A `List` of machine numbers is folded on its doubles, at machine
-  // precision: see `machineExtremum`.
+  // A `List` of machine numbers is folded on its doubles: see
+  // `machineExtremum`.
   if (isMachineDoubleList(item)) {
     const extremum = machineExtremum(item.array, upper, ce);
     if (extremum !== undefined) return [ce.number(extremum), []];
@@ -7828,11 +7862,7 @@ function processMinMaxItem(
         if (val.im !== 0) rest.push(val);
         else if (!result) result = val;
         else {
-          if (
-            (upper && val.isGreater(result)) ||
-            (!upper && val.isLess(result))
-          )
-            result = val;
+          if (extremumReplaces(val, result, upper)) result = val;
         }
       }
       rest.push(...others);
@@ -7927,15 +7957,12 @@ function machineListTotal(list: Expression): number | undefined {
  * element-by-element fold of `processMinMaxItem` answers it, or `undefined`
  * when the fold must answer (an empty array, an integer past the safe range).
  *
- * The fold compares with `isGreater`/`isLess`, which are tolerance-aware: a
- * value replaces the extremum so far only when it differs from it by the
- * tolerance of the engine or more, so that the first of several values
- * within the tolerance of each other is the one kept. Two details of that
- * comparison (`cmp()`, `boxed-expression/compare.ts`) are reproduced here.
- * A difference EQUAL to the tolerance is a tie between two integers and is
- * not a tie when one of the values is a float. And a comparison with the
- * integer `0` reads the sign, with no tolerance. With both, the scan answers
- * the element the fold answers. `NaN` absorbs, as in the fold. Boxing each of
+ * The fold orders two values exactly, with no tolerance (`exactOrder`), and
+ * so does this scan: the result is the value `Math.max`/`Math.min` give,
+ * which is what the compiled JavaScript calls. This includes signed zero:
+ * of `0` and `-0`, the maximum is `0` and the minimum is `-0`. (A machine
+ * list stores `+0` for `-0`, as `ce.number(-0)` boxes to `+0`, so the scan
+ * does not see `-0` today.) `NaN` absorbs, as in the fold. Boxing each of
  * ten thousand doubles to compare it cost about 10 ms; the scan costs
  * microseconds.
  */
@@ -7945,7 +7972,6 @@ function machineExtremum(
   ce: ComputeEngine
 ): number | undefined {
   if (values.length === 0) return undefined;
-  const tolerance = ce.tolerance;
   let result = values[0];
   if (Number.isNaN(result)) return NaN;
   if (Number.isInteger(result) && !Number.isSafeInteger(result))
@@ -7958,13 +7984,10 @@ function machineExtremum(
     // An integer past the safe range is boxed as an exact big integer, whose
     // comparison takes a route of its own: the fold answers.
     if (Number.isInteger(v) && !Number.isSafeInteger(v)) return undefined;
-    if (v === result) continue;
-    if (result !== 0) {
-      const gap = Math.abs(v - result);
-      const bothIntegers = Number.isInteger(v) && Number.isInteger(result);
-      if (bothIntegers ? gap <= tolerance : gap < tolerance) continue;
-    }
     if (upper ? v > result : v < result) result = v;
+    // `0 === -0`, so the comparison above does not choose between them.
+    else if (v === 0 && result === 0 && Object.is(upper ? result : v, -0))
+      result = v;
   }
   return result;
 }
@@ -7992,12 +8015,39 @@ function scalarExtremum(
   if (a.isNaN === true || b.isNaN === true) return ce.NaN;
   if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0))
     return undefined;
-  // `isGreater`/`isLess` return `undefined` when the comparison is not
-  // decidable (a free symbol); ties keep `a`.
-  const bWins = upper ? b.isGreater(a) : b.isLess(a);
+  // `undefined` when the comparison is not decidable (a free symbol); ties
+  // keep `a`.
+  const bWins = extremumOrder(b, a, upper);
   if (bWins === undefined) return undefined;
   const winner = bWins ? b : a;
   return numericApproximation ? winner.N() : winner;
+}
+
+/**
+ * Whether `candidate` is strictly greater (`upper`) or strictly less than
+ * `current`: `undefined` when the order is not decidable. Two different
+ * numbers are ordered exactly (`exactOrder`), however close they are:
+ * `isGreater`/`isLess` apply the engine tolerance, and with them
+ * `Max(1e-12, 2e-12)` answered `1e-12`. Two equal values are a tie, and the
+ * caller keeps `current`.
+ */
+function extremumOrder(
+  candidate: Expression,
+  current: Expression,
+  upper: boolean
+): boolean | undefined {
+  const order = exactOrder(candidate, current);
+  if (order === undefined) return undefined;
+  return upper ? order > 0 : order < 0;
+}
+
+/** `extremumOrder`, where an undecided order keeps `current`. */
+function extremumReplaces(
+  candidate: Expression,
+  current: Expression,
+  upper: boolean
+): boolean {
+  return extremumOrder(candidate, current, upper) === true;
 }
 
 /**
@@ -8053,8 +8103,7 @@ function evaluateMinMax(
       if (val.im !== 0) rest.push(val);
       else if (!result) result = val;
       else {
-        if ((upper && val.isGreater(result)) || (!upper && val.isLess(result)))
-          result = val;
+        if (extremumReplaces(val, result, upper)) result = val;
       }
     }
     rest.push(...others);

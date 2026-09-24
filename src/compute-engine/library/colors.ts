@@ -5,15 +5,10 @@ import {
   oklabDeltaE,
   asOklch,
   rgbToOklch,
-  oklchToRgb,
   oklchToOklab,
   oklabToOklch,
-  rgbToHsl,
-  hslToRgb,
-  rgbToHsv,
   hsvToRgb,
   rgbToOklab,
-  oklabToRgb,
   SEQUENTIAL_PALETTES,
   CATEGORICAL_PALETTES,
   DIVERGING_PALETTES,
@@ -25,6 +20,15 @@ import {
   isString,
 } from '../boxed-expression/type-guards.js';
 import { MAX_COLORMAP_SAMPLES } from '../numerics/value-scaled-caps.js';
+import {
+  readColorChannels,
+  hslToRgb255,
+  oklabToRgb255,
+  oklchToRgb255,
+  rgb255ToHsl,
+  rgb255ToHsv,
+} from '../numerics/color-conversion.js';
+import type { ColorChannelSpace } from '../numerics/color-conversion.js';
 
 /**
  * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
@@ -50,18 +54,42 @@ function normalizeAlpha(a: number | undefined): number | undefined {
  * returns the 3-component form, consistent with how every other emit site
  * handles alpha. Symbolic alphas (variables, expressions) are left in place.
  *
- * A numeric channel that is not finite is rejected here exactly as the
- * conversion path rejects it (`readColorExpr`): the same-head shortcut must
- * not admit a color that changing the head would refuse, or
- * `AsRgb(Rgb(~oo, 0, 0))` echoed its argument while `AsRgb(Hsv(90, 1, ~oo))`
- * was an error. Symbolic channels are left in place.
+ * The numeric channels are read here exactly as the conversion path reads
+ * them (`readColorExpr`, which applies `readColorChannels`): the same-head
+ * shortcut must not answer a color that changing the head would answer
+ * differently. So HSV saturation and value and HSL saturation and lightness
+ * are clamped into `[0, 1]` (an infinite one reads as its bound), and the
+ * HSV/HSL hue is reduced into `[0, 360)`: `AsHsv(Hsv(30, 2, 1))` and
+ * `AsHsv(Hsv(390, +oo, 1))` are both `Hsv(30, 1, 1)`. A finite `Rgb`
+ * channel outside `[0, 1]` is extended sRGB and is kept. A `NaN` channel, or
+ * an infinite channel that is not clamped (an sRGB channel, a hue, an
+ * OKLab/OKLCh channel), is `incompatible-type`, as it is when the head
+ * changes. Symbolic channels are left in place.
  */
 function normalizeColorHead(ce: any, expr: any): any {
   if (!isFunction(expr) || !expr.ops || expr.ops.length < 3) return expr;
-  if (
-    expr.ops.slice(0, 3).some((c: any) => isNumber(c) && !Number.isFinite(c.re))
-  )
-    return ce.error('incompatible-type');
+  const channels = expr.ops.slice(0, 3);
+  if (channels.some((c: any) => isNumber(c))) {
+    // A symbolic channel is read as 0, a finite value, and is not written
+    // back: only the numeric channels are checked and replaced here.
+    const [c0, c1, c2] = channels.map((c: any) => (isNumber(c) ? c.re : 0));
+    const read = readColorChannels(
+      expr.operator.toLowerCase() as ColorChannelSpace,
+      c0,
+      c1,
+      c2
+    );
+    if (read === undefined) return ce.error('incompatible-type');
+    // Only a channel that the rule changed is replaced, so an exact channel
+    // such as `1/2` stays exact.
+    if (channels.some((c: any, i: number) => isNumber(c) && c.re !== read[i])) {
+      const ops = [...expr.ops];
+      channels.forEach((c: any, i: number) => {
+        if (isNumber(c) && c.re !== read[i]) ops[i] = ce.number(read[i]);
+      });
+      expr = ce.function(expr.operator, ops);
+    }
+  }
   if (expr.ops.length < 4) return expr;
   const alphaExpr = expr.ops[3];
   if (!isNumber(alphaExpr)) return expr;
@@ -201,8 +229,17 @@ const COLOR_OPERATORS = new Set(['Rgb', 'Hsv', 'Hsl', 'Oklab', 'Oklch']);
 
 /**
  * Read the components of a typed color expression (`Rgb`/`Hsv`/`Hsl`/`Oklab`/`Oklch`).
- * Returns `null` if the expression isn't a recognized color head or the components
- * aren't all finite numbers.
+ * Returns `null` if the expression isn't a recognized color head or the
+ * components do not make a color.
+ *
+ * The channels are read by `readColorChannels`, the rule the compiled
+ * runtime also applies. HSV saturation and value and HSL saturation and
+ * lightness are clamped into `[0, 1]`, an infinite one included (`+oo` reads
+ * as 1 and `-oo` as 0), and the HSV/HSL hue is reduced into `[0, 360)`. Any
+ * other channel is kept when it is finite: an `Rgb` channel outside `[0, 1]`
+ * is an extended sRGB channel. A `NaN` channel, or an infinite channel that
+ * is not clamped (an sRGB channel, a hue, an OKLab/OKLCh channel), makes the
+ * expression not a color.
  */
 function readColorExpr(arg: any): {
   space: string;
@@ -214,11 +251,14 @@ function readColorExpr(arg: any): {
   if (!isFunction(arg)) return null;
   if (!COLOR_OPERATORS.has(arg.operator)) return null;
   if (!arg.ops || arg.ops.length < 3) return null;
-  const c0 = arg.ops[0].re;
-  const c1 = arg.ops[1].re;
-  const c2 = arg.ops[2].re;
-  if (!Number.isFinite(c0) || !Number.isFinite(c1) || !Number.isFinite(c2))
-    return null;
+  const channels = readColorChannels(
+    arg.operator.toLowerCase() as ColorChannelSpace,
+    arg.ops[0].re,
+    arg.ops[1].re,
+    arg.ops[2].re
+  );
+  if (channels === undefined) return null;
+  const [c0, c1, c2] = channels;
   const alpha = arg.ops.length >= 4 ? normalizeAlpha(arg.ops[3].re) : undefined;
   return { space: arg.operator, c0, c1, c2, alpha };
 }
@@ -242,11 +282,11 @@ function colorExprToRgb(arg: any): RgbColor | null {
     case 'Hsv':
       return withAlpha(hsvToRgb(c.c0, c.c1, c.c2));
     case 'Hsl':
-      return withAlpha(hslToRgb(c.c0, c.c1, c.c2));
+      return withAlpha(hslToRgb255(c.c0, c.c1, c.c2));
     case 'Oklab':
-      return withAlpha(oklabToRgb({ L: c.c0, a: c.c1, b: c.c2 }));
+      return withAlpha(oklabToRgb255({ L: c.c0, a: c.c1, b: c.c2 }));
     case 'Oklch':
-      return withAlpha(oklchToRgb({ L: c.c0, C: c.c1, H: c.c2 }));
+      return withAlpha(oklchToRgb255({ L: c.c0, C: c.c1, H: c.c2 }));
   }
   return null;
 }
@@ -277,7 +317,7 @@ function colorExprToOklch(arg: any): OklchColor | null {
       return asOklch({ ...rgb, alpha: c.alpha });
     }
     case 'Hsl': {
-      const rgb = hslToRgb(c.c0, c.c1, c.c2);
+      const rgb = hslToRgb255(c.c0, c.c1, c.c2);
       return asOklch({ r: rgb.r, g: rgb.g, b: rgb.b, alpha: c.alpha });
     }
   }
@@ -347,11 +387,10 @@ function oklchToExpr(ce: any, c: OklchColor): any {
  * components and dropping the rest accepted `(1, 0, 0, 0.5, 0.2)` as red at
  * half alpha, which no other route did.
  *
- * A tuple whose components are not all finite numbers is refused, exactly as
- * a typed head with the same components is refused (`readColorExpr`). The
- * typed-head rule is the one rule: `Rgb(~oo, 0, 0)` and `(~oo, 0, 0)` are
- * both `incompatible-type` instead of one answering an error and the other a
- * NaN color.
+ * The components of a tuple are read exactly as the channels of an `Rgb`
+ * head are read (`readColorChannels`): `(2, 0, 0)` and `Rgb(2, 0, 0)` are the
+ * same extended sRGB color, and a tuple with a `NaN` or an infinite
+ * component is refused, as the head is.
  */
 function extractRgb(ce: any, arg: any): RgbColor | undefined {
   if (isString(arg)) {
@@ -373,11 +412,14 @@ function extractRgb(ce: any, arg: any): RgbColor | undefined {
     arg.ops &&
     (arg.ops.length === 3 || arg.ops.length === 4)
   ) {
-    const c0 = arg.ops[0].re;
-    const c1 = arg.ops[1].re;
-    const c2 = arg.ops[2].re;
-    if (!Number.isFinite(c0) || !Number.isFinite(c1) || !Number.isFinite(c2))
-      return undefined;
+    const channels = readColorChannels(
+      'rgb',
+      arg.ops[0].re,
+      arg.ops[1].re,
+      arg.ops[2].re
+    );
+    if (channels === undefined) return undefined;
+    const [c0, c1, c2] = channels;
     const rgb: RgbColor = { r: c0 * 255, g: c1 * 255, b: c2 * 255 };
     if (arg.ops.length >= 4) {
       const alpha = normalizeAlpha(arg.ops[3].re);
@@ -515,7 +557,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         }
 
         case 'hsl': {
-          const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+          const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
           const h = Math.round(hsl.h * 10) / 10;
           const s = Math.round(hsl.s * 1000) / 10;
           const l = Math.round(hsl.l * 1000) / 10;
@@ -643,12 +685,12 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           );
 
         case 'hsl': {
-          const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+          const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
           return componentsTuple(ce, [hsl.h, hsl.s, hsl.l], alpha);
         }
 
         case 'hsv': {
-          const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+          const hsv = rgb255ToHsv(rgb.r, rgb.g, rgb.b);
           return componentsTuple(ce, [hsv.h, hsv.s, hsv.v], alpha);
         }
 
@@ -688,39 +730,30 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       // as if they were a Tuple of the same components. The head's OWN space
       // is ignored at this position — `ColorFromColorspace(Rgb(0.5, 0.1, 20),
       // "oklch")` reads (0.5, 0.1, 20) as L, C and H.
-      let c0: number, c1: number, c2: number;
-      let alpha: number | undefined;
       const arg = ops[0];
-      const typed = readColorExpr(arg);
-      if (typed) {
-        c0 = typed.c0;
-        c1 = typed.c1;
-        c2 = typed.c2;
-        alpha = typed.alpha;
-      } else if (
-        isFunction(arg) &&
-        arg.operator === 'Tuple' &&
-        arg.ops.length >= 3
-      ) {
-        c0 = arg.ops[0].re;
-        c1 = arg.ops[1].re;
-        c2 = arg.ops[2].re;
-        alpha = arg.ops.length >= 4 ? arg.ops[3].re : undefined;
-        // A channel that is not a finite number is refused here exactly as a
-        // typed head with the same channel is refused (`readColorExpr`): the
-        // result of this operator is a color, and a color head with a
-        // non-finite channel is `incompatible-type` everywhere else.
-        if (
-          !Number.isFinite(c0) ||
-          !Number.isFinite(c1) ||
-          !Number.isFinite(c2)
-        )
-          return ce.error('incompatible-type');
-      } else {
+      if (
+        !isFunction(arg) ||
+        !(arg.operator === 'Tuple' || COLOR_OPERATORS.has(arg.operator)) ||
+        arg.ops.length < 3
+      )
         return ce.error('incompatible-type');
-      }
+      // The channels are read by the rule of the NAMED space
+      // (`readColorChannels`), the rule a head of that space applies to its
+      // own channels: the result of this operator is a head of that space.
+      // So `ColorFromColorspace((30, +oo, 1), "hsv")` is `Hsv(30, 1, 1)`,
+      // `ColorFromColorspace((2, 0, 0), "rgb")` is `Rgb(2, 0, 0)`, and a
+      // `NaN`, an infinite hue or an infinite sRGB channel is
+      // `incompatible-type`.
+      const channels = readColorChannels(
+        head.toLowerCase() as ColorChannelSpace,
+        arg.ops[0].re,
+        arg.ops[1].re,
+        arg.ops[2].re
+      );
+      if (channels === undefined) return ce.error('incompatible-type');
+      const alpha = arg.ops.length >= 4 ? arg.ops[3].re : undefined;
 
-      return colorHeadFromSpace(ce, head, [c0, c1, c2], alpha);
+      return colorHeadFromSpace(ce, head, channels, alpha);
     },
   },
 
@@ -783,7 +816,12 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   // operator name is the discriminator. Components are interpreted per
   // colorspace conventions (Rgb channels 0-1, Hsv/Hsl hue in degrees with
   // sat/value 0-1, Oklab/Oklch L 0-1 with standard a/b/C/H ranges). The
-  // optional 4th argument is alpha in [0, 1]. No clamping at evaluation time.
+  // optional 4th argument is alpha in [0, 1]. A constructor does not change
+  // its channels at evaluation time. The conversions read them by the rule of
+  // `readColorChannels` (`numerics/color-conversion.ts`): an `Rgb` channel
+  // outside [0, 1] is extended sRGB and is kept, HSV/HSL saturation, value
+  // and lightness are clamped into [0, 1], and a `NaN` or an infinite
+  // channel that is not clamped is `incompatible-type`.
   // ---------------------------------------------------------------------------
 
   Rgb: {
@@ -873,7 +911,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         return normalizeColorHead(ce, arg);
       const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
-      const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+      const hsv = rgb255ToHsv(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsv.h), ce.number(hsv.s), ce.number(hsv.v)];
       if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Hsv', args);
@@ -893,7 +931,7 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
         return normalizeColorHead(ce, arg);
       const rgb = extractRgb(ce, arg);
       if (!rgb) return ce.error('incompatible-type');
-      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
       const args = [ce.number(hsl.h), ce.number(hsl.s), ce.number(hsl.l)];
       if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
       return ce.function('Hsl', args);

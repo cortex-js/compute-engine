@@ -1163,10 +1163,11 @@ export class ExactNumericValue extends NumericValue {
       }
     }
 
-    if (this.sign > 0) {
-      const re = Math.sqrt(this.re);
-      if (Number.isInteger(re)) return this.clone(re);
-    }
+    // Here the radical is not 1, so the value is `q·√r` with a rational `q`
+    // and a square-free integer `r > 1`. Its square root is irrational, so it
+    // has no exact form. (A test for an integer machine root was here, but
+    // it could only be true by rounding: every double above 2^53 is an
+    // integer, so `√(10^40·√2)` answered an exact integer.)
     return this.factory(this.bignumRe).sqrt();
   }
 

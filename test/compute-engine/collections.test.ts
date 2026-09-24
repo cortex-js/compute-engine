@@ -1445,16 +1445,30 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       ).toBe('[3,1,2]');
     });
 
-    test('with no key, Ordering answers the identity permutation because Sort answers the list unchanged', () => {
-      // The no-key comparison treats an undecided pair as "greater" instead
-      // of declining, so `Sort` returns the list unchanged over incomparable
-      // elements. The identity permutation is the matching answer.
-      expect(engine.box(['Sort', listsOfOne]).evaluate().toString()).toBe(
-        '[[5],[1],[3]]'
+    test('with no key, both operators decline over elements that cannot be ordered', () => {
+      // The no-key comparison declines an undecided pair, as the key
+      // comparison does: a result that depended on the order of the input
+      // would not be a sort. Both `Sort` and `Ordering` stay unevaluated.
+      expect(engine.box(['Sort', listsOfOne]).evaluate().operator).toBe(
+        'Sort'
       );
-      expect(engine.box(['Ordering', listsOfOne]).evaluate().toString()).toBe(
-        '[1,2,3]'
+      expect(engine.box(['Ordering', listsOfOne]).evaluate().operator).toBe(
+        'Ordering'
       );
+      // The same holds for symbols and complex numbers, in any input order.
+      for (const xs of [
+        ['List', 'x', 3, 1, 'y', 2],
+        ['List', 2, 'y', 1, 3, 'x'],
+        ['List', ['Complex', 1, 1], 1, 2],
+      ] as Expression[])
+        expect(engine.box(['Sort', xs]).evaluate().operator).toBe('Sort');
+      // Numbers alone still sort, exactly.
+      expect(
+        engine
+          .box(['Sort', ['List', ['Rational', 1, 3], 0.3, 1, 'Pi', 3]])
+          .evaluate()
+          .toString()
+      ).toBe('[0.3,1/3,1,3,pi]');
     });
   });
 

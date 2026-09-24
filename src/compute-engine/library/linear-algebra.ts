@@ -45,6 +45,7 @@ import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { operandLiteralValue } from './type-handlers.js';
 import {
   isCharacter,
+  isExpression,
   isFunction,
   isNumber,
   isString,
@@ -55,6 +56,11 @@ import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
 import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
+import { spectralNorm } from '../numerics/linear-algebra.js';
+import {
+  exactCompareNumbers,
+  float64HoldsNumber,
+} from '../boxed-expression/constraint-subject.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -147,6 +153,335 @@ export function hasInfiniteMagnitudeComponent(
  */
 function declineWideNormType(claim: string): string | undefined {
   return claim === 'number' ? undefined : claim;
+}
+
+/** The largest matrix side for which `spectralMatrixNorm` builds the exact
+ * closed form of a matrix with two rows or two columns. The closed form sums
+ * one 2×2 minor per pair of the other side, so its size grows with the
+ * square of that side. */
+const MAX_EXACT_SPECTRAL_SIDE = 16;
+
+/**
+ * The spectral norm `‖A‖₂` of an `m × n` matrix: its largest singular value,
+ * `√(λ_max(Aᴴ A))`. `entries` is the matrix row-major, and no entry has an
+ * infinite magnitude (the caller answers `+∞` for that first).
+ *
+ * The answer follows the exactness contract of `evaluate()` and `.N()`:
+ *
+ * - A matrix with a symbolic entry (one with no numeric value) has no
+ *   answer: the application stays unevaluated.
+ * - A NaN entry makes the norm NaN.
+ * - A matrix with one row or one column is a vector, and its spectral norm
+ *   is the vector 2-norm, exact for exact entries.
+ * - A matrix with at most one nonzero entry in each row and in each column
+ *   (a diagonal matrix, for example) has `Aᴴ A` diagonal, with the squared
+ *   moduli of those entries on the diagonal. The norm is the largest modulus,
+ *   exact for exact entries.
+ * - A matrix of exact entries with two rows or two columns (up to
+ *   `MAX_EXACT_SPECTRAL_SIDE` on the other side) has a 2 × 2 Gram matrix, so
+ *   the norm has the closed form `√((t + √(t² − 4d)) / 2)`, where
+ *   `t = Σ|aᵢⱼ|²` is the trace of the Gram matrix and `d` is its determinant.
+ *   By the Cauchy–Binet formula, `d` is the sum of `|M|²` over the 2 × 2
+ *   minors `M` of the matrix. This is the answer the 2 × 2 `Eigenvalues`
+ *   handler gives for the Gram matrix.
+ * - Any other matrix of exact entries has no simple closed form, so under
+ *   `evaluate()` the application stays unevaluated, like `ln(2)`. Under
+ *   `.N()`, or when an entry is inexact, the norm is a machine number from
+ *   `spectralNorm()` (`numerics/linear-algebra.ts`).
+ *
+ * An exact complex entry (`i`, `1 + 2i`) is exact here too: the packed
+ * tensor keeps it as an exact expression, not as a machine complex
+ * (`getExpressionDatatype`, `tensor/tensor-fields.ts`). So the spectral
+ * norm of `[[1, i], [0, 1]]` is the closed form `√((3 + √5) / 2)`.
+ */
+function spectralMatrixNorm(
+  ce: ComputeEngine,
+  entries: readonly Expression[],
+  m: number,
+  n: number,
+  vectorNorm: (elements: readonly Expression[]) => Expression | undefined,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (m === 1 || n === 1) return vectorNorm(entries);
+
+  // The numeric value of each entry. A symbolic entry leaves the norm
+  // undecided, and a NaN entry makes it NaN.
+  const values: { re: number; im: number }[] = [];
+  let allExact = true;
+  for (const el of entries) {
+    const v = el.N();
+    if (!isNumber(v)) return undefined;
+    if (Number.isNaN(v.re) || Number.isNaN(v.im)) return ce.NaN;
+    values.push({ re: v.re, im: v.im });
+    if (isNumber(el) && !el.isExact) allExact = false;
+  }
+  // An entry is zero only when its value is exactly zero. A machine value of
+  // 0 is not enough: an exact entry such as `10^{-400}` is below the smallest
+  // machine number, and its machine value is 0. Such an entry counts as
+  // nonzero here, which can only make the test below reject a matrix.
+  const isZero = (k: number) =>
+    values[k].re === 0 &&
+    values[k].im === 0 &&
+    (entries[k].isSame(0) || entries[k].evaluate().isSame(0));
+
+  // At most one nonzero entry in each row and each column: the norm is the
+  // largest modulus.
+  let monomial = true;
+  for (let i = 0; i < m && monomial; i++) {
+    let count = 0;
+    for (let j = 0; j < n; j++) if (!isZero(i * n + j)) count += 1;
+    if (count > 1) monomial = false;
+  }
+  for (let j = 0; j < n && monomial; j++) {
+    let count = 0;
+    for (let i = 0; i < m; i++) if (!isZero(i * n + j)) count += 1;
+    if (count > 1) monomial = false;
+  }
+  if (monomial) {
+    let best = -1;
+    let bestModulus = -1;
+    // Whether the machine moduli are enough to find the largest entry. They
+    // are not when a nonzero entry has a machine modulus of 0 or of infinity
+    // (an exact entry outside the machine range), or when two nonzero exact
+    // entries have the same machine modulus (`10^{400}` and `10^{400} + 1`).
+    // An inexact entry is its machine value, so a tie with it is a real tie.
+    const isExactEntry = (k: number) =>
+      !(isNumber(entries[k]) && !entries[k].isExact);
+    let machineDecides = true;
+    const nonzero: number[] = [];
+    for (let k = 0; k < entries.length; k++) {
+      const modulus = Math.hypot(values[k].re, values[k].im);
+      if (!isZero(k)) {
+        if (
+          modulus === 0 ||
+          !Number.isFinite(modulus) ||
+          (isExactEntry(k) &&
+            nonzero.some(
+              (j) =>
+                isExactEntry(j) &&
+                Math.hypot(values[j].re, values[j].im) === modulus
+            ))
+        )
+          machineDecides = false;
+        nonzero.push(k);
+      }
+      if (modulus > bestModulus) {
+        bestModulus = modulus;
+        best = k;
+      }
+    }
+    if (!machineDecides) {
+      // Compare the moduli by their values (`exactCompareNumbers`): exact
+      // values (`10^{-400}`, `√2 · 10^{-400}`) exactly, and inexact values
+      // (the decimal `1e-400` under `.N()`) at working precision. Their
+      // machine values are 0 or infinity here, and `isGreater` reads those
+      // or applies the engine tolerance. A modulus that is not a real
+      // number literal leaves the application unevaluated.
+      const moduli = nonzero.map((k) =>
+        ce.function('Abs', [entries[k]]).evaluate()
+      );
+      let top = 0;
+      for (let i = 1; i < moduli.length; i++) {
+        const order = exactCompareNumbers(moduli[i], moduli[top]);
+        if (order === undefined) return undefined;
+        if (order > 0) top = i;
+      }
+      best = nonzero[top];
+    }
+    return ce
+      .function('Abs', [entries[best]])
+      .evaluate({ numericApproximation });
+  }
+
+  // Two rows or two columns, exact entries: the closed form.
+  if (
+    allExact &&
+    Math.min(m, n) === 2 &&
+    Math.max(m, n) <= MAX_EXACT_SPECTRAL_SIDE
+  ) {
+    // Built with `ce.function` rather than the `.add()`/`.mul()` methods,
+    // which fold a sum of exact values such as `18 + 2√65` to a float.
+    const at = (i: number, j: number) => entries[i * n + j];
+    const squaredModulus = (x: Expression) =>
+      ce.function('Power', [ce.function('Abs', [x]), ce.number(2)]);
+    const product = (a: Expression, b: Expression) =>
+      ce.function('Multiply', [a, b]);
+    const t = ce.function('Add', entries.map(squaredModulus));
+    // The 2 × 2 minors: over each pair of columns when there are two rows,
+    // else over each pair of rows.
+    const minors: Expression[] = [];
+    const side = m === 2 ? n : m;
+    for (let p = 0; p < side; p++)
+      for (let q = p + 1; q < side; q++) {
+        const minor =
+          m === 2
+            ? ce.function('Subtract', [
+                product(at(0, p), at(1, q)),
+                product(at(0, q), at(1, p)),
+              ])
+            : ce.function('Subtract', [
+                product(at(p, 0), at(q, 1)),
+                product(at(p, 1), at(q, 0)),
+              ]);
+        minors.push(squaredModulus(minor));
+      }
+    const d = ce.function('Add', minors);
+    const discriminant = ce.function('Subtract', [
+      ce.function('Power', [t, ce.number(2)]),
+      product(ce.number(4), d),
+    ]);
+    // The closed form is evaluated exactly first, and only then made
+    // numeric. The discriminant `t² − 4d` is the difference of two nearly
+    // equal numbers when the two singular values are near each other, so a
+    // numeric evaluation of it loses every digit: with `.N()`,
+    // `‖[[10^12, 1], [1, 10^12]]‖₂` was 10^12 instead of 10^12 + 1, and
+    // `‖[[10^200, 1], [1, 10^200]]‖₂` was `~oo`.
+    const exact = ce
+      .function('Sqrt', [
+        ce.function('Divide', [
+          ce.function('Add', [t, ce.function('Sqrt', [discriminant])]),
+          ce.number(2),
+        ]),
+      ])
+      .evaluate();
+    return numericApproximation ? exact.N() : exact;
+  }
+
+  if (allExact && !numericApproximation) return undefined;
+
+  const re: number[][] = [];
+  const im: number[][] = [];
+  for (let i = 0; i < m; i++) {
+    re.push(values.slice(i * n, (i + 1) * n).map((v) => v.re));
+    im.push(values.slice(i * n, (i + 1) * n).map((v) => v.im));
+  }
+  return ce.number(spectralNorm(re, im));
+}
+
+/**
+ * The largest sum of entry magnitudes over `lines`: the order-1 matrix norm
+ * when each line is a column, the order-∞ norm when each line is a row.
+ * `lines[k]` holds the indices, in `entries`, of the entries of line `k`.
+ *
+ * The largest line is chosen from the numeric value (`.N()`) of each
+ * magnitude. When no entry is an inexact number, the result is then the
+ * EXACT sum of that line's magnitudes, so `‖[[1, 1+2i], [0, 1]]‖₁` is
+ * `1 + √5` and `‖[[π, 1], [0, 1]]‖₁` is `π`, not a machine number. When an
+ * entry is inexact, the result is the machine sum.
+ *
+ * A NaN entry makes the norm NaN, wherever it is: its line sum is NaN, so
+ * the maximum over the lines is NaN. It is tested before the comparison
+ * because a `>` test is false for NaN and would skip that line
+ * (`‖[[NaN, 1], [2, 3]]‖₁` would read 4). The compiled code propagates the
+ * NaN too (`_SYS.norm`, `compilation/javascript-target.ts`). Otherwise, a magnitude with no
+ * numeric value (`|x|` for an unassigned `x`) leaves the norm undecided
+ * (`undefined`). An infinite entry is handled by the caller, before this
+ * function.
+ *
+ * The machine sums give the order only when they can tell the lines apart.
+ * When no entry is inexact, the lines whose machine sum overflows, or is
+ * within the machine precision of the largest one (which includes a tie,
+ * and a sum of entries such as `10^-400` that underflow to 0), are ordered
+ * by their EXACT sums instead: `‖[[10^20, 0], [0, 10^20 + 1]]‖₁` is
+ * `10^20 + 1`, and `‖[[10^400, 0], [0, 2·10^400]]‖₁` is `2·10^400`. When
+ * the exact sums of those lines cannot be ordered, the norm is undecided
+ * (`undefined`).
+ */
+function maxAbsoluteLineSum(
+  ce: ComputeEngine,
+  entries: readonly Expression[],
+  lines: readonly (readonly number[])[],
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const magnitudes: Expression[] = [];
+  const values: number[] = [];
+  let allExact = true;
+  let undecided = false;
+  for (const el of entries) {
+    const magnitude = ce.function('Abs', [el]).evaluate();
+    const v = magnitude.N();
+    if (isNumber(v) && Number.isNaN(v.re)) return ce.NaN;
+    if (!isNumber(v)) undecided = true;
+    magnitudes.push(magnitude);
+    values.push(v.re);
+    if (isNumber(el) && !el.isExact) allExact = false;
+  }
+  if (undecided) return undefined;
+
+  let best = -1;
+  let bestSum = -Infinity;
+  const sums: number[] = [];
+  for (let k = 0; k < lines.length; k++) {
+    let sum = 0;
+    for (const index of lines[k]) sum += values[index];
+    sums.push(sum);
+    if (sum > bestSum) {
+      bestSum = sum;
+      best = k;
+    }
+  }
+  if (best < 0) return ce.Zero;
+
+  if (!allExact || numericApproximation) return ce.number(bestSum);
+
+  // The exact sum of a line. Built with `ce.function` rather than the
+  // `.add()` method, which folds a sum of exact values such as `1 + √5` to a
+  // float.
+  const exactSum = (k: number): Expression =>
+    ce
+      .function(
+        'Add',
+        lines[k].map((index) => magnitudes[index])
+      )
+      .evaluate();
+
+  // The lines the machine sums cannot separate from the best line. When the
+  // best machine sum overflows, these are the other lines that overflow.
+  // Otherwise, they are the lines whose machine sum is within the rounding
+  // error of the best one: each magnitude and each addition can round by
+  // one unit in the last place.
+  const candidates: number[] = [];
+  for (let k = 0; k < lines.length; k++) {
+    const sum = sums[k];
+    if (!Number.isFinite(bestSum)) {
+      if (!Number.isFinite(sum)) candidates.push(k);
+      continue;
+    }
+    const tolerance =
+      4 * Number.EPSILON * (lines[k].length + 1) * Math.abs(bestSum);
+    if (bestSum - sum <= tolerance) candidates.push(k);
+  }
+
+  let bestExact = exactSum(candidates[0]);
+  for (const k of candidates.slice(1)) {
+    const candidate = exactSum(k);
+    const order = compareExactSums(ce, candidate, bestExact);
+    if (order === undefined) return undefined;
+    if (order > 0) bestExact = candidate;
+  }
+  return bestExact;
+}
+
+/**
+ * The order of two exact line sums of `maxAbsoluteLineSum`: `-1`, `0` or
+ * `1`, or `undefined` when it cannot be decided.
+ *
+ * Two number literals compare exactly (`exactCompareNumbers`). Other sums
+ * (`1 + π`) are equal when they are the same expression, and are otherwise
+ * ordered by the sign of their exact difference, when that difference
+ * evaluates to a number literal.
+ */
+function compareExactSums(
+  ce: ComputeEngine,
+  a: Expression,
+  b: Expression
+): -1 | 0 | 1 | undefined {
+  if (a.isSame(b)) return 0;
+  const order = exactCompareNumbers(a, b);
+  if (order !== undefined) return order;
+  const difference = ce.function('Subtract', [a, b]).evaluate();
+  if (difference.isSame(0)) return 0;
+  return exactCompareNumbers(difference, 0);
 }
 
 /** The shape gate `list<any>`: "is this operand list-shaped?", asked with
@@ -2770,7 +3105,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //   - L∞ (max): max(|xi|)
     //   - Lp: (Σ|xi|^p)^(1/p)
     // For matrices:
-    //   - Frobenius (default): √(ΣΣ|aij|²)
+    //   - Frobenius (default, and `"Frobenius"`): √(ΣΣ|aij|²)
+    //   - order 2: the spectral norm, the largest singular value
+    //   - order 1: max column sum; order ∞: max row sum
     Norm: {
       description: 'Vector or matrix norm.',
       complexity: 8200,
@@ -2856,6 +3193,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // for — an unassigned symbol — was silently discarded, and a later
         // `p = -1` never reached `Norm`'s precondition.
         let normType: number | string = 2; // Default to L2/Frobenius
+        // Whether the order is an explicit NUMERIC 2. On a matrix that is the
+        // spectral norm, while the default and `"Frobenius"` are the
+        // Frobenius norm. On a vector the two readings are the same norm.
+        let explicitOrderTwo = false;
         if (normTypeExpr) {
           const normStr = isString(normTypeExpr)
             ? normTypeExpr.string
@@ -2892,6 +3233,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           )
             return undefined;
           normType = order;
+          explicitOrderTwo = order === 2 && normStr !== 'Frobenius';
         }
 
         // Scalar: |x| (absolute value)
@@ -3127,7 +3469,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const [m, n] = shape;
 
           // A matrix norm order this handler does not compute — anything but
-          // the Frobenius norm (the default, and `p = 2`), the max column sum
+          // the Frobenius norm (the default, and `"Frobenius"`), the spectral
+          // norm (`p = 2`), the max column sum
           // (`p = 1`) and the max row sum (`p = ∞`) — has no value, whatever
           // the entries are, so the order is decided first: otherwise
           // `Norm([[+oo]], 3)` would answer `+oo` where `Norm([[1]], 3)` stays
@@ -3157,6 +3500,17 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (hasInfiniteMagnitudeComponent(entries))
             return ce.PositiveInfinity;
 
+          // The spectral norm (`p = 2`): the largest singular value.
+          if (normType === 2 && explicitOrderTwo)
+            return spectralMatrixNorm(
+              ce,
+              entries,
+              m,
+              n,
+              vectorNorm,
+              numericApproximation
+            );
+
           // Frobenius norm (default for matrices): √(ΣΣ|aij|²)
           if (normType === 2) {
             let sumSq: Expression = ce.Zero;
@@ -3167,60 +3521,22 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return ce.expr(['Sqrt', sumSq]).evaluate({ numericApproximation });
           }
 
-          // L1 (max column sum of absolute values)
-          if (normType === 1) {
-            let maxColSum = 0;
-            for (let j = 0; j < n; j++) {
-              let colSum = 0;
-              for (let i = 0; i < m; i++) {
-                const absEl = ce.expr(['Abs', entries[i * n + j]]).evaluate();
-                // A magnitude that is still symbolic (`|x|` for an
-                // unassigned `x`) has no place in a numeric column sum: `.re`
-                // reads NaN for it, exactly as it does for a NaN literal, so
-                // adding it in would report the wrong answer (NaN) for a
-                // question this branch cannot decide. The whole norm is
-                // undecided instead.
-                if (!isNumber(absEl)) return undefined;
-                colSum += absEl.re ?? 0;
-              }
-              // With no infinite entry left, a NaN column sum comes from a NaN
-              // entry, and the norm is NaN. The test is explicit because every
-              // comparison with NaN is false: the `>` below skips such a
-              // column and answers the maximum of the REMAINING ones, which
-              // makes `‖[[NaN, 1], [2, 3]]‖₁` read 4 instead of NaN. The
-              // compiled code propagates the NaN (`_SYS.norm`,
-              // `compilation/javascript-target.ts`).
-              if (Number.isNaN(colSum)) return ce.NaN;
-              if (colSum > maxColSum) maxColSum = colSum;
-            }
-            return ce.number(maxColSum);
-          }
-
-          // L∞ (max row sum of absolute values)
-          if (normType === 'infinity') {
-            let maxRowSum = 0;
-            for (let i = 0; i < m; i++) {
-              let rowSum = 0;
-              for (let j = 0; j < n; j++) {
-                const absEl = ce.expr(['Abs', entries[i * n + j]]).evaluate();
-                // A still-symbolic magnitude leaves the norm undecided, for
-                // the reason the L1 branch above states.
-                if (!isNumber(absEl)) return undefined;
-                rowSum += absEl.re ?? 0;
-              }
-              // A NaN row sum is the norm, for the reason the L1 branch above
-              // states: the `>` test cannot see a NaN and would drop the row.
-              if (Number.isNaN(rowSum)) return ce.NaN;
-              if (rowSum > maxRowSum) maxRowSum = rowSum;
-            }
-            return ce.number(maxRowSum);
-          }
-
-          return undefined;
+          // L1 (max column sum of absolute values) and L∞ (max row sum of
+          // absolute values). Each line is a column (order 1) or a row
+          // (order ∞), given as the indices of its entries in `entries`.
+          const lines: number[][] = [];
+          if (normType === 1)
+            for (let j = 0; j < n; j++)
+              lines.push(Array.from({ length: m }, (_, i) => i * n + j));
+          else
+            for (let i = 0; i < m; i++)
+              lines.push(Array.from({ length: n }, (_, j) => i * n + j));
+          return maxAbsoluteLineSum(ce, entries, lines, numericApproximation);
         }
 
-        // Higher-rank tensors (rank ≥ 3). The Frobenius norm — the order 2,
-        // which is also the default and the `"Frobenius"` spelling — is the
+        // Higher-rank tensors (rank ≥ 3). The Frobenius norm — the default and
+        // the `"Frobenius"` spelling, and also the order 2 at this rank (the
+        // spectral reading of the order 2 is a matrix norm only) — is the
         // ENTRY-WISE L2 norm `√(Σ|xᵢ|²)`, and that definition does not
         // mention the rank: it is the same sum over every cell of the
         // tensor, read in whatever order. So it is computed here from the
@@ -3399,6 +3715,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         if (eigenvalues.operator === 'Error') return eigenvalues;
         if (eigenvectors.operator === 'Error') return eigenvectors;
+        // When either part cannot be computed (for example, the eigenvalues
+        // of a complex 3×3 matrix), the application stays unevaluated instead
+        // of returning a tuple with an unevaluated part.
+        if (
+          eigenvalues.operator === 'Eigenvalues' ||
+          eigenvectors.operator === 'Eigenvectors'
+        )
+          return undefined;
 
         return ce.expr(['Tuple', eigenvalues, eigenvectors]);
       },
@@ -3529,7 +3853,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // the numeric SVD, which itself declines. See
       // `canEnumerateFiniteSource`.
       canEnumerate: canEnumerateFiniteSource,
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const M = ops[0];
         if (!isTensorValue(M)) return undefined;
 
@@ -3544,7 +3871,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // has exactly min(m, n) eigenvalues. For a 1×1 or 2×2 Gram with exact
         // rational entries, the eigenvalues (hence singular values) are exact.
         const exact = exactSingularValues(M, m, n, ce);
-        if (exact !== undefined) return exact;
+        // Under `N()` the exact values are approximated, as for the other
+        // exact results of the library.
+        if (exact !== undefined)
+          return numericApproximation ? exact.N() : exact;
 
         // Numeric fallback: extract the singular values from the float SVD,
         // sorted descending, keeping min(m, n) of them (zeros included).
@@ -3570,25 +3900,12 @@ function computeLU(
   ce: ComputeEngine
 ): { P: Expression; L: Expression; U: Expression } | undefined {
   if (!isTensorValue(M)) return undefined;
-  const mTensor = packTensor(ce, M);
-  if (!mTensor) return undefined;
-
-  // Convert matrix to numeric array
-  const A: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    A[i] = [];
-    for (let j = 0; j < n; j++) {
-      const val = mTensor.at(i + 1, j + 1);
-      const num =
-        typeof val === 'number'
-          ? val
-          : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
-      if (isNaN(num)) return undefined;
-      A[i][j] = num;
-    }
-  }
+  // Convert the matrix to a numeric array. The algorithm below does real
+  // arithmetic only, so the conversion fails for an entry that is complex or
+  // not numeric, and the application then stays unevaluated. Reading only the
+  // real part of a complex entry would give a wrong result.
+  const A = tensorToNumericMatrix(M, n, n);
+  if (!A) return undefined;
 
   // Initialize L as identity, U as copy of A, P as identity permutation
   const L: number[][] = Array(n)
@@ -3673,25 +3990,12 @@ function computeQR(
   ce: ComputeEngine
 ): { Q: Expression; R: Expression } | undefined {
   if (!isTensorValue(M)) return undefined;
-  const mTensor = packTensor(ce, M);
-  if (!mTensor) return undefined;
-
-  // Convert matrix to numeric array
-  const A: number[][] = [];
-  for (let i = 0; i < m; i++) {
-    A[i] = [];
-    for (let j = 0; j < n; j++) {
-      const val = mTensor.at(i + 1, j + 1);
-      const num =
-        typeof val === 'number'
-          ? val
-          : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
-      if (isNaN(num)) return undefined;
-      A[i][j] = num;
-    }
-  }
+  // Convert the matrix to a numeric array. The algorithm below does real
+  // arithmetic only, so the conversion fails for an entry that is complex or
+  // not numeric, and the application then stays unevaluated. Reading only the
+  // real part of a complex entry would give a wrong result.
+  const A = tensorToNumericMatrix(M, m, n);
+  if (!A) return undefined;
 
   // Use Householder reflections for better numerical stability
   const Q: number[][] = Array(m)
@@ -3785,25 +4089,12 @@ function computeCholesky(
   ce: ComputeEngine
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
-  const mTensor = packTensor(ce, M);
-  if (!mTensor) return undefined;
-
-  // Convert matrix to numeric array
-  const A: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    A[i] = [];
-    for (let j = 0; j < n; j++) {
-      const val = mTensor.at(i + 1, j + 1);
-      const num =
-        typeof val === 'number'
-          ? val
-          : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
-      if (isNaN(num)) return undefined;
-      A[i][j] = num;
-    }
-  }
+  // Convert the matrix to a numeric array. The algorithm below does real
+  // arithmetic only, so the conversion fails for an entry that is complex or
+  // not numeric, and the application then stays unevaluated. Reading only the
+  // real part of a complex entry would give a wrong result.
+  const A = tensorToNumericMatrix(M, n, n);
+  if (!A) return undefined;
 
   // Initialize L as zero matrix
   const L: number[][] = Array(n)
@@ -3858,25 +4149,12 @@ function computeSVD(
   | { U: Expression; S: Expression; V: Expression; singularValues: number[] }
   | undefined {
   if (!isTensorValue(M)) return undefined;
-  const mTensor = packTensor(ce, M);
-  if (!mTensor) return undefined;
-
-  // Convert matrix to numeric array
-  const A: number[][] = [];
-  for (let i = 0; i < m; i++) {
-    A[i] = [];
-    for (let j = 0; j < n; j++) {
-      const val = mTensor.at(i + 1, j + 1);
-      const num =
-        typeof val === 'number'
-          ? val
-          : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
-      if (isNaN(num)) return undefined;
-      A[i][j] = num;
-    }
-  }
+  // Convert the matrix to a numeric array. The algorithm below does real
+  // arithmetic only, so the conversion fails for an entry that is complex or
+  // not numeric, and the application then stays unevaluated. Reading only the
+  // real part of a complex entry would give a wrong result.
+  const A = tensorToNumericMatrix(M, m, n);
+  if (!A) return undefined;
 
   // Compute A^T * A for right singular vectors
   const AtA: number[][] = Array(n)
@@ -4107,11 +4385,11 @@ function exactSingularValues(
   ce: ComputeEngine
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
-  const rational = tensorToRationalMatrix(M, m, n);
-  if (rational === undefined) return undefined;
-
   const g = Math.min(m, n);
   if (g > 2) return undefined;
+
+  const rational = tensorToRationalMatrix(M, m, n);
+  if (rational === undefined) return exactComplexSingularValues(M, m, n, ce);
 
   // Gram entry: A^T·A when n ≤ m (g = n), else A·A^T (g = m).
   const useAtA = n <= m;
@@ -4139,8 +4417,20 @@ function exactSingularValues(
   const g01 = gram(0, 1);
   const trRat = ratAdd(g00, g11);
   const detRat = ratSub(ratMul(g00, g11), ratMul(g01, g01));
-  const tr = ce.number(trRat);
-  const det = ce.number(detRat);
+  return gram2x2SingularValues(ce.number(trRat), ce.number(detRat), ce);
+}
+
+/**
+ * The two singular values √λ₁ ≥ √λ₂ of a matrix whose 2×2 Gram matrix has
+ * the trace `tr` and the determinant `det`. The Gram matrix is Hermitian
+ * positive semidefinite, so λ = (tr ± √(tr² − 4·det)) / 2 are real and
+ * non-negative, and the list is already in descending order.
+ */
+function gram2x2SingularValues(
+  tr: Expression,
+  det: Expression,
+  ce: ComputeEngine
+): Expression {
   const disc = ce.function('Sqrt', [
     ce.function('Subtract', [
       ce.function('Power', [tr, 2]),
@@ -4157,6 +4447,72 @@ function exactSingularValues(
     ce.function('Sqrt', [lambda1]).evaluate(),
     ce.function('Sqrt', [lambda2]).evaluate(),
   ]);
+}
+
+/**
+ * Exact singular values of a matrix with exact complex entries (Gaussian
+ * rationals such as `1 + i` or `1/2 - 3i`), or `undefined` when they cannot
+ * be computed exactly. The Gram matrix is the conjugate product Aᴴ·A (or
+ * A·Aᴴ, whichever is at most 2×2): its trace Σ|aᵢⱼ|² and its determinant are
+ * real, so the closed form of `gram2x2SingularValues` applies. The result is
+ * accepted only when the trace and the determinant evaluate to exact
+ * rationals.
+ */
+function exactComplexSingularValues(
+  M: Expression,
+  m: number,
+  n: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isTensorValue(M)) return undefined;
+  const packed = packTensor(ce, M);
+  if (!packed) return undefined;
+  // An exact entry always packs in the `expression` dtype, so a machine
+  // tensor has no exact entry: decline before boxing its cells.
+  if (packed.dtype === 'float64' || packed.dtype === 'complex128')
+    return undefined;
+  const entries: Expression[][] = [];
+  for (let i = 0; i < m; i++) {
+    const row: Expression[] = [];
+    for (let j = 0; j < n; j++) {
+      const entry = ce.box(packed.at(i + 1, j + 1) as Expression);
+      if (!isNumber(entry) || !entry.isExact) return undefined;
+      row.push(entry);
+    }
+    entries.push(row);
+  }
+
+  // Gram entry: (Aᴴ·A)ᵢⱼ when n ≤ m, else (A·Aᴴ)ᵢⱼ.
+  const useAhA = n <= m;
+  const gram = (i: number, j: number): Expression => {
+    const terms: Expression[] = [];
+    for (let k = 0; k < (useAhA ? m : n); k++) {
+      const x = useAhA ? entries[k][i] : entries[i][k];
+      const y = useAhA ? entries[k][j] : entries[j][k];
+      terms.push(ce.function('Multiply', [ce.function('Conjugate', [x]), y]));
+    }
+    return ce.function('Add', terms).evaluate();
+  };
+  const isRational = (x: Expression): boolean =>
+    isNumber(x) && x.isExact && asRational(x) !== undefined;
+
+  if (m === 1 || n === 1) {
+    const g00 = gram(0, 0);
+    if (!isRational(g00)) return undefined;
+    return ce.expr(['List', ce.function('Sqrt', [g00]).evaluate()]);
+  }
+
+  const g00 = gram(0, 0);
+  const g11 = gram(1, 1);
+  const tr = ce.function('Add', [g00, g11]).evaluate();
+  const det = ce
+    .function('Subtract', [
+      ce.function('Multiply', [g00, g11]),
+      ce.function('Multiply', [gram(0, 1), gram(1, 0)]),
+    ])
+    .evaluate();
+  if (!isRational(tr) || !isRational(det)) return undefined;
+  return gram2x2SingularValues(tr, det, ce);
 }
 
 /**
@@ -4189,10 +4545,14 @@ function checkDiagonalOrTriangular(M: Expression, n: number): boolean {
   for (let i = 0; i < n && (isUpperTriangular || isLowerTriangular); i++) {
     for (let j = 0; j < n; j++) {
       const val = mTensor.at(i + 1, j + 1);
+      // Both parts must be zero: an entry `i` has a zero real part.
       const isZero =
         val === undefined ||
         val === 0 ||
-        (typeof val === 'object' && 're' in val && val.re === 0);
+        (typeof val === 'object' &&
+          're' in val &&
+          val.re === 0 &&
+          (!('im' in val) || val.im === 0));
 
       if (i > j && !isZero) isUpperTriangular = false;
       if (i < j && !isZero) isLowerTriangular = false;
@@ -4211,6 +4571,16 @@ function computeEigenvalues3x3(
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
 
+  // The cubic solver below is real-only. A matrix with a complex entry has a
+  // characteristic polynomial with complex coefficients, which it cannot
+  // solve, so the application stays unevaluated. (A symbolic entry still
+  // takes the QR fallback below, which declines it too.)
+  for (let i = 1; i <= 3; i++)
+    for (let j = 1; j <= 3; j++) {
+      const im = getElement(M, i, j, ce).im;
+      if (!isNaN(im) && im !== 0) return undefined;
+    }
+
   // Get matrix elements
   const a11 = getElement(M, 1, 1, ce).re ?? 0;
   const a12 = getElement(M, 1, 2, ce).re ?? 0;
@@ -4222,10 +4592,18 @@ function computeEigenvalues3x3(
   const a32 = getElement(M, 3, 2, ce).re ?? 0;
   const a33 = getElement(M, 3, 3, ce).re ?? 0;
 
-  // If any element is not numeric, fall back to QR
+  // If any element is not numeric, or its machine value is not finite, or a
+  // float64 cannot hold its magnitude (the exact `10^400` reads as +Infinity
+  // and makes every root NaN; a nonzero `10^-400` reads as 0), fall back to
+  // QR. QR declines such a matrix too (`tensorToNumericMatrix`).
+  let holdsAll = true;
+  for (let i = 1; i <= 3 && holdsAll; i++)
+    for (let j = 1; j <= 3 && holdsAll; j++)
+      holdsAll = float64HoldsNumber(getElement(M, i, j, ce));
   if (
+    !holdsAll ||
     [a11, a12, a13, a21, a22, a23, a31, a32, a33].some(
-      (x) => x === undefined || isNaN(x)
+      (x) => x === undefined || !Number.isFinite(x)
     )
   ) {
     return computeEigenvaluesQR(M, 3, ce);
@@ -4321,25 +4699,12 @@ function computeEigenvaluesQR(
   ce: ComputeEngine
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
-  const mTensor = packTensor(ce, M);
-  if (!mTensor) return undefined;
-
-  // Convert matrix to numeric array
-  const A: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    A[i] = [];
-    for (let j = 0; j < n; j++) {
-      const val = mTensor.at(i + 1, j + 1);
-      const num =
-        typeof val === 'number'
-          ? val
-          : typeof val === 'object' && 're' in val
-            ? (val.re ?? 0)
-            : 0;
-      if (isNaN(num)) return undefined; // Can't compute numerically
-      A[i][j] = num;
-    }
-  }
+  // Convert the matrix to a numeric array. The algorithm below does real
+  // arithmetic only, so the conversion fails for an entry that is complex or
+  // not numeric, and the application then stays unevaluated. Reading only the
+  // real part of a complex entry would give a wrong result.
+  const A = tensorToNumericMatrix(M, n, n);
+  if (!A) return undefined;
 
   // Reduce to upper Hessenberg form, then run the shifted (Francis
   // double-shift) QR algorithm with deflation. The double shift is an implicit
@@ -4687,8 +5052,6 @@ function computeEigenvector(
   ce: ComputeEngine
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
-  const mTensor = packTensor(ce, M);
-  if (!mTensor) return undefined;
 
   // Exact path: when M and λ are both exact rationals, A − λI is exact, so the
   // eigenvector (a null-space vector of A − λI) can be computed with exact
@@ -4696,24 +5059,23 @@ function computeEigenvector(
   const exact = exactEigenvector(M, lambda, n, ce);
   if (exact) return exact;
 
+  // The float path below does real arithmetic only. It requires a real λ and
+  // real numeric entries: reading only the real part of a complex λ (for
+  // example `i`, an eigenvalue of the real rotation matrix [[0, -1], [1, 0]])
+  // or of a complex entry gives a vector that is not an eigenvector. In the
+  // other cases, a 2×2 matrix takes the symbolic path, which is valid for
+  // complex values, and a larger matrix stays unevaluated.
   const lambdaNum = lambda.re;
-  if (lambdaNum === undefined || isNaN(lambdaNum)) {
-    // Try symbolic computation for 2×2
-    if (n === 2) {
-      return computeEigenvector2x2Symbolic(M, lambda, ce);
-    }
+  const A = tensorToNumericMatrix(M, n, n);
+  if (A === undefined || isNaN(lambdaNum) || lambda.im !== 0) {
+    if (n === 2) return computeEigenvector2x2Symbolic(M, lambda, ce);
     return undefined;
   }
 
   // Build (A - λI) matrix
-  const AminusLambdaI: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    AminusLambdaI[i] = [];
-    for (let j = 0; j < n; j++) {
-      const num = asRealNumber(mTensor.at(i + 1, j + 1)) ?? 0;
-      AminusLambdaI[i][j] = num - (i === j ? lambdaNum : 0);
-    }
-  }
+  const AminusLambdaI: number[][] = A.map((row, i) =>
+    row.map((num, j) => num - (i === j ? lambdaNum : 0))
+  );
 
   // Solve (A - λI)v = 0 using Gaussian elimination to find null space
   const eigenvector = solveNullSpace(AminusLambdaI, n);
@@ -4742,31 +5104,41 @@ function computeEigenvector2x2Symbolic(
   // If b = 0 and c ≠ 0: v = [λ - d, c]
   // If b = 0 and c = 0: v = [1, 0] or [0, 1]
 
-  const bVal = b.re;
-  if (bVal !== undefined && Math.abs(bVal) > 1e-10) {
-    // v = [b, λ - a]
+  // The magnitude of a value, from both parts, so that an entry such as `i`
+  // (real part 0) does not read as zero. NaN when the value is not numeric
+  // (for example, a symbol).
+  const magnitude = (x: Expression): number => {
+    const v = x.N();
+    return Math.hypot(v.re, v.im);
+  };
+  const bMag = magnitude(b);
+  const c2 = magnitude(c);
+
+  // A symbolic `b` or `c` is taken as nonzero: the vector is then correct
+  // except for the values of the symbol that make it zero.
+  if (bMag > 1e-10 || (isNaN(bMag) && !(c2 > 1e-10))) {
+    // v = [b, λ - a]. When λ = a, this vector is zero for a symbolic b that
+    // is zero, and [1, 0] is an eigenvector for every value of b.
     const v2 = lambda.sub(a).evaluate();
+    if (isNaN(bMag) && isNumber(v2) && v2.isSame(0))
+      return ce.expr(['List', ce.One, ce.Zero]);
     return ce.expr(['List', b, v2]);
   }
 
-  const cVal = c.re;
-  if (cVal !== undefined && Math.abs(cVal) > 1e-10) {
+  if (c2 > 1e-10 || isNaN(c2)) {
     // v = [λ - d, c]
     const d = getElement(M, 2, 2, ce);
     const v1 = lambda.sub(d).evaluate();
     return ce.expr(['List', v1, c]);
   }
 
-  // Diagonal matrix case
-  const aVal = a.re;
-  const lambdaVal = lambda.re;
-  if (aVal !== undefined && lambdaVal !== undefined) {
-    if (Math.abs(aVal - lambdaVal) < 1e-10) {
-      return ce.expr(['List', ce.One, ce.Zero]);
-    } else {
-      return ce.expr(['List', ce.Zero, ce.One]);
-    }
-  }
+  // Diagonal matrix case: λ is a or d. Compare the complex difference.
+  const aDiff = magnitude(ce.function('Subtract', [a, lambda]));
+  if (aDiff < 1e-10) return ce.expr(['List', ce.One, ce.Zero]);
+  const dDiff = magnitude(
+    ce.function('Subtract', [getElement(M, 2, 2, ce), lambda])
+  );
+  if (dDiff < 1e-10) return ce.expr(['List', ce.Zero, ce.One]);
 
   return undefined;
 }
@@ -4923,7 +5295,12 @@ function tensorToNumericMatrix(
           ? tensorPacked.at(j + 1)
           : tensorPacked.at(i + 1, j + 1);
       const num = asRealNumber(value);
-      if (num === undefined || isNaN(num)) return undefined;
+      // A float kernel cannot use an entry whose machine value is not
+      // finite, or an exact entry whose magnitude a float64 cannot hold: the
+      // exact `10^400` reads as +Infinity and makes the LU, QR and
+      // eigenvalue kernels return NaN, and a nonzero `10^-400` reads as 0.
+      if (num === undefined || !Number.isFinite(num)) return undefined;
+      if (isExpression(value) && !float64HoldsNumber(value)) return undefined;
       matrix[i][j] = num;
     }
   }

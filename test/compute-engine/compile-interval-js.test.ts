@@ -1431,16 +1431,29 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     expect(Number.isNaN(straddle.lo)).toBe(true);
   });
 
-  test('a point with a broadcasting component declines', () => {
+  test('a point with a broadcasting component is a list of points', () => {
     // A component that is itself a collection zips into one point per element,
-    // so the value is a LIST of points, which no lowering builds here.
-    for (const root of [
-      cePt.box(['PointList', ['List', 1, 2], 'b']),
-      cePt.box(['Tuple', ['List', 1, 2], 'b']),
-    ]) {
-      const fn = compile(root, { to: 'interval-js' });
-      expect(fn.success).toBe(false);
-    }
+    // so the value is a LIST of points. A `PointList` of that shape is built at
+    // run time, the scalar component reused at every point; a `Tuple` of that
+    // shape has no lowering and declines.
+    const list = compile(cePt.box(['PointList', ['List', 1, 2], 'b']), {
+      to: 'interval-js',
+    });
+    expect(list.success).toBe(true);
+    expect(list.run!({ b: { lo: 3, hi: 3 } })).toEqual([
+      [
+        { lo: 1, hi: 1 },
+        { lo: 3, hi: 3 },
+      ],
+      [
+        { lo: 2, hi: 2 },
+        { lo: 3, hi: 3 },
+      ],
+    ]);
+    const tuple = compile(cePt.box(['Tuple', ['List', 1, 2], 'b']), {
+      to: 'interval-js',
+    });
+    expect(tuple.success).toBe(false);
   });
 
   test('a coordinate that is not provably a number declines', () => {

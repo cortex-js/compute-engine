@@ -1027,8 +1027,8 @@ describe('PYTHON TARGET', () => {
   });
 
   // A norm ORDER that numpy spells differently, or that only becomes known at
-  // run time (see the `Norm` handler): `'fro'` is matrix-only, and ord 2 is the
-  // Frobenius norm in the interpreter but the SPECTRAL norm in numpy.
+  // run time (see the `Norm` handler): `'fro'` is matrix-only, and numpy
+  // raises for an explicit order on an input with more than two axes.
   describe('Norm order guards', () => {
     const M = ['List', ['List', 3, 4], ['List', 5, 12]];
     // The operands below are literal matrices/vectors, so compile-time
@@ -1142,11 +1142,21 @@ describe('PYTHON TARGET', () => {
       ).toBe('np.linalg.norm([3, 4], 3)');
     });
 
-    it('a run-time order over a matrix respells ord 2 as Frobenius', () => {
+    it('a run-time order over a matrix is tested when the code runs', () => {
+      // The matrix orders the interpreter computes — 1, 2 (the spectral
+      // norm) and +Infinity — mean the same norms in `np.linalg.norm`. For
+      // every other order the interpreter has no value, so the emitted code
+      // answers NaN.
       const scoped = new ComputeEngine();
       scoped.declare('normP', 'real');
       expect(python.compile(scoped.box(['Norm', M, 'normP'] as any)).code).toBe(
-        "np.linalg.norm([[3, 4], [5, 12]], ('fro' if (normP) == 2 else (normP)))"
+        "(lambda _x, _p: np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan'))([[3, 4], [5, 12]], normP)"
+      );
+    });
+
+    it('order 2 over a matrix is the spectral norm, `ord=2` in numpy', () => {
+      expect(python.compile(ce.box(['Norm', M, 2] as any), noFold).code).toBe(
+        'np.linalg.norm([[3, 4], [5, 12]], 2)'
       );
     });
 

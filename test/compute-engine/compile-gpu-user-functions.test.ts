@@ -166,6 +166,114 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
   });
 });
 
+describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifted', () => {
+  /**
+   * A complex parameter is a `vec2(re, im)` in the synthesized signature. A
+   * real argument is valid (a real number is a complex number), but GLSL and
+   * WGSL do not convert a scalar to a vector implicitly. The call site used to
+   * refuse the call ("lowers to float but parameter is declared vec2"), while
+   * the JavaScript target wraps the same argument in `{ re: x, im: 0 }`. The
+   * argument is now lifted to `vec2(x, 0.0)` at the call.
+   *
+   * `x` is DECLARED `real` in these engines. An undeclared `x` in `f(x)` is
+   * narrowed to `complex` by the call itself (a use of a symbol with no value
+   * narrows its type), and is then a `vec2` shader input that needs no lift.
+   */
+  function engineWithComplexF(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(complex) -> complex');
+    ce.assign('f', ce.parse('z \\mapsto z^2'));
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    return ce;
+  }
+
+  const cases: [string, string, string][] = [
+    ['a real symbol', 'f(x)', '_fn_f(V(x, 0.0))'],
+    ['a real expression', 'f(\\sin(x))', '_fn_f(V(sin(x), 0.0))'],
+    ['a real sum beside the call', 'f(x) + 1', '_fn_f(V(x, 0.0)) + V(1.0, 0.0)'],
+  ];
+  for (const [lang, target, v] of [
+    ['GLSL', glsl, 'vec2'],
+    ['WGSL', wgsl, 'vec2f'],
+  ] as const) {
+    for (const [name, latex, expected] of cases) {
+      it(`${lang}: ${name} (parse route)`, () => {
+        const ce = engineWithComplexF();
+        const r = target.compile(ce.parse(latex));
+        expect(r.code).toBe(expected.replaceAll('V(', `${v}(`));
+        expect(r.preamble).toContain(
+          target === glsl ? 'vec2 _fn_f(vec2 z)' : 'fn _fn_f(z: vec2f) -> vec2f'
+        );
+      });
+    }
+
+    it(`${lang}: a real symbol (box route)`, () => {
+      const ce = engineWithComplexF();
+      expect(target.compile(ce.box(['f', 'x'])).code).toBe(
+        `_fn_f(${v}(x, 0.0))`
+      );
+    });
+
+    it(`${lang}: an integer symbol and a number literal`, () => {
+      const ce = engineWithComplexF();
+      ce.declare('n', 'integer');
+      expect(target.compile(ce.box(['f', 'n'])).code).toBe(
+        `_fn_f(${v}(n, 0.0))`
+      );
+      expect(target.compile(ce.box(['f', 2]), NO_FOLD).code).toBe(
+        `_fn_f(${v}(2.0, 0.0))`
+      );
+    });
+
+    it(`${lang}: only the complex parameter is lifted`, () => {
+      const ce = engineWithComplexF();
+      ce.declare('g', '(complex, real) -> complex');
+      ce.assign('g', ce.parse('(z, t) \\mapsto z t'));
+      expect(target.compile(ce.parse('g(x, x)')).code).toBe(
+        `_fn_g(${v}(x, 0.0), x)`
+      );
+    });
+
+    it(`${lang}: a complex argument is not lifted`, () => {
+      const ce = engineWithComplexF();
+      ce.declare('w', 'complex');
+      expect(target.compile(ce.parse('f(w)')).code).toBe('_fn_f(w)');
+    });
+
+    it(`${lang}: a real call beside a complex call adds as vec2 + vec2`, () => {
+      // `x + iy` must lower to `vec2(x, y)`. A `float + vec2` sum is not a
+      // complex sum: the shader adds the float to BOTH components.
+      const ce = engineWithComplexF();
+      const r = target.compile(ce.parse('f(x) + \\arg(f(x+iy))'));
+      expect(r.code).toContain(`_fn_f(${v}(x, 0.0))`);
+      expect(r.code).toContain(`_fn_f(${v}(x, y))`);
+      expect(r.code).not.toMatch(/\bx \+ vec2/);
+    });
+
+    it(`${lang}: a caller-declared float parameter is lifted`, () => {
+      const ce = engineWithComplexF();
+      const src = target.compileFunction(ce.parse('f(t)'), 'wrap', 'vec2', [
+        ['t', 'float'],
+      ]);
+      expect(src).toContain(`return _fn_f(${v}(t, 0.0));`);
+    });
+
+    it(`${lang}: a float into a 2-VECTOR parameter still fails closed`, () => {
+      // A `vec2` parameter that is not complex has no lift: `vec2(t, 0.0)`
+      // would be a point, not the value the caller passed.
+      const ce = new ComputeEngine();
+      ce.declare('h', '(tuple<real,real>) -> real');
+      ce.assign('h', ce.expr(['Function', 5, 'w']));
+      expect(() =>
+        target.compileFunction(ce.parse('h(t)'), 'wrap', 'float', [
+          ['t', 'float'],
+        ])
+      ).toThrow(/argument 1 `t` lowers to "(float|f32)" but parameter "w"/);
+    });
+  }
+});
+
 describe('GPU USER FUNCTIONS — definition ordering', () => {
   it('GLSL: a callee is declared before its caller', () => {
     const ce = new ComputeEngine();

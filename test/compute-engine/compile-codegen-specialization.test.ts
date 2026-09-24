@@ -56,7 +56,10 @@ describe('code generation from numeric and representation facts', () => {
         expect(result.success).toBe(true);
         expect(result.code).toContain('_gpu_srgb_roundtrip(');
         expect(result.code).not.toContain('_gpu_oklch_to_srgb(');
-        expect(result.preamble).toContain('return clamp(rgb,');
+        // A finite sRGB triple is returned as it is: the conversions keep
+        // extended sRGB channels and do no gamut mapping, so the round trip
+        // of a finite triple is the identity.
+        expect(result.preamble).toContain('return rgb;');
         expect(result.preamble).toContain(
           'return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));'
         );
@@ -100,8 +103,12 @@ describe('code generation from numeric and representation facts', () => {
     // actual HSV and linear-sRGB helpers. Only the old round trip is mocked.
     const vec3 = (...values: number[]) =>
       values.length === 1 ? [values[0], values[0], values[0]] : values;
-    const clamp = (v: number[], lo: number, hi: number) =>
-      v.map((x) => Math.min(hi, Math.max(lo, x)));
+    // GLSL `clamp` takes a scalar or a vector: `_gpu_hsv_to_rgb` clamps its
+    // saturation and value.
+    const clamp = (v: number | number[], lo: number, hi: number): any =>
+      typeof v === 'number'
+        ? Math.min(hi, Math.max(lo, v))
+        : v.map((x) => Math.min(hi, Math.max(lo, x)));
     const fallback = jest.fn(() => [123, 456, 789]);
     const dependencies: Record<string, unknown> = {
       vec3,
@@ -111,6 +118,7 @@ describe('code generation from numeric and representation facts', () => {
       greaterThanEqual: (a: number[], b: number[]) => a.map((x, i) => x >= b[i]),
       pow: Math.pow,
       abs: Math.abs,
+      sign: Math.sign,
       mod: (x: number, y: number) => x - y * Math.floor(x / y),
       _gpu_srgb_to_oklch: (rgb: number[]) => rgb,
       _gpu_oklch_to_srgb: fallback,
@@ -147,13 +155,17 @@ describe('code generation from numeric and representation facts', () => {
         expect(actual[i]).toBeCloseTo(channel, 12)
       );
     }
-    expect(roundtrip([2, 2, 2])).toEqual([1, 1, 1]);
-    expect(roundtrip([-0.1, 1, 1])).toEqual([0, 1, 1]);
+    // A finite triple is extended sRGB and is returned unchanged, also
+    // outside [0, 1]: no clamp and no gamut mapping.
+    expect(roundtrip([2, 2, 2])).toEqual([2, 2, 2]);
+    expect(roundtrip([-0.1, 1, 1])).toEqual([-0.1, 1, 1]);
+    expect(roundtrip([-100, 1, 1])).toEqual([-100, 1, 1]);
+    expect(roundtrip([2.01, 1, 1])).toEqual([2.01, 1, 1]);
     expect(fallback).not.toHaveBeenCalled();
 
+    // A channel that is not a finite 32-bit float goes through the
+    // conversions, which answer the NaN color.
     for (const rgb of [
-      [-100, 1, 1], // Negative LMS cannot pass through the original cube roots.
-      [2.01, 1, 1],
       [Number.MAX_VALUE, 1, 1],
       [Infinity, 1, 1],
       [-Infinity, 1, 1],

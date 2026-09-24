@@ -2,139 +2,250 @@
 
 ### Behavior Changes
 
-- **Symbolic integration gives up at the same point on every machine.** The
-  Rubi integration rules (`loadIntegrationRules`) and the compiler's attempt
-  to find a closed form for an `Integrate` now stop after a number of steps,
-  not after a time. Before, the same integral could close on a fast machine
-  and stay unevaluated (or compile to numeric quadrature) on a slow or loaded
-  one. The rule driver has 300,000 steps per integral (new option
-  `stepBudget` of `loadIntegrationRules`); the compiler has 300,000 steps per
-  integral and 600,000 per compilation. The wall-clock limits remain only as
-  a guard against a hang: `timeLimitMs` of `loadIntegrationRules` now
-  defaults to 30 s (it was 10 s), and the compiler's attempt has 30 s per
-  integral and per compilation (it was 2 s and 4 s). An integrand that spends
-  its time in code that does not count steps can therefore run up to 30 s
-  before it stays unevaluated.
+- **Ordering functions order exactly.** `Max`, `Min`, `Supremum`, `Infimum`,
+  `Clamp`, `ElementMax`, `ElementMin`, `Sort`, `MaxBy`, `MinBy`, `ArgMax` and
+  `ArgMin` order two different numbers exactly: `Max(1e-12, 2e-12)` is `2e-12`.
+  Before, two numbers closer than the engine tolerance (1e-10) were a tie that
+  kept the first operand. The relational operators (`Less`, `Greater`, …) and
+  equality keep the tolerance, so `1e-12 < 2e-12` is still `False`: a relation
+  stays consistent with `Equal`. `Real`, `Imaginary` and `Argument` of an exact
+  complex constant now evaluate (`Real(1 + √2 i)` is `1`), and `Argument` of an
+  exact complex number is exact.
+- **`Sort` without a key stays unevaluated when two elements cannot be ordered**
+  (a symbol, a complex number), as `Sort` with a key already did. The result
+  used to depend on the order of the input: `Sort([2, y, 1, 3, x])` was
+  `[2, y, 1, 3, x]`. `Ordering` follows `Sort`.
+- **`Rgb` colours are extended sRGB.** A finite `Rgb` channel outside [0, 1] is
+  a colour outside the sRGB gamut (a Display-P3 display can show it). It is now
+  kept on every route: `AsRgb(Rgb(2, 0, 0))` is `Rgb(2, 0, 0)` on the
+  interpreter, the `javascript` target and the shaders, and conversions among
+  `Rgb`, `Oklab` and `Oklch` no longer gamut-map (a round trip through `Oklch`
+  returns `Rgb(2, 0, 0)`). The compiled route used to give white, and the
+  shaders clamped each channel. Negative channels use the sign-extended sRGB
+  transfer function of CSS Color 4. The renderer maps to the display gamut.
+- **`Hsv` and `Hsl` clamp saturation, value and lightness on every route,
+  including an infinite one.** `AsRgb(Hsv(30, ∞, 3.14))` is `Rgb(1, 0.5, 0)`
+  (Desmos draws `hsv(h, ∞, π)` this way); before, it was an `incompatible-type`
+  error and the compiled colour had null channels. A same-space conversion
+  clamps too (`AsHsv(Hsv(30, 2, 1))` is `Hsv(30, 1, 1)`), and the hue is reduced
+  modulo 360. The interpreter now also clamps a finite HSL saturation or
+  lightness (`AsRgb(Hsl(30, 1, 2))` was `Rgb(1, 2, 3)`; it is white). An
+  infinite hue, a NaN channel, and an infinite `Rgb`, `Oklab` or `Oklch` channel
+  are still an error (the NaN colour when compiled). Converting an extended
+  `Rgb` colour to `Hsv` or `Hsl` clips each channel.
+- **`Norm(A, 2)` of a matrix is the spectral norm** (the largest singular
+  value), as in the usual notation `‖A‖₂`. Before, it was the Frobenius norm.
+  `Norm(A)` and `Norm(A, "Frobenius")` are still the Frobenius norm. The result
+  is exact for a matrix with one or two rows or columns and for a matrix with at
+  most one nonzero entry in each row and column; any other exact matrix stays
+  `Norm(A, 2)` under `evaluate()` and gives a number under `.N()`. Compiled
+  JavaScript computes it too (it returned `NaN`), and the Python target emits
+  `np.linalg.norm(A, 2)` (it emitted `'fro'`). On a tensor of rank 3 or more,
+  order 2 is still the Frobenius norm.
 
-- **A caller's deadline now propagates out of `compile()` and the
-  integration components.** A `CancellationError` from an expired `ce.withTimeLimit` span
+- **Symbolic integration gives up at the same point on every machine.** The Rubi
+  integration rules (`loadIntegrationRules`) and the compiler's attempt to find
+  a closed form for an `Integrate` now stop after a number of steps, not after a
+  time. Before, the same integral could close on a fast machine and stay
+  unevaluated (or compile to numeric quadrature) on a slow or loaded one. The
+  rule driver has 300,000 steps per integral (new option `stepBudget` of
+  `loadIntegrationRules`); the compiler has 300,000 steps per integral and
+  600,000 per compilation. The wall-clock limits remain only as a guard against
+  a hang: `timeLimitMs` of `loadIntegrationRules` now defaults to 30 s (it was
+  10 s), and the compiler's attempt has 30 s per integral and per compilation
+  (it was 2 s and 4 s). An integrand that spends its time in code that does not
+  count steps can therefore run up to 30 s before it stays unevaluated.
+
+- **A caller's deadline now propagates out of `compile()` and the integration
+  components.** A `CancellationError` from an expired `ce.withTimeLimit` span
   (or an abort signal, an iteration limit or a recursion limit) is no longer
   turned into an ordinary "no result". `compile()` of an expression with an
   `Integrate` inside an expired span now throws, where it returned
-  `success: false`; the Rubi integration driver, its simplification step and
-  the compiler's closed-form antiderivative attempt re-throw it, where they
-  returned no result or fell back to numeric quadrature. A component still
-  falls back when only its OWN time budget expires (for example the
-  compiler's antiderivative attempt, which then emits quadrature code). The
-  `Integrate` handler also recognizes a `CancellationError` thrown by a
-  plugin bundle's copy of the class.
-- **Numeric integration now throws the caller's timeout.** When the deadline
-  of a `ce.withTimeLimit` span expires during `Integrate(...).N()`,
-  `NIntegrate` or a compiled integral, the `CancellationError` of that span
-  is thrown, with its label. Before, adaptive quadrature and Monte Carlo
-  sampling returned the partial result computed so far: a less accurate
-  number with no mark that it was incomplete. An already expired deadline
-  could even give a result from one panel reported as converged.
-- A caller's timeout that reaches the compilation of `D`, `ND` or
-  `Derivative` now propagates. Before, it turned into the numeric derivative
-  fallback or into a declined compilation. The same is true for the other
-  compilation steps that catch an error and continue: the closed-form
-  derivative, the constant fold of a term in an unrolled loop, the reference
-  analysis (which runs the `compile` handlers of custom operators), and the
-  binding of a loop-invariant term.
+  `success: false`; the Rubi integration driver, its simplification step and the
+  compiler's closed-form antiderivative attempt re-throw it, where they returned
+  no result or fell back to numeric quadrature. A component still falls back
+  when only its OWN time budget expires (for example the compiler's
+  antiderivative attempt, which then emits quadrature code). The `Integrate`
+  handler also recognizes a `CancellationError` thrown by a plugin bundle's copy
+  of the class.
+- **Numeric integration now throws the caller's timeout.** When the deadline of
+  a `ce.withTimeLimit` span expires during `Integrate(...).N()`, `NIntegrate` or
+  a compiled integral, the `CancellationError` of that span is thrown, with its
+  label. Before, adaptive quadrature and Monte Carlo sampling returned the
+  partial result computed so far: a less accurate number with no mark that it
+  was incomplete. An already expired deadline could even give a result from one
+  panel reported as converged.
+- A caller's timeout that reaches the compilation of `D`, `ND` or `Derivative`
+  now propagates. Before, it turned into the numeric derivative fallback or into
+  a declined compilation. The same is true for the other compilation steps that
+  catch an error and continue: the closed-form derivative, the constant fold of
+  a term in an unrolled loop, the reference analysis (which runs the `compile`
+  handlers of custom operators), and the binding of a loop-invariant term.
 - `.N()` of a sum or product of quantities with exact magnitudes now gives a
-  float magnitude, like every other `.N()` result:
-  `(1/3 m + 1/3 m).N()` is `0.6666… m`, not `2/3 m`.
-- Compiled `Tan`, `Cot`, `Sec` and `Csc` of a real argument now answer the
-  pole where the interpreter answers `~oo`: when the magnitude of the value
-  is more than a million. The JavaScript target answers `Infinity` and the
-  Python target `np.inf`. Before, compiled code answered a large finite
-  number: `Tan(1.5707963267948966)` was `16331239353195370`. A lazy `Map`
-  over more than a hundred elements, which is compiled under `N()`, now
-  answers `~oo` for such an element, and also for `1/x` at `0` (it answered
-  `+oo`).
+  float magnitude, like every other `.N()` result: `(1/3 m + 1/3 m).N()` is
+  `0.6666… m`, not `2/3 m`.
+- Compiled `Tan`, `Cot`, `Sec` and `Csc` of a real argument now answer the pole
+  where the interpreter answers `~oo`: when the magnitude of the value is more
+  than a million. The JavaScript target answers `Infinity` and the Python target
+  `np.inf`. Before, compiled code answered a large finite number:
+  `Tan(1.5707963267948966)` was `16331239353195370`. A lazy `Map` over more than
+  a hundred elements, which is compiled under `N()`, now answers `~oo` for such
+  an element, and also for `1/x` at `0` (it answered `+oo`).
 
 ### Improvements
 
-- `evaluate()` of a `Sum` of symbolic terms is no longer quadratic in the
-  number of terms. The fold kept a running `Add` and canonicalized it again
-  at every step; it now keeps the terms and builds one `Add` of them at the
-  end. `Sum(sin(i), i, 1, 1000).evaluate()` takes about 80 ms (it took about
-  770 ms), and `Sum(x^i, i, 0, 300)` about 17 ms (it took about 100 ms).
+- On the `interval-js` target, `PointX`/`PointY` of a `PointList` whose
+  components are list-typed symbols now compile (for example the Voronoï field
+  `\sin(120\sqrt{\min((x-P.x)^2+(y-P.y)^2)})` with `P = PointList(L_1, L_2)`),
+  and so does the sum of two such `PointList`s. As on the other routes, the
+  points stop at the shortest component.
+- On `glsl` and `wgsl`, a real argument to a user function declared with a
+  complex parameter is converted to `vec2(x, 0.0)` at the call. Before, the call
+  was refused.
 
-- More element-wise operations over a large list of machine numbers are
-  computed at once on doubles at machine precision, with the values the
-  element-by-element evaluation gives: a sum or a product with an exact
-  rational (`L / 3`, `L + 1/3`), and `Exp`, `Arcsin`, `Arccos` and `Arctan`
-  under `evaluate()` (they were computed at once only under `N()`). A list
-  with an element that `evaluate()` answers exactly for (`Exp(0.5)` is `√e`,
+- `evaluate()` of a `Sum` of symbolic terms is no longer quadratic in the number
+  of terms. The fold kept a running `Add` and canonicalized it again at every
+  step; it now keeps the terms and builds one `Add` of them at the end.
+  `Sum(sin(i), i, 1, 1000).evaluate()` takes about 80 ms (it took about 770 ms),
+  and `Sum(x^i, i, 0, 300)` about 17 ms (it took about 100 ms).
+
+- More element-wise operations over a large list of machine numbers are computed
+  at once on doubles at machine precision, with the values the
+  element-by-element evaluation gives: a sum or a product with an exact rational
+  (`L / 3`, `L + 1/3`), and `Exp`, `Arcsin`, `Arccos` and `Arctan` under
+  `evaluate()` (they were computed at once only under `N()`). A list with an
+  element that `evaluate()` answers exactly for (`Exp(0.5)` is `√e`,
   `Arcsin(0.5)` is `π/6`) keeps the lazy form.
 
-- `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly
-  before it approximates it, and no longer approximates an operand twice.
-  `.N()` of a polynomial in Horner form of degree 12 makes 24 evaluations
-  (it made more than 16 million), and `(1 + Σ_{i=1}^{1000} sin i).N()` takes
-  about 12 ms (it took about 0.9 s). A constant sub-expression that the
-  compiler folds for a GPU target benefits in the same way.
+- `.N()` of `Add` and `Multiply` no longer evaluates each operand exactly before
+  it approximates it, and no longer approximates an operand twice. `.N()` of a
+  polynomial in Horner form of degree 12 makes 24 evaluations (it made more than
+  16 million), and `(1 + Σ_{i=1}^{1000} sin i).N()` takes about 12 ms (it took
+  about 0.9 s). A constant sub-expression that the compiler folds for a GPU
+  target benefits in the same way.
 - Finding a like term in a sum is now a hash lookup, not a scan of all the
-  terms: `Sum(sin(i), i, 1, 1000).evaluate()` takes about 0.7 s (it took
-  about 11 s), and `Expand((x+y+z+1)^32)` (6,545 terms) is about 2.7 times
-  faster.
-- `NIntegrate` and the Monte Carlo route of numeric integration no longer
-  build a string key and look up a cache for each random sample: 10⁷ samples
-  of `x²` take about 0.4 s (about 3.6 s before).
-- A repeated derivative of the same function (`Derivative(f, n)`) is now
-  read from the cache; before, the cache never
-  matched, and each call computed and simplified the derivative again.
+  terms: `Sum(sin(i), i, 1, 1000).evaluate()` takes about 0.7 s (it took about
+  11 s), and `Expand((x+y+z+1)^32)` (6,545 terms) is about 2.7 times faster.
+- `NIntegrate` and the Monte Carlo route of numeric integration no longer build
+  a string key and look up a cache for each random sample: 10⁷ samples of `x²`
+  take about 0.4 s (about 3.6 s before).
+- A repeated derivative of the same function (`Derivative(f, n)`) is now read
+  from the cache; before, the cache never matched, and each call computed and
+  simplified the derivative again.
 
 ### Resolved Issues
+
+- A product or quotient of a radical and a complex number evaluated to a float:
+  `√2·(1 + i)` is now `√2 + √2 i` (it was `1.414… + 1.414…i`) and `(1 + i)/√2`
+  is `√2/2 + (√2/2) i`. `Abs(π i)` stayed unevaluated; it is now `π`, and
+  `Abs(π(1 + i))` is `√2·π`.
+- Matrix functions dropped the imaginary part of a complex entry and gave wrong
+  values: `SingularValues([[1, i], [0, 1]])` was `[1, 1]` (it is now
+  `√((3 ± √5)/2)`), `Eigenvalues([[0, i], [i, 0]])` was `[0, 0]` (now `±i`),
+  `Eigenvectors` of a complex matrix or of the rotation `[[0, -1], [1, 0]]` was
+  wrong, and `CholeskyDecomposition([[2, 1+i], [1-i, 3]])` gave a real `L`.
+  `LUDecomposition`, `QRDecomposition`, `CholeskyDecomposition` and `SVD` of a
+  complex matrix, and the eigenvalues of a complex matrix of size 3 or more, now
+  stay unevaluated; 2×2 complex eigenvalues and eigenvectors, and
+  `SingularValues` of a matrix whose Gram matrix is at most 2×2, are computed.
+  `SingularValues(...).N()` of an exact matrix now gives floats.
+- `Conjugate` of an exact complex sum evaluates: `Conjugate(1 + √2 i)` is
+  `1 − √2 i`, so `ConjugateTranspose` of a matrix with such an entry no longer
+  keeps a `Conjugate(…)` entry.
+- In the Python target, `Norm(x, p)` with a literal order on an operand whose
+  rank is not known at compile time raised for a matrix; it now checks the rank
+  at run time and answers `nan` where the interpreter has no value.
+- Exact numbers outside the float64 range lost their value: a matrix or list
+  entry of `10^400` packed as `+oo` and one of `10^-400` as 0
+  (`Norm([10^400, 1])` was `+oo`); `Max`, `Min`, `Clamp`, `Sort`, `MaxBy`,
+  `ArgMax` and the other orderings compared such numbers as equal and kept the
+  first (`Max(10^{-400}, 2·10^{-400})` was `10^-400`); and `Median`, `Quartiles`
+  and `Mode` sorted exact values by their machine value
+  (`Median([10^20+1, 10^20, 10^20+2])` was `10^20`). The square root of a large
+  exact number could come back as a wrong exact integer (`√(10^30 + 1)` was
+  `10^15`).
+- An exact complex entry of a matrix (`i`, `1 + 2i`, `1/2 + i`) was read back
+  from the packed tensor as a machine number, so exact complex matrices gave
+  machine results: `Norm([[1, 1+2i], [0, 1]], 1)` was `3.236…`, not `1 + √5`,
+  and `Inverse` of a Gaussian-integer matrix gave floats. These entries now stay
+  exact. The order-1 and order-∞ norms of a matrix also return an exact sum
+  (`Norm([[1/2, i], [0, 1]], ∞)` is `3/2`, not `1.5`).
+- `spectralNorm` scales the matrix before it squares the entries, so a matrix
+  with entries near `1e200` or `1e-200` no longer gives `Infinity` or 0. In the
+  Python target, a `Norm` order known only at run time answers `nan` for an
+  order the interpreter does not compute (numpy computes `ord=-1`, `ord=0`, …),
+  and a literal order 0 or -1 fails closed.
+
+- On `glsl` and `wgsl`, a complex value in a point component
+  (`PointList(t, t + i)`, or `PointList(t, h(t))` where `h` returns a complex
+  value) compiled to `vec2(t, vec2(…))`, which GLSL accepts and which keeps only
+  the real part. It now fails closed. The same analysis corrected other
+  arithmetic on such a call: on `glsl`, `1 - h(t)` added 1 to both components,
+  and in strict JavaScript it was `NaN`.
+- A compiled user function whose body reads a global with the same name as an
+  enclosing `Sum`/`Product` index, or as a local of the calling `Block`, was
+  analyzed with the caller's binding, so its complex result was missed: with
+  `k := i` and `h(s) := s + k`, the compiled `\sum_{k=1}^{3} h(x)` returned the
+  string `"[object Object]…"`. It now returns `6 + 3i`, like the interpreter.
+- In compiled JavaScript, `Norm` of a list with a complex entry returned `NaN`
+  (`Norm([x, i])`); it now reads each entry by its modulus. `Dot`,
+  `MatrixMultiply`, `Cross`, `Determinant`, `Inverse`, `Trace` (a complex
+  diagonal entry), `MatrixPower`, `RowReduce` and `Distance` returned `NaN` or
+  threw on a complex entry; they now fail closed and the interpreter computes
+  the value.
+- Colour conversions rounded each channel to 8 bits: the compiled
+  `AsRgb(Hsv(30, 1, 1))` had a green channel of `0.498` (`127/255`), and the
+  interpreter rounded HSL, Oklab and Oklch input the same way. Conversions no
+  longer round.
+- On the shaders, a hue of 360 or more, or below 0, gave the wrong colour. A NaN
+  colour channel now stays NaN through the shader colour helpers.
+- `determinant()` of the `numerics` entry point threw a `TypeError` for every
+  matrix of size 3 or more.
 
 - `Norm` of a lazy collection is now computed. Above a hundred elements a
   broadcast answers a lazy `Map`, so `Norm(Sin(L))` was a number for a list of
   fifty numbers and stayed unevaluated for a thousand. A finite collection of
-  scalars that is not a tensor (a lazy `Map`, a `Range`) is now read element
-  by element, as `Sum` and `Max` read it.
+  scalars that is not a tensor (a lazy `Map`, a `Range`) is now read element by
+  element, as `Sum` and `Max` read it.
 
-- An expression boxed before a use narrowed the type of one of its symbols
-  kept the type it had computed with the wider type. For example, after
-  `l = List(x)` and a use `Mod(x, 2)` that makes `x` `real`, `l.type` stayed
-  `vector<1>` where a new `List(x)` has the type `vector<real^1>`. A
-  narrowing now updates the cached types once the type computation that
-  caused it ends. As a consequence, the result type of some inferred
-  signatures is now the one a fresh computation gives: `v ↦ v[1] + 1` has the
-  type `(v: indexed_collection<number>) -> number` (it read
-  `-> broadcastable<number>`), and a function whose value is a list has a
-  list result type.
+- An expression boxed before a use narrowed the type of one of its symbols kept
+  the type it had computed with the wider type. For example, after `l = List(x)`
+  and a use `Mod(x, 2)` that makes `x` `real`, `l.type` stayed `vector<1>` where
+  a new `List(x)` has the type `vector<real^1>`. A narrowing now updates the
+  cached types once the type computation that caused it ends. As a consequence,
+  the result type of some inferred signatures is now the one a fresh computation
+  gives: `v ↦ v[1] + 1` has the type `(v: indexed_collection<number>) -> number`
+  (it read `-> broadcastable<number>`), and a function whose value is a list has
+  a list result type.
 
-- Compiled `Cot`, `Coth`, `Round`, `Fract`, `Haversine` and the odd real
-  root now compute their operand once. They computed it two or three times,
-  so an operand that draws a random number (`Cot(Random())`) used a
-  different draw for each use.
-- `isIdenticallyEqual` sometimes answered `undefined` for a true identity
-  such as `(x+y)² ≡ x²+2xy+y²` (about 0.6% of calls). At random sample points
-  where `x ≈ −y`, machine-float cancellation in the expanded form was larger
-  than the tolerance. A disagreement of the compiled values is now checked
-  again at engine precision before it counts.
-- Adaptive quadrature of an integrand that is NaN everywhere returned `0`
-  after about 32,000 evaluations. It now returns `NaN` quickly. In a nested
-  integral, an inner level that is NaN everywhere no longer makes the outer
-  level use its whole budget. Isolated removable singularities still
-  integrate.
+- Compiled `Cot`, `Coth`, `Round`, `Fract`, `Haversine` and the odd real root
+  now compute their operand once. They computed it two or three times, so an
+  operand that draws a random number (`Cot(Random())`) used a different draw for
+  each use.
+- `isIdenticallyEqual` sometimes answered `undefined` for a true identity such
+  as `(x+y)² ≡ x²+2xy+y²` (about 0.6% of calls). At random sample points where
+  `x ≈ −y`, machine-float cancellation in the expanded form was larger than the
+  tolerance. A disagreement of the compiled values is now checked again at
+  engine precision before it counts.
+- Adaptive quadrature of an integrand that is NaN everywhere returned `0` after
+  about 32,000 evaluations. It now returns `NaN` quickly. In a nested integral,
+  an inner level that is NaN everywhere no longer makes the outer level use its
+  whole budget. Isolated removable singularities still integrate.
 - A compiled nested integral that used its evaluation budget exactly to zero
-  returned a wrong finite value; it now returns `NaN`, like any other use of
-  the whole budget.
+  returned a wrong finite value; it now returns `NaN`, like any other use of the
+  whole budget.
 - Writing a symbol's type through its definition
   (`expr.valueDefinition.type = …`) or an operator's signature
-  (`def.operator.signature = …`) did not tell the engine, so an expression
-  whose type was already computed kept its old type. Both writes now report
-  the change.
+  (`def.operator.signature = …`) did not tell the engine, so an expression whose
+  type was already computed kept its old type. Both writes now report the
+  change.
 - The hash of a dictionary depended on the order of its keys, so two
   dictionaries that are `isSame` could have different hashes, and like terms
-  that held them did not always combine. The hash no longer depends on the
-  key order.
-- The description of `Timing` said it returns seconds, and its signature put
-  the result first. It returns the time first, in microseconds, then the
-  value; the description and the signature now say so.
+  that held them did not always combine. The hash no longer depends on the key
+  order.
+- The description of `Timing` said it returns seconds, and its signature put the
+  result first. It returns the time first, in microseconds, then the value; the
+  description and the signature now say so.
 
 ## 0.133.0 _2026-09-22_
 

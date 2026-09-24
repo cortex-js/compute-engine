@@ -434,6 +434,53 @@ export function bcastPoint(
 }
 
 /**
+ * A `PointList` with one or more list SOURCES at run time: the list of points
+ * obtained by zipping the sources — the interval counterpart of the zip the
+ * JavaScript target emits for the same node (`compileJSPointList`).
+ *
+ * `kinds` has one letter per component, stated by the compiler from the
+ * static types: `'l'`, a SOURCE (a list of numbers), whose element `i` is
+ * coordinate `k` of point `i`; `'s'`, a SLOT (a number), reused as that
+ * coordinate of every point.
+ *
+ * - The number of points is the length of the SHORTEST source, as in the
+ *   interpreter and the JavaScript target: `PointList([1, 2, 3], [4, 5])` is
+ *   `[(1, 4), (2, 5)]`.
+ * - A source that is not an array is a breach of the type contract of the
+ *   caller's input, and throws the `RangeError` the JavaScript target throws.
+ *   The exception is a band-less interval result (`propagatedNonCollection`),
+ *   such as the `entire` of a run-time `range` over a wide bound: the list
+ *   exists but cannot be bounded, and that result is passed through, as every
+ *   accessor of this module does.
+ * - Each coordinate is an interval operand (`elementOperand`): a raw number
+ *   becomes a point interval.
+ */
+export function pointList(kinds: string, ...components: unknown[]): unknown {
+  let n = Infinity;
+  for (let i = 0; i < components.length; i++) {
+    if (kinds[i] !== 'l') continue;
+    const c = components[i];
+    if (!Array.isArray(c)) {
+      const propagated = propagatedNonCollection(c);
+      if (propagated !== undefined) return propagated;
+      throw new RangeError(
+        `PointList: source component ${i + 1} is not an array at run time`
+      );
+    }
+    n = Math.min(n, c.length);
+  }
+  // The compiler emits this function only with at least one source; without
+  // one there is no list of points.
+  if (n === Infinity) return absent();
+  const out: unknown[] = new Array(n);
+  for (let j = 0; j < n; j++)
+    out[j] = components.map((c, i) =>
+      kinds[i] === 'l' ? elementOperand((c as unknown[])[j]) : elementOperand(c)
+    );
+  return out;
+}
+
+/**
  * `Map(f, collection)` at run time: the array of `f` applied to each element
  * (a raw number element is lifted to a point interval first). A non-array
  * operand is not a collection at run time and answers the numeric absence

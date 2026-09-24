@@ -690,10 +690,23 @@ function eqImpl(
   return same(a, b);
 }
 
+/**
+ * The relation between `a` and `b`, or `undefined` when it is not known.
+ *
+ * Two values that differ by `tolerance` or less are `'='`. The default is
+ * the engine tolerance, which the relational predicates (`isLess`,
+ * `isGreater`…) use. An ordering that must separate two different numbers
+ * however close they are (`Max`, `Sort`) passes `0`: see `exactOrder`.
+ */
 export function cmp(
   a: Expression,
-  b: number | Expression
+  b: number | Expression,
+  tolerance: number = a.engine.tolerance
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  // A machine value's `isZeroWithTolerance(t)` tests `|x| < t`, which is
+  // false for every `x` when `t` is 0. With no tolerance, only a zero is zero.
+  const isZeroWithin = (x: NumericValue): boolean =>
+    tolerance === 0 ? x.isZero : x.isZeroWithTolerance(tolerance);
   // Objects are UNORDERED — there is no `<` on references — so an object
   // operand answers `undefined` up front. This is a guard, not an
   // optimization: without it an object compared against a function expression
@@ -734,7 +747,7 @@ export function cmp(
         // Exact match first: `Infinity - Infinity` is NaN, so the
         // tolerance check below cannot detect equal infinities
         if (av === b) return '=';
-        if (Math.abs(av - b) <= a.engine.tolerance) return '=';
+        if (Math.abs(av - b) <= tolerance) return '=';
         return av < b ? '<' : '>';
       }
       if (av.isNaN || Number.isNaN(b)) return undefined;
@@ -745,12 +758,7 @@ export function cmp(
       // the symbol branches below: values within tolerance must not be ordered
       // strictly, or `isEqual` and `isGreater`/`isLess` would both be true
       // (CM-P1-4).
-      if (
-        av
-          .sub(a.engine._numericValue(b))
-          .isZeroWithTolerance(a.engine.tolerance)
-      )
-        return '=';
+      if (isZeroWithin(av.sub(a.engine._numericValue(b)))) return '=';
       return lt ? '<' : '>';
     }
 
@@ -802,8 +810,7 @@ export function cmp(
             Number.isFinite(bSymNum) &&
             b.im === 0
           ) {
-            const tol = a.engine.tolerance;
-            if (Math.abs(aNum - bSymNum) <= tol) return '=';
+            if (Math.abs(aNum - bSymNum) <= tolerance) return '=';
             return aNum < bSymNum ? '<' : '>';
           }
         }
@@ -813,7 +820,6 @@ export function cmp(
 
     const av = a.numericValue;
     const bv = b.numericValue as NumericValue;
-    const tol = a.engine.tolerance;
     // NaN is unordered: comparisons involving it are indeterminate
     if (bv.isNaN) return undefined;
     if (typeof av === 'number') {
@@ -826,15 +832,14 @@ export function cmp(
       // Tolerance-aware equality, consistent with the machine and symbol
       // branches of cmp(): values within tolerance must not be ordered
       // strictly, or `isEqual` and `isLess` would both be true (CM-P1-4).
-      if (bv.sub(a.engine._numericValue(av)).isZeroWithTolerance(tol))
-        return '=';
+      if (isZeroWithin(bv.sub(a.engine._numericValue(av)))) return '=';
       return gt ? '>' : '<';
     }
     if (av.isNaN) return undefined;
     if (av.eq(bv)) return '=';
     const lt = av.lt(bv);
     if (lt === undefined) return undefined;
-    if (av.sub(bv).isZeroWithTolerance(tol)) return '=';
+    if (isZeroWithin(av.sub(bv))) return '=';
     return lt ? '<' : '>';
   }
 
@@ -873,8 +878,7 @@ export function cmp(
       // Only order if the symbol's value is provably real.
       const aNum = a.re;
       if (typeof aNum === 'number' && Number.isFinite(aNum) && a.im === 0) {
-        const tol = a.engine.tolerance;
-        if (Math.abs(aNum - b) <= tol) return '=';
+        if (Math.abs(aNum - b) <= tolerance) return '=';
         return aNum < b ? '<' : '>';
       }
     }
@@ -891,8 +895,7 @@ export function cmp(
       }
       const aNum = a.re;
       if (typeof aNum === 'number' && Number.isFinite(aNum)) {
-        const tol = a.engine.tolerance;
-        if (Math.abs(aNum - b) <= tol) return '=';
+        if (Math.abs(aNum - b) <= tolerance) return '=';
         return aNum < b ? '<' : '>';
       }
     }
@@ -934,21 +937,18 @@ export function cmp(
     // For example, '1 + y' and 'x - 1' can't be compared
     if (!isNumber(diff)) return undefined;
 
-    // We'll use the the tolerance of the engine
-    const tol = a.engine.tolerance;
-
     if (typeof diff.numericValue === 'number') {
       const v = diff.numericValue;
       // A NaN difference is indeterminate, not "greater".
       if (Number.isNaN(v)) return undefined;
       // Compare within tolerance, consistent with the NumericValue path below.
-      if (Math.abs(v) <= tol) return '=';
+      if (Math.abs(v) <= tolerance) return '=';
       return v < 0 ? '<' : '>';
     }
 
     // A NaN difference is indeterminate, not "greater".
     if (diff.numericValue.isNaN) return undefined;
-    if (diff.numericValue.isZeroWithTolerance(tol)) return '=';
+    if (isZeroWithin(diff.numericValue)) return '=';
     return diff.numericValue.lt(0) ? '<' : '>';
   }
 
@@ -1015,8 +1015,7 @@ export function cmp(
       const bNum = typeof b === 'number' ? b : b.re;
       const bIm = typeof b === 'number' ? 0 : b.im;
       if (typeof bNum === 'number' && Number.isFinite(bNum) && bIm === 0) {
-        const tol = a.engine.tolerance;
-        if (Math.abs(aNum - bNum) <= tol) return '=';
+        if (Math.abs(aNum - bNum) <= tolerance) return '=';
         return aNum < bNum ? '<' : '>';
       }
     }
@@ -1073,6 +1072,52 @@ export function cmp(
   // a tensor value IS a function expression and never reaches this point.)
 
   return undefined;
+}
+
+/**
+ * The order of `a` and `b` for an operator that orders values (`Max`,
+ * `Min`, `Clamp`, `Sort`, `ArgMax`…): `-1`, `0` or `1`, or `undefined` when
+ * the order is not known (a free symbol, a complex value).
+ *
+ * The order is EXACT: two different numbers are never a tie, however close
+ * they are, so `Max(1e-12, 2e-12)` is `2e-12`. The relational predicates
+ * (`isLess`, `isEqual`) apply the engine tolerance, and with it `1e-12` and
+ * `2e-12` compare as equal. A compiled `Math.max` compares exactly too.
+ *
+ * Two real number literals compare by their values (`exactCompareNumbers`),
+ * also when a float64 cannot hold them (`10^-400`). Other operands (`π`,
+ * `√2 + 1`) compare by `cmp` with a zero tolerance, at working precision.
+ * A weak relation (`'<='` or `'>='`, from an assumption) does not order
+ * the operands and gives `undefined`.
+ */
+export function exactOrder(
+  a: Expression,
+  b: Expression
+): -1 | 0 | 1 | undefined {
+  const order = exactCompareNumbers(a, b);
+  if (order !== undefined) return order;
+  // Complex numbers have no order. `cmp` can still answer for two complex
+  // values whose difference is real (`1 + i` and `(1 + i) + 10^-12`), so a
+  // value whose type is complex and not real is refused here.
+  if (isNonRealComplex(a) || isNonRealComplex(b)) return undefined;
+  // Some branches of `cmp` decide only one operand order (a number against
+  // a symbol with assumed bounds), so both directions are probed.
+  const c = cmp(a, b, 0);
+  if (c === '<') return -1;
+  if (c === '>') return 1;
+  if (c === '=') return 0;
+  const r = cmp(b, a, 0);
+  if (r === '<') return 1;
+  if (r === '>') return -1;
+  if (r === '=') return 0;
+  return undefined;
+}
+
+/** True when the type of `x` is complex and excludes every real value
+ *  (for example `1 + i`). An unknown or a real type gives `false`. */
+function isNonRealComplex(x: Expression): boolean {
+  const t = x.type;
+  return t.matches('complex') && !t.matches('real | signed_infinity');
 }
 
 /** True when any leaf of a (possibly nested) structure is a NaN number

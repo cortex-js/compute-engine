@@ -17,7 +17,10 @@
  * (`_IA.pointComponent`). A literal single point — a `Tuple`
  * of scalars, or an all-scalar `PointList` — is the third place an array
  * spelling exists: at the ROOT it compiles to the array of its coordinate
- * intervals (`literalRootPointOps`). The array spelling of a LITERAL
+ * intervals (`literalRootPointOps`). A `PointList` with a list component is a
+ * list of points, built at run time by `_IA.pointList` in the same positions
+ * as any other collection value (`compileIntervalCollectionValue`). The array
+ * spelling of a LITERAL
  * `List`/`Tuple` is emitted only in those positions, never as an ordinary
  * lowering: see `compileIntervalCollectionOperand` for why. Point ARITHMETIC
  * (point ± point, scalar × point, point / scalar) is the one kernel position
@@ -330,7 +333,7 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  * entry in `INTERVAL_JAVASCRIPT_FUNCTIONS` — see
  * `compileIntervalCollectionOperand` for the reason.
  *
- * Four forms are spelled:
+ * Five forms are spelled:
  *
  * - a literal `List`/`Tuple` (written inline or held as a symbol's assigned
  *   value, `assignedLiteral`) whose every element is provably a number or is
@@ -341,7 +344,9 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  *   since a wide bound gives a range of varying length, which no array holds
  *   (it answers `entire`);
  * - `Map(f, collection)` with `f` a one-parameter function literal, as
- *   `_IA.map` over the spelled (or ordinarily compiled) source.
+ *   `_IA.map` over the spelled (or ordinarily compiled) source;
+ * - a `PointList` with a list component, as the list of points
+ *   `_IA.pointList` builds at run time (`compileIntervalPointListZip`).
  *
  * A `List` with an element that is not provably a number — a boolean, a
  * string — is NOT spelled (it answers `undefined`), so a helper such as
@@ -432,9 +437,13 @@ function compileIntervalCollectionValue(
     // zips into the list of points `[(1, 3), (2, 3)]` in the interpreter,
     // which a nested array `[[1, 2], 3]` does not spell. A list holds a
     // list as an element, so only the point spellings are held to scalar
-    // coordinates.
+    // coordinates. A `PointList` with a list component is built as that
+    // list of points at run time (`compileIntervalPointListZip`); a `Tuple`
+    // with one is not spelled.
     if (head !== 'List' && pointHasBroadcastComponent(literal))
-      return undefined;
+      return head === 'PointList'
+        ? compileIntervalPointListZip(literal.ops, target)
+        : undefined;
     const elements: string[] = [];
     for (const op of literal.ops) {
       const code = element(op);
@@ -476,6 +485,48 @@ function compileIntervalCollectionValue(
     compileIntervalCollectionValue(source, target) ??
     BaseCompiler.compileValueOperand(source, target);
   return `_IA.map(${BaseCompiler.compileValueOperand(fn, target)}, ${coll})`;
+}
+
+/**
+ * A `PointList` with one or more list SOURCES (see
+ * `compileIntervalCollectionValue`): the list of points the interpreter and
+ * the JavaScript target build by zipping the sources to the length of the
+ * shortest one. The run-time `_IA.pointList` builds it, and is told the kind
+ * of each component: `'l'`, a source, or `'s'`, a slot reused at every point.
+ *
+ * The classification is stricter than the JavaScript target's
+ * (`isPointListSource` and `compileJSPointList` there), because every
+ * coordinate must have an interval reading. A source must PROVABLY be a list
+ * of numbers (`isProvablyNumericListOperand`), and a slot must be a number by
+ * its type. A component that is neither — a `broadcastable<number>`, an
+ * untyped or opaque value, a nested point, a list of lists — answers
+ * `undefined`, and the node then declines in its ordinary lowering (fail
+ * closed) instead of taking a role the value may not have. A statically
+ * infinite source declines too: an infinite list of points has no array.
+ *
+ * Each component is compiled once, in operand order, as an argument of the
+ * run-time call.
+ */
+function compileIntervalPointListZip(
+  ops: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string | undefined {
+  const kinds: string[] = [];
+  for (const op of ops) {
+    if (isProvablyNumericListOperand(op)) {
+      if (op.isCollection && op.isFiniteCollection === false) return undefined;
+      kinds.push('l');
+    } else if (op.type.matches('number') && !op.isCollection) kinds.push('s');
+    else return undefined;
+  }
+  if (!kinds.includes('l')) return undefined;
+  const components = ops.map(
+    (op, i) =>
+      (kinds[i] === 'l'
+        ? compileIntervalCollectionValue(op, target)
+        : undefined) ?? BaseCompiler.compileValueOperand(op, target)
+  );
+  return `_IA.pointList('${kinds.join('')}', ${components.join(', ')})`;
 }
 
 /**
@@ -603,8 +654,9 @@ function literalPointOps(
  * refuses it, exactly as before this lowering existed. A coordinate that is not
  * provably a number has no interval reading (a text or a nested collection
  * component). A point with a BROADCASTING component is not one point at all: it
- * zips into one point per element of that component, so it is a LIST of points,
- * and this target has no lowering that builds one.
+ * zips into one point per element of that component, so it is a LIST of points.
+ * A `PointList` of that shape is then built by `compileIntervalCollectionValue`
+ * instead; a `Tuple` of that shape has no lowering that builds it.
  */
 function literalRootPointOps(
   e: Expression,
@@ -664,7 +716,8 @@ function pointCoordinateTypes(t: Type, k: number): Type[] {
  * - an operand whose static type is a tuple: `_IA.component` reads the
  *   coordinate off the run-time array;
  * - a LIST of points — a declared `list<tuple<…>>`, a list of numeric
- *   coordinate rows, or a provably empty collection: the interpreter and the
+ *   coordinate rows, a `PointList` with a list component (built at run time
+ *   by `_IA.pointList`), or a provably empty collection: the interpreter and the
  *   JavaScript target broadcast the coordinate over the list, and so does this
  *   target, with `_IA.pointComponent` reading the coordinate of every point of
  *   the run-time array. The result is a collection value (an array of

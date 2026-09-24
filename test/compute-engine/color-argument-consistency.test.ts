@@ -685,22 +685,42 @@ describe('a color tuple has exactly 3 or 4 components on every route', () => {
 });
 
 describe('a tuple with a component that is not a finite number is not a color', () => {
-  // The typed-head rule is the one rule. `Rgb(~oo, 0, 0)` at a color position
-  // is `incompatible-type`, but the same components written as a bare tuple
-  // multiplied `~oo` by 255 and answered a NaN color.
+  // The typed-head rule is the one rule (`readColorChannels`). `Rgb(NaN, 0,
+  // 0)` at a color position is `incompatible-type`, but the same components
+  // written as a bare tuple were multiplied by 255 and answered a NaN color.
   test('the tuple spelling is refused exactly as the Rgb spelling is', () => {
-    const tuple = ['ColorMix', ['Tuple', 'ComplexInfinity', 0, 0], "'red'"];
-    const head = ['ColorMix', ['Rgb', 'ComplexInfinity', 0, 0], "'red'"];
+    const tuple = ['ColorMix', ['Tuple', 'NaN', 0, 0], "'red'"];
+    const head = ['ColorMix', ['Rgb', 'NaN', 0, 0], "'red'"];
     expect(interp(head).operator).toBe('Error');
     expect(interp(tuple).operator).toBe('Error');
   });
 
   test('ColorToString and AsRgb agree with ColorMix', () => {
-    expect(
-      interp(['ColorToString', ['Tuple', 'ComplexInfinity', 0, 0]]).operator
-    ).toBe('Error');
-    expect(interp(['AsRgb', ['Tuple', 'ComplexInfinity', 0, 0]]).operator).toBe(
+    expect(interp(['ColorToString', ['Tuple', 'NaN', 0, 0]]).operator).toBe(
       'Error'
+    );
+    expect(interp(['AsRgb', ['Tuple', 'NaN', 0, 0]]).operator).toBe('Error');
+  });
+
+  test('an infinite component is refused in both spellings', () => {
+    // An sRGB channel is not clamped: a finite channel outside [0, 1] is
+    // extended sRGB, and an infinite one is not a color, in a tuple as in an
+    // `Rgb` head.
+    const tuple = ['Tuple', 'PositiveInfinity', 0, 'NegativeInfinity'];
+    const head = ['Rgb', 'PositiveInfinity', 0, 'NegativeInfinity'];
+    expect(interp(['AsRgb', tuple]).operator).toBe('Error');
+    expect(interp(['AsRgb', head]).operator).toBe('Error');
+    expect(interp(['ColorToString', tuple]).operator).toBe('Error');
+    expect(interp(['ColorMix', tuple, "'red'"]).operator).toBe('Error');
+  });
+
+  test('a finite component outside [0, 1] is kept in both spellings', () => {
+    const tuple = ['Tuple', 2, 0, -0.5];
+    const head = ['Rgb', 2, 0, -0.5];
+    expect(String(interp(['AsRgb', tuple]))).toBe('Rgb(2, 0, -0.5)');
+    expect(String(interp(['AsRgb', head]))).toBe('Rgb(2, 0, -0.5)');
+    expect(String(interp(['ColorMix', tuple, "'red'"]))).toBe(
+      String(interp(['ColorMix', head, "'red'"]))
     );
   });
 });

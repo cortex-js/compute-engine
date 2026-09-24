@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -175,16 +176,14 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
     ).toThrow(/Fail closed/);
   });
 
-  // `Norm(m, 2)` is the FROBENIUS norm in the interpreter
-  // (`library/linear-algebra.ts`), but `np.linalg.norm(m, 2)` is the SPECTRAL
-  // norm: on `[[3,4],[5,12]]` the interpreter answers 13.9283882771841…, the
-  // old emission 13.8806092198653… — a silent wrong value (D6).
+  // `Norm(m, 2)` is the SPECTRAL norm (the largest singular value) in the
+  // interpreter (`library/linear-algebra.ts`) and in `np.linalg.norm(m, 2)`:
+  // on `[[3,4],[5,12]]` both answer 13.8806092198653…, while the Frobenius
+  // norm (the default, and `"Frobenius"`) is 13.9283882771841….
   const M = ['List', ['List', 3, 4], ['List', 5, 12]];
 
-  it('order 2 on a MATRIX lowers to the Frobenius norm, not numpy’s spectral norm', () => {
-    expect(src(['Norm', M, 2])).toBe(
-      "np.linalg.norm([[3, 4], [5, 12]], 'fro')"
-    );
+  it('order 2 on a MATRIX lowers to numpy’s spectral norm', () => {
+    expect(src(['Norm', M, 2])).toBe('np.linalg.norm([[3, 4], [5, 12]], 2)');
   });
 
   it('order 2 on a VECTOR is unchanged (the two systems agree at rank 1)', () => {
@@ -261,11 +260,11 @@ const EXEC_CASES: Array<{ name: string; expr: any; expected: any }> = [
     expected: 2.6457513110645907,
   },
   { name: 'norm_inf_string', expr: ['Norm', ['List', 3, -4], { str: 'Infinity' }], expected: 4 },
-  // Frobenius (13.9283…), NOT numpy's spectral norm for ord 2 (13.8806…).
+  // The spectral norm (13.8806…), NOT the Frobenius norm (13.9283…).
   {
     name: 'norm_matrix_ord2',
     expr: ['Norm', ['List', ['List', 3, 4], ['List', 5, 12]], 2],
-    expected: 13.928388277184119,
+    expected: 13.88060921986538,
   },
   {
     name: 'norm_matrix_ord1',
@@ -351,6 +350,140 @@ describeNumpy('PYTHON ARITY — execution parity (venv)', () => {
           expect.closeTo(c.expected, 10),
         ]);
       else expect([c.name, actual[i]]).toEqual([c.name, c.expected]);
+    });
+  });
+});
+
+// A run-time norm order: the interpreter computes a vector norm only for an
+// order `p > 0`, and a matrix norm only for the orders 1, 2 and +Infinity.
+// For every other order the interpreter has no value, while
+// `np.linalg.norm` answers one (`ord=-1` and `ord=0` on a vector) or raises
+// (`ord=3` on a matrix). The emitted code must answer NaN for those orders.
+describe('PYTHON ARITY — a run-time Norm order the interpreter does not compute', () => {
+  const V = ['List', 3, 4];
+  const M = ['List', ['List', 3, 4], ['List', 5, 12]];
+
+  it('a non-positive literal order fails closed', () => {
+    expect(() => src(['Norm', V, 0])).toThrow(/positive order.*Fail closed/s);
+    expect(() => src(['Norm', V, -1])).toThrow(/Fail closed/);
+    // A `-∞` order is already an invalid expression, which does not compile.
+    expect(() => src(['Norm', V, 'NegativeInfinity'])).toThrow();
+  });
+
+  describeNumpy('execution (venv)', () => {
+    it('answers NaN for an order the interpreter does not compute', () => {
+      const cases: Array<[any, number, number]> = [
+        // [operand, order, expected value (NaN: no value)]
+        [V, -1, NaN],
+        [V, 0, NaN],
+        [V, 3, Math.cbrt(27 + 64)],
+        [V, 2, 5],
+        [M, 3, NaN],
+        [M, 1, 16],
+        [M, 2, 13.88060921986538],
+      ];
+      let program = 'import numpy as np\nimport math, json\n\n';
+      cases.forEach(([x], i) => {
+        program += `${python.compileFunction(ce.box(['Norm', x, 'normRunP']), `fn_${i}`, ['normRunP'])}\n`;
+      });
+      program += 'results = []\n';
+      cases.forEach(([, p], i) => {
+        program += `r = float(fn_${i}(${p}))\n`;
+        program += `results.append(None if math.isnan(r) else r)\n`;
+      });
+      program += 'print(json.dumps(results))\n';
+
+      const file = path.join(os.tmpdir(), `ce-py-norm-${process.pid}.py`);
+      fs.writeFileSync(file, program);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      const actual = JSON.parse(out) as (number | null)[];
+      cases.forEach(([x, p, expected], i) => {
+        // The interpreter agrees: no value for the refused orders.
+        const interpreted = ce.box(['Norm', x, p]).N();
+        if (Number.isNaN(expected)) {
+          expect([i, actual[i]]).toEqual([i, null]);
+          expect(isNumber(interpreted)).toBe(false);
+        } else {
+          expect([i, actual[i]]).toEqual([i, expect.closeTo(expected, 10)]);
+          expect(interpreted.re).toBeCloseTo(expected, 10);
+        }
+      });
+    });
+  });
+});
+
+// A literal norm order over an operand whose rank is not known when it
+// compiles. `np.linalg.norm(x, 3)` raises a ValueError for a matrix, and
+// `np.linalg.norm(x, p)` raises for a scalar and for an input with more than
+// two axes, but the interpreter answers a value (a scalar: its absolute
+// value) or leaves the application unevaluated. The emitted code tests the
+// rank when it runs, and answers NaN where the interpreter has no value.
+describe('PYTHON ARITY — a literal Norm order over an operand of unknown rank', () => {
+  ce.declare('normOpaqueX', 'unknown');
+
+  it('emits a run-time rank test instead of a bare `np.linalg.norm`', () => {
+    expect(src(['Norm', 'normOpaqueX', 3])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 3) if np.ndim(_x) == 1 else float('nan'))(normOpaqueX)"
+    );
+    expect(src(['Norm', 'normOpaqueX', 1])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
+    );
+  });
+
+  describeNumpy('execution (venv)', () => {
+    it('answers the interpreter value, or NaN where it has none', () => {
+      const V = ['List', 3, 4];
+      const M = ['List', ['List', 3, 4], ['List', 5, 12]];
+      const T = ['List', ['List', ['List', 1, 2]], ['List', ['List', 3, 4]]];
+      // [operand, operand as Python source, order, expected (NaN: no value)]
+      // The values were computed by hand: ‖(3, 4)‖₃ = ∛91, ‖(3, 4)‖∞ = 4, the
+      // maximum absolute column sum of M is 4 + 12 = 16, its maximum absolute
+      // row sum is 5 + 12 = 17, and |−5| = 5.
+      const cases: Array<[any, string, any, number]> = [
+        [V, '[3, 4]', 3, Math.cbrt(91)],
+        [V, '[3, 4]', 'PositiveInfinity', 4],
+        [M, '[[3, 4], [5, 12]]', 3, NaN],
+        [M, '[[3, 4], [5, 12]]', 1, 16],
+        [M, '[[3, 4], [5, 12]]', 'PositiveInfinity', 17],
+        [T, '[[[1, 2]], [[3, 4]]]', 1, NaN],
+        [-5, '-5', 3, 5],
+      ];
+      let program = 'import numpy as np\nimport math, json\n\n';
+      cases.forEach(([, , p], i) => {
+        program += `${python.compileFunction(ce.box(['Norm', 'normOpaqueX', p]), `fn_${i}`, ['normOpaqueX'])}\n`;
+      });
+      program += 'results = []\n';
+      cases.forEach(([, arg], i) => {
+        program += `r = float(fn_${i}(${arg}))\n`;
+        program += `results.append(None if math.isnan(r) else r)\n`;
+      });
+      program += 'print(json.dumps(results))\n';
+
+      const file = path.join(os.tmpdir(), `ce-py-norm-rank-${process.pid}.py`);
+      fs.writeFileSync(file, program);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      const actual = JSON.parse(out) as (number | null)[];
+      cases.forEach(([x, , p, expected], i) => {
+        // The interpreter agrees: no value where the emitted code answers NaN.
+        const interpreted = ce.box(['Norm', x, p]).N();
+        if (Number.isNaN(expected)) {
+          expect([i, actual[i]]).toEqual([i, null]);
+          expect(isNumber(interpreted)).toBe(false);
+        } else {
+          expect([i, actual[i]]).toEqual([i, expect.closeTo(expected, 10)]);
+          expect(interpreted.re).toBeCloseTo(expected, 10);
+        }
+      });
     });
   });
 });

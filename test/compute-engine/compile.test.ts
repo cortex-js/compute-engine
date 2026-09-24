@@ -2667,9 +2667,144 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       Math.sqrt(30),
       12
     );
-    // The spectral 2-norm needs an SVD — NaN, never a silently-wrong number
-    expect(Number.isNaN(runJs(e, ['Norm', M, 2]) as number)).toBe(true);
+    // The order 2 of a matrix is the spectral norm (the largest singular
+    // value). The compiled runtime computes it, and each answer below is the
+    // interpreter's `.N()` within 1e-12. Constant folding is off, so the
+    // value comes from the compiled code and not from the interpreter.
     const js = new JavaScriptTarget();
+    const interpreted = (mathjson: any) => e.box(mathjson).N().re;
+    for (const matrix of [
+      // √(9 + √65) = 4.130648586880582
+      ['List', ['List', 1, 2], ['List', 3, 2]],
+      // The golden ratio: A complex matrix, read through the real and
+      // imaginary parts of each entry.
+      ['List', ['List', 1, 'ImaginaryUnit'], ['List', 0, 1]],
+      // A matrix that is not square: 9.508032000695724
+      ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]],
+    ]) {
+      const expected = interpreted(['Norm', matrix, 2]);
+      expect(Number.isFinite(expected)).toBe(true);
+      expect(runJs(e, ['Norm', matrix, 2]) as number).toBeCloseTo(expected, 12);
+    }
+    expect(
+      runJs(e, ['Norm', ['List', ['List', 1, 2], ['List', 3, 2]], 2]) as number
+    ).toBeCloseTo(Math.sqrt(9 + Math.sqrt(65)), 12);
+    expect(
+      runJs(e, [
+        'Norm',
+        ['List', ['List', 1, 'ImaginaryUnit'], ['List', 0, 1]],
+        2,
+      ]) as number
+    ).toBeCloseTo((1 + Math.sqrt(5)) / 2, 12);
+    expect(
+      runJs(e, [
+        'Norm',
+        ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]],
+        2,
+      ]) as number
+    ).toBeCloseTo(9.508032000695724, 12);
+    // A non-finite entry follows the interpreter: an infinite entry makes
+    // the norm +∞ (also beside a NaN entry), and a NaN entry makes it NaN.
+    const withInfinity = [
+      'List',
+      ['List', 1, 'PositiveInfinity'],
+      ['List', 'NaN', 1],
+    ];
+    const withNaN = ['List', ['List', 'NaN', 1], ['List', 2, 3]];
+    expect(interpreted(['Norm', withInfinity, 2])).toBe(Infinity);
+    expect(runJs(e, ['Norm', withInfinity, 2])).toBe(Infinity);
+    expect(Number.isNaN(interpreted(['Norm', withNaN, 2]))).toBe(true);
+    expect(Number.isNaN(runJs(e, ['Norm', withNaN, 2]) as number)).toBe(true);
+    // A rank-3 tensor with the order 2 is the Frobenius norm, as in the
+    // interpreter: the spectral norm is a matrix norm only.
+    const T3 = [
+      'List',
+      ['List', ['List', 1, 2], ['List', 3, 4]],
+      ['List', ['List', 5, 6], ['List', 7, 8]],
+    ];
+    expect(runJs(e, ['Norm', T3, 2]) as number).toBeCloseTo(
+      interpreted(['Norm', T3, 2]),
+      12
+    );
+    expect(runJs(e, ['Norm', T3, 2]) as number).toBeCloseTo(Math.sqrt(204), 12);
+    // An operand whose type admits a matrix (`list<number>` with no
+    // dimensions) compiles, and the value decides the norm at run time.
+    e.declare('normListOperand', 'list<number>');
+    const listNorm = js.compile(e.box(['Norm', 'normListOperand', 2]), {
+      constantFold: false,
+    });
+    expect(listNorm.success).toBe(true);
+    expect(listNorm.run!({ normListOperand: [3, 4] })).toBe(5);
+    expect(
+      listNorm.run!({
+        normListOperand: [
+          [1, 2],
+          [3, 2],
+        ],
+      }) as number
+    ).toBeCloseTo(
+      interpreted(['Norm', ['List', ['List', 1, 2], ['List', 3, 2]], 2]),
+      12
+    );
+    // An order that is 2 only at run time is the spectral norm too.
+    e.declare('normOrder', 'integer');
+    const orderNorm = js.compile(e.box(['Norm', M, 'normOrder']), {
+      constantFold: false,
+    });
+    expect(orderNorm.success).toBe(true);
+    expect(orderNorm.run!({ normOrder: 2 }) as number).toBeCloseTo(
+      interpreted(['Norm', M, 2]),
+      12
+    );
+    expect(orderNorm.run!({ normOrder: 1 })).toBe(6);
+    // With constant folding (the default), a literal matrix folds to the
+    // interpreter's spectral norm: √(9 + √65) for [[1, 2], [3, 2]].
+    const folded = compile(
+      e.box(['Norm', ['List', ['List', 1, 2], ['List', 3, 2]], 2]),
+      {
+        fallback: false,
+      }
+    )!;
+    expect(folded.success).toBe(true);
+    expect(folded.run!() as number).toBeCloseTo(
+      Math.sqrt(9 + Math.sqrt(65)),
+      12
+    );
+    // The GPU targets compile only the default order, so the order 2 of a
+    // matrix declines there too.
+    for (const to of ['glsl', 'wgsl'] as const)
+      expect(() =>
+        compile(e.box(['Norm', M, 2]), {
+          to,
+          fallback: false,
+          constantFold: false,
+        })
+      ).toThrow(/Fail closed/);
+    // The order 2 of a vector is the Euclidean norm.
+    expect(runJs(e, ['Norm', ['List', 3, 4], 2])).toBe(5);
+    // Entries far from 1: the Gram matrix squares them, so without scaling
+    // the compiled runtime answered Infinity for 1e200 entries and 0 for
+    // 1e-200 entries. The compiled code and the interpreter's `.N()` agree.
+    for (const [matrix, expected] of [
+      [['List', ['List', 1e200, 1], ['List', 1, 1e200]], 1e200],
+      [['List', ['List', 1e-200, 0], ['List', 0, 1e-200]], 1e-200],
+      [
+        ['List', ['List', 1e-170, 2e-170], ['List', 3e-170, 4e-170]],
+        5.464985704219043e-170,
+      ],
+    ] as const) {
+      const compiled = runJs(e, ['Norm', matrix, 2]) as number;
+      expect(compiled / expected).toBeCloseTo(1, 12);
+      expect(interpreted(['Norm', matrix, 2]) / expected).toBeCloseTo(1, 12);
+    }
+    expect(runJs(e, ['Norm', ['Tuple', 3, 4], 2])).toBe(5);
+    e.declare('normVectorOperand', 'vector');
+    expect(
+      compile(e.box(['Norm', 'normVectorOperand', 2]), { fallback: false })!
+        .run!({
+        normVectorOperand: [3, 4],
+      })
+    ).toBe(5);
     expect(() =>
       js.compile(e.box(['Norm', M, { str: 'Nuclear' }]), {
         constantFold: false,

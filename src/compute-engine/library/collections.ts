@@ -145,6 +145,7 @@ import {
   isSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
+import { exactOrder } from '../boxed-expression/compare.js';
 import { typeMembership } from './sets.js';
 import { isRingConstant } from './ring-constructions.js';
 import { RING_CONSTANTS } from '../latex-syntax/utils.js';
@@ -2651,7 +2652,9 @@ const MAX_ABSENCE_MARKER_PROBE = 10;
 
 /**
  * The target languages `PointList`'s compile handler lowers (a point value with
- * scalar components). On any OTHER language the handler declines by returning
+ * scalar components). On `glsl` and `wgsl` the handler checks the operand
+ * shapes and then leaves the emission to the target's own `PointList` entry.
+ * On any OTHER language the handler declines by returning
  * `undefined` — it has no opinion there, so a custom target's own `PointList`
  * mapping still applies. Used to decide whether an operand-shape decline may
  * fail closed with a specific diagnostic (Tycho item 109a) or must stay silent.
@@ -4552,6 +4555,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // opaque-slot guard the JavaScript arm adds below. Targets with no
       // `Tuple` lowering (`interval-javascript`) are not enumerated, so
       // `PointList` fails closed there too — matching `Tuple`.
+      //
+      // On `glsl` and `wgsl`, decline by fall-through to the target table
+      // (`PointList` in `glsl-target.ts`/`wgsl-target.ts`). A shader point is
+      // a `vecN` of floats, so each component must be a shader scalar. A
+      // complex component is a `vec2(re, im)`, and the type alone does not
+      // always show it: a call of a user function whose body is complex can
+      // type `number`. Only the compiler's own shape analysis
+      // (`assertGPUScalarComponents`) sees that. Without this, `(t, h(t))`
+      // with `h(s) = s + i` emitted `vec2(t, _fn_h(t))`: GLSL accepts a
+      // constructor whose last argument is only partly used, so the shader
+      // kept the real part of `h(t)` and dropped the imaginary part.
+      if (language === 'glsl' || language === 'wgsl') return undefined;
       const parts = args.map((a) => compile(a));
       if (language === 'javascript') {
         // An OPAQUE component — one whose type does not prove it is a number,
@@ -4576,16 +4591,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           .join(', ')}]`;
       }
       if (language === 'python') return `(${parts.join(', ')})`;
-      if (language === 'glsl' || language === 'wgsl') {
-        const suffix = language === 'wgsl' ? 'f' : '';
-        if (parts.length >= 2 && parts.length <= 4)
-          return `vec${parts.length}${suffix}(${parts.join(', ')})`;
-        const arrayType =
-          language === 'wgsl'
-            ? `array<f32, ${parts.length}>`
-            : `float[${parts.length}]`;
-        return `${arrayType}(${parts.join(', ')})`;
-      }
       return undefined;
     },
   } as OperatorDefinition,
@@ -13841,20 +13846,32 @@ export function sortedIndices(
 
   const indices = Array.from({ length: l }, (_, i) => i + 1);
 
+  // Without a function, two elements are ordered exactly, with no tolerance
+  // (`exactOrder`). A pair that cannot be ordered (a symbol, a complex
+  // number) makes the whole sort undetermined, so the application stays
+  // unevaluated, as with a sort key. Before, such a pair counted as "greater"
+  // in both directions, and the result depended on the order of the input.
+  let undeterminedDefault = false;
   const defaultCmp = (a: Expression, b: Expression) => {
-    if (a.isLess(b)) return -1;
-    if (a.isEqual(b)) return 0;
-    return 1;
+    const exact = exactOrder(a, b);
+    if (exact !== undefined) return exact;
+    // A tie is exact too: only two identical elements tie. `isEqual` alone
+    // would tie two different constants that agree within the engine
+    // tolerance. It is still asked of an identical pair, because `isSame`
+    // treats two NaN as identical while `isEqual` keeps `NaN ≠ NaN`, so a
+    // NaN element leaves the sort undetermined.
+    if (a.isSame(b) && a.isEqual(b) === true) return 0;
+    undeterminedDefault = true;
+    return 0;
   };
 
   const f = fn ? applicable(fn) : undefined;
 
   // A unary function is used as a sort KEY: sort ascending by `f(x)` using
-  // `compareKeys` (both comparison directions probed — the one-directional
-  // `defaultCmp` treats an undetermined comparison as "greater"). Compute
-  // each key once (decorate-sort-undecorate). A key that cannot be computed
-  // or an undetermined key comparison makes the whole sort undetermined
-  // (inert), matching `MaxBy`/`MinBy`/`ArgMax`/`ArgMin`. A binary function
+  // `compareKeys`, which has the same exact ordering as `defaultCmp`.
+  // Compute each key once (decorate-sort-undecorate). A key that cannot be
+  // computed or an undetermined key comparison makes the whole sort
+  // undetermined (inert), matching `MaxBy`/`MinBy`/`ArgMax`/`ArgMin`. A binary function
   // is used as a comparator (historical behavior); a statically-unknown
   // arity (bare `function`) is also treated as a comparator, so nothing
   // existing changes meaning.
@@ -13899,17 +13916,22 @@ export function sortedIndices(
     return cmpFn(va, vb);
   });
 
-  return indices;
+  return f === undefined && undeterminedDefault ? undefined : indices;
 }
 
 /** Compare two (already evaluated) key values with the default element
  * ordering. Returns -1, 0, 1, or `undefined` when the order is undetermined
- * (symbolic keys). `a.isLess(b)` being `false` is NOT the same as
- * `b.isLess(a)` being `true`, so both directions are probed. */
+ * (symbolic keys). */
 function compareKeys(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
-  if (a.isEqual(b) === true) return 0;
-  if (a.isLess(b) === true) return -1;
-  if (b.isLess(a) === true) return 1;
+  // Two different numbers are ordered exactly, with no tolerance: see
+  // `exactOrder`.
+  const exact = exactOrder(a, b);
+  if (exact !== undefined) return exact;
+  // Only two identical keys tie. A pair that is neither ordered nor
+  // identical is undetermined, even when the two keys agree within the
+  // engine tolerance. `isEqual` is asked of an identical pair only to keep
+  // `NaN ≠ NaN` (see `defaultCmp` in `sortedIndices`).
+  if (a.isSame(b) && a.isEqual(b) === true) return 0;
   return undefined;
 }
 

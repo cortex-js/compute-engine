@@ -506,10 +506,29 @@ never agrees with. Declining hands the expression back to the interpreter; the
 diagnostic names `AsRgb((r, g, b))` and `ColorFromColorspace(components,
 space)`, the two spellings that build a color from components.
 
-A color whose channels are not all finite is the same object with `NaN`
-channels, in the space the answering helper names. It is the numeric projection
-of the interpreter's `incompatible-type` rejection of an infinite or `NaN`
-channel.
+Both routes read the channels of a color by one rule, `readColorChannels` in
+`src/compute-engine/numerics/color-conversion.ts`:
+
+- `Rgb` channels are extended sRGB. A finite channel outside `[0, 1]` is a color
+  outside the sRGB gamut (a Display P3 screen can show it), and it is kept on
+  every route: no clamp, and no gamut mapping in the conversions among `Rgb`,
+  `Oklab` and `Oklch`, in `ColorMix`, or in `ColorToColorspace`. Gamut mapping
+  is the job of the renderer. The sRGB transfer function is sign-extended
+  (`sign(c)·f(|c|)`, as CSS Color 4 does for extended sRGB), so a negative
+  channel converts to OKLab and back.
+- `Hsv`/`Hsl` describe only the sRGB gamut. Their saturation, value and
+  lightness are clamped into `[0, 1]`, an infinite one included (`+∞` reads as 1
+  and `−∞` as 0), and the hue is reduced modulo 360. A conversion of an extended
+  `Rgb` color to `Hsv`/`Hsl` first clips each channel into `[0, 1]`.
+- A color with a `NaN` channel, or with an infinite channel that is not clamped
+  (an sRGB channel, a hue, an OKLab/OKLCh channel), is `incompatible-type` on
+  the interpreter. On the JavaScript target it is the same object with `NaN`
+  channels, in the space the answering helper names: the numeric projection of
+  that error.
+
+The shader helpers apply the same rule. They do not clamp an sRGB channel (the
+canvas clamps at output), they clamp the HSV/HSL channels, and an infinite sRGB
+or OKLab channel makes `NaN` channels through the arithmetic of the conversion.
 
 A color-VALUED expression is NOT constant-folded on this target. The
 interpreter's value for a color is a typed head, whose literal emission is a

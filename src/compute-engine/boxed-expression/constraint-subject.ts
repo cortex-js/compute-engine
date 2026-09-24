@@ -129,7 +129,8 @@ function isFiniteRealNumber(
  *
  * This is the comparison every reader of the assumption bounds uses in
  * place of comparing machine projections, which rounded an exact bound to
- * the nearest double in either direction.
+ * the nearest double in either direction. The operators that order values
+ * (`Max`, `Sort`, `Median`) use it too, through `exactOrder`.
  */
 export function exactCompareNumbers(
   a: Expression,
@@ -165,6 +166,40 @@ export function exactCompareNumbers(
     return o === undefined ? undefined : (-o as -1 | 0 | 1);
   }
   return order(av, bv);
+}
+
+/**
+ * False when a float64 cannot hold the magnitude of the real part of the
+ * number literal `x`: its value is finite and nonzero, but its machine value
+ * `x.re` overflows to ±Infinity or underflows to 0 (the exact `10^400` and
+ * `10^-400`, or the decimal `1e-400`). Such a value has a big decimal real
+ * part (`bignumRe`). A machine number, a zero, an infinity and NaN are held
+ * by a float64, and so is any expression that is not a number literal: they
+ * return true.
+ *
+ * The test must be cheap, because tensor packing runs it on every inexact
+ * cell. A big decimal converts to a machine number through a decimal string,
+ * so its magnitude is read from its decimal exponent instead, and the
+ * conversion is made only near the limits of the float64 range. An exact
+ * value computes its machine value cheaply but its big decimal by a
+ * division, so it reads the machine value first.
+ */
+export function float64HoldsNumber(x: Expression): boolean {
+  if (!isNumber(x)) return true;
+  if (typeof x.numericValue === 'number') return true;
+  if (x.isExact) {
+    const re = x.re;
+    if (Number.isFinite(re) && re !== 0) return true;
+  }
+  const big = x.bignumRe;
+  if (big === undefined || !big.isFinite() || big.isZero()) return true;
+  // The value is `significand × 10^exponent`, so its magnitude is at least
+  // `10^exponent` and less than `10^(exponent + digits)`. Both limits are
+  // well inside the float64 range (about 5e-324 to 1.8e308) here.
+  if (big.exponent > -300 && big.exponent + big._digitCount() < 300)
+    return true;
+  const re = big.toNumber();
+  return Number.isFinite(re) && re !== 0;
 }
 
 /**

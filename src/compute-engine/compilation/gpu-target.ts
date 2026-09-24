@@ -595,10 +595,11 @@ function gpuVec3(target?: CompileTarget<Expression>): string {
   return target?.language === 'wgsl' ? 'vec3f' : 'vec3';
 }
 
-/** A direct sRGB constructor can skip its perceptual-space round trip when
- * bounded channels keep the conversion in its real-valued domain. Compile the
- * child normally first so alpha, operand-shape, and caller-mapping checks still
- * govern its lowering. */
+/** A direct sRGB constructor can skip its perceptual-space round trip: the
+ * conversions keep extended sRGB channels and do no gamut mapping, so the
+ * round trip of a finite triple is the identity (`_gpu_srgb_roundtrip`).
+ * Compile the child normally first so alpha, operand-shape, and caller-mapping
+ * checks still govern its lowering. */
 function gpuRgbBoundary(
   color: Expression,
   code: string,
@@ -1208,7 +1209,7 @@ export function assertGPUScalarComponents(
       `${ctor}: an empty tuple/list has no GPU lowering — neither GLSL nor ` +
         `WGSL has a zero-length array type. Fail closed.`
     );
-  for (const arg of args) {
+  for (const [i, arg] of args.entries()) {
     if (!BaseCompiler.isNonScalarShape(arg)) continue;
     const n = BaseCompiler.aggregateComponentCount(arg);
     const shape =
@@ -1217,8 +1218,8 @@ export function assertGPUScalarComponents(
         : `${n} component${n === 1 ? '' : 's'} — a complex value or a ` +
           `nested tuple/list`;
     throw new Error(
-      `${ctor}: a tuple/list element that is itself vector-valued ` +
-        `(${shape}) has no GPU ` +
+      `${ctor}: element ${i + 1} (\`${arg.toString()}\`) is itself ` +
+        `vector-valued (${shape}) and has no GPU ` +
         `lowering; a ${ctor} constructor takes scalar components. Fail closed.`
     );
   }
@@ -9330,13 +9331,49 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  *
  * Hue is in degrees throughout (matching the boxed-expression convention);
  * HSL/HSV saturation, lightness and value are in 0-1.
+ *
+ * The channels follow the rule of the interpreter and of the JavaScript
+ * runtime (`readColorChannels`, `numerics/color-conversion.ts`):
+ *
+ * - sRGB channels are EXTENDED sRGB. A channel below 0 or above 1 is a color
+ *   outside the sRGB gamut, and no helper clamps it or maps it into the
+ *   gamut: the canvas clamps at output. The transfer functions
+ *   (`_gpu_srgb_to_linear`, `_gpu_linear_to_srgb`) are sign-extended,
+ *   `sign(c)·f(|c|)`, as for extended sRGB in CSS Color 4, and the cube
+ *   roots in `_gpu_srgb_to_oklab` are sign-extended too, because `pow` is
+ *   undefined for a negative base. So a conversion to OKLab and back returns
+ *   the same extended channels.
+ * - `_gpu_hsv_to_rgb` and `_gpu_hsl_to_rgb` reduce the hue modulo 360 and
+ *   clamp the saturation, the value and the lightness into `[0, 1]`: HSV and
+ *   HSL describe only the sRGB gamut. `clamp` also reads an infinite channel
+ *   as its bound, `+inf` as 1 and `-inf` as 0. An infinite hue has no
+ *   reduction: it becomes `NaN`, and so does the whole triple (next item).
+ * - `_gpu_rgb_to_hsv` and `_gpu_rgb_to_hsl` first clip each sRGB channel
+ *   into `[0, 1]`, because HSV and HSL cannot hold an extended color.
+ * - An infinite sRGB channel or OKLab/OKLCh channel is not clamped: the
+ *   arithmetic of the conversion makes it `NaN` (`inf - inf`), the NaN color
+ *   of the interpreter's `incompatible-type` error.
+ * - A `NaN` channel gives the `NaN` triple, as the interpreter refuses a
+ *   `NaN` channel. GLSL and WGSL do not specify `min`, `max` or `clamp` of
+ *   `NaN`, nor `sign(NaN)`, so a clamp or a sign step can change a `NaN`
+ *   into a finite number. Each helper that clamps, takes a sign or compares
+ *   (the HSV and HSL conversions, the sign-extended transfer functions and
+ *   cube roots, `_gpu_apca_luma` and `_gpu_apca`) therefore first tests its
+ *   input with a self-comparison (`x != x`, true only for `NaN`) and returns
+ *   `NaN` channels. The `NaN` it returns is the sum of the tested values,
+ *   which is `NaN` because one of them is, so the helpers do not depend on
+ *   `_gpu_nan()`. This is best effort, as every `NaN` test on a shader is: a
+ *   driver that assumes no `NaN` occurs (fast-math in GLSL, and WGSL, whose
+ *   implementations may assume finite values) can fold the test to false.
+ *
  * `_gpu_color_mix` interpolates directly in OKLCh — no sRGB pinch — and
  * special-cases achromatic endpoints (C ≈ 0) so e.g. mixing red with white
  * preserves red's hue rather than drifting through arbitrary hues.
  *
  * `_gpu_apca` is the APCA contrast the interpreter's `ColorContrast` answers,
  * component for component: the simple 2.4-power luminance the APCA method
- * asks for (NOT the piecewise sRGB transfer), the black-level soft clamp, the
+ * asks for (NOT the piecewise sRGB transfer), sign-extended for an extended
+ * sRGB channel as the interpreter's is, the black-level soft clamp, the
  * separate light-on-dark and dark-on-light exponents, the low-contrast clip
  * and its offset. The value is the APCA Lc divided by 100, so black text on
  * white is about 1.06 and white on black about -1.08. An earlier
@@ -9348,22 +9385,30 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  */
 export const GPU_COLOR_PREAMBLE_GLSL = `
 float _gpu_srgb_to_linear(float c) {
-  if (c <= 0.04045) return c / 12.92;
-  return pow((c + 0.055) / 1.055, 2.4);
+  if (c != c) return c;
+  float a = abs(c);
+  if (a <= 0.04045) return c / 12.92;
+  return sign(c) * pow((a + 0.055) / 1.055, 2.4);
 }
 
 float _gpu_linear_to_srgb(float c) {
-  if (c <= 0.0031308) return 12.92 * c;
-  return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+  if (c != c) return c;
+  float a = abs(c);
+  if (a <= 0.0031308) return 12.92 * c;
+  return sign(c) * (1.055 * pow(a, 1.0 / 2.4) - 0.055);
 }
 
 vec3 _gpu_srgb_to_oklab(vec3 rgb) {
   float r = _gpu_srgb_to_linear(rgb.x);
   float g = _gpu_srgb_to_linear(rgb.y);
   float b = _gpu_srgb_to_linear(rgb.z);
-  float l_ = pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1.0 / 3.0);
-  float m_ = pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1.0 / 3.0);
-  float s_ = pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1.0 / 3.0);
+  float lc = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+  float mc = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+  float sc = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+  if (lc != lc || mc != mc || sc != sc) return vec3(lc + mc + sc);
+  float l_ = sign(lc) * pow(abs(lc), 1.0 / 3.0);
+  float m_ = sign(mc) * pow(abs(mc), 1.0 / 3.0);
+  float s_ = sign(sc) * pow(abs(sc), 1.0 / 3.0);
   return vec3(
     0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_,
     1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_,
@@ -9381,7 +9426,7 @@ vec3 _gpu_oklab_to_srgb(vec3 lab) {
   float r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
   float g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   float b = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
-  return clamp(vec3(_gpu_linear_to_srgb(r), _gpu_linear_to_srgb(g), _gpu_linear_to_srgb(b)), 0.0, 1.0);
+  return vec3(_gpu_linear_to_srgb(r), _gpu_linear_to_srgb(g), _gpu_linear_to_srgb(b));
 }
 
 vec3 _gpu_oklab_to_oklch(vec3 lab) {
@@ -9405,9 +9450,10 @@ vec3 _gpu_oklch_to_srgb(vec3 lch) {
 }
 
 vec3 _gpu_hsl_to_rgb(vec3 hsl) {
-  float h = hsl.x;
-  float s = hsl.y;
-  float l = hsl.z;
+  float h = mod(hsl.x, 360.0);
+  if (h != h || hsl.y != hsl.y || hsl.z != hsl.z) return vec3(h + hsl.y + hsl.z);
+  float s = clamp(hsl.y, 0.0, 1.0);
+  float l = clamp(hsl.z, 0.0, 1.0);
   float c = (1.0 - abs(2.0 * l - 1.0)) * s;
   float h6 = h / 60.0;
   float x = c * (1.0 - abs(mod(h6, 2.0) - 1.0));
@@ -9424,7 +9470,10 @@ vec3 _gpu_hsl_to_rgb(vec3 hsl) {
   return vec3(r + m, g + m, b + m);
 }
 
-vec3 _gpu_rgb_to_hsl(vec3 rgb) {
+vec3 _gpu_rgb_to_hsl(vec3 rgb_in) {
+  if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z)
+    return vec3(rgb_in.x + rgb_in.y + rgb_in.z);
+  vec3 rgb = clamp(rgb_in, 0.0, 1.0);
   float maxc = max(max(rgb.x, rgb.y), rgb.z);
   float minc = min(min(rgb.x, rgb.y), rgb.z);
   float l = (maxc + minc) / 2.0;
@@ -9441,9 +9490,10 @@ vec3 _gpu_rgb_to_hsl(vec3 rgb) {
 }
 
 vec3 _gpu_hsv_to_rgb(vec3 hsv) {
-  float h = hsv.x;
-  float s = hsv.y;
-  float v = hsv.z;
+  float h = mod(hsv.x, 360.0);
+  if (h != h || hsv.y != hsv.y || hsv.z != hsv.z) return vec3(h + hsv.y + hsv.z);
+  float s = clamp(hsv.y, 0.0, 1.0);
+  float v = clamp(hsv.z, 0.0, 1.0);
   float c = v * s;
   float h6 = h / 60.0;
   float x = c * (1.0 - abs(mod(h6, 2.0) - 1.0));
@@ -9460,7 +9510,10 @@ vec3 _gpu_hsv_to_rgb(vec3 hsv) {
   return vec3(r + m, g + m, b + m);
 }
 
-vec3 _gpu_rgb_to_hsv(vec3 rgb) {
+vec3 _gpu_rgb_to_hsv(vec3 rgb_in) {
+  if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z)
+    return vec3(rgb_in.x + rgb_in.y + rgb_in.z);
+  vec3 rgb = clamp(rgb_in, 0.0, 1.0);
   float maxc = max(max(rgb.x, rgb.y), rgb.z);
   float minc = min(min(rgb.x, rgb.y), rgb.z);
   float v = maxc;
@@ -9500,15 +9553,18 @@ vec3 _gpu_color_mix(vec3 lch1, vec3 lch2, float t) {
 }
 
 float _gpu_apca_luma(vec3 srgb) {
-  float Y = 0.2126729 * pow(srgb.x, 2.4)
-          + 0.7151522 * pow(srgb.y, 2.4)
-          + 0.0721750 * pow(srgb.z, 2.4);
+  if (srgb.x != srgb.x || srgb.y != srgb.y || srgb.z != srgb.z)
+    return srgb.x + srgb.y + srgb.z;
+  float Y = 0.2126729 * sign(srgb.x) * pow(abs(srgb.x), 2.4)
+          + 0.7151522 * sign(srgb.y) * pow(abs(srgb.y), 2.4)
+          + 0.0721750 * sign(srgb.z) * pow(abs(srgb.z), 2.4);
   return Y >= 0.022 ? Y : Y + pow(0.022 - Y, 1.414);
 }
 
 float _gpu_apca(vec3 lch_bg, vec3 lch_fg) {
   float Ybg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_bg));
   float Yfg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_fg));
+  if (Ybg != Ybg || Yfg != Yfg) return Ybg + Yfg;
   float C = 0.0;
   if (abs(Ybg - Yfg) >= 0.0005) {
     if (Ybg > Yfg) C = (pow(Ybg, 0.56) - pow(Yfg, 0.57)) * 1.14;
@@ -9528,22 +9584,30 @@ float _gpu_apca(vec3 lch_bg, vec3 lch_fg) {
  */
 export const GPU_COLOR_PREAMBLE_WGSL = `
 fn _gpu_srgb_to_linear(c: f32) -> f32 {
-  if (c <= 0.04045) { return c / 12.92; }
-  return pow((c + 0.055) / 1.055, 2.4);
+  if (c != c) { return c; }
+  let a = abs(c);
+  if (a <= 0.04045) { return c / 12.92; }
+  return sign(c) * pow((a + 0.055) / 1.055, 2.4);
 }
 
 fn _gpu_linear_to_srgb(c: f32) -> f32 {
-  if (c <= 0.0031308) { return 12.92 * c; }
-  return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+  if (c != c) { return c; }
+  let a = abs(c);
+  if (a <= 0.0031308) { return 12.92 * c; }
+  return sign(c) * (1.055 * pow(a, 1.0 / 2.4) - 0.055);
 }
 
 fn _gpu_srgb_to_oklab(rgb: vec3f) -> vec3f {
   let r = _gpu_srgb_to_linear(rgb.x);
   let g = _gpu_srgb_to_linear(rgb.y);
   let b = _gpu_srgb_to_linear(rgb.z);
-  let l_ = pow(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b, 1.0 / 3.0);
-  let m_ = pow(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b, 1.0 / 3.0);
-  let s_ = pow(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b, 1.0 / 3.0);
+  let lc = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+  let mc = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+  let sc = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+  if (lc != lc || mc != mc || sc != sc) { return vec3f(lc + mc + sc); }
+  let l_ = sign(lc) * pow(abs(lc), 1.0 / 3.0);
+  let m_ = sign(mc) * pow(abs(mc), 1.0 / 3.0);
+  let s_ = sign(sc) * pow(abs(sc), 1.0 / 3.0);
   return vec3f(
     0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_,
     1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_,
@@ -9561,7 +9625,7 @@ fn _gpu_oklab_to_srgb(lab: vec3f) -> vec3f {
   let r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
   let g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   let b = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
-  return clamp(vec3f(_gpu_linear_to_srgb(r), _gpu_linear_to_srgb(g), _gpu_linear_to_srgb(b)), vec3f(0.0), vec3f(1.0));
+  return vec3f(_gpu_linear_to_srgb(r), _gpu_linear_to_srgb(g), _gpu_linear_to_srgb(b));
 }
 
 fn _gpu_oklab_to_oklch(lab: vec3f) -> vec3f {
@@ -9585,9 +9649,10 @@ fn _gpu_oklch_to_srgb(lch: vec3f) -> vec3f {
 }
 
 fn _gpu_hsl_to_rgb(hsl: vec3f) -> vec3f {
-  let h = hsl.x;
-  let s = hsl.y;
-  let l = hsl.z;
+  let h = hsl.x - 360.0 * floor(hsl.x / 360.0);
+  if (h != h || hsl.y != hsl.y || hsl.z != hsl.z) { return vec3f(h + hsl.y + hsl.z); }
+  let s = clamp(hsl.y, 0.0, 1.0);
+  let l = clamp(hsl.z, 0.0, 1.0);
   let c = (1.0 - abs(2.0 * l - 1.0)) * s;
   let h6 = h / 60.0;
   let x = c * (1.0 - abs((h6 - 2.0 * floor(h6 / 2.0)) - 1.0));
@@ -9604,7 +9669,11 @@ fn _gpu_hsl_to_rgb(hsl: vec3f) -> vec3f {
   return vec3f(r + m, g + m, b + m);
 }
 
-fn _gpu_rgb_to_hsl(rgb: vec3f) -> vec3f {
+fn _gpu_rgb_to_hsl(rgb_in: vec3f) -> vec3f {
+  if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z) {
+    return vec3f(rgb_in.x + rgb_in.y + rgb_in.z);
+  }
+  let rgb = clamp(rgb_in, vec3f(0.0), vec3f(1.0));
   let maxc = max(max(rgb.x, rgb.y), rgb.z);
   let minc = min(min(rgb.x, rgb.y), rgb.z);
   let l = (maxc + minc) / 2.0;
@@ -9626,9 +9695,10 @@ fn _gpu_rgb_to_hsl(rgb: vec3f) -> vec3f {
 }
 
 fn _gpu_hsv_to_rgb(hsv: vec3f) -> vec3f {
-  let h = hsv.x;
-  let s = hsv.y;
-  let v = hsv.z;
+  let h = hsv.x - 360.0 * floor(hsv.x / 360.0);
+  if (h != h || hsv.y != hsv.y || hsv.z != hsv.z) { return vec3f(h + hsv.y + hsv.z); }
+  let s = clamp(hsv.y, 0.0, 1.0);
+  let v = clamp(hsv.z, 0.0, 1.0);
   let c = v * s;
   let h6 = h / 60.0;
   let x = c * (1.0 - abs((h6 - 2.0 * floor(h6 / 2.0)) - 1.0));
@@ -9645,7 +9715,11 @@ fn _gpu_hsv_to_rgb(hsv: vec3f) -> vec3f {
   return vec3f(r + m, g + m, b + m);
 }
 
-fn _gpu_rgb_to_hsv(rgb: vec3f) -> vec3f {
+fn _gpu_rgb_to_hsv(rgb_in: vec3f) -> vec3f {
+  if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z) {
+    return vec3f(rgb_in.x + rgb_in.y + rgb_in.z);
+  }
+  let rgb = clamp(rgb_in, vec3f(0.0), vec3f(1.0));
   let maxc = max(max(rgb.x, rgb.y), rgb.z);
   let minc = min(min(rgb.x, rgb.y), rgb.z);
   let v = maxc;
@@ -9691,15 +9765,19 @@ fn _gpu_color_mix(lch1: vec3f, lch2: vec3f, t: f32) -> vec3f {
 }
 
 fn _gpu_apca_luma(srgb: vec3f) -> f32 {
-  let Y = 0.2126729 * pow(srgb.x, 2.4)
-        + 0.7151522 * pow(srgb.y, 2.4)
-        + 0.0721750 * pow(srgb.z, 2.4);
+  if (srgb.x != srgb.x || srgb.y != srgb.y || srgb.z != srgb.z) {
+    return srgb.x + srgb.y + srgb.z;
+  }
+  let Y = 0.2126729 * sign(srgb.x) * pow(abs(srgb.x), 2.4)
+        + 0.7151522 * sign(srgb.y) * pow(abs(srgb.y), 2.4)
+        + 0.0721750 * sign(srgb.z) * pow(abs(srgb.z), 2.4);
   return select(Y + pow(0.022 - Y, 1.414), Y, Y >= 0.022);
 }
 
 fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
   let Ybg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_bg));
   let Yfg = _gpu_apca_luma(_gpu_oklch_to_srgb(lch_fg));
+  if (Ybg != Ybg || Yfg != Yfg) { return Ybg + Yfg; }
   var C = 0.0;
   if (abs(Ybg - Yfg) >= 0.0005) {
     if (Ybg > Yfg) {
@@ -9714,29 +9792,31 @@ fn _gpu_apca(lch_bg: vec3f, lch_fg: vec3f) -> f32 {
 `;
 
 /**
- * The sRGB round trip (GLSL syntax) — a colour already inside the sRGB gamut
- * is returned unchanged, and one outside it is mapped back through OKLCh.
+ * The sRGB round trip (GLSL syntax): an sRGB triple converted to OKLCh and
+ * back, which the `AsRgb(Rgb(…))`, `AsRgb(Hsv(…))` and `AsRgb(Hsl(…))`
+ * lowerings emit (`gpuRgbBoundary`).
+ *
+ * The conversions keep extended sRGB channels (a channel below 0 or above 1
+ * is a color outside the sRGB gamut, and the canvas clamps it at output), and
+ * they do no gamut mapping. So for a finite triple the round trip is the
+ * identity, and the helper returns the triple without the two conversions.
+ * A triple with an infinite or `NaN` channel goes through the conversions,
+ * which answer `NaN` channels: an infinite sRGB channel is not a color, as on
+ * the interpreter (`readColorChannels`). An infinite channel becomes `NaN` in
+ * the arithmetic of the conversion (`inf - inf`), and the conversions test
+ * for a `NaN` channel before each sign step and return `NaN` channels, so a
+ * `NaN` channel stays `NaN` (best effort, as the colour preamble comment
+ * says). The test is against `3.0e38`, near
+ * the largest finite 32-bit float, because WGSL has no `isinf`.
  *
  * It stands apart from the colour preamble above only because it is a later
- * addition to the same library; it calls three of that library's functions,
+ * addition to the same library; it calls two of that library's functions,
  * so it is appended to it (`GPU_COLOR_LIBRARY_GLSL`) and the per-function
  * inclusion pass pulls in whatever it needs.
  */
 const GPU_SRGB_ROUNDTRIP_GLSL = `
 vec3 _gpu_srgb_roundtrip(vec3 rgb) {
-  // Bound positive contributions before checking the cube-root domain.
-  if (all(lessThanEqual(rgb, vec3(2.0)))) {
-    if (all(greaterThanEqual(rgb, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
-    float r = _gpu_srgb_to_linear(rgb.x);
-    float g = _gpu_srgb_to_linear(rgb.y);
-    float b = _gpu_srgb_to_linear(rgb.z);
-    vec3 lms = vec3(
-      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
-      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
-      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
-    );
-    if (all(greaterThanEqual(lms, vec3(0.0)))) return clamp(rgb, 0.0, 1.0);
-  }
+  if (abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38) return rgb;
   return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
 }
 `;
@@ -9744,19 +9824,7 @@ vec3 _gpu_srgb_roundtrip(vec3 rgb) {
 /** The sRGB round trip (WGSL syntax). See `GPU_SRGB_ROUNDTRIP_GLSL`. */
 const GPU_SRGB_ROUNDTRIP_WGSL = `
 fn _gpu_srgb_roundtrip(rgb: vec3f) -> vec3f {
-  // Bound positive contributions before checking the cube-root domain.
-  if (all(rgb <= vec3f(2.0))) {
-    if (all(rgb >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
-    let r = _gpu_srgb_to_linear(rgb.x);
-    let g = _gpu_srgb_to_linear(rgb.y);
-    let b = _gpu_srgb_to_linear(rgb.z);
-    let lms = vec3f(
-      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
-      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
-      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
-    );
-    if (all(lms >= vec3f(0.0))) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
-  }
+  if (abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38) { return rgb; }
   return _gpu_oklch_to_srgb(_gpu_srgb_to_oklch(rgb));
 }
 `;
@@ -10785,6 +10853,13 @@ type GPUUserFunctionSignature = {
   params: ReadonlyArray<string>;
   /** Color parameters receive canonical OKLCh channels. */
   colors: ReadonlyArray<boolean>;
+  /**
+   * Complex parameters hold a `vec2(re, im)`. A real argument is lifted to
+   * `vec2(x, 0.0)` at the call. The shader type alone cannot tell this: a
+   * 2-component vector parameter is also a `vec2`, and a scalar passed to
+   * one must still be refused.
+   */
+  complex: ReadonlyArray<boolean>;
   /** Shader return type. */
   ret: string;
 };
@@ -11376,6 +11451,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           const complexFrame = new Map<string, boolean>();
           const vectorFrame = new Map<string, number>();
           const colors: boolean[] = [];
+          const complexParams: boolean[] = [];
           const paramTypes = params.map((p, i) => {
             const declared =
               parameterTypes?.[i] ??
@@ -11411,6 +11487,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 ? 3
                 : (gpuDeclaredComponentCount(t ?? 'unknown') ?? 0);
             complexFrame.set(p, complex);
+            complexParams.push(complex);
             vectorFrame.set(
               p,
               shader === 'bool'
@@ -11540,6 +11617,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             names: allNames,
             params: allTypes,
             colors: [...colors, ...extras.map(() => false)],
+            complex: [...complexParams, ...extraTypes.map((x) => x.complex)],
             ret,
           });
           return declareFn(
@@ -11596,6 +11674,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                   `vectors have one), and a shader has no runtime broadcast ` +
                   `dispatch to apply "${id}" element-wise. Fail closed (D6).`
               );
+            // A real argument to a complex parameter. A real number is a
+            // complex number, so the call is valid, but the parameter is a
+            // `vec2` and neither language converts a scalar to a vector
+            // implicitly. Lift the argument to `vec2(x, 0.0)`, as the
+            // JavaScript target wraps it in `{ re: x, im: 0 }`. Only a
+            // floating-point scalar is lifted: WGSL has no `vec2f(i32, f32)`
+            // constructor, and a `bool` is not a number.
+            if (
+              sig.complex[i] &&
+              t === (isWGSL ? 'f32' : 'float') &&
+              t !== sig.params[i]
+            )
+              return `${gpuVec2(target)}(${BaseCompiler.compileValueOperand(
+                arg,
+                target
+              )}, 0.0)`;
             if (t !== sig.params[i])
               throw new Error(
                 // The argument is named as well as numbered: the mismatch is

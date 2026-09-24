@@ -673,10 +673,15 @@ export class BoxedNumber
     // Exact NumericValue (rational / radical / complex): if the value is
     // exact but its square root is not, stay symbolic rather than numericize
     // (`√(√2)`, `√(-3/2)` → symbolic; `√(1/4)` → 1/2 stays exact).
-    const r = ce.number(this._value.sqrt());
-    if (this.isExact && isNumber(r) && r.isExact === false)
+    // The test is on the numeric value, BEFORE boxing: an exact square root
+    // is an `ExactNumericValue`, and any other value is a float
+    // approximation. Boxing an approximation with an integer value makes an
+    // exact integer literal, so a test on the boxed result let a rounded
+    // root pass as exact (`√(10^30 + 1)` answered `10^15`).
+    const root = this._value.sqrt();
+    if (this.isExact && !(root instanceof ExactNumericValue))
       return ce._fn('Sqrt', [this]);
-    return r;
+    return ce.number(root);
   }
 
   ln(semiBase?: number | Expression): Expression {

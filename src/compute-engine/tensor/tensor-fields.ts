@@ -8,6 +8,7 @@ import {
   TensorField,
 } from '../global-types.js';
 import { isSymbol, isNumber } from '../boxed-expression/type-guards.js';
+import { float64HoldsNumber } from '../boxed-expression/constraint-subject.js';
 import { stripNumericRanges } from '../../common/type/utils.js';
 import { isComplexInfinityValue } from '../../common/type/types.js';
 
@@ -542,7 +543,10 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
     if (expr.symbol === 'PositiveInfinity') return 'float64';
     if (expr.symbol === 'NegativeInfinity') return 'float64';
     if (expr.symbol === 'ComplexInfinity') return 'complex128';
-    if (expr.symbol === 'ImaginaryUnit') return 'complex128';
+    // The imaginary unit is an exact value. A `complex128` cell would read
+    // back as a machine complex, which boxes as an inexact number, so it
+    // uses the `expression` dtype (see the `complex` tier below).
+    if (expr.symbol === 'ImaginaryUnit') return 'expression';
   }
 
   if (isNumber(expr)) {
@@ -577,7 +581,12 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // Preserve exactness: an exact rational (½) or radical (√2) stored as
         // float64 would lose precision, so it uses the `expression` dtype. An
         // inexact (machine/decimal) value uses float64.
-        return expr.isExact ? 'expression' : 'float64';
+        // An inexact value whose magnitude is outside the float64 range
+        // (a decimal such as `1e-400` from `.N()`) would also be lost in a
+        // float64 cell, so it uses the `expression` dtype too.
+        return expr.isExact || !float64HoldsNumber(expr)
+          ? 'expression'
+          : 'float64';
 
       case 'integer': {
         // The narrowest integer storage class that holds this value. A cell
@@ -588,8 +597,13 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
         // representable range (|n| > 2^53) would be truncated in a
         // float64-backed buffer, so it is preserved exactly via the
         // `expression` dtype (mirrors the exact rational/real case above).
+        // An integer whose magnitude overflows the float64 range (`10^400`)
+        // has a non-finite `expr.re` too, but it has a value: it is also
+        // preserved via the `expression` dtype, not read as the valueless
+        // case, where it became `+oo`.
         const val = expr.re;
-        if (!Number.isFinite(val)) return 'float64';
+        if (!Number.isFinite(val))
+          return float64HoldsNumber(expr) ? 'float64' : 'expression';
         if (!Number.isSafeInteger(val)) return 'expression';
         return val >= 0 && val <= 255 ? 'uint8' : 'int32';
       }
@@ -610,7 +624,13 @@ export function getExpressionDatatype(expr: Expression): TensorDataType {
 
       case 'complex':
       case 'imaginary':
-        return 'complex128';
+        // Preserve exactness, as for the real tiers above: a `complex128`
+        // cell reads back as a machine complex, which boxes as an INEXACT
+        // number, so an exact entry such as `i` or `1 + 2i` would lose its
+        // exactness through the tensor (`Norm([[1, 1+2i], [0, 1]], 1)` would
+        // answer `3.236…` instead of `1 + √5`). An exact complex value
+        // uses the `expression` dtype; an inexact one uses `complex128`.
+        return expr.isExact ? 'expression' : 'complex128';
 
       default:
         return 'expression';

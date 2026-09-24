@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
+import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 
 /**
  * The color operators and their SIGNATURES, checked route by route.
@@ -136,6 +137,12 @@ const GLSL_BUILTINS = {
     z: (a.z as number) >= (b.z as number),
   }),
   all: (v: { x: boolean; y: boolean; z: boolean }) => v.x && v.y && v.z,
+  // `_gpu_inf()` reads the bit pattern of `+inf` (`GPU_INF_PREAMBLE_GLSL`).
+  intBitsToFloat: (bits: number) => {
+    const view = new DataView(new ArrayBuffer(4));
+    view.setInt32(0, bits);
+    return view.getFloat32(0);
+  },
   clamp: (v: Vec | number, lo: number, hi: number) =>
     isVec(v)
       ? V3(
@@ -177,19 +184,22 @@ function glslToJS(src: string): string {
  * Compile `expr` to GLSL and evaluate the emitted source. Returns a number for
  * a scalar-valued expression and a `{x, y, z}` triple for a color.
  */
-function evalGLSL(expr: any): any {
+function evalGLSL(
+  expr: any,
+  builtins: typeof GLSL_BUILTINS = GLSL_BUILTINS
+): any {
   const r = glsl.compile(ce.expr(expr), NO_FOLD as any);
   const body = `${glslToJS(r.preamble ?? '')}\nreturn (${glslToJS(r.code!)});`;
-  const names = Object.keys(GLSL_BUILTINS);
+  const names = Object.keys(builtins);
   // eslint-disable-next-line no-new-func
   const f = new Function(...names, body);
-  return f(...names.map((n) => GLSL_BUILTINS[n as keyof typeof GLSL_BUILTINS]));
+  return f(...names.map((n) => builtins[n as keyof typeof GLSL_BUILTINS]));
 }
 
-/** Compare a shader `vec3` against three interpreter channels. A compiled
- *  converter rounds to 8-bit integer channels inside its sRGB round trip,
- *  which moves the third significant digit of a channel and about a degree of
- *  a hue, so the comparison carries that tolerance. */
+/** Compare a shader `vec3` against three interpreter channels. The shader
+ *  preamble has its own, shorter conversion constants and computes in 32-bit
+ *  floats, so the comparison carries a tolerance of about the third
+ *  significant digit of a channel and a degree of a hue. */
 function expectShaderChannels(shader: any, expected: number[]): void {
   expect(Math.abs(shader.x - expected[0])).toBeLessThanOrEqual(
     0.005 + 0.02 * Math.abs(expected[0])
@@ -208,9 +218,9 @@ function expectShaderChannels(shader: any, expected: number[]): void {
 
 describe('ColorFromColorspace builds a color in the space it names', () => {
   // Each triple is IN RANGE for the space it is written in — a hue in
-  // degrees for `hsv`/`hsl`/`oklch`, 0-1 elsewhere. An out-of-range channel
-  // is clamped by the shader's sRGB conversion and not by the interpreter's,
-  // which would make the shader comparison below a test of the clamp.
+  // degrees for `hsv`/`hsl`/`oklch`, 0-1 elsewhere. An out-of-range HSV or
+  // HSL channel is clamped by every route, so the channels the operator
+  // answers would not be the ones written.
   test.each([
     ['rgb', 'Rgb', [0.5, 0.1, 0.2]],
     ['hsv', 'Hsv', [20, 0.5, 0.6]],
@@ -309,17 +319,51 @@ describe('ColorFromColorspace builds a color in the space it names', () => {
     }
   );
 
-  test('a channel that is not a finite number is refused', () => {
-    // The typed-head rule is the one rule: `Oklch(~oo, 0, 0)` at a color
-    // position is `incompatible-type`, and so is a components tuple with the
-    // same channel.
+  test('a channel is read by the rule of the space it names', () => {
+    // The typed-head rule is the one rule (`readColorChannels`). A `NaN`
+    // channel, or an infinite channel without a bound such as a hue, is
+    // `incompatible-type`, as it is in a color head at a color position.
+    expect(
+      interp(['ColorFromColorspace', ['Tuple', 'NaN', 0, 0], "'rgb'"]).operator
+    ).toBe('Error');
     expect(
       interp([
         'ColorFromColorspace',
-        ['Tuple', 'ComplexInfinity', 0, 0],
+        ['Tuple', 'PositiveInfinity', 1, 1],
+        "'hsv'",
+      ]).operator
+    ).toBe('Error');
+    // An sRGB channel is extended sRGB: a finite channel outside [0, 1] is
+    // kept, and an infinite one is `incompatible-type`.
+    expect(
+      interp([
+        'ColorFromColorspace',
+        ['Tuple', 'PositiveInfinity', 0, 'NegativeInfinity'],
         "'rgb'",
       ]).operator
     ).toBe('Error');
+    expect(
+      String(interp(['ColorFromColorspace', ['Tuple', 2, 0, -0.5], "'rgb'"]))
+    ).toBe('Rgb(2, 0, -0.5)');
+    // An OKLCh lightness has no bound: an infinite one is refused.
+    expect(
+      interp([
+        'ColorFromColorspace',
+        ['Tuple', 'PositiveInfinity', 0.1, 30],
+        "'oklch'",
+      ]).operator
+    ).toBe('Error');
+    // HSV saturation and value are clamped into [0, 1], an infinite one
+    // included: `+oo` reads as 1 and `-oo` as 0.
+    expect(
+      String(
+        interp([
+          'ColorFromColorspace',
+          ['Tuple', 30, 'PositiveInfinity', 1],
+          "'hsv'",
+        ])
+      )
+    ).toBe('Hsv(30, 1, 1)');
   });
 });
 
@@ -339,17 +383,19 @@ describe('the color ColorFromColorspace builds is consumed as a color', () => {
   });
 
   test('ColorToColorspace reads the components back out', () => {
-    // These are the numbers `ColorFromColorspace` itself used to answer, when
-    // it converted to 0-1 sRGB and answered a components tuple. They are now
+    // `ColorFromColorspace` itself used to answer these numbers, when it
+    // converted to 0-1 sRGB and answered a components tuple. They are now
     // one `ColorToColorspace` away, which is the migration for a caller that
-    // wants them.
+    // wants them. The conversion from OKLCh no longer rounds each channel to
+    // an 8-bit integer, so they are no longer multiples of 1/255 (they were
+    // 148/255, 74/255 and 75/255).
     const expr = [
       'ColorToColorspace',
       ['ColorFromColorspace', ['Tuple', 0.5, 0.1, 20], "'oklch'"],
       "'rgb'",
     ];
     const expected = [
-      0.5803921568627451, 0.2901960784313726, 0.29411764705882354,
+      0.5794652253705687, 0.2883838518001147, 0.29455531221211584,
     ];
     expect(interp(expr).ops!.map((op) => op.re)).toEqual(expected);
     // On this target components are a plain array, the same one the
@@ -594,7 +640,13 @@ describe('an entry function reads a tuple-typed operand as components', () => {
     expect(jsCode(expr)).toBe(
       '_SYS.asRgb(_SYS.colorFromSrgbComponents(_SYS.colorToColorspace(_SYS.rgb(1, 0.5, 0.25), "rgb")))'
     );
-    expect(runJS(expr)).toEqual(runJS(['AsRgb', c]));
+    // The components go through OKLCh twice on this route and once on the
+    // other, so they agree to the rounding error of that conversion.
+    const roundTrip = runJS(expr);
+    const direct = runJS(['AsRgb', c]);
+    expect(roundTrip.space).toBe(direct.space);
+    for (const k of ['c0', 'c1', 'c2'])
+      expect(roundTrip[k]).toBeCloseTo(direct[k], 12);
     expectShaderChannels(
       evalGLSL(expr),
       interp(['AsRgb', c]).ops!.map((op) => op.re)
@@ -646,5 +698,407 @@ describe('a shader selection between colors in named spaces', () => {
     ];
     expect(runJSSpace(expr)).toBe('oklch');
     expectShaderChannels(evalGLSL(expr), runJSChannels(expr));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The sRGB conversions do not round to 8-bit channels
+// ---------------------------------------------------------------------------
+
+describe('a compiled sRGB conversion agrees with the interpreter to 1e-9', () => {
+  // The compiled constructors convert to OKLCh at once, and the conversions
+  // back to sRGB rounded each channel to an integer from 0 to 255, so
+  // `AsRgb(Hsv(30, 1, 1))` had a green channel of 127/255 on this target and
+  // 0.5 in the interpreter. The interpreter's HSL and OKLCh conversions also
+  // rounded. Neither route rounds now (`numerics/color-conversion.ts`).
+  const INPUTS = [
+    ['Hsv', 30, 1, 1],
+    ['Hsv', 200, 0.3, 0.7],
+    ['Hsv', 390, 0.5, 0.2],
+    ['Hsv', 0, 0, 0.4],
+    ['Hsl', 30, 1, 0.5],
+    ['Hsl', 200, 0.3, 0.7],
+    ['Hsl', -30, 0.8, 0.6],
+    ['Hsl', 120, 1, 0.25],
+    ['Rgb', 1, 0.5, 0],
+    ['Rgb', 0.2, 0.4, 0.6],
+    ['Rgb', 0.5, 0.5, 0.5],
+    ['Rgb', 1, 0.3, 0.3],
+    ['Rgb', 0, 0, 1],
+  ];
+  const HEADS: [string, string][] = [
+    ['AsRgb', 'Rgb'],
+    ['AsHsv', 'Hsv'],
+    ['AsHsl', 'Hsl'],
+  ];
+
+  test.each(
+    HEADS.flatMap(([head, target]) =>
+      INPUTS.filter((input) => input[0] !== target).map(
+        (input) => [head, JSON.stringify(input)] as [string, string]
+      )
+    )
+  )('%s(%s)', (head, input) => {
+    const expr = [head, JSON.parse(input)];
+    const expected = interp(expr);
+    expect(expected.operator).toBe(head.slice(2));
+    const channels = expected.ops!.slice(0, 3).map((op) => op.re);
+    const js = runJSChannels(expr);
+    for (let i = 0; i < 3; i++)
+      expect(Math.abs(js[i] - channels[i])).toBeLessThan(1e-9);
+  });
+
+  test('the green channel of AsRgb(Hsv(30, 1, 1)) is 0.5', () => {
+    const expr = ['AsRgb', ['Hsv', 30, 1, 1]];
+    expect(String(interp(expr))).toBe('Rgb(1, 0.5, 0)');
+    const [r, g, b] = runJSChannels(expr);
+    expect(r).toBe(1);
+    expect(Math.abs(g - 0.5)).toBeLessThan(1e-12);
+    expect(b).toBe(0);
+  });
+
+  test('the interpreter converts HSL without rounding, and clamps it', () => {
+    expect(String(interp(['AsRgb', ['Hsl', 30, 1, 0.5]]))).toBe(
+      'Rgb(1, 0.5, 0)'
+    );
+    // Saturation and lightness are clamped into [0, 1], as HSV saturation
+    // and value are: `Hsl(30, 1, 2)` converted to the sRGB channels (1, 2, 3).
+    expect(String(interp(['AsRgb', ['Hsl', 30, 1, 2]]))).toBe('Rgb(1, 1, 1)');
+    expect(String(interp(['AsRgb', ['Hsl', 30, 2, 0.5]]))).toBe(
+      'Rgb(1, 0.5, 0)'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// An infinite bounded channel on a shader
+// ---------------------------------------------------------------------------
+
+describe('a shader reads an infinite HSV or HSL channel as its bound', () => {
+  // The rule of the interpreter and the JavaScript runtime
+  // (`readColorChannels`): HSV/HSL saturation, value and lightness are
+  // clamped into [0, 1], so `+oo` is 1 and `-oo` is 0. The shader helpers
+  // `_gpu_hsv_to_rgb` and `_gpu_hsl_to_rgb` clamp them the same way.
+  test.each([
+    [
+      ['Hsv', 30, 'PositiveInfinity', 1],
+      ['Hsv', 30, 1, 1],
+    ],
+    [
+      ['Hsv', 30, 1, 'PositiveInfinity'],
+      ['Hsv', 30, 1, 1],
+    ],
+    [
+      ['Hsv', 30, 1, 'NegativeInfinity'],
+      ['Hsv', 30, 1, 0],
+    ],
+    [
+      ['Hsl', 30, 'PositiveInfinity', 0.5],
+      ['Hsl', 30, 1, 0.5],
+    ],
+    [
+      ['Hsl', 30, 1, 'PositiveInfinity'],
+      ['Hsl', 30, 1, 1],
+    ],
+  ])('%j', (color, bound) => {
+    const shader = evalGLSL(['AsRgb', color]);
+    const expected = interp(['AsRgb', bound]).ops!.map((op) => op.re);
+    expect(interp(['AsRgb', color]).ops!.map((op) => op.re)).toEqual(expected);
+    for (const [k, i] of [
+      ['x', 0],
+      ['y', 1],
+      ['z', 2],
+    ] as const)
+      expect(shader[k]).toBeCloseTo(expected[i], 6);
+  });
+
+  test('an out-of-range hue is reduced modulo 360', () => {
+    for (const color of [
+      ['Hsv', 390, 1, 1],
+      ['Hsv', -30, 1, 1],
+      ['Hsl', 390, 1, 0.5],
+      ['Hsl', -30, 1, 0.5],
+    ]) {
+      const shader = evalGLSL(['AsRgb', color]);
+      const expected = interp(['AsRgb', color]).ops!.map((op) => op.re);
+      expect(shader.x).toBeCloseTo(expected[0], 6);
+      expect(shader.y).toBeCloseTo(expected[1], 6);
+      expect(shader.z).toBeCloseTo(expected[2], 6);
+    }
+  });
+
+  test('an infinite hue is NaN', () => {
+    const shader = evalGLSL(['AsRgb', ['Hsv', 'PositiveInfinity', 1, 1]]);
+    expect(Number.isNaN(shader.x)).toBe(true);
+  });
+
+  test('an infinite sRGB channel or OKLab lightness is NaN', () => {
+    // These channels are not clamped, so an infinite one is not a color:
+    // `incompatible-type` on the interpreter and NaN channels on a shader.
+    for (const color of [
+      ['Rgb', 'PositiveInfinity', 0.5, 0],
+      ['Rgb', 1, 'NegativeInfinity', 0],
+      ['Oklch', 'PositiveInfinity', 0, 30],
+      ['Oklab', 'NegativeInfinity', 0, 0],
+    ]) {
+      expect(interp(['AsRgb', color]).operator).toBe('Error');
+      const shader = evalGLSL(['AsRgb', color]);
+      expect(Number.isNaN(shader.x)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A NaN channel on a shader
+// ---------------------------------------------------------------------------
+
+describe('a shader keeps a NaN channel NaN through a clamp or a sign', () => {
+  // GLSL and WGSL do not specify `min`, `max` or `clamp` of NaN, nor
+  // `sign(NaN)`. These builtins give one answer the specifications allow and
+  // that GPUs give: `min` and `max` return the operand that is not NaN (the
+  // IEEE 754 `minNum` and `maxNum`), so `clamp(NaN, 0, 1)` is 0, and
+  // `sign(NaN)` is 0. JavaScript's `Math.min` and `Math.sign` propagate NaN,
+  // so the default builtins cannot show a helper that loses a NaN channel.
+  const notNaN = (
+    a: number,
+    b: number,
+    pick: (a: number, b: number) => number
+  ) => (Number.isNaN(a) ? b : Number.isNaN(b) ? a : pick(a, b));
+  const max = (a: number, b: number) => notNaN(a, b, Math.max);
+  const min = (a: number, b: number) => notNaN(a, b, Math.min);
+  const clampOne = (v: number, lo: number, hi: number) => min(max(v, lo), hi);
+  const GPU_NAN_BUILTINS: typeof GLSL_BUILTINS = {
+    ...GLSL_BUILTINS,
+    max,
+    min,
+    sign: (x: number) => (Number.isNaN(x) ? 0 : Math.sign(x)),
+    clamp: (v: Vec | number, lo: number, hi: number) =>
+      isVec(v)
+        ? V3(
+            clampOne(v.x, lo, hi),
+            clampOne(v.y, lo, hi),
+            clampOne(v.z!, lo, hi)
+          )
+        : clampOne(v, lo, hi),
+  };
+
+  test.each([
+    [['AsHsv', ['Hsv', 30, 'NaN', 1]]],
+    [['AsHsv', ['Rgb', 'NaN', 0.5, 0]]],
+    [['AsHsl', ['Rgb', 0.5, 'NaN', 0]]],
+    [['AsRgb', ['Hsl', 30, 1, 'NaN']]],
+  ])('%j gives NaN channels', (expr) => {
+    // The interpreter refuses a NaN channel.
+    expect(interp(expr).operator).toBe('Error');
+    const shader = evalGLSL(expr, GPU_NAN_BUILTINS);
+    expect([shader.x, shader.y, shader.z].every(Number.isNaN)).toBe(true);
+  });
+
+  test('the APCA contrast of a NaN channel is NaN', () => {
+    const expr = ['ColorContrast', ['Rgb', 'NaN', 0, 0], ['Rgb', 0, 0, 0]];
+    expect(interp(expr).operator).toBe('Error');
+    expect(Number.isNaN(evalGLSL(expr, GPU_NAN_BUILTINS))).toBe(true);
+  });
+
+  test('the WGSL helpers test for NaN before they clamp', () => {
+    const r = new WGSLTarget().compile(
+      ce.expr(['AsHsv', ['Hsv', 30, 'NaN', 1]]),
+      NO_FOLD as any
+    ) as any;
+    expect(r.preamble).toContain(
+      'if (h != h || hsv.y != hsv.y || hsv.z != hsv.z) { return vec3f(h + hsv.y + hsv.z); }'
+    );
+    expect(r.preamble).toContain(
+      'if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z) {'
+    );
+    expect(r.preamble).toContain(
+      'if (lc != lc || mc != mc || sc != sc) { return vec3f(lc + mc + sc); }'
+    );
+    expect(r.preamble).toContain('if (c != c) { return c; }');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Out-of-range channels, route by route
+// ---------------------------------------------------------------------------
+
+/**
+ * The numbers of an interpreted result: the channels of a color head, the
+ * components of a tuple, or a scalar. `null` for an `Error`.
+ */
+function interpNumbers(expr: any): number[] | null {
+  const r = interp(expr);
+  if (r.operator === 'Error') return null;
+  if (r.ops === undefined || r.ops === null) return [r.re];
+  return r.ops.slice(0, 3).map((op) => op.re);
+}
+
+/** The numbers of a compiled result, in the same shape as `interpNumbers`. */
+function jsNumbers(expr: any): number[] {
+  const r = runJS(expr);
+  if (typeof r === 'number') return [r];
+  if (Array.isArray(r)) return r.slice(0, 3);
+  return [r.c0, r.c1, r.c2];
+}
+
+describe('an out-of-range channel on the interpreter and the javascript target', () => {
+  // The user decision on out-of-range color channels:
+  // - `Rgb` is extended sRGB. A finite channel outside [0, 1] is kept on
+  //   every route, and no conversion among `Rgb`, `Oklab` and `Oklch` does
+  //   gamut mapping. An infinite or `NaN` `Rgb` channel is an error.
+  // - HSV/HSL saturation, value and lightness are clamped into [0, 1], an
+  //   infinite one included, also by a same-space conversion.
+  // - A conversion of an extended `Rgb` color to HSV/HSL clips each channel
+  //   into [0, 1].
+  // - OKLab/OKLCh channels have no bound: a large finite lightness is kept,
+  //   and an infinite one is an error.
+  // Each row: the expression, and the numbers both routes must answer
+  // (`null` when the interpreter answers an error and the compiled route the
+  // NaN color). A row without expected numbers checks only that the two
+  // routes agree.
+  const I = 'PositiveInfinity';
+  const ROWS: [string, any, number[] | null | undefined][] = [
+    ['AsRgb(Rgb(2, 0, 0))', ['AsRgb', ['Rgb', 2, 0, 0]], [2, 0, 0]],
+    [
+      'AsRgb(Rgb(-0.5, 0.5, 0))',
+      ['AsRgb', ['Rgb', -0.5, 0.5, 0]],
+      [-0.5, 0.5, 0],
+    ],
+    ['AsOklch(Rgb(2, 0, 0))', ['AsOklch', ['Rgb', 2, 0, 0]], undefined],
+    [
+      'AsRgb(AsOklch(Rgb(2, 0, 0)))',
+      ['AsRgb', ['AsOklch', ['Rgb', 2, 0, 0]]],
+      [2, 0, 0],
+    ],
+    [
+      'AsRgb(AsOklab(Rgb(-0.5, 0.5, 0)))',
+      ['AsRgb', ['AsOklab', ['Rgb', -0.5, 0.5, 0]]],
+      [-0.5, 0.5, 0],
+    ],
+    ['AsHsv(Rgb(2, 0, 0))', ['AsHsv', ['Rgb', 2, 0, 0]], [0, 1, 1]],
+    ['AsHsl(Rgb(2, 0.5, -1))', ['AsHsl', ['Rgb', 2, 0.5, -1]], [30, 1, 0.5]],
+    ['AsRgb(Hsv(30, 2, 1))', ['AsRgb', ['Hsv', 30, 2, 1]], [1, 0.5, 0]],
+    ['AsHsv(Hsv(30, 2, 1))', ['AsHsv', ['Hsv', 30, 2, 1]], [30, 1, 1]],
+    ['AsHsv(Hsv(390, 1, 1))', ['AsHsv', ['Hsv', 390, 1, 1]], [30, 1, 1]],
+    ['AsRgb(Hsv(30, +oo, 3.14))', ['AsRgb', ['Hsv', 30, I, 3.14]], [1, 0.5, 0]],
+    ['AsRgb(Rgb(+oo, 0, 0))', ['AsRgb', ['Rgb', I, 0, 0]], null],
+    ['AsRgb(Oklch(+oo, 0.1, 30))', ['AsRgb', ['Oklch', I, 0.1, 30]], null],
+    ['AsOklch(Oklch(+oo, 0.1, 30))', ['AsOklch', ['Oklch', I, 0.1, 30]], null],
+    ['AsRgb(Oklch(3, 0.1, 30))', ['AsRgb', ['Oklch', 3, 0.1, 30]], undefined],
+    [
+      'ColorMix(Rgb(2, 0, 0), Rgb(0, 0, 1), 0.5)',
+      ['ColorMix', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 1], 0.5],
+      undefined,
+    ],
+    [
+      'AsRgb(ColorMix(Rgb(2, 0, 0), Rgb(0, 0, 1), 0.5))',
+      ['AsRgb', ['ColorMix', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 1], 0.5]],
+      undefined,
+    ],
+    [
+      'ColorToColorspace(Rgb(2, 0, 0), "oklab")',
+      ['ColorToColorspace', ['Rgb', 2, 0, 0], "'oklab'"],
+      undefined,
+    ],
+    [
+      'ColorContrast(Rgb(2, 0, 0), Rgb(0, 0, 0))',
+      ['ColorContrast', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 0]],
+      undefined,
+    ],
+    [
+      'ColorFromColorspace((2, 0, 0), "rgb")',
+      ['ColorFromColorspace', ['Tuple', 2, 0, 0], "'rgb'"],
+      [2, 0, 0],
+    ],
+  ];
+
+  test.each(ROWS)('%s', (_label, expr, expected) => {
+    const fromInterp = interpNumbers(expr);
+    const fromJS = jsNumbers(expr);
+    if (expected === null) {
+      expect(fromInterp).toBeNull();
+      expect(fromJS.every((x) => Number.isNaN(x))).toBe(true);
+      return;
+    }
+    expect(fromInterp).not.toBeNull();
+    expect(fromJS).toHaveLength(fromInterp!.length);
+    for (let i = 0; i < fromJS.length; i++)
+      expect(Math.abs(fromJS[i] - fromInterp![i])).toBeLessThan(1e-9);
+    if (expected !== undefined)
+      for (let i = 0; i < expected.length; i++)
+        expect(Math.abs(fromInterp![i] - expected[i])).toBeLessThan(1e-9);
+  });
+
+  test('a mix with an extended color is itself outside the sRGB gamut', () => {
+    // No gamut mapping: the mix of an extended red and a blue has a green
+    // channel below 0 on both routes.
+    const expr = [
+      'AsRgb',
+      ['ColorMix', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 1], 0.5],
+    ];
+    expect(interpNumbers(expr)![1]).toBeLessThan(0);
+    expect(jsNumbers(expr)[1]).toBeLessThan(0);
+  });
+
+  test('a large OKLCh lightness is kept', () => {
+    const [r, g, b] = interpNumbers(['AsRgb', ['Oklch', 3, 0.1, 30]])!;
+    expect(r).toBeGreaterThan(1);
+    expect(g).toBeGreaterThan(1);
+    expect(b).toBeGreaterThan(1);
+  });
+
+  test('a bare constructor with an infinite channel is the NaN color', () => {
+    for (const color of [
+      ['Rgb', I, 0, 0],
+      ['Oklch', I, 0.1, 30],
+    ])
+      expect(jsNumbers(color).every((x) => Number.isNaN(x))).toBe(true);
+  });
+});
+
+describe('a shader passes an extended sRGB channel through', () => {
+  // The shader helpers do not clamp an sRGB channel (the canvas clamps at
+  // output) and do no gamut mapping. Their sRGB transfer functions and cube
+  // roots are sign-extended, so a negative channel survives a conversion to
+  // OKLab and back. The shader computes in 32-bit floats with shorter
+  // constants, hence the looser tolerance of a conversion.
+  test.each([
+    [['Rgb', 2, 0, 0]],
+    [['Rgb', -0.5, 0.5, 0]],
+    [['Rgb', 1.5, -0.25, 3]],
+  ])('AsRgb(%j) is the same channels', (color) => {
+    const shader = evalGLSL(['AsRgb', color]);
+    expect([shader.x, shader.y, shader.z]).toEqual(color.slice(1));
+  });
+
+  test.each([
+    [['AsRgb', ['AsOklch', ['Rgb', 2, 0, 0]]]],
+    [['AsRgb', ['AsOklab', ['Rgb', -0.5, 0.5, 0]]]],
+    [['AsRgb', ['ColorMix', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 1], 0.5]]],
+    [['AsOklch', ['Rgb', 2, 0, 0]]],
+  ])('%j agrees with the interpreter', (expr) => {
+    const shader = evalGLSL(expr);
+    const expected = interpNumbers(expr)!;
+    expect(Math.abs(shader.x - expected[0])).toBeLessThan(1e-4);
+    expect(Math.abs(shader.y - expected[1])).toBeLessThan(1e-4);
+    expect(Math.abs(shader.z - expected[2])).toBeLessThan(1e-3);
+  });
+
+  test('a conversion to HSV or HSL clips each channel into [0, 1]', () => {
+    for (const expr of [
+      ['AsHsv', ['Rgb', 2, 0, 0]],
+      ['AsHsl', ['Rgb', 2, 0.5, -1]],
+    ]) {
+      const shader = evalGLSL(expr);
+      const expected = interpNumbers(expr)!;
+      expect(shader.x).toBeCloseTo(expected[0], 3);
+      expect(shader.y).toBeCloseTo(expected[1], 5);
+      expect(shader.z).toBeCloseTo(expected[2], 5);
+    }
+  });
+
+  test('the APCA contrast of an extended color agrees with the interpreter', () => {
+    const expr = ['ColorContrast', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 0]];
+    expect(evalGLSL(expr)).toBeCloseTo(interpNumbers(expr)![0], 5);
   });
 });

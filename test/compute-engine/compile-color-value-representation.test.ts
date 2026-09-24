@@ -167,7 +167,10 @@ describe('the shape of a compiled color value', () => {
       // KEEPS them in it, so the value carries those channels and that tag —
       // the same color the interpreter answers as `Rgb(...)`, `Hsv(...)` and
       // so on. Converting to OKLCh here would answer different numbers from
-      // the interpreter for the same expression.
+      // the interpreter for the same expression. The one change is the rule
+      // every route applies to the channels (`readColorChannels`): HSV value
+      // and HSL lightness are clamped into [0, 1], so the third channel, 20,
+      // is 1 in those two spaces.
       const ce = new ComputeEngine();
       const c = runColor(ce, [
         'ColorFromColorspace',
@@ -176,7 +179,9 @@ describe('the shape of a compiled color value', () => {
       ]);
       expect(c.space).toBe(space);
       expect(Object.keys(c)).toEqual(['space', 'c0', 'c1', 'c2', 'alpha']);
-      expect([c.c0, c.c1, c.c2]).toEqual([0.5, 0.1, 20]);
+      expect([c.c0, c.c1, c.c2]).toEqual(
+        space === 'hsv' || space === 'hsl' ? [0.5, 0.1, 1] : [0.5, 0.1, 20]
+      );
       expect(c.alpha).toBeUndefined();
     }
   );
@@ -230,7 +235,9 @@ describe('the shape of a compiled color value', () => {
 
   test('a non-finite color is the same object with NaN channels', () => {
     const ce = new ComputeEngine();
-    const c = runColor(ce, ['Hsv', 90, 1, ['Divide', 1, 0]]);
+    // An infinite HUE has no limit color. (An infinite value or saturation
+    // reads as its bound, 1 or 0, and is a finite color.)
+    const c = runColor(ce, ['Hsv', ['Divide', 1, 0], 1, 1]);
     expect(c).toEqual({
       space: 'oklch',
       c0: NaN,
@@ -240,7 +247,7 @@ describe('the shape of a compiled color value', () => {
     });
     expect(Object.keys(c)).toEqual(['space', 'c0', 'c1', 'c2', 'alpha']);
     // A conversion answers the non-finite color in the space IT names.
-    expect(runColor(ce, ['AsHsl', ['Hsv', 90, 1, ['Divide', 1, 0]]])).toEqual({
+    expect(runColor(ce, ['AsHsl', ['Hsv', ['Divide', 1, 0], 1, 1]])).toEqual({
       space: 'hsl',
       c0: NaN,
       c1: NaN,
@@ -254,7 +261,7 @@ describe('the shape of a compiled color value', () => {
     expect(
       run(ce, [
         'ColorToColorspace',
-        ['Hsv', 90, 1, ['Divide', 1, 0]],
+        ['Hsv', ['Divide', 1, 0], 1, 1],
         { str: 'hsv' },
       ])
     ).toEqual([NaN, NaN, NaN]);

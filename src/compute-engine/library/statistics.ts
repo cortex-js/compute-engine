@@ -35,6 +35,7 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { exactCompareNumbers } from '../boxed-expression/constraint-subject.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   canEnumerateFiniteSource,
@@ -684,7 +685,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (hasValuelessDatum(xs)) return engine.NaN;
         if (!numericApproximation) {
           const vals = exactData(xs);
-          if (vals) return exactMedianOf(engine, sortExact(vals));
+          if (vals) {
+            const sorted = sortExact(vals);
+            // Two data whose exact order is undecided leave the median
+            // unevaluated.
+            if (sorted === undefined) return undefined;
+            return exactMedianOf(engine, sorted);
+          }
         }
         return engine.number(
           bignumPreferred(engine)
@@ -1072,6 +1079,8 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (hasValuelessDatum(xs)) return engine.NaN;
         if (!numericApproximation) {
           const vals = exactData(xs);
+          // `undefined` when two data cannot be ordered exactly: the mode
+          // stays unevaluated.
           if (vals) return exactMode(engine, vals);
         }
         return engine.number(
@@ -1148,7 +1157,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) {
-            const [q1, q2, q3] = exactQuartiles(engine, vals);
+            // `undefined` when two data cannot be ordered exactly: the
+            // quartiles stay unevaluated.
+            const quartiles = exactQuartiles(engine, vals);
+            if (quartiles === undefined) return undefined;
+            const [q1, q2, q3] = quartiles;
             return engine.tuple(q1, q2, q3);
           }
         }
@@ -1207,7 +1220,11 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) {
-            const [q1, , q3] = exactQuartiles(engine, vals);
+            // `undefined` when two data cannot be ordered exactly: the
+            // interquartile range stays unevaluated.
+            const quartiles = exactQuartiles(engine, vals);
+            if (quartiles === undefined) return undefined;
+            const [q1, , q3] = quartiles;
             return subtract(engine, q3, q1);
           }
         }
@@ -1976,8 +1993,26 @@ function exactMedianOf(ce: ComputeEngine, sorted: Expression[]): Expression {
   return sorted[mid];
 }
 
-function sortExact(vals: Expression[]): Expression[] {
-  return [...vals].sort((a, b) => a.re - b.re);
+/**
+ * Sort exact, finite, real number literals by their exact values. Their
+ * machine values cannot order them: `10^20` and `10^20 + 1` have the same
+ * machine value, and `10^-400` and `2·10^-400` both have the machine value 0.
+ *
+ * Returns `undefined` when the exact order of two values is undecided. Such a
+ * pair must not count as equal: that would make the comparison intransitive,
+ * and the sort order would then depend on the sort algorithm.
+ */
+function sortExact(vals: Expression[]): Expression[] | undefined {
+  let undecided = false;
+  const sorted = [...vals].sort((a, b) => {
+    const order = exactCompareNumbers(a, b);
+    if (order === undefined) {
+      undecided = true;
+      return 0;
+    }
+    return order;
+  });
+  return undecided ? undefined : sorted;
 }
 
 // Same Moore–McCabe convention as `quartiles()`/`bigQuartiles()` in
@@ -1987,8 +2022,9 @@ function sortExact(vals: Expression[]): Expression[] {
 function exactQuartiles(
   ce: ComputeEngine,
   vals: Expression[]
-): [Expression, Expression, Expression] {
+): [Expression, Expression, Expression] | undefined {
   const sorted = sortExact(vals);
+  if (sorted === undefined) return undefined;
   const n = sorted.length;
   if (n === 1) return [sorted[0], sorted[0], sorted[0]];
   const mid = Math.floor(n / 2);
@@ -2032,10 +2068,15 @@ function exactSkewness(ce: ComputeEngine, vals: Expression[]): Expression {
   );
 }
 
-function exactMode(ce: ComputeEngine, vals: Expression[]): Expression {
+function exactMode(
+  ce: ComputeEngine,
+  vals: Expression[]
+): Expression | undefined {
   // Tie-break by smallest value (matches the ascending numeric-key iteration
   // of the float `mode`, which keeps the first value reaching the max count).
+  // `undefined` when two values cannot be ordered exactly.
   const sorted = sortExact(vals);
+  if (sorted === undefined) return undefined;
   const counts = new Map<string, { count: number; val: Expression }>();
   for (const v of sorted) {
     const key = v.toString();

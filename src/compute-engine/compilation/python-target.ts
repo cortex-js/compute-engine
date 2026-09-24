@@ -2722,57 +2722,63 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       assertPythonNormRankAtMost2(rank);
       return `np.linalg.norm(${compile(args[0])}, ${ord})`;
     }
-    // Order 2 names a DIFFERENT norm on a matrix in each system: the
-    // interpreter's rank-2 branch treats `2` as the FROBENIUS norm
-    // (`library/linear-algebra.ts`), while `np.linalg.norm(m, 2)` is the
-    // SPECTRAL norm (largest singular value) — on `[[3,4],[5,12]]` that is
-    // 13.9283… vs 13.8806…, a silent wrong value. The two agree on a vector,
-    // so only a statically rank-2 operand is respelled `'fro'`. Above rank 2
-    // the interpreter reads the order 2 as the entry-wise Frobenius norm over
-    // the flattened cells, which is numpy's DEFAULT order (no `ord`
-    // argument) — `np.linalg.norm(t, 2)` raises on a 3-D input instead. When
-    // the rank is not statically known there is no single numpy order that
-    // matches the interpreter for every rank, so this fails closed (D6).
+    // The order 2 is the Euclidean norm on a vector and the SPECTRAL norm
+    // (the largest singular value) on a matrix, in the interpreter
+    // (`library/linear-algebra.ts`) and in `np.linalg.norm` alike, so a
+    // statically rank-1 or rank-2 operand keeps `ord=2`. Above rank 2 the
+    // interpreter reads the order 2 as the entry-wise Frobenius norm over the
+    // flattened cells, which is numpy's DEFAULT order (no `ord` argument) —
+    // `np.linalg.norm(t, 2)` raises on a 3-D input instead. When the rank is
+    // not statically known, `ord=2` would raise at run time on an operand of
+    // rank 3 or more, so this fails closed (D6).
     if (p.isSame(2)) {
-      if (rank === 2) return `np.linalg.norm(${compile(args[0])}, 'fro')`;
       if (rank !== undefined && rank >= 3)
         return `np.linalg.norm(${compile(args[0])})`;
-      if (rank !== 1)
+      if (rank !== 1 && rank !== 2)
         throw new Error(
           `Norm: the order-2 norm of an operand whose rank is not statically ` +
-            `known has no numpy spelling — the interpreter's \`Norm(m, 2)\` is ` +
-            `the Frobenius norm ("fro"), but \`np.linalg.norm(m, 2)\` is the ` +
-            `spectral norm. Fail closed (D6).`
+            `known has no numpy spelling — \`np.linalg.norm(t, 2)\` raises ` +
+            `on an input with more than two axes, where the interpreter ` +
+            `answers the Frobenius norm. Fail closed (D6).`
         );
     } else if (!isNumber(p) && !p.isInfinity) {
-      // The order is only known at RUN time, so the respelling above cannot be
-      // decided statically. On a matrix, substitute at run time so order 2
-      // still selects the Frobenius norm; when the rank is not statically known
-      // there is no faithful emission (a numeric order is fine on a vector, but
-      // that cannot be established here), so fail closed (D6).
-      if (rank === 2) {
-        const m = compile(args[0]);
-        const ord = compile(p);
-        // NOTE: the run-time order is spliced TWICE (as the test and as the
-        // fallback value), so it is evaluated twice; that is only safe while
-        // this target has no impure lowering (`Random` and friends decline
-        // today) — bind it to a temporary if that changes. Same caveat as the
-        // `Equal`/`NotEqual` chains.
-        return `np.linalg.norm(${m}, ('fro' if (${ord}) == 2 else (${ord})))`;
-      }
-      if (rank !== 1)
+      // The order is only known at RUN time. When the rank is not statically
+      // known there is no faithful emission (an operand of rank 3 or more
+      // makes numpy raise for any explicit order), so fail closed (D6).
+      if (rank !== 1 && rank !== 2)
         throw new Error(
           `Norm: a run-time norm order over an operand whose rank is not ` +
-            `statically known has no numpy spelling — order 2 is the ` +
-            `Frobenius norm ("fro") in the interpreter but the spectral norm ` +
-            `in \`np.linalg.norm\`. Fail closed (D6).`
+            `statically known has no numpy spelling — \`np.linalg.norm\` ` +
+            `raises for an explicit order on an input with more than two ` +
+            `axes. Fail closed (D6).`
         );
+      // The interpreter (`library/linear-algebra.ts`) computes a vector norm
+      // only for an order `p > 0` (the p-norms, and L∞ for `+∞`), and a
+      // matrix norm only for the orders 1, 2 and `+∞`. Each of these orders
+      // has the same meaning in `np.linalg.norm`. For every other order the
+      // interpreter leaves the application unevaluated, but numpy answers a
+      // value (`ord=-1`, `ord=0` on a vector, `ord=-inf`) or raises
+      // (`ord=3` on a matrix). So the emitted code tests the order when it
+      // runs and answers NaN for an order the interpreter does not compute.
+      const admitted =
+        rank === 1 ? '_p > 0' : '_p == 1 or _p == 2 or _p == np.inf';
+      return `(lambda _x, _p: np.linalg.norm(_x, _p) if ${admitted} else float('nan'))(${compile(args[0])}, ${compile(p)})`;
     }
+    // A literal numeric order that is not positive (`0`, `-1`, `-∞`) has no
+    // value in the interpreter at any rank: the `requires` precondition of
+    // `Norm` refuses it. But numpy answers a value for it (`ord=0` on a
+    // vector counts the nonzero entries), so fail closed (D6).
+    if (isNumber(p) && !(p.re > 0))
+      throw new Error(
+        `Norm: the interpreter defines norms only for a positive order, ` +
+          `but \`np.linalg.norm\` answers a value for this order. Fail ` +
+          `closed (D6).`
+      );
     // A literal numeric order on a statically rank-2 operand: the
     // interpreter's matrix branch (`library/linear-algebra.ts`) defines only
-    // orders 1 (max column sum), 2/Frobenius (respelled above) and
-    // +Infinity (max row sum) — 1 and +Infinity verified against numpy's
-    // matrix semantics (probed 2026-07-31: both agree). Any OTHER literal
+    // orders 1 (max column sum), 2 (spectral, handled above) and +Infinity
+    // (max row sum) — 1 and +Infinity verified against numpy's matrix
+    // semantics (probed 2026-07-31: both agree). Any OTHER literal
     // order stays SYMBOLIC in the interpreter, while numpy either raises
     // (`ord=3` on a matrix is a ValueError) or computes a norm the
     // interpreter does not define (`-inf`), so fail closed (D6).
@@ -2780,13 +2786,27 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       rank === 2 &&
       isNumber(p) &&
       !p.isSame(1) &&
+      !p.isSame(2) &&
       !(p.isInfinity && p.isPositive === true)
     )
       throw new Error(
         `Norm: the interpreter defines matrix norms only for orders 1, ` +
-          `2/Frobenius and +Infinity — \`np.linalg.norm\` would raise or ` +
+          `2 and +Infinity — \`np.linalg.norm\` would raise or ` +
           `diverge for this order. Fail closed (D6).`
       );
+    // A literal positive order (not 2, which is decided above) on an operand
+    // whose rank is not statically known. `np.linalg.norm(x, p)` raises for a
+    // scalar and for an input with more than two axes, and for a matrix when
+    // `p` is not 1, 2 or `inf`. So the emitted code tests the rank when it
+    // runs, and matches the interpreter: a scalar answers its absolute value
+    // for every order, a vector answers its p-norm, a matrix answers its norm
+    // for the orders 1 and +Infinity, and every other case (which the
+    // interpreter leaves unevaluated) answers NaN.
+    if (rank === undefined) {
+      const matrixOrder = p.isSame(1) || p.isInfinity === true;
+      const admitted = matrixOrder ? 'np.ndim(_x) <= 2' : 'np.ndim(_x) == 1';
+      return `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, ${compile(p)}) if ${admitted} else float('nan'))(${compile(args[0])})`;
+    }
     assertPythonNormRankAtMost2(rank);
     return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
   },

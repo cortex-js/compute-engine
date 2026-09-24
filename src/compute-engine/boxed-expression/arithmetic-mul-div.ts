@@ -306,30 +306,31 @@ export class Product {
         }
 
         if (isOne(exp)) {
-          this.coefficient = this.coefficient.mul(num);
+          if (!this.foldIntoCoefficient(num)) this.tally(term, exp);
         } else if (exactPowExceedsBudget(this.engine._numericValue(num), exp)) {
           // Materializing this exact power would exceed the digit budget:
           // keep it symbolic (an inert Power term) rather than folding it
           // into the coefficient — mirrors the guard in arithmetic-power.ts,
           // and avoids a `Maximum BigInt size exceeded` throw.
           this.terms.push({ term, exponent: exp });
-        } else
-          this.coefficient = this.coefficient.mul(
+        } else if (
+          !this.foldIntoCoefficient(
             this.engine._numericValue(num).pow(this.engine._numericValue(exp))
-          );
+          )
+        )
+          this.tally(term, exp);
         return;
       }
 
       const radical = asRadical(term);
       if (radical !== null) {
-        this.coefficient = this.coefficient.mul(
-          this.engine
-            ._numericValue({
-              radical: (radical[0] as number) * (radical[1] as number),
-              rational: [1, Number(radical[1])],
-            })
-            .pow(this.engine._numericValue(exp))
-        );
+        const factor = this.engine
+          ._numericValue({
+            radical: (radical[0] as number) * (radical[1] as number),
+            rational: [1, Number(radical[1])],
+          })
+          .pow(this.engine._numericValue(exp));
+        if (!this.foldIntoCoefficient(factor)) this.tally(term, exp);
         return;
       }
 
@@ -355,14 +356,15 @@ export class Product {
             !isIntegerRational(e) &&
             Number(e[1]) % 2 === 0 &&
             coef.sgn() === -1;
-          if (!evenRootOfNegative) {
-            this.coefficient = this.coefficient.mul(
+          if (
+            !evenRootOfNegative &&
+            this.foldIntoCoefficient(
               exp && !isOne(exp)
                 ? coef.pow(this.engine._numericValue(exp))
                 : coef
-            );
+            )
+          )
             term = rest;
-          }
         }
       }
     }
@@ -485,6 +487,50 @@ export class Product {
       }
     }
     if (!found) this.terms.push({ term: tallyTerm, exponent: tallyExp });
+  }
+
+  /**
+   * Multiply `factor` into the running coefficient and return `true`, or
+   * return `false` and leave the coefficient unchanged when the product
+   * would lose exactness.
+   *
+   * An `ExactNumericValue` can hold a real radical (`√2`), a Gaussian
+   * rational (`1 + i`) or a pure-imaginary radical (`√2·i`), but not a value
+   * with a radical and a non-zero imaginary part (`√2 + √2·i`). When the
+   * product of two exact values leaves that set, `ExactNumericValue.mul`
+   * returns a float. The canonical `Multiply` fold (`canonicalMultiply`)
+   * keeps such a factor as a separate operand, and this method gives the
+   * caller the same option: the caller then keeps the factor as a separate
+   * term, so `√2·(1 + i)` stays exact instead of becoming
+   * `1.414… + 1.414…i`.
+   *
+   * The check applies only when an operand is complex. A real radical
+   * product whose radicand is too large still folds to a float, as before.
+   */
+  private foldIntoCoefficient(factor: number | NumericValue): boolean {
+    const product = this.coefficient.mul(factor);
+    if (
+      typeof factor !== 'number' &&
+      !product.isExact &&
+      !product.isNaN &&
+      this.coefficient.isExact &&
+      factor.isExact &&
+      (this.coefficient.im !== 0 || factor.im !== 0)
+    )
+      return false;
+    this.coefficient = product;
+    return true;
+  }
+
+  /** Add `exponent` to the exponent of `term`, or add `term` as a new term. */
+  private tally(term: Expression, exponent: Rational): void {
+    for (const x of this.terms) {
+      if (x.term.isSame(term)) {
+        x.exponent = rationalAdd(x.exponent, exponent);
+        return;
+      }
+    }
+    this.terms.push({ term, exponent });
   }
 
   /** Divide the product by a term of coefficient */
@@ -1422,7 +1468,20 @@ export function div(num: Expression, denom: number | Expression): Expression {
         }
       } else if (typeof numV !== 'number' && typeof denomV !== 'number') {
         if (numV.isExact && denomV.isExact) {
-          return ce.number(numV.asExact!.div(denomV.asExact!));
+          const q = numV.asExact!.div(denomV.asExact!);
+          // One exact literal cannot hold a quotient such as
+          // `(1 + i)/√2 = √2/2 + (√2/2)·i` (a radical and a non-zero
+          // imaginary part), and `div` then returns a float. Write the
+          // quotient as the sum of its exact parts instead: see
+          // `exactComplexProductAsSum`.
+          if (!q.isExact && (numV.im !== 0 || denomV.im !== 0)) {
+            const inv = denomV.asExact!.inv();
+            if (inv.isExact) {
+              const sum = exactComplexProductAsSum(ce, [num, ce.number(inv)]);
+              if (sum !== undefined) return sum;
+            }
+          }
+          return ce.number(q);
         }
       }
     }
@@ -1998,6 +2057,66 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   }
 
   return new Product(ce, xs).asRationalExpression();
+}
+
+/**
+ * The product of exact number literals `xs`, at least one of them complex,
+ * written as the sum of its exact real and imaginary parts: `√2·(1 + i)` is
+ * `√2 + √2·i`. Return `undefined` when an operand is not an exact finite
+ * number literal, when no operand is complex, or when the product would be
+ * inexact.
+ *
+ * One `ExactNumericValue` cannot hold a value with a radical and a non-zero
+ * imaginary part, so `Product` keeps such a factor as a separate term (see
+ * `Product.foldIntoCoefficient`). The `Multiply` evaluate handler uses this
+ * function to give that product the form of the other exact complex values
+ * that are not one literal, such as `1 + √2·i`: an `Add` of a real literal
+ * and a pure-imaginary literal.
+ *
+ * Every exact value is `√r·g`, with `r` a positive integer and `g` a
+ * Gaussian rational: a real radical `(a/b)·√c` is `√c·(a/b)`, a Gaussian
+ * rational has `r = 1`, and a pure-imaginary radical `(a/b)·√c·i` is
+ * `√c·((a/b)·i)`. The product is then `√R·G`, where `√R` is the product of
+ * the radicals and `G` is the product of the Gaussian rationals. Both
+ * products are exact. The real part is `√R·Re(G)` and the imaginary part is
+ * `√R·Im(G)`, each an exact real radical.
+ */
+export function exactComplexProductAsSum(
+  ce: ComputeEngine,
+  xs: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (xs.length < 2) return undefined;
+  let radical: NumericValue = ce._numericValue(1);
+  let gaussian: NumericValue = ce._numericValue(1);
+  let hasComplex = false;
+  for (const x of xs) {
+    if (!isNumber(x)) return undefined;
+    const nv = x.numericValue;
+    if (!(nv instanceof ExactNumericValue) || !nv.isExact) return undefined;
+    if (nv.im === 0) {
+      radical = radical.mul(ce._numericValue({ radical: nv.radical }));
+      gaussian = gaussian.mul(ce._numericValue({ rational: nv.rational }));
+    } else if (isZero(nv.rational) && nv.imRadical !== 1) {
+      hasComplex = true;
+      radical = radical.mul(ce._numericValue({ radical: nv.imRadical }));
+      gaussian = gaussian.mul(
+        ce._numericValue({ rational: [0, 1], imRational: nv.imRational })
+      );
+    } else {
+      hasComplex = true;
+      gaussian = gaussian.mul(nv);
+    }
+    if (!radical.isExact || !gaussian.isExact) return undefined;
+  }
+  if (!hasComplex) return undefined;
+  if (!(gaussian instanceof ExactNumericValue)) return undefined;
+  const re = radical.mul(ce._numericValue({ rational: gaussian.rational }));
+  const im = radical.mul(ce._numericValue({ rational: gaussian.imRational }));
+  if (!re.isExact || !im.isExact) return undefined;
+  return ce.function('Add', [
+    ce.number(re),
+    ce.function('Multiply', [ce.number(im), ce.I]),
+  ]);
 }
 
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {

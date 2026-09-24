@@ -878,9 +878,18 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       [2, 2],
       [4, 4],
     ]);
-    // A `PointList` with a broadcasting component is a LIST of points, which
-    // no lowering of this target builds.
-    declines(ce, ['PointY', ['PointList', 'L', 1]], /PointList/);
+    // A `PointList` with a broadcasting component is a LIST of points, built
+    // at run time; the scalar component is the same coordinate of every
+    // point.
+    const zipped = compile(ce.box(['PointY', ['PointList', 'L', 1]]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(zipped.success).toBe(true);
+    expect(bands(zipped.run!({ L: [1, 2] }))).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
   });
 
   test('a union that the broadcast does not admit fails closed at the kernel', () => {
@@ -916,6 +925,164 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     // A POINT-or-point-list union is not a list of numbers: a point has no
     // interval reading (the 2026-08-22 decision).
     declines(ce, ['Add', 'c', 1]);
+  });
+});
+
+// A `PointList` whose components are list-typed SYMBOLS is a list of points:
+// the interpreter and the JavaScript target zip the sources to the length of
+// the SHORTEST one, and reuse a scalar component at every point. The interval
+// target builds the same list at run time (`_IA.pointList`). Every value is
+// compared with the interpreter's, evaluated on a separate engine so that no
+// symbol of the compiling engine holds a value (a symbol with a value is
+// folded into the code at compile time).
+describe('Interval target — a PointList of list-typed symbols', () => {
+  function zipEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('L_1', 'list<real>');
+    ce.declare('L_2', 'list<real>');
+    ce.declare('A', 'list<real>');
+    ce.declare('B', 'list<real> | real');
+    return ce;
+  }
+
+  /** The interpreter's numeric value of `expr` with `values` substituted. */
+  function interpreted(
+    expr: any,
+    values: Record<string, number | number[]>
+  ): any {
+    const ce = zipEngine();
+    const subs: Record<string, any> = {};
+    for (const [k, v] of Object.entries(values))
+      subs[k] = ce.box(Array.isArray(v) ? ['List', ...v] : v);
+    const value = (
+      typeof expr === 'string' ? ce.parse(expr) : ce.box(expr)
+    )
+      .subs(subs)
+      .N();
+    return value.isCollection
+      ? [...value.each()].map((x) => x.re)
+      : value.re;
+  }
+
+  /** Compile on interval-js, run with `values`, and check the result
+   *  encloses the interpreter's value. */
+  function agrees(
+    expr: any,
+    values: Record<string, number | number[]>
+  ): string {
+    const ce = zipEngine();
+    const boxed = typeof expr === 'string' ? ce.parse(expr) : ce.box(expr);
+    const r = compile(boxed, { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(true);
+    const vars: Record<string, any> = {};
+    for (const [k, v] of Object.entries(values))
+      vars[k] = Array.isArray(v) ? v : pt(v);
+    expectEncloses(bands(r.run!(vars)), interpreted(expr, values));
+    return r.code;
+  }
+
+  const PX = ['PointX', ['PointList', 'L_1', 'L_2']];
+  const PY = ['PointY', ['PointList', 'L_1', 'L_2']];
+
+  test('sources of equal length', () => {
+    const values = { L_1: [1, 2, 3], L_2: [4, 5, 6] };
+    expect(agrees(PX, values)).toBe(
+      "_IA.pointComponent(_IA.pointList('ll', _.L_1, _.L_2), 0, true, true)"
+    );
+    agrees(PY, values);
+    agrees(['Min', PX], values);
+  });
+
+  test('sources of different lengths are truncated to the shortest', () => {
+    const values = { L_1: [1, 2, 3], L_2: [4, 5] };
+    expect(interpreted(PX, values)).toEqual([1, 2]);
+    agrees(PX, values);
+    agrees(PY, values);
+    agrees(['Max', PX], values);
+    // Zero points have zero coordinates.
+    agrees(PX, { L_1: [], L_2: [4, 5] });
+  });
+
+  test('a scalar component is the same coordinate of every point', () => {
+    const values = { L_1: [1, 2, 3] };
+    agrees(['PointX', ['PointList', 'L_1', 0]], values);
+    agrees(['PointY', ['PointList', 'L_1', 0]], values);
+  });
+
+  test('the sum of two point lists', () => {
+    // The spelling of the Tycho document D-274: a list of points plus a
+    // scaled list of unit vectors. `A` has the length of the `L_k`, as the
+    // interpreter requires of two lists added element by element.
+    const expr = [
+      'Min',
+      [
+        'PointX',
+        [
+          'Add',
+          ['PointList', 'L_1', 'L_2'],
+          [
+            'Multiply',
+            ['Rational', 1, 20],
+            ['PointList', ['Cos', 'A'], ['Sin', 'A']],
+          ],
+        ],
+      ],
+    ];
+    agrees(expr, { L_1: [1, 2, 3], L_2: [4, 5, 6], A: [0.1, 0.2, 0.3] });
+    // Sources of different lengths inside one `PointList` are truncated
+    // before the sum.
+    agrees(expr, { L_1: [1, 2, 3], L_2: [4, 5], A: [0.1, 0.2] });
+  });
+
+  test('the Voronoi field of a point list', () => {
+    const P = ['PointList', 'L_1', 'L_2'];
+    const field = [
+      'Sin',
+      [
+        'Multiply',
+        120,
+        [
+          'Sqrt',
+          [
+            'Min',
+            [
+              'Add',
+              ['Power', ['Subtract', 'x', ['PointX', P]], 2],
+              ['Power', ['Subtract', 'y', ['PointY', P]], 2],
+            ],
+          ],
+        ],
+      ],
+    ];
+    agrees(field, { L_1: [0.1, 0.5, 0.9], L_2: [0.2, 0.8], x: 0.3, y: 0.7 });
+    agrees(field, { L_1: [0.1, 0.5], L_2: [0.2, 0.8], x: 0.45, y: 0.1 });
+  });
+
+  test('the parse route', () => {
+    const latex =
+      '\\min(\\operatorname{PointX}(\\operatorname{PointList}(L_1, L_2)))';
+    expect(agrees(latex, { L_1: [3, 1, 2], L_2: [4, 5] })).toContain(
+      "_IA.pointList('ll', _.L_1, _.L_2)"
+    );
+  });
+
+  test('a source that is not an array at run time', () => {
+    // The run-time helper throws the JavaScript target's error, which the
+    // compiled function reports as `entire` ("cannot bound this").
+    expect(() => IntervalArithmetic.pointList('ll', 3, [1])).toThrow(
+      /PointList: source component 1 is not an array at run time/
+    );
+    const ce = zipEngine();
+    const r = compile(ce.box(PX), { to: 'interval-js', fallback: false });
+    expect(r.run!({ L_1: pt(3), L_2: [1] })).toEqual({ kind: 'entire' });
+  });
+
+  test('a component with no stated role fails closed', () => {
+    // A number-or-list component (`B`) and an untyped one (`x`) may be a
+    // source or a slot at run time; the JavaScript target decides at the
+    // value, this target declines.
+    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'B']], /PointList/);
+    declines(zipEngine(), ['PointX', ['PointList', 'L_1', 'x']], /PointList/);
   });
 });
 

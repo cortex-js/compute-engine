@@ -714,13 +714,20 @@ describe('PointList — GPU construction and the other targets are unchanged', (
     );
   });
 
-  it('interval-js still reports the target gap (no `Tuple` lowering at all)', () => {
+  it('interval-js builds the zipped list of points at run time', () => {
     const ce = zipEngine();
     const r = new IntervalJavaScriptTarget().compile(
       ce.box(['PointList', -6, 'n'])
     );
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(
+    expect(r.success).toBe(true);
+    expect(r.code).toBe("_IA.pointList('sl', _k1, _.n)");
+    // A component whose role the type does not state (`number | list`) is
+    // not guessed: the node declines, as before.
+    const wide = new IntervalJavaScriptTarget().compile(
+      ce.box(['PointList', 'U', 'n'])
+    );
+    expect(wide.success).toBe(false);
+    expect(wide.error).toMatch(
       /PointList: cannot compile — the operator's compile handler has no lowering/
     );
   });

@@ -127,6 +127,19 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     ),
   // Tuple compiles identically to List
   Tuple: compileWGSLList,
+  // A `PointList` that reaches this table is ONE point (the library handler
+  // declines a collection-valued component before it gets here). A point is
+  // a `vecNf` of floats, so every component must be a scalar. The check
+  // comes first: without it, a point whose components are all complex would
+  // take the list-of-points reading of `compileWGSLList` and emit an array of
+  // `vec2f`.
+  PointList: (args, compile) => {
+    assertGPUScalarComponents(
+      args,
+      args.length >= 2 && args.length <= 4 ? `vec${args.length}f` : 'array<f32>'
+    );
+    return compileWGSLList(args, compile);
+  },
 };
 
 /** Map common GLSL/MathJSON types to WGSL types */
