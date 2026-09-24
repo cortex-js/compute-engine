@@ -827,7 +827,7 @@ experimental `@cortex-js/compute-engine/epsil` published entry.
 - **Test**: `npm run test compute-engine/<name>` runs
   `test/compute-engine/<name>.test.ts` (Jest via `config/jest.config.cjs`).
   `npm run test snapshot` updates snapshots.
-- **Lint**: `npm run lint` (ESLint + Prettier).
+- **Lint**: `npm run lint` runs every check of `npm run ci` except the test suite (ESLint + Prettier, the type check, the corpus and artifact freshness checks). `npm run lint:code` runs only ESLint + Prettier.
 - **Dependency check**: `npm run check:deps` (`madge` — zero circular
   dependencies; ESLint also enforces the layering rules).
 - **Docs**: `npm run doc` (TypeDoc + `concat-md`) regenerates `src/api.md`. It is

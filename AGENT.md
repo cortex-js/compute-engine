@@ -22,7 +22,8 @@ Guidance for coding agents working in this repository. Derived from `CLAUDE.md`.
 ### Development
 
 - `npm start` - Development build with watch and local server
-- `npm run lint` - Run ESLint with auto-fix
+- `npm run lint` - Run every check of `npm run ci` except the test suite: ESLint + Prettier with auto-fix (`npm run lint:code`), the type check, and the corpus and artifact freshness checks (`npm run ci:corpus-pipeline`)
+- `npm run lint:code` - Run only ESLint + Prettier with auto-fix
 - `npm run doc` - Generate documentation
 
 ### Code Comments

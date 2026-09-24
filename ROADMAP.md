@@ -1195,6 +1195,24 @@ here.
   (`src/compute-engine/function-utils.ts:2761`) rather than returning an error
   value. Wanted: an unknown protocol name should say so.
 
+### Fungrim identity `e2288d` does not apply in `simplify()` for a symbolic argument (OPEN — found 2026-09-24)
+
+The identity `(1+i)/√(2y) · θ₃(0, 1 + i/y) = θ₂(0, 1 + i·y)` for real `y > 0`
+(Fungrim entry `e2288d`) does not rewrite under `simplify()` after
+`loadIdentities(ce, { topics: ['jacobi_theta'] })`, `ce.declare('y', 'real')`
+and `ce.assume(y > 0)`. The result stays
+`((√2/2 + √2/2·i) · θ₃(0, i/y + 1)) / √y`. This is true with the rule as
+committed before 2026-09-24 and with the rule regenerated on 2026-09-24. The
+regeneration was necessary because canonical form now writes `(1+i)/√(2y)` as
+`(√2/2 + √2/2·i)/√y`, so the committed pattern could not match any input
+(`scripts/fungrim/recompile-drift.ts` reported the change). The compiler
+self-test in `scripts/fungrim/compile-rules.ts` still reports the regenerated
+rule as firing, because it calls `replace()` on the rule set directly. So the
+cause is between `replace()` and the `simplify()` channels: the dispatch
+bucket of the loader (`src/compute-engine/fungrim/loader.ts`) or the cost
+check of `simplify()`. With `y = 2` the input folds to a number before any
+rule runs, so only a symbolic argument shows the problem.
+
 ### Fungrim Stage-2 residues: `Fibonacci` growth class, the corpus manifest fork id, `CartesianPower` (OPEN, low — Stage-2 triage of 2026-08-29)
 
 **Left from the Stage-2 triage of 2026-08-29.** (With the deadline restored,
