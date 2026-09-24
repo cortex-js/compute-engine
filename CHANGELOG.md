@@ -56,6 +56,12 @@
 
 ### Improvements
 
+- `evaluate()` of a `Sum` of symbolic terms is no longer quadratic in the
+  number of terms. The fold kept a running `Add` and canonicalized it again
+  at every step; it now keeps the terms and builds one `Add` of them at the
+  end. `Sum(sin(i), i, 1, 1000).evaluate()` takes about 80 ms (it took about
+  770 ms), and `Sum(x^i, i, 0, 300)` about 17 ms (it took about 100 ms).
+
 - More element-wise operations over a large list of machine numbers are
   computed at once on doubles at machine precision, with the values the
   element-by-element evaluation gives: a sum or a product with an exact

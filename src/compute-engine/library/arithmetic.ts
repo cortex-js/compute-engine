@@ -6846,9 +6846,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // are elements.
           let walked = 0;
           const result = run(
-            reduceCollection(source, engine.Zero, (acc, x) => {
+            reduceCollection(source, new SumTerms(), (acc, x) => {
               walked += 1;
-              return sumAccumulate(
+              return addSumTerm(
                 acc,
                 x.evaluate({ numericApproximation }),
                 numericApproximation
@@ -6858,7 +6858,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             engine._deadlineFrame
           );
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
-          return result?.evaluate({ numericApproximation }) ?? engine.NaN;
+          if (result === undefined) return engine.NaN;
+          return finishSum(engine, result, numericApproximation);
         }
 
         // Big-op form: Sum(body, [i, a, b], …).
@@ -6911,21 +6912,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           reduceBigOp(
             first,
             rest,
-            (acc: Expression, x, bindings) => {
+            (acc: SumTerms, x, bindings) => {
               const term = evaluateBigOpTerm(x, bindings, numeric);
               if (term === undefined) {
                 captureUnsafe = true;
                 return null;
               }
-              return sumAccumulate(acc, term, numeric);
+              return addSumTerm(acc, term, numeric);
             },
-            engine.Zero,
+            new SumTerms(),
             {
               // A body that evaluates to a list of machine numbers
               // (`Sum(PointX(C))`) is summed on its doubles: `machineSum`.
               foldValue: (collection) => {
                 const total = machineListTotal(collection);
-                return total === undefined ? undefined : engine.number(total);
+                return total === undefined
+                  ? undefined
+                  : sumOf(engine.number(total));
               },
               numericApproximation: numeric,
             }
@@ -6939,10 +6942,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Bounds we cannot walk: surface an error rather than truncate.
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
-        // Re-evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
-        return (
-          result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
-        );
+        if (result === undefined || result === null) return engine.NaN;
+        // Evaluate to combine numeric terms (e.g., 3x + 1 + 2 + 3 → 3x + 6).
+        return finishSum(engine, result, numeric);
       },
 
       evaluateAsync: async (
@@ -6970,9 +6972,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             withEvaluationEffects(
               engine,
               effects,
-              reduceCollection(first, engine.Zero, (acc, x) => {
+              reduceCollection(first, new SumTerms(), (acc, x) => {
                 walked += 1;
-                return sumAccumulate(
+                return addSumTerm(
                   acc,
                   x.evaluate({ numericApproximation }),
                   numericApproximation
@@ -6984,7 +6986,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             engine._deadlineFrame
           );
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
-          return result?.evaluate({ numericApproximation }) ?? engine.NaN;
+          if (result === undefined) return engine.NaN;
+          return finishSum(engine, result, numericApproximation);
         }
 
         const numeric = numericApproximation;
@@ -7033,14 +7036,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Capture-unsafe decline flag — see the Product sync handler.
         let captureUnsafe = false;
         const accumulate = (
-          acc: Expression,
+          acc: SumTerms,
           term: Expression | undefined
-        ): Expression | null => {
+        ): SumTerms | null => {
           if (term === undefined) {
             captureUnsafe = true;
             return null;
           }
-          return sumAccumulate(acc, term, numeric);
+          return addSumTerm(acc, term, numeric);
         };
         const result = await runAsync(
           // The terms are evaluated synchronously, and `runAsync`
@@ -7052,7 +7055,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             reduceBigOp(
               first,
               rest,
-              (acc: Expression, x, bindings) =>
+              (acc: SumTerms, x, bindings) =>
                 asyncTerms
                   ? evaluateBigOpTermAsync(
                       x,
@@ -7062,14 +7065,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       effects
                     ).then((term) => accumulate(acc, term))
                   : accumulate(acc, evaluateBigOpTerm(x, bindings, numeric)),
-              engine.Zero,
+              new SumTerms(),
               {
                 // The same fold as the synchronous handler, so that both
                 // answer the same value for a body that is a list of machine
                 // numbers.
                 foldValue: (collection) => {
                   const total = machineListTotal(collection);
-                  return total === undefined ? undefined : engine.number(total);
+                  return total === undefined
+                    ? undefined
+                    : sumOf(engine.number(total));
                 },
                 numericApproximation: numeric,
               }
@@ -7083,9 +7088,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_DOMAIN) return undefined;
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
-        return (
-          result?.evaluate({ numericApproximation: numeric }) ?? engine.NaN
-        );
+        if (result === undefined || result === null) return engine.NaN;
+        return finishSum(engine, result, numeric);
       },
     },
 
@@ -7215,19 +7219,6 @@ function productAccumulate(
   return acc.mul(term);
 }
 
-/** Accumulate one term of a `Sum` without the `.add()` float-folding pitfall.
- *
- * The `.add()` **method** folds two exact-but-non-combinable number literals
- * (e.g. `1 + √2`, `2 + √3`) into a machine float. For `Sum().evaluate()` we
- * want to preserve exactness, so when both operands are exact literals whose
- * sum is *not* exact we build a symbolic `Add` instead. A canonical `Add` still
- * folds combinable exact operands (integers, rationals, like radicals), so a
- * numeric sum such as `Sum(k, 1..n)` keeps the accumulator to a single literal
- * (O(1) memory) while `Sum(√k, 1..5)` stays exact (`3 + √2 + √3 + √5`).
- *
- * Under `numericApproximation` (i.e. `.N()`), folding to a float is the desired
- * behavior and no symbolic accumulation is done.
- */
 /**
  * The `incompatible-type` error for an operand of `IsPrime`/`IsComposite`
  * that is outside their carrier, or `undefined` when the operand is inside
@@ -7310,38 +7301,108 @@ function parityPredicate(
   return verdict ? ce.True : ce.False;
 }
 
-function sumAccumulate(
-  acc: Expression,
+/**
+ * The terms of a `Sum` fold, combined once at the end (`finishSum`).
+ *
+ * Adding each term to the sum of the terms before it builds a new `Add` of
+ * all the terms at every step, which is then canonicalized again (its like
+ * terms collected and its operands sorted), so a sum of `n` symbolic terms
+ * cost `O(n²)`: `Sum(sin i, i, 1, 1000).evaluate()` took about 0.7 s. The
+ * fold keeps the symbolic terms and builds one canonical `Add` of them.
+ *
+ * A number literal is added at once to `literal`, in the order of the walk,
+ * so a numeric sum keeps one number, as before, and under `N()` the floats
+ * are added in the same order as before (a canonical `Add` sorts its
+ * operands, which changes the rounding). On the exact route two literals are
+ * combined only when their sum stays exact: the `.add()` method makes a float
+ * of `1 + √2`, so such a term goes to `terms`, where the canonical `Add`
+ * keeps it exact (`Sum(√k, 1..5)` is `3 + √2 + √3 + √5`).
+ *
+ * The first text term (a string or a character) is kept as the type error
+ * the sum answers.
+ */
+class SumTerms {
+  readonly terms: Expression[] = [];
+  literal: Expression | undefined = undefined;
+  error: Expression | undefined = undefined;
+}
+
+function addSumTerm(
+  acc: SumTerms,
   term: Expression,
   numericApproximation: boolean | undefined
+): SumTerms {
+  if (acc.error !== undefined) return acc;
+  if (isString(term) || isCharacter(term)) {
+    acc.error = term.engine.typeError('number', term.type);
+    return acc;
+  }
+  if (isNumber(term)) {
+    const literal = acc.literal;
+    if (literal === undefined) {
+      acc.literal = term;
+      return acc;
+    }
+    const sum = literal.add(term);
+    if (
+      !numericApproximation &&
+      isNumber(literal) &&
+      literal.isExact &&
+      term.isExact &&
+      !(isNumber(sum) && sum.isExact)
+    ) {
+      acc.terms.push(term);
+      return acc;
+    }
+    acc.literal = sum;
+    return acc;
+  }
+  acc.terms.push(term);
+  return acc;
+}
+
+/** The sum a `Sum` fold answers, evaluated on the route of the fold: see
+ * `SumTerms`. */
+function finishSum(
+  ce: ComputeEngine,
+  acc: SumTerms,
+  numericApproximation: boolean | undefined
 ): Expression {
-  const err = reducerElementError(acc, term);
-  if (err) return err;
-  const sum = acc.add(term);
-  if (numericApproximation) return sum;
-  // Only two exact number literals can be silently floated by `.add()`. Once
-  // `acc` is a symbolic `Add`, `.add()` already keeps the result symbolic.
-  if (
-    isNumber(acc) &&
-    acc.isExact &&
-    isNumber(term) &&
-    term.isExact &&
-    isNumber(sum) &&
-    !sum.isExact
-  )
-    return acc.engine.function('Add', [acc, term]);
-  return sum;
+  if (acc.error !== undefined) return acc.error;
+  const terms =
+    acc.literal === undefined ? acc.terms : [acc.literal, ...acc.terms];
+  const sum =
+    terms.length === 0
+      ? ce.Zero
+      : terms.length === 1
+        ? terms[0]
+        : ce.function('Add', terms);
+  const value = sum.evaluate({ numericApproximation });
+  // The pole `~oo` is the symbol `ComplexInfinity`, as the running sum
+  // answered before. At machine precision `N()` of an `Add` that holds it
+  // answers the number `Complex(+oo, +oo)` instead, where `evaluate()`
+  // answers the symbol (an open entry of ROADMAP.md).
+  if (isNumber(value) && value.re === Infinity && value.im === Infinity)
+    return ce.ComplexInfinity;
+  return value;
+}
+
+/** A `SumTerms` that holds the one number `term`. */
+function sumOf(term: Expression): SumTerms {
+  const acc = new SumTerms();
+  acc.literal = term;
+  return acc;
 }
 
 /** Generator-based reducer over a finite collection. Yields between
  * iterations so callers can wrap it with `run`/`runAsync` for timeout
  * and cancellation. Caller is responsible for finiteness checks.
  */
-function* reduceCollection(
+function* reduceCollection<T>(
   collection: Expression,
-  init: Expression,
-  combine: (acc: Expression, x: Expression) => Expression
-): Generator<Expression, Expression> {
+  init: T,
+  combine: (acc: T, x: Expression) => T
+): Generator<T, T> {
   let acc = init;
   for (const x of collection.each()) {
     acc = combine(acc, x);
