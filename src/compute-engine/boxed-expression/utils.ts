@@ -738,7 +738,10 @@ export function getImaginaryFactor(
   const ce = expr.engine;
   if (isSymbol(expr, 'ImaginaryUnit')) return ce.One;
 
-  if (expr.re === 0) return ce.number(expr.im!);
+  // The structure is read first, and the numeric value of the expression
+  // only at the end: an exact factor (`π/3` in `e^{iπ/3}`) stays exact, and
+  // the numeric value of `iπ/3` would give the float `1.047…`.
+  if (isNumber(expr)) return expr.re === 0 ? imaginaryPart(expr) : undefined;
 
   if (isFunction(expr, 'Negate')) return getImaginaryFactor(expr.op1)?.neg();
 
@@ -748,25 +751,51 @@ export function getImaginaryFactor(
     return undefined;
   }
 
-  if (isFunction(expr, 'Multiply') && expr.nops === 2) {
-    const [op1, op2] = expr.ops;
-    if (isSymbol(op1, 'ImaginaryUnit')) return op2;
-    if (isSymbol(op2, 'ImaginaryUnit')) return op1;
-
-    // c * (bi)
-    if (isNumber(op2) && op2.re === 0 && op2.im !== 0) return op1.mul(op2.im!);
-
-    // (bi) * c
-    if (isNumber(op1) && op1.re === 0 && op1.im !== 0) return op2.mul(op1.im!);
+  // A product with exactly one imaginary factor (`i`, or a literal `bi`) and
+  // only real factors otherwise: `0.5·i·π` has the factor `0.5·π`. Any
+  // number of operands, so that `e^{iπ·0.5}` keeps the exact angle.
+  if (isFunction(expr, 'Multiply')) {
+    let imaginary: Expression | undefined;
+    const rest: Expression[] = [];
+    for (const op of expr.ops) {
+      const im = isSymbol(op, 'ImaginaryUnit')
+        ? ce.One
+        : isNumber(op) && op.re === 0 && op.im !== 0
+          ? imaginaryPart(op)
+          : undefined;
+      if (im !== undefined) {
+        if (imaginary !== undefined) return undefined;
+        imaginary = im;
+      } else if (op.type.matches('real')) rest.push(op);
+      else return undefined;
+    }
+    if (imaginary !== undefined)
+      return rest.length === 0
+        ? imaginary
+        : ce.function('Multiply', [imaginary, ...rest]);
   }
 
   if (isFunction(expr, 'Divide')) {
     const denom = expr.op2;
     if (denom.isSame(0)) return undefined;
-    return getImaginaryFactor(expr.op1)?.div(denom);
+    const factor = getImaginaryFactor(expr.op1);
+    if (factor !== undefined) return factor.div(denom);
   }
 
+  if (expr.re === 0) return ce.number(expr.im!);
+
   return undefined;
+}
+
+/** The imaginary part of the number literal `x`: exact (`1/3` for `i/3`)
+ * when `x` is exact, else a machine number. */
+function imaginaryPart(x: Expression): Expression {
+  const ce = x.engine;
+  if (isNumber(x) && x.isExact) {
+    const json = x.json;
+    if (Array.isArray(json) && json[0] === 'Complex') return ce.box(json[2]);
+  }
+  return ce.number(x.im);
 }
 
 /**

@@ -46,7 +46,7 @@ def polynomial(x):
 import numpy as np
 def trigonometric(x, y, z):
     r"""Trigonometric: \sin(x) + \cos(y) + \tan(z)"""
-    return np.sin(x) + np.cos(y) + (lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(np.tan(z))
+    return np.sin(x) + np.cos(y) + (lambda _x: (lambda _y: np.where(np.isinf(_y) | (np.abs(_y) * np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 >= 1), np.inf, _y)[()])(np.tan(_x)))(z)
 
 
 import numpy as np

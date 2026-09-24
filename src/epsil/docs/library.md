@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 674 functions and constants of the standard library, by category.
+The 675 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -28,7 +28,7 @@ To search the library by concept rather than by name, use
 - [Control structures](#control-structures) — 14 definitions
 - [Logic](#logic) — 27 definitions
 - [Collections](#collections) — 122 definitions
-- [Colors](#colors) — 19 definitions
+- [Colors](#colors) — 20 definitions
 - [Regular expressions](#regular-expressions) — 4 definitions
 - [Fractals](#fractals) — 2 definitions
 - [Relations](#relations) — 30 definitions
@@ -352,9 +352,10 @@ To search the library by concept rather than by name, use
 | `colorFromColorspace` | `ColorFromColorspace` | `(color \| tuple, string) -> color` | Build a color from channel values in a named color space. |
 | `colorMix` | `ColorMix` | `(color \| string \| tuple, color \| string \| tuple, number?) -> color` | Mix two colors in OKLCh space |
 | `colorToColorspace` | `ColorToColorspace` | `(color \| string \| tuple, string) -> tuple` | Convert a color to components in a target color space |
-| `colorToString` | `ColorToString` | `(color \| string \| tuple, string?) -> string` | Convert a color to a string in the specified format |
+| `colorToString` | `ColorToString` | `(color \| string \| tuple, string?) -> string` | Convert a color to a string in the specified format: "hex" (the default), "rgb", "hsl", "oklch", "srgb" (the same as "hex") or "display-p3" (the CSS spelling `color(display-p3 r g b)`). |
 | `colormap` | `Colormap` | `(string, number?) -> color \| list<color>` | Sample colors from a named palette |
 | `contrastingColor` | `ContrastingColor` | `(color \| string \| tuple, (color \| string \| tuple)?, (color \| string \| tuple)?) -> color` | Choose the foreground color with better APCA contrast against a background, answered as given: the interpreter keeps the color head the candidate was written with, and a compiled target answers the same color in its canonical form |
+| `gamutMap` | `GamutMap` | `(color \| string \| tuple, string?) -> color` | Map a color into a target gamut, "srgb" (the default) or "display-p3", with the CSS Color 4 gamut-mapping algorithm: the OKLCh chroma is reduced, at constant lightness and hue, until the color is inside the gamut or until clipping each… |
 | `hsl` | `Hsl` | `(number, number, number, number?) -> color` | HSL color (hue degrees, saturation/lightness 0-1, optional alpha) |
 | `hsv` | `Hsv` | `(number, number, number, number?) -> color` | HSV color (hue degrees, saturation/value 0-1, optional alpha) |
 | `oklab` | `Oklab` | `(number, number, number, number?) -> color` | OKLab color (L 0-1, a/b ~ -0.4..0.4, optional alpha) |
@@ -374,8 +375,8 @@ To search the library by concept rather than by name, use
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `julia` | `Julia` | `(number, number, integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
-| `mandelbrot` | `Mandelbrot` | `(number, integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
+| `julia` | `Julia` | `(complex, complex, integer) -> real` | Smooth escape-time value for a Julia set with parameter c. |
+| `mandelbrot` | `Mandelbrot` | `(complex, integer) -> real` | Smooth escape-time value for the Mandelbrot set. |
 
 ## Relations
 

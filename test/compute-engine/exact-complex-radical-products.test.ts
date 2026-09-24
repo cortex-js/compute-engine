@@ -4,12 +4,12 @@ import type { Expression } from '../../src/compute-engine';
 // `evaluate()` returns the most exact form (the exactness contract in
 // CLAUDE.md, "Evaluate vs. N"). Two cases broke it:
 //
-// 1. A product of exact values that one exact literal cannot hold. An exact
-//    literal holds a real radical (`√2`), a Gaussian rational (`1 + i`) or a
-//    pure-imaginary radical (`√2·i`), but not a radical with a non-zero
-//    imaginary part (`√2 + √2·i`). `√2·(1 + i)` evaluated to the float
-//    `1.414… + 1.414…i`. It now evaluates to the sum of its exact parts,
-//    `√2 + √2·i`, which is the form `1 + √2·i` already had.
+// 1. A product of a radical and a complex value. `√2·(1 + i)` evaluated to
+//    the float `1.414… + 1.414…i`. An exact literal now holds one radical
+//    times a Gaussian rational (`√2·(1 + i)`, serialized as
+//    `["Complex", ["Sqrt", 2], ["Sqrt", 2]]`), so the product is one exact
+//    literal. A value with two different radicals, such as `1 + √2·i`, is
+//    still a sum of two exact literals.
 //
 // 2. The modulus of a constant complex value whose squared modulus is not a
 //    number literal. `|π·i|` stayed unevaluated because `π²` is not a
@@ -38,12 +38,12 @@ const parse = (s: string) => check(ce.parse(s));
 describe('EXACT PRODUCT OF A RADICAL AND A COMPLEX VALUE', () => {
   test('√2·(1 + i), box route', () =>
     expect(box(['Multiply', ['Sqrt', 2], ['Complex', 1, 1]])).toBe(
-      '["Add",["Sqrt",2],["Complex",0,["Sqrt",2]]]'
+      '["Complex",["Sqrt",2],["Sqrt",2]]'
     ));
 
   test('√2·(1 + i), parse route', () =>
     expect(parse('\\sqrt{2}(1+\\imaginaryI)')).toBe(
-      '["Add",["Sqrt",2],["Complex",0,["Sqrt",2]]]'
+      '["Complex",["Sqrt",2],["Sqrt",2]]'
     ));
 
   test('the result has the form of 1 + √2·i', () =>
@@ -68,24 +68,24 @@ describe('EXACT PRODUCT OF A RADICAL AND A COMPLEX VALUE', () => {
 
   test('(1 + i)√3 + 1, box route', () =>
     expect(box(['Add', ['Multiply', ['Complex', 1, 1], ['Sqrt', 3]], 1])).toBe(
-      '["Add",1,["Sqrt",3],["Complex",0,["Sqrt",3]]]'
+      '["Add",1,["Complex",["Sqrt",3],["Sqrt",3]]]'
     ));
 
   test('(1 + i)√3 + 1, parse route', () =>
     expect(parse('(1+\\imaginaryI)\\sqrt{3}+1')).toBe(
-      '["Add",1,["Sqrt",3],["Complex",0,["Sqrt",3]]]'
+      '["Add",1,["Complex",["Sqrt",3],["Sqrt",3]]]'
     ));
 
   test('a pure-imaginary radical times a Gaussian integer', () =>
     // (1 + i)·√2·i = −√2 + √2·i
     expect(
       box(['Multiply', ['Complex', 0, ['Sqrt', 2]], ['Complex', 1, 1]])
-    ).toBe('["Add",["Negate",["Sqrt",2]],["Complex",0,["Sqrt",2]]]'));
+    ).toBe('["Complex",["Negate",["Sqrt",2]],["Sqrt",2]]'));
 
   test('several radicals and Gaussian integers', () =>
     // √3·(1 + i)·√2·(2 − i) = √6·(3 + i) = 3√6 + √6·i
     expect(parse('\\sqrt{3}(1+\\imaginaryI)\\sqrt{2}(2-\\imaginaryI)')).toBe(
-      '["Add",["Multiply",3,["Sqrt",6]],["Complex",0,["Sqrt",6]]]'
+      '["Complex",["Multiply",3,["Sqrt",6]],["Sqrt",6]]'
     ));
 
   test('a product that one exact literal can hold folds to it', () =>
@@ -97,16 +97,16 @@ describe('EXACT PRODUCT OF A RADICAL AND A COMPLEX VALUE', () => {
   test('a symbolic factor keeps the product factored and exact', () =>
     expect(
       JSON.stringify(ce.parse('\\sqrt{2}(1+\\imaginaryI)x').evaluate().json)
-    ).toBe('["Multiply",["Sqrt",2],["Complex",1,1],"x"]'));
+    ).toBe('["Multiply",["Complex",["Sqrt",2],["Sqrt",2]],"x"]'));
 
   test('(1 + i)/√2', () =>
     expect(box(['Divide', ['Complex', 1, 1], ['Sqrt', 2]])).toBe(
-      '["Add",["Divide",["Sqrt",2],2],["Complex",0,["Divide",["Sqrt",2],2]]]'
+      '["Complex",["Divide",["Sqrt",2],2],["Divide",["Sqrt",2],2]]'
     ));
 
   test('√2/(1 + i)', () =>
     expect(box(['Divide', ['Sqrt', 2], ['Complex', 1, 1]])).toBe(
-      '["Add",["Divide",["Sqrt",2],2],["Complex",0,["Negate",["Divide",["Sqrt",2],2]]]]'
+      '["Complex",["Divide",["Sqrt",2],2],["Negate",["Divide",["Sqrt",2],2]]]'
     ));
 
   test('.N() gives the float', () =>

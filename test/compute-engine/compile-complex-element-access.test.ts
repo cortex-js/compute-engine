@@ -307,9 +307,9 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
   });
 
   test('ON: a MIXED body still hands back its real element as a number', () => {
-    // The guard `isComplexValuedUserCall` carries for a collection body is not
-    // relaxed by any of this: element 2 of `[√(t−1), 1]` is the plain `1`, and
-    // reading it must not inherit element 1's promotion.
+    // A call whose value is a collection has no scalar lane
+    // (`userCallLane` in `base-compiler.ts`): element 2 of `[√(t−1), 1]` is
+    // the plain `1`, and reading it must not inherit element 1's promotion.
     const ce = withFn('g', ['List', ['Sqrt', ['Subtract', 't', 1]], 1]);
     const r = compile(ce.box(['Add', ['At', ['g', 't'], 2], 1] as any), {
       mode: 'complex',

@@ -511,6 +511,13 @@ describe('Python: compileLambda fails closed on runtime-helper lowerings', () =>
       python.compileLambda(ce.box(['Less', 'xs', 3]), ['xs'])
     ).toThrow(/_ce_ord.*compileFunction/s);
   });
+
+  test('a RowReduce body declines (it emitted an undefined _ce_rref)', () => {
+    ce.declare('rrefM', 'matrix<real>');
+    expect(() =>
+      python.compileLambda(ce.box(['RowReduce', 'rrefM']), ['rrefM'])
+    ).toThrow(/RowReduce.*_ce_rref.*compileFunction/s);
+  });
 });
 
 // -----------------------------------------------------------------------------

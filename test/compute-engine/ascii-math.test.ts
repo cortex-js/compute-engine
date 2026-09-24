@@ -173,7 +173,7 @@ describe('ARITHMETIC OPERATORS', () => {
       `-3.455 - 2.3454 - 1.23`
     );
     expect(check('-1.23e30 - 2.3454e32 - 3.455e35')).toMatchInlineSnapshot(
-      `-34573577e+28`
+      `-3.455e+35 - 2.3454e+32 - 1.23e+30`
     );
     // Exact Gaussian literals fold at canonicalization since D12-A
     expect(check('1 + (2+3i)')).toMatchInlineSnapshot(`(3 + 3i)`);
@@ -212,7 +212,7 @@ describe('ARITHMETIC OPERATORS', () => {
     ).toMatchInlineSnapshot(`-2.123 * 3.456 * 4.465 * 5.564`);
     expect(
       check('2.123e32 \\times 3.456e33 \\times -4.465 \\times 5')
-    ).toMatchInlineSnapshot(`-3.668544e+66 * 4.465`);
+    ).toMatchInlineSnapshot(`-2.123e+32 * 5 * 3.456e+33 * 4.465`);
 
     expect(check('\\pi \\times 4')).toMatchInlineSnapshot(`4pi`);
     expect(check('4 \\times \\pi')).toMatchInlineSnapshot(`4pi`);

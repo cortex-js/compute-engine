@@ -4552,9 +4552,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return undefined;
       }
       // Emit byte-identically to the equivalent `Tuple(...)`, except for the
-      // opaque-slot guard the JavaScript arm adds below. Targets with no
-      // `Tuple` lowering (`interval-javascript`) are not enumerated, so
-      // `PointList` fails closed there too — matching `Tuple`.
+      // opaque-slot guard the JavaScript arm adds below. The
+      // `interval-javascript` target is not enumerated here: it lowers
+      // `PointList` itself, in the positions where it accepts a collection
+      // value — an all-scalar `PointList` at the root is the array of its
+      // coordinate intervals, and a `PointList` with a list component
+      // (`PointList(L_1, L_2)`) is the list of points that `_IA.pointList`
+      // builds at run time. See `literalRootPointOps` and
+      // `compileIntervalCollectionValue` in
+      // `compilation/interval-javascript-target.ts`.
       //
       // On `glsl` and `wgsl`, decline by fall-through to the target table
       // (`PointList` in `glsl-target.ts`/`wgsl-target.ts`). A shader point is
@@ -10316,7 +10322,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const indices = sortedIndices(xs, fn);
       // `sortedIndices` returns `undefined` when the order cannot be decided —
       // a key that cannot be computed, or a pair of keys that compare neither
-      // equal nor less in either direction (a list key, a NaN key). A
+      // equal nor less in either direction (a list key; a NaN key sorts
+      // last, see `nanLastOrder`). A
       // permutation of N elements has N entries, so a truncated or empty index
       // list would be a wrong count, not a decline. Stay unevaluated, the same
       // answer `Sort` gives for the same input. Fixed 2026-09-22.
@@ -13851,15 +13858,21 @@ export function sortedIndices(
   // number) makes the whole sort undetermined, so the application stays
   // unevaluated, as with a sort key. Before, such a pair counted as "greater"
   // in both directions, and the result depended on the order of the input.
+  // Two constants whose order is not decided at a higher precision either
+  // are a tie when they agree within the engine tolerance
+  // (`tieWithinTolerance`, the last step of `exactOrder`); the sort is
+  // stable, so a tie keeps the order of the input.
   let undeterminedDefault = false;
   const defaultCmp = (a: Expression, b: Expression) => {
-    const exact = exactOrder(a, b);
+    // NaN sorts last (see `nanLastOrder`).
+    const nan = nanLastOrder(a, b);
+    if (nan !== undefined) return nan;
+    const exact = exactOrder(a, b, { tieWithinTolerance: true });
     if (exact !== undefined) return exact;
     // A tie is exact too: only two identical elements tie. `isEqual` alone
     // would tie two different constants that agree within the engine
-    // tolerance. It is still asked of an identical pair, because `isSame`
-    // treats two NaN as identical while `isEqual` keeps `NaN ≠ NaN`, so a
-    // NaN element leaves the sort undetermined.
+    // tolerance. (`nanLastOrder` has already ordered a NaN beside a real
+    // number or another NaN; a NaN beside a symbol stays undetermined.)
     if (a.isSame(b) && a.isEqual(b) === true) return 0;
     undeterminedDefault = true;
     return 0;
@@ -13886,7 +13899,12 @@ export function sortedIndices(
     // original relative order (first-listed stays first).
     let undetermined = false;
     indices.sort((i, j) => {
-      const c = compareKeys(keys.get(i)!, keys.get(j)!);
+      // A NaN key sorts last (see `nanLastOrder`). This is done here and not
+      // in `compareKeys`, which `MaxBy`/`MinBy`/`ArgMax`/`ArgMin` share: an
+      // extremum over a NaN key stays undetermined.
+      const a = keys.get(i)!;
+      const b = keys.get(j)!;
+      const c = nanLastOrder(a, b) ?? compareKeys(a, b);
       if (c === undefined) {
         undetermined = true;
         return 0;
@@ -13898,6 +13916,11 @@ export function sortedIndices(
 
   const cmpFn = f
     ? (a: Expression, b: Expression) => {
+        // NaN sorts last whatever the comparator: a comparator that computes
+        // `b - a` or `a > b` has no answer for a NaN operand. So a
+        // descending sort puts NaN last too (see `nanLastOrder`).
+        const nan = nanLastOrder(a, b);
+        if (nan !== undefined) return nan;
         const r = f([a, b]);
         // A boolean comparator (Elixir-style): True means the first argument
         // sorts first. Previously a boolean result was silently treated as
@@ -13906,6 +13929,10 @@ export function sortedIndices(
         const s = sym(r);
         if (s === 'True') return -1;
         if (s === 'False') return 1;
+        // A NaN result (`b - a` for two equal infinities) is a tie, as in
+        // `Array.prototype.sort`: read as "greater" it would say each of
+        // the two elements goes after the other.
+        if (r?.isNaN === true) return 0;
         return r?.isNegative ? -1 : r?.isSame(0) ? 0 : 1;
       }
     : defaultCmp;
@@ -13919,13 +13946,36 @@ export function sortedIndices(
   return f === undefined && undeterminedDefault ? undefined : indices;
 }
 
+/** The position of NaN in a `Sort`/`Ordering`: NaN is always LAST, in an
+ * ascending sort, in a descending sort (a comparator) and in a sort by a key
+ * (a NaN key). This is the IEEE 754 total-order convention, which is also
+ * what NumPy's `sort` does and what the compiled JavaScript comparator does,
+ * so the interpreter and the compiled code give the same order. Two NaN tie,
+ * so the stable sort keeps their order in the input.
+ *
+ * Returns `undefined` when neither operand is NaN, or when the other operand
+ * is not on the extended real line (a symbol, a boolean, a tuple, a complex
+ * number): such an operand has no place relative to the other elements
+ * either, and the caller decides the pair (the default order leaves the sort
+ * undetermined). */
+function nanLastOrder(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
+  const aNaN = a.isNaN === true;
+  const bNaN = b.isNaN === true;
+  if (aNaN && bNaN) return 0;
+  if (aNaN) return b.type.matches('real | signed_infinity') ? 1 : undefined;
+  if (bNaN) return a.type.matches('real | signed_infinity') ? -1 : undefined;
+  return undefined;
+}
+
 /** Compare two (already evaluated) key values with the default element
  * ordering. Returns -1, 0, 1, or `undefined` when the order is undetermined
  * (symbolic keys). */
 function compareKeys(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
   // Two different numbers are ordered exactly, with no tolerance: see
-  // `exactOrder`.
-  const exact = exactOrder(a, b);
+  // `exactOrder`. Two constants whose order is not decided at a higher
+  // precision either are a tie within the engine tolerance, as in
+  // `defaultCmp`.
+  const exact = exactOrder(a, b, { tieWithinTolerance: true });
   if (exact !== undefined) return exact;
   // Only two identical keys tie. A pair that is neither ordered nor
   // identical is undetermined, even when the two keys agree within the

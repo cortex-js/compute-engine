@@ -89,8 +89,12 @@ describe('WP-2.11 / EX-14: Gamma/GammaLn/Zeta bignum kernels', () => {
     expect(r.isFinite).toBe(true);
     // ln(Gamma(1e300)) ≈ (1e300 - 1/2)·ln(1e300) - 1e300 + ln(2π)/2
     expect(r.re).toBeCloseTo(6.897755278982137e302, -288);
+    // The JavaScript number `1e300` is the decimal 10^300 (not the binary
+    // value of the double, 1.0000000000000000525…e300, which gave
+    // 6.8977552789821374…). Checked against mpmath:
+    // loggamma(10^300) = 6.89775527898213705205…e302.
     const gammaLnStr = r.bignumRe!.toString();
-    expect(gammaLnStr.startsWith('6.8977552789821374')).toBe(true);
+    expect(gammaLnStr.startsWith('6.897755278982137052')).toBe(true);
   });
 
   // Layer 2: zetaCore's exact positive-even-integer closed form (which

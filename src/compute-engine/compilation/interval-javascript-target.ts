@@ -885,6 +885,29 @@ function compileIntervalFold(
  * would read as "the target inlines this" and drop a genuine input from
  * `freeSymbols`.
  */
+/**
+ * Fail closed (D6) when the free symbol `id` is complex-valued. The interval
+ * domain is real: an input reads as one real interval `{lo, hi}`, and no
+ * lowering of this target has complex arithmetic. A symbol declared
+ * `complex` that compiled as a real interval gave a wrong value behind
+ * `success: true` (`1 - (t + z)` emitted `_IA.sub(…, _.z)`).
+ *
+ * The test is `BaseCompiler.isComplexValued`, the one the other targets use
+ * to choose their complex lowering, so a symbol is complex here exactly when
+ * the JavaScript target would read it as `{re, im}`. The raw type is not
+ * enough: a symbol with no declaration whose type was inferred from a use
+ * (`|x|` infers `x: complex | infinity`) is not complex-valued there.
+ */
+function assertIntervalRealSymbol(ce: ComputeEngine, id: string): void {
+  const symbol = ce.symbol(id);
+  if (!BaseCompiler.isComplexValued(symbol)) return;
+  throw new Error(
+    `interval-js: the symbol \`${id}\` has the complex type ` +
+      `\`${symbol.type.toString()}\`. The interval target computes with ` +
+      `real intervals only and has no complex arithmetic. Fail closed (D6).`
+  );
+}
+
 /** See `varsObjectAccess` in `javascript-target.ts` — the same own-property
  * guard, for the interval target's own vars-object emission. */
 function intervalVarsAccess(id: string): string {
@@ -2282,6 +2305,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Hypot: (args, compile) =>
     `_IA.hypot(${compile(args[0])}, ${compile(args[1])})`,
+  // Degrees → radians. This lowering runs only in radian mode: in the other
+  // angular units `rewriteAngularUnit` replaces the `Degrees` node before
+  // codegen. The factor is an ENCLOSURE of π/180, not the rounded double
+  // `Math.PI / 180` (which carries up to two rounding errors and does not
+  // contain π/180): two ulps each side cover both roundings.
+  Degrees: (args, compile) =>
+    `_IA.mul(${compile(args[0])}, ${intervalEnclosureLiteral(Math.PI / 180, 2)})`,
 
   // Elementary
   Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,
@@ -4818,7 +4848,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // See `varsObjectAccess` in `javascript-target.ts`: a name that
         // collides with an `Object.prototype` member needs an own-property
         // guard, or a missing symbol reads the inherited function.
-        if (unknowns.includes(id)) return intervalVarsAccess(id);
+        if (unknowns.includes(id)) {
+          assertIntervalRealSymbol(expr.engine, id);
+          return intervalVarsAccess(id);
+        }
         // An assigned value / declared constant: returning `undefined` lets
         // BaseCompiler fold it (see the JavaScript target) rather than emitting
         // a bare, dangling reference for a symbol that `expr.unknowns` omits.
@@ -4826,6 +4859,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // No value: a genuinely free symbol, possibly reachable only through a
         // folded value (so absent from `unknowns`). Emit the vars-object lookup
         // rather than a bare, dangling reference.
+        assertIntervalRealSymbol(expr.engine, id);
         return intervalVarsAccess(id);
       },
       preamble: (preamble ?? '') + preambleImports,

@@ -443,20 +443,22 @@ describe('DISPLAY DIGITS', () => {
       expect(e.toMathJson(frac2)).toEqual({ num: '1500.00' });
     });
 
-    test('integer-valued floats (1500.0, 7.0) pad like bare integers', () => {
-      // These parse to a pure-integer ExactNumericValue; `{ fractional }` must
-      // still pad them, and `{ significant }` stays a no-op.
+    test('integer-valued floats (1500.0, 7.0) pad like other floats', () => {
+      // A literal with a decimal point is a big decimal, which is never
+      // exact, so these are floats: `{ fractional }` pads them like any
+      // float, and `{ significant }` keeps their integer digits (in the
+      // string form of a formatted float).
       const a = ce.parse('1500.0');
-      expect(a.toMathJson(frac2)).toEqual({ num: '1500.00' });
-      expect(a.toMathJson(sig3)).toEqual(1500);
+      expect(a.toMathJson(frac2)).toEqual('1500.00');
+      expect(a.toMathJson(sig3)).toEqual('1500');
 
       const b = ce.parse('7.0');
-      expect(b.toMathJson(frac2)).toEqual({ num: '7.00' });
-      expect(b.toMathJson(sig3)).toEqual(7);
+      expect(b.toMathJson(frac2)).toEqual('7.00');
+      expect(b.toMathJson(sig3)).toEqual('7');
 
       const c = ce.parse('123456.0');
-      expect(c.toMathJson(frac2)).toEqual({ num: '123456.00' });
-      expect(c.toMathJson(sig3)).toEqual(123456);
+      expect(c.toMathJson(frac2)).toEqual('123456.00');
+      expect(c.toMathJson(sig3)).toEqual('123456');
     });
 
     test('0.00123456 (float) → 3 sig figs / 2 fractional', () => {

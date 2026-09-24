@@ -11,7 +11,8 @@ import {
 import type { Rational } from '../numerics/types.js';
 
 import { asRational } from './numerics.js';
-import { canonicalAngle, getImaginaryFactor } from './utils.js';
+import { getImaginaryFactor } from './utils.js';
+import { halfTurnAngle, radiansToAngle } from './trigonometry.js';
 import { apply, apply2 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -914,8 +915,10 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
 
     const v = exact.pow(e);
     // `pow` falls back to the float lane when the result leaves the exact
-    // representable set — keep the power symbolic in that case.
-    if (v.isExact && !v.isNaN) return ce.number(v);
+    // representable set — keep the power symbolic in that case. A float
+    // result whose value is an integer reports `isExact` too, so the test is
+    // on the class, not on that flag.
+    if (v instanceof ExactNumericValue && !v.isNaN) return ce.number(v);
     return undefined;
   }
 
@@ -981,6 +984,28 @@ function rawRational(exp: Expression): Rational | undefined {
   const value = exp.value;
   if (value === undefined || value === exp) return undefined;
   return asRational(value);
+}
+
+/**
+ * When `theta` is `c·π` with `c` a float literal whose value is a multiple
+ * of `1/2`, the quarter-turn `k` (0..3) such that `e^{iθ}` is `i^k`.
+ * `undefined` for any other angle.
+ */
+function eulerQuarterTurn(theta: Expression): number | undefined {
+  if (!isFunction(theta, 'Multiply') || theta.nops !== 2) return undefined;
+  const [c, pi] = theta.ops;
+  if (!isSymbol(pi, 'Pi')) return undefined;
+  if (!isNumber(c) || c.isExact || c.im !== 0) return undefined;
+  const twice = (c.bignumRe ?? new BigDecimal(c.re)).mul(2);
+  if (!twice.isFinite() || !twice.isInteger()) return undefined;
+  return Number(((twice.toBigInt() % 4n) + 4n) % 4n);
+}
+
+/** Whether `x` holds a float (an inexact number literal) at any depth. */
+function hasInexactLiteral(x: Expression): boolean {
+  if (isNumber(x)) return !x.isExact;
+  if (isFunction(x)) return x.ops.some(hasInexactLiteral);
+  return false;
 }
 
 /**
@@ -1218,10 +1243,51 @@ export function pow(
     if (typeof exp !== 'number' && isFunction(exp, 'Ln')) return exp.op1;
 
     // Is the argument an imaginary or complex number?
-    const imagFactor = getImaginaryFactor(exp);
+    //
+    // The imaginary factor is read from the RAW exponent first, when the
+    // caller has it. The `Power` evaluate handler receives its exponent
+    // already evaluated, and the evaluation of `0.5·i·π` is the machine
+    // complex `1.5707963267948966i`: the cosine of that rounded angle is
+    // `1.9e-17`, not `0`, and `e^{0.5iπ}` became `1.9e-17 + i`. The raw
+    // exponent keeps the factor `0.5·π`, which is exactly a quarter-turn
+    // (`eulerQuarterTurn` below).
+    const rawFactor =
+      rawExponent !== undefined &&
+      (rawExponent.isCanonical || rawExponent.isStructural)
+        ? getImaginaryFactor(rawExponent)
+        : undefined;
+    const imagFactor = rawFactor ?? getImaginaryFactor(exp);
     if (imagFactor !== undefined) {
-      // We have an expression of the form `e^(i theta)`
-      const theta = canonicalAngle(imagFactor);
+      // We have an expression of the form `e^(i theta)`, with `theta` in
+      // radians.
+      //
+      // A float multiple of π whose double is a multiple of a quarter-turn
+      // (`e^{0.5iπ}`) has the value `±1` or `±i`: the coefficient is known
+      // exactly, and only the product with π would round.
+      const cardinal = eulerQuarterTurn(imagFactor);
+      if (cardinal !== undefined)
+        return [ce.One, ce.I, ce.NegativeOne, ce.I.neg()][cardinal];
+      // `Cos` and `Sin` read their argument in the engine's angular unit, so
+      // in another unit `theta` is converted to it. An exact angle is
+      // converted exactly (`θ·halfTurn/π`: `π` is `180` in degrees), and
+      // `Cos` and `Sin` find an exact value from its structure
+      // (`halfTurns`). An angle with a float is converted numerically, at
+      // the working precision (`radiansToAngle`): a float is never a
+      // special angle, and a symbolic conversion of it could fold the float
+      // into an exact integer (`0.25·π·180/π` is `45`). In radians the angle
+      // is passed as it is, and `Cos` and `Sin` reduce and round an angle
+      // that is not special at the working precision.
+      const theta =
+        ce.angularUnit === 'rad'
+          ? imagFactor
+          : hasInexactLiteral(imagFactor)
+            ? imagFactor.unknowns.length === 0
+              ? radiansToAngle(imagFactor.N())
+              : undefined
+            : ce.function('Divide', [
+                ce.function('Multiply', [imagFactor, halfTurnAngle(ce)]),
+                ce.Pi,
+              ]);
       // Euler's formula e^{iθ} = cos θ + i·sin θ — but only adopt it for a
       // CONSTANT angle (`e^{iπ/2}→i`, `e^{iπ}→-1`): there the trig reduces to a
       // closed-form value and this is a genuine evaluation. For a SYMBOLIC
@@ -1399,9 +1465,13 @@ export function pow(
       const p = Number(r[0]);
       const q = Number(r[1]);
       const realRootExists = x.isNegative !== true || q % 2 !== 0;
+      // A numerator or a denominator past the safe integers is rounded by
+      // the conversion to a double: `(5·10^29 + 1)/10^30` became exactly
+      // `1/2`, and `2^{1/2 + 10^-30}` evaluated to `√2`. Such an exponent
+      // keeps the power symbolic.
       if (
-        Number.isInteger(p) &&
-        Number.isInteger(q) &&
+        Number.isSafeInteger(p) &&
+        Number.isSafeInteger(q) &&
         q > 1 &&
         realRootExists
       ) {
@@ -1566,13 +1636,16 @@ export function root(
 
     // @todo the result should always be exact if e is an integer
     if (e !== undefined && !evenRootOfNegative) {
-      if (typeof a.numericValue === 'number') {
-        const v = a.engine._numericValue(a.numericValue).root(e);
-        if (v?.isExact && !v.isNaN) return a.engine.number(v);
-      } else {
-        const v = a.numericValue.asExact?.root(e);
-        if (v?.isExact && !v.isNaN) return a.engine.number(v);
-      }
+      // Only an `ExactNumericValue` is an exact root. The root of an exact
+      // value that is not a perfect power is a big float, and such a float
+      // reports `isExact` when its value at the working precision is an
+      // integer: `(1 + 10^-30)^(1/3)` at 21 digits is `1.000…` and was
+      // answered as the exact integer `1`.
+      const v =
+        typeof a.numericValue === 'number'
+          ? a.engine._numericValue(a.numericValue).root(e)
+          : a.numericValue.asExact?.root(e);
+      if (v instanceof ExactNumericValue && !v.isNaN) return a.engine.number(v);
     }
 
     // The radicand may be a perfect power whose structure was folded away at

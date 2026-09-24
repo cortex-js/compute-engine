@@ -18,6 +18,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
 import { exactOrder } from '../boxed-expression/compare.js';
+import { complexParts } from './complex-parts.js';
 import {
   infinitePoint,
   type InfinitePoint,
@@ -273,13 +274,16 @@ const absArgType: OperatorTypeHandlerOnTypes = ([z], context) => {
  * The conjugate of a constant expression that is not a number literal, or
  * `undefined` when it cannot be found exactly.
  *
- * An exact complex value such as `1 + √2·i` is an `Add` of number literals,
- * not one literal, so the literal branch of the `Conjugate` handler does not
- * apply to it. The conjugate is linear and multiplicative, so it goes into
- * the operands of `Add`, `Subtract`, `Negate`, `Multiply` and `Divide`, and
- * into the base of a `Power` with an integer exponent. At a leaf, a number
- * literal takes the literal branch, and a real constant (`π`, `sin(1)`) is
- * its own conjugate. Any other leaf makes the whole result `undefined`.
+ * The conjugate goes into the structure of the expression, because it is
+ * linear and multiplicative: `conj(u + v) = conj(u) + conj(v)`, the same for
+ * `Subtract` and `Negate`, `conj(u·v) = conj(u)·conj(v)`,
+ * `conj(u/v) = conj(u)/conj(v)`, and `conj(bⁿ) = conj(b)ⁿ` for an integer
+ * `n`. So `conj((1 + √2·i)^20)` is `(1 − √2·i)^20`, for any `n`, and
+ * `conj(1/(π + √2·i))` is `1/(π − √2·i)`. At a leaf, a number literal takes
+ * the literal branch of `Conjugate`, and a real constant (`π`, `sin(1)`) is
+ * its own conjugate. Any other leaf is split into its parts
+ * (`complexParts`), and its conjugate is `re − im·i`. When a leaf cannot be
+ * split, the whole result is `undefined`.
  *
  * An operand with a free variable (`Conjugate(z + 1)`) is not rewritten, so
  * that the application stays unevaluated.
@@ -295,167 +299,45 @@ function conjugateOfConstant(
       return result.operator === 'Conjugate' ? undefined : result;
     }
     if (x.type.matches('real')) return x;
-    if (!isFunction(x)) return undefined;
-    const op = x.operator;
-    if (
-      op === 'Add' ||
-      op === 'Subtract' ||
-      op === 'Negate' ||
-      op === 'Multiply' ||
-      op === 'Divide'
-    ) {
-      const parts: Expression[] = [];
-      for (const operand of x.ops) {
-        const part = conj(operand);
-        if (part === undefined) return undefined;
-        parts.push(part);
+    if (isFunction(x)) {
+      const op = x.operator;
+      if (
+        op === 'Add' ||
+        op === 'Subtract' ||
+        op === 'Negate' ||
+        op === 'Multiply' ||
+        op === 'Divide'
+      ) {
+        const ops: Expression[] = [];
+        for (const operand of x.ops) {
+          const c = conj(operand);
+          if (c === undefined) return undefined;
+          ops.push(c);
+        }
+        return ce.function(op, ops);
       }
-      return ce.function(op, parts);
+      if (op === 'Power' && isNumber(x.op2) && x.op2.isInteger === true) {
+        const base = conj(x.op1);
+        return base === undefined
+          ? undefined
+          : ce.function('Power', [base, x.op2]);
+      }
     }
-    if (op === 'Power' && isNumber(x.op2) && x.op2.isInteger === true) {
-      const base = conj(x.op1);
-      return base === undefined
-        ? undefined
-        : ce.function('Power', [base, x.op2]);
-    }
-    return undefined;
+    // A leaf that is not a number literal and not real: `re − im·i`, from
+    // its parts. With a negative `im`, the conjugate is `re + |im|·i`, so
+    // that it is not written with a double negation.
+    const parts = complexParts(x);
+    if (parts === undefined) return undefined;
+    const re = parts[0].evaluate();
+    const im = parts[1].evaluate();
+    if (im.isSame(0)) return re;
+    const imTerm =
+      im.isNegative === true
+        ? ce.function('Multiply', [im.neg(), ce.I])
+        : ce.function('Negate', [ce.function('Multiply', [im, ce.I])]);
+    return ce.function('Add', [re, imTerm]);
   };
-  return conj(z);
-}
-
-/**
- * The real and the imaginary part of a constant expression that is not a
- * number literal, as `[re, im]`, or `undefined` when they cannot be found
- * exactly. The parts are not evaluated.
- *
- * An exact complex value such as `1 + √2·i` is an `Add` of number literals,
- * not one literal, so the literal branches of `Real`, `Imaginary` and
- * `Argument` do not apply to it. The parts go into the operands of `Add`,
- * `Subtract` and `Negate`, and into the factors of `Multiply`, where
- * `(a + bi)(c + di) = (ac − bd) + (ad + bc)i`. A quotient uses
- * `(a + bi)/(c + di) = ((ac + bd) + (bc − ad)i)/(c² + d²)`, and is not split
- * when `c² + d²` is zero or is not known to be non-zero. A power with an
- * integer exponent `n`, `1 ≤ |n| ≤ 16`, is a repeated product (the reciprocal
- * of one when `n` is negative). The parts are evaluated after each product,
- * so that the expression does not double in size at each step. Any other
- * power is not split. At a leaf, a number literal
- * has its exact parts (the literal branches of `Real` and `Imaginary`), and
- * a real constant (`π`, `sin(1)`) is its own real part. Any other leaf makes
- * the result `undefined`.
- *
- * An operand with a free variable (`Real(z + 1)`) is not split, so that the
- * application stays unevaluated.
- */
-function partsOfConstant(
-  ce: ComputeEngine,
-  z: Expression
-): [Expression, Expression] | undefined {
-  if (z.unknowns.length > 0) return undefined;
-  const parts = (x: Expression): [Expression, Expression] | undefined => {
-    if (isNumber(x)) {
-      const re = ce.function('Real', [x]).evaluate();
-      const im = ce.function('Imaginary', [x]).evaluate();
-      if (!isNumber(re) || !isNumber(im)) return undefined;
-      return [re, im];
-    }
-    if (x.type.matches('real')) return [x, ce.Zero];
-    if (!isFunction(x)) return undefined;
-    const op = x.operator;
-    if (op === 'Negate') {
-      const p = parts(x.op1);
-      if (p === undefined) return undefined;
-      return [ce.function('Negate', [p[0]]), ce.function('Negate', [p[1]])];
-    }
-    if (op === 'Add' || op === 'Subtract') {
-      const re: Expression[] = [];
-      const im: Expression[] = [];
-      for (const operand of x.ops) {
-        const p = parts(operand);
-        if (p === undefined) return undefined;
-        re.push(p[0]);
-        im.push(p[1]);
-      }
-      return [ce.function(op, re), ce.function(op, im)];
-    }
-    if (op === 'Multiply') {
-      let acc: [Expression, Expression] | undefined = undefined;
-      for (const operand of x.ops) {
-        const p = parts(operand);
-        if (p === undefined) return undefined;
-        acc = acc === undefined ? p : mulParts(acc, p);
-      }
-      return acc;
-    }
-    if (op === 'Divide' && x.nops === 2) {
-      const p = parts(x.op1);
-      if (p === undefined) return undefined;
-      const q = parts(x.op2);
-      if (q === undefined) return undefined;
-      return divParts(p, q);
-    }
-    if (op === 'Power' && isNumber(x.op2) && x.op2.isInteger === true) {
-      const n = x.op2.re;
-      if (!Number.isInteger(n) || n === 0 || Math.abs(n) > 16) return undefined;
-      const p = parts(x.op1);
-      if (p === undefined) return undefined;
-      // Square-and-multiply: at most eight products for `|n| ≤ 16`.
-      let result: [Expression, Expression] | undefined = undefined;
-      let square = p;
-      let k = Math.abs(n);
-      while (true) {
-        if (k % 2 === 1)
-          result =
-            result === undefined
-              ? square
-              : evaluateParts(mulParts(result, square));
-        k = Math.floor(k / 2);
-        if (k === 0) break;
-        square = evaluateParts(mulParts(square, square));
-      }
-      if (n > 0) return result;
-      return divParts([ce.One, ce.Zero], result!);
-    }
-    return undefined;
-  };
-
-  const mul = (u: Expression, v: Expression) => ce.function('Multiply', [u, v]);
-
-  // `(a + bi)(c + di) = (ac − bd) + (ad + bc)i`
-  const mulParts = (
-    [a, b]: [Expression, Expression],
-    [c, d]: [Expression, Expression]
-  ): [Expression, Expression] => [
-    ce.function('Subtract', [mul(a, c), mul(b, d)]),
-    ce.function('Add', [mul(a, d), mul(b, c)]),
-  ];
-
-  // `(a + bi)/(c + di) = ((ac + bd) + (bc − ad)i)/(c² + d²)`. The result is
-  // `undefined` when `c² + d²` is zero or is not known to be non-zero.
-  const divParts = (
-    [a, b]: [Expression, Expression],
-    [c, d]: [Expression, Expression]
-  ): [Expression, Expression] | undefined => {
-    // `c` and `d` are real, so `c² + d²` is non-zero exactly when it is
-    // positive. `isPositive` does not know the sign of a constant sum such as
-    // `1 + (√2 − π)²`, so an exact comparison with zero is the fallback.
-    const den = ce.function('Add', [mul(c, c), mul(d, d)]).evaluate();
-    if (den.isPositive !== true && exactOrder(den, ce.Zero) !== 1)
-      return undefined;
-    return [
-      ce.function('Divide', [ce.function('Add', [mul(a, c), mul(b, d)]), den]),
-      ce.function('Divide', [
-        ce.function('Subtract', [mul(b, c), mul(a, d)]),
-        den,
-      ]),
-    ];
-  };
-
-  const evaluateParts = ([re, im]: [Expression, Expression]): [
-    Expression,
-    Expression,
-  ] => [re.evaluate(), im.evaluate()];
-
-  return parts(z);
+  return conj(z)?.evaluate();
 }
 
 /**
@@ -574,7 +456,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const m = measurementLipschitzUnary(ce, 'Real', ops[0]);
         if (m !== undefined) return m;
         if (!isNumber(ops[0]))
-          return partsOfConstant(ce, ops[0])?.[0].evaluate({
+          return complexParts(ops[0])?.[0].evaluate({
             numericApproximation,
           });
         // `~oo` has no direction, so no real part (see the table above the
@@ -624,7 +506,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         if (m !== undefined) return m;
         // See `Real`: the imaginary part of a constant sum (`1 + √2·i`).
         if (!isNumber(ops[0]))
-          return partsOfConstant(ce, ops[0])?.[1].evaluate({
+          return complexParts(ops[0])?.[1].evaluate({
             numericApproximation,
           });
         // A NaN operand normally never reaches the handler (the NaN gate
@@ -690,7 +572,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         // A constant sum (`1 + √2·i`) is split into its exact parts (see
         // `Real`), and its angle is `Arctan2(im, re)`.
         if (!isNumber(ops[0])) {
-          const parts = partsOfConstant(ce, ops[0]);
+          const parts = complexParts(ops[0]);
           if (parts === undefined) return undefined;
           const im = parts[1].evaluate();
           const re = parts[0].evaluate();

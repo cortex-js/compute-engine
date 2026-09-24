@@ -324,12 +324,30 @@ export class Product {
 
       const radical = asRadical(term);
       if (radical !== null) {
-        const factor = this.engine
-          ._numericValue({
-            radical: (radical[0] as number) * (radical[1] as number),
-            rational: [1, Number(radical[1])],
-          })
-          .pow(this.engine._numericValue(exp));
+        // √(p/q) = √(p·q)/q. The radicand `p·q` of an exact numeric value
+        // is a safe integer. When it is not (`√(1 + 10⁻³⁰)`, where `p·q`
+        // has 61 digits), or when the value is not exact (a radicand with
+        // a large square-free part is held as a float), the factor stays a
+        // symbolic term: a float would round it, and `2·√(1 + 10⁻³⁰) − 2`
+        // was an exact `0`.
+        const radicand = BigInt(radical[0]) * BigInt(radical[1]);
+        const denominator = BigInt(radical[1]);
+        if (
+          radicand > BigInt(Number.MAX_SAFE_INTEGER) ||
+          denominator > BigInt(Number.MAX_SAFE_INTEGER)
+        ) {
+          this.tally(term, exp);
+          return;
+        }
+        const root = this.engine._numericValue({
+          radical: Number(radicand),
+          rational: [1, Number(denominator)],
+        });
+        if (!root.isExact) {
+          this.tally(term, exp);
+          return;
+        }
+        const factor = root.pow(this.engine._numericValue(exp));
         if (!this.foldIntoCoefficient(factor)) this.tally(term, exp);
         return;
       }
@@ -494,15 +512,12 @@ export class Product {
    * return `false` and leave the coefficient unchanged when the product
    * would lose exactness.
    *
-   * An `ExactNumericValue` can hold a real radical (`√2`), a Gaussian
-   * rational (`1 + i`) or a pure-imaginary radical (`√2·i`), but not a value
-   * with a radical and a non-zero imaginary part (`√2 + √2·i`). When the
-   * product of two exact values leaves that set, `ExactNumericValue.mul`
-   * returns a float. The canonical `Multiply` fold (`canonicalMultiply`)
-   * keeps such a factor as a separate operand, and this method gives the
-   * caller the same option: the caller then keeps the factor as a separate
-   * term, so `√2·(1 + i)` stays exact instead of becoming
-   * `1.414… + 1.414…i`.
+   * An `ExactNumericValue` holds one radical times a Gaussian rational
+   * (`√2·(1 + i)`), a set closed under multiplication. The product of two
+   * exact values is then exact, except when the radicand of the product is
+   * too large to store: `ExactNumericValue.mul` then returns a float. For a
+   * complex operand, this method gives the caller the option to keep the
+   * factor as a separate term instead, so the product stays exact.
    *
    * The check applies only when an operand is complex. A real radical
    * product whose radicand is too large still folds to a float, as before.
@@ -1468,20 +1483,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
         }
       } else if (typeof numV !== 'number' && typeof denomV !== 'number') {
         if (numV.isExact && denomV.isExact) {
-          const q = numV.asExact!.div(denomV.asExact!);
-          // One exact literal cannot hold a quotient such as
-          // `(1 + i)/√2 = √2/2 + (√2/2)·i` (a radical and a non-zero
-          // imaginary part), and `div` then returns a float. Write the
-          // quotient as the sum of its exact parts instead: see
-          // `exactComplexProductAsSum`.
-          if (!q.isExact && (numV.im !== 0 || denomV.im !== 0)) {
-            const inv = denomV.asExact!.inv();
-            if (inv.isExact) {
-              const sum = exactComplexProductAsSum(ce, [num, ce.number(inv)]);
-              if (sum !== undefined) return sum;
-            }
-          }
-          return ce.number(q);
+          return ce.number(numV.asExact!.div(denomV.asExact!));
         }
       }
     }
@@ -2059,66 +2061,6 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   return new Product(ce, xs).asRationalExpression();
 }
 
-/**
- * The product of exact number literals `xs`, at least one of them complex,
- * written as the sum of its exact real and imaginary parts: `√2·(1 + i)` is
- * `√2 + √2·i`. Return `undefined` when an operand is not an exact finite
- * number literal, when no operand is complex, or when the product would be
- * inexact.
- *
- * One `ExactNumericValue` cannot hold a value with a radical and a non-zero
- * imaginary part, so `Product` keeps such a factor as a separate term (see
- * `Product.foldIntoCoefficient`). The `Multiply` evaluate handler uses this
- * function to give that product the form of the other exact complex values
- * that are not one literal, such as `1 + √2·i`: an `Add` of a real literal
- * and a pure-imaginary literal.
- *
- * Every exact value is `√r·g`, with `r` a positive integer and `g` a
- * Gaussian rational: a real radical `(a/b)·√c` is `√c·(a/b)`, a Gaussian
- * rational has `r = 1`, and a pure-imaginary radical `(a/b)·√c·i` is
- * `√c·((a/b)·i)`. The product is then `√R·G`, where `√R` is the product of
- * the radicals and `G` is the product of the Gaussian rationals. Both
- * products are exact. The real part is `√R·Re(G)` and the imaginary part is
- * `√R·Im(G)`, each an exact real radical.
- */
-export function exactComplexProductAsSum(
-  ce: ComputeEngine,
-  xs: ReadonlyArray<Expression>
-): Expression | undefined {
-  if (xs.length < 2) return undefined;
-  let radical: NumericValue = ce._numericValue(1);
-  let gaussian: NumericValue = ce._numericValue(1);
-  let hasComplex = false;
-  for (const x of xs) {
-    if (!isNumber(x)) return undefined;
-    const nv = x.numericValue;
-    if (!(nv instanceof ExactNumericValue) || !nv.isExact) return undefined;
-    if (nv.im === 0) {
-      radical = radical.mul(ce._numericValue({ radical: nv.radical }));
-      gaussian = gaussian.mul(ce._numericValue({ rational: nv.rational }));
-    } else if (isZero(nv.rational) && nv.imRadical !== 1) {
-      hasComplex = true;
-      radical = radical.mul(ce._numericValue({ radical: nv.imRadical }));
-      gaussian = gaussian.mul(
-        ce._numericValue({ rational: [0, 1], imRational: nv.imRational })
-      );
-    } else {
-      hasComplex = true;
-      gaussian = gaussian.mul(nv);
-    }
-    if (!radical.isExact || !gaussian.isExact) return undefined;
-  }
-  if (!hasComplex) return undefined;
-  if (!(gaussian instanceof ExactNumericValue)) return undefined;
-  const re = radical.mul(ce._numericValue({ rational: gaussian.rational }));
-  const im = radical.mul(ce._numericValue({ rational: gaussian.imRational }));
-  if (!re.isExact || !im.isExact) return undefined;
-  return ce.function('Add', [
-    ce.number(re),
-    ce.function('Multiply', [ce.number(im), ce.I]),
-  ]);
-}
-
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   return mulNEvaluated(xs);
 }
@@ -2544,8 +2486,9 @@ function scaleMachineVector(
     if (!Number.isFinite(v)) return undefined;
     const p = k * v;
     // An integer past the safe range is declined whatever the factors are:
-    // `ce.number()` makes it an exact big integer, which is not the value
-    // the cell product holds when a factor is a float.
+    // with two integer factors the interpreter's product is an exact big
+    // integer, and `ce.number()` of the double is a float (only a
+    // safe-integer double is boxed as an exact integer).
     if (Number.isInteger(p) && !Number.isSafeInteger(p)) return undefined;
     if (!(integerScalar && Number.isInteger(v)) && !floatsAreDoubles)
       return undefined;

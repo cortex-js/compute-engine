@@ -196,9 +196,13 @@ describe('huge integer powers stay symbolic; .json never throws (EX-15)', () => 
     expect(ce.box(['Power', 2, 1e15]).N().re).toBe(Infinity);
   });
   test('Power(10,1e300).evaluate() stays symbolic (no crash)', () => {
-    const r = ce.box(['Power', 10, 1e300]).evaluate();
+    // The exponent is the EXACT integer 10^300 (a string of digits). The
+    // JavaScript number `1e300` is past the safe integers, so it boxes as a
+    // float, and a power with a float exponent is computed: it overflows.
+    const r = ce.box(['Power', 10, { num: '1e300' }]).evaluate();
     expect(r.operator).toEqual('Power');
     expect(() => JSON.stringify(r.json)).not.toThrow();
+    expect(ce.box(['Power', 10, 1e300]).evaluate().re).toBe(Infinity);
   });
 });
 

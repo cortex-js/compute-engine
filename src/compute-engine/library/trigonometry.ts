@@ -231,6 +231,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const arg = ops[0];
         if (!isNumber(arg) || !arg.isValid) return ce._fn('Degrees', ops);
 
+        // The result is an angle in the engine's `angularUnit`, because the
+        // trigonometric functions read their argument in that unit. The
+        // radian-specific folds below apply only to 'rad'; for 'grad' and
+        // 'turn' the conversion is the exact linear factor `halfTurn/180`
+        // (`Degrees(30)` is `100/3` grads and `1/12` turn). Converting to
+        // radians in every unit made `\sin(30^\circ)` read `π/6` as grads.
+        if (ce.angularUnit !== 'rad')
+          return arg.mul(halfTurnAngle(ce).div(180));
+
         const fArg = arg.re;
 
         if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
@@ -282,9 +291,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const nonNumeric = nonNumericOperandError(options.engine, ops);
         if (nonNumeric !== undefined) return nonNumeric;
         if (options.engine.angularUnit === 'deg') return ops[0];
-        // Faithful `d·π/180` conversion, matching the canonical handler (no
-        // mod-360 reduction — see the note there).
-        return ops[0].mul(options.engine.Pi.div(180)).evaluate(options);
+        // Faithful linear conversion to the engine's `angularUnit` (`d·π/180`
+        // in radians), matching the canonical handler (no mod-360 reduction —
+        // see the note there).
+        return ops[0]
+          .mul(halfTurnAngle(options.engine).div(180))
+          .evaluate(options);
       },
     },
 
@@ -367,7 +379,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const degrees =
           rational !== null ? ce.number(rational) : ce.number(totalSec / 3600);
         if (ce.angularUnit === 'deg') return degrees;
-        return degrees.div(180).mul(ce.Pi).evaluate(options);
+        // Convert to the engine's `angularUnit`, as `Degrees` does.
+        return degrees.div(180).mul(halfTurnAngle(ce)).evaluate(options);
       },
     },
 

@@ -55,6 +55,8 @@ import {
   resolveTypeAlias,
   resolveTypeForCompilation,
   stripMissingFromType,
+  unfoldAliasOnDescent,
+  type AliasDescent,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type, TupleType } from '../../common/type/types.js';
@@ -170,21 +172,6 @@ function isNumberCoordinateType(t: Type): boolean {
   if (typeof r !== 'string' && r.kind === 'union')
     return r.types.every(isNumberCoordinateType);
   return isSubtype(r, 'number');
-}
-
-/**
- * Is every value of this coordinate type a REAL number?
- *
- * The real half of the sibling test named in {@link isNumberCoordinateType}.
- * A `complex` coordinate compiles to a `{ re, im }` object, whose JavaScript
- * `*` is `NaN`, so the point-list lowering declines it exactly as the tuple
- * broadcast does.
- */
-function isRealNumberCoordinateType(t: Type): boolean {
-  const r = resolveTypeForCompilation(t);
-  if (typeof r !== 'string' && r.kind === 'union')
-    return r.types.every(isRealNumberCoordinateType);
-  return !isNonRealNumber(r);
 }
 
 /**
@@ -443,7 +430,15 @@ import {
   oklchToRgb255,
   rgb255ToHsl,
   rgb255ToHsv,
+  gamutMapOklch,
+  gamutMapSrgb,
+  gamutToSrgb,
+  srgbToGamut,
+  inGamut,
+  readColorGamut,
+  displayP3String,
 } from '../numerics/color-conversion.js';
+import type { ColorGamut } from '../numerics/color-conversion.js';
 import {
   gamma,
   gammaln,
@@ -555,6 +550,7 @@ import type {
   CompileMode,
   CompileTarget,
   CompiledOperators,
+  CompiledFunction,
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
@@ -2813,6 +2809,53 @@ const JS_COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The heads this target lowers with a real-only FUNCTION codegen, beyond the
+ * heads that are real-only on every target
+ * (`BaseCompiler.REAL_ONLY_BY_DEFINITION`). The special functions have a
+ * complex extension in the interpreter, but their lowerings here compute with
+ * real numbers only: `Haversine` is `(1 - Math.cos(x)) / 2` and `BesselJ`
+ * calls `_SYS.besselJ`, which ran to NaN on a `{re, im}` operand even when
+ * its imaginary part was zero at run time. `Hypot` is `Math.hypot`, spelled
+ * as a function so that it can take a point operand as one leg. The heads
+ * this target maps to a plain helper name (`Erf: '_SYS.erf'`,
+ * `Gamma: '_SYS.gamma'`) are real-only by that mapping
+ * (`BaseCompiler.stringHelperIsRealOnly`); several of them are listed here as
+ * well, so the set names every special function without complex lowering.
+ * `Mean`, `Variance` and `StandardDeviation` have a complex value in the
+ * interpreter, but the `_SYS` reducers behind them sum plain numbers.
+ */
+const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
+  'Mean',
+  'Variance',
+  'StandardDeviation',
+  'Hypot',
+  'Arctan2',
+  'Haversine',
+  'GammaLn',
+  'Beta',
+  'Erf',
+  'Erfc',
+  'ErfInv',
+  'Heaviside',
+  'Sinc',
+  'FresnelC',
+  'FresnelS',
+  'BesselJ',
+]);
+
+/** `CompileTarget.isRealOnlyLowering` of this target. */
+function jsIsRealOnlyLowering(
+  head: string,
+  lowering: CompiledFunction<Expression> | undefined
+): boolean {
+  return (
+    BaseCompiler.REAL_ONLY_BY_DEFINITION.has(head) ||
+    JS_REAL_ONLY_LOWERINGS.has(head) ||
+    BaseCompiler.stringHelperIsRealOnly(head, lowering)
+  );
+}
+
+/**
  * Compile an operand that sits at a COLOR position.
  *
  * A bare tuple written at a color position denotes 0-1 sRGB components on
@@ -3861,7 +3904,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter's own character order (`compare.ts`, decision D8).
     if (isProvablyStringOperand(args[0]))
       return joinIfString(args[0], `(${coll}).slice().sort(_SYS.cmpc)`);
-    return `(${coll}).slice().sort((_a, _b) => _a - _b)`;
+    assertNumericSortElements('Sort', args[0]!);
+    return `(${coll}).slice().sort(${NAN_LAST_COMPARATOR})`;
   },
   // Flat concatenation of the (top-level) elements of each collection operand.
   //
@@ -4854,7 +4898,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Ordering: a custom ordering function does not compile; only the ` +
           `default ascending numeric order is supported. Fail closed (D6).`
       );
-    return `((_l) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _l[_a - 1] - _l[_b - 1]))(${coll})`;
+    assertNumericSortElements('Ordering', args[0]!);
+    return `((_l, _c) => Array.from({ length: _l.length }, (_, _i) => _i + 1).sort((_a, _b) => _c(_l[_a - 1], _l[_b - 1])))(${coll}, ${NAN_LAST_COMPARATOR})`;
   },
   // Unbiased Fisher–Yates shuffle on a copy (`_SYS.shuffle`), consuming its
   // `n − 1` draws through the frame-aware `_SYS.drawNextRandomNumber()` in the
@@ -5128,13 +5173,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             'collection, or a type too open to tell); the interpreter leaves ' +
             'such a product unevaluated. Fail closed (D6).'
         );
-      if (
-        target.mode === 'complex' ||
-        !coordinates.every(isRealNumberCoordinateType)
-      )
-        throw new Error(
-          'Dot: broadcasting complex point coordinates is not supported by this target.'
-        );
+      // The lane of the coordinates selects the helper, and the parent reads
+      // the value with the same answer (`BaseCompiler.linearAlgebraLane`):
+      // `_SYS.complexPointdot` returns `{re, im}` inner products, and
+      // `_SYS.pointdot` real ones. A wide coordinate type
+      // (`list<tuple<number, number>>`) is read as real in `strict` and
+      // `auto` mode.
+      const helper = linearAlgebraHelper(
+        'Dot',
+        'pointdot',
+        'complexPointdot',
+        args
+      );
       // Which operand is the list is decided HERE, from the static type, and
       // passed to the helper. Read from the run-time value instead — by
       // testing whether the first element is an array — an EMPTY point list
@@ -5146,7 +5196,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           ? collArg('Dot', arg, compile, position)
           : compile(arg);
       return (
-        `_SYS.pointdot(${operand(args[0], 1)}, ${operand(args[1], 2)}, ` +
+        `${helper}(${operand(args[0], 1)}, ${operand(args[1], 2)}, ` +
         `${listFlags[0]}, ${listFlags[1]})`
       );
     }
@@ -5167,22 +5217,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // dispatch (`compileStaticInnerProduct`).
     const inner = BaseCompiler.compileStaticInnerProduct(args, target);
     if (inner !== undefined) return inner;
-    // `compileStaticInnerProduct` declines a complex operand, and
-    // `_SYS.matmul` is real-only.
-    assertRealEntries('Dot', args);
-    return `_SYS.matmul(${collArg('Dot', args[0], compile, 1)}, ${collArg('Dot', args[1], compile, 2)})`;
+    // `compileStaticInnerProduct` declines a complex operand;
+    // `_SYS.complexMatmul` computes with complex entries.
+    return `${linearAlgebraHelper('Dot', 'matmul', 'complexMatmul', args)}(${collArg('Dot', args[0], compile, 1)}, ${collArg('Dot', args[1], compile, 2)})`;
   },
   MatrixMultiply: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('MatrixMultiply: missing argument');
-    assertRealEntries('MatrixMultiply', args);
-    return `_SYS.matmul(${collArg('MatrixMultiply', args[0], compile, 1)}, ${collArg('MatrixMultiply', args[1], compile, 2)})`;
+    return `${linearAlgebraHelper('MatrixMultiply', 'matmul', 'complexMatmul', args)}(${collArg('MatrixMultiply', args[0], compile, 1)}, ${collArg('MatrixMultiply', args[1], compile, 2)})`;
   },
   Cross: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Cross: missing argument');
-    assertRealEntries('Cross', args);
-    return `_SYS.cross(${collArg('Cross', args[0], compile, 1)}, ${collArg('Cross', args[1], compile, 2)})`;
+    return `${linearAlgebraHelper('Cross', 'cross', 'complexCross', args)}(${collArg('Cross', args[0], compile, 1)}, ${collArg('Cross', args[1], compile, 2)})`;
   },
   // Norm accepts a scalar (absolute value) or a collection: 2-norm /
   // Frobenius by default, vector p-norm or matrix 1-/∞-operator norm with a
@@ -5319,36 +5366,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.transpose(${collArg('Transpose', args[0], compile)})`;
   },
-  Determinant: (args, compile) => {
-    assertRealEntries('Determinant', args);
-    return `_SYS.det(${collArg('Determinant', args[0], compile)})`;
-  },
+  Determinant: (args, compile) =>
+    `${linearAlgebraHelper('Determinant', 'det', 'complexDet', args)}(${collArg('Determinant', args[0], compile)})`,
   // A singular matrix yields NaN (the interpreter stays inert — no numeric
   // equivalent on a real target).
-  Inverse: (args, compile) => {
-    assertRealEntries('Inverse', args);
-    return `_SYS.inv(${collArg('Inverse', args[0], compile)})`;
-  },
+  Inverse: (args, compile) =>
+    `${linearAlgebraHelper('Inverse', 'inv', 'complexInv', args)}(${collArg('Inverse', args[0], compile)})`,
   Trace: (args, compile) => {
     if (args.length > 1)
       throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
-    // The trace reads only the diagonal, so a literal matrix is checked on
-    // its diagonal entries: `Trace([[x, i], [1, 2]])` is real and compiles.
-    // Any other operand is checked whole.
-    const m = args[0];
-    const rows =
-      m !== undefined &&
-      isFunction(m, 'List') &&
-      m.ops.every((r) => isFunction(r, 'List'))
-        ? m.ops
-        : undefined;
-    if (rows !== undefined)
-      assertRealEntries(
-        'Trace',
-        rows.map((r, i) => (isFunction(r) ? r.ops[i] : undefined))
-      );
-    else assertRealEntries('Trace', args);
-    return `_SYS.trace(${collArg('Trace', args[0], compile)})`;
+    return `${linearAlgebraHelper('Trace', 'trace', 'complexTrace', args)}(${collArg('Trace', args[0], compile)})`;
   },
   // Transpose + element-wise complex conjugate. Explicit axes do not compile.
   ConjugateTranspose: (args, compile) => {
@@ -5404,14 +5431,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `MatrixPower: an exponent past ${MAX_MATRIX_POWER_EXPONENT} stays ` +
           'symbolic in the interpreter. Fail closed (D6).'
       );
-    assertRealEntries('MatrixPower', [args[0]]);
-    return `_SYS.matpow(${collArg('MatrixPower', args[0], compile)}, ${compile(
+    return `${linearAlgebraHelper('MatrixPower', 'matpow', 'complexMatpow', [args[0]])}(${collArg('MatrixPower', args[0], compile)}, ${compile(
       args[1]
     )})`;
   },
   // Reduced row echelon form (Gauss–Jordan).
+  //
+  // The interpreter computes no reduced row echelon form of a matrix with a
+  // complex entry (it leaves `RowReduce` unevaluated), so there is no value
+  // for the compiled code to match: an operand whose entries are complex, or
+  // are complex under `mode: 'complex'`, fails closed (D6). An operand whose
+  // type does not say whether its entries are real (`matrix<number>`, an
+  // undeclared matrix) is read as real in `strict` and `auto` mode, as the
+  // other linear-algebra heads read it (`linearAlgebraOperandLane`).
   RowReduce: (args, compile) => {
-    assertRealEntries('RowReduce', args);
+    if (args[0] === undefined) throw new Error('RowReduce: missing argument');
+    const lane = BaseCompiler.linearAlgebraLane([args[0]]);
+    if (lane === 'complex')
+      throw new Error(
+        'RowReduce: the interpreter computes no reduced row echelon form of ' +
+          'a matrix with a complex entry, so the compiled code has no value ' +
+          'to match. Fail closed (D6).'
+      );
     return `_SYS.rref(${collArg('RowReduce', args[0], compile)})`;
   },
   // CE `Rank` is the TENSOR rank — the number of axes (scalar 0, vector 1,
@@ -5929,6 +5970,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // for a negative `x` where the interpreter answers the principal complex
     // root. `promotesRadicalToComplex` is what the enclosing expression's
     // analysis asks, so this emission must ask the same question.
+    // A COMPLEX radicand or degree takes `_SYS.croot`: the real lowerings
+    // below (`Math.cbrt`, `Math.pow`) read a `{re, im}` object as NaN. The
+    // node's type does not select this branch: `Root(x + iy, 3)` types
+    // `number`, while the enclosing expression's analysis reads the operands
+    // (`BaseCompiler.isComplexValued`) and expects `{re, im}` from this node.
+    if (BaseCompiler.isComplexValued(arg) || BaseCompiler.isComplexValued(exp))
+      return spliceJSValues(
+        target,
+        [compile(arg), compile(exp)],
+        ([z, n]) => `_SYS.croot(${z}, ${n})`
+      );
     if (
       resultIsComplexValued('Root', [arg, exp]) ||
       BaseCompiler.promotesRadicalToComplex('Root', [arg, exp])
@@ -6579,6 +6631,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const params = legs.map(() => BaseCompiler.tempVar(target));
     return `_SYS.bcast((${params.join(', ')}) => Math.hypot(${params.join(', ')}), ${legs.join(', ')})`;
   },
+  // Degrees → radians. Only reached in radian mode: in the other angular
+  // units `rewriteAngularUnit` replaces the `Degrees` node before codegen.
   Degrees: ([x], compile) => {
     if (x === null) throw new Error('Degrees: no argument');
     return `(${compile(x)} * Math.PI / 180)`;
@@ -6763,6 +6817,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length >= 2)
       return `_SYS.colorToString(${c}, ${compile(args[1])})`;
     return `_SYS.colorToString(${c})`;
+  },
+  GamutMap: (args, compile) => {
+    if (args.length === 0) throw new Error('GamutMap: no argument');
+    const c = compileColorOperand('GamutMap', args[0], compile);
+    const gamut = args[1];
+    if (gamut === undefined || gamut === null) return `_SYS.gamutMap(${c})`;
+    // A literal gamut the interpreter does not know answers
+    // `expected-value` there, so it fails closed here at compile time. A
+    // gamut computed at run time is checked by `_SYS.gamutMap`, which throws.
+    if (isString(gamut) && readColorGamut(gamut.string) === undefined)
+      throw new Error(
+        `GamutMap: unknown gamut "${gamut.string}" — the gamut is "srgb" ` +
+          `or "display-p3"`
+      );
+    return `_SYS.gamutMap(${c}, ${compile(gamut)})`;
   },
   ColorMix: (args, compile) => {
     if (args.length < 2) throw new Error('ColorMix: need two colors');
@@ -6972,8 +7041,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // (vec-only); this JS handler works on plain arrays of any length.
   Distance: ([a, b], compile) => {
     if (a === null || b === null) throw new Error('Distance: need two points');
-    assertRealEntries('Distance', [a, b]);
-    return `_SYS.distance(${compile(a)}, ${compile(b)})`;
+    // The distance is a real number for real and complex coordinates alike,
+    // so the lane decides only whether the coordinates may be `{re, im}`
+    // objects: `_SYS.distanceAny` reads either representation, and a wide
+    // coordinate type needs no decline.
+    const helper =
+      BaseCompiler.linearAlgebraLane([a, b]) === 'real'
+        ? '_SYS.distance'
+        : '_SYS.distanceAny';
+    return `${helper}(${compile(a)}, ${compile(b)})`;
   },
   // Block-scoped seeding. A prologue pushes a frame onto the SAME per-engine
   // stack the interpreter uses, and a `finally` pops it — literally
@@ -7631,6 +7707,37 @@ function packedToColor(c: number): CompiledColor {
   );
 }
 
+/**
+ * Map a color into `gamut` with the CSS Color 4 gamut mapping, and answer its
+ * gamma-encoded coordinates in that gamut (0-1 scale), each in [0, 1], with
+ * its alpha.
+ *
+ * This is the rule of the interpreter (`gamutMapColor`, `library/colors.ts`):
+ * a color held in OKLCh or OKLab is mapped from its own OKLCh channels, so its
+ * chroma does not go through sRGB first, and any other color (a color in
+ * sRGB, HSV or HSL, or a color string) is mapped from its extended sRGB
+ * channels. A color whose channels `readColorChannels` refuses has `NaN`
+ * channels, and they stay `NaN`: every comparison of the mapping with `NaN`
+ * is false, so it returns the clip of the `NaN` channels, which is `NaN`.
+ */
+function gamutMapInput(
+  input: unknown,
+  gamut: ColorGamut
+): { channels: [number, number, number]; alpha: number | undefined } {
+  if (
+    isCompiledColor(input) &&
+    (input.space === 'oklch' || input.space === 'oklab')
+  ) {
+    const c = toOklch(input);
+    return { channels: gamutMapOklch(c.L, c.C, c.H, gamut), alpha: c.alpha };
+  }
+  const rgb = toRgb255(input);
+  return {
+    channels: gamutMapSrgb(rgb.r / 255, rgb.g / 255, rgb.b / 255, gamut),
+    alpha: rgb.alpha,
+  };
+}
+
 /** Color runtime helpers shared by both SYS objects. */
 const colorHelpers = {
   color(input: unknown): CompiledColor {
@@ -7638,10 +7745,30 @@ const colorHelpers = {
     return mkColor('oklch', c.L, c.C, c.H, c.alpha);
   },
   colorToString(input: unknown, format?: string): string {
-    const rgb = toRgb255(input);
     const fmt = (format ?? 'hex').toLowerCase();
+    if (fmt === 'display-p3') {
+      const p3 = gamutMapInput(input, 'display-p3');
+      return displayP3String(p3.channels, p3.alpha);
+    }
+    // The hex, `srgb`, `rgb` and `hsl` formats are sRGB: the color is first
+    // mapped into the sRGB gamut with the CSS Color 4 gamut mapping, as the
+    // interpreter does. A clip of each channel changed the hue:
+    // `Oklch(0.7, 0.4, 30)` was `#ff0000` here and `#ff5843` there. The
+    // `oklch` format has no gamut and is not mapped.
+    let rgb: { r: number; g: number; b: number; alpha?: number } = {
+      r: NaN,
+      g: NaN,
+      b: NaN,
+    };
+    if (fmt === 'hex' || fmt === 'srgb' || fmt === 'rgb' || fmt === 'hsl') {
+      const mapped = gamutMapInput(input, 'srgb');
+      const [r, g, b] = mapped.channels;
+      rgb = { r: r * 255, g: g * 255, b: b * 255 };
+      if (mapped.alpha !== undefined) rgb.alpha = mapped.alpha;
+    }
     switch (fmt) {
-      case 'hex': {
+      case 'hex':
+      case 'srgb': {
         const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
         const g = Math.round(Math.max(0, Math.min(255, rgb.g)));
         const b = Math.round(Math.max(0, Math.min(255, rgb.b)));
@@ -8027,6 +8154,39 @@ const colorHelpers = {
   // (asRgb/asHsv/asHsl) use 0-1 channels for consistency with the GPU
   // target's shader convention.
   // -----------------------------------------------------------------------
+  /**
+   * `GamutMap`: map a color into `gamutName` ("srgb", the default, or
+   * "display-p3") with the CSS Color 4 gamut mapping, and answer it as a
+   * color in sRGB, tagged `rgb`, as the interpreter answers an `Rgb` head.
+   * For "display-p3" the channels are extended sRGB: a color inside the
+   * Display-P3 gamut but outside the sRGB gamut has a channel outside
+   * [0, 1].
+   *
+   * A color already in sRGB and inside the gamut is returned with its own
+   * channels, as the interpreter returns such an `Rgb` head unchanged. For
+   * "srgb" that requires each channel in [0, 1]; a channel a little outside
+   * (within the tolerance of the gamut test) is mapped, which clips it.
+   */
+  gamutMap(input: unknown, gamutName = 'srgb'): CompiledColor {
+    const gamut = readColorGamut(gamutName);
+    if (gamut === undefined)
+      throw new Error(
+        `Unknown gamut: ${gamutName} — the gamut is "srgb" or "display-p3"`
+      );
+    if (isCompiledColor(input) && input.space === 'rgb') {
+      const ch = readColorChannels('rgb', input.c0, input.c1, input.c2);
+      if (ch !== undefined) {
+        const inside =
+          gamut === 'srgb'
+            ? ch.every((x) => x >= 0 && x <= 1)
+            : inGamut(srgbToGamut(ch, gamut));
+        if (inside) return mkColor('rgb', ch[0], ch[1], ch[2], input.alpha);
+      }
+    }
+    const mapped = gamutMapInput(input, gamut);
+    const [r, g, b] = gamutToSrgb(mapped.channels, gamut);
+    return mkColor('rgb', r, g, b, mapped.alpha);
+  },
   asRgb(input: unknown): CompiledColor {
     const rgb = toRgb255(input);
     return mkColor('rgb', rgb.r / 255, rgb.g / 255, rgb.b / 255, rgb.alpha);
@@ -8125,6 +8285,59 @@ const colorHelpers = {
       // test for the same reason.
       if (d === Infinity || d === -Infinity) return Infinity;
       sumSq += d * d;
+    }
+    return Math.sqrt(sumSq);
+  },
+
+  // `distance` over points whose coordinates may be `{re, im}` objects: the
+  // same broadcast, with `pointDistanceAny` as the scalar leg. The compiler
+  // emits it when the lane of the coordinates is not real
+  // (`BaseCompiler.linearAlgebraLane`). Its value is a real number for real
+  // and complex coordinates alike, so it has no complex counterpart.
+  distanceAny(a: unknown, b: unknown): number | number[] {
+    if (!Array.isArray(a) || !Array.isArray(b))
+      throw new Error('Distance: expected two arrays');
+    const aList = a.length === 0 || Array.isArray(a[0]);
+    const bList = b.length === 0 || Array.isArray(b[0]);
+    if (!aList && !bList) return colorHelpers.pointDistanceAny(a, b);
+    if (aList && bList) {
+      if (a.length !== b.length)
+        throw new Error('Distance: dimension mismatch');
+      return a.map((p, i) => colorHelpers.pointDistanceAny(p, b[i]));
+    }
+    if (aList) return a.map((p) => colorHelpers.pointDistanceAny(p, b));
+    return b.map((p) => colorHelpers.pointDistanceAny(a, p));
+  },
+
+  // The scalar leg of `distanceAny`. The distance is the norm of the
+  // difference, `√(Σ|aᵢ − bᵢ|²)`, so a complex coordinate difference
+  // contributes its squared modulus. A real difference contributes `d²`
+  // exactly as in `pointDistance`, and the infinite-difference rule is the
+  // same.
+  pointDistanceAny(a: unknown, b: unknown): number {
+    if (!Array.isArray(a) || !Array.isArray(b))
+      throw new Error('Distance: expected points (flat numeric arrays)');
+    if (a.length !== b.length || a.length === 0)
+      throw new Error('Distance: dimension mismatch');
+    let sumSq = 0;
+    for (let i = 0; i < a.length; i++) {
+      if (
+        (typeof a[i] !== 'number' && !isComplexObject(a[i])) ||
+        (typeof b[i] !== 'number' && !isComplexObject(b[i]))
+      )
+        throw new Error('Distance: expected points (flat numeric arrays)');
+      const p = complexEntry(a[i]);
+      const q = complexEntry(b[i]);
+      const dr = p.re - q.re;
+      const di = p.im - q.im;
+      if (
+        dr === Infinity ||
+        dr === -Infinity ||
+        di === Infinity ||
+        di === -Infinity
+      )
+        return Infinity;
+      sumSq += dr * dr + di * di;
     }
     return Math.sqrt(sumSq);
   },
@@ -8692,6 +8905,131 @@ function select(...clauses: Array<() => unknown>): unknown {
   return out;
 }
 
+// --- Complex entries of the linear-algebra helpers ------------------------
+//
+// Compiled code holds a complex entry of a vector or a matrix as a `{re, im}`
+// object (`[x, i]` lowers to `[x, { re: 0, im: 1 }]`).
+//
+// Each linear-algebra helper therefore has two forms. The plain form (`det`,
+// `matmul`, `inv`, `trace`, `cross`, `matpow`, `pointdot`) does real
+// arithmetic only. The complex form (`complexDet`, `complexMatmul`, …) lifts
+// every entry to `{re, im}` and computes with complex arithmetic, and EVERY
+// entry of its result is a `{re, im}` object, even an entry whose imaginary
+// part is zero. The compiler chooses the form from the lane of the operands
+// (`BaseCompiler.linearAlgebraLane`), and a parent expression reads the
+// result with the same answer (`BaseCompiler.isComplexValued`). So the
+// choice is made when the code is compiled, and no helper tests its operands
+// for a complex entry when the code runs.
+//
+// The two forms are separate functions on purpose. A plain helper that
+// scanned its own operands became more than twice as slow on a 100×100 real
+// matrix (`det`: 320 → 740 µs) once any helper in the process had met a
+// complex entry. A plain helper that never meets a `{re, im}` object keeps
+// its speed.
+
+/** The `{re, im}` form of one entry: a number is lifted, a `{re, im}` object
+ * passes through, and anything else (a nested array where a scalar was
+ * expected, a string) is NaN. */
+function complexEntry(v: unknown): ComplexResult {
+  if (typeof v === 'number') return { re: v, im: 0 };
+  if (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as ComplexResult).re === 'number' &&
+    typeof (v as ComplexResult).im === 'number'
+  )
+    return v as ComplexResult;
+  return { re: NaN, im: NaN };
+}
+
+const cxAdd = (a: ComplexResult, b: ComplexResult): ComplexResult => ({
+  re: a.re + b.re,
+  im: a.im + b.im,
+});
+const cxSub = (a: ComplexResult, b: ComplexResult): ComplexResult => ({
+  re: a.re - b.re,
+  im: a.im - b.im,
+});
+const cxMul = (a: ComplexResult, b: ComplexResult): ComplexResult => ({
+  re: a.re * b.re - a.im * b.im,
+  im: a.re * b.im + a.im * b.re,
+});
+/** `a / b`, scaled by the larger part of the divisor so that no square of a
+ * part is formed (the same formula `_SYS.cdivedge` uses). The linear-algebra
+ * callers divide only by a pivot, which is not zero; a zero divisor gives
+ * NaN parts. */
+function cxDiv(a: ComplexResult, b: ComplexResult): ComplexResult {
+  if (Math.abs(b.re) >= Math.abs(b.im)) {
+    const r = b.im / b.re;
+    const den = b.re + b.im * r;
+    return { re: (a.re + a.im * r) / den, im: (a.im - a.re * r) / den };
+  }
+  const r = b.re / b.im;
+  const den = b.re * r + b.im;
+  return { re: (a.re * r + a.im) / den, im: (a.im * r - a.re) / den };
+}
+/** `|z|`, used to choose a pivot and to test it for zero. */
+const cxAbs = (z: ComplexResult): number => Math.hypot(z.re, z.im);
+
+/** A matrix (or a vector) with every entry in `{re, im}` form. */
+const complexEntries = (m: any): any =>
+  Array.isArray(m)
+    ? m.map((v: unknown) =>
+        Array.isArray(v) ? complexEntries(v) : complexEntry(v)
+      )
+    : complexEntry(m);
+
+/**
+ * `matmul` over operands that hold a complex entry: the same dimensionality
+ * dispatch, with complex arithmetic. The inner product does not conjugate
+ * either operand, as in the interpreter (`Dot([1+i, 2], [1-i, i])` is
+ * `2 + 2i`).
+ */
+function complexMatmul(a: any, b: any): any {
+  const aM = Array.isArray(a?.[0]);
+  const bM = Array.isArray(b?.[0]);
+  const A = complexEntries(a);
+  const B = complexEntries(b);
+  const zero = (): ComplexResult => ({ re: 0, im: 0 });
+  if (!aM && !bM) {
+    // A scalar result is `{re, im}` even on a length mismatch, so that the
+    // parent, which reads it as complex, reads NaN parts.
+    if (A.length !== B.length) return { re: NaN, im: NaN };
+    let s = zero();
+    for (let i = 0; i < A.length; i++) s = cxAdd(s, cxMul(A[i], B[i]));
+    return s;
+  }
+  if (aM && !bM)
+    return A.map((row: ComplexResult[]) => {
+      if (row.length !== B.length) return { re: NaN, im: NaN };
+      let s = zero();
+      for (let i = 0; i < row.length; i++) s = cxAdd(s, cxMul(row[i], B[i]));
+      return s;
+    });
+  if (!aM && bM) {
+    if (A.length !== B.length) return NaN;
+    const n = B[0].length;
+    const out: ComplexResult[] = Array.from({ length: n }, zero);
+    for (let i = 0; i < A.length; i++)
+      for (let j = 0; j < n; j++) out[j] = cxAdd(out[j], cxMul(A[i], B[i][j]));
+    return out;
+  }
+  const m = A.length;
+  const k = A[0].length;
+  if (B.length !== k) return NaN;
+  const n = B[0].length;
+  const out: ComplexResult[][] = [];
+  for (let i = 0; i < m; i++) {
+    const row: ComplexResult[] = Array.from({ length: n }, zero);
+    for (let p = 0; p < k; p++) {
+      const v = A[i][p];
+      for (let j = 0; j < n; j++) row[j] = cxAdd(row[j], cxMul(v, B[p][j]));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * Product dispatch on dimensionality, mirroring the interpreter's
  * `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
@@ -8776,6 +9114,31 @@ function pointdot(a: any, b: any, aList: boolean, bList: boolean): any {
       : NaN;
   if (aList) return a.map((p: number[]) => inner(p, b));
   if (bList) return b.map((q: number[]) => inner(a, q));
+  return inner(a, b);
+}
+
+/**
+ * The complex form of `pointdot`: every inner product is computed with
+ * complex arithmetic, without conjugation (as in the interpreter), and is a
+ * `{re, im}` object. See the note above `complexEntry`.
+ */
+function complexPointdot(a: any, b: any, aList: boolean, bList: boolean): any {
+  const inner = (p: unknown[], q: unknown[]): ComplexResult => {
+    if (!Array.isArray(p) || !Array.isArray(q) || p.length !== q.length)
+      return { re: NaN, im: NaN };
+    let s: ComplexResult = { re: 0, im: 0 };
+    for (let i = 0; i < p.length; i++)
+      s = cxAdd(s, cxMul(complexEntry(p[i]), complexEntry(q[i])));
+    return s;
+  };
+  if (aList && !Array.isArray(a)) return NaN;
+  if (bList && !Array.isArray(b)) return NaN;
+  if (aList && bList)
+    return a.length === b.length
+      ? a.map((p: unknown[], i: number) => inner(p, b[i]))
+      : NaN;
+  if (aList) return a.map((p: unknown[]) => inner(p, b));
+  if (bList) return b.map((q: unknown[]) => inner(a, q));
   return inner(a, b);
 }
 
@@ -9003,6 +9366,139 @@ function matinv(m: number[][]): number[][] | number {
     }
   }
   return a.map((row) => row.slice(n));
+}
+
+/**
+ * `matinv` over a square matrix with a complex entry: the same Gauss–Jordan
+ * elimination with complex arithmetic, the pivot chosen by modulus. A
+ * singular matrix yields NaN.
+ */
+function complexMatinv(m: unknown[][]): ComplexResult[][] | number {
+  const n = m.length;
+  const a: ComplexResult[][] = m.map((row, i) => [
+    ...row.map(complexEntry),
+    ...Array.from({ length: n }, (_, j) => ({ re: i === j ? 1 : 0, im: 0 })),
+  ]);
+  for (let i = 0; i < n; i++) {
+    let piv = i;
+    for (let r = i + 1; r < n; r++)
+      if (cxAbs(a[r][i]) > cxAbs(a[piv][i])) piv = r;
+    if (cxAbs(a[piv][i]) === 0) return NaN;
+    if (piv !== i) [a[i], a[piv]] = [a[piv], a[i]];
+    const f = a[i][i];
+    for (let c = 0; c < 2 * n; c++) a[i][c] = cxDiv(a[i][c], f);
+    for (let r = 0; r < n; r++) {
+      if (r === i) continue;
+      const g = a[r][i];
+      if (g.re === 0 && g.im === 0) continue;
+      for (let c = 0; c < 2 * n; c++)
+        a[r][c] = cxSub(a[r][c], cxMul(g, a[i][c]));
+    }
+  }
+  return a.map((row) => row.slice(n));
+}
+
+/**
+ * Determinant by Gaussian elimination with partial pivoting over a square
+ * matrix with a complex entry; the pivot is chosen by modulus.
+ */
+function complexDet(m: unknown[][]): ComplexResult {
+  const n = m.length;
+  const a: ComplexResult[][] = m.map((row) => row.map(complexEntry));
+  let d: ComplexResult = { re: 1, im: 0 };
+  for (let i = 0; i < n; i++) {
+    let piv = i;
+    for (let r = i + 1; r < n; r++)
+      if (cxAbs(a[r][i]) > cxAbs(a[piv][i])) piv = r;
+    if (cxAbs(a[piv][i]) === 0) return { re: 0, im: 0 };
+    if (piv !== i) {
+      [a[i], a[piv]] = [a[piv], a[i]];
+      d = { re: -d.re, im: -d.im };
+    }
+    d = cxMul(d, a[i][i]);
+    for (let r = i + 1; r < n; r++) {
+      const f = cxDiv(a[r][i], a[i][i]);
+      for (let c = i; c < n; c++) a[r][c] = cxSub(a[r][c], cxMul(f, a[i][c]));
+    }
+  }
+  return d;
+}
+
+/** Whether `m` is a non-empty square matrix. */
+function isSquareMatrix(m: unknown): m is unknown[][] {
+  const n = Array.isArray(m) ? m.length : 0;
+  return (
+    n > 0 &&
+    (m as unknown[]).every((row) => Array.isArray(row) && row.length === n)
+  );
+}
+
+// The complex forms of the linear-algebra helpers that have no standalone
+// function above. Each one returns `{re, im}` entries only. See the note above
+// `complexEntry`.
+
+function complexDetOrNaN(m: unknown): ComplexResult {
+  return isSquareMatrix(m) ? complexDet(m) : { re: NaN, im: NaN };
+}
+
+function complexInvOrNaN(m: unknown): ComplexResult[][] | number {
+  return isSquareMatrix(m) ? complexMatinv(m) : NaN;
+}
+
+/** A matrix with a complex entry ANYWHERE has a `{re, im}` trace, even when
+ * its diagonal is real. */
+function complexTrace(m: unknown): ComplexResult {
+  if (!Array.isArray(m) || !Array.isArray(m[0])) return { re: NaN, im: NaN };
+  let re = 0;
+  let im = 0;
+  for (let i = 0; i < Math.min(m.length, m[0].length); i++) {
+    // An array on the diagonal (a tensor of rank > 2) has no trace, as in
+    // `trace`.
+    const v: unknown = m[i][i];
+    if (Array.isArray(v)) return { re: NaN, im: NaN };
+    const z = complexEntry(v);
+    re += z.re;
+    im += z.im;
+  }
+  return { re, im };
+}
+
+/** No conjugation of either operand, as in the interpreter. */
+function complexCross(a: unknown, b: unknown): ComplexResult[] | number {
+  if (!Array.isArray(a) || !Array.isArray(b)) return NaN;
+  if (a.length !== 3 || b.length !== 3) return NaN;
+  const [a0, a1, a2] = a.map(complexEntry);
+  const [b0, b1, b2] = b.map(complexEntry);
+  return [
+    cxSub(cxMul(a1, b2), cxMul(a2, b1)),
+    cxSub(cxMul(a2, b0), cxMul(a0, b2)),
+    cxSub(cxMul(a0, b1), cxMul(a1, b0)),
+  ];
+}
+
+/** The complex form mirrors `matpow` step by step; the identity of `M^0` has
+ * `{re, im}` entries too. */
+function complexMatpow(m: unknown, p: number): ComplexResult[][] | number {
+  if (!isSquareMatrix(m)) return NaN;
+  const n = m.length;
+  if (!Number.isInteger(p)) return NaN;
+  if (Math.abs(p) > MAX_MATRIX_POWER_EXPONENT) return NaN;
+  let base: ComplexResult[][];
+  let e = p;
+  if (e < 0) {
+    const inv = complexMatinv(m);
+    if (!Array.isArray(inv)) return NaN;
+    base = inv;
+    e = -e;
+  } else base = complexEntries(m);
+  let result: ComplexResult[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => ({ re: i === j ? 1 : 0, im: 0 }))
+  );
+  for (; e > 0; e = Math.floor(e / 2)) {
+    if (e % 2 === 1) result = complexMatmul(result, base);
+    if (e > 1) base = complexMatmul(base, base);
+  }
+  return result;
 }
 
 /**
@@ -9981,19 +10477,30 @@ const SYS_HELPERS = {
   // OWNING ENGINE, so they are bound per compiled artifact by
   // `makeSysHelpers(ce)` below. A shared instance would have to reach a
   // module-level slot — a process singleton cross-contaminating engines.
-  // --- Linear algebra (real, nested-array representation) ----------------
+  // --- Linear algebra (nested-array representation) ------------------------
   // Dimension mismatches yield NaN (the interpreter's error/inert result
-  // projected onto a real target).
+  // projected onto a real target). Each helper has a real-only plain form
+  // and a complex form that computes with `{re, im}` entries; the compiler
+  // picks one from the lane of the operands (see `complexEntry`).
   //
   // Product dispatch on dimensionality, mirroring the interpreter's
   // `Dot`/`MatrixMultiply`: vector·vector → scalar, matrix·vector → vector,
   // vector·matrix → vector, matrix·matrix → matrix.
   matmul,
+  // The complex forms, emitted when the lane of the operands is complex —
+  // see the note above `complexEntry`.
+  complexMatmul,
+  complexDet: complexDetOrNaN,
+  complexInv: complexInvOrNaN,
+  complexTrace,
+  complexCross,
+  complexMatpow,
   // The broadcasting `Dot` over a LIST OF POINTS — one inner product per
   // point. Separate from `matmul` because an array of points and an array of
   // matrix rows are the same run-time shape but contract differently. The
   // last two arguments say which operand the static type called a list.
   pointdot,
+  complexPointdot,
   // Interpreter-faithful `Multiply` over a mix of scalars and (possibly
   // nested) real arrays whose collection-ness was not statically provable —
   // see `tryCompileBroadcast`'s ≥2-possibly-collection branch.
@@ -10742,6 +11249,33 @@ const SYS_HELPERS = {
     }
     return toRI(zz.pow(ww));
   },
+  // `Root(z, n)` over a complex-lane radicand or degree. A radicand whose
+  // imaginary part is exactly zero, under an odd integer degree, has the REAL
+  // root the interpreter answers (`Root(-8, 3)` is `-2`, not the principal
+  // value `1 + 1.732i`); the real lane computes it the same way. Any other
+  // pair takes the principal value `z^(1/n)`, as the interpreter does
+  // (`Root(0.5 + 0.25i, 3)` is `0.8140 + 0.1268i`).
+  croot: (
+    z: number | ComplexResult,
+    n: number | ComplexResult
+  ): ComplexResult => {
+    const zz = typeof z === 'number' ? { re: z, im: 0 } : z;
+    const nn = typeof n === 'number' ? { re: n, im: 0 } : n;
+    if (
+      zz.im === 0 &&
+      nn.im === 0 &&
+      Number.isInteger(nn.re) &&
+      nn.re % 2 !== 0
+    )
+      return {
+        re:
+          nn.re === 3
+            ? Math.cbrt(zz.re)
+            : Math.sign(zz.re) * Math.pow(Math.abs(zz.re), 1 / nn.re),
+        im: 0,
+      };
+    return SYS_HELPERS.cpow(zz, cxDiv({ re: 1, im: 0 }, nn));
+  },
   // The reciprocal kernels have a pole at zero, where the complex library
   // answers `NaN`. The interpreter answers `~oo` for `cot 0` and `csc 0`, and
   // `+∞` for `coth 0` and `csch 0`.
@@ -11212,15 +11746,90 @@ function makeSysHelpers(ce: ComputeEngine): SysHelpers {
  *   summand bound to a number gives the scalar sum, not `NaN` (see
  *   `test/compute-engine/compile-elementwise-bigop.test.ts`). Carrier contract:
  *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`;
+ * - analyzed as a collection whose ENTRIES are read on the real lane (a
+ *   declared type with a collection member and no complex leaf, in `strict`
+ *   or `auto` mode, or a type that proves every entry real, in any mode —
+ *   `BaseCompiler.realLaneEntryCheck`): when the value is a plain `Array`,
+ *   every entry is visited, through nested arrays, and a `{re, im}` entry
+ *   THROWS a `TypeError` that names the binding and the entry. When the type
+ *   proves every entry a number, any other entry that is not a number (a
+ *   string, `null`) throws too, except `undefined`, an absent cell. The linear-algebra heads read a
+ *   `matrix<number>` operand as real in these modes, and would otherwise
+ *   give `NaN` or a wrong number for a complex entry;
  * - anything else (a string, a boolean, an array, `undefined`) is left to
  *   today's behavior.
  *
- * One `typeof` per checked binding per call. The vars object is never mutated
- * (a lifted copy is built only when a lift or a typed-array copy is needed).
+ * One `typeof` per checked binding per call, plus one per entry of each
+ * collection whose entries are checked. The vars object is never mutated (a
+ * lifted copy is built only when a lift or a typed-array copy is needed).
  */
 type EntryPlan =
-  | { kind: 'vars'; real: string[]; complex: string[]; lists: string[] }
-  | { kind: 'args'; real: number[]; complex: number[]; lists: number[] };
+  | {
+      kind: 'vars';
+      real: string[];
+      complex: string[];
+      lists: string[];
+      entries: Map<string, RealEntryCheck>;
+    }
+  | {
+      kind: 'args';
+      real: number[];
+      complex: number[];
+      lists: number[];
+      entries: Map<number, RealEntryCheck>;
+    };
+
+/**
+ * The entry check of one collection-valued binding read on the real lane,
+ * keyed in `EntryPlan.entries` by the name of the free symbol or the index
+ * of the parameter: `numbers` is whether every entry must be a number
+ * (otherwise only a `{re, im}` entry is refused), and `label` the binding
+ * and its declared type as the diagnostic shows them. Every key of
+ * `entries` is also in `real`, `complex` or `lists`, and the check runs in
+ * that loop, on the value it has read: the vars object is read once per
+ * binding (a getter on it runs once).
+ */
+type RealEntryCheck = { numbers: boolean; depth: number; label: string };
+
+/**
+ * Run the entry check `check` of a binding on its value `x`, when `x` is a
+ * plain array, and return the value the compiled code reads: `x` itself, or,
+ * when an entry of `x` at any depth is a numeric typed array (a
+ * `Float64Array` row of a matrix), a copy of `x` in which each such typed
+ * array is replaced by a plain `Array`. The compiled code reads plain arrays
+ * only: the `det` helper, for one, answers `NaN` for a typed-array row. A
+ * top-level typed array is not an `Array` and is returned unchanged; the
+ * list rule of `checkEntry` copies it.
+ */
+function checkBindingEntries(
+  check: RealEntryCheck | undefined,
+  x: unknown
+): unknown {
+  if (check === undefined || !Array.isArray(x)) return x;
+  sawTypedArrayEntry = false;
+  checkRealEntries(x, check.numbers, check.depth, check.label);
+  return sawTypedArrayEntry ? copyNestedTypedArrays(x) : x;
+}
+
+/**
+ * Set by `realEntryAdmitted` when it admits a numeric typed array as an
+ * entry, and reset by `checkBindingEntries` before each walk. A flag, and
+ * not a return value of the walk, so that the walk of an array of numbers
+ * (the common case) does no extra work.
+ */
+let sawTypedArrayEntry = false;
+
+/** A copy of the array `x` in which each numeric typed array, at any depth,
+ * is a plain `Array`. A hole of `x` stays a hole. */
+function copyNestedTypedArrays(x: unknown[]): unknown[] {
+  return x.map((e) =>
+    Array.isArray(e)
+      ? copyNestedTypedArrays(e)
+      : isNumericTypedArray(e)
+        ? copyToPlainArray(e)
+        : e
+  );
+}
 
 const isComplexObject = (v: unknown): v is ComplexResult =>
   typeof v === 'object' &&
@@ -11247,6 +11856,117 @@ const isUnsignedPole = (v: ComplexResult): boolean =>
     v.re === -Infinity ||
     v.im === Infinity ||
     v.im === -Infinity);
+
+/**
+ * Throw when an entry of the array `x`, at any depth, is a `{re, im}` object
+ * or, when `numbers` is set, anything that is not a number or `undefined`
+ * (`realEntryAdmitted`). `label` names the binding. The walk goes into an
+ * array at ANY depth and never refuses one: a declared type constrains what
+ * the engine assigns, not what a caller supplies, and a caller may pass a
+ * matrix where a point was declared (the compiled code then hands the value
+ * to the run-time helper, which reads its rank; pinned in
+ * `compile-static-point-components.test.ts`). `depth` is kept for the
+ * diagnostic path only.
+ *
+ * The walk is split in two functions that call each other, one for the
+ * arrays at an even depth and one for the arrays at an odd depth, so that
+ * the element read of each function sees one kind of array in a vector or a
+ * matrix: the outer array of a matrix holds arrays, and its rows hold
+ * numbers. A single recursive function that read both kinds made the `det`
+ * helper that ran next on the same matrix more than twice as slow (100×100:
+ * 320 → 720 µs, measured 2026-09-24 on Node, reproducible in a separate
+ * process), while this form leaves it at 320 µs and walks the matrix in
+ * about 1.4 µs. The entry path of the diagnostic is found by a second walk
+ * (`realEntryError`), only when the check fails.
+ */
+function checkRealEntries(
+  x: unknown[],
+  numbers: boolean,
+  depth: number,
+  label: string
+): void {
+  if (!realEntriesEven(x, numbers, depth))
+    throw realEntryError(x, numbers, depth, label);
+}
+
+function realEntriesEven(
+  x: unknown[],
+  numbers: boolean,
+  depth: number
+): boolean {
+  const n = x.length;
+  for (let i = 0; i < n; i++) {
+    const e = x[i];
+    if (typeof e === 'number') continue;
+    if (Array.isArray(e)) {
+      if (!realEntriesOdd(e, numbers, depth - 1)) return false;
+    } else if (!realEntryAdmitted(e, numbers)) return false;
+  }
+  return true;
+}
+
+function realEntriesOdd(
+  x: unknown[],
+  numbers: boolean,
+  depth: number
+): boolean {
+  const n = x.length;
+  for (let i = 0; i < n; i++) {
+    const e = x[i];
+    if (typeof e === 'number') continue;
+    if (Array.isArray(e)) {
+      if (!realEntriesEven(e, numbers, depth - 1)) return false;
+    } else if (!realEntryAdmitted(e, numbers)) return false;
+  }
+  return true;
+}
+
+/** Whether an entry that is neither a number nor an array is admitted: never
+ * a `{re, im}` object; `undefined` always, because an absent cell (a hole,
+ * or a written `Missing`) is read by the lowerings that accept one (the
+ * numeric selection fusion tests every cell for it); a typed array of
+ * numbers at any depth, recorded in `sawTypedArrayEntry` so that the value
+ * is copied to plain arrays; anything else only when `numbers` is not
+ * set. */
+function realEntryAdmitted(e: unknown, numbers: boolean): boolean {
+  if (e === undefined) return true;
+  if (isComplexObject(e)) return false;
+  if (isNumericTypedArray(e)) {
+    sawTypedArrayEntry = true;
+    return true;
+  }
+  return !numbers;
+}
+
+/** The diagnostic of `checkRealEntries`: the first entry of `x` that is not
+ * admitted, with its path (`[1][0]`). */
+function realEntryError(
+  x: unknown[],
+  numbers: boolean,
+  depth: number,
+  label: string,
+  path = ''
+): TypeError {
+  for (let i = 0; i < x.length; i++) {
+    const e = x[i];
+    if (typeof e === 'number') continue;
+    const at = `${path}[${i}]`;
+    if (Array.isArray(e)) {
+      const error = realEntryError(e, numbers, depth - 1, label, at);
+      if (error.message !== '') return error;
+      continue;
+    }
+    if (isComplexObject(e))
+      return new TypeError(
+        `${label} was compiled with real entries, but its entry ${at} is a complex {re, im} value. Declare complex entries (for example \`matrix<complex>\` or \`list<complex>\`), or compile with \`mode: 'complex'\`.`
+      );
+    if (!realEntryAdmitted(e, numbers))
+      return new TypeError(
+        `${label} was compiled with number entries, but its entry ${at} is ${e === null ? 'null' : typeof e === 'object' ? 'an object' : `a ${typeof e}`}, not a number.`
+      );
+  }
+  return new TypeError('');
+}
 
 function entryCheckError(binding: string): TypeError {
   return new TypeError(
@@ -11316,6 +12036,12 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
     // float encoding of it.
     for (const id of plan.real) {
       const x = v[id];
+      const read = checkBindingEntries(plan.entries.get(id), x);
+      if (read !== x) {
+        lifted ??= { ...v };
+        lifted[id] = read;
+        continue;
+      }
       if (!isComplexObject(x)) continue;
       if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
       lifted ??= { ...v };
@@ -11323,7 +12049,11 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
     }
     for (const id of plan.complex) {
       const x = v[id];
-      if (typeof x === 'number') {
+      const read = checkBindingEntries(plan.entries.get(id), x);
+      if (read !== x) {
+        lifted ??= { ...v };
+        lifted[id] = read;
+      } else if (typeof x === 'number') {
         lifted ??= { ...v };
         lifted[id] = { re: x, im: 0 };
       }
@@ -11334,6 +12064,12 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
     // shape, so a narrower declaration is not enforced here.
     for (const id of plan.lists) {
       const x = v[id];
+      const read = checkBindingEntries(plan.entries.get(id), x);
+      if (read !== x) {
+        lifted ??= { ...v };
+        lifted[id] = read;
+        continue;
+      }
       if (!isNumericTypedArray(x)) continue;
       lifted ??= { ...v };
       lifted[id] = copyToPlainArray(x);
@@ -11345,6 +12081,12 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
   // free-symbol route above.
   for (const i of plan.real) {
     const x = argumentsList[i];
+    const read = checkBindingEntries(plan.entries.get(i), x);
+    if (read !== x) {
+      lifted ??= [...argumentsList];
+      lifted[i] = read;
+      continue;
+    }
     if (!isComplexObject(x)) continue;
     if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
     lifted ??= [...argumentsList];
@@ -11352,7 +12094,11 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
   }
   for (const i of plan.complex) {
     const x = argumentsList[i];
-    if (typeof x === 'number') {
+    const read = checkBindingEntries(plan.entries.get(i), x);
+    if (read !== x) {
+      lifted ??= [...argumentsList];
+      lifted[i] = read;
+    } else if (typeof x === 'number') {
       lifted ??= [...argumentsList];
       lifted[i] = { re: x, im: 0 };
     }
@@ -11361,6 +12107,12 @@ function checkEntry(plan: EntryPlan, argumentsList: unknown[]): unknown[] {
   // free-symbol route above.
   for (const i of plan.lists) {
     const x = argumentsList[i];
+    const read = checkBindingEntries(plan.entries.get(i), x);
+    if (read !== x) {
+      lifted ??= [...argumentsList];
+      lifted[i] = read;
+      continue;
+    }
     if (!isNumericTypedArray(x)) continue;
     lifted ??= [...argumentsList];
     lifted[i] = copyToPlainArray(x);
@@ -11901,6 +12653,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       functions: (id) => JAVASCRIPT_FUNCTIONS[id],
       constant: (id) => JAVASCRIPT_CONSTANTS[id],
       collectionAwareHeads: JS_COLLECTION_AWARE_HEADS,
+      isRealOnlyLowering: jsIsRealOnlyLowering,
       // Free symbols read through the vars object bound to `_` (see the
       // `_.<id>` emissions below), so a lambda parameter spelled `_` must not
       // shadow it — see `CompileTarget.varsObjectName`.
@@ -12365,10 +13118,101 @@ function isListEntryType(t: Type): boolean {
 }
 
 /**
+ * The run-time entry check of a binding with the type `t`, or `undefined`
+ * when the entries are not checked (`BaseCompiler.realLaneEntryCheck`).
+ * `label` names the binding in the diagnostic.
+ */
+function realEntryCheckOf(
+  t: Type,
+  complexMode: boolean,
+  label: string
+): RealEntryCheck | undefined {
+  const check = BaseCompiler.realLaneEntryCheck(t, complexMode);
+  if (check === undefined) return undefined;
+  const numbers = check === 'numbers';
+  return {
+    numbers,
+    depth: numbers ? entryArrayDepth(t) : Infinity,
+    label: `${label} (type \`${BaseCompiler.declaredTypeText(t)}\`)`,
+  };
+}
+
+/**
+ * The number of array levels below the top-level array of a value of type
+ * `t`, when every entry type of `t` is at the same level: 0 for a
+ * `vector<real>`, 1 for a `matrix<real>` or a `list<tuple<number, number>>`.
+ * `Infinity` when the levels differ (`list<number | vector<number>>`), or
+ * when the type does not fix them: a bare `list`, a self-referential alias,
+ * or a list of scalars with no dimensions (`list<number>`,
+ * `indexed_collection<real>`). The engine reads a list of numbers with no
+ * dimensions as a tensor of any rank: `Norm` over a `list<number>` symbol
+ * bound to a matrix is the matrix norm. The entry check then accepts any
+ * depth.
+ */
+function entryArrayDepth(t: Type): number {
+  const depths = new Set<number>();
+  entryLeafDepths(t, 0, false, depths, undefined);
+  return depths.size === 1 ? [...depths][0] : Infinity;
+}
+
+/** Add to `out` the depth of each entry type of `t`, where `level` is the
+ * number of array levels above `t` (the walk of
+ * `BaseCompiler.arrayEntryLeaves`) and `anyRank` is whether `t` is the
+ * element type of a list with no dimensions: an entry there may be an
+ * array of any depth. */
+function entryLeafDepths(
+  t: Type,
+  level: number,
+  anyRank: boolean,
+  out: Set<number>,
+  seen: AliasDescent
+): void {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) {
+    out.add(Infinity);
+    return;
+  }
+  const r = unfolded.type;
+  seen = unfolded.seen;
+  if (r === 'list' || r === 'tuple') {
+    out.add(Infinity);
+    return;
+  }
+  if (typeof r !== 'string') {
+    if (r.kind === 'union') {
+      for (const m of r.types) entryLeafDepths(m, level, anyRank, out, seen);
+      return;
+    }
+    if (r.kind === 'tuple') {
+      for (const e of r.elements)
+        entryLeafDepths(e.type, level + 1, false, out, seen);
+      return;
+    }
+    if (r.kind === 'list' || r.kind === 'indexed_collection') {
+      const elt = collectionElementType(r);
+      const open = r.kind !== 'list' || r.dimensions === undefined;
+      entryLeafDepths(elt ?? 'unknown', level + 1, open, out, seen);
+      return;
+    }
+  }
+  if (level > 0) out.add(anyRank ? Infinity : level - 1);
+}
+
+/**
  * The D3 entry plan of the LAMBDA route: parameter `i` is list-shaped when its
  * annotation proves a JS array, complex-shaped when its annotation is a
  * non-real number type, real-shaped otherwise (an unannotated parameter is
  * wide, which the analysis shapes real).
+ *
+ * The entries of a collection-valued parameter are checked when the
+ * parameter is read on the real lane (`realEntryCheckOf`). The type of this
+ * check is the annotation when there is one, and otherwise the type the
+ * engine inferred for the parameter from its uses in the body: in
+ * `(M) ↦ det(M)` the parameter `M` is inferred `matrix`, and the body reads
+ * it with the real `det` helper, so a `{re, im}` entry must throw here as it
+ * does for `(M: matrix<real>) ↦ det(M)`, not give `NaN`. The inferred type
+ * decides the entry check only: an unannotated parameter keeps the
+ * real/complex shape rule above.
  */
 function lambdaEntryPlan(
   literalParams: ReadonlyArray<Expression>,
@@ -12377,6 +13221,7 @@ function lambdaEntryPlan(
   const real: number[] = [];
   const complex: number[] = [];
   const lists: number[] = [];
+  const entries = new Map<number, RealEntryCheck>();
   literalParams.forEach((p, i) => {
     let t: Type | undefined;
     if (isFunction(p, 'Typed')) {
@@ -12394,6 +13239,12 @@ function lambdaEntryPlan(
         }
       }
     }
+    const checkType = t ?? (isSymbol(p) ? p.type.type : undefined);
+    const check =
+      checkType === undefined
+        ? undefined
+        : realEntryCheckOf(checkType, mode === 'complex', `argument ${i + 1}`);
+    if (check !== undefined) entries.set(i, check);
     if (t !== undefined && isListEntryType(t)) {
       lists.push(i);
       return;
@@ -12407,7 +13258,7 @@ function lambdaEntryPlan(
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
   });
-  return { kind: 'args', real, complex, lists };
+  return { kind: 'args', real, complex, lists, entries };
 }
 
 /**
@@ -12427,12 +13278,18 @@ function varsEntryPlan(
   const real: string[] = [];
   const complex: string[] = [];
   const lists: string[] = [];
+  const entries = new Map<string, RealEntryCheck>();
   for (const id of refs) {
     const sym = engine.symbol(id);
     // A symbol whose declared type proves an array is classed as a list
     // instead of as a number: the real/complex rules read the value as a
     // scalar, which an array is not.
     const declared = sym.type?.type;
+    const check =
+      declared === undefined
+        ? undefined
+        : realEntryCheckOf(declared, mode === 'complex', `"${id}"`);
+    if (check !== undefined) entries.set(id, check);
     if (declared !== undefined && isListEntryType(declared)) {
       lists.push(id);
       continue;
@@ -12444,7 +13301,7 @@ function varsEntryPlan(
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
   }
-  return { kind: 'vars', real, complex, lists };
+  return { kind: 'vars', real, complex, lists, entries };
 }
 
 function compileToTarget(
@@ -12966,23 +13823,30 @@ function emitLazyStream(
 }
 
 /**
- * Fail closed (D6) when a linear-algebra operand may hold a complex entry.
- * The `_SYS` helpers behind `Dot`, `MatrixMultiply`, `Cross`, `Determinant`,
- * `Inverse`, `Trace`, `MatrixPower`, `RowReduce` and `Distance` do real
- * arithmetic on the entries, and a `{re, im}` entry makes them answer NaN
- * (or throw) where the interpreter answers a complex value: `Dot([2, i],
- * [1, i])` is `1` there. The interpreter evaluates such an application.
+ * The `_SYS` helper of the linear-algebra head `head` over the collection
+ * operands `operands`: `real`, which does real arithmetic only, when the
+ * lane of the operands is real, and `complex`, which computes with complex
+ * entries and returns `{re, im}` values, when it is complex. The lane is
+ * `BaseCompiler.linearAlgebraLane`, which is also what a parent expression
+ * reads the value of the head with (`BaseCompiler.isComplexValued`), so the
+ * helper and its parent always agree on the representation of the value.
+ *
+ * An operand whose type admits real and complex entries (`matrix<number>`)
+ * has the lane `'wide'` in `strict` and `auto` mode, and is read as real: the
+ * real helper is emitted, and the compiled runner checks the entries of each
+ * collection-valued binding when it is called (`realLaneEntryCheck`), so a
+ * `{re, im}` entry throws instead of reading as NaN.
  */
-function assertRealEntries(
-  kind: string,
-  args: ReadonlyArray<Expression | undefined>
-): void {
-  for (const arg of args)
-    if (arg !== undefined && BaseCompiler.mayHoldComplexElement(arg))
-      throw new Error(
-        `${kind}: the target's lowering does real arithmetic on the entries ` +
-          `and cannot represent a complex entry. Fail closed (D6).`
-      );
+function linearAlgebraHelper(
+  _head: string,
+  real: string,
+  complex: string,
+  operands: ReadonlyArray<Expression | undefined>
+): string {
+  const ops = operands.filter((a): a is Expression => a !== undefined);
+  return BaseCompiler.linearAlgebraLane(ops) === 'complex'
+    ? `_SYS.${complex}`
+    : `_SYS.${real}`;
 }
 
 /**
@@ -13060,6 +13924,59 @@ function elementsArg(
   // array lowering as a JS string. `collArg` refuses it (see
   // `couldBeStringOperand`), which is why this funnel needs no test of its own.
   return collArg(kind, arg, compile, position);
+}
+
+/**
+ * The comparator of the compiled `Sort`/`Ordering`: ascending numeric order,
+ * with NaN LAST. `x === x` is false only for NaN. Two NaN tie, and the native
+ * sort is stable, so they keep their order in the input. The interpreter
+ * gives the same order (`nanLastOrder` in `library/collections.ts`): NaN is
+ * after every real number and after both infinities. The plain `a - b`
+ * comparator that was used before answers NaN for every pair with a NaN, and
+ * `Array.prototype.sort` reads that as a tie, so the result depended on the
+ * position of the NaN in the input.
+ */
+const NAN_LAST_COMPARATOR =
+  '(_a, _b) => _a === _a ? (_b === _b ? _a - _b : -1) : (_b === _b ? 1 : 0)';
+
+/**
+ * Fail closed (D6) when the elements of a `Sort`/`Ordering` source are not
+ * provably numbers.
+ *
+ * The compiled comparator orders numbers only. The interpreter leaves a sort
+ * of booleans, tuples, lists or symbols unevaluated, because it has no order
+ * for them, while the comparator would coerce a boolean to 0 or 1 and read
+ * every pair of arrays as a tie. So an element type that admits any value that
+ * is not a number (`boolean`, `tuple<…>`, `list<…>`, `any`, `unknown`)
+ * does not compile, and the two routes never give different answers.
+ */
+function assertNumericSortElements(kind: string, arg: Expression): void {
+  const elt = collectionElementType(arg.type.type);
+  // A complex value has no order: the interpreter leaves such a sort
+  // unevaluated, and the comparator would read a `{re, im}` pair as a tie.
+  // A complex value that arrives at run time under a `number` element type
+  // is caught by the entry check of the binding; a written complex element
+  // (`Sort([3, 1 + 2i, 1])`) or a `complex` element type is refused here.
+  // (`real` is a subtype of `complex` in this lattice, so the element type
+  // is refused only when it is complex AND not real.)
+  if (
+    elt !== undefined &&
+    ((isSubtype(elt, 'complex') && !isSubtype(elt, 'real')) ||
+      (isFunction(arg, 'List') &&
+        arg.ops.some((x) => BaseCompiler.isComplexValued(x))))
+  )
+    throw new Error(
+      `${kind}: an element is a complex value, which has no order; the ` +
+        `interpreter leaves the sort unevaluated. Fail closed (D6).`
+    );
+  if (elt !== undefined && (elt === 'never' || isSubtype(elt, 'number')))
+    return;
+  throw new Error(
+    `${kind}: the elements (type \`${elt === undefined ? 'unknown' : typeToString(elt)}\`) ` +
+      `are not provably numbers; the compiled sort orders numbers only, ` +
+      `and the interpreter leaves a sort of booleans, tuples or symbols ` +
+      `unevaluated. Fail closed (D6).`
+  );
 }
 
 /**
@@ -13893,7 +14810,12 @@ export function requirePrimitiveElements(kind: string, arg: Expression): void {
   const primitive =
     elt !== undefined &&
     (elt === 'number' ||
-      isSubtype(elt, 'real') ||
+      // The extended reals: `Set` and `includes` use SameValueZero, under
+      // which `Infinity`, `-Infinity` and `NaN` each equal themselves, as
+      // they do for the interpreter's `isSame`. A host that declares
+      // `list<real | signed_infinity | nan>` (a plot axis) was refused while
+      // the wider `list<number>` was admitted.
+      isSubtype(elt, 'real | signed_infinity | nan') ||
       isSubtype(elt, 'boolean') ||
       isSubtype(elt, 'string') ||
       // A character lowers to a one-cluster JS string, so it compares by

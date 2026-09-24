@@ -58,15 +58,25 @@ type ExactComponent = { rat: Rational; rad: number };
  *
  *     (a/b)·√c + (k/l)·√m · i   where a, b, c, k, l, m are integers
  *
- * The representable set is restricted (see `ExactNumericValueData`):
+ * The representable set is one radical times a Gaussian rational,
+ * `√c·(p + q·i)` with `p`, `q` rationals (see `ExactNumericValueData`):
  * - real values: any `(a/b)·√c` (the imaginary component is 0);
- * - Gaussian rationals: both radicals are 1 (e.g. `2+3i`, `1/2-5i/3`);
- * - pure-imaginary radicals: the real component is 0 (e.g. `√2·i`).
+ * - pure-imaginary values: the real component is 0 (e.g. `√2·i`);
+ * - both components non-zero: the two radicals are EQUAL, `c = m` (e.g.
+ *   `2+3i`, where `c = m = 1`, or `√2 + √2·i = √2·(1 + i)`).
  *
- * A value that would need a radical on both non-zero components (e.g.
- * `√2 + √3·i`) is NOT representable: operations whose result leaves the set
- * fall back to the (inexact) float lane via `factory`, exactly as real
- * radical operations do when radicals are incompatible.
+ * This set is closed under multiplication, division, inversion, negation
+ * and conjugation, but not under addition, as the real set is not
+ * (`√2 + √3` has no exact form). A value that would need two DIFFERENT
+ * radicals on its non-zero components (e.g. `1 + √2·i`) is NOT
+ * representable: operations whose result leaves the set fall back to the
+ * (inexact) float lane via `factory`, as real radical operations do when
+ * radicals are incompatible.
+ *
+ * Each value has one stored form: a zero real component stores `radical`
+ * 1, a zero imaginary component stores `imRadical` 1, both radicals are
+ * square-free and both rationals are reduced with a positive denominator.
+ * So two values are equal exactly when their fields are equal (`eq()`).
  *
  * Note that ExactNumericValue does not "know" about BigNumericValue, but
  * BigNumericValue "knows" about ExactNumericValue.
@@ -109,8 +119,8 @@ export class ExactNumericValue extends NumericValue {
   /** The caller is responsible to make sure the input is valid, i.e.
    * - rational is a fraction of integers (but it may not be reduced)
    * - radical is an integer
-   * - the value is in the representable set (Gaussian rational, or a
-   *   single-radical pure form — see the class comment)
+   * - the value is in the representable set (one radical times a Gaussian
+   *   rational — see the class comment)
    */
   constructor(
     value: number | bigint | ExactNumericValueData,
@@ -455,15 +465,16 @@ export class ExactNumericValue extends NumericValue {
 
     w.rational = reducedRational(this.rational);
 
-    // Representable-set invariant: a value with BOTH non-zero components can
-    // carry no radical on either. (Callers must check before constructing.)
+    // Representable-set invariant: a value with BOTH non-zero components
+    // carries the same radical on both. (Callers must check before
+    // constructing.)
     // The assert is gated on `im !== 0` so the real-value hot path pays
     // nothing for it in from-source (assert-live) runs: when `im === 0` the
     // invariant holds vacuously.
     if (this.im !== 0)
       console.assert(
         !Number.isFinite(this.rational[0] as number) ||
-          (this.radical === 1 && this.imRadical === 1)
+          this.radical === this.imRadical
       );
   }
 
@@ -559,15 +570,12 @@ export class ExactNumericValue extends NumericValue {
       if (this.rational[1] == 1 && this.radical === 1) return this;
       return this.factory(this.bignumRe);
     }
-    // A Gaussian integer is its own float representation (mirroring the
-    // real-integer case above); other complex values go to the float lane.
-    if (
-      this.rational[1] == 1 &&
-      this.radical === 1 &&
-      this.imRational[1] == 1 &&
-      this.imRadical === 1
-    )
-      return this;
+    // Every complex value goes to the float lane, a Gaussian integer
+    // (`1 + i`) too: under `.N()` a complex value is always inexact. The
+    // decision stops there: when a float complex value with integer parts
+    // meets an exact value in `add`, `mul` or `div`, `_liftComplex` lifts
+    // it back to an exact value, as an integer machine number is kept exact
+    // in those operations for a real value.
     return this._toFloat();
   }
 
@@ -613,15 +621,18 @@ export class ExactNumericValue extends NumericValue {
           imRadical: this.imRadical,
         });
       }
-      // Gaussian rational (both radicals are 1 by the set invariant):
-      // 1/(a+bi) = (a − bi)/(a² + b²)
+      // One radical times a Gaussian rational (both components carry the
+      // radical r by the set invariant):
+      // 1/(√r·(a+bi)) = √r·(a − bi)/(r·(a² + b²))
       const a = this.rational;
       const b = this.imRational;
-      const invNorm = inverse(add(mul(a, a), mul(b, b)));
+      const r = this.radical;
+      const invNorm = inverse(mul(add(mul(a, a), mul(b, b)), [r, 1]));
       return this.clone({
         rational: mul(a, invNorm),
+        radical: r,
         imRational: neg(mul(b, invNorm)),
-        imRadical: 1,
+        imRadical: r,
       });
     }
 
@@ -946,11 +957,10 @@ export class ExactNumericValue extends NumericValue {
 
     // Complex base: an integer power stays exact (binary exponentiation via
     // the exact `mul`, which falls back to the float lane if an intermediate
-    // leaves the representable set — a value in the set never does: Gaussian
-    // rationals are closed under multiplication, and powers of a
-    // pure-imaginary radical alternate between pure-real and pure-imaginary
-    // radicals). A non-integer exponent has no exact closed form here: use
-    // the float lane.
+    // leaves the representable set — a value in the set never does: values
+    // `√r·(a + bi)` are closed under multiplication, unless the radical of
+    // an intermediate product is too large to store). A non-integer
+    // exponent has no exact closed form here: use the float lane.
     if (this.im !== 0) {
       if (Number.isInteger(exponent) && exponent <= 1024) {
         let result: NumericValue = this.clone(1);
@@ -1074,13 +1084,26 @@ export class ExactNumericValue extends NumericValue {
   sqrt(): NumericValue {
     if (this.isZero || this.isOne) return this;
 
-    // Complex operand: exact when the value is a perfect Gaussian-rational
-    // square — √(a+bi) = x + y·i with x = √((a+|z|)/2), y = sign(b)·√((|z|−a)/2)
-    // — i.e. when |z| and both x, y are rational (√(3+4i) = 2+i, √(2i) = 1+i).
-    // Otherwise the root leaves the representable set: float lane
-    // (`BoxedNumber.sqrt` keeps an exact argument symbolic in that case).
+    // Complex operand: √(a+bi) = x + y·i with x = √((|z|+a)/2) and
+    // y = sign(b)·√((|z|−a)/2). The root is exact when |z| is rational and
+    // x, y are exact values with the SAME radical, which keeps the result in
+    // the representable set: √(3+4i) = 2+i, √(2i) = 1+i, and
+    // √(4i) = √2 + √2·i = √2·(1+i). Otherwise the root leaves the
+    // representable set: float lane (`BoxedNumber.sqrt` keeps an exact
+    // argument symbolic in that case).
+    //
+    // `±i` itself is kept out: `√i` is `(√2/2)·(1+i)`, but
+    // `test/compute-engine/imaginary-unit-spelling.test.ts` requires
+    // `evaluate()` of `√i` to stay a symbolic `Sqrt`.
     if (this.im !== 0) {
-      if (this.radical === 1 && this.imRadical === 1) {
+      if (
+        this.radical === 1 &&
+        this.imRadical === 1 &&
+        !(
+          isZero(this.rational) &&
+          (isOne(this.imRational) || isNegativeOne(this.imRational))
+        )
+      ) {
         const a = this.rational;
         const b = this.imRational;
         const modulus = this.clone({
@@ -1095,17 +1118,25 @@ export class ExactNumericValue extends NumericValue {
           const x = this.clone({
             rational: mul(add(a, modulus.rational), half),
           }).sqrt();
-          if (x instanceof ExactNumericValue && x.im === 0 && x.radical === 1) {
-            const y = this.clone({
-              rational: mul(add(modulus.rational, neg(a)), half),
-            }).sqrt();
-            if (y instanceof ExactNumericValue && y.im === 0 && y.radical === 1)
-              return this.clone({
-                rational: x.rational,
-                imRational: isPositive(b) ? y.rational : neg(y.rational),
-                imRadical: 1,
-              });
-          }
+          const y = this.clone({
+            rational: mul(add(modulus.rational, neg(a)), half),
+          }).sqrt();
+          // `y` is not zero (`b ≠ 0`, so |z| > a). `x` is zero when `a = −|z|`,
+          // which cannot happen for `b ≠ 0` either, but a zero `x` would
+          // carry no radical and is accepted with any radical of `y`.
+          if (
+            x instanceof ExactNumericValue &&
+            x.im === 0 &&
+            y instanceof ExactNumericValue &&
+            y.im === 0 &&
+            (x.isZero || x.radical === y.radical)
+          )
+            return this.clone({
+              rational: x.rational,
+              radical: x.isZero ? 1 : x.radical,
+              imRational: isPositive(b) ? y.rational : neg(y.rational),
+              imRadical: y.radical,
+            });
         }
       }
       return this._toFloat().sqrt();
@@ -1202,13 +1233,24 @@ export class ExactNumericValue extends NumericValue {
           radical: this.imRadical,
         });
       }
-      // Gaussian rational (radicals are 1 by the set invariant):
-      // |a+bi| = √(a²+b²) — exact when the norm has a small representable
-      // square root (perfect squares fold; small norms keep an exact
-      // radical), otherwise `sqrt` falls back to the float lane.
+      // One radical times a Gaussian rational (both components carry the
+      // radical r by the set invariant): |√r·(a+bi)| = √(r·(a²+b²)). The
+      // root is taken in ONE step, of the exact rational r·(a²+b²), with
+      // bigint arithmetic (`exactSqrtParts`). Two steps (`√(a²+b²)`, then a
+      // product with `√r`) sent a norm that is not a perfect square to the
+      // float lane before the product with `√r` could make it one:
+      // `|√2·(1000+1000i)|` = `√(2·2000000)` = 2000 came out as
+      // 1999.999…976. When the root is not one exact value, the result is
+      // the float of the same one-step root. `Abs` does not use that float
+      // under `evaluate()`: it stays symbolic for an exact argument.
       const a = this.rational;
       const b = this.imRational;
-      return this.clone({ rational: add(mul(a, a), mul(b, b)) }).sqrt();
+      const norm = reducedRational(
+        mul([this.radical, 1], add(mul(a, a), mul(b, b)))
+      );
+      const parts = exactSqrtParts(BigInt(norm[0]), BigInt(norm[1]));
+      if (parts) return this.clone(parts);
+      return this.factory(this.clone({ rational: norm }).bignumRe).sqrt();
     }
     return this.sign === -1 ? this.neg() : this;
   }
@@ -1547,15 +1589,36 @@ export class ExactNumericValue extends NumericValue {
           factory
         )
       );
-    // Real radicals (each exact, kept separate)
-    for (const x of radicals)
-      if (!isZero(x.multiple))
+    // Real radicals (each exact, kept separate). A real radical and an
+    // imaginary radical with the same radicand make ONE exact value
+    // `√r·(p + q·i)`, so `√2 + √2·i` has the same form as the product
+    // `√2·(1 + i)`.
+    for (const x of radicals) {
+      if (isZero(x.multiple)) continue;
+      const index = imRadicals.findIndex(
+        (y) => y.radical === x.radical && !isZero(y.multiple)
+      );
+      if (index >= 0) {
+        result.push(
+          new ExactNumericValue(
+            {
+              rational: x.multiple,
+              radical: x.radical,
+              imRational: imRadicals[index].multiple,
+              imRadical: x.radical,
+            },
+            factory
+          )
+        );
+        imRadicals.splice(index, 1);
+      } else
         result.push(
           new ExactNumericValue(
             { rational: x.multiple, radical: x.radical },
             factory
           )
         );
+    }
     // Imaginary radicals (each an exact pure-imaginary value)
     for (const x of imRadicals)
       if (!isZero(x.multiple))
@@ -1617,11 +1680,12 @@ function negComponent(x: ExactComponent): ExactComponent {
 }
 
 /** Is a (re, im) component pair inside the representable set?
- * — real, pure-imaginary, or Gaussian rational (both radicals 1). */
+ * — real, pure-imaginary, or one radical times a Gaussian rational (both
+ * components carry the same radical). */
 function componentsInSet(re: ExactComponent, im: ExactComponent): boolean {
   if (isZero(im.rat)) return true; // real
   if (isZero(re.rat)) return true; // pure imaginary
-  return re.rad === 1 && im.rad === 1; // Gaussian rational
+  return re.rad === im.rad; // √c·(p + q·i)
 }
 
 /** String form of one exact component `rational · √radical` (the shapes
@@ -1801,6 +1865,70 @@ function orderExact(x: ExactNumericValue, y: ExactNumericValue): -1 | 0 | 1 {
   return sa > 0 ? o : (-o as -1 | 0 | 1);
 }
 
+/**
+ * The exact rational value `[numerator, denominator]` of a finite double or
+ * big decimal. A double is a binary fraction `m·2^-k`, and a big decimal is
+ * `significand·10^exponent`, so both are exact rationals; `undefined` for a
+ * value that is not finite.
+ */
+function exactRationalOfInexact(
+  y: number | BigDecimal
+): [bigint, bigint] | undefined {
+  if (typeof y === 'number') {
+    if (!Number.isFinite(y)) return undefined;
+    // Doubling a double is exact until it is an integer (at most 1074 steps
+    // for the smallest subnormal).
+    let m = y;
+    let k = 0;
+    while (!Number.isInteger(m)) {
+      m *= 2;
+      k += 1;
+    }
+    return [BigInt(m), 2n ** BigInt(k)];
+  }
+  if (!y.isFinite()) return undefined;
+  const e = y.exponent;
+  return e >= 0
+    ? [y.significand * 10n ** BigInt(e), 1n]
+    : [y.significand, 10n ** BigInt(-e)];
+}
+
+/**
+ * The EXACT order of the exact value `x` against a finite real value `y`
+ * that is inexact (a double or the big decimal of an inexact numeric value),
+ * both read as the exact rationals they hold: `-1`, `0` or `1`, or
+ * `undefined` when `x` is not a finite real value or `y` is not finite.
+ *
+ * `ExactNumericValue.lt`/`gt` compare such a pair at working precision
+ * (`orderBignum`), which is the right reading for an ordinary comparison
+ * but rounds `1/3` before it is compared with the 22-digit decimal
+ * `0.3333333333333333333333` (a wrong sign). An order that must never
+ * decide a sign from rounding (`exactOrder`) uses this function instead.
+ */
+export function orderExactAgainstInexact(
+  x: ExactNumericValue,
+  y: number | BigDecimal
+): -1 | 0 | 1 | undefined {
+  if (x.im !== 0 || isInfiniteEncoding(x.rational)) return undefined;
+  const r = exactRationalOfInexact(y);
+  if (r === undefined) return undefined;
+  const [D, E] = r;
+  const [a, b] = x.rational;
+  const A = BigInt(a);
+  const B = BigInt(b);
+  const sa = bigSign(A);
+  const sd = bigSign(D);
+  if (sa !== sd) return sa < sd ? -1 : 1;
+  if (sa === 0) return 0;
+  // Compare the squares of the magnitudes, `a²·c·E²` against `D²·b²`
+  // (`x = (a/b)√c`, `y = D/E`, both of one sign); for negative values the
+  // order is reversed.
+  const lhs = A * A * BigInt(x.radical) * E * E;
+  const rhs = D * D * B * B;
+  const o = bigSign(lhs - rhs);
+  return sa > 0 ? o : (-o as -1 | 0 | 1);
+}
+
 function componentToExpression(
   rational: Rational,
   radical: number
@@ -1851,6 +1979,47 @@ function exactRationalSqrt(n: bigint, d: bigint): Rational | null {
   const rd = perfectSquareRoot(d);
   if (rd === null) return null;
   return [rn, rd];
+}
+
+/**
+ * The exact square root of the rational `n/d` (`n ≥ 0`, `d > 0`, in lowest
+ * terms) as a rational times a square-free radical, `{ rational, radical }`,
+ * or `null` when the radical does not fit the `radical` field
+ * (`≤ SMALL_INTEGER`).
+ *
+ * `√(n/d) = √(n·d)/d`. The square factors of `m = n·d` come out of the root:
+ * first by trial division with every `k ≤ 1000`, then by a perfect-square
+ * test of what is left. A remainder `≤ SMALL_INTEGER` (10^6) that has no
+ * factor `≤ 1000` is square-free, because a square `p²` of a prime `p > 1000`
+ * is greater than 10^6. So the result is either exact and in normal form, or
+ * `null`. Everything is in bigint arithmetic, so the answer does not depend
+ * on the engine's precision (`√(2·10^60)` is `10^30·√2`).
+ */
+function exactSqrtParts(
+  n: bigint,
+  d: bigint
+): { rational: Rational; radical: number } | null {
+  let m = n * d;
+  if (m === 0n) return { rational: [0, 1], radical: 1 };
+  let factor = 1n;
+  if (m > BigInt(SMALL_INTEGER)) {
+    for (let k = 2n; k <= 1000n; k += 1n) {
+      const k2 = k * k;
+      while (m % k2 === 0n) {
+        m /= k2;
+        factor *= k;
+      }
+    }
+    const root = perfectSquareRoot(m);
+    if (root !== null) {
+      factor *= root;
+      m = 1n;
+    }
+    if (m > BigInt(SMALL_INTEGER)) return null;
+  }
+  // The constructor takes the square factors out of a radical `≤ 10^6` and
+  // reduces the rational.
+  return { rational: [factor, d], radical: Number(m) };
 }
 
 /**

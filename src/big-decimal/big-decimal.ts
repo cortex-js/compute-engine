@@ -1516,8 +1516,11 @@ function fromNumber(value: number): [bigint, number] {
   if (value === Infinity) return [1n, Infinity];
   if (value === -Infinity) return [-1n, Infinity];
 
-  // Integer fast-path (avoids toString round-trip for safe integers)
-  if (Number.isInteger(value)) return normalize(BigInt(value), 0);
+  // Integer fast-path (avoids toString round-trip for safe integers). A
+  // double past the safe integers takes the general case, so `1e200` is the
+  // decimal `1e200` (the shortest digits that round-trip), not the binary
+  // value of the double (`99999999999999996973…`), as for any other float.
+  if (Number.isSafeInteger(value)) return normalize(BigInt(value), 0);
 
   // General case: use the string representation produced by the engine.
   // This avoids hand-rolling binary-to-decimal conversion and gives us

@@ -1195,7 +1195,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Convert a color to a string in the specified format"
+      "description": "Convert a color to a string in the specified format: \"hex\" (the default), \"rgb\", \"hsl\", \"oklch\", \"srgb\" (the same as \"hex\") or \"display-p3\" (the CSS spelling `color(display-p3 r g b)`). The hex, rgb, hsl and srgb formats map the color into the sRGB gamut, and display-p3 maps it into the Display-P3 gamut, with the CSS Color 4 gamut mapping: the OKLCh chroma is reduced at constant lightness and hue. The channels are not clipped one by one. The oklch format has no gamut and is not mapped"
     },
     {
       "name": "Combinations",
@@ -2745,6 +2745,18 @@
       "description": "Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a)"
     },
     {
+      "name": "GamutMap",
+      "category": "Colors",
+      "arity": "optional",
+      "signature": "(color | string | tuple, string?) -> color",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Map a color into a target gamut, \"srgb\" (the default) or \"display-p3\", with the CSS Color 4 gamut-mapping algorithm: the OKLCh chroma is reduced, at constant lightness and hue, until the color is inside the gamut or until clipping each channel changes the color by less than a just noticeable difference (ΔE_OK 0.02). A lightness of 1 or more gives white, and 0 or less gives black. A color already inside the gamut is returned unchanged. The result is an Rgb color, in sRGB coordinates also for \"display-p3\": its channels are in [0, 1] for \"srgb\", and for \"display-p3\" they can be outside [0, 1] (extended sRGB) for a color that is inside the Display-P3 gamut but outside the sRGB gamut. Color values themselves have no gamut: only this operator and the string output map a color"
+    },
+    {
       "name": "GCD",
       "category": "Arithmetic",
       "arity": "variadic",
@@ -3676,7 +3688,7 @@
       "name": "Julia",
       "category": "fractals",
       "arity": "3",
-      "signature": "(number, number, integer) -> real",
+      "signature": "(complex, complex, integer) -> real",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4084,7 +4096,7 @@
       "name": "Mandelbrot",
       "category": "fractals",
       "arity": "2",
-      "signature": "(number, integer) -> real",
+      "signature": "(complex, integer) -> real",
       "associative": false,
       "commutative": false,
       "idempotent": false,

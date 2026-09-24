@@ -95,14 +95,14 @@ took before.
   `|−3|`, `⌊2.5⌋` and `3^2` are admitted), an argument outside the real
   domain (`Sqrt` and `Ln` of a negative, `Arcsin` outside `[−1, 1]`), a
   value past a million in magnitude for `Tan` and its relatives (the pole
-  `~oo`), a float within `1e-9` of a special angle for a trigonometric head
-  under `evaluate()` (the recognizer answers an exact value within `1e-12`),
-  under `evaluate()` a value whose inverse trigonometric function is an
-  exact angle (within ten times the engine tolerance, and at least `1e-9`, of
-  the sine, cosine or tangent of a multiple of `π/120`; the recognizer answers
-  within the engine tolerance, `1e-10` by default) and the exponent
-  `0.5` of `e` (`e^0.5` is `√e`), an angular unit other than radians, and a
-  non-finite result. `Log` and `Lb` (canonically `Log(x, 2)`), and
+  `~oo`), under `evaluate()` the exponent `0.5` of `e` (`e^0.5` is `√e`),
+  an angular unit other than radians, and a non-finite result. The
+  trigonometric heads and their inverses decline no special argument: the
+  scalar route answers an exact value only for an exact argument (an exact
+  rational multiple of `π` for `Sin`, the exact `1/2` for `Arcsin`), and a
+  float is never special, so `Sin(3.141592653589793)` is the float
+  `1.2246467991473532e-16` and `Arcsin(0.5)` is `0.5235987755982989`, on
+  both routes. `Log` and `Lb` (canonically `Log(x, 2)`), and
   `Log(x, 10)`, compute `Math.log10` and `Math.log2`, the primitives of the
   `N()` route; another base has no kernel.
 - **Reductions of a body.** `Sum(…).N()` of a body with no indexing set

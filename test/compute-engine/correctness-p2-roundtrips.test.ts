@@ -148,7 +148,11 @@ describe('P2 parse/serialize: double superscript is an error (#7)', () => {
     expect(ce.parse('2^3^4').isValid).toBe(false);
   });
   test('the explicit nesting x^{2^3} still works', () => {
-    expect(ce.parse('2^{3^4}').evaluate().json).toBe(2 ** 81);
+    // An exact integer past the safe integers serializes as a string of
+    // digits (a JSON number there would box as a float).
+    expect(ce.parse('2^{3^4}').evaluate().json).toEqual({
+      num: (2n ** 81n).toString(),
+    });
   });
 });
 

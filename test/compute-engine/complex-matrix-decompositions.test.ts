@@ -298,6 +298,7 @@ describe('Conjugate of an exact expression that is not a number literal', () => 
     ['1-\\frac12\\sqrt3 i', '1 + sqrt(3)/2i'],
     ['\\pi i', '-i * pi'],
     ['\\sin(1)+\\sqrt5 i', '-sqrt(5)i + sin(1)'],
+    // The conjugate goes into the quotient: conj(u/v) = conj(u)/conj(v).
     ['\\frac{2+\\sqrt3 i}{1+\\sqrt2 i}', '(2 - sqrt(3)i) / (1 - sqrt(2)i)'],
   ];
   for (const [tex, expected] of cases)

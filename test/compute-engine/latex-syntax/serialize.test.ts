@@ -65,6 +65,68 @@ describe('LATEX SERIALIZING', () => {
     );
   });
 
+  // An exact imaginary part is symbolic MathJSON (`['Negate', ['Sqrt', 2]]`),
+  // whose sign is read from its shape: a negative part is written as a
+  // subtraction, never as `+-`.
+  test('Complex numbers with a negative exact imaginary part', () => {
+    expect(latex(['Complex', ['Sqrt', 2], ['Negate', ['Sqrt', 2]]])).toBe(
+      '\\sqrt{2}-\\sqrt{2}\\imaginaryI'
+    );
+    expect(
+      latex(['Complex', ['Negate', ['Sqrt', 2]], ['Negate', ['Sqrt', 2]]])
+    ).toBe('-\\sqrt{2}-\\sqrt{2}\\imaginaryI');
+    expect(
+      latex([
+        'Complex',
+        ['Multiply', 3, ['Sqrt', 2]],
+        ['Multiply', -2, ['Sqrt', 2]],
+      ])
+    ).toBe('3\\sqrt{2}-2\\sqrt{2}\\imaginaryI');
+    expect(latex(['Complex', ['Rational', 1, 2], ['Rational', -1, 3]])).toBe(
+      '\\frac{1}{2}-\\frac{1}{3}\\imaginaryI'
+    );
+    expect(latex(['Complex', 0, ['Negate', ['Sqrt', 2]]])).toBe(
+      '-\\sqrt{2}\\imaginaryI'
+    );
+  });
+
+  // A pure imaginary number serializes as a product, which binds more
+  // tightly than `+` and `-`: no parentheses in a sum or a difference.
+  test('Pure imaginary term of a sum', () => {
+    expect(ce.parse('\\frac12-\\frac{\\sqrt3}{2}i').latex).toBe(
+      '\\frac{1}{2}-\\frac{\\sqrt{3}}{2}\\imaginaryI'
+    );
+    expect(ce.parse('\\frac12+\\frac{\\sqrt3}{2}i').latex).toBe(
+      '\\frac{1}{2}+\\frac{\\sqrt{3}}{2}\\imaginaryI'
+    );
+    expect(ce.parse('x+2i').latex).toBe('x+2\\imaginaryI');
+    expect(ce.parse('x-2i').latex).toBe('x-2\\imaginaryI');
+    expect(ce.parse('2i-x').latex).toBe('2\\imaginaryI-x');
+    expect(
+      ce.box(['Subtract', 'x', ['Complex', 0, 2]], { form: 'raw' }).latex
+    ).toBe('x-2\\imaginaryI');
+    expect(
+      ce.box(['Subtract', ['Complex', 0, 2], 'x'], { form: 'raw' }).latex
+    ).toBe('2\\imaginaryI-x');
+    // A complex number with a real part keeps its parentheses
+    expect(
+      ce.box(['Subtract', 'x', ['Complex', 1, 2]], { form: 'raw' }).latex
+    ).toBe('x-(1+2\\imaginaryI)');
+  });
+
+  test.each([
+    '\\sqrt2(1-i)',
+    '-\\sqrt2(1+i)',
+    '\\frac12-\\frac{\\sqrt3}{2}i',
+    '\\sqrt2(3-2i)',
+    '\\sqrt2(\\frac13-\\frac23i)',
+    'x-\\sqrt2 i',
+    '2i-x',
+  ])('LaTeX round trip of a complex number: %s', (s) => {
+    const x = ce.parse(s);
+    expect(ce.parse(x.latex).isSame(x)).toBe(true);
+  });
+
   // Leave space between pi and x
   test('Spacing', () => {
     expect(latex(['Multiply', 'Pi', 'x'])).toMatchInlineSnapshot(`\\pi x`);

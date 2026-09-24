@@ -399,41 +399,239 @@ whose result is a complex scalar. Also, `\sum_{k=1}^{3} p((x, \sqrt{x-5}))`
 declines in `auto` mode (inlining refuses because the body's `k` would be
 captured by the index); strict mode compiles it.
 
-### `simplify()` and `Expand` give floats for a radical times a complex number (OPEN, ruling — found 2026-09-23)
+### Residues of the 2026-09-24 fix round (OPEN, small — found by the review of the fixes)
 
-`evaluate()` keeps `√3·(1 + i) + 1` exact since 2026-09-23 (`1 + √3 + √3 i`),
-but `simplify()` of it, `simplify()` of `√2(1 + i) + √2(1 − i)` (`2.8284…`;
-`evaluate()` gives `2√2`), and `Expand(π(1 + i))` give floats. Cause:
-`BoxedFunction.toNumericValue()` for `Multiply` (`boxed-function.ts`) folds the
-coefficients into one numeric value, and one exact numeric value cannot hold
-`√3 + √3 i`. `Add` requires the coefficient to carry every literal
-(`console.assert` in `arithmetic-add.ts`), so the factor cannot stay in the
-non-numeric rest. Options: (a) change the `toNumericValue`/`Add` contract so a
-coefficient can be an exact product that is not one numeric value; (b) accept
-that `simplify()` and `Expand` are inexact for these values and document it.
+Found by the review of the fixes of 2026-09-24, not fixed in that round: (1) a
+perfect-power root of a bigint radicand is no longer extracted, because the
+extraction accepted a rounded float that happened to be integer-valued and now
+requires an `ExactNumericValue`: `∛(10^60)` stays `root(3)(1e+60)` (it was
+`10^20`) while `(2^60)^{1/3}` still folds through `pow()`; an integer n-th root
+on the bigint (`arithmetic-power.ts`, `root()`) would keep both exact. (2)
+`e^{0.25iπ}` is the exact `√2/2 + √2/2·i` in degree mode and a float in radian
+and turn mode: `radiansToAngle` gives the big decimal `45.000…`, which the
+degree-mode recognizer accepts as the special angle 45°, while a float is never
+special in radians. (3) `e^{1 + 0.5iπ}` still carries dust (`5.2e-17 + 2.718i`)
+under `evaluate()`: the Euler branch reads the raw exponent only when it is
+purely imaginary. (4) The dust limit is capped at `|x| ≥ 1`, so `sin(10^6π).N()`
+is `−3.8e-19` while `evaluate()` is `0`, and `tan(10^6π + π/2).N()` is `2.6e18`
+while `evaluate()` is `~oo` (the cap exists so that `sin(10^22)` is not chopped;
+the two routes disagree for multiples of π above `10^2`). (5) A float near a
+special angle gives the sine of the DECIMAL literal on the scalar route
+(`Sin(3.141592653589793)` is `2.38e-16`, 21 digits) and the sine of the DOUBLE
+inside a machine list (`1.22e-16`, `Math.sin`), a factor of 2 at a zero
+crossing; both are exact readings of their literal. (6) A mutually recursive
+pair whose body has no lowering fails closed with the message "Cannot compile a
+call of `h`: its type is `number`…" for the spelling `h(2)`, which names the
+lane question rather than the root cause (`Simplify` has no lowering); the
+failed emission's own diagnostic should be the one reported.
 
-### `Max(π, 3)` stays unevaluated (OPEN — found 2026-09-23)
+### Residues of the exact-boxing rule (OPEN, decisions — found 2026-09-24)
 
-`Max(π, 3)` and `Min(π, 3)` evaluate to themselves, while `Max(√2, 1)` is
-`√2`; `.N()` gives the right numbers. Present on HEAD `d70e788d`. The value is
-not wrong, but the order of `π` and `3` is known (`exactOrder` decides it), so
-the application could evaluate to `π`.
+(1) Small integer-valued big decimals are still exact on two routes that predate
+the rule: `ce.parse('1.0')` is the exact `One` (the shared `isOne`/ `isZero`
+constants in `createNumberExpression`) while `ce.parse('2.0')` is a float, and
+`ce.number(ce.bignum('1500'))` is exact (`canonicalNumber` turns a big decimal
+at most `10^6` into an exact number) while `ce.parse('1500.0')` is a float.
+Decide whether no big decimal is ever exact (then `Sqrt(4).N()` at bignum
+precision becomes inexact; blast radius unmeasured) or accept the difference.
+(2) A float past the safe integers becomes exact after a LaTeX round trip:
+`ce.box(1e16)` serializes to `10\,000\,000\,000\,000\,000`, which parses back as
+an exact integer; a fix needs a LaTeX mark for an inexact integer-valued number.
+(3) The `SingularValues` double kernel returns `0` for a singular value below
+about `ε·σ_max` even when the entries are within the double range:
+`SingularValues([[1e20, 0.5], [0.5, 2.5]]).evaluate()` gives `[1e+20, 0]` (the
+1×1/2×2 closed form under `.N()` on exact decimal entries is fixed; the general
+kernel is not). Pre-existing, wrong value.
 
-### GPU targets: a host cannot learn that a free symbol must be bound as a `vec2` (OPEN, ruling — found 2026-09-23 while reviewing Tycho item 308)
+### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
 
-With `f: (complex) -> complex`, a use `f(x)` of an undeclared `x` infers
-`x: complex`, as the inference rule for a symbol with no value says. On `glsl`
-and `wgsl` a complex value is a `vec2`, so `f(x)` compiles to `_fn_f(x)` and the
-host must bind `x` as a `vec2`. The compile result lists `freeSymbols: ["x"]`
-without types, so a host cannot learn this; if it binds a `float`, the driver
-rejects the shader. (The JavaScript target accepts a number or a `{re, im}`
-object at run time, so it has no such problem.) Options: (1) report the shader
-type of each free symbol in the compile result; (2) on the GPU targets, keep a
-free symbol whose type is only INFERRED `complex` as a real `float`, and lift it
-at each complex use; (3) keep the behavior and document it. If nothing is
-decided, a host that binds such a symbol as a `float` gets a shader that does
-not compile. (A DECLARED real argument to a complex parameter is lifted to
-`vec2(x, 0.0)` since 2026-09-23.)
+A host now declares plot variables and list seams as
+`real | signed_infinity | nan` instead of `number` (Tycho, 2026-09-24). Three
+places widen that union back: (1) a function declared
+`(real | signed_infinity | nan) -> unknown` whose body is closed on the extended
+reals (`t + 1`, `t²`, `sin t`) refines its result to `number`, and `Sum(L)`,
+`Max(L)` over `list<real | signed_infinity | nan>` type `number`; (2) arithmetic
+widens `signed_infinity` to `infinity`, which admits the complex infinity:
+`C + 1` over such a list types `list<infinity | infinity | nan | real>` (the
+union also PRINTS `infinity` twice, a normalization or printing defect of its
+own); (3) a literal list with an infinite or NaN member types `vector<2>`
+(element type `number`): `[1, ∞]` and `[1.5, NaN]` do not match
+`list<(real | signed_infinity | nan)^2>`, although the join of the members'
+types is `real | signed_infinity` (the ASSIGNMENT of `[1, ∞]` to a symbol
+declared with the union does succeed on main; Tycho measured a failure on
+0.133.0). Each is a lost precision, not a wrong value; a host that reads the
+type of a result to choose a shader type or a lane sees `number` where
+`real | signed_infinity | nan` is true. Probe: Tycho's
+`scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
+
+### A number literal made at machine precision keeps a machine factory after the precision is raised (OPEN, wrong values — found 2026-09-24)
+
+An `ExactNumericValue` keeps the numeric factory of the engine that created it
+(`ExactNumericValue.factory`): with
+`e = new ComputeEngine({precision: 'machine'})`, `b = e.box(['Sqrt', 2])`, then
+`e.precision = 50`, `b.N()` is still the double `1.4142135623730951`. The exact
+ordering's raised-precision step (`exactOrder`, `compare.ts`) is therefore
+skipped at machine precision, because the error bound would assume 50-digit
+leaves while such a leaf has the error of a double, and the order came out wrong
+(`−1` for `√(2 + 10⁻³⁰)` against `√2`). Fix: a literal's numeric value follows
+the engine's CURRENT precision (the factory is looked up at `N()` time, or the
+cached machine value is dropped when the precision changes).
+
+### A constant that contains an operator with no error bound is never ordered, however far apart the values are (OPEN — found 2026-09-24)
+
+`Max(Γ(1/3), 3)` stays unevaluated (Γ(1/3) ≈ 2.679): `approximate()`
+(`compare.ts`) has no derivative bound for `Gamma`, `Erf`, `Zeta`, `Bessel`, the
+inverse hyperbolic functions or any operator outside its list, and the fast path
+uses machine values only for literals, `π` and `e`. Add bounds for the common
+special functions, or a machine-value fast path for two values that are far
+apart relative to the double's precision when the function is computed
+accurately.
+
+### JavaScript entry check: an O(n) walk per call per collection input (OPEN, decision — 2026-09-24)
+
+The run-time entry check that makes a `{re, im}` entry under a real-lane
+collection input throw walks every entry on every call: a 10,000-element `Dot`
+went from 6 to 21 µs (a 100×100 determinant is unchanged, the walk is 1.4 µs
+against 320 µs). A `WeakSet` of arrays already checked would remove the cost on
+repeated calls but would miss a complex value a host writes into an array it
+reuses. Options: (a) keep the walk (sound; the cost matters for O(n) kernels
+only); (b) the `WeakSet` cache with the documented hazard; (c) the cache only
+for arrays the host froze (`Object.isFrozen`). `entryChecks: false` turns the
+check off today.
+
+### The imaginary part of an inexact number is a machine double (OPEN, scheduled — 2026-09-24)
+
+`BigNumericValue.im` is a `number`, so `.N()` of a complex value has the working
+precision (21 digits by default) on the real part and 16 digits on the imaginary
+part: `.N()` of `√2 + √2 i` is
+`1.414213562373095048801689 + 1.4142135623730951i`. A big-decimal imaginary part
+is scheduled (user decision 2026-09-24), not done. Also,
+`BigNumericValue.toString()` does not round the real part of a complex value to
+the working precision (the real-only branch does), so that part prints 25
+digits. Related: `numericCostFunction` (`cost-function.ts`) prices the imaginary
+radical of a complex literal but not its real radical.
+
+### `4i` typed as LaTeX is an inexact number, and `√i` stays symbolic (OPEN, small — found 2026-09-24)
+
+`invisible-operator.ts:124` builds `2i`, `4i` and similar with
+`ce.number(ce.complex(0, n))`, a `BigNumericValue`, so `\sqrt{4i}` evaluates to
+a float while `ce.box(['Sqrt', ['Complex', 0, 4]])` gives `√2(1 + i)`, `i4`
+parses exact and `4i` does not, and `(4i)^2` is computed from the inexact value.
+The fix is one line (build the exact Gaussian integer), but every parsed literal
+like `2i` changes its exactness, so measure the snapshot blast radius first.
+Separately, `√i` stays a `Sqrt` head because
+`imaginary-unit-spelling.test.ts:210` requires it, while `√(i/4)` is the exact
+`(√2/4)(1 + i)`; decide whether that pin should change.
+
+### The raised-precision step of the exact ordering resets the engine twice per comparison (OPEN, decision — found 2026-09-24 by the review)
+
+`orderAtRaisedPrecision` (`compare.ts`) sets `ce.precision` up and back, and
+each write runs the engine reset (`config` state event, `purgeValues()`,
+`onConfigurationChange` on every constant). Every host-visible cache is
+discarded twice per undecided pair. Measured: `Sort` of `ln(2 + k·10⁻⁴⁰)` for n
+= 100 takes 241 ms, n = 1000 takes 2.36 s (16,792 cache-axis advances); `Max` of
+the same 1000 values 322 ms; 1000 plain rationals sort in 4–6 ms. The values are
+right. Options: (a) accept; (b) evaluate the two operands at the raised
+precision through a narrower mechanism than the public `precision` setter (a
+scoped `BigDecimal` precision with the constants recomputed on demand), which
+keeps the caches. Also `resolvingTie` (`compare.ts`) is a module global shared
+by every engine in the process.
+
+### `interval-js` gives a finite enclosure inside the machine pole zone (OPEN, small — found 2026-09-24)
+
+The machine pole rule (2026-09-24) declares `Tan(x)` the pole `~oo` when
+`|tan x|·min(1, |x|)·100·2⁻⁵² ≥ 1`, so at `π + 1 ulp` (`3.1415926535897936`) the
+interpreter answers `~oo` while `interval-js` gives a finite enclosure of about
+`3.1e15` (it reads the argument as exact, as the big-decimal route does). Decide
+whether the interval target should answer `singular` inside that zone. Also:
+`Csc(5e-324)` overflows to `Infinity` and is read as the pole `~oo` although the
+true value is `+2.02e323` (beyond the largest double); the sign is known, so
+`+oo` would be more precise.
+
+### `Tuple(list, list)` is read as a list of points by `PointX` and as one point by `+` (OPEN, wrong values — found 2026-09-24 by the review of `168de97d`)
+
+With `A` a 2-element list, `(cos A, sin A)` is a tuple of lists. `PointX` reads
+it as a LIST OF POINTS and answers `[cos A₁, cos A₂]`; the point-list sum
+`PointList([1,2],[3,4]) + (cos A, sin A)` reads it as ONE point and broadcasts
+it over the list, giving two "points" whose coordinates are lists
+(`[([1.995, 1.980], [3.0998, 3.1987]), …]`) and no dimension error for a
+3-element `A`. Desmos reads `(cos a, sin a)` with a list `a` as a list of points
+and pairs element by element (2 points). The reply to Tycho ask 307 said the sum
+is an "outer combination" (N² points); it is not. Decide one reading (Desmos's
+element-wise pairing is the natural one) and apply it to `PointX`/`PointY`, the
+point-list arithmetic, and the `javascript`/`interval-js` lowerings, which
+reproduce the interpreter's structure today.
+
+### An exact integer argument of a trigonometric function is rounded to the working precision before the kernel runs (OPEN, wrong values — found 2026-09-24)
+
+`Sin(12345678901234567890123).N()` is `0.9918…`; the true value is `−0.4206…`.
+The 23-digit exact integer is rounded to 21 digits before the big-decimal kernel
+reduces it modulo π, so the argument itself is wrong at the working precision.
+The kernel reduces an exact large integer exactly when it receives it
+(`Sin(10^22).N()` is `−0.852…`, correct). Pass an exact integer argument to the
+kernel unrounded, or reduce it modulo 2π in exact arithmetic first.
+
+### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
+
+`Eigenvalues([[1, i, 0], [i, 2, 0], [0, 0, 3]])`, `Eigenvectors` of it,
+`CholeskyDecomposition([[2, 1+i], [1-i, 3]])`, and `LUDecomposition`,
+`QRDecomposition` and `SVD` of a complex matrix stay unevaluated under
+`evaluate()` AND under `.N()` (before `168de97d` they answered wrong real
+values). `SingularValues(...).N()` of a complex matrix of any size is computed
+since 2026-09-24 (`singularValues(re, im)` in `numerics/linear-algebra.ts`, the
+Jacobi run on the Hermitian embedding `[[P, −Q], [Q, P]]`). The same embedding
+gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself,
+take each eigenvalue once; an eigenvector `[x; y]` gives `x + iy`); a general
+complex matrix needs a complex QR iteration.
+
+### Compiled colour values: keep the colour space; non-rounding conversions in `@arnog/colors` (OPEN, design — found 2026-09-23 by the review of `168de97d`)
+
+The compiled constructors store every colour in OKLCh (`_SYS.rgb(0.2, 0.5, 0.7)`
+is `{space: 'oklch', …}`), so each `AsRgb`/`AsHsv` of a constructed sRGB colour
+makes an OKLCh round trip (compiled `AsRgb(Rgb(0.2, 0.5, 0.7))` gives
+`0.20000000000000512`), which the snapping tolerances in
+`numerics/color-conversion.ts` then correct. Fix at the cause: the compiled
+constructors keep their own space, as the interpreter keeps the `Rgb` head.
+Also, `numerics/color-conversion.ts` copies conversions of `@arnog/colors`
+because that package rounds to integers and does not clamp HSL
+(`hslToRgb(30, 1, 2)` is `{r: 255, g: 510, b: 765}`); fix it there and delete
+the copies. Two symptoms of the OKLCh storage, found 2026-09-24 by the review of
+`168de97d`: a same-space conversion of an ACHROMATIC colour disagrees between
+the interpreter and the `javascript` target (`AsHsv(Hsv(120, 1, 0))` is
+`Hsv(120, 1, 0)` on the interpreter and `[0, 0, 0]` compiled, because OKLCh has
+no hue at zero chroma; 112 of 200 random achromatic inputs differ), and the
+interpreter's `AsHsv`/`AsHsl` snap a saturation below `1e-9` to 0 and a hue
+within `1e-9` of 0 to 0 (`ACHROMATIC_TOLERANCE`, `HUE_TOLERANCE` in
+`numerics/color-conversion.ts`) only to match the compiled round trip
+(`AsHsv(Rgb(0.5, 0.5, 0.5000000001))` was exact, it is now `Hsv(0, 0, …)`). The
+shader helpers (`gpu-target.ts`, `_gpu_srgb_to_oklab` and neighbours) are a
+third copy of the conversion math with their own f32 coefficients and an
+achromatic threshold of `1e-6`. A third symptom: compiled
+`ColorToString(Rgb(1, 0.5, 0))` is `#ff7f00`, the interpreter's is `#ff8000`,
+because the OKLCh round trip gives a green channel of `0.49999999999999795`,
+which rounds down.
+
+### The lane question of a user call emits code and can throw (OPEN, design — found 2026-09-24 by the review of the return-lane record)
+
+A user-function call reads the lane its emitted definition recorded
+(`userCallLane`, `recordUserFunctionLane` in `compilation/base-compiler.ts`). A
+parent lowering asks for the lane of an operand before it compiles the operand,
+so the question emits the definition on demand, which needs a global
+`_callSiteTarget`, a per-call route memo, and pruning of definitions the
+question emitted but nothing uses; `isComplexValued` can therefore write
+definitions and throw user-facing diagnostics. Cleaner: in `compileExpr`, before
+a lowering reads the lanes of its operands, emit the definitions of the
+user-function calls among its direct operands with the current target and
+frames; then `userCallLane` only reads the record, and the global, the route
+memo, the ask-time pruning and the throws inside the predicate go away.
+
+### `Cos(π/3).isPositive` is `undefined` (OPEN — found 2026-09-24)
+
+`trigSign` recognizes an exact special angle only for literal arguments, so
+`Cos(π/3).isPositive` stays `undefined` although the value is `1/2`.
+`expression-properties.test.ts` pins `undefined`. The exact angle is now
+available (`halfTurns()`, `boxed-expression/trigonometry.ts`); answering `true`
+is correct but changes that pinned test.
 
 ### A point argument with a complex-valued coordinate declines where the interpreter answers a real number (OPEN — found 2026-09-15 in the Tycho corpus document `neyret/hpr2q4kles`)
 

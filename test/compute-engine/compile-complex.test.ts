@@ -2158,7 +2158,7 @@ describe('COMPILE COMPLEX - real-only color constructors guard promoted operands
   // `_SYS.hsv` the promoted `{re, im}` object and returned NaN at EVERY
   // input — including x = 3, where √4 = 2 is entirely real — with no
   // decline the consumer could detect. The color constructors are now in
-  // `REAL_ONLY_CODEGEN_HEADS`, so a maybe-complex operand takes the D2/D6
+  // `REAL_ONLY_BY_DEFINITION`, so a maybe-complex operand takes the D2/D6
   // runtime guard: real-at-runtime unwraps to the true color, genuinely
   // complex yields NaN.
   const hsv = () =>

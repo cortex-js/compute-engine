@@ -314,9 +314,10 @@ describe('a compiled Hypot consumes a point leg whole', () => {
   });
 
   test('a complex element is projected element-wise; an all-complex list fails closed', () => {
-    // `Math.hypot` has no complex call form, and the head is listed in
-    // `REAL_ONLY_CODEGEN_HEADS`. Over an array with a complex element LANE
-    // the real-only lowering runs over the element-wise real projection
+    // `Math.hypot` has no complex call form, and the JavaScript target
+    // declares the head real-only (`JS_REAL_ONLY_LOWERINGS`). Over an array
+    // with a complex element LANE the real-only lowering runs over the
+    // element-wise real projection
     // (a real element keeps its value, any other becomes NaN — the Tycho
     // item 251 design, `docs/COMPILATION-MODEL.md` "Complex modes"), so a
     // mixed list compiles and the complex cell answers NaN. A list whose

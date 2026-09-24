@@ -1388,14 +1388,16 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       ).toBe('[2,3,1]');
     });
 
-    test('a NaN key leaves Ordering unevaluated, like Sort', () => {
-      // NaN is not equal to, less than, or greater than NaN, so no pair of
-      // keys can be ordered.
+    test('a NaN key for EVERY element ties, so both operators answer', () => {
+      // A NaN key sorts last, and two NaN keys tie (the IEEE 754 total-order
+      // convention, user decision 2026-09-24). The sort is stable, so the
+      // elements keep their positions. Before, NaN keys left both operators
+      // unevaluated.
       const nanKey: Expression = ['Function', 'NaN', 'x'];
       const e = engine.box(['Ordering', ['List', 3, 1, 2], nanKey]).evaluate();
-      expect(e.operator).toEqual('Ordering');
+      expect(e.toString()).toBe('[1,2,3]');
       const s = engine.box(['Sort', ['List', 3, 1, 2], nanKey]).evaluate();
-      expect(s.operator).toEqual('Sort');
+      expect(s.toString()).toBe('[3,1,2]');
     });
 
     test('a Missing key for ONE element leaves both operators unevaluated', () => {
@@ -1412,16 +1414,18 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       expect(s.operator).toEqual('Sort');
     });
 
-    test('a NaN key for ONE element leaves both operators unevaluated', () => {
+    test('a NaN key for ONE element puts that element last', () => {
+      // A NaN key sorts last (user decision 2026-09-24). Before, it left
+      // both operators unevaluated.
       const key: Expression = [
         'Function',
         ['At', ['List', 'NaN', 5, 6], 'x'],
         'x',
       ];
       const e = engine.box(['Ordering', ['List', 1, 2, 3], key]).evaluate();
-      expect(e.operator).toEqual('Ordering');
+      expect(e.toString()).toBe('[2,3,1]');
       const s = engine.box(['Sort', ['List', 1, 2, 3], key]).evaluate();
-      expect(s.operator).toEqual('Sort');
+      expect(s.toString()).toBe('[2,3,1]');
     });
 
     test('a Missing key for EVERY element ties, so both operators answer', () => {

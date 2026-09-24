@@ -177,7 +177,7 @@ describe('PARSING OF NUMBER', () => {
       `["Equal", "x", 1230]`
     );
     expect(parse('x=.123\\ldots e4+1')).toMatchInlineSnapshot(
-      `["Equal", "x", 1231]`
+      `["Equal", "x", ["Add", 1, 1230]]`
     );
     expect(parse('x=.123\\ldots e-423+1')).toMatchInlineSnapshot(
       `["Equal", "x", ["Add", 1, "1.23e-424"]]`

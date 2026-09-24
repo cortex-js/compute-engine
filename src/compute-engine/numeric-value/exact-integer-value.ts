@@ -5,12 +5,17 @@ import { NumericValue } from './types.js';
  * Extract the exact integer value of a `NumericValue`, or `null` if it does
  * not represent an exact integer.
  *
- * This reads the exact underlying representation directly — the integer
- * numerator of an `ExactNumericValue`, or the integer-valued `BigDecimal` of a
- * `BigNumericValue` (via its exact significand) — and never round-trips through
- * `bignumRe`, which is rendered at the engine's working precision and would
- * silently round any integer with more digits than `ce.precision` (corrupting
- * large-integer number theory: `IsPrime`, `FactorInteger`, `Mod`, …).
+ * Only a value that `asExact` lifts qualifies: an `ExactNumericValue` with an
+ * integer value, or a machine double in the safe-integer range. A big decimal
+ * is never exact, so an integer-valued `BigNumericValue` answers `null` here
+ * — a caller that must also read an integer-valued inexact number reads its
+ * own value, as `asBigint` and `toBigint` do.
+ *
+ * This reads the integer numerator and denominator directly and never
+ * round-trips through `bignumRe`: the `bignumRe` of an `ExactNumericValue`
+ * is rendered at the engine's working precision and would silently round
+ * any integer with more digits than `ce.precision` (corrupting large-integer
+ * number theory: `IsPrime`, `FactorInteger`, `Mod`, …).
  */
 export function exactIntegerValue(num: NumericValue): bigint | null {
   if (num.im !== 0) return null;

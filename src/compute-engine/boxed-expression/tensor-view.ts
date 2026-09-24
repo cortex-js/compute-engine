@@ -34,7 +34,7 @@ import {
 } from '../tensor/tensor-fields.js';
 import { makeTensor } from '../tensor/tensors.js';
 
-import { isFunction, isNumber, isTensor } from './type-guards.js';
+import { isFunction, isTensor } from './type-guards.js';
 
 /**
  * O(rank) candidate shape: descend the first-child chain of literal `List`
@@ -159,7 +159,7 @@ export function packTensor(
       dtype: 'float64',
     });
 
-  const info = expressionTensorInfo(x.ops, numeric);
+  const info = expressionTensorInfo(x.ops);
   if (!info?.dtype) return undefined;
   // Exactness (design §D2.3 policy): integer-classified cells are EXACT
   // values, and the int-backed kernels do JS-number arithmetic whose
@@ -213,10 +213,7 @@ export function packStructural(
 // re-check for container/string cells.
 // ---------------------------------------------------------------------------
 
-function expressionTensorInfo(
-  rows: ReadonlyArray<Expression>,
-  numeric: boolean
-):
+function expressionTensorInfo(rows: ReadonlyArray<Expression>):
   | {
       shape: number[];
       dtype: TensorDataType;
@@ -262,40 +259,13 @@ function expressionTensorInfo(
     // 4b. all leaves → accumulate dtype.
     else {
       for (const item of t) {
-        dtype = getSupertype(dtype, cellDatatype(item, numeric));
+        dtype = getSupertype(dtype, getExpressionDatatype(item));
       }
     }
   };
 
   visit(rows);
   return valid ? { shape, dtype: dtype! } : undefined;
-}
-
-/**
- * The storage class of one cell. It is the classifier's answer
- * (`getExpressionDatatype`, `tensor-fields.ts`), with one change for a
- * numeric pack: the classifier gives an EXACT complex literal (`i`,
- * `1 + 2i`) the `expression` dtype, so that its exactness is kept, but
- * under `.N()` (`numeric: true`) a float result is the contract. There the
- * cell packs as `complex128`, which is the same policy `packTensor` applies
- * to an integer cell (`float64` under `.N()`). The change is necessary
- * because `.N()` does not make a Gaussian-integer literal inexact: the
- * operand reaches the kernel with its exact complex cells, and an
- * `expression` pack would make `Inverse([[2, 1+i], [1-i, 3]]).N()` answer
- * exact rationals.
- */
-function cellDatatype(item: Expression, numeric: boolean): TensorDataType {
-  const dtype = getExpressionDatatype(item);
-  if (
-    numeric &&
-    dtype === 'expression' &&
-    isNumber(item) &&
-    item.im !== 0 &&
-    Number.isFinite(item.re) &&
-    Number.isFinite(item.im)
-  )
-    return 'complex128';
-  return dtype;
 }
 
 function expressionAsTensor<T extends TensorDataType = 'expression'>(

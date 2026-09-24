@@ -31,8 +31,47 @@
   modulo 360. The interpreter now also clamps a finite HSL saturation or
   lightness (`AsRgb(Hsl(30, 1, 2))` was `Rgb(1, 2, 3)`; it is white). An
   infinite hue, a NaN channel, and an infinite `Rgb`, `Oklab` or `Oklch` channel
-  are still an error (the NaN colour when compiled). Converting an extended
-  `Rgb` colour to `Hsv` or `Hsl` clips each channel.
+  are still an error (the NaN colour when compiled).
+- **Colour output is gamut-mapped, not clipped.** Colour values have no gamut:
+  `Rgb` is extended sRGB and `Oklab`/`Oklch` have no bound, so
+  `AsRgb(Oklch(0.7, 0.4, 30))` stays `Rgb(1.32, −0.45, −0.31)`. Where a colour
+  leaves the engine, it is mapped into the target gamut with the CSS Color 4
+  algorithm: the OKLCh chroma is reduced at constant lightness and hue; a
+  lightness of 1 or more gives white, 0 or less gives black. This applies to
+  `ColorToString` (hex, `rgb`, `hsl`) and to the conversion to `Hsv`/`Hsl` (and
+  `ColorToColorspace` to `"hsv"`/`"hsl"`). `ColorToString(Oklch(0.7, 0.4, 30))`
+  is `#ff5843`; before, each channel was clipped and gave `#ff0000`, a red of
+  another hue. `AsHsv(Rgb(2, 0, 0))` is white (the OKLCh lightness of that
+  colour is 1.07). New operator `GamutMap(color, gamut?)`, with gamut `"srgb"`
+  (default) or `"display-p3"`, answers the mapped colour as an `Rgb` in sRGB
+  coordinates. `ColorToString(c, "display-p3")` answers
+  `color(display-p3 r g b)`, and `"srgb"` is the same as the default hex format.
+  A host tells CE the gamut of its canvas through these two arguments. The
+  compiled `javascript` target and the GLSL/WGSL shaders map the same way
+  (`ColorToString`, `GamutMap`, and the conversions to HSV/HSL), so every route
+  answers the same colour; on a shader, wrap a final colour in
+  `_gpu_gamut_map_oklch()` instead of `_gpu_oklch_to_srgb()`.
+- **`Sort` and `Ordering` put NaN last on every route.** `Sort([3, NaN, 1])` is
+  `[1, 3, NaN]` and `Ordering([3, NaN, 1])` is `[3, 1, 2]` in the interpreter
+  and in compiled JavaScript (the interpreter left them unevaluated, the
+  compiled code sorted NaN in place). NaN is also last in a descending sort and
+  for a NaN sort key, and NaN elements keep their input order (the IEEE 754
+  total-order convention, as in NumPy). The compiled `Sort`/`Ordering` refuse to
+  compile when an element may be a boolean, a tuple, a complex value or a value
+  of unknown type, which the interpreter leaves unevaluated.
+- **Only a safe integer is boxed as an exact integer.** A JavaScript number is
+  an exact integer only when it is a safe integer (`Number.isSafeInteger`):
+  `ce.number(2.0)` is the exact `2`, but `ce.number(1e200)` is the float
+  `1e+200` (it was the exact 200-digit integer of the double's binary value,
+  `99999999999999996973…`). A big decimal is never exact: `.N()` of `10^400` is
+  a float, and a literal with a decimal point (`12345678.0`) is a float. An
+  exact integer past the safe integers comes from a bigint or a string of digits
+  (`{num: "1e200"}`, or `1e200` in LaTeX), and its `.json` is now always a
+  `{num}` string, since a JSON number there boxes as a float.
+  `Norm([[1e200, 1e200], [1e200, 2e200]], 2)` is now a number. `IsPrime`,
+  `IsComposite` and the other integer readers still read an integer-valued
+  inexact number as an integer (`IsPrime(7.0)` is `True`); the number itself
+  stays inexact.
 - **`Norm(A, 2)` of a matrix is the spectral norm** (the largest singular
   value), as in the usual notation `‖A‖₂`. Before, it was the Frobenius norm.
   `Norm(A)` and `Norm(A, "Frobenius")` are still the Frobenius norm. The result
@@ -41,7 +80,73 @@
   `Norm(A, 2)` under `evaluate()` and gives a number under `.N()`. Compiled
   JavaScript computes it too (it returned `NaN`), and the Python target emits
   `np.linalg.norm(A, 2)` (it emitted `'fro'`). On a tensor of rank 3 or more,
-  order 2 is still the Frobenius norm.
+  order 2 is still the Frobenius norm. The closed form for a matrix with two
+  rows or two columns is used when the other side has at most 16 entries. Such a
+  matrix may have a symbolic entry: `Norm([[x, 1], [0, 1]], 2)` is
+  `√((|x|² + 2 + √((|x|² + 2)² − 4|x|²))/2)`. A matrix of rank 1 answers its
+  Frobenius norm exactly: the norm of the 3×3 matrix of ones is `3`.
+- **A float argument of a trigonometric function is never a special value.** A
+  special value is recognized from the STRUCTURE of the argument only (an exact
+  rational multiple of a half-turn), never within a float tolerance. Float input
+  loses its exact answers: `Sin(3.141592653589793)` is `2.38e-16` (was `0`),
+  `Arcsin(0.5)` is the float `0.523598775598298873077` (was `π/6`), and
+  `Sin(0.25π)` is a float (was `√2/2`); write `Sin(π)`, `Arcsin(1/2)` or
+  `Sin(π/4)` for an exact value. This fixes wrong exact answers for arguments
+  that are not special: `Sin(π − 10^-30)` was exactly 0, `Cos(π/2 − 10^-12)` was
+  0, `Tan(π/2 + 10^-15).N()` was `~oo` even at 150 digits, and
+  `|ln(1 − 10^-30)|` was negative. `e^{iπ}` in degree mode evaluated to
+  `0.9999995 + 0.00096i` (the angle was converted twice); it is `−1`, and
+  `e^{0.5iπ}` is `i` in every angular unit and at every precision. In another
+  unit than radians an inverse trigonometric function of a float is converted at
+  the working precision: `Arcsin(0.5)` in degrees is `30` (was
+  `30.000000000000004`) and `Arcsin(0.3)` has 21 digits. At the working
+  precision a pole or a zero is declared only within the rounding error of the
+  argument: `Cot(10^-25).N()` is `1e25` and `Sin(10^-25).N()` is `1e-25` (both
+  were `~oo` and `0`). The sign of a trigonometric function of a float is
+  decided at the working precision: `Sin(3.1415926536)` is negative and
+  `Sin(1e-10)` positive (both were undecided). A large list of machine floats
+  now computes `Sin`, `Cos`, `Tan`, `Arcsin`, … on doubles also when it holds a
+  value near a special angle.
+- **On the JavaScript target, the linear-algebra heads** (`Determinant`,
+  `Inverse`, `Trace`, `MatrixPower`, `Dot`, `MatrixMultiply`, `Cross`,
+  `RowReduce`) choose their real or complex computation from the static types of
+  their operands, the same way the enclosing expression reads the result;
+  before, `Determinant(M) + 1` over a `matrix<number>` with a complex entry
+  returned `NaN`, because the real helper read the complex entry as `NaN`. **An
+  operand whose type does not say whether its entries are real
+  (`matrix<number>`, `vector<number>`, `list<tuple<number, number>>`, an
+  undeclared matrix) is read as real in `strict` and `auto` mode, as a
+  `number`-typed scalar is, and as complex under `mode: 'complex'`.** The
+  compiled JavaScript function checks the entries of each collection-valued
+  input read as real when it is called, for `number`- and `real`-typed entries
+  alike: a `{re, im}` entry throws an error that names the input and the entry
+  (`"M" (type matrix<number>) was compiled with real entries, but its entry [1][1] is a complex {re, im} value`),
+  where before `Determinant(M) + 1` returned `NaN` for `M: matrix<real>` and
+  `At(L, 1) + 1` with `L: list<number>` returned the string
+  `"[object Object]1"`. `RowReduce` over such an operand compiles.
+  `entryChecks: false` turns the check off. A function declared with a real
+  result over a body that computes a complex value (`q: (unknown) -> real`,
+  `q := z ↦ z²`) now fails closed on JavaScript, as on GLSL and WGSL. Each
+  compilation target declares which of its own lowerings are real-only: on
+  Python, `Erf`, `Erfc`, `GammaLn`, `Gamma`, the inverse hyperbolic functions,
+  `Log2`/`Log10`/`Exp2` and the NumPy linear-algebra helpers take complex
+  arguments; on JavaScript, a real-only function of a value that is certainly
+  not real (`Erf(x + i)` with `x` real) fails closed instead of compiling to
+  `NaN`; GLSL and WGSL compile `Root` of a complex radicand. On Python, `Norm`
+  of an operand whose rank is not known at compile time emits code that checks
+  the rank with `np.ndim` when it runs: a scalar answers its absolute value, a
+  vector its p-norm, a matrix its norm for orders 1, 2 (the spectral norm) and
+  +∞, and above rank 2 the order 2 answers the Frobenius norm; every other case
+  answers NaN, where the interpreter has no value. The default order and the
+  `"Frobenius"` norm type emit `np.linalg.norm(x)` with no rank check. A
+  declared nested list type such as `list<list<list<real>>>` has a known rank. A
+  literal matrix written with a `Matrix` head
+  (`\det\begin{pmatrix}x&1\\1&x\end{pmatrix}`) compiles like the same matrix
+  written as a list of lists.
+- `.N()` of a Gaussian integer (`1 + i`) is now a float, like every other
+  complex number literal (`Inverse([[2, 1+i], [1-i, 3]]).N()` gives `0.75`, not
+  `3/4`). An exact operation whose machine-number result is a safe integer gives
+  an exact integer again (`(1+i).N() · (1−i)` evaluates to the exact `2`).
 
 - **Symbolic integration gives up at the same point on every machine.** The Rubi
   integration rules (`loadIntegrationRules`) and the compiler's attempt to find
@@ -85,15 +190,44 @@
   float magnitude, like every other `.N()` result: `(1/3 m + 1/3 m).N()` is
   `0.6666… m`, not `2/3 m`.
 - Compiled `Tan`, `Cot`, `Sec` and `Csc` of a real argument now answer the pole
-  where the interpreter answers `~oo`: when the magnitude of the value is more
-  than a million. The JavaScript target answers `Infinity` and the Python target
-  `np.inf`. Before, compiled code answered a large finite number:
-  `Tan(1.5707963267948966)` was `16331239353195370`. A lazy `Map` over more than
-  a hundred elements, which is compiled under `N()`, now answers `~oo` for such
-  an element, and also for `1/x` at `0` (it answered `+oo`).
+  where the interpreter answers `~oo`; the JavaScript target answers `Infinity`
+  and the Python target `np.inf`. At machine precision the pole rule is relative
+  to the rounding error of the argument, in the interpreter and in compiled
+  JavaScript and Python together: a value `y` at the angle `x` is the pole when
+  `|y|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1`, that is, when the argument is within 100
+  ulps of a pole. The allowed error is relative to the argument, because the
+  rounding error of a double is, so the double nearest to `kπ` is a pole of
+  `cot` for every `k` (`cot(1000π)` is `~oo`, not `−3.1·10¹²`); the cap `2⁴⁰`
+  keeps the allowed error below about `1.2·10⁻²` radians, so `cot(10²²)` is
+  `−0.614`. The big-decimal route keeps `min(1, |x|)`, because there an exact
+  integer argument is reduced exactly. Before, a value of more than a million in
+  magnitude was the pole: `Cot(1e-13)` was `~oo` (it is `1e13`),
+  `Tan(1.5707954)` was `~oo` (it is `1078987.38…`), and `1/Tan(1.5707954)` was
+  `0`. `Tan(1.5707963267948966)`, the double nearest to `π/2`, is still `~oo`. A
+  lazy `Map` over more than a hundred elements, which is compiled under `N()`,
+  answers `~oo` for such an element, and also for `1/x` at `0` (it answered
+  `+oo`).
 
 ### Improvements
 
+- On `glsl` and `wgsl`, a user function called with a complex argument at a
+  parameter whose declared type does not say `complex` (`unknown`, `number`, or
+  no declaration) now compiles: the call uses a second definition,
+  `_fn_f_complex`, whose parameter is a `vec2`/`vec2f`, and a call with a real
+  argument keeps the `float` definition; only the definitions the calls use are
+  emitted. A parameter declared `real` still declines. JavaScript is unchanged.
+  Before, `\arg(f(x+iy))` with `f: (unknown) -> unknown` declined.
+- Every compile result has `freeSymbolTypes`: it maps each free symbol to its
+  engine `type`, the type the compiled code reads it as on the target
+  (`lowered`: `float`/`vec2`/`vec3`/`mat2`/`float[5]` on the shaders,
+  `number`/`complex`/`point`/`color`/… on JavaScript, `float`/`complex`/… on
+  Python, `interval` on `interval-js`), and its `provenance` (`declared` or
+  `inferred`). A symbol used as a colour operand reports `vec3` on the shaders
+  although its engine type is `color | string | tuple`. A host binds its
+  uniforms from this report.
+- New compile option `strictTypes: true`: a compile with a free symbol that has
+  no declaration fails closed, and the error names each symbol, its inferred
+  type and the type the code would read it as. The failure follows `fallback`.
 - On the `interval-js` target, `PointX`/`PointY` of a `PointList` whose
   components are list-typed symbols now compile (for example the Voronoï field
   `\sin(120\sqrt{\min((x-P.x)^2+(y-P.y)^2)})` with `P = PointList(L_1, L_2)`),
@@ -135,10 +269,104 @@
 
 ### Resolved Issues
 
-- A product or quotient of a radical and a complex number evaluated to a float:
-  `√2·(1 + i)` is now `√2 + √2 i` (it was `1.414… + 1.414…i`) and `(1 + i)/√2`
-  is `√2/2 + (√2/2) i`. `Abs(π i)` stayed unevaluated; it is now `π`, and
-  `Abs(π(1 + i))` is `√2·π`.
+- `Mode` under `.N()` uses the same tie rule as under `evaluate()`: among the
+  most frequent values, the smallest wins (`Mode([π, 3, e]).N()` is `2.718…`,
+  not `3`; `Mode([3.5, 2.5, 1.5])` is `1.5`, not `3.5`). Before, the order of
+  the keys of a JavaScript object decided the tie. Two big decimals that agree
+  within the working precision count as one value
+  (`Mode([ln 6, ln 2 + ln 3, 1]).N()` is `ln 6`).
+- The statistics operators accept real constants such as `π`, `e` and `ln 2` as
+  data. Under `evaluate()` the answer is exact: `Median([π, 3, e])` is `3` and
+  `Mean([π, 3])` is `(π + 3)/2`; under `.N()` it is a float. A pair of constants
+  that cannot be ordered exactly leaves an order-based statistic unevaluated.
+- Python target: `GammaLn` of a real value lowers to `scipy.special.gammaln`
+  (ln|Γ|); `scipy.special.loggamma` answered `nan` for a negative real.
+  `GammaLn` of a complex value fails closed: a value that is certainly not real
+  declines at compile time (SciPy's `loggamma` takes another branch than the
+  interpreter off the real axis), and a value that may be complex raises
+  `ValueError` at run time when its imaginary part is not zero, where before it
+  silently returned `nan`.
+- `|√r·(a + bi)|` is exact when `√(r·(a² + b²))` has an exact form
+  (`|√2(1000 + 1000i)|` is `2000`, `|1000 + 1000i|` is `1000√2`); when it does
+  not, `Abs` of an exact argument stays symbolic under `evaluate()` (it returned
+  a float). `simplify()` of an exact complex literal (`√2(1 + i)`, `√2·i`)
+  returns the number, not a `Complex(…)` function. A negative exact imaginary
+  part serializes as a subtraction (`\sqrt{2}-\sqrt{2}\imaginaryI`, not `+-`),
+  and a pure imaginary term in a sum has no parentheses (`x+2\imaginaryI`).
+  `.is(v)` with a JavaScript number compares an exact value within the engine
+  tolerance (`Rational(1,3).is(1/3)` is `true`), while `isSame` stays exact.
+  `√(k·i)` is exact when `√(k/2)` has an exact radical form (`√(4i)` is
+  `√2(1 + i)`). Boxing `['Complex', re, im]` with exact components that one
+  literal cannot hold (`√2`, `√3`) builds the exact sum `√2 + √3·i` instead of a
+  float.
+- A compiled JavaScript function literal checks the entries of an unannotated
+  collection parameter against the type inferred from its body, so
+  `(M) ↦ det(M)` throws a diagnostic for a complex entry instead of returning
+  `NaN`. Typed-array rows of a matrix argument (`Float64Array`) are copied to
+  plain arrays at entry, so `det` computes them instead of returning `NaN`.
+  `freeSymbolTypes` reports a symbol declared in a scope that was popped as
+  `declared`, and spells vector and matrix types as the entry diagnostic does
+  (`matrix<number>`). A GLSL/WGSL selection with a complex value and a boolean
+  value fails closed instead of emitting invalid shader code.
+- Python target: `Norm` of an operand declared `tensor` or a dimension-less
+  `list<number>` checks the rank when the code runs instead of assuming a vector
+  (`np.linalg.norm(T, 3)` raised for a matrix). A norm order known only at run
+  time accepts the strings `"Infinity"` and `"Frobenius"` (on a matrix,
+  `"Frobenius"` is `'fro'`) instead of raising `TypeError`.
+- On the JavaScript target, `Unique` (and the other heads that compare elements
+  by value) refused a list declared `list<real | signed_infinity | nan>` while
+  it admitted the wider `list<number>`; the extended reals compare by value in
+  JavaScript exactly as the interpreter compares them.
+- A degree literal such as `\sin(30^\circ)` (and `DMS`) converts to the engine's
+  `angularUnit` instead of always to radians, so it evaluates correctly in grad
+  and turn mode (`\sin(30^\circ)` gave `0.0082` in grad mode and `−0.1477` in
+  turn mode; it is `1/2`). The Python and `interval-js` targets compile a degree
+  literal in radian mode (they refused it).
+- GLSL and WGSL: an `If` or `Which` with one complex and one real value emitted
+  a `vec2` and a `float` arm (`((0.0 < t) ? (z) : (1.0))`), which no shader
+  compiler accepts; the real values are now `vec2(v, 0.0)`. `Norm` of a list
+  with complex entries emitted `length(vec2[2](z, z))`; it is now the length of
+  the vector of the moduli. `interval-js`: a free symbol declared `complex`
+  compiled as a real interval (`1 - (t + z)`); it now fails closed.
+- A rounded big float whose value at the working precision is an integer was
+  accepted as an exact result: `2√(1 + 10^-30) − 2` and `√(1 + 10^-30) − 1`
+  evaluated to an exact `0`, `2^{10^-30}` and `(1 + 10^-30)^{1/3}` to an exact
+  `1`, and `2^{1/2 + 10^-30}` to `√2` (the rational exponent was rounded to a
+  double, and `isSame` compared the rational `(5·10^29 + 1)/10^30` with `0.5` at
+  the working precision). These now stay symbolic, and `isSame` compares a
+  non-integer exact literal with a double exactly.
+- On `glsl` and `wgsl`, `Root` with a compound degree emitted
+  `pow(x, 1.0 / u + 1.0)` for `Root(x, u + 1)`; the degree is now in
+  parentheses. Seventeen real-only shader lowerings (`Gamma`, `GammaLn`,
+  `Factorial`, `Beta`, `Erf`, `Erfc`, `ErfInv`, `Heaviside`, `Sinc`, `FresnelC`,
+  `FresnelS`, `BesselJ`, `Arctan2`, `Arccot`, `Arcsch`, `Haversine`,
+  `InverseHaversine`) accepted a complex operand and emitted invalid shader code
+  or a wrong value behind `success: true`; they now fail closed. `Root` of a
+  complex radicand emitted `sign(z) * pow(abs(z), …)`; it now computes the
+  principal complex root. In JavaScript, `Haversine` and `BesselJ` of a complex
+  value whose imaginary part is 0 at run time gave `NaN`; they now give the real
+  value. `Mandelbrot` and `Julia` with a complex iteration count emitted
+  `int(vec2(x, y))`; they now fail closed.
+- `Mandelbrot` and `Julia` type their point operands `complex`
+  (`(complex, integer) -> real`, `(complex, complex, integer) -> real`; they
+  were `number`). An undeclared symbol used as a point is inferred `complex`, so
+  a shader reads it as a `vec2`. A real point (`Mandelbrot(0.25, 100)`) is still
+  valid; on the shaders it is now passed as `vec2(x, 0.0)` (a `float` was passed
+  to the `vec2` parameter, which is not valid shader code).
+- On `glsl` and `wgsl`, a user function declared with a complex result whose
+  body is real (`s: (complex) -> complex`, `s := z ↦ Re(z)`) emitted a `vec2`
+  function that returned a `float`. The value is now converted to `vec2(v, 0.0)`
+  in the function. A complex value under a declared real result fails closed.
+- A product or quotient of a radical and a complex number evaluated to a float.
+  An exact number now holds one radical times a Gaussian rational, so
+  `evaluate()` stays exact under multiplication, division and integer powers of
+  such values: `√2·(1 + i)` is the single exact number `√2 + √2 i` (it was
+  `1.414… + 1.414…i`), `(1 + i)/√2` is `√2/2 + (√2/2) i`, `((1 + i)/√2)·√2` is
+  `1 + i`, `(√2(1 + i))²` is `4i` and `1/(√2(1 + i))` is `√2/4 − (√2/4) i`.
+  `Abs(π i)` stayed unevaluated; it is now `π`, and `Abs(π(1 + i))` is `√2·π`.
+  `simplify()` and `Expand` no longer give a float for a sum that holds such a
+  product: `simplify(√3·(1 + i) + 1)` is `1 + (√3 + √3 i)`. A value with two
+  different radicals, such as `1 + √2 i`, is still a sum.
 - Matrix functions dropped the imaginary part of a complex entry and gave wrong
   values: `SingularValues([[1, i], [0, 1]])` was `[1, 1]` (it is now
   `√((3 ± √5)/2)`), `Eigenvalues([[0, i], [i, 0]])` was `[0, 0]` (now `±i`),
@@ -146,15 +374,20 @@
   wrong, and `CholeskyDecomposition([[2, 1+i], [1-i, 3]])` gave a real `L`.
   `LUDecomposition`, `QRDecomposition`, `CholeskyDecomposition` and `SVD` of a
   complex matrix, and the eigenvalues of a complex matrix of size 3 or more, now
-  stay unevaluated; 2×2 complex eigenvalues and eigenvectors, and
-  `SingularValues` of a matrix whose Gram matrix is at most 2×2, are computed.
+  stay unevaluated, under `evaluate()` and under `.N()`. 2×2 complex eigenvalues
+  and eigenvectors, and exact `SingularValues` of a matrix whose Gram matrix is
+  at most 2×2, are computed. `SingularValues` of a complex matrix of any size
+  gives numbers under `.N()`, and under `evaluate()` when an entry is inexact.
   `SingularValues(...).N()` of an exact matrix now gives floats.
 - `Conjugate` of an exact complex sum evaluates: `Conjugate(1 + √2 i)` is
   `1 − √2 i`, so `ConjugateTranspose` of a matrix with such an entry no longer
   keeps a `Conjugate(…)` entry.
-- In the Python target, `Norm(x, p)` with a literal order on an operand whose
-  rank is not known at compile time raised for a matrix; it now checks the rank
-  at run time and answers `nan` where the interpreter has no value.
+- In the Python target, `Norm(x, p)` with a literal order over an operand whose
+  rank is not known at compile time emitted `np.linalg.norm(x, p)`, which raises
+  at run time for a scalar, for an input with more than two axes, and for a
+  matrix with an order other than 1, 2 or ∞. It now checks the rank at run time
+  and answers NaN where the interpreter has no value. A literal order of 0 or −1
+  still fails closed.
 - Exact numbers outside the float64 range lost their value: a matrix or list
   entry of `10^400` packed as `+oo` and one of `10^-400` as 0
   (`Norm([10^400, 1])` was `+oo`); `Max`, `Min`, `Clamp`, `Sort`, `MaxBy`,
@@ -163,7 +396,88 @@
   and `Mode` sorted exact values by their machine value
   (`Median([10^20+1, 10^20, 10^20+2])` was `10^20`). The square root of a large
   exact number could come back as a wrong exact integer (`√(10^30 + 1)` was
-  `10^15`).
+  `10^15`). Under `.N()`, the norms of order 1, 2 and ∞ of a matrix with such an
+  entry are big decimals: `Norm([[10^400, 1, 0], [0, 1, 0], [0, 0, 1]], 2).N()`
+  is `1e+400` (it was NaN), `Norm([[10^400, 0], [0, 10^400]], 1).N()` is
+  `1e+400` (it was `+oo`), and `Norm([[10^-400, 0], [0, 0]], 1).N()` is `1e-400`
+  (it was 0). `SingularValues` of an exact matrix with entries such as `10^200`
+  stays exact (`10^200·√((7 ± 3√5)/2)`), not the square root of a rounded
+  integer, and `SVD` and `SingularValues` of a machine matrix with entries above
+  about 1e154 or below about 1e-154 no longer give NaN or 0. When the entry
+  magnitudes of a matrix span more than about 10^150, the double kernels cannot
+  resolve the smaller singular values (their absolute error is about ε·σ_max):
+  `SingularValues` and `SVD` then stay unevaluated instead of answering 0 for
+  those values, while `Norm(A, 2)` still answers.
+- Compiled linear algebra, continued: in `mode: 'complex'`, `Dot(p, q)` over
+  points with `number` coordinates computes with complex entries (it gave
+  `null`), and a parameter declared `real` stays real in the compiled body
+  (`Trace(f(x))` with `f: (real) -> matrix<real>` gave `null`). A nested head
+  (`Trace(MatrixPower(A, 2))`, `Determinant(MatrixMultiply(A, A))`,
+  `Dot(Cross(u, u), u)`) compiles over `matrix<real>`/`vector<real>` operands
+  (it asked for a precise type), and a matrix whose entry type includes a signed
+  infinity (`matrix<integer | +oo>`) is real. The lane of a call of a user
+  function that returns a collection comes from its body; a complex entry under
+  a declared `matrix<real>` or `list<real>` fails closed and asks for a
+  corrected signature.
+- Python: `Artanh` and `Arsinh` of a non-real value compute the complex value
+  (`artanh(1 + 2i)` gave `nan`; it is now `0.1733 + 1.1781i`), except on the
+  branch cut, where NumPy takes the other side and the value stays `nan`;
+  `Artanh(x + i)` with `x` real compiles (it failed closed); `Sign` of a
+  non-real value is `z / |z|` whatever the NumPy version (it gave `nan`);
+  `Mean`, `Variance` and `StandardDeviation` of a complex list compute the
+  complex value; `Trace` of a complex matrix keeps its imaginary part; a product
+  or power with a complex operand is parenthesized correctly (`2(x + z)`
+  compiled to `2 * x + z`).
+- GLSL and WGSL: a complex power `0^w` with a positive real part of `w`,
+  including `Root(z, n)` at `z = 0`, is 0 instead of `NaN`.
+- `Erfc` of a complex argument evaluates (`1 − Erf(z)`); it stayed unevaluated
+  while `Erf` of the same argument had a value.
+- The exact ordering is sound: an order is decided only when a bound on the
+  rounding error of both operands proves it (the bound is computed in one pass
+  over the expression, and an operation with no known bound leaves the order
+  undecided). A value near a root of `ln` or `sin`, or a long literal rounded to
+  the working precision, no longer decides a sign from rounding noise
+  (`Max(L, 0)` with `L = ln(√2 − c)` near 0 stays unevaluated at the default
+  precision and is decided at a higher one), and two computed zeros are no
+  longer an exact tie. Values outside the range of a double are ordered
+  (`Max(e^{800}, 10^{347})` is `e^{800}`; `Sort([π·10^{400}, 3·10^{400}])`
+  sorts), `Max`/`Min` order a real constant of type `number`
+  (`Max(tan(π/2 − 1/10), 9)`), as `Sort` and `Clamp` already did, and sorting
+  symbolic constants is about 8× faster (the approximation of each operand is
+  computed once). When the working precision cannot decide the order of two
+  constants, three more steps run. First, a proof that the two constants are
+  equal (their difference simplifies to 0): `Sort([ln 6, ln 2 + ln 3])` keeps
+  the input order, `Max(sin²1 + cos²1, 1)` is `1`, and
+  `Max(ln 2 + ln 3 − ln 6, 0)` is `0`. Second, the comparison is made again at
+  twice the working precision (at least 50 digits, at most 100; not at machine
+  precision): `Max(√(2 + 10⁻³⁰), √2)` is `√(2 + 10⁻³⁰)` at the default
+  precision. Last, for `Max`, `Min`, `Clamp` and `Sort` only, two constants
+  whose values agree within the engine tolerance are a tie, the order these
+  operators used before and the last resort, because two different constants can
+  tie. Of two tied values, `Max` and `Min` return the number literal when there
+  is one. `Abs` and the sign of a value never use the tolerance tie.
+- `Arsinh` and `Arcosh` of a big decimal use the stable kernels: the direct
+  formula `ln(x + √(x² ± 1))` lost relative precision near 0 (`arsinh(10^-10)`
+  had a relative error of 5e-11). An exact value is ordered exactly against an
+  inexact literal (`1/3` against the 22-digit `0.3333333333333333333333` had the
+  wrong sign, an error that existed before), and two different complex values
+  are never a computed tie.
+- Ordering (`Max`, `Min`, `Sort`, `isLess`, `isGreater`): a symbol with a value
+  was compared with a number at machine precision, so
+  `Max(3.141592653589793, π)` gave the float (which is smaller than `π`) and the
+  result depended on the order of the operands; it is now compared at working
+  precision. A difference smaller than its rounding error no longer decides an
+  order (the order is undecided and the application stays unevaluated): `√(c²)`
+  gave a negative value for a constant `c` near zero. Complex values are never
+  ordered, also when their type is `number` (`Gamma(i) + 1 < Gamma(i) + 2` was
+  `True`). A finite value is ordered against `±∞` (`Max(∞, π)` is `+∞`), and
+  `3 < 1 + π` is decided (it was undecided while `1 + π > 3` was not).
+- `Abs` of a real constant evaluates (`|1 − π|` is `π − 1`), in agreement with
+  `√((1 − π)²)`; `Conjugate` distributes over sums, products, quotients and
+  integer powers (`Conjugate((1 + √2 i)^20)` is `(1 − √2 i)^20`); `Distance`
+  accepts a constant coordinate (`Distance((π, 0), (0, 0))` was an error) and is
+  the vector 2-norm of the difference; the vector ∞-norm orders exactly
+  (`‖(10²⁰, 10²⁰ + 1)‖∞` was `1e+20`).
 - An exact complex entry of a matrix (`i`, `1 + 2i`, `1/2 + i`) was read back
   from the packed tensor as a machine number, so exact complex matrices gave
   machine results: `Norm([[1, 1+2i], [0, 1]], 1)` was `3.236…`, not `1 + √5`,

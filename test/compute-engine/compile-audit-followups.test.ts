@@ -243,7 +243,11 @@ describe('sharing range-gather reductions', () => {
         ['Add', ['Sin', reduce('Sum')], ['Cos', reduce('Sum')]],
         0,
       ]),
-      { constantFold: false }
+      // The entry check of the runner reads every entry of the
+      // `list<number>` `P` when it is called, to refuse a `{re, im}` entry,
+      // which would read the throwing entry below before the code runs. It
+      // is turned off here: this test is about the compiled code.
+      { constantFold: false, entryChecks: false }
     );
     expect(result.success).toBe(true);
     expect(

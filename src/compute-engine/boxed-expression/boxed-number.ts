@@ -19,7 +19,10 @@ import {
   NumericValue,
   NumericValueData,
 } from '../numeric-value/types.js';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import {
+  ExactNumericValue,
+  orderExactAgainstInexact,
+} from '../numeric-value/exact-numeric-value.js';
 
 import { replace } from './rules.js';
 import { simplify } from './simplify.js';
@@ -1214,11 +1217,12 @@ export class BoxedNumber
   /**
    * Is this number a machine number, exactness included — does
    * `engine.number(x)` of its machine value reproduce it? `true` for a
-   * float (machine or bignum, when the double is the same value), for an
-   * integer a double holds (`3`, `2^70`; not `2^53 + 1`), for `NaN` and the
-   * infinities. `false` for an exact non-integer, even one a double holds:
-   * `1/2` re-boxes as the float `0.5`, which computes as a float where
-   * `1/2` computes exactly. `false` for a radical and a complex number.
+   * float (machine or bignum, when the double is the same value), for a
+   * safe integer (`3`), for `NaN` and the infinities. `false` for an exact
+   * non-integer, even one a double holds: `1/2` re-boxes as the float `0.5`,
+   * which computes as a float where `1/2` computes exactly. `false` for an
+   * exact integer past the safe integers (`2^70`), which re-boxes as a float
+   * for the same reason. `false` for a radical and a complex number.
    * This is the per-element rule of `BoxedFunction.isMachineNumeric`.
    */
   get isMachineNumeric(): boolean {
@@ -1278,7 +1282,25 @@ export class BoxedNumber
       }
     }
 
-    // For primitive arguments without explicit tolerance, isSame is definitive
+    // An exact value (a rational, a radical, an exact complex) compared with
+    // a double: `isSame` compares the two EXACTLY (a double is a dyadic
+    // rational), so `1/3` is not the same as the double `1/3`. `.is()` is
+    // the tolerant check, so it compares the values within the engine
+    // tolerance, as it does for `.is(ce.number(v))`. A machine number
+    // compared with a primitive keeps the strict answer of `isSame`
+    // (`ce.number(1e-17).is(0)` is false).
+    if (
+      (typeof other === 'number' || typeof other === 'bigint') &&
+      this._value instanceof ExactNumericValue
+    ) {
+      const v = Number(other);
+      if (!Number.isFinite(v)) return false;
+      const tol = this.engine.tolerance;
+      return Math.abs(this.re - v) <= tol && Math.abs(this.im) <= tol;
+    }
+
+    // For other primitive arguments without explicit tolerance, isSame is
+    // definitive
     if (!(other instanceof _BoxedExpression)) return false;
 
     // BoxedExpression: evaluate other side and compare numerically
@@ -1321,8 +1343,19 @@ export class BoxedNumber
       // `isSame(0.5)`-driven BigDecimal builds per `d/dx xⁿ` iteration
       // (integer exponents repeatedly probed against `0.5` in `canonicalPower`).
       // (#15 / perf review)
+      // A non-integer exact value (a rational, a radical) is compared with
+      // the double EXACTLY: a double is a dyadic rational, and the exact
+      // value equals it only when the two rationals are the same. The former
+      // `eq` compared at the working precision, so the rational
+      // `(5·10^29 + 1)/10^30` was the same as `0.5` at 21 digits, and
+      // `2^{1/2 + 10^-30}` canonicalized to `√2`. A radical (`√2`) is never
+      // a double, so only the rational part is compared.
       if (v instanceof ExactNumericValue && v.type !== 'integer')
-        return v.eq(this.engine._numericValue(other));
+        return (
+          v.im === 0 &&
+          v.radical === 1 &&
+          orderExactAgainstInexact(v, other) === 0
+        );
       return false;
     }
     if (typeof other === 'bigint') {
@@ -1358,9 +1391,22 @@ export class BoxedNumber
   }
 
   simplify(options?: Partial<SimplifyOptions>): Expression {
-    const results = simplify(this.structural, options);
-
-    return results.at(-1)!.value ?? this;
+    const structural = this.structural;
+    const results = simplify(structural, options);
+    const result = results.at(-1)?.value;
+    if (result === undefined) return this;
+    // The structural form of an exact complex literal is a `Complex(re, im)`
+    // FUNCTION (`√2·(1+i)` is `Complex(√2, √2)`), and the simplification of
+    // that function can return a `Complex(…)` function again (with its
+    // operands folded to number literals, which `isSame` does not match with
+    // the structural `Sqrt(2)`). When that function is the same value as
+    // this literal, the answer is the literal, not a `Complex` head.
+    if (
+      result.operator === 'Complex' &&
+      this.engine.expr(result.json).isSame(this)
+    )
+      return this;
+    return result;
   }
 
   explain(operation?: ExplainOperation, options?: ExplainOptions): Explanation {

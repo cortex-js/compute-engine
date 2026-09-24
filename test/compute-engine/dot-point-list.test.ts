@@ -275,16 +275,26 @@ describe('Dot over a tuple with collection components', () => {
       expect(r.run!({})).toBe(11);
     });
 
-    test('a matrix written as a list of rows still compiles', () => {
-      const ce = new ComputeEngine();
-      ce.declare('r', 'list<number>');
-      ce.declare('s', 'list<number>');
-      const r = compile(ce.parse('\\operatorname{Dot}([r,s],[[1,0],[0,1]])'), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.matmul');
-    });
+    // A `list<number>` row is read as real in the default mode, as a
+    // `list<real>` row is; the runner refuses a complex entry of it when it
+    // is called.
+    test.each(['list<real>', 'list<number>'])(
+      'a matrix written as a list of %s rows still compiles',
+      (type) => {
+        const ce = new ComputeEngine();
+        ce.declare('r', type);
+        ce.declare('s', type);
+        const r = compile(
+          ce.parse('\\operatorname{Dot}([r,s],[[1,0],[0,1]])'),
+          { fallback: false, constantFold: false }
+        );
+        expect(r.success).toBe(true);
+        expect(r.code).toContain('_SYS.matmul');
+        expect(r.run!({ r: [1, 2], s: [3, 4] })).toEqual([
+          [1, 2],
+          [3, 4],
+        ]);
+      }
+    );
   });
 });

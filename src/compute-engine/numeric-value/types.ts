@@ -30,13 +30,15 @@ import { NumericPrimitiveType } from '../../common/type/types.js';
 
 /** The value is equal to `rational * sqrt(radical) + imRational * sqrt(imRadical) * i`
  *
- * Representable set (enforced by `ExactNumericValue`):
+ * Representable set (enforced by `ExactNumericValue`): one radical times a
+ * Gaussian rational, `√r·(p + q·i)`:
  * - real values: `rational * sqrt(radical)` (imaginary part 0);
- * - Gaussian rationals: both `radical` and `imRadical` are 1 (e.g. `2+3i`, `1/2-5i/3`);
- * - pure-imaginary radicals: the real part is 0 (e.g. `√2·i`).
+ * - pure-imaginary values: the real part is 0 (e.g. `√2·i`);
+ * - both parts non-zero: `radical` and `imRadical` are equal (e.g. `2+3i`,
+ *   `1/2-5i/3`, `√2 + √2·i`).
  *
- * A value needing a radical on both a non-zero real AND a non-zero imaginary
- * component (e.g. `√2 + √3·i`) is NOT representable exactly.
+ * A value needing two different radicals on a non-zero real AND a non-zero
+ * imaginary component (e.g. `1 + √2·i`) is NOT representable exactly.
  *
  * @category Numerics */
 export type ExactNumericValueData = {

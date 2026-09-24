@@ -70,13 +70,18 @@ export class BigNumericValue extends NumericValue {
     return 'real';
   }
 
+  // A big decimal is never exact. It is a value at the working precision
+  // (the result of a numeric evaluation, or a literal written with a decimal
+  // point), and whether it is integer-valued depends on that precision:
+  // `10^400` evaluated with `.N()` is integer-valued at 21 digits only
+  // because the digits past the precision were rounded away. An exact
+  // integer is built from a bigint or a string of digits instead.
   get isExact(): boolean {
-    return this.im === 0 && this.decimal.isInteger();
+    return false;
   }
 
   get asExact(): ExactNumericValue | undefined {
-    if (!this.isExact) return undefined;
-    return this._makeExact(bigint(this.decimal)!);
+    return undefined;
   }
 
   /**

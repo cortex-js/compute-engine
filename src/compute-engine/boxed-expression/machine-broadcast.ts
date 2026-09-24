@@ -1,7 +1,11 @@
 import type { Expression } from '../types-expression.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { isExactNonInteger, machineNumberOf } from './machine-number.js';
-import { MACHINE_PRECISION, roundHalfAway } from '../numerics/numeric.js';
+import {
+  isMachineTrigPole,
+  MACHINE_PRECISION,
+  roundHalfAway,
+} from '../numerics/numeric.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
 /**
@@ -161,8 +165,9 @@ export function machineBroadcast(
       const column = columns[c];
       const x = typeof column === 'number' ? column : column[i];
       if (!Number.isFinite(x)) return undefined;
-      // An integer past the safe range is an exact big integer in the
-      // interpreter, which the double does not hold.
+      // An integer past the safe range may be an exact big integer in the
+      // interpreter, which the double does not hold (the double boxes as a
+      // float).
       if (Number.isInteger(x) && !Number.isSafeInteger(x)) return undefined;
       // An integer with an exact rational: an exact rational result.
       if (rationalScalar && typeof column !== 'number' && Number.isInteger(x))
@@ -175,8 +180,8 @@ export function machineBroadcast(
         : foldExactFirst(kernel, cell);
     // A `NaN` or an infinite result, and an integer result past the safe
     // range (an exact big integer in the interpreter when every operand is
-    // an integer, and not the value it holds when one is a float), are
-    // decided by the interpreter.
+    // an integer, where the double boxes as a float), are decided by the
+    // interpreter.
     if (r === undefined || !Number.isFinite(r)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
     // `-0` is stored as `0`, as the `array` of a list stores it.
@@ -195,15 +200,15 @@ export function machineBroadcast(
  *
  * - `routes`: `'N'` for a kernel used under `N()` only (the power of the
  *   numeric `e`, whose base exists only on that route); `'both'` otherwise.
- * - `avoid`: the arguments that `evaluate()` recognizes, for a head that
- *   computes the primitive on every other argument; it receives the engine
- *   tolerance. The trigonometric functions answer an exact value for a float
- *   within `1e-12` of a special angle (`Sin(3.141592653589793)` is `0`,
- *   `Cos(π/3)` is `1/2`, and a tiny argument is a special angle too:
- *   `Sin(1e-300)` is `0`): see `nearSpecialAngle`. The inverse
- *   trigonometric functions answer an exact angle within the engine
- *   tolerance of a special value (`Arcsin(0.5)` is `π/6`): see
- *   `nearSpecialValue`. A power of `e` answers `√e` for the exponent `0.5`.
+ * - `avoid`: the arguments that `evaluate()` answers exactly, for a head
+ *   that computes the primitive on every other argument: a power of `e`
+ *   answers `√e` for the exponent `0.5`. The trigonometric functions and
+ *   their inverses need none: `evaluate()` answers an exact value only for
+ *   an exact argument (an exact rational multiple of `π` for `Sin`, an
+ *   exact `1/2` for `Arcsin`), and a float is never special:
+ *   `Sin(3.141592653589793)` is the float `Math.sin` gives,
+ *   `1.2246467991473532e-16`, and `Arcsin(0.5)` is `0.5235987755982989`,
+ *   not `π/6`.
  * - `integers`: whether an integer element is admitted under `evaluate()`.
  *   `Sinh(1)` and `Sqrt(2)` are exact there, `|−3|`, `⌊2.5⌋` and `3^2`
  *   are the integers the primitive gives. Under `N()` an integer element is
@@ -211,8 +216,10 @@ export function machineBroadcast(
  *   answers an exact value (`Sqrt(4)`, `Sinh(0)`) that value is the double.
  * - `domain`: the arguments with a finite real value. A negative argument of
  *   `Sqrt` or `Ln` has a complex value; `Arcsin` outside `[−1, 1]` too.
- * - `bound`: `Tan` and its three relatives answer the pole `~oo` when the
- *   primitive's value passes a million in magnitude.
+ * - `pole`: `Tan` and its three relatives answer the pole `~oo` when the
+ *   argument is within its rounding error of a pole (`isMachineTrigPole`:
+ *   `|value|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1`). The kernel declines such an
+ *   element, and the scalar route answers it.
  * - The trigonometric heads read `ce.angularUnit`: in another unit than
  *   radians the argument is converted first, which the kernel does not do.
  */
@@ -221,56 +228,9 @@ interface MachineFunctionKernel {
   routes: 'both' | 'N';
   integers: boolean;
   domain?: (x: number) => boolean;
-  avoid?: (x: number, tolerance: number) => boolean;
-  bound?: number;
+  avoid?: (x: number) => boolean;
+  pole?: boolean;
   angle?: boolean;
-}
-
-const POLE_BOUND = 1e6;
-
-/**
- * Is `x` an angle (in radians) that `evaluate()` of a trigonometric function
- * may answer an exact value for?
- *
- * The recognizer (`constructibleValues`, `boxed-expression/trigonometry.ts`)
- * reduces the angle to `[0, π/2)` with the two remainders below, and answers
- * an exact value when the remainder is within `1e-12` of `π·n/d` for a
- * fraction `n/d` of its table, whose denominators all divide 120. The test
- * here is the same reduction, followed by the distance to the nearest
- * multiple of `π/120` with a tolerance a thousand times wider: every angle
- * the recognizer answers is within it, and an angle that is within it and
- * that the recognizer does not answer takes the general route, which
- * computes the same primitive.
- */
-function nearSpecialAngle(x: number): boolean {
-  const theta = Math.abs(x % (2 * Math.PI)) % (Math.PI / 2);
-  const step = Math.PI / 120;
-  const r = theta % step;
-  return r <= 1e-9 || step - r <= 1e-9;
-}
-
-/**
- * Is `x` a value that `evaluate()` of an inverse trigonometric function may
- * answer an exact angle for? The recognizer (`constructibleValuesInverse`,
- * `boxed-expression/trigonometry.ts`) answers `π·n/d` when `x` is within the
- * engine tolerance (`ce.chop`, `1e-10` by default) of the sine, cosine or
- * tangent of such an angle, and the angles of its table are multiples of
- * `π/120` (see `nearSpecialAngle`). So the angle `inverse(x)` is rounded to
- * the nearest multiple of `π/120`, and `x` is compared with the forward
- * function of that angle, with a tolerance ten times wider than the
- * recognizer's (and at least `1e-9`). An argument this test accepts and the
- * recognizer does not takes the general route, which computes the same
- * primitive.
- */
-function nearSpecialValue(
-  x: number,
-  tolerance: number,
-  inverse: (x: number) => number,
-  forward: (a: number) => number
-): boolean {
-  const step = Math.PI / 120;
-  const angle = Math.round(inverse(x) / step) * step;
-  return Math.abs(forward(angle) - x) <= Math.max(1e-9, 10 * tolerance);
 }
 
 const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
@@ -279,54 +239,46 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: nearSpecialAngle,
   },
   Cos: {
     apply: Math.cos,
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: nearSpecialAngle,
   },
   Tan: {
     apply: Math.tan,
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: nearSpecialAngle,
-    bound: POLE_BOUND,
+    pole: true,
   },
   Cot: {
     apply: (x) => 1 / Math.tan(x),
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: nearSpecialAngle,
-    bound: POLE_BOUND,
+    pole: true,
   },
   Sec: {
     apply: (x) => 1 / Math.cos(x),
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: nearSpecialAngle,
-    bound: POLE_BOUND,
+    pole: true,
   },
   Csc: {
     apply: (x) => 1 / Math.sin(x),
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: nearSpecialAngle,
-    bound: POLE_BOUND,
+    pole: true,
   },
   Arctan: {
     apply: Math.atan,
     routes: 'both',
     integers: false,
     angle: true,
-    avoid: (x, tolerance) =>
-      nearSpecialValue(x, tolerance, Math.atan, Math.tan),
   },
   Arcsin: {
     apply: Math.asin,
@@ -334,8 +286,6 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
     integers: false,
     angle: true,
     domain: (x) => x >= -1 && x <= 1,
-    avoid: (x, tolerance) =>
-      nearSpecialValue(x, tolerance, Math.asin, Math.sin),
   },
   Arccos: {
     apply: Math.acos,
@@ -343,8 +293,6 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
     integers: false,
     angle: true,
     domain: (x) => x >= -1 && x <= 1,
-    avoid: (x, tolerance) =>
-      nearSpecialValue(x, tolerance, Math.acos, Math.cos),
   },
   Sinh: { apply: Math.sinh, routes: 'both', integers: false },
   Cosh: { apply: Math.cosh, routes: 'both', integers: false },
@@ -511,16 +459,11 @@ function machineFunctionBroadcast(
     if (!Number.isFinite(x)) return undefined;
     if (!admitsIntegers && Number.isInteger(x)) return undefined;
     if (kernel.domain !== undefined && !kernel.domain(x)) return undefined;
-    if (
-      !numericApproximation &&
-      kernel.avoid !== undefined &&
-      kernel.avoid(x, ce.tolerance)
-    )
+    if (!numericApproximation && kernel.avoid !== undefined && kernel.avoid(x))
       return undefined;
     const r = kernel.apply(x);
     if (!Number.isFinite(r)) return undefined;
-    if (kernel.bound !== undefined && Math.abs(r) > kernel.bound)
-      return undefined;
+    if (kernel.pole === true && isMachineTrigPole(r, x)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;
     out[i] = r === 0 ? 0 : r;
   }
@@ -648,9 +591,6 @@ export function machineListFrom(
     const x = machineNumberOf(el);
     if (x === undefined || isExactNonInteger(el, x) || !isStoredAsDouble(el))
       return undefined;
-    // `ce.number()` makes an integer past the safe range an exact big
-    // integer, which the element may not be (a float with an integer value).
-    if (Number.isInteger(x) && !Number.isSafeInteger(x)) return undefined;
     out[i] = x === 0 ? 0 : x;
   }
   return ce.list(out);

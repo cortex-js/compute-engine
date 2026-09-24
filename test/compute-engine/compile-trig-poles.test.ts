@@ -11,11 +11,13 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
 //
 // THE POLES OF `Tan`, `Cot`, `Sec` AND `Csc` IN COMPILED CODE
 //
-// The interpreter answers the unsigned pole `~oo` when the machine value of
-// one of these functions has a magnitude of more than a million
-// (`boxed-expression/trigonometry.ts`). Compiled JavaScript and Python answer
-// `Infinity` (`np.inf`) at the same arguments, the double that stands for
-// `~oo`. Without the rule, `Math.tan(π/2)` gives `16331239353195370`.
+// The interpreter answers the unsigned pole `~oo` when the argument `x` of
+// one of these functions is within its rounding error of a pole: when the
+// machine value `y` is infinite or `|y|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1`
+// (`isMachineTrigPole`, `numerics/numeric.ts`). Compiled JavaScript and
+// Python answer `Infinity` (`np.inf`) at the same arguments, the double that
+// stands for `~oo`. Without the rule, `Math.tan(π/2)` gives
+// `16331239353195370`.
 //
 
 const HEADS = ['Tan', 'Cot', 'Sec', 'Csc'] as const;
@@ -26,7 +28,11 @@ for (let k = -12; k <= 12; k++) {
   const a = (k * Math.PI) / 12;
   ANGLES.push(a, a + 1e-13, a - 1e-13, a + 1e-7, a + 1e-3);
 }
-ANGLES.push(1e-13, -1e-13, 0.5, -2.5, 100);
+ANGLES.push(1e-13, -1e-13, 0.5, -2.5, 100, 1e18, 1e22, -1e22);
+// The double nearest to `kπ` and to `(2k + 1)π/2` for a large `k`: a pole,
+// as the allowed error is relative to the argument.
+for (const k of [100, 200, 500, 1000, 1e4, 1e6, 1e9, -1000])
+  ANGLES.push(k * Math.PI, ((2 * k + 1) * Math.PI) / 2);
 
 /** Is `v` the unsigned pole `~oo`? At machine precision `N()` spells it as
  * the complex number with two infinite parts. */
@@ -61,12 +67,20 @@ describe('compiled JavaScript answers the pole where the interpreter does', () =
     const at = (head: string, x: number) =>
       compile(ce.box([head, 'x'])).run!({ x });
     expect(at('Tan', 1.5707963267948966)).toBe(Infinity);
-    expect(at('Cot', 1e-13)).toBe(Infinity);
-    expect(at('Cot', -1e-13)).toBe(Infinity);
+    // The pole at 0 is exact, and `1e-13` is far from it relative to its
+    // own rounding error: the value is the double, not the pole.
+    expect(at('Cot', 1e-13)).toBe(1 / Math.tan(1e-13));
+    expect(at('Cot', -1e-13)).toBe(1 / Math.tan(-1e-13));
+    expect(at('Tan', 1.5707954)).toBe(Math.tan(1.5707954));
     expect(at('Sec', 1.5707963267948966)).toBe(Infinity);
     expect(at('Csc', 0)).toBe(Infinity);
     expect(at('Csc', Math.PI)).toBe(Infinity);
     expect(at('Tan', 1)).toBe(Math.tan(1));
+    expect(at('Cot', 500 * Math.PI)).toBe(Infinity);
+    expect(at('Cot', 1000 * Math.PI)).toBe(Infinity);
+    expect(at('Cot', 1e4 * Math.PI)).toBe(Infinity);
+    expect(at('Tan', (401 * Math.PI) / 2)).toBe(Infinity);
+    expect(at('Cot', 1e22)).toBe(1 / Math.tan(1e22));
   });
 
   test('a literal argument folds', () => {
@@ -146,12 +160,16 @@ describe('compiled Python answers the pole', () => {
   });
 
   test('the emitted code', () => {
+    const rule =
+      '(lambda _y: np.where(np.isinf(_y) | (np.abs(_y) * ' +
+      'np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 ' +
+      '>= 1), np.inf, _y)[()])';
     expect(py.compileFunction(ce.box(['Tan', 'x']), 'f', ['x'])).toContain(
-      '(lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(np.tan(x))'
+      `(lambda _x: ${rule}(np.tan(_x)))(x)`
     );
     // No module-level helper, so a bare lambda can hold it.
     expect(py.compileLambda(ce.box(['Cot', 'x']), ['x'])).toBe(
-      'lambda x: (lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(1 / np.tan(x))'
+      `lambda x: (lambda _x: ${rule}(1 / np.tan(_x)))(x)`
     );
   });
 
@@ -207,7 +225,12 @@ describe('compiled Python answers the pole', () => {
       const e = expected[i];
       const a = actual[i];
       if (e === 'inf') expect(a).toBe('inf');
-      else if (!(Math.abs((a as number) - e) <= 1e-9))
+      // Relative: a value near a pole that is not a pole is large (`cot` of
+      // `π/12·k + 10⁻⁷` is about `10⁷`), and numpy and V8 can differ in the
+      // last bit of it.
+      else if (
+        !(Math.abs((a as number) - e) <= 1e-9 * Math.max(1, Math.abs(e)))
+      )
         expect([i, a]).toEqual([i, e]);
     }
   });

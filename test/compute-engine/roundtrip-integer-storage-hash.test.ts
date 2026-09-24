@@ -19,7 +19,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  */
 
 /** The four predicates of the Tycho round-trip harness, on one engine. */
-function predicates(json: number) {
+function predicates(json: number | { num: string }) {
   const ce = new ComputeEngine();
   const a = ce.box(json);
   const b = ce.parse(a.toLatex({ materialization: false }));
@@ -44,9 +44,22 @@ describe('an exact integer round-trips with all four predicates agreeing', () =>
   // the parse of its own serialization. The constructor now stores those as
   // bigint — one canonical form on each side of 2^53 (machine below, bigint
   // above). 2^53 itself was always clean and guards the boundary.
-  test.each([
-    100000000000, 1000000, 100000, 12345678, 0, 1, -1000000, 1e16, 8e19,
-    -8e19, 2 ** 53, 2 ** 53 + 2,
+  // The values past the safe integers are written as strings of digits: a
+  // JavaScript number past the safe integers boxes as a float, not as an
+  // exact integer.
+  test.each<number | { num: string }>([
+    100000000000,
+    1000000,
+    100000,
+    12345678,
+    0,
+    1,
+    -1000000,
+    { num: '1e16' },
+    { num: '8e19' },
+    { num: '-8e19' },
+    { num: '9007199254740992' },
+    { num: '9007199254740994' },
   ])('%p', (value) => {
     const p = predicates(value);
     expect(p).toMatchObject({

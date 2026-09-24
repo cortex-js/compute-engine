@@ -188,15 +188,23 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
 
   it('order 2 on a VECTOR is unchanged (the two systems agree at rank 1)', () => {
     expect(src(['Norm', ['List', 3, 4], 2])).toBe('np.linalg.norm([3, 4], 2)');
-    // A dimension-less `list<number>` (the `vector` spelling) is still
-    // provably rank 1, so it must not fall into the decline below.
-    ce.declare('normVec1', 'list<number>');
+    // A `vector` carries `dimensions: [-1]`, so it is provably rank 1.
+    ce.declare('normVec1', 'vector<real>');
     expect(src(['Norm', 'normVec1', 2])).toBe('np.linalg.norm(normVec1, 2)');
+    // A dimension-less `list<number>` is NOT provably rank 1: a matrix
+    // conforms to it too, and on a matrix the order 2 is the spectral norm.
+    // So the emitted code tests the rank when it runs.
+    ce.declare('normList1', 'list<number>');
+    expect(src(['Norm', 'normList1', 2])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normList1)"
+    );
   });
 
-  it('order 2 on an operand of unknown rank fails closed', () => {
+  it('order 2 on an operand of unknown rank tests the rank when it runs', () => {
     ce.declare('normOpaque1', 'unknown');
-    expect(() => src(['Norm', 'normOpaque1', 2])).toThrow(/Fail closed/);
+    expect(src(['Norm', 'normOpaque1', 2])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normOpaque1)"
+    );
   });
 
   it('the other matrix orders are unchanged', () => {
@@ -415,16 +423,72 @@ describe('PYTHON ARITY — a run-time Norm order the interpreter does not comput
       });
     });
   });
+
+    it('a run-time STRING order is the norm type the interpreter reads', () => {
+      // `normRunP` is not declared, so the emitted code accepts the string
+      // orders of the `Norm` signature: `"Infinity"` is the order +Infinity,
+      // `"Frobenius"` the entry-wise L2 norm (`'fro'` on a matrix, not the
+      // spectral norm), and any other string has no value. Without the
+      // normalization, `_p > 0` raised a `TypeError` for a string.
+      // ‖(3, 4)‖∞ = 4, the maximum absolute row sum of M is 17, and its
+      // Frobenius norm is √(9 + 16 + 25 + 144) = √194.
+      const cases: Array<[any, string, number]> = [
+        [V, 'Infinity', 4],
+        [V, 'Frobenius', 5],
+        [V, 'bogus', NaN],
+        [M, 'Infinity', 17],
+        [M, 'Frobenius', Math.sqrt(194)],
+        [M, 'bogus', NaN],
+      ];
+      let program = 'import numpy as np\nimport math, json\n\n';
+      cases.forEach(([x], i) => {
+        program += `${python.compileFunction(ce.box(['Norm', x, 'normRunP']), `fn_${i}`, ['normRunP'])}\n`;
+      });
+      program += 'results = []\n';
+      cases.forEach(([, p], i) => {
+        program += `r = float(fn_${i}('${p}'))\n`;
+        program += `results.append(None if math.isnan(r) else r)\n`;
+      });
+      program += 'print(json.dumps(results))\n';
+
+      const file = path.join(os.tmpdir(), `ce-py-norm-str-${process.pid}.py`);
+      fs.writeFileSync(file, program);
+      let out = '';
+      try {
+        out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      const actual = JSON.parse(out) as (number | null)[];
+      cases.forEach(([x, p, expected], i) => {
+        const interpreted = ce.box(['Norm', x, { str: p }]).N();
+        if (Number.isNaN(expected)) {
+          expect([i, actual[i]]).toEqual([i, null]);
+          expect(isNumber(interpreted)).toBe(false);
+        } else {
+          expect([i, actual[i]]).toEqual([i, expect.closeTo(expected, 10)]);
+          expect(interpreted.re).toBeCloseTo(expected, 10);
+        }
+      });
+    });
 });
 
-// A literal norm order over an operand whose rank is not known when it
-// compiles. `np.linalg.norm(x, 3)` raises a ValueError for a matrix, and
-// `np.linalg.norm(x, p)` raises for a scalar and for an input with more than
-// two axes, but the interpreter answers a value (a scalar: its absolute
-// value) or leaves the application unevaluated. The emitted code tests the
-// rank when it runs, and answers NaN where the interpreter has no value.
-describe('PYTHON ARITY — a literal Norm order over an operand of unknown rank', () => {
+// A norm order over an operand whose rank is not known when it compiles.
+// `np.linalg.norm(x, p)` spells a different norm, or raises, for each rank: it
+// raises for a scalar and for an input with more than two axes, and for a
+// matrix when `p` is not 1, 2 or `inf`. The interpreter answers a value (a
+// scalar: its absolute value; above rank 2: the Frobenius norm for the order
+// 2) or leaves the application unevaluated. The emitted code tests the rank
+// when it runs, and answers NaN where the interpreter has no value.
+describe('PYTHON ARITY — a Norm order over an operand of unknown rank', () => {
   ce.declare('normOpaqueX', 'unknown');
+  ce.declare('normScalarX', 'real');
+  ce.declare('normVecX', 'vector<real>');
+  ce.declare('normMatX', 'matrix<real>');
+  ce.declare('normT3X', 'list<list<list<real>>>');
+  ce.declare('normTensorX', 'tensor');
+  ce.declare('normListVecX', 'list<vector<real>>');
+  ce.declare('normListMatX', 'list<matrix<real>>');
 
   it('emits a run-time rank test instead of a bare `np.linalg.norm`', () => {
     expect(src(['Norm', 'normOpaqueX', 3])).toBe(
@@ -433,6 +497,115 @@ describe('PYTHON ARITY — a literal Norm order over an operand of unknown rank'
     expect(src(['Norm', 'normOpaqueX', 1])).toBe(
       "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
     );
+    expect(src(['Norm', 'normOpaqueX', 'PositiveInfinity'])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, np.inf) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
+    );
+    expect(src(['Norm', 'normOpaqueX', { str: 'Infinity' }])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, np.inf) if np.ndim(_x) <= 2 else float('nan'))(normOpaqueX)"
+    );
+    // The order 2 is the Euclidean norm of a vector, the spectral norm of a
+    // matrix, and the Frobenius norm (numpy's default order) above rank 2.
+    expect(src(['Norm', 'normOpaqueX', 2])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normOpaqueX)"
+    );
+  });
+
+  it('a run-time order tests the rank and the order when it runs', () => {
+    // `normRunP` is not declared, so its type admits a string: the order is
+    // normalized first (`"Infinity"` → `np.inf`, `"Frobenius"` → 2, any other
+    // string → NaN), and the matrix branch spells `"Frobenius"` as `'fro'`.
+    expect(src(['Norm', 'normOpaqueX', 'normRunP'])).toBe(
+      "(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, 'fro') if (isinstance(_q, str) and _q == 'Frobenius') else np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normOpaqueX, normRunP)"
+    );
+    // An order whose type admits no string is compared as it is.
+    ce.declare('normRealP', 'real');
+    expect(src(['Norm', 'normOpaqueX', 'normRealP'])).toBe(
+      "(lambda _x, _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(normOpaqueX, normRealP)"
+    );
+  });
+
+  it('the default order and the Frobenius norm type need no rank test', () => {
+    // With no `ord` argument `np.linalg.norm` flattens its input at every
+    // rank, which is the entry-wise Frobenius norm of the interpreter.
+    expect(src(['Norm', 'normOpaqueX'])).toBe('np.linalg.norm(normOpaqueX)');
+    expect(src(['Norm', 'normOpaqueX', { str: 'Frobenius' }])).toBe(
+      'np.linalg.norm(normOpaqueX)'
+    );
+  });
+
+  it('a non-positive literal order still fails closed', () => {
+    expect(() => src(['Norm', 'normOpaqueX', 0])).toThrow(
+      /positive order.*Fail closed/s
+    );
+    expect(() => src(['Norm', 'normOpaqueX', -1])).toThrow(/Fail closed/);
+  });
+
+  it('a scalar operand is its absolute value', () => {
+    expect(src(['Norm', 'normScalarX', 3])).toBe('np.abs(normScalarX)');
+    expect(src(['Norm', 'normScalarX', 2])).toBe('np.abs(normScalarX)');
+    expect(src(['Norm', 'normScalarX', { str: 'Infinity' }])).toBe(
+      'np.abs(normScalarX)'
+    );
+    expect(src(['Norm', 'normScalarX', 'normRunP'])).toBe(
+      "(lambda _x, _q: (lambda _p: np.abs(_x) if _p > 0 else float('nan'))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normScalarX, normRunP)"
+    );
+  });
+
+  it('a declared vector or matrix keeps the plain call', () => {
+    expect(src(['Norm', 'normVecX', 3])).toBe('np.linalg.norm(normVecX, 3)');
+    expect(src(['Norm', 'normMatX', 1])).toBe('np.linalg.norm(normMatX, 1)');
+  });
+
+  it('a dimension-less nested list has no static rank', () => {
+    // `list<list<list<real>>>` carries no `dimensions`, and its innermost
+    // `list<real>` admits a matrix, so a rank-4 value conforms to it too. The
+    // emitted code tests the rank when it runs.
+    expect(src(['Norm', 'normT3X', 2])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normT3X)"
+    );
+    expect(src(['Norm', 'normT3X', 1])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normT3X)"
+    );
+    expect(src(['Norm', 'normT3X', 'normRunP'])).toBe(
+      "(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, 'fro') if (isinstance(_q, str) and _q == 'Frobenius') else np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normT3X, normRunP)"
+    );
+  });
+
+  it('a `tensor` operand has no static rank', () => {
+    // `tensor` is the dimension-less `list<number>`: a vector, a matrix and
+    // every higher tensor conform to it. Reading it as rank 1 emitted
+    // `np.linalg.norm(T, 3)`, which raises for a matrix, and
+    // `np.linalg.norm(T, 2)`, which raises above rank 2.
+    expect(src(['Norm', 'normTensorX', 1])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 1) if np.ndim(_x) <= 2 else float('nan'))(normTensorX)"
+    );
+    expect(src(['Norm', 'normTensorX', 2])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 2) if np.ndim(_x) <= 2 else np.linalg.norm(_x))(normTensorX)"
+    );
+    expect(src(['Norm', 'normTensorX', 3])).toBe(
+      "(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, 3) if np.ndim(_x) == 1 else float('nan'))(normTensorX)"
+    );
+    expect(src(['Norm', 'normTensorX', 'normRunP'])).toBe(
+      "(lambda _x, _q: (lambda _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, 'fro') if (isinstance(_q, str) and _q == 'Frobenius') else np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normTensorX, normRunP)"
+    );
+  });
+
+  it('a list of vectors or of matrices keeps its static rank', () => {
+    // The outer dimension-less list adds one axis to a list element type
+    // that carries `dimensions`.
+    expect(() => src(['Norm', 'normListVecX', 3])).toThrow(
+      /matrix norms only for orders.*Fail closed/s
+    );
+    expect(src(['Norm', 'normListMatX', 2])).toBe('np.linalg.norm(normListMatX)');
+  });
+
+  it('a run-time STRING order over a declared vector or matrix', () => {
+    expect(src(['Norm', 'normVecX', 'normRunP'])).toBe(
+      "(lambda _x, _q: (lambda _p: np.linalg.norm(_x, _p) if _p > 0 else float('nan'))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normVecX, normRunP)"
+    );
+    expect(src(['Norm', 'normMatX', 'normRunP'])).toBe(
+      "(lambda _x, _q: (lambda _p: np.linalg.norm(_x, 'fro') if (isinstance(_q, str) and _q == 'Frobenius') else np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan'))(({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) if isinstance(_q, str) else _q)))(normMatX, normRunP)"
+    );
   });
 
   describeNumpy('execution (venv)', () => {
@@ -440,25 +613,39 @@ describe('PYTHON ARITY — a literal Norm order over an operand of unknown rank'
       const V = ['List', 3, 4];
       const M = ['List', ['List', 3, 4], ['List', 5, 12]];
       const T = ['List', ['List', ['List', 1, 2]], ['List', ['List', 3, 4]]];
-      // [operand, operand as Python source, order, expected (NaN: no value)]
-      // The values were computed by hand: ‖(3, 4)‖₃ = ∛91, ‖(3, 4)‖∞ = 4, the
-      // maximum absolute column sum of M is 4 + 12 = 16, its maximum absolute
-      // row sum is 5 + 12 = 17, and |−5| = 5.
-      const cases: Array<[any, string, any, number]> = [
-        [V, '[3, 4]', 3, Math.cbrt(91)],
-        [V, '[3, 4]', 'PositiveInfinity', 4],
-        [M, '[[3, 4], [5, 12]]', 3, NaN],
-        [M, '[[3, 4], [5, 12]]', 1, 16],
-        [M, '[[3, 4], [5, 12]]', 'PositiveInfinity', 17],
-        [T, '[[[1, 2]], [[3, 4]]]', 1, NaN],
-        [-5, '-5', 3, 5],
+      // [operand symbol, operand value, operand as Python source, order,
+      // expected (NaN: no value)]. The values were computed by hand:
+      // ‖(3, 4)‖₃ = ∛91, ‖(3, 4)‖∞ = 4, the maximum absolute column sum of M
+      // is 4 + 12 = 16, its maximum absolute row sum is 5 + 12 = 17, its
+      // spectral norm is 13.8806092198653…, the Frobenius norm of T is
+      // √(1 + 4 + 9 + 16) = √30, and |−5| = 5.
+      const cases: Array<[string, any, string, any, number]> = [
+        ['normVecX', V, '[3, 4]', 3, Math.cbrt(91)],
+        ['normVecX', V, '[3, 4]', 'PositiveInfinity', 4],
+        ['normMatX', M, '[[3, 4], [5, 12]]', 1, 16],
+        ['normMatX', M, '[[3, 4], [5, 12]]', 'PositiveInfinity', 17],
+        ['normScalarX', -5, '-5', 3, 5],
+        ['normScalarX', -5, '-5', 2, 5],
+        ['normOpaqueX', V, '[3, 4]', 3, Math.cbrt(91)],
+        ['normOpaqueX', V, '[3, 4]', 'PositiveInfinity', 4],
+        ['normOpaqueX', M, '[[3, 4], [5, 12]]', 3, NaN],
+        ['normOpaqueX', M, '[[3, 4], [5, 12]]', 1, 16],
+        ['normOpaqueX', M, '[[3, 4], [5, 12]]', 2, 13.88060921986538],
+        ['normOpaqueX', T, '[[[1, 2]], [[3, 4]]]', 1, NaN],
+        ['normOpaqueX', T, '[[[1, 2]], [[3, 4]]]', 2, Math.sqrt(30)],
+        ['normOpaqueX', -5, '-5', 3, 5],
+        ['normT3X', T, '[[[1, 2]], [[3, 4]]]', 2, Math.sqrt(30)],
+        ['normTensorX', V, '[3, 4]', 3, Math.cbrt(91)],
+        ['normTensorX', M, '[[3, 4], [5, 12]]', 3, NaN],
+        ['normTensorX', M, '[[3, 4], [5, 12]]', 2, 13.88060921986538],
+        ['normTensorX', T, '[[[1, 2]], [[3, 4]]]', 2, Math.sqrt(30)],
       ];
       let program = 'import numpy as np\nimport math, json\n\n';
-      cases.forEach(([, , p], i) => {
-        program += `${python.compileFunction(ce.box(['Norm', 'normOpaqueX', p]), `fn_${i}`, ['normOpaqueX'])}\n`;
+      cases.forEach(([x, , , p], i) => {
+        program += `${python.compileFunction(ce.box(['Norm', x, p]), `fn_${i}`, [x])}\n`;
       });
       program += 'results = []\n';
-      cases.forEach(([, arg], i) => {
+      cases.forEach(([, , arg], i) => {
         program += `r = float(fn_${i}(${arg}))\n`;
         program += `results.append(None if math.isnan(r) else r)\n`;
       });
@@ -473,7 +660,7 @@ describe('PYTHON ARITY — a literal Norm order over an operand of unknown rank'
         fs.unlinkSync(file);
       }
       const actual = JSON.parse(out) as (number | null)[];
-      cases.forEach(([x, , p, expected], i) => {
+      cases.forEach(([, x, , p, expected], i) => {
         // The interpreter agrees: no value where the emitted code answers NaN.
         const interpreted = ce.box(['Norm', x, p]).N();
         if (Number.isNaN(expected)) {

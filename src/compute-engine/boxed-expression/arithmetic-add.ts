@@ -902,7 +902,7 @@ export class Terms {
         return;
       }
 
-      const [coef, rest] = term.toNumericValue();
+      const [coef, rest] = exactSplit(ce, term);
       if (coef.isPositiveInfinity) posInfinityCount += 1;
       else if (coef.isNegativeInfinity) negInfinityCount += 1;
 
@@ -944,7 +944,7 @@ export class Terms {
 
     if (isFunction(term, 'Add')) {
       for (const x of term.ops) {
-        const [c, t] = x.toNumericValue();
+        const [c, t] = exactSplit(this.engine, x);
         this._add(coef.mul(c), t);
       }
       return;
@@ -1098,4 +1098,44 @@ function nvSumN(
   if (result.length === 1) return result[0].N();
 
   return result.reduce((acc, x) => acc.add(x).N());
+}
+
+/**
+ * The coefficient and the rest of `term` (`term.toNumericValue()`), except
+ * that a term with no float in it keeps an exact coefficient.
+ * `toNumericValue()` computes the coefficient of `√(1 + 10⁻³⁰)` as the
+ * square root of the rational `1 + 10⁻³⁰`, which has no exact form: it is
+ * a big float, and at 21 digits it is `1`. Then `√(1 + 10⁻³⁰) − 1` was an
+ * exact `0`. Such a term is kept whole, with the coefficient `1`.
+ *
+ * The coefficient is tested for the exact representation, not with
+ * `isExact`: a big float with an integer value (the `1` above) answers
+ * `isExact`. A non-finite coefficient (`∞`) is kept: the sum counts the
+ * infinities by their coefficient. A number literal or a symbol is its own
+ * coefficient, as before.
+ */
+function exactSplit(
+  ce: ComputeEngine,
+  term: Expression
+): [NumericValue, Expression] {
+  const [coef, rest] = term.toNumericValue();
+  if (
+    !isFunction(term) ||
+    coef instanceof ExactNumericValue ||
+    coef.isNaN ||
+    coef.isPositiveInfinity ||
+    coef.isNegativeInfinity ||
+    coef.isComplexInfinity ||
+    containsInexactLiteral(term)
+  )
+    return [coef, rest];
+  return [ce._numericValue(1), term];
+}
+
+/** True when a number literal of `x`, at any depth, is not exact (a
+ *  float). The value of a symbol is not read. */
+function containsInexactLiteral(x: Expression): boolean {
+  if (isNumber(x)) return !x.isExact;
+  if (isFunction(x)) return x.ops.some((op) => containsInexactLiteral(op));
+  return false;
 }

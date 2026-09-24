@@ -1563,11 +1563,16 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
   });
 
   it('rejects unsafe-integer dimensions instead of building an unusable lazy matrix', () => {
-    // `1e+16` (not `10000000000000000`): an integer-valued machine number
-    // beyond the safe range stores as a bigint and prints in the compact
-    // exponent form (the item-178(b) residual storage normalization).
+    // An exact integer beyond the safe range (a string of digits) stores as a
+    // bigint and prints in the compact exponent form (the item-178(b)
+    // residual storage normalization).
+    expect(
+      ce.expr(['IdentityMatrix', { num: '1e16' }]).evaluate().toString()
+    ).toBe('Error("expected-positive-integer", "1e+16")');
+    // The JavaScript number `1e16` is past the safe integers, so it boxes as
+    // a float, which prints in full.
     expect(ce.expr(['IdentityMatrix', 1e16]).evaluate().toString()).toBe(
-      'Error("expected-positive-integer", "1e+16")'
+      'Error("expected-positive-integer", "10000000000000000")'
     );
   });
 
@@ -1904,10 +1909,21 @@ describe('Norm', () => {
       );
     });
 
-    it('a symbolic entry stays unevaluated; infinity and NaN entries', () => {
+    it('a symbolic entry of a 3 × 3 matrix stays unevaluated; infinity and NaN entries', () => {
+      // A 2 × 2 matrix with a symbolic entry has the closed form instead
+      // (`linear-algebra-numeric-fixes.test.ts`).
       expect(
         ce
-          .expr(['Norm', ['List', ['List', 'xSpectral', 2], ['List', 3, 2]], 2])
+          .expr([
+            'Norm',
+            [
+              'List',
+              ['List', 'xSpectral', 2, 0],
+              ['List', 3, 2, 1],
+              ['List', 0, 1, 1],
+            ],
+            2,
+          ])
           .evaluate().operator
       ).toBe('Norm');
       expect(

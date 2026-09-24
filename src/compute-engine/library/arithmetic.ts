@@ -115,7 +115,6 @@ import {
   absorbScalarsIntoCells,
 } from '../boxed-expression/arithmetic-add.js';
 import {
-  exactComplexProductAsSum,
   mulFactored,
   mulNEvaluated,
   canonicalDivide,
@@ -143,7 +142,6 @@ import {
   operandChildren,
   pointNormType,
 } from './utils.js';
-import { hasInfiniteMagnitudeComponent } from './linear-algebra.js';
 import { inferContinuationPattern } from '../symbolic/interpret.js';
 import {
   canonicalPower,
@@ -317,7 +315,7 @@ import {
   isContinuationOperand,
   isAbsentValue,
 } from '../boxed-expression/type-guards.js';
-import { exactOrder } from '../boxed-expression/compare.js';
+import { cmp, exactOrder } from '../boxed-expression/compare.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
@@ -331,6 +329,7 @@ import {
   unionHasGenuineScalarBranch,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
+import { complexParts } from './complex-parts.js';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -405,13 +404,38 @@ function oppositeSgn(x: Sign | undefined): Sign | undefined {
   return x;
 }
 
-/** Determines sgn of ln(x) */
+/**
+ * Determines sgn of ln(x).
+ *
+ * `x` is compared with 1 and 0 with no tolerance (see `exactOrder`): with
+ * the engine tolerance, `1 − 10⁻³⁰` was equal to 1, so `ln(1 − 10⁻³⁰)` was
+ * non-negative and `|ln(1 − 10⁻³⁰)|` evaluated to the negative
+ * `ln(1 − 10⁻³⁰)`. A weak relation (`x ≥ 1`, from an assumption) gives a
+ * weak sign.
+ */
 function lnSign(x: Expression): Sign | undefined {
-  if (x.isGreater(1)) return 'positive';
-  if (x.isGreaterEqual(1)) return 'non-negative';
-  if (x.isLessEqual(1) && x.isGreaterEqual(0)) return 'non-positive';
-  if (x.isLess(1) && x.isGreaterEqual(0)) return 'negative';
-  if (x.isSame(1)) return 'zero';
+  const ce = x.engine;
+  // The relation of `x` to `y`, from both operand orders: some branches of
+  // `cmp` decide only one of them.
+  const relation = (y: Expression) => {
+    const r = cmp(x, y, 0);
+    if (r !== undefined) return r;
+    const s = cmp(y, x, 0);
+    if (s === '<') return '>';
+    if (s === '>') return '<';
+    if (s === '<=') return '>=';
+    if (s === '>=') return '<=';
+    return s;
+  };
+  const one = relation(ce.One);
+  if (one === '>') return 'positive';
+  if (one === '=') return 'zero';
+  if (one === '>=') return 'non-negative';
+  if (one === '<' || one === '<=') {
+    const zero = relation(ce.Zero);
+    if (one === '<' && zero === '>') return 'negative';
+    if (zero === '>' || zero === '>=' || zero === '=') return 'non-positive';
+  }
   if (x.isNegative || x.isExtendedReal === false) return 'unsigned';
   return undefined;
 }
@@ -4361,14 +4385,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Internal callers keep `mul()`, whose distribution several
         // normalization paths need to reach a fixpoint — see `mulFactored`.
         const result = mulFactored(...evaluated);
-        // A product of exact number literals that is still a `Multiply` has a
-        // value that one exact literal cannot hold, such as `√2·(1 + i)`
-        // (see `Product.foldIntoCoefficient`). Write it as the sum of its
-        // exact real and imaginary parts, `√2 + √2·i`.
-        if (isFunction(result, 'Multiply')) {
-          const sum = exactComplexProductAsSum(engine!, result.ops);
-          if (sum !== undefined) return sum;
-        }
         // D2: see the matching comment in `Add` — an inexact (float) operand
         // numericizes the whole product even when mixed with an exact
         // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
@@ -5602,7 +5618,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? r?.N() : r;
         }
 
-        if (!numericApproximation) return x.sqrt();
+        if (!numericApproximation) return sqrtOfSquareFactors(x) ?? x.sqrt();
 
         // An infinite radicand — a named infinity, or an "anonymous" one
         // with an infinite component (`∞ + i`) — has an exact value on the
@@ -7443,10 +7459,19 @@ function pointOperand(x: Expression): readonly Expression[] | undefined {
     return undefined;
   const coords: Expression[] = [];
   for (const el of x.each()) {
-    if (!isNumber(el)) return undefined;
+    if (!isCoordinate(el)) return undefined;
     coords.push(el);
   }
   return coords;
+}
+
+/**
+ * True when `x` can be a coordinate of a point for `Distance`: a number
+ * literal, or a constant expression with a numeric value (`π`, `1 − π`,
+ * `1 + √2·i`). A symbol with no value is not a coordinate.
+ */
+function isCoordinate(x: Expression): boolean {
+  return isNumber(x) || (x.isConstant && x.type.matches('number'));
 }
 
 /**
@@ -7504,10 +7529,10 @@ function isPointListType(t: Type): boolean | undefined {
   return isSubtype(elt, INDEXED_COLLECTION_SHAPE_TYPE);
 }
 
-/** The Euclidean distance between two points, as an EXPRESSION:
- *  √(Σ (aᵢ − bᵢ)²) built and evaluated once, so the exact path is honored
- *  (`Distance((0,0),(1,1)) → √2`, not the machine float) — mirroring `Hypot`.
- *  `.N()` still numericizes. */
+/** The Euclidean distance between two points, as an EXPRESSION: the
+ *  2-norm of the coordinate differences, `Norm(p − q)`, evaluated once, so
+ *  the exact path is honored (`Distance((0,0),(1,1)) → √2`, not the machine
+ *  float) — mirroring `Hypot`. `.N()` still numericizes. */
 function pointDistance(
   a: readonly Expression[],
   b: readonly Expression[],
@@ -7526,27 +7551,89 @@ function pointDistance(
     const ai = a[i];
     const bi = b[i];
     // A coordinate that is not a number at all is a malformed point — a
-    // violated contract rather than a value — so it is an error. A non-finite
+    // violated contract rather than a value — so it is an error. A constant
+    // with a numeric value (`π`, `1 − π`) is a coordinate. A non-finite
     // coordinate is not malformed and is not an error: it has an in-band
-    // answer, given below.
-    if (!isNumber(ai) || !isNumber(bi)) return ce.error('expected-value');
+    // answer, given by the norm.
+    if (!isCoordinate(ai) || !isCoordinate(bi))
+      return ce.error('expected-value');
     legs.push(ce.function('Subtract', [ai, bi]).evaluate());
   }
-  // Because a distance is the norm of the difference, it obeys the norm rule:
-  // an infinite leg — signed, the unsigned `~oo`, or a directed infinity such
-  // as `∞ + i`, each of modulus `+∞` — makes the distance `+oo` whatever the
-  // other legs are, a NaN leg included; with no infinite leg, a NaN leg makes
-  // it NaN, which the arithmetic below reaches on its own. The test comes
-  // before the sum of squares for two reasons: folding `∞² + NaN` answers NaN
-  // and would lose the domination, and `(~oo)²` is `~oo`, whose square root is
-  // `~oo` rather than the `+oo` a norm must be. The compiled code answers
-  // the same way: it emits `Math.hypot`, and `Math.hypot(Infinity, NaN)` is
-  // `Infinity`.
-  if (hasInfiniteMagnitudeComponent(legs)) return ce.PositiveInfinity;
-  const terms = legs.map((leg) => ce.function('Power', [leg, ce.number(2)]));
+  // A distance is the norm of the difference, so the vector 2-norm computes
+  // it, with the rules of the norm: each term is the squared modulus of a
+  // leg, so the distance between complex points is real
+  // (`Distance((2, i), (1, 1))` is `√3`); an infinite leg — signed, `~oo`,
+  // or a directed infinity such as `∞ + i` — makes the distance `+oo`
+  // whatever the other legs are, a NaN leg included
+  // (`hasInfiniteMagnitudeComponent`, tested by the norm before the sum of
+  // squares); with no infinite leg, a NaN leg makes it NaN. The compiled
+  // code answers the same way: it emits `Math.hypot`, and
+  // `Math.hypot(Infinity, NaN)` is `Infinity`.
   return ce
-    .function('Sqrt', [ce.function('Add', terms)])
+    .function('Norm', [ce.function('Tuple', legs)])
     .evaluate({ numericApproximation });
+}
+
+/**
+ * The square root of a constant radicand that has the square of a real
+ * constant as a factor, with that factor taken out: `√(π²)` is `π`,
+ * `√((1 − π)²)` is `π − 1`, `√(2π²)` is `√2·π` and `√(e²π²)` is `e·π`. A
+ * factor `c^(2k)`, with `c` a real constant and `k` a positive integer, gives
+ * `|c|^k`, because `√(c²) = |c|` for every real `c`. The other factors stay
+ * under the root (`√(8π²)` is `π·√8`, which is `2√2·π`).
+ *
+ * Returns `undefined` when the radicand has no such factor, or is not
+ * constant: `√(x²)` stays `√(x²)` under `evaluate()`, since `x` may be
+ * complex, and `|x|` is the answer of `simplify()` only when `x` is known
+ * to be real.
+ *
+ * The value `|c|` is found by `Abs` (`evaluateAbs`), from the sign of `c`.
+ * When that sign is not known, `Abs(c)` stays unevaluated, and the factor
+ * stays under the root. The canonical form does not take the square out
+ * (`\sqrt{\pi^2}` parses to `Sqrt(Power(Pi, 2))`), and the evaluation of
+ * `Sqrt` does not either, so without this `evaluate()` left `√(π²)` as it
+ * is, and the modulus `|π·i| = √(π²)` was not reduced.
+ */
+function sqrtOfSquareFactors(x: Expression): Expression | undefined {
+  if (!isFunction(x) || !x.isConstant) return undefined;
+  const ce = x.engine;
+  const factors = isFunction(x, 'Multiply') ? x.ops : [x];
+  const outside: Expression[] = [];
+  const inside: Expression[] = [];
+  for (const factor of factors) {
+    const base = isFunction(factor, 'Power') ? factor.op1 : undefined;
+    const abs =
+      base !== undefined && base.type.matches('real')
+        ? ce.function('Abs', [base]).evaluate()
+        : undefined;
+    const n = isFunction(factor, 'Power') ? factor.op2 : undefined;
+    // An unevaluated `Abs(base)` means the sign of `base` is not known,
+    // unless `base` is itself an `Abs`, which is non-negative:
+    // `√(|w|²) = |w|`.
+    if (
+      abs === undefined ||
+      (isFunction(abs, 'Abs') && !isFunction(base, 'Abs')) ||
+      n === undefined ||
+      !isNumber(n) ||
+      n.im !== 0 ||
+      !Number.isInteger(n.re) ||
+      n.re <= 0 ||
+      n.re % 2 !== 0
+    ) {
+      inside.push(factor);
+      continue;
+    }
+    const k = n.re / 2;
+    outside.push(k === 1 ? abs : ce.function('Power', [abs, ce.number(k)]));
+  }
+  if (outside.length === 0) return undefined;
+  if (inside.length > 0)
+    outside.push(
+      ce.function('Sqrt', [
+        inside.length === 1 ? inside[0] : ce.function('Multiply', inside),
+      ])
+    );
+  return ce.function('Multiply', outside).evaluate();
 }
 
 function evaluateAbs(
@@ -7574,6 +7661,16 @@ function evaluateAbs(
     // hypot float. `Abs(3+4i)` already gave 5 because 25 is a perfect square;
     // this extends the exact path to every integer a, b. `.N()` numericizes.
     if (num.im !== 0) {
+      // An exact complex value `√r·(a+bi)`: its modulus `√(r·(a²+b²))` is
+      // exact when the root has an exact form (`|√2·(1000+1000i)|` is 2000,
+      // `|√3·(1+2i)|` is `√15`).
+      if (num.isExact) {
+        const modulus = num.abs();
+        if (modulus.isExact)
+          return numericApproximation
+            ? ce.number(modulus).N()
+            : ce.number(modulus);
+      }
       const re = num.re;
       const im = num.im;
       const s = re * re + im * im;
@@ -7585,20 +7682,38 @@ function evaluateAbs(
         return ce
           .function('Sqrt', [ce.number(s)])
           .evaluate({ numericApproximation });
+      // The exactness contract: `evaluate()` of an exact argument never
+      // gives a float. The modulus has no exact form here (the root of a
+      // large non-square), so `Abs` stays unevaluated; `.N()` gives the
+      // float.
+      if (num.isExact && !numericApproximation) return undefined;
     }
     return ce.number(num.abs());
   }
   if (arg.isNonNegative) return arg;
   if (arg.isNegative) return arg.neg();
+  // A real constant whose sign `isNonNegative` does not know, such as the
+  // sum `1 − π`: the sign comes from the exact comparison with zero
+  // (`exactOrder`), which is `undefined` when the value is too near zero to
+  // be decided at the working precision. Then `Abs` stays unevaluated.
+  if (arg.isConstant && arg.type.matches('real')) {
+    const sign = exactOrder(arg, ce.Zero);
+    if (sign === undefined) return undefined;
+    const result = sign < 0 ? arg.neg() : arg;
+    return numericApproximation ? result.N() : result;
+  }
 
   // Exact modulus of a complex expression with radical/rational real and
   // imaginary parts, e.g. |3 − √7 + i√(6√7 − 15)| → 1 (W. Kahan). Split
   // z = a + b·i, then |z| = √(a² + b²) with the square expanded so exact
   // arithmetic folds the radicals. Fire only when the squared modulus folds
   // to a concrete non-negative real number AND the exact result matches |z|
-  // numerically — this rejects an incorrect real/imaginary split (e.g. a
-  // radical whose radicand is actually negative, so √(…) is itself imaginary)
-  // and keeps every non-reducing complex `Abs` symbolic.
+  // numerically — this rejects an incorrect real/imaginary split (the split
+  // reads the realness of a leaf from its type, and a declared type can be
+  // wrong: see `complexParts`) and keeps every non-reducing complex `Abs`
+  // symbolic. The square root of
+  // the squared modulus takes the square factors out (`sqrtOfSquareFactors`),
+  // so `|π·i| = √(π²)` is `π` and `|π·(1 + i)| = √(2π²)` is `√2·π`.
   //
   // Gate on a closed-constant operand first: a symbolic `Abs(f(x))` can never
   // fold to a numeric modulus, and this cheap check avoids the `arg.N()`
@@ -7607,31 +7722,20 @@ function evaluateAbs(
   // inside a function application is not a foldable constant; see the D2
   // comment on `Add`.)
   if (arg.isConstant) {
-    // |z·w| = |z|·|w| for all complex z and w. Take the modulus of each
-    // factor of a constant product, so that |π·i| is π and |π·(1 + i)| is
-    // π·√2. The square root of the squared modulus below cannot give these
-    // results, because `evaluate()` does not reduce `√(π²)` to `π`. This
-    // applies only to a constant product: `evaluate()` does not take the
-    // factors out of `|2x|` (only `simplify()` does), so `|x·i|` stays as it is.
-    if (isFunction(arg, 'Multiply')) {
-      const factors: Expression[] = [];
-      for (const factor of arg.ops) {
-        const f = evaluateAbs(factor, numericApproximation);
-        if (f === undefined) break;
-        factors.push(f);
-      }
-      if (factors.length === arg.ops.length)
-        return ce
-          .function('Multiply', factors)
-          .evaluate({ numericApproximation });
-    }
     const zn = arg.N();
     const zre = zn.re;
     const zim = zn.im;
     if (Number.isFinite(zre) && Number.isFinite(zim) && zim !== 0) {
-      const parts = splitComplexParts(arg);
+      const parts = complexParts(arg);
       if (parts) {
-        const [a, b] = parts;
+        const [a, b] = parts.map((part) => part.evaluate());
+        // A value on an axis: `|a + 0·i|` is `|a|`, and `|0 + b·i|` is `|b|`.
+        // The squared modulus below would be `b²` expanded (for `i(1 − π)`,
+        // `1 − 2π + π²`), whose sign `isNonNegative` does not know.
+        if (a.isSame(0))
+          return ce.function('Abs', [b]).evaluate({ numericApproximation });
+        if (b.isSame(0))
+          return ce.function('Abs', [a]).evaluate({ numericApproximation });
         const m = ce.function('Add', [
           ce.function('Multiply', [a, a]),
           ce.function('Multiply', [b, b]),
@@ -7659,91 +7763,6 @@ function evaluateAbs(
   }
 
   return undefined;
-}
-
-/**
- * Split a complex expression `z` into `[a, b]` such that `z = a + b·i`, with
- * `a` and `b` real expressions, or `undefined` if `z` cannot be put in that
- * form structurally. The realness of `a` and `b` is not fully trusted here (a
- * `Sqrt` of an unresolved-sign radicand reports `isExtendedReal === true`
- * optimistically); callers confirm the split numerically before relying on it.
- */
-function splitComplexParts(
-  z: Expression
-): [Expression, Expression] | undefined {
-  const ce = z.engine;
-
-  // A numeric leaf. Its `.json` is a lossless exact representation: a complex
-  // exact number serializes as `['Complex', reExpr, imExpr]` with exact-shape
-  // components (e.g. `['Complex', 0, ['Sqrt', 3]]`), so boxing them preserves
-  // the radicals. A real number contributes only a real part.
-  if (isNumber(z)) {
-    const j = z.json;
-    if (Array.isArray(j) && j[0] === 'Complex')
-      return [ce.box(j[1]), ce.box(j[2])];
-    return [z, ce.Zero];
-  }
-
-  if (isFunction(z)) {
-    const op = z.operator;
-
-    if (op === 'Add') {
-      const as: Expression[] = [];
-      const bs: Expression[] = [];
-      for (const t of z.ops) {
-        const p = splitComplexParts(t);
-        if (!p) return undefined;
-        as.push(p[0]);
-        bs.push(p[1]);
-      }
-      return [ce.function('Add', as), ce.function('Add', bs)];
-    }
-
-    if (op === 'Negate') {
-      const p = splitComplexParts(z.op1);
-      if (!p) return undefined;
-      return [p[0].neg(), p[1].neg()];
-    }
-
-    if (op === 'Subtract') {
-      const p1 = splitComplexParts(z.op1);
-      const p2 = splitComplexParts(z.op2);
-      if (!p1 || !p2) return undefined;
-      return [
-        ce.function('Subtract', [p1[0], p2[0]]),
-        ce.function('Subtract', [p1[1], p2[1]]),
-      ];
-    }
-
-    if (op === 'Multiply') {
-      let a: Expression = ce.One;
-      let b: Expression = ce.Zero;
-      for (const t of z.ops) {
-        const p = splitComplexParts(t);
-        if (!p) return undefined;
-        const [fa, fb] = p;
-        // (a + b·i)(fa + fb·i) = (a·fa − b·fb) + (a·fb + b·fa)·i
-        const na = ce.function('Subtract', [
-          ce.function('Multiply', [a, fa]),
-          ce.function('Multiply', [b, fb]),
-        ]);
-        const nb = ce.function('Add', [
-          ce.function('Multiply', [a, fb]),
-          ce.function('Multiply', [b, fa]),
-        ]);
-        a = na;
-        b = nb;
-      }
-      return [a, b];
-    }
-
-    if (op === 'Complex') return [z.op1, z.op2];
-  }
-
-  // A leaf: treat it as a real contribution. If it is in fact imaginary (an
-  // unresolved-sign radical), the caller's numeric confirmation rejects the
-  // split.
-  return [z, ce.Zero];
 }
 
 function processMinMaxItem(
@@ -7857,13 +7876,7 @@ function processMinMaxItem(
         // NaN, matching Max(1, NaN, 3)). Returning NaN as this item's value
         // lets the caller's top-level NaN check absorb it.
         if (val.isNaN) return [ce.NaN, []];
-        // A non-real (complex) value is unordered: keep it symbolic rather
-        // than silently absorbing it in an order-dependent way.
-        if (val.im !== 0) rest.push(val);
-        else if (!result) result = val;
-        else {
-          if (extremumReplaces(val, result, upper)) result = val;
-        }
+        result = foldExtremumValue(val, result, rest, upper);
       }
       rest.push(...others);
     }
@@ -7871,8 +7884,21 @@ function processMinMaxItem(
     return [result, rest];
   }
 
-  if (!item.isNumber || !isNumber(item)) return [undefined, [item]];
-  return [item, []];
+  if (isNumber(item)) return [item, []];
+  // A real constant that is not a number literal (`π`, `√10`, `e²`) has a
+  // value, and `exactOrder` orders it against the other values:
+  // `Max(π, 3)` is `π`. Any other operand (a symbol with no value, a complex
+  // constant such as `π + i`) stays in the unevaluated result.
+  if (item.isConstant && item.type.matches('real')) return [item, []];
+  // A constant of type `number` can be real (`tan(π/2 − 1/10)`: the type of
+  // `Tan` does not exclude the complex numbers). Its value decides, as it
+  // does for `Sort` and `Clamp`, which order any operands with `exactOrder`:
+  // a value that is not real stays in the unevaluated result.
+  if (item.isConstant && item.type.matches('number')) {
+    const value = item.N();
+    if (isNumber(value) && value.im === 0 && !value.isNaN) return [item, []];
+  }
+  return [undefined, [item]];
 }
 
 /**
@@ -7981,8 +8007,9 @@ function machineExtremum(
       checkDeadline(ce._deadlineFrame);
     const v = values[i];
     if (Number.isNaN(v)) return NaN;
-    // An integer past the safe range is boxed as an exact big integer, whose
-    // comparison takes a route of its own: the fold answers.
+    // An integer past the safe range may be an exact big integer in the
+    // list, which the double would box again as a float (only a safe-integer
+    // double is boxed as an exact integer): the fold answers.
     if (Number.isInteger(v) && !Number.isSafeInteger(v)) return undefined;
     if (upper ? v > result : v < result) result = v;
     // `0 === -0`, so the comparison above does not choose between them.
@@ -8016,8 +8043,9 @@ function scalarExtremum(
   if ((isNumber(a) && a.im !== 0) || (isNumber(b) && b.im !== 0))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
-  // keep `a`.
-  const bWins = extremumOrder(b, a, upper);
+  // keep `a`, unless `b` is a number literal and `a` is not (see
+  // `extremumOrder`).
+  const bWins = extremumOrder(b, a, upper, true);
   if (bWins === undefined) return undefined;
   const winner = bWins ? b : a;
   return numericApproximation ? winner.N() : winner;
@@ -8029,25 +8057,67 @@ function scalarExtremum(
  * numbers are ordered exactly (`exactOrder`), however close they are:
  * `isGreater`/`isLess` apply the engine tolerance, and with them
  * `Max(1e-12, 2e-12)` answered `1e-12`. Two equal values are a tie, and the
- * caller keeps `current`.
+ * caller keeps `current`. Two constants whose order is not decided at a
+ * higher precision either are a tie when they agree within the engine
+ * tolerance (`tieWithinTolerance`, the last step of `exactOrder`).
+ *
+ * With `preferLiteralOnTie`, a tie replaces `current` when `candidate` is a
+ * number literal and `current` is not: of two equal values, the result is
+ * the literal (`Max(sin²1 + cos²1, 1)` is `1`, `Max(ln 2 + ln 3 − ln 6, 0)`
+ * is `0`), whatever the order of the operands. A tie within the tolerance
+ * is most often a constant that is nearly equal to a literal
+ * (`cos(10⁻³⁰) − 1` and `0`), and the literal is then the better answer.
  */
 function extremumOrder(
   candidate: Expression,
   current: Expression,
-  upper: boolean
+  upper: boolean,
+  preferLiteralOnTie = false
 ): boolean | undefined {
-  const order = exactOrder(candidate, current);
+  const order = exactOrder(candidate, current, { tieWithinTolerance: true });
   if (order === undefined) return undefined;
+  if (order === 0)
+    return preferLiteralOnTie && isNumber(candidate) && !isNumber(current);
   return upper ? order > 0 : order < 0;
 }
 
-/** `extremumOrder`, where an undecided order keeps `current`. */
-function extremumReplaces(
-  candidate: Expression,
-  current: Expression,
+/**
+ * Fold the value `val` into the extremum `current` of `Max`/`Min`: return
+ * the new extremum. A value that cannot be ordered against `current` is
+ * pushed to `rest`, which stays in the unevaluated result, and `current` is
+ * kept. This is the case for a complex number literal (complex numbers have
+ * no order: `Max(i, 2)` and `Max(2, i)` both stay unevaluated) and for a
+ * value whose order `exactOrder` does not decide. Discarding such a value
+ * instead would make the result wrong.
+ */
+function foldExtremumValue(
+  val: Expression,
+  current: Expression | undefined,
+  rest: Expression[],
   upper: boolean
-): boolean {
-  return extremumOrder(candidate, current, upper) === true;
+): Expression | undefined {
+  if (isNumber(val) && val.im !== 0) {
+    rest.push(val);
+    return current;
+  }
+  if (current === undefined) return val;
+  const replaces = extremumOrder(val, current, upper, true);
+  if (replaces === undefined) rest.push(val);
+  if (replaces !== true) return current;
+  // A value that was not ordered against the previous extremum can be
+  // ordered against the new one: in `Max(L, 0, 1)` with `L` near 0, `L`
+  // cannot be ordered against 0, but it is less than 1. A value that the
+  // new extremum is not less than is removed (`extremumOrder` is `false`).
+  // A symbolic operand or a complex number is never ordered, and stays. A
+  // collection that could not be folded stays too, and is not compared: the
+  // comparison would subtract the value from each of its elements.
+  for (let i = rest.length - 1; i >= 0; i--)
+    if (
+      rest[i].isCollection !== true &&
+      extremumOrder(rest[i], val, upper) === false
+    )
+      rest.splice(i, 1);
+  return val;
 }
 
 /**
@@ -8096,15 +8166,7 @@ function evaluateMinMax(
       // (Comparisons with NaN are themselves indeterminate, so without this
       // guard a NaN operand would be silently dropped.)
       if (val.isNaN) return ce.NaN;
-      // A non-real (complex) value is unordered. Ordering comparisons return
-      // `undefined` for it, which previously left it silently absorbed in an
-      // order-dependent way (Max(i, 2) = i but Max(2, i) = 2). Keep it symbolic
-      // instead so both operand orders agree.
-      if (val.im !== 0) rest.push(val);
-      else if (!result) result = val;
-      else {
-        if (extremumReplaces(val, result, upper)) result = val;
-      }
+      result = foldExtremumValue(val, result, rest, upper);
     }
     rest.push(...others);
   }

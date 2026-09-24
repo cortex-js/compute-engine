@@ -35,7 +35,7 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { exactCompareNumbers } from '../boxed-expression/constraint-subject.js';
+import { exactOrder } from '../boxed-expression/compare.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   canEnumerateFiniteSource,
@@ -441,15 +441,21 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
-        if (!isNumber(x) || x.im !== 0) return undefined;
-        // Exact special values, regardless of numericApproximation
-        if (x.isSame(0)) return ce.One;
-        if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
+        if (!isNumber(x)) return undefined;
+        if (x.im === 0) {
+          // Exact special values, regardless of numericApproximation
+          if (x.isSame(0)) return ce.One;
+          if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
+        }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // Real args use the machine/bignum kernel; a complex argument uses
+        // `erfc(z) = 1 − erf(z)` with the complex `Erf` kernel, as the
+        // compiled Python target does.
         return apply(
           x,
           (x) => erfc(x),
-          (x) => bigErfc(ce, x)
+          (x) => bigErfc(ce, x),
+          (z) => erfComplex(z).neg().add(1)
         );
       },
     },
@@ -1663,6 +1669,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
  * and one that DECLINES to enumerate, make the empty-input half undecidable:
  * the head stays inert instead of claiming its input was empty.
  *
+ * A REAL CONSTANT is a datum like any number literal (`isRealConstantDatum`):
+ * `Median([π, 3, e])` is `3` and `Mean([π, 3])` is `(π + 3)/2`.
+ *
  * An aggregate stays INERT when some datum has no numeric reading yet. Two
  * shapes qualify:
  *
@@ -1728,6 +1737,7 @@ function collectData(
         walked += 1;
         sawData = true;
         if (isAbsentValue(v)) absent = true;
+        else if (isRealConstantDatum(v)) data.push(v);
         else if (!isNumber(v)) {
           if (isNonNumericDatum(v))
             return dataConstraintError(ce, name, v, 'number');
@@ -1741,6 +1751,7 @@ function collectData(
     } else {
       sawData = true;
       if (isAbsentValue(op)) absent = true;
+      else if (isRealConstantDatum(op)) data.push(op);
       else if (!isNumber(op)) {
         // A COLLECTION-typed operand is a container, not a datum, even when
         // it has no value yet to enumerate: `Mean(L)` for a declared but
@@ -1759,6 +1770,33 @@ function collectData(
   if (absent) return absentAnswer?.(ce) ?? ce.NaN;
   if (inert) return null;
   return data;
+}
+
+/**
+ * True when a datum is a REAL CONSTANT that is not a number literal: `π`, `e`,
+ * `ln 2`, `π + 1`. Such a datum has no unknowns, a type that is `real` (which
+ * excludes `±∞` and `NaN`), and a numeric value that is a finite real number
+ * literal. The statistics accept it as data: the exact path computes with it
+ * symbolically, and the float and bignum kernels read its numeric value
+ * (`scalarsOf`).
+ *
+ * A declared constant with no value (`c: real`, constant) is not accepted: it
+ * is an unknown, so its datum leaves the aggregate inert like a valueless
+ * symbol. A constant whose value is complex (`√-2`, `ln(-1)`) is not accepted
+ * either: its type is not `real`.
+ *
+ * The numeric value is computed here to confirm that the constant has one.
+ * A constant has no unknowns, so it holds no callback, and this evaluation is
+ * not observable (see the note on callback counts on `collectData`).
+ */
+function isRealConstantDatum(v: Expression): boolean {
+  if (isNumber(v) || v.isCollection === true) return false;
+  if (v.unknowns.length > 0) return false;
+  if (!v.type.matches('real') || v.isFinite === false) return false;
+  const n = v.N();
+  return (
+    isNumber(n) && n.isFinite === true && n.im === 0 && Number.isFinite(n.re)
+  );
 }
 
 /**
@@ -1797,12 +1835,17 @@ function isNonNumericDatum(v: Expression): boolean {
 // path, which reads it as `NaN` rather than as the real part its spelling
 // happens to report. A real `±∞` is unaffected and keeps the behavior it has
 // always had.
+//
+// A real constant datum (`π`, `ln 2`, see `isRealConstantDatum`) is not a
+// number literal, so these projections read its numeric value instead. That
+// happens only under `evaluate()` when the exact path does not apply (some
+// other datum is inexact): under `.N()` the operands are already numeric.
 function* scalarsOf(data: ReadonlyArray<Expression>) {
-  for (const op of data) yield realProjection(op);
+  for (const op of data) yield realProjection(isNumber(op) ? op : op.N());
 }
 
 function* bigScalarsOf(data: ReadonlyArray<Expression>) {
-  for (const op of data) yield bigProjection(op);
+  for (const op of data) yield bigProjection(isNumber(op) ? op : op.N());
 }
 
 //
@@ -1821,14 +1864,18 @@ function* bigScalarsOf(data: ReadonlyArray<Expression>) {
 //
 
 /**
- * If every already-collected datum is an exact, finite real number, return them
+ * If every already-collected datum is an exact, finite real number — a number
+ * literal or a real constant such as `π` (`isRealConstantDatum`) — return them
  * as boxed expressions; otherwise `null` (caller falls back to the float path).
  */
 function exactData(data: ReadonlyArray<Expression>): Expression[] | null {
   if (data.length === 0) return null;
-  for (const v of data)
-    if (!isNumber(v) || v.isExact !== true || v.im !== 0 || v.isFinite !== true)
-      return null;
+  for (const v of data) {
+    // `collectData` admits a datum that is not a number literal only when it
+    // is a real constant.
+    if (!isNumber(v)) continue;
+    if (v.isExact !== true || v.im !== 0 || v.isFinite !== true) return null;
+  }
   return [...data];
 }
 
@@ -1915,6 +1962,14 @@ function complexVariance(
  * `.re`/`.im` give up nothing on that branch.
  */
 function squaredMagnitude(ce: ComputeEngine, d: Expression): Expression {
+  // A deviation that is not a number literal comes from a real constant datum
+  // (`Variance([π, 1 + 2i])`). Its `.re` and `.im` are `NaN`, so its squared
+  // magnitude is `Re(d)² + Im(d)²`, which stays exact.
+  if (!isNumber(d))
+    return add(ce, [
+      powi(ce, ce.function('Re', [d]).evaluate(), 2),
+      powi(ce, ce.function('Im', [d]).evaluate(), 2),
+    ]);
   if (d.im === 0) return multiply(ce, [d, d]);
   if (isNumber(d) && d.isExact)
     return powi(ce, ce.function('Abs', [d]).evaluate(), 2);
@@ -1994,7 +2049,8 @@ function exactMedianOf(ce: ComputeEngine, sorted: Expression[]): Expression {
 }
 
 /**
- * Sort exact, finite, real number literals by their exact values. Their
+ * Sort exact, finite, real number literals by their exact values, with
+ * `exactOrder`, the order that `Max`, `Min` and `Sort` also use. Their
  * machine values cannot order them: `10^20` and `10^20 + 1` have the same
  * machine value, and `10^-400` and `2·10^-400` both have the machine value 0.
  *
@@ -2005,7 +2061,7 @@ function exactMedianOf(ce: ComputeEngine, sorted: Expression[]): Expression {
 function sortExact(vals: Expression[]): Expression[] | undefined {
   let undecided = false;
   const sorted = [...vals].sort((a, b) => {
-    const order = exactCompareNumbers(a, b);
+    const order = exactOrder(a, b);
     if (order === undefined) {
       undecided = true;
       return 0;
@@ -2072,21 +2128,22 @@ function exactMode(
   ce: ComputeEngine,
   vals: Expression[]
 ): Expression | undefined {
-  // Tie-break by smallest value (matches the ascending numeric-key iteration
-  // of the float `mode`, which keeps the first value reaching the max count).
+  // Tie-break by smallest value, the same rule as the numeric kernels `mode`
+  // and `bigMode` (`numerics/statistics.ts`), so `.N()` picks the same value.
   // `undefined` when two values cannot be ordered exactly.
   const sorted = sortExact(vals);
   if (sorted === undefined) return undefined;
-  const counts = new Map<string, { count: number; val: Expression }>();
-  for (const v of sorted) {
-    const key = v.toString();
-    const e = counts.get(key);
-    if (e) e.count += 1;
-    else counts.set(key, { count: 1, val: v });
-  }
+  // Equal values are adjacent in the sorted data, so each run of values that
+  // `exactOrder` finds equal is one value. Two spellings of one real constant
+  // (`ln 6` and `ln 2 + ln 3`) are the same value and count together; a text
+  // key would count them apart.
   let best: { count: number; val: Expression } | undefined;
-  for (const e of counts.values())
-    if (best === undefined || e.count > best.count) best = e;
+  let run: { count: number; val: Expression } | undefined;
+  for (const v of sorted) {
+    if (run !== undefined && exactOrder(run.val, v) === 0) run.count += 1;
+    else run = { count: 1, val: v };
+    if (best === undefined || run.count > best.count) best = run;
+  }
   return best ? best.val : ce.NaN;
 }
 

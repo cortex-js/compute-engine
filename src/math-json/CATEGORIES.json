@@ -273,6 +273,7 @@
       "ColorToColorspace",
       "ColorToString",
       "ContrastingColor",
+      "GamutMap",
       "Hsl",
       "Hsv",
       "Oklab",

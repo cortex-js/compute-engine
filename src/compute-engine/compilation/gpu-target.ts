@@ -711,6 +711,10 @@ function gpuColorOperand(
           `run-time tag, so the channels cannot be converted back to OKLCh. ` +
           `Fail closed (D6).`
       );
+    // A free symbol read here is a colour: the emitted code reads it as a
+    // `vec3`, whatever its engine type says (see `gpuColorSymbolReads`).
+    if (isSymbol(color) && target?.loweredSymbolType !== undefined)
+      gpuColorSymbolReads.get(target.loweredSymbolType)?.add(color.symbol);
     return gpuToOklch(compile(color), colorSpaceOf(color));
   }
   const ops = color.ops;
@@ -1414,7 +1418,14 @@ function compileGPUStatementSelection(
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const isWGSL = target.language === 'wgsl';
   const arms = args.filter((_, i) => i % 2 === 1);
-  const types = arms.map((a) => gpuTypeOfValue(a, isWGSL));
+  // In a complex selection the caller lifts each real scalar arm to a `vec2`
+  // (`gpuSelectionArm`), so such an arm has the complex type here.
+  const complex = gpuSelectionIsComplex(arms);
+  const types = arms.map((a) =>
+    complex && gpuOperandShape(a) === 'scalar'
+      ? gpuVecType(2, isWGSL)
+      : gpuTypeOfValue(a, isWGSL)
+  );
   if (types.some((t) => t === undefined) || new Set(types).size !== 1)
     return undefined;
   const type = types[0]!;
@@ -1457,8 +1468,11 @@ function compileGPUStatementSelection(
     /[;{}]\s*$/.test(stmt) ? stmt : `${stmt};`;
   const tv = BaseCompiler.tempVar(target);
   const shapeRef = arms.find((v) => gpuComponentCount(v)) ?? null;
+  const noClause = complex
+    ? `${gpuVec2(target)}(${gpuNaN(target)})`
+    : gpuNaNFor(shapeRef, target);
   const build = (i: number): string[] => {
-    if (i >= args.length) return [`${tv} = ${gpuNaNFor(shapeRef, target)}`];
+    if (i >= args.length) return [`${tv} = ${noClause}`];
     const cond = args[i];
     const val = args[i + 1];
     // `True` marks the default branch.
@@ -1719,6 +1733,50 @@ function gpuAssertSelectableArms(
 
 function gpuSelectionDecline(reason: string): never {
   throw new Error(`Which: ${reason} Fail closed (D6).`);
+}
+
+/**
+ * True when a value arm of a selection (`If`, `Which`, the statement form of
+ * both) is complex. A complex value lowers to a `vec2` of (re, im) and a real
+ * value to a `float`, and neither a GLSL ternary nor a WGSL `select` accepts
+ * a `vec2` arm beside a `float` arm. The real arms are then lifted to
+ * `vec2(v, 0.0)` (`gpuSelectionArm`), so every arm has the type of the
+ * complex selection.
+ */
+function gpuSelectionIsComplex(
+  values: ReadonlyArray<Expression | null | undefined>
+): boolean {
+  return values.some(
+    (v) => v !== null && v !== undefined && BaseCompiler.isComplexValued(v)
+  );
+}
+
+/**
+ * The code of one value arm of a selection. In a complex selection
+ * (`gpuSelectionIsComplex`) a real scalar arm is lifted to `vec2(v, 0.0)`;
+ * an arm that is not a scalar (a point, a list), or a scalar whose type
+ * cannot be a number (a boolean: `vec2f(true, 0.0)` is not valid WGSL), has
+ * no complex form, and the selection fails closed.
+ */
+function gpuSelectionArm(
+  head: string,
+  value: Expression,
+  code: string,
+  complex: boolean,
+  target: CompileTarget<Expression>
+): string {
+  if (!complex || BaseCompiler.isComplexValued(value)) return code;
+  // An arm whose type is not known (an undeclared uniform `z`) is read as a
+  // float, as it is in a selection with no complex arm, and is lifted. An
+  // arm whose type cannot be a number (`True`, a comparison) is not.
+  const scalar = gpuOperandShape(value) === 'scalar';
+  if (!scalar || !couldMatch(value.type.type, 'number'))
+    throw new Error(
+      `${head}: the value \`${value.toString()}\` is not a ` +
+        `${scalar ? 'number' : 'scalar'}, and another value of the ` +
+        `selection is complex. Fail closed (D6).`
+    );
+  return `${gpuVec2(target)}(${code}, 0.0)`;
 }
 
 /**
@@ -2903,6 +2961,64 @@ function gpuMisplacedScalarArgument(
 }
 
 /**
+ * The heads this target lowers with a real-only FUNCTION codegen, beyond the
+ * heads that are real-only on every target
+ * (`BaseCompiler.REAL_ONLY_BY_DEFINITION`). The shader lowering reads the
+ * operand as a `float` and has no complex form for it.
+ *
+ * A complex value lowers to a `vec2` of (re, im). Given one, these lowerings
+ * emit either a call no shader compiler accepts (`_gpu_gamma(vec2(x, y))`:
+ * the helper takes a `float`) or a componentwise builtin that computes a
+ * different value than the interpreter (`asinh(1.0 / vec2(x, y))` for
+ * `Arcsch`, `(1 - cos(vec2(x, y))) / 2` for `Haversine`), behind
+ * `success: true`. Several of these heads have a complex lowering on another
+ * target: the JavaScript target lowers `Arccot`, `Arcsch` and
+ * `InverseHaversine` with a complex form (`_SYS.cacot`, …), and the Python
+ * target lowers `Gamma`, `Factorial` and `Erf` with `scipy.special`
+ * routines that take a complex argument. `Root` is not listed: a complex
+ * radicand lowers through `_gpu_cpow` (see the `Root` lowering). `Variance`
+ * has a complex value in the interpreter and on the Python target, but the
+ * shader lowering sums `float` values. `Mean` and `StandardDeviation` are not
+ * listed: the shader targets have no lowering for them, so they fail closed
+ * for every operand.
+ */
+const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
+  'Variance',
+  'Hypot',
+  'Arctan2',
+  'Haversine',
+  'GammaLn',
+  'Beta',
+  'Erf',
+  'Erfc',
+  'ErfInv',
+  'Heaviside',
+  'Sinc',
+  'FresnelC',
+  'FresnelS',
+  'BesselJ',
+  'Arccot',
+  'Arcsch',
+  'InverseHaversine',
+  'Gamma',
+  'Factorial',
+]);
+
+/** `CompileTarget.isRealOnlyLowering` of the shader targets. The base
+ * compiler fails a complex operand of a real-only lowering closed: the
+ * shader targets have no run-time realness guard. */
+function gpuIsRealOnlyLowering(
+  head: string,
+  lowering: CompiledFunction<Expression> | undefined
+): boolean {
+  return (
+    BaseCompiler.REAL_ONLY_BY_DEFINITION.has(head) ||
+    GPU_REAL_ONLY_LOWERINGS.has(head) ||
+    BaseCompiler.stringHelperIsRealOnly(head, lowering)
+  );
+}
+
+/**
  * Reject a non-scalar operand when the emitted shader cannot accept its shape.
  *
  * The counterpart of `compileGPUBroadcastUnary` for every emission that does
@@ -2917,7 +3033,10 @@ function gpuMisplacedScalarArgument(
  * its lowering is re-judged on the new source. The one exception is DECLARED
  * rather than inferred — a lowering that consumes its aggregate operands
  * (`GPU_AGGREGATE_CONSUMING`) steps the gate aside, because the shapes it was
- * handed are no longer in its emission.
+ * handed are no longer in its emission. A complex operand reads as a scalar
+ * here, so no shape test can tell that a real-only lowering received one: the
+ * base compiler refuses that case before the lowering runs
+ * (`gpuIsRealOnlyLowering`, read through `BaseCompiler.isRealOnlyLowering`).
  */
 function gpuCheckOperandShapes(
   head: string,
@@ -4909,12 +5028,22 @@ function readStringLiteral(expr: Expression): string | null {
  *  Integer constants emit as plain literals (`200`); other expressions
  *  are wrapped in a cast (`int(...)` or `i32(...)`). */
 function compileIntArg(
+  head: string,
   expr: Expression,
   compile: (e: Expression) => string,
   target?: CompileTarget<Expression>
 ): string {
   const c = tryGetConstant(expr);
   if (c !== undefined && Number.isInteger(c)) return c.toString();
+  // A complex value is a `vec2`, and `int(vec2(x, y))` is not a scalar: no
+  // shader compiler accepts it where an `int` is expected (for example the
+  // iteration count of `_fractal_mandelbrot`).
+  if (BaseCompiler.isComplexValued(expr))
+    throw new Error(
+      `${head}: the integer operand \`${expr.toString()}\` is complex, and a shader ` +
+        `has no conversion from a complex value to an integer. Fail closed ` +
+        `(D6).`
+    );
   const intCast = target?.language === 'wgsl' ? 'i32' : 'int';
   return `${intCast}(${compile(expr)})`;
 }
@@ -5936,8 +6065,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_ccos(${compile(args[0])})`;
     return `cos(${compile(args[0])})`;
   },
-  // CE's `Degrees` converts degrees→radians (Degrees(180) = π), which is
-  // GLSL's `radians()`. GLSL's `degrees()` is the inverse (rad→deg).
+  // In radian mode CE's `Degrees` converts degrees→radians (Degrees(180) =
+  // π), which is GLSL's `radians()`. GLSL's `degrees()` is the inverse
+  // (rad→deg). In the other angular units `rewriteAngularUnit` replaces the
+  // `Degrees` node before codegen, so this lowering is not reached.
   Degrees: 'radians',
   Exp: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -6019,6 +6150,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   If: (args, compile, target) => {
     if (args.length !== 3) throw new Error('If: wrong number of arguments');
     gpuAssertSelectableArms('If', [args[1], args[2]]);
+    // With one complex arm, a real arm is lifted to `vec2(v, 0.0)`.
+    const complex = gpuSelectionIsComplex([args[1], args[2]]);
+    const arm = (i: 1 | 2): string =>
+      gpuSelectionArm('If', args[i], compile(args[i], i), complex, target);
     // An arm that needs statements, or that repeats a subexpression a
     // ternary would expand once per occurrence, takes the statement form;
     // the clause list is in `Which` shape, so its position 3 is the `If`
@@ -6031,7 +6166,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
-        (e, i) => compile(e, i === 3 ? 2 : i),
+        (e, i) =>
+          i === 1 || i === 3
+            ? gpuSelectionArm(
+                'If',
+                e,
+                compile(e, i === 3 ? 2 : i),
+                complex,
+                target
+              )
+            : compile(e, i),
         target
       );
       if (statement !== undefined) return statement;
@@ -6041,8 +6185,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // indices preserve their CSE regions, allowing reuse of outer bindings.
     return gpuConditional(
       compile(args[0], 0),
-      compileGPUConditionalArm('If', () => compile(args[1], 1), target),
-      compileGPUConditionalArm('If', () => compile(args[2], 2), target),
+      compileGPUConditionalArm('If', () => arm(1), target),
+      compileGPUConditionalArm('If', () => arm(2), target),
       target
     );
   },
@@ -6085,6 +6229,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       'Which',
       args.filter((_, i) => i % 2 === 1)
     );
+    // With one complex value, a real value is lifted to `vec2(v, 0.0)`, and
+    // the fall-through NaN is a `vec2` too.
+    const complex = gpuSelectionIsComplex(args.filter((_, i) => i % 2 === 1));
+    const value = (i: number): string =>
+      gpuSelectionArm('Which', args[i], compile(args[i], i), complex, target);
     // An arm, or a condition past the first, that needs statements takes the
     // statement form (`compileGPUStatementSelection`); the ternary chain
     // below cannot hold them.
@@ -6095,7 +6244,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           i > 0 && (gpuNeedsStatements(a) || (canPlace && gpuArmSharesWork(a)))
       )
     ) {
-      const statement = compileGPUStatementSelection(args, compile, target);
+      const statement = compileGPUStatementSelection(
+        args,
+        (e, i) =>
+          i % 2 === 1
+            ? gpuSelectionArm('Which', e, compile(e, i), complex, target)
+            : compile(e, i),
+        target
+      );
       if (statement !== undefined) return statement;
     }
     // The fall-through NaN must match the branch values' shape (see
@@ -6105,9 +6261,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       args.filter((_, i) => i % 2 === 1).find((v) => gpuComponentCount(v)) ??
       null;
     const build = (i: number): string => {
-      if (i >= args.length) return gpuNaNFor(shapeRef, target);
+      if (i >= args.length)
+        return complex
+          ? `${gpuVec2(target)}(${gpuNaN(target)})`
+          : gpuNaNFor(shapeRef, target);
       const cond = args[i];
-      const val = args[i + 1];
       // Only the FIRST condition is evaluated unconditionally. Every value, and
       // every LATER condition, sits behind a branch and must not hoist out of
       // it. (`build(i + 2)` needs no wrapper of its own: it guards its own
@@ -6115,8 +6273,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const armed = (f: () => string): string =>
         i === 0 ? f() : compileGPUConditionalArm('Which', f, target);
       // `True` marks the default branch.
-      if (isSymbol(cond, 'True'))
-        return `(${armed(() => compile(val, i + 1))})`;
+      if (isSymbol(cond, 'True')) return `(${armed(() => value(i + 1))})`;
       // CONSECUTIVE clauses that answer the same value collapse into one
       // clause whose condition is their disjunction: `c1 ? v : (c2 ? v : e)`
       // is `(c1 || c2) ? v : e`. Both languages short-circuit `||`, so a
@@ -6148,7 +6305,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           : [first, ...merged].map((c) => `(${c})`).join(' || ');
       return gpuConditional(
         condCode,
-        compileGPUConditionalArm('Which', () => compile(val, i + 1), target),
+        compileGPUConditionalArm('Which', () => value(i + 1), target),
         build(last + 2),
         target
       );
@@ -6900,6 +7057,50 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Root: ([x, n], compile, target) => {
     if (x === null) throw new Error('Root: no argument');
+    // A COMPLEX radicand is a `vec2`, which the real lowerings below would
+    // read componentwise. It takes the principal root through `_gpu_cpow`,
+    // with the one exception the interpreter and the JavaScript `_SYS.croot`
+    // make: a radicand whose imaginary part is exactly zero, under an odd
+    // integer degree, has the REAL root (`Root(-8, 3)` is `-2`, not the
+    // principal `1 + 1.732i`). The radicand is complex-shaped but may be real
+    // when the code runs, so the test is emitted. A complex DEGREE has no
+    // shader lowering.
+    if (
+      BaseCompiler.isComplexValued(x) ||
+      (n != null && BaseCompiler.isComplexValued(n))
+    ) {
+      if (n != null && BaseCompiler.isComplexValued(n))
+        throw new Error(
+          'Root: a complex degree has no shader lowering. Fail closed (D6).'
+        );
+      const v2 = gpuVec2(target);
+      const z = gpuOperandOnce('Root', x, compile, target, true);
+      if (n == null) return `_gpu_csqrt(${z})`;
+      const degreeConst = tryGetConstant(n);
+      if (degreeConst !== undefined) {
+        const inverse = formatFloat(1 / degreeConst, target.language);
+        const principal = `_gpu_cpow(${z}, ${v2}(${inverse}, 0.0))`;
+        if (!Number.isInteger(degreeConst) || degreeConst % 2 === 0)
+          return principal;
+        return gpuConditional(
+          `(${z}).y == 0.0`,
+          `${v2}(sign((${z}).x) * pow(abs((${z}).x), ${inverse}), 0.0)`,
+          principal,
+          target
+        );
+      }
+      const d = gpuOperandOnce('Root', n, compile, target);
+      const odd =
+        target.language === 'wgsl'
+          ? `abs(${d}) % 2.0 == 1.0`
+          : `mod(abs(${d}), 2.0) == 1.0`;
+      return gpuConditional(
+        `(${z}).y == 0.0 && fract(${d}) == 0.0 && ${odd}`,
+        `${v2}(sign((${z}).x) * pow(abs((${z}).x), 1.0 / (${d})), 0.0)`,
+        `_gpu_cpow(${z}, ${v2}(1.0 / (${d}), 0.0))`,
+        target
+      );
+    }
     if (n === null || n === undefined) return `sqrt(${compile(x)})`;
     const nConst = tryGetConstant(n);
     if (nConst === 2) return `sqrt(${compile(x)})`;
@@ -6939,10 +7140,43 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target.language
       )}))`;
     }
-    return `pow(${compile(x)}, 1.0 / ${compile(n)})`;
+    // The degree is parenthesized unless it is a single name or number:
+    // `Root(x, u + 1)` is `pow(x, 1.0 / (u + 1.0))`, not `pow(x, 1.0 / u + 1.0)`.
+    const degree = compile(n);
+    return `pow(${compile(x)}, 1.0 / ${
+      /^[\w.]+$/.test(degree) ? degree : `(${degree})`
+    })`;
   },
 
   // Color functions (pure-math, GPU-compilable)
+  // `GamutMap(c, gamut?)` answers the mapped color in sRGB channels, as the
+  // interpreter answers an `Rgb` head, and `colorSpaceOf` reports `rgb` for it,
+  // so a consumer converts the channels back to OKLCh (`gpuColorOperand`). For
+  // "display-p3" the channels are extended sRGB: a color inside the
+  // Display-P3 gamut but outside the sRGB gamut has a channel outside [0, 1].
+  // The gamut must be a string literal, because a shader has no run-time
+  // string; an unknown gamut answers `expected-value` in the interpreter, and
+  // fails closed here.
+  GamutMap: (args, compile, target) => {
+    if (args.length === 0) throw new Error('GamutMap: no argument');
+    const c = gpuColorOperand('GamutMap', args[0], compile, target);
+    const gamut = args.length >= 2 && args[1] !== null ? args[1] : undefined;
+    let name = 'srgb';
+    if (gamut !== undefined) {
+      const literal = readStringLiteral(gamut);
+      if (literal === null)
+        throw new Error(
+          'GamutMap: the gamut must be a string literal on a shader target'
+        );
+      name = literal;
+    }
+    if (name === 'srgb') return `_gpu_gamut_map_oklch(${c})`;
+    if (name === 'display-p3') return `_gpu_gamut_map_oklch_p3(${c})`;
+    throw new Error(
+      `GamutMap: unknown gamut "${name}" — the gamut is "srgb" or ` +
+        `"display-p3". Fail closed (D6).`
+    );
+  },
   ColorMix: (args, compile, target) => {
     if (args.length < 2) throw new Error('ColorMix: need two colors');
     const c1 = gpuColorOperand('ColorMix', args[0], compile, target);
@@ -7269,14 +7503,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Mandelbrot: ([c, maxIter], compile, target) => {
     if (c === null || maxIter === null)
       throw new Error('Mandelbrot: missing arguments');
-    const iterCode = compileIntArg(maxIter, compile, target);
-    return `_fractal_mandelbrot(${compile(c)}, ${iterCode})`;
+    const iterCode = compileIntArg('Mandelbrot', maxIter, compile, target);
+    return `_fractal_mandelbrot(${gpuComplexOperand(c, compile, target)}, ${iterCode})`;
   },
   Julia: ([z, c, maxIter], compile, target) => {
     if (z === null || c === null || maxIter === null)
       throw new Error('Julia: missing arguments');
-    const iterCode = compileIntArg(maxIter, compile, target);
-    return `_fractal_julia(${compile(z)}, ${compile(c)}, ${iterCode})`;
+    const iterCode = compileIntArg('Julia', maxIter, compile, target);
+    return `_fractal_julia(${gpuComplexOperand(z, compile, target)}, ${gpuComplexOperand(c, compile, target)}, ${iterCode})`;
   },
 
   // Vector/Matrix operations
@@ -7311,6 +7545,25 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           `Norm: the ${target.language ?? 'GPU'} 'length()' builtin only ` +
             `accepts 2-4 component vectors (got ${n}). Fail closed (D6).`
         );
+      // A complex entry lowers to a `vec2` of (re, im), and an array of
+      // them is not a `length()` operand. The 2-norm is the length of the
+      // vector of the entries' moduli: `length(z)` for a complex entry, the
+      // value itself for a real one (only its square is used).
+      if (arg.ops.some((x) => BaseCompiler.isComplexValued(x))) {
+        const moduli = arg.ops.map((x) => {
+          if (BaseCompiler.isComplexValued(x)) return `length(${compile(x)})`;
+          // A real entry must be a scalar: a point beside a complex entry
+          // would put a `vec2` inside the vector of moduli.
+          if (gpuOperandShape(x) !== 'scalar')
+            throw new Error(
+              `Norm: the entry \`${x.toString()}\` is not a scalar, so it ` +
+                `has no modulus beside a complex entry. Fail closed (D6).`
+            );
+          return compile(x);
+        });
+        if (n === 1) return moduli[0];
+        return `length(${gpuFVec(n, target)}(${moduli.join(', ')}))`;
+      }
       if (n === 1) return `abs(${compile(arg.op1)})`;
       return `length(${compile(arg)})`;
     }
@@ -9327,7 +9580,11 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  *
  * Canonical color value: vec3 OKLCh `(L, C, H_deg)` — same convention as the
  * interpreted/JS-runtime layer. Shaders that write to a sRGB framebuffer must
- * wrap the final color in `_gpu_oklch_to_srgb()` at the boundary.
+ * wrap the final color in `_gpu_gamut_map_oklch()` at the boundary: it maps
+ * the color into the sRGB gamut with the CSS Color 4 gamut mapping (below),
+ * as the interpreter does at output. `_gpu_oklch_to_srgb()` does no mapping
+ * and answers extended sRGB channels, which the canvas would clip one by one,
+ * changing the hue of a color outside the gamut.
  *
  * Hue is in degrees throughout (matching the boxed-expression convention);
  * HSL/HSV saturation, lightness and value are in 0-1.
@@ -9336,8 +9593,9 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  * runtime (`readColorChannels`, `numerics/color-conversion.ts`):
  *
  * - sRGB channels are EXTENDED sRGB. A channel below 0 or above 1 is a color
- *   outside the sRGB gamut, and no helper clamps it or maps it into the
- *   gamut: the canvas clamps at output. The transfer functions
+ *   outside the sRGB gamut, and no conversion helper clamps it or maps it
+ *   into the gamut: only the output does (`_gpu_gamut_map_oklch`, and the
+ *   conversions to HSV and HSL). The transfer functions
  *   (`_gpu_srgb_to_linear`, `_gpu_linear_to_srgb`) are sign-extended,
  *   `sign(c)·f(|c|)`, as for extended sRGB in CSS Color 4, and the cube
  *   roots in `_gpu_srgb_to_oklab` are sign-extended too, because `pow` is
@@ -9348,8 +9606,29 @@ fn _gpu_median_8(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32)
  *   HSL describe only the sRGB gamut. `clamp` also reads an infinite channel
  *   as its bound, `+inf` as 1 and `-inf` as 0. An infinite hue has no
  *   reduction: it becomes `NaN`, and so does the whole triple (next item).
- * - `_gpu_rgb_to_hsv` and `_gpu_rgb_to_hsl` first clip each sRGB channel
- *   into `[0, 1]`, because HSV and HSL cannot hold an extended color.
+ * - `_gpu_rgb_to_hsv` and `_gpu_rgb_to_hsl` first map the color into the
+ *   sRGB gamut (`_gpu_gamut_map_srgb`), because HSV and HSL cannot hold an
+ *   extended color.
+ * - `_gpu_gamut_map_oklch` is the CSS Color 4 gamut mapping of the
+ *   interpreter (`gamutMapOklch`, `numerics/color-conversion.ts`), step for
+ *   step: a lightness of 1 or more is white and 0 or less is black; a
+ *   negative chroma is the positive chroma at the hue plus 180; a color
+ *   inside the gamut (each channel within 1e-6 of `[0, 1]`) is its own
+ *   channels, clamped; otherwise the chroma is searched in `[0, C]` at
+ *   constant lightness and hue, and the search stops at the first chroma
+ *   whose clamped color is within ΔE_OK 0.02 of it (and within 0.0001 of that
+ *   bound), or when the interval is narrower than 0.0001. The loop has the
+ *   constant bound 24, which a shader requires; 24 halvings bring a chroma
+ *   below 1000 under 0.0001, so the bound does not stop the search first for
+ *   any chroma a color has. `_gpu_gamut_map_oklch_p3` does the same in the
+ *   Display-P3 gamut and answers the result in extended sRGB channels. The
+ *   Display-P3 matrices are those of `LINEAR_SRGB_TO_LINEAR_P3` and
+ *   `LINEAR_P3_TO_LINEAR_SRGB` in that module, rounded to 10 decimals.
+ *   `_gpu_in_srgb_gamut` tests that each channel is in `[0, 1]`, within 1e-6,
+ *   so it is also the test of Display-P3 coordinates.
+ * - `_gpu_gamut_map_srgb` maps an extended sRGB color: a color inside the
+ *   gamut is its own channels, clamped, and any other finite color goes
+ *   through OKLCh and `_gpu_gamut_map_oklch`, as `gamutMapSrgb` does.
  * - An infinite sRGB channel or OKLab/OKLCh channel is not clamped: the
  *   arithmetic of the conversion makes it `NaN` (`inf - inf`), the NaN color
  *   of the interpreter's `incompatible-type` error.
@@ -9449,6 +9728,103 @@ vec3 _gpu_oklch_to_srgb(vec3 lch) {
   return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
 }
 
+bool _gpu_in_srgb_gamut(vec3 rgb) {
+  return all(greaterThanEqual(rgb, vec3(-1e-6))) && all(lessThanEqual(rgb, vec3(1.000001)));
+}
+
+vec3 _gpu_srgb_to_p3(vec3 rgb) {
+  float r = _gpu_srgb_to_linear(rgb.x);
+  float g = _gpu_srgb_to_linear(rgb.y);
+  float b = _gpu_srgb_to_linear(rgb.z);
+  return vec3(
+    _gpu_linear_to_srgb(0.8224619687 * r + 0.1775380313 * g),
+    _gpu_linear_to_srgb(0.0331941989 * r + 0.9668058011 * g),
+    _gpu_linear_to_srgb(0.0170826307 * r + 0.0723974407 * g + 0.9105199286 * b)
+  );
+}
+
+vec3 _gpu_p3_to_srgb(vec3 p3) {
+  float r = _gpu_srgb_to_linear(p3.x);
+  float g = _gpu_srgb_to_linear(p3.y);
+  float b = _gpu_srgb_to_linear(p3.z);
+  return vec3(
+    _gpu_linear_to_srgb(1.2249401763 * r - 0.2249401763 * g),
+    _gpu_linear_to_srgb(-0.0420569547 * r + 1.0420569547 * g),
+    _gpu_linear_to_srgb(-0.0196375546 * r - 0.0786360456 * g + 1.0982736 * b)
+  );
+}
+
+vec3 _gpu_oklch_to_gamut(vec3 lch, bool p3) {
+  vec3 rgb = _gpu_oklch_to_srgb(lch);
+  if (p3) return _gpu_srgb_to_p3(rgb);
+  return rgb;
+}
+
+float _gpu_gamut_delta_e(vec3 c, vec3 lch, bool p3) {
+  vec3 a = _gpu_srgb_to_oklab(p3 ? _gpu_p3_to_srgb(c) : c);
+  vec3 b = _gpu_oklch_to_oklab(lch);
+  float dL = a.x - b.x;
+  float da = a.y - b.y;
+  float db = a.z - b.z;
+  return sqrt(dL * dL + da * da + db * db);
+}
+
+vec3 _gpu_gamut_map_oklch_in(vec3 lch, bool p3) {
+  float L = lch.x;
+  float C = lch.y;
+  float H = lch.z;
+  if (L != L || C != C || H != H) return vec3(L + C + H);
+  if (L >= 1.0) return vec3(1.0);
+  if (L <= 0.0) return vec3(0.0);
+  if (C < 0.0) {
+    C = -C;
+    H = H + 180.0;
+  }
+  vec3 origin = _gpu_oklch_to_gamut(vec3(L, C, H), p3);
+  vec3 clipped = clamp(origin, 0.0, 1.0);
+  if (_gpu_in_srgb_gamut(origin)) return clipped;
+  if (_gpu_gamut_delta_e(clipped, vec3(L, C, H), p3) < 0.02) return clipped;
+  float lo = 0.0;
+  float hi = C;
+  bool loInGamut = true;
+  for (int i = 0; i < 24; i++) {
+    if (hi - lo <= 0.0001) break;
+    float chroma = (lo + hi) / 2.0;
+    vec3 current = _gpu_oklch_to_gamut(vec3(L, chroma, H), p3);
+    if (loInGamut && _gpu_in_srgb_gamut(current)) {
+      lo = chroma;
+    } else {
+      clipped = clamp(current, 0.0, 1.0);
+      float e = _gpu_gamut_delta_e(clipped, vec3(L, chroma, H), p3);
+      if (e < 0.02) {
+        if (0.02 - e < 0.0001) return clipped;
+        loInGamut = false;
+        lo = chroma;
+      } else {
+        hi = chroma;
+      }
+    }
+  }
+  return clipped;
+}
+
+vec3 _gpu_gamut_map_oklch(vec3 lch) {
+  return _gpu_gamut_map_oklch_in(lch, false);
+}
+
+vec3 _gpu_gamut_map_oklch_p3(vec3 lch) {
+  return _gpu_p3_to_srgb(_gpu_gamut_map_oklch_in(lch, true));
+}
+
+vec3 _gpu_gamut_map_srgb(vec3 rgb) {
+  if (rgb.x != rgb.x || rgb.y != rgb.y || rgb.z != rgb.z)
+    return vec3(rgb.x + rgb.y + rgb.z);
+  if (_gpu_in_srgb_gamut(rgb)) return clamp(rgb, 0.0, 1.0);
+  if (!(abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38))
+    return clamp(rgb, 0.0, 1.0);
+  return _gpu_gamut_map_oklch(_gpu_srgb_to_oklch(rgb));
+}
+
 vec3 _gpu_hsl_to_rgb(vec3 hsl) {
   float h = mod(hsl.x, 360.0);
   if (h != h || hsl.y != hsl.y || hsl.z != hsl.z) return vec3(h + hsl.y + hsl.z);
@@ -9473,7 +9849,7 @@ vec3 _gpu_hsl_to_rgb(vec3 hsl) {
 vec3 _gpu_rgb_to_hsl(vec3 rgb_in) {
   if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z)
     return vec3(rgb_in.x + rgb_in.y + rgb_in.z);
-  vec3 rgb = clamp(rgb_in, 0.0, 1.0);
+  vec3 rgb = _gpu_gamut_map_srgb(rgb_in);
   float maxc = max(max(rgb.x, rgb.y), rgb.z);
   float minc = min(min(rgb.x, rgb.y), rgb.z);
   float l = (maxc + minc) / 2.0;
@@ -9513,7 +9889,7 @@ vec3 _gpu_hsv_to_rgb(vec3 hsv) {
 vec3 _gpu_rgb_to_hsv(vec3 rgb_in) {
   if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z)
     return vec3(rgb_in.x + rgb_in.y + rgb_in.z);
-  vec3 rgb = clamp(rgb_in, 0.0, 1.0);
+  vec3 rgb = _gpu_gamut_map_srgb(rgb_in);
   float maxc = max(max(rgb.x, rgb.y), rgb.z);
   float minc = min(min(rgb.x, rgb.y), rgb.z);
   float v = maxc;
@@ -9580,7 +9956,7 @@ float _gpu_apca(vec3 lch_bg, vec3 lch_fg) {
  *
  * Same convention as the GLSL preamble: canonical color value is `vec3f`
  * OKLCh `(L, C, H_deg)`. Shaders writing to a sRGB framebuffer must wrap
- * their final color in `_gpu_oklch_to_srgb()`.
+ * their final color in `_gpu_gamut_map_oklch()`.
  */
 export const GPU_COLOR_PREAMBLE_WGSL = `
 fn _gpu_srgb_to_linear(c: f32) -> f32 {
@@ -9648,6 +10024,105 @@ fn _gpu_oklch_to_srgb(lch: vec3f) -> vec3f {
   return _gpu_oklab_to_srgb(_gpu_oklch_to_oklab(lch));
 }
 
+fn _gpu_in_srgb_gamut(rgb: vec3f) -> bool {
+  return all(rgb >= vec3f(-1e-6)) && all(rgb <= vec3f(1.000001));
+}
+
+fn _gpu_srgb_to_p3(rgb: vec3f) -> vec3f {
+  let r = _gpu_srgb_to_linear(rgb.x);
+  let g = _gpu_srgb_to_linear(rgb.y);
+  let b = _gpu_srgb_to_linear(rgb.z);
+  return vec3f(
+    _gpu_linear_to_srgb(0.8224619687 * r + 0.1775380313 * g),
+    _gpu_linear_to_srgb(0.0331941989 * r + 0.9668058011 * g),
+    _gpu_linear_to_srgb(0.0170826307 * r + 0.0723974407 * g + 0.9105199286 * b)
+  );
+}
+
+fn _gpu_p3_to_srgb(p3: vec3f) -> vec3f {
+  let r = _gpu_srgb_to_linear(p3.x);
+  let g = _gpu_srgb_to_linear(p3.y);
+  let b = _gpu_srgb_to_linear(p3.z);
+  return vec3f(
+    _gpu_linear_to_srgb(1.2249401763 * r - 0.2249401763 * g),
+    _gpu_linear_to_srgb(-0.0420569547 * r + 1.0420569547 * g),
+    _gpu_linear_to_srgb(-0.0196375546 * r - 0.0786360456 * g + 1.0982736 * b)
+  );
+}
+
+fn _gpu_oklch_to_gamut(lch: vec3f, p3: bool) -> vec3f {
+  let rgb = _gpu_oklch_to_srgb(lch);
+  if (p3) { return _gpu_srgb_to_p3(rgb); }
+  return rgb;
+}
+
+fn _gpu_gamut_delta_e(c: vec3f, lch: vec3f, p3: bool) -> f32 {
+  let a = _gpu_srgb_to_oklab(select(c, _gpu_p3_to_srgb(c), p3));
+  let b = _gpu_oklch_to_oklab(lch);
+  let dL = a.x - b.x;
+  let da = a.y - b.y;
+  let db = a.z - b.z;
+  return sqrt(dL * dL + da * da + db * db);
+}
+
+fn _gpu_gamut_map_oklch_in(lch: vec3f, p3: bool) -> vec3f {
+  let L = lch.x;
+  var C = lch.y;
+  var H = lch.z;
+  if (L != L || C != C || H != H) { return vec3f(L + C + H); }
+  if (L >= 1.0) { return vec3f(1.0); }
+  if (L <= 0.0) { return vec3f(0.0); }
+  if (C < 0.0) {
+    C = -C;
+    H = H + 180.0;
+  }
+  let origin = _gpu_oklch_to_gamut(vec3f(L, C, H), p3);
+  var clipped = clamp(origin, vec3f(0.0), vec3f(1.0));
+  if (_gpu_in_srgb_gamut(origin)) { return clipped; }
+  if (_gpu_gamut_delta_e(clipped, vec3f(L, C, H), p3) < 0.02) { return clipped; }
+  var lo: f32 = 0.0;
+  var hi: f32 = C;
+  var loInGamut = true;
+  for (var i: i32 = 0; i < 24; i = i + 1) {
+    if (hi - lo <= 0.0001) { break; }
+    let chroma = (lo + hi) / 2.0;
+    let current = _gpu_oklch_to_gamut(vec3f(L, chroma, H), p3);
+    if (loInGamut && _gpu_in_srgb_gamut(current)) {
+      lo = chroma;
+    } else {
+      clipped = clamp(current, vec3f(0.0), vec3f(1.0));
+      let e = _gpu_gamut_delta_e(clipped, vec3f(L, chroma, H), p3);
+      if (e < 0.02) {
+        if (0.02 - e < 0.0001) { return clipped; }
+        loInGamut = false;
+        lo = chroma;
+      } else {
+        hi = chroma;
+      }
+    }
+  }
+  return clipped;
+}
+
+fn _gpu_gamut_map_oklch(lch: vec3f) -> vec3f {
+  return _gpu_gamut_map_oklch_in(lch, false);
+}
+
+fn _gpu_gamut_map_oklch_p3(lch: vec3f) -> vec3f {
+  return _gpu_p3_to_srgb(_gpu_gamut_map_oklch_in(lch, true));
+}
+
+fn _gpu_gamut_map_srgb(rgb: vec3f) -> vec3f {
+  if (rgb.x != rgb.x || rgb.y != rgb.y || rgb.z != rgb.z) {
+    return vec3f(rgb.x + rgb.y + rgb.z);
+  }
+  if (_gpu_in_srgb_gamut(rgb)) { return clamp(rgb, vec3f(0.0), vec3f(1.0)); }
+  if (!(abs(rgb.x) <= 3.0e38 && abs(rgb.y) <= 3.0e38 && abs(rgb.z) <= 3.0e38)) {
+    return clamp(rgb, vec3f(0.0), vec3f(1.0));
+  }
+  return _gpu_gamut_map_oklch(_gpu_srgb_to_oklch(rgb));
+}
+
 fn _gpu_hsl_to_rgb(hsl: vec3f) -> vec3f {
   let h = hsl.x - 360.0 * floor(hsl.x / 360.0);
   if (h != h || hsl.y != hsl.y || hsl.z != hsl.z) { return vec3f(h + hsl.y + hsl.z); }
@@ -9673,7 +10148,7 @@ fn _gpu_rgb_to_hsl(rgb_in: vec3f) -> vec3f {
   if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z) {
     return vec3f(rgb_in.x + rgb_in.y + rgb_in.z);
   }
-  let rgb = clamp(rgb_in, vec3f(0.0), vec3f(1.0));
+  let rgb = _gpu_gamut_map_srgb(rgb_in);
   let maxc = max(max(rgb.x, rgb.y), rgb.z);
   let minc = min(min(rgb.x, rgb.y), rgb.z);
   let l = (maxc + minc) / 2.0;
@@ -9719,7 +10194,7 @@ fn _gpu_rgb_to_hsv(rgb_in: vec3f) -> vec3f {
   if (rgb_in.x != rgb_in.x || rgb_in.y != rgb_in.y || rgb_in.z != rgb_in.z) {
     return vec3f(rgb_in.x + rgb_in.y + rgb_in.z);
   }
-  let rgb = clamp(rgb_in, vec3f(0.0), vec3f(1.0));
+  let rgb = _gpu_gamut_map_srgb(rgb_in);
   let maxc = max(max(rgb.x, rgb.y), rgb.z);
   let minc = min(min(rgb.x, rgb.y), rgb.z);
   let v = maxc;
@@ -9902,12 +10377,21 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   return vec2f(log(length(z)), atan2(z.y, z.x));
 }`,
   },
+  // `z^w` is `exp(w · ln z)`. At `z = 0`, `ln z` is `(−∞, 0)`, and the
+  // product with `w` has the imaginary part `w.x · 0 + w.y · (−∞)`, which is
+  // NaN even when `w.y` is 0 (`0 · −∞`). The interpreter answers 0 for
+  // `0^w` when the real part of `w` is positive (`Root(0, n)` for a positive
+  // degree `n`, `0^(1/2 + i)`), so that case is answered first. For any
+  // other `w`, the interpreter has no finite value, and the formula answers
+  // NaN.
   _gpu_cpow: {
     deps: ['_gpu_cexp', '_gpu_cmul', '_gpu_cln'],
     glsl: `vec2 _gpu_cpow(vec2 z, vec2 w) {
+  if (z.x == 0.0 && z.y == 0.0 && w.x > 0.0) return vec2(0.0);
   return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
 }`,
     wgsl: `fn _gpu_cpow(z: vec2f, w: vec2f) -> vec2f {
+  if (z.x == 0.0 && z.y == 0.0 && w.x > 0.0) { return vec2f(0.0); }
   return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
 }`,
   },
@@ -10845,6 +11329,60 @@ function gpuValueHasVectorComponents(expr: Expression): boolean {
   return true;
 }
 
+/**
+ * The names of the symbols read as a COLOUR operand during a compilation,
+ * keyed by the `loweredSymbolType` hook of the target that compiled it.
+ *
+ * A symbol used as a colour operand (`a` in `ColorMix(a, b, 0.5)`) has the
+ * engine type `color | string | tuple`, from which no shader type follows,
+ * but the emitted code reads it as a `vec3` of colour channels. Only the
+ * emission knows this, so `gpuColorOperand` records the name here while it
+ * compiles, and the hook reads it back when the result reports its free
+ * symbols. The key is the hook function because it is the one value every
+ * copy of the target (`{ ...target }`, made for nested compilations)
+ * shares with the target that reports the result.
+ */
+const gpuColorSymbolReads = new WeakMap<object, Set<string>>();
+
+/**
+ * A new `CompileTarget.loweredSymbolType` hook for one shader target: the
+ * shader type the emitted code reads the free symbol `symbol` as — the type
+ * of the uniform the host must declare. A symbol read as a colour operand is
+ * a `vec3`; otherwise the type is read from the same analysis that types the
+ * parameters and return values of emitted functions (`gpuTypeOfValue`),
+ * then a matrix (`mat2`, `mat3x2f`) or an array (`float[5]`,
+ * `array<f32, 5>`). `undefined` when none of these apply.
+ */
+function gpuLoweredSymbolTypeHook(
+  isWGSL: boolean
+): (symbol: Expression) => string | undefined {
+  const colorReads = new Set<string>();
+  const hook = (symbol: Expression): string | undefined => {
+    if (isSymbol(symbol) && colorReads.has(symbol.symbol))
+      return gpuVecType(3, isWGSL);
+    const shape = gpuOperandShape(symbol);
+    if (shape === 'matrix') {
+      const dims = gpuMatrixDims(symbol);
+      if (dims === undefined) return undefined;
+      const [rows, cols] = dims;
+      if (isWGSL) return `mat${cols}x${rows}f`;
+      return rows === cols ? `mat${cols}` : `mat${cols}x${rows}`;
+    }
+    if (shape === 'array') {
+      const t = gpuType(symbol);
+      const n =
+        typeof t !== 'string' && t.kind === 'list' && t.dimensions?.length === 1
+          ? t.dimensions[0]
+          : undefined;
+      if (n === undefined || !(n > 0)) return undefined;
+      return isWGSL ? `array<f32, ${n}>` : `float[${n}]`;
+    }
+    return gpuTypeOfValue(symbol, isWGSL);
+  };
+  gpuColorSymbolReads.set(hook, colorReads);
+  return hook;
+}
+
 /** The synthesized signature of an emitted user-function definition. */
 type GPUUserFunctionSignature = {
   /** Formal parameter names, for diagnostics. */
@@ -10997,11 +11535,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     const rules = this.getShapeRules();
     const target: GPURandomTarget & GPUShapeRulesTarget = {
       language: this.languageId,
+      isRealOnlyLowering: gpuIsRealOnlyLowering,
       // A shader value has ONE static shape (`float` or `vec2`), decided by
       // type analysis — the strict discipline IS this target's model, and the
       // only mode it offers (`CompileMode`). A requested `'complex'`/`'auto'`
       // is the `unsupported-mode` decline.
       supportedModes: GPU_SUPPORTED_MODES,
+      // The shader type of each free symbol, for
+      // `CompilationResult.freeSymbolTypes`. See `gpuLoweredSymbolTypeHook`.
+      loweredSymbolType: gpuLoweredSymbolTypeHook(this.languageId === 'wgsl'),
       // Constant-collection folding inlines up to the SAME limit this
       // target's `Range` handler already inlines to. On a shader target a
       // dynamic collection has no lowering at all, so for a constant one the
@@ -11560,41 +12102,47 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                     `colors, complex values and 2–4 component vectors have one. Fail ` +
                     `closed (D6).`
                 );
-              return {
-                ret,
-                // Every `Return` in the body must yield the shape the
-                // signature just synthesized: a shader function has ONE return
-                // type and neither language converts between a scalar, a
-                // `bool` and a `vecN`. Checked AT the emission, not by a
-                // pre-walk, because the shape of a `Return`'s value is only
-                // knowable while the emitter's local frames are pushed — a
-                // `Return(z)` naming a `vec2` block-local reads as a scalar
-                // once `compileBlock` has popped its frame, which is exactly
-                // how `float _fn_a(float t) { … return z; }` went out behind
-                // `success: true`.
-                code: BaseCompiler.compileFunctionBody(body, {
-                  ...target,
-                  onReturn: (value) => {
-                    const t =
-                      value === undefined
-                        ? undefined
-                        : gpuTypeOfValue(value, isWGSL);
-                    if (t === ret) return;
-                    throw new Error(
-                      `${id}: a \`Return\` in this body yields ` +
-                        (t === undefined
-                          ? `a value with no static ${language.toUpperCase()} type`
-                          : `a "${t}" value`) +
-                        `, but "${id}" is declared to return "${ret}" (the ` +
-                        `shape of the body's own final value). ` +
-                        `${language.toUpperCase()} has no implicit conversion ` +
-                        `between them, and a shader function has a single ` +
-                        `return type. Make every \`Return\` — and the body's ` +
-                        `final value — the same shape. Fail closed (D6).`
-                    );
-                  },
-                }),
-              };
+              // Every `Return` in the body must yield the shape the
+              // signature just synthesized: a shader function has ONE return
+              // type and neither language converts between a scalar, a
+              // `bool` and a `vecN`. Checked AT the emission, not by a
+              // pre-walk, because the shape of a `Return`'s value is only
+              // knowable while the emitter's local frames are pushed — a
+              // `Return(z)` naming a `vec2` block-local reads as a scalar
+              // once `compileBlock` has popped its frame, which is exactly
+              // how `float _fn_a(float t) { … return z; }` went out behind
+              // `success: true`.
+              const code = BaseCompiler.compileFunctionBody(body, {
+                ...target,
+                onReturn: (value) => {
+                  const t =
+                    value === undefined
+                      ? undefined
+                      : gpuTypeOfValue(value, isWGSL);
+                  if (t === ret) return;
+                  throw new Error(
+                    `${id}: a \`Return\` in this body yields ` +
+                      (t === undefined
+                        ? `a value with no static ${language.toUpperCase()} type`
+                        : `a "${t}" value`) +
+                      `, but "${id}" is declared to return "${ret}" (the ` +
+                      `shape of the body's own final value). ` +
+                      `${language.toUpperCase()} has no implicit conversion ` +
+                      `between them, and a shader function has a single ` +
+                      `return type. Make every \`Return\` — and the body's ` +
+                      `final value — the same shape. Fail closed (D6).`
+                  );
+                },
+              });
+              // The lane of the value, read by the call sites
+              // (`BaseCompiler.userCallLane`): a `vec2` return type is also
+              // the type of a two-component point, so the return type alone
+              // does not say whether the value is complex. Recorded after
+              // the body compiled, as on the JavaScript definition route, so
+              // that a recursive call read as real while the body compiled is
+              // checked against the lane of the value.
+              BaseCompiler.recordUserFunctionLane(target, id, name, body);
+              return { ret, code };
             },
             true
           );

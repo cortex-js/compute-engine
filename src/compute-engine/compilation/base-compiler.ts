@@ -172,6 +172,7 @@ import type {
   ComplexResult,
   CseRegionInstance,
   CseSession,
+  FreeSymbolType,
   InvariantPrefix,
   NamingContext,
   OperandCompiler,
@@ -1569,21 +1570,48 @@ export function statementBodyHead(
 type ElementLane = boolean | 'mixed' | undefined;
 
 /**
- * A user function's body with each argument of one call replaced by a
- * stand-in symbol, built by `BaseCompiler.userCallStandIns`. The stand-ins
- * are named apart from every name of the body and of the call site, so the
- * body can be analyzed with the caller's bindings hidden while each argument
- * keeps the lane it has at the call site.
+ * What one compilation knows about the lane of the value that each emitted
+ * user-function definition returns (`BaseCompiler.recordUserFunctionLane`,
+ * read by `BaseCompiler.userCallLane`).
  */
-type UserCallStandIns = {
-  /** The body with the stand-ins substituted for the parameters. */
-  body: Expression;
-  /** Stand-ins for a value that is a plain number at the call site. */
-  real: string[];
-  /** Stand-ins for a scalar that is a `{re, im}` object at the call site. */
-  complex: string[];
-  /** Stand-ins described by their static type only (not a scalar). */
-  typed: string[];
+type UserFunctionLanes = {
+  /**
+   * Emitted definition name → `true` when the definition returns a complex
+   * scalar, `false` for a real scalar, `undefined` for a value that is not a
+   * scalar.
+   */
+  byName: Map<string, boolean | undefined>;
+  /**
+   * Call node → the name of the emitted definition that the call uses, once
+   * that definition is emitted (`userCallLane`).
+   */
+  byNode: WeakMap<Expression, string>;
+  /**
+   * The definitions emitted because an analysis asked for the lane of a call
+   * (`userCallDefinition`) before the call was compiled. The ones that the
+   * compiled code does not reference are removed from the preamble.
+   */
+  onAsk: Set<string>;
+  /**
+   * The definitions whose recursive call was read as real while the
+   * definition was compiling, because the call's type is not complex and
+   * the lane discipline in force reads that type as real.
+   */
+  assumedReal: Set<string>;
+  /**
+   * The definitions that are compiled a second time with their recursive
+   * calls read as complex, because the first compilation read them as real
+   * and the body then returned a complex value (`RecursiveLaneRetry`).
+   */
+  assumedComplex: Set<string>;
+  /**
+   * Emitted definition name → the lane of the ENTRIES of the collection
+   * that the definition returns (`linearAlgebraOperandLane` of its body),
+   * for a definition whose body is a collection. Read by
+   * `linearAlgebraOperandLane` for a call of the definition
+   * (`userCallElementLane`).
+   */
+  elementByName: Map<string, 'real' | 'complex' | 'wide'>;
 };
 
 /**
@@ -2390,7 +2418,7 @@ export class BaseCompiler {
     // it would never be restored.
     const prevPromotion = BaseCompiler._complexPromotion;
     const prevMode = BaseCompiler._mode;
-    const prevHelperLookup = BaseCompiler._realOnlyHelperLookup;
+    const prevRealOnlyLowering = BaseCompiler._realOnlyLowering;
     // Fold-before-shape for the complexness oracle (Tycho item 229): with
     // this latch set, `isComplexValued` answers `false` for a closed pure
     // scalar whose constant fold is a real number — an exact constant such
@@ -2425,6 +2453,7 @@ export class BaseCompiler {
     // Saved here, cleared at the depth-0 entry below and restored on the way
     // out, the same boundary `_invalidateComplexMemo` uses.
     const prevUnrolledIndexValues = BaseCompiler._unrolledIndexValues;
+    const prevCallSiteTarget = BaseCompiler._callSiteTarget;
     const oracleFoldEligible =
       target.language === 'javascript' &&
       target.constantFold !== false &&
@@ -2467,19 +2496,19 @@ export class BaseCompiler {
       // The per-compilation report (`modeReport`) starts fresh: no head
       // promoted yet; the discipline is the one just latched.
       BaseCompiler._promoted = false;
-      // The outermost target's helper table, so the contextless analysis can
-      // tell which heads this compilation lowers through a real-only STRING
-      // helper (see `_realOnlyHelperLookup`). Latched once per compilation
-      // like the mode: nested targets (a user-function body, a broadcast
-      // element) are spread from this one and lower every head the same way.
-      BaseCompiler._realOnlyHelperLookup =
-        target.language !== undefined &&
-        !target.language.startsWith('interval') &&
-        typeof target.functions === 'function'
-          ? target.functions
+      // The outermost target's real-only lowerings, so the contextless
+      // analysis can tell which heads this compilation lowers with a
+      // real-only lowering (see `_realOnlyLowering`). Latched once per
+      // compilation like the mode: nested targets (a user-function body, a
+      // broadcast element) are spread from this one and lower every head the
+      // same way.
+      BaseCompiler._realOnlyLowering =
+        target.language !== undefined && !target.language.startsWith('interval')
+          ? (h) => BaseCompiler.isRealOnlyLowering(target, h)
           : undefined;
     }
     BaseCompiler._compileDepth += 1;
+    BaseCompiler._callSiteTarget = target;
     // Only a genuine CHANGE of the bound-variable context invalidates: the
     // inner targets of a recursion carry the SAME `boundVars` set object
     // except at a binder crossing, so the memo survives the common path.
@@ -2539,6 +2568,7 @@ export class BaseCompiler {
       return compiled;
     } finally {
       BaseCompiler._compileDepth -= 1;
+      BaseCompiler._callSiteTarget = prevCallSiteTarget;
       // Leaving the OUTERMOST compilation: freeze its report for the target
       // to attach (`withReferences` → `modeReport`), before the latches are
       // restored.
@@ -2586,7 +2616,7 @@ export class BaseCompiler {
         };
       BaseCompiler._complexPromotion = prevPromotion;
       BaseCompiler._mode = prevMode;
-      BaseCompiler._realOnlyHelperLookup = prevHelperLookup;
+      BaseCompiler._realOnlyLowering = prevRealOnlyLowering;
       // Restore the caller's oracle-fold latch (undefined at depth 0:
       // outside a compilation the conservative shape-first verdict is the
       // safe one — engine symbol values may change between compilations,
@@ -2621,6 +2651,15 @@ export class BaseCompiler {
    * literal and every analysis answer describe the same plain number.
    */
   private static _oracleFoldTarget: CompileTarget<Expression> | undefined;
+
+  /**
+   * The target of the innermost `compile()` in progress, or `undefined`
+   * outside a compilation. A lowering asks for the lane of its operands
+   * while it compiles its own node, so this is the target that an operand
+   * which is a user-function call is compiled with: `userCallLane` emits the
+   * definition that the call uses against it.
+   */
+  private static _callSiteTarget: CompileTarget<Expression> | undefined;
 
   /**
    * The latch above, for the target-side code that must ask the same question
@@ -2774,48 +2813,96 @@ export class BaseCompiler {
   private static _promoted = false;
 
   /**
-   * The OUTERMOST compilation's `target.functions` lookup, latched by
-   * `compile()` at depth 0 (only for a target with a `language` other than
-   * the interval family — the same condition under which `compileExpr`'s
-   * string branch applies its real-only rule) and restored on the way out.
-   * `undefined` outside any compilation.
+   * The OUTERMOST compilation's real-only predicate
+   * (`isRealOnlyLowering(target, h)`), latched by `compile()` at depth 0
+   * (only for a target with a `language` other than the interval family) and
+   * restored on the way out. `undefined` outside any compilation.
    *
    * It exists so that `isComplexValued` can answer for a head the target
-   * lowers through a real-only STRING helper (`Erf: '_SYS.erf'`, `Gamma:
-   * '_SYS.gamma'`, Python `Erf: 'scipy.special.erf'`). Such a head never
-   * yields a `{re, im}` object: a maybe-complex operand takes the D2/D6
-   * runtime rule (`realOperandGuard` — the helper runs on the real part when
-   * the imaginary part is exactly zero, `NaN` otherwise) and a definitely
-   * non-real one is a compile-time decline. Yet several of these heads have a
-   * WIDE result type (`Erf`, `Gamma`, `Zeta`, `Digamma`, `Factorial`,
-   * `LambertW`, `Arsinh`, `ErfInv` all type `number`), so the type-based
-   * analysis fell through to the operand recursion and reported them complex
-   * whenever an operand was — a promoted unknown-sign radical, say. The
-   * enclosing arithmetic then read `.re`/`.im` off a plain number. Measured
-   * before this latch, in the default `auto` mode: `2·Erf(√y)` compiled to
-   * `{re: 2 * _b.re, …}` around a bare `_SYS.erf(…)` and ran to `{re: NaN}`
-   * at every point, and `Limit` at +∞ — whose growth oracles probe through
-   * the compiler — declined `k·Erf(√y) + anything` for every `k ≠ 1` (test
-   * `limit.test.ts` › "sum mixing a scaled Erf(∞) addend with a decaying
-   * addend").
+   * lowers with a real-only lowering (`Erf: '_SYS.erf'`, `Floor`, …). Such a
+   * head never yields a complex value: a maybe-complex operand takes the
+   * D2/D6 runtime rule (`realOperandGuard` — the lowering runs on the real
+   * part when the imaginary part is exactly zero, `NaN` otherwise) and a
+   * definitely non-real one is a compile-time decline. Yet several of these
+   * heads have a WIDE result type (`Erf`, `Gamma`, `Zeta`, `Digamma`,
+   * `Factorial`, `LambertW`, `Arsinh`, `ErfInv` all type `number`), so the
+   * type-based analysis fell through to the operand recursion and reported
+   * them complex whenever an operand was — a promoted unknown-sign radical,
+   * say. The enclosing arithmetic then read `.re`/`.im` off a plain number.
+   * Measured before this latch, in the default `auto` mode: `2·Erf(√y)`
+   * compiled to `{re: 2 * _b.re, …}` around a bare `_SYS.erf(…)` and ran to
+   * `{re: NaN}` at every point, and `Limit` at +∞ — whose growth oracles
+   * probe through the compiler — declined `k·Erf(√y) + anything` for every
+   * `k ≠ 1` (test `limit.test.ts` › "sum mixing a scaled Erf(∞) addend with a
+   * decaying addend").
    */
-  private static _realOnlyHelperLookup:
-    | ((id: MathJsonSymbol) => CompiledFunction<Expression> | undefined)
-    | undefined = undefined;
+  private static _realOnlyLowering: ((h: string) => boolean) | undefined =
+    undefined;
 
   /**
-   * Whether the compilation in progress lowers head `h` through a real-only
-   * STRING helper — the exact routing condition of `compileExpr`'s string
-   * branch, mirrored here so the analysis and the emission agree on the value
-   * SHAPE. `false` outside any compilation, and for the complex-transparent
-   * heads (`Real`, `Imaginary`, `Argument`, `Conjugate`), which are string-
-   * mapped in some targets but consume and may return complex values.
+   * Whether the compilation in progress lowers head `h` with a real-only
+   * lowering — the predicate the emission gates read
+   * (`isRealOnlyLowering`), so the analysis and the emission agree on the
+   * value SHAPE. Outside any compilation, and for an interval target, only
+   * the heads that are real-only on every target by definition
+   * (`REAL_ONLY_BY_DEFINITION`) answer `true`.
    */
-  private static isRealOnlyHelperHead(h: string): boolean {
-    const lookup = BaseCompiler._realOnlyHelperLookup;
-    if (lookup === undefined) return false;
-    if (BaseCompiler.COMPLEX_TRANSPARENT_HEADS.has(h)) return false;
-    return typeof lookup(h) === 'string';
+  private static isRealOnlyLoweringHead(h: string): boolean {
+    const lookup = BaseCompiler._realOnlyLowering;
+    if (lookup === undefined)
+      return BaseCompiler.REAL_ONLY_BY_DEFINITION.has(h);
+    return lookup(h);
+  }
+
+  /**
+   * Whether `target` lowers the head `h` with a REAL-ONLY lowering: one
+   * that computes with real numbers only, so a complex operand has no value
+   * there. Each target declares its own real-only lowerings
+   * (`CompileTarget.isRealOnlyLowering`): the same head can be real-only on
+   * one target and have a complex lowering on another (`Erf` is real-only on
+   * JavaScript and takes a complex argument on Python). A target that
+   * declares nothing gets the default: the heads in
+   * `REAL_ONLY_BY_DEFINITION`, and every head it maps to a plain helper name
+   * (`stringHelperIsRealOnly`). An interval target, and a target with no
+   * `language`, has no real-only lowering: it keeps no complex values.
+   *
+   * Read by every real-only gate of `compileExpr` (the function-codegen
+   * branch, the helper-name branch and the JavaScript broadcast attempt) and,
+   * through `_realOnlyLowering`, by `isComplexValued`.
+   */
+  static isRealOnlyLowering(
+    target: CompileTarget<Expression>,
+    h: string
+  ): boolean {
+    const language = target.language;
+    if (language === undefined || language.startsWith('interval')) return false;
+    const lowering = target.functions?.(h);
+    if (target.isRealOnlyLowering !== undefined)
+      return target.isRealOnlyLowering(h, lowering);
+    return (
+      BaseCompiler.REAL_ONLY_BY_DEFINITION.has(h) ||
+      BaseCompiler.stringHelperIsRealOnly(h, lowering)
+    );
+  }
+
+  /**
+   * Whether a head mapped to the plain helper name `lowering`
+   * (`Erf: '_SYS.erf'`) is real-only by that mapping. A helper named by a
+   * string takes its operands as they are, and the helpers of the
+   * JavaScript and shader targets take real numbers only: handing one a
+   * complex value returns a wrong value, not NaN (`_SYS.erf` of a complex
+   * `z` answered −1). The heads that consume a complex value by definition
+   * (`Real`, `Imaginary`, `Argument`, `Conjugate`) are excluded: some
+   * targets map them to a complex-aware routine (Python `np.real`).
+   */
+  static stringHelperIsRealOnly(
+    h: string,
+    lowering: CompiledFunction<Expression> | undefined
+  ): boolean {
+    return (
+      typeof lowering === 'string' &&
+      !BaseCompiler.COMPLEX_TRANSPARENT_HEADS.has(h)
+    );
   }
 
   /** Record that a promotable head was lowered through a complex kernel. */
@@ -2958,6 +3045,37 @@ export class BaseCompiler {
           expr.ops.length > 0 &&
           expr.ops.every((e) => BaseCompiler.isProvablyNonReal(e))
         );
+      // Arithmetic that keeps a non-zero imaginary part: a sum or difference
+      // of ONE statically non-real term and real terms (`x + i` over a real
+      // `x`: its imaginary part is the imaginary part of that term), the
+      // negation of a statically non-real value, and the product of one
+      // statically non-real factor with real factors of known sign (`2x·i`
+      // over a positive `x`; a real factor that may be zero may cancel the
+      // imaginary part). Without these, `Erf(x + i)` took the run-time rule
+      // and was NaN at every point, where it has no compiled value at all on
+      // a target whose `Erf` is real-only. The type cannot answer: `x + i`
+      // types `complex`, which admits real values.
+      const realOperand = (e: Expression): boolean =>
+        !BaseCompiler.isComplexValued(e) && e.type.matches('real');
+      if (expr.operator === 'Negate' && expr.ops.length === 1)
+        return BaseCompiler.isProvablyNonReal(expr.ops[0]);
+      if (
+        expr.operator === 'Add' ||
+        expr.operator === 'Subtract' ||
+        expr.operator === 'Multiply'
+      ) {
+        const nonReal = expr.ops.filter((e) =>
+          BaseCompiler.isProvablyNonReal(e)
+        );
+        if (nonReal.length !== 1) return false;
+        const others = expr.ops.filter((e) => e !== nonReal[0]);
+        if (expr.operator === 'Multiply')
+          return others.every(
+            (e) =>
+              realOperand(e) && (e.isPositive === true || e.isNegative === true)
+          );
+        return others.every(realOperand);
+      }
       const t = expr.type;
       return t !== undefined && isSubtype(t.type, 'imaginary');
     }
@@ -2981,9 +3099,12 @@ export class BaseCompiler {
    * short-circuited operand keeps its laziness.
    *
    * A STATICALLY non-real operand (`isProvablyNonReal`: `i`, `2i`, an
-   * `imaginary`-typed symbol) is the compile-time DECLINE — `Less(i, 2)` has
-   * no compiled value, exactly as the interpreter leaves it unevaluated —
-   * raised here as a `capability` diagnostic (`code: 'non-real-operand'`).
+   * `imaginary`-typed symbol) is the compile-time DECLINE, raised here as a
+   * `capability` diagnostic (`code: 'non-real-operand'`). The real lowering
+   * has no value to give there. The interpreter may still have one: it
+   * leaves `Less(i, 2)` unevaluated, but it computes `Erf(1 + i)` under
+   * `.N()`, which the real-only JavaScript helper cannot do. The diagnostic therefore
+   * names the lowering, not the interpreter, as the reason.
    *
    * THE ELEMENT-WISE FORM. When some maybe-complex operand is an ARRAY at
    * run time — a list whose elements may be complex (`√L` over `L:
@@ -3003,7 +3124,7 @@ export class BaseCompiler {
    * element, not a scalar `false` — which relies on every real lowering
    * propagating NaN (`Math.floor`, `%`, `Math.max`, the helpers, and `<`,
    * which answers `false` on NaN; measured for each head of
-   * `REAL_ONLY_CODEGEN_HEADS` before this form was written). An operand the
+   * `REAL_ONLY_BY_DEFINITION` before this form was written). An operand the
    * analysis has already projected (present in `_codeOverrides`) answers
    * "real" to `isComplexValued` and `operandElementLane`, so the re-emission
    * lowers the head on the real lane (`tryCompileBroadcast` emits its plain
@@ -3060,8 +3181,8 @@ export class BaseCompiler {
         kind: 'capability',
         message:
           `${h}: cannot compile over the non-real operand \`${nonReal.toString()}\` — ` +
-          `the value is certainly not a real number, so the head has no ` +
-          `compiled value (the interpreter leaves it unevaluated). Fail closed (D6).`,
+          `the value is certainly not a real number, and this target's ` +
+          `lowering of the head is real-only. Fail closed (D6).`,
       });
     if (
       !target.bindExpr ||
@@ -3228,8 +3349,8 @@ export class BaseCompiler {
         kind: 'capability',
         message:
           `${h}: cannot compile over the non-real operand \`${nonReal.toString()}\` — ` +
-          `the value is certainly not a real number, so the head has no ` +
-          `compiled value (the interpreter leaves it unevaluated). Fail closed (D6).`,
+          `the value is certainly not a real number, and this target's ` +
+          `lowering of the head is real-only. Fail closed (D6).`,
       });
     const bind = target.bindExpr;
     const isReal = target.complexIsReal;
@@ -3623,191 +3744,509 @@ export class BaseCompiler {
   }
 
   /**
-   * Whether a call to a USER-defined function produces a complex value —
-   * decided by looking through to its body, analyzed with the parameters
-   * shielded (typed as declared, never read through the engine).
+   * The lane of the value that a call to a USER-defined function returns:
+   * `true` for a complex scalar (a `{re, im}` object, a shader `vec2`),
+   * `false` for a real scalar. `undefined` when `expr` is not such a call,
+   * when no compilation that emits user functions is running, or when the
+   * value is not a scalar: `isComplexValued` then gives its type-based
+   * answer.
    *
-   * What happens inside the emitted `_fn_…` that the call site's type does
-   * not describe: under a PROMOTING discipline the body itself promotes —
-   * with `z(t) := √(t−1)`, `_fn_z` returns `{re, im}` while the call `z(t)`
-   * types the wide `number` and would otherwise be read as a plain
-   * number (`Math.abs(0.5 * {re,im} + -1)`, `NaN` everywhere: item 190's
-   * exact witness).
+   * The TYPE of the call cannot give this answer. The result type of a
+   * function with no declared codomain is inferred, and the complex body of
+   * `h(s) := s + i` infers `number`, while the emitted `_fn_h` returns a
+   * complex value. Only the definition that the call uses knows the lane. So
+   * the lane is RECORDED when the definition is emitted
+   * (`recordUserFunctionLane`), and read here.
    *
-   * Without promotion (the `strict` discipline, which the shader targets
-   * always use) this answers only `true` — when the body is complex without
-   * any promotion — and declines (`undefined`) otherwise. A body such as
-   * `h(s) := s + i` is complex under every discipline, but a call `h(t)`
-   * of a function declared `(unknown) -> unknown` types `number`. Before
-   * this answer, consumers read that call as a real number: `1 - h(t)`
-   * emitted `-_fn_h(t) + 1` (`NaN` in JavaScript, where `_fn_h` returns
-   * `{re, im}`), and a shader point `(t, h(t))` emitted
-   * `vec2(t, _fn_h(t))`, which kept only the real part. A `false` verdict
-   * is still a decline, so a merely promotable body stays on the real
-   * kernel and every other call keeps its type-based answer and its
-   * byte-identical emission.
+   * A parent lowering asks for the lane of an operand BEFORE it compiles the
+   * operand, so the definition is often not emitted yet. It is emitted here,
+   * through the same route that the call takes (`userCallDefinition`). A
+   * definition that the compiled code does not reference in the end (the
+   * call was folded, for example) is removed from the preamble
+   * (`pruneUnreferencedVariantBases`).
    *
-   * The parameters are shielded during the body analysis, exactly as for a
-   * `Function` literal operand (`binderParts`) — with the complex-lane ones
-   * additionally bound complex — and `visited` declines self- and mutual
-   * recursion rather than looping.
+   * An INLINED call has no definition: its value is the substituted body,
+   * compiled at the call site, so its lane is the lane of that expression.
+   *
+   * A RECURSIVE call, reached while its own definition is compiling, has no
+   * record yet. Its lane is read from its type, and the definition records
+   * that assumption: when the body then returns a complex value, the
+   * definition fails closed (`recordUserFunctionLane`).
+   *
+   * A definition that has no record (a target lowering that records
+   * nothing), called with a type that does not decide the lane (`number`,
+   * `unknown`), fails closed with a diagnostic that asks for a declared
+   * signature. The compiler does not guess the lane.
    */
-  private static isComplexValuedUserCall(
-    expr: Expression & { ops: ReadonlyArray<Expression> },
-    visited: Set<string>
+  private static userCallLane(
+    expr: Expression & { ops: ReadonlyArray<Expression> }
   ): boolean | undefined {
-    const op = expr.operator;
-    if (typeof op !== 'string') return undefined;
-    if (visited.has(op)) {
-      BaseCompiler._userCallRecursionDeclines += 1;
-      return undefined;
-    }
-    const literal = BaseCompiler.userFunctionLiteral(expr.engine, op);
-    if (literal === undefined) return undefined;
-    const body = literal.ops[0];
-    if (body === undefined) return undefined;
-    // A body that may build a COLLECTION is not classifiable this way and must
-    // decline. `isComplexValued` answers for a list from `ops.some(…)`, so a
-    // single complex ELEMENT would report the whole call complex — and the
-    // scalar extracted from it inherits that verdict, because `At` has an
-    // `unknown` result type. Measured before this guard, with
-    // `g(t) := [√(t−1), 1]` under the opt-in: `g(t)[2] + 1` emitted
-    // `{re: _tv.re + 1, im: _tv.im}` around the plain number `1` and returned
-    // `{re: null}` instead of `2`. Declining here falls through to the
-    // ordinary analysis, which is what classified such calls before the
-    // look-through existed. Element-level complexness has its own separate
-    // handling (the list emitters' own element test).
-    //
-    // Both predicates are needed and neither subsumes the other:
-    // `type.matches('collection')` catches a body whose type is DEFINITELY a
-    // collection (`[√(t−1), 1]` types `vector<number^2>`), while
-    // `isPossiblyCollectionTyped` catches the merely POSSIBLE ones — a
-    // `broadcastable<T>` or top-typed body, for which the former is false.
-    // The test is applied to the body that is analyzed: the generic body
-    // here, or the body with a written point substituted below.
-    const mayBeCollection = (e: Expression): boolean =>
-      e.type.matches('collection<any>') || isPossiblyCollectionTyped(e);
-    const bodyMayBeCollection = mayBeCollection(body);
-    // The parameters are shielded — bound as declared, never read through
-    // the engine — the same binding the emitted definition compiles under,
-    // so this verdict describes the value the call actually returns.
-    // Under a PROMOTING discipline the body's verdict is the answer in both
-    // directions: a radical inside `a(t) := √(t−1)` promotes THERE, and the
-    // call's wide result type would otherwise report it real (item 190's
-    // witness). Without promotion only a `true` verdict is used
-    // (`onlyComplex`): a body that is complex without promotion returns a
-    // complex value whatever the call's declared type says.
-    // A written-out point argument with a complex-shaped coordinate never
-    // reaches the emitted definition, which reads coordinates as real
-    // numbers: the call is inlined instead (`tryCompileUserFunction`), and
-    // the inlined body reads that coordinate at its own lane. The verdict
-    // must be the inlined body's, so the enclosing arithmetic reads the
-    // call the way it is emitted: the body is analyzed with the point
-    // substituted for its parameter. A real reading of `1 + g((x, i·x))`
-    // with `g(P) = P.y` added the `{re, im}` object as a string
-    // (`"[object Object]1"`), and a blanket complex reading of
-    // `1 + h((x, i·x))` with `h(P) = P.x` read `.re` off the plain number
-    // `x` (`NaN`); the substituted verdict gets both right.
-    //
-    // A written point argument also narrows a parameter the definition
-    // leaves broad. With `p(P) := P.x + k`, `P` types
-    // `collection<any> | tuple`, so the generic body is possibly a
-    // collection and is not classifiable. But the call `p((x, 1))` is
-    // emitted through a call-shape specialization whose `P` is the point
-    // (`trySpecializedUserCall`), and that body is a scalar: with
-    // a global `k := i` it returns `{re, im}`. The analysis must read the
-    // same specialized body, so the point is substituted there too. Before,
-    // the call was read as the real number its `unknown` result type
-    // suggests, and `p((x, 1)) + 1` emitted `_fn_p…(…) + 1`, which the
-    // JavaScript runtime computed as the string `"[object Object]1"`.
-    let analyzed: Expression = body;
-    let onlyComplex = false;
-    let standIns: UserCallStandIns | undefined;
-    const complexPoint =
-      BaseCompiler.writtenPointWithComplexCoordinateAt(expr.ops) >= 0;
+    const h = expr.operator;
+    if (typeof h !== 'string') return undefined;
+    const target = BaseCompiler._callSiteTarget;
+    const registry = target?.userFunctions;
     if (
-      complexPoint ||
-      (bodyMayBeCollection &&
-        expr.ops.some((a) => BaseCompiler.isWrittenPointArg(a)))
-    ) {
-      standIns = BaseCompiler.userCallStandIns(literal, expr.ops);
-      if (standIns === undefined) return undefined;
-      analyzed = standIns.body;
-      if (mayBeCollection(analyzed)) return undefined;
-      // A real-coordinate point reaches the specialized definition, not an
-      // inlined body. Its verdict is used under the same rule as the plain
-      // body's.
-      if (!complexPoint && !BaseCompiler.promotionActive) onlyComplex = true;
-    } else if (bodyMayBeCollection) return undefined;
-    else if (!BaseCompiler.promotionActive) onlyComplex = true;
-    // Without promotion the analysis of the plain body reads only the body
-    // and the function's own parameter mask, never the call site, so one
-    // verdict per function serves every call of it in this compilation.
-    // Without this memo, each call site analyzed the body again, and a graph
-    // of functions that each call the previous one twice cost much more. A
-    // body with the arguments substituted depends on the call site, so its
-    // verdict is not stored.
-    const memo = BaseCompiler._strictUserCallVerdicts;
-    const memoize =
-      onlyComplex && standIns === undefined && BaseCompiler._compileDepth > 0;
-    if (memoize) {
-      const known = memo.get(op);
-      if (known !== undefined) return known ? true : undefined;
+      target === undefined ||
+      registry === undefined ||
+      !BaseCompiler.LANE_RECORD_LANGUAGES.has(target.language ?? '')
+    )
+      return undefined;
+    const lanes = BaseCompiler.userFunctionLanes(registry);
+    // A call whose definition is known answers from its record at once. The
+    // route of a call is found once: finding it analyzes the arguments, and
+    // with nested calls (`F(F(F(a, c), c), c)`) each level would analyze
+    // the levels below it again.
+    let name = lanes.byNode.get(expr);
+    // A definition removed since the route was found
+    // (`removeDefinitionsAddedSince`) is emitted again by a new route.
+    if (
+      name !== undefined &&
+      !registry.defs.has(name) &&
+      !registry.compiling.has(name)
+    )
+      name = undefined;
+    if (name === undefined) {
+      const engine = expr.engine;
+      if (!BaseCompiler.isUserDefinedFunction(engine, h)) return undefined;
+      const route = BaseCompiler.userCallDefinition(
+        engine,
+        h,
+        expr.ops,
+        target
+      );
+      // No definition and no inlining: the call itself fails to compile,
+      // with its own diagnostic.
+      if (route === undefined) return undefined;
+      if ('inlined' in route) {
+        if (BaseCompiler.mayBeCollectionValued(route.inlined)) return undefined;
+        // The lane of an inlined call is the lane of the inlined body, whose
+        // own calls are asked the same question. A call of `h` inside the
+        // inlined body of `h` (a mutually recursive pair whose definitions
+        // cannot be emitted) would be inlined again without end: the guard
+        // is the one the code-generation route uses (`registry.inlining`),
+        // and a call met while its own body is being inlined has no known
+        // lane.
+        const inlining = (registry.inlining ??= new Set<string>());
+        if (inlining.has(h)) return undefined;
+        inlining.add(h);
+        try {
+          return BaseCompiler.isComplexValued(route.inlined);
+        } finally {
+          inlining.delete(h);
+        }
+      }
+      name = route.name;
+      if (registry.compiling.has(name)) {
+        // A value that is a collection by its type has no scalar lane to
+        // assume. A `broadcastable<T>` (the type of a recursive call of a
+        // function with an untyped parameter, applied element by element at
+        // the call sites) is read as its scalar `T`: the definition being
+        // compiled computes one scalar per call, and `setUserFunctionLane`
+        // reads the lane of that scalar (see `recordUserFunctionLane`).
+        // Answering "no lane" here let the body add `1` to the `{re, im}`
+        // object of the recursive call as a string.
+        const callType = expr.type.type;
+        if (expr.type.matches('collection<any>')) return undefined;
+        const scalarType =
+          typeof callType !== 'string' && callType.kind === 'broadcastable'
+            ? callType.elements
+            : callType;
+        if (
+          scalarType !== callType
+            ? false
+            : BaseCompiler.mayBeCollectionValued(expr)
+        )
+          return undefined;
+        // The assumption follows the lane discipline in force: a complex
+        // type, or a wide type (`number`) under `mode: 'complex'`, which
+        // reads every wide value as complex. A definition that the first
+        // compilation proved complex is compiled again with the complex
+        // assumption (`assumedComplex`). Otherwise the call is assumed real,
+        // and `setUserFunctionLane` checks that assumption against the lane
+        // of the body.
+        const t = finitePartOfType(scalarType);
+        if (
+          lanes.assumedComplex.has(name) ||
+          isNonRealNumber(t) ||
+          BaseCompiler.wideIsComplex(t)
+        )
+          return true;
+        lanes.assumedReal.add(name);
+        return false;
+      }
+      lanes.byNode.set(expr, name);
     }
-    const parameterMask = BaseCompiler.userCallMask(literal);
-    const mask =
-      standIns === undefined
-        ? parameterMask
-        : {
-            real: [...parameterMask.real, ...standIns.real],
-            shielded: [
-              ...parameterMask.shielded,
-              ...standIns.real,
-              ...standIns.complex,
-              ...standIns.typed,
-            ],
-            complex: [...parameterMask.complex, ...standIns.complex],
-          };
-    const nextVisited = new Set(visited);
-    nextVisited.add(op);
-    const prevVisited = BaseCompiler._userCallVisited;
-    BaseCompiler._userCallVisited = nextVisited;
-    const declinesBefore = BaseCompiler._userCallRecursionDeclines;
+    if (lanes.byName.has(name)) return lanes.byName.get(name);
+    if (BaseCompiler.wideNumericType(finitePartOfType(expr.type.type)))
+      throw new Error(
+        `Cannot compile a call of \`${h}\`: its type is ` +
+          `\`${expr.type.toString()}\`, which does not say whether the call ` +
+          `returns a real or a complex value, and the definition of \`${h}\` ` +
+          `on target '${target.language}' does not say either. Declare the ` +
+          `signature of \`${h}\`, for example \`${h}: (real) -> complex\` or ` +
+          `\`${h}: (real) -> real\`. Fail closed (D6).`
+      );
+    return undefined;
+  }
+
+  /**
+   * The target languages whose user-function definitions record the lane of
+   * their value (`recordUserFunctionLane`). On another target a user-function
+   * call keeps the type-based answer of `isComplexValued`.
+   */
+  private static readonly LANE_RECORD_LANGUAGES: ReadonlySet<string> = new Set([
+    'javascript',
+    'glsl',
+    'wgsl',
+  ]);
+
+  /**
+   * The definition that the call `h(args)` compiled on `target` uses,
+   * emitted if it is not emitted yet: `{ name }` for an emitted definition,
+   * `{ inlined }` for a call that is compiled as its substituted body, and
+   * `undefined` when the call has neither (its compilation then fails).
+   *
+   * The routes are tested in the order of `tryCompileUserFunction`, so the
+   * answer is the definition that the call itself uses: a point argument
+   * with a complex coordinate is inlined (JavaScript), a call-shape
+   * specialization comes next, then the inlining of a point at an untyped
+   * parameter, then the ordinary definition, and the inlining of a call whose
+   * definition cannot be emitted. An invariant-prefix variant has the body
+   * of the ordinary definition, so the ordinary definition answers for it.
+   *
+   * The emission is done with the caller's bindings hidden
+   * (`withCallerBindingsHidden`): it can start inside an analysis of the
+   * caller (a `Sum` whose index is shielded, a `Block` local frame), and an
+   * emitted definition is a module-level function that sees none of these.
+   * The definitions that this emission adds to the preamble are noted, so
+   * that the ones the compiled code does not reference can be removed.
+   */
+  private static userCallDefinition(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): { name: string } | { inlined: Expression } | undefined {
+    const registry = target.userFunctions;
+    if (registry === undefined) return undefined;
+    const inline = (): { inlined: Expression } | undefined => {
+      const inlined = BaseCompiler.inlinedUserFunctionCall(
+        engine,
+        h,
+        args,
+        target
+      );
+      return inlined === undefined ? undefined : { inlined };
+    };
+    // `name` is `undefined` when the route has no definition, and the result
+    // is `undefined` when the emission threw.
+    const emit = (
+      fn: () => string | undefined
+    ): { name: string | undefined } | undefined => {
+      const before = new Set(registry.defs.keys());
+      try {
+        return { name: BaseCompiler.withCallerBindingsHidden(fn) };
+      } catch (e) {
+        if (e instanceof Error && e.name === 'CancellationError') throw e;
+        // The emission failed. A definition emitted during the failed
+        // emission can call the one that failed (a mutually recursive `h`
+        // emitted while `g` compiled), and that name is never defined:
+        // remove them.
+        BaseCompiler.removeDefinitionsAddedSince(registry, before);
+        // Inside the compilation of another definition, the failure is the
+        // enclosing definition's failure too: its body would keep a call of
+        // a name that is never emitted (`_fn_h` calling `_fn_g` after `g`
+        // failed). The error reaches the call site of the enclosing
+        // definition, which inlines it or fails closed. At the top level the
+        // call is inlined or fails.
+        if (registry.compiling.size > 0) throw e;
+        return undefined;
+      } finally {
+        const lanes = BaseCompiler.userFunctionLanes(registry);
+        for (const name of registry.defs.keys())
+          if (!before.has(name)) lanes.onAsk.add(name);
+      }
+    };
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (
+      literal !== undefined &&
+      !registry.lowering &&
+      BaseCompiler.complexCoordinateArgumentAt(engine, args, target) >= 0
+    )
+      return inline();
+    if (literal !== undefined) {
+      const specialized = emit(
+        () =>
+          BaseCompiler.ensureSpecializedUserCallEmitted(
+            engine,
+            h,
+            literal,
+            args,
+            target
+          )?.name
+      );
+      if (specialized === undefined) return undefined;
+      if (specialized.name !== undefined) return { name: specialized.name };
+    }
+    if (BaseCompiler.pointArgumentAtUntypedParameter(engine, h, args) >= 0)
+      return inline();
+    const ordinary = emit(() =>
+      BaseCompiler.ensureUserFunctionEmitted(engine, h, target)
+    );
+    if (ordinary === undefined) return inline();
+    return ordinary.name === undefined ? undefined : { name: ordinary.name };
+  }
+
+  /** Whether the value of `e` may be a collection, by its type. */
+  private static mayBeCollectionValued(e: Expression): boolean {
+    return e.type.matches('collection<any>') || isPossiblyCollectionTyped(e);
+  }
+
+  /** The lane records of the compilation that owns `registry`. */
+  private static userFunctionLanes(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>
+  ): UserFunctionLanes {
+    let lanes = BaseCompiler._userFunctionLanes.get(registry);
+    if (lanes === undefined) {
+      lanes = {
+        byName: new Map(),
+        byNode: new WeakMap(),
+        onAsk: new Set(),
+        assumedReal: new Set(),
+        assumedComplex: new Set(),
+        elementByName: new Map(),
+      };
+      BaseCompiler._userFunctionLanes.set(registry, lanes);
+    }
+    return lanes;
+  }
+
+  /**
+   * The lane records, per user-function registry. A registry lives for one
+   * compilation, so its records do too.
+   */
+  private static _userFunctionLanes = new WeakMap<
+    NonNullable<CompileTarget<Expression>['userFunctions']>,
+    UserFunctionLanes
+  >();
+
+  /**
+   * Run `emitBody`, the compilation of the body of the definition `name`,
+   * and compile it a second time when the first compilation read a recursive
+   * call of the definition as real and the body then returned a complex
+   * value (`setUserFunctionLane` throws `RecursiveLaneRetry`).
+   *
+   * The lane of a recursive call is not known while its own definition
+   * compiles, so it is assumed: complex for a complex type, or for a wide
+   * type (`number`) under `mode: 'complex'`, real otherwise
+   * (`userCallLane`). With `f: (integer) -> number` and
+   * `f := n ↦ (i if n = 0, n·f(n − 1) otherwise)`, the real assumption
+   * compiles `n·f(n − 1)` as a real product, but the body returns a complex
+   * value. The second compilation reads the recursive calls as complex
+   * (`assumedComplex`), and its body is complex too, so the lanes agree. At
+   * most two compilations run for one definition.
+   *
+   * Before the second compilation, the definitions that the first one
+   * emitted are removed. They were compiled with the wrong lane of this
+   * definition (a mutually recursive `g` called by `f`), and are emitted
+   * again when the second compilation reaches them.
+   */
+  private static emitWithRecursiveLaneRetry<T>(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    name: string,
+    emitBody: () => T
+  ): T {
+    const lanes = BaseCompiler.userFunctionLanes(registry);
+    const before = new Set(registry.defs.keys());
+    const complexShapedBefore = new Set(registry.complexShaped ?? []);
     try {
-      const analyze = () =>
-        BaseCompiler.withBinderMask(mask, () =>
-          BaseCompiler.isComplexValued(analyzed)
-        );
-      // The emitted definition is a module-level function, so no binding of
-      // the CALLER is visible in its body: the body is analyzed with every
-      // caller binding hidden (`withCallerBindingsHidden`). Otherwise, with a
-      // global `k := i` and `h(s) := s + k` called inside `Σ_{k=1}^{3} h(x)`,
-      // the body's `k` was read as the real loop index, the call was read as
-      // real, and the JavaScript sum concatenated the `{re, im}` objects as
-      // strings. A substituted body is analyzed the same way: its arguments
-      // are stand-in symbols whose lanes were decided in the caller's
-      // context (`userCallStandIns`), so they need no caller binding.
-      const verdict = BaseCompiler.withCallerBindingsHidden(analyze);
-      // A verdict reached while a recursive call was declined depends on
-      // which functions were already being analyzed, so it is not stored.
-      if (memoize && BaseCompiler._userCallRecursionDeclines === declinesBefore)
-        memo.set(op, verdict);
-      return onlyComplex && !verdict ? undefined : verdict;
-    } finally {
-      BaseCompiler._userCallVisited = prevVisited;
+      return emitBody();
+    } catch (e) {
+      if (
+        !(e instanceof Error) ||
+        e.name !== 'RecursiveLaneRetry' ||
+        (e as Error & { definition?: string }).definition !== name
+      )
+        throw e;
+    }
+    BaseCompiler.removeDefinitionsAddedSince(registry, before);
+    if (registry.complexShaped !== undefined)
+      registry.complexShaped = complexShapedBefore;
+    lanes.assumedReal.delete(name);
+    lanes.assumedComplex.add(name);
+    BaseCompiler._invalidateComplexMemo();
+    return emitBody();
+  }
+
+  /**
+   * Remove from `registry` the definitions that are not in `before`, with
+   * their lane records. Used when the compilation that emitted them is
+   * abandoned: they can call the definition whose compilation failed or is
+   * redone, and the compiled code must not keep a call of a definition
+   * that is never emitted.
+   */
+  private static removeDefinitionsAddedSince(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    before: ReadonlySet<string>
+  ): void {
+    const lanes = BaseCompiler.userFunctionLanes(registry);
+    for (const added of [...registry.defs.keys()]) {
+      if (before.has(added)) continue;
+      registry.defs.delete(added);
+      registry.literals?.delete(added);
+      registry.memoizable?.delete(added);
+      lanes.byName.delete(added);
+      lanes.elementByName.delete(added);
+      lanes.onAsk.delete(added);
     }
   }
 
   /**
-   * Run `fn` — an analysis of a user function's BODY — with every binding of
-   * the call site hidden.
+   * Record the lane of the value that the definition `name` of the user
+   * function `id` returns, read from `body`, the expression the definition
+   * returns: complex, real, or not a scalar. Read by `userCallLane`.
+   *
+   * Must be called inside the shape frames that the body was compiled under,
+   * with the target that compiled it, so that the analysis reads the
+   * parameters as the body does: the parameters are the bound names of that
+   * target (`boundVars`), and a parameter named `i` is then not the
+   * imaginary unit. The JavaScript definition route calls it, and a target
+   * with its own definition lowering calls it from its `define` hook (the
+   * shader targets).
+   *
+   * When a recursive call in the body was read as real while the
+   * definition was compiling (`userCallLane`), and the body returns a complex
+   * value, the body was compiled with a wrong lane. That fails closed, with a
+   * diagnostic that asks for a declared signature.
+   */
+  static recordUserFunctionLane(
+    target: CompileTarget<Expression>,
+    id: string,
+    name: string,
+    body: Expression
+  ): void {
+    const registry = target.userFunctions;
+    if (registry === undefined) return;
+    // A body that MAY be a collection without being one by its type
+    // (`broadcastable<number>`: the body of a function with an untyped
+    // parameter, which the call sites apply element by element) has no lane
+    // for the whole call, but the definition itself computes one scalar, and
+    // the recursion check reads the lane of that scalar.
+    const scalarComplex = body.type.matches('collection<any>')
+      ? false
+      : BaseCompiler.withBoundVarsOf(target, () =>
+          BaseCompiler.isComplexValued(body)
+        );
+    BaseCompiler.setUserFunctionLane(
+      registry,
+      id,
+      name,
+      BaseCompiler.mayBeCollectionValued(body) ? undefined : scalarComplex,
+      scalarComplex
+    );
+    // The lane of the entries of a collection body, read by a
+    // linear-algebra head over a call of the definition. The declared
+    // result type of the function cannot give it: `(real) -> matrix<number>`
+    // says nothing about the entries of `[[t, i], [2, 3]]`.
+    if (body.type.matches('collection<any>')) {
+      const lanes = BaseCompiler.userFunctionLanes(registry);
+      lanes.elementByName.set(
+        name,
+        BaseCompiler.withBoundVarsOf(target, () =>
+          BaseCompiler.linearAlgebraOperandLane(body)
+        )
+      );
+    }
+  }
+
+  /**
+   * Run `fn`, an analysis, with the bound names of `target` in force, as
+   * `compile()` puts them in force for the compilation of a node with that
+   * target: the same `_boundVarsCtx`, and the same unrolled index values
+   * masked.
+   */
+  private static withBoundVarsOf<T>(
+    target: CompileTarget<Expression>,
+    fn: () => T
+  ): T {
+    const prev = BaseCompiler._boundVarsCtx;
+    const next = target.boundVars ?? prev;
+    if (next === prev) return fn();
+    BaseCompiler._boundVarsCtx = next;
+    BaseCompiler._invalidateComplexMemo();
+    const rebound = BaseCompiler._enterUnrolledIndexBinder(
+      boundNamesAddedBy(next)
+    );
+    try {
+      return fn();
+    } finally {
+      BaseCompiler._boundVarsCtx = prev;
+      BaseCompiler._invalidateComplexMemo();
+      BaseCompiler._exitUnrolledIndexBinder(rebound);
+    }
+  }
+
+  /** Store the lane `lane` of the definition `name` of `id`, and check
+   * `scalarComplex`, whether the scalar that the definition computes is
+   * complex, against a recursive call read as real: see
+   * `recordUserFunctionLane`. */
+  private static setUserFunctionLane(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    id: string,
+    name: string,
+    lane: boolean | undefined,
+    scalarComplex: boolean = lane === true
+  ): void {
+    const lanes = BaseCompiler.userFunctionLanes(registry);
+    // The first compilation read a recursive call as real, and the body is
+    // complex. The emission of the definition catches this error and
+    // compiles the body again with the recursive calls read as complex
+    // (`emitWithRecursiveLaneRetry`).
+    if (
+      scalarComplex &&
+      lanes.assumedReal.has(name) &&
+      !lanes.assumedComplex.has(name)
+    ) {
+      const retry = new Error(`${id}: recompile with complex recursive calls`);
+      retry.name = 'RecursiveLaneRetry';
+      (retry as Error & { definition?: string }).definition = name;
+      throw retry;
+    }
+    // A second compilation that read the recursive calls as complex must
+    // produce a complex body. When it does not, the value of a recursive
+    // call has no consistent lane. (Under `mode: 'complex'` a real value
+    // read as complex is lifted where it is used, so there is no conflict.)
+    if (
+      !scalarComplex &&
+      lanes.assumedComplex.has(name) &&
+      !BaseCompiler.complexDiscipline
+    )
+      throw new Error(
+        `Cannot compile \`${id}\`: a recursive call of \`${id}\` in its body ` +
+          `has a type that does not say whether it returns a real or a ` +
+          `complex value, and neither reading gives a body with the same ` +
+          `lane. Declare the signature of \`${id}\`, for example ` +
+          `\`${id}: (real) -> complex\` or \`${id}: (real) -> real\`. Fail ` +
+          `closed (D6).`
+      );
+    lanes.byName.set(name, lane);
+  }
+
+  /**
+   * Run `fn` — the emission of a user function's definition, or an analysis
+   * of its BODY — with every binding of the call site hidden.
    *
    * The emitted `_fn_…` definition is a module-level function, so inside its
    * body a name refers to the function's own parameters or to the engine,
-   * never to a name the caller binds. The analysis must read the body the
-   * same way, or its verdict describes a different value than the one the
-   * definition returns. The caller's bindings live in four places, and all
-   * four are hidden for the duration:
+   * never to a name the caller binds. An emission that starts inside an
+   * analysis of the caller (`userCallDefinition`), and an analysis of the
+   * elements of a body (`withCollectionElements`,
+   * `elementsRealByConstruction`), must read the body the same way, or they
+   * describe a different value than the one the definition returns. With a
+   * global `k := i` and `v(s) := [s, k]` called inside `Σ_{k=1}^{3}`, the
+   * element `k` of the body is the global, not the index. The caller's
+   * bindings live in four places, and all four are hidden for the
+   * duration:
    * - the `Block` local frames (`_localComplex`, `_localVector`), replaced by
    *   an empty frame;
    * - the compile context's bound variables (`_boundVarsCtx`): a loop index,
@@ -3845,11 +4284,14 @@ export class BaseCompiler {
   }
 
   /**
-   * The binder mask under which a user function's body is ANALYZED for a call
-   * site with lanes `lanes`: every parameter shielded (a parameter is not a
+   * The binder mask under which a user function's body is ANALYZED: every
+   * parameter shielded (a parameter is not a
    * free engine symbol, so the engine-value fallback must not read through
    * it — but its declared type stays in play, since a typed parameter can
-   * legitimately be complex), and the complex-lane parameters bound complex.
+   * legitimately be complex). No parameter is bound complex or real here: the
+   * `real` and `complex` lists are always empty, so a parameter is complex
+   * only when its declared type says so. Every target uses this mask, the
+   * JavaScript target included.
    */
   private static userCallMask(literal: Expression & FunctionInterface): {
     real: string[];
@@ -3864,25 +4306,12 @@ export class BaseCompiler {
     return { real: [], shielded, complex: [] };
   }
 
-  /** Heads already being looked through by `isComplexValuedUserCall`. */
+  /**
+   * Heads whose body is being looked through (`withCollectionElements`,
+   * `elementsRealByConstruction`, the `Apply(Derivative(f), …)` arm of
+   * `isComplexValued`), so a recursive definition stops the look-through.
+   */
   private static _userCallVisited: Set<string> = new Set();
-
-  /**
-   * How many times a look-through into a user function body declined because
-   * its head was already being analyzed (recursion). Every site that tests
-   * `_userCallVisited` increments it: `isComplexValuedUserCall`,
-   * `withCollectionElements`, `elementsRealByConstruction`, and the
-   * `Apply(Derivative(f), …)` arm of `isComplexValued`. Compared
-   * before and after an analysis to know whether its verdict may be stored.
-   */
-  private static _userCallRecursionDeclines = 0;
-
-  /**
-   * The body verdict of `isComplexValuedUserCall` without promotion, per
-   * function name. Cleared with the complexness memo
-   * (`_invalidateComplexMemo`), so it never outlives one compilation.
-   */
-  private static _strictUserCallVerdicts = new Map<string, boolean>();
 
   /**
    * The VALUE expression of a user function's stored body, with the wrappers
@@ -3920,8 +4349,13 @@ export class BaseCompiler {
   private static collectionConstructorBody(
     body: Expression | undefined
   ): (Expression & { ops: ReadonlyArray<Expression> }) | undefined {
-    const e = BaseCompiler.unwrappedFunctionBody(body);
+    let e = BaseCompiler.unwrappedFunctionBody(body);
     if (e === undefined) return undefined;
+    // A `Matrix` wrapper (what `\begin{pmatrix}…\end{pmatrix}` parses to)
+    // compiles to its first operand, the nested `List` of rows, so row k of
+    // the value is operand k of that `List`. Its other operands are
+    // delimiter strings and do not reach the compiled code.
+    if (isFunction(e, 'Matrix') && e.ops.length >= 1) e = e.ops[0];
     if (isFunction(e, 'List') || isFunction(e, 'Tuple')) return e;
     // An ALL-SCALAR `PointList` is a single point whose component k is operand
     // k — the same equivalence the JavaScript target already relies on, where
@@ -3948,10 +4382,9 @@ export class BaseCompiler {
    *
    * Two routes: the collection is itself a literal constructor, or it is a call
    * to a user function whose body is one. The second route runs `fn` with the
-   * function's PARAMETERS shielded, exactly as {@link isComplexValuedUserCall}
-   * shields them for a scalar body — the elements mention those parameters, and
-   * reading a same-named engine symbol's value through one would analyze the
-   * wrong definition. It also declines a head already being looked through, so
+   * function's PARAMETERS shielded (`userCallMask`) — the elements mention
+   * those parameters, and reading a same-named engine symbol's value through
+   * one would analyze the wrong definition. It also declines a head already being looked through, so
    * a self- or mutually-recursive definition terminates instead of looping.
    */
   private static withCollectionElements<T>(
@@ -3960,20 +4393,21 @@ export class BaseCompiler {
   ): T | undefined {
     if (isFunction(collection, 'List') || isFunction(collection, 'Tuple'))
       return fn(collection.ops);
+    // A `Matrix` literal compiles to its first operand, the nested `List` of
+    // rows (the JavaScript `Matrix` handler emits only that operand), so its
+    // elements are the rows of that `List`.
+    if (isFunction(collection, 'Matrix') && collection.ops.length >= 1)
+      return BaseCompiler.withCollectionElements(collection.ops[0], fn);
     if (!isFunction(collection)) return undefined;
     const op = collection.operator;
-    if (typeof op !== 'string') return undefined;
-    if (BaseCompiler._userCallVisited.has(op)) {
-      BaseCompiler._userCallRecursionDeclines += 1;
+    if (typeof op !== 'string' || BaseCompiler._userCallVisited.has(op))
       return undefined;
-    }
     const literal = BaseCompiler.userFunctionLiteral(collection.engine, op);
     if (literal === undefined) return undefined;
     const body = BaseCompiler.collectionConstructorBody(literal.ops[0]);
     if (body === undefined) return undefined;
-    // Same binding as `isComplexValuedUserCall`: the elements mention the
-    // parameters, which are shielded (typed as declared, never read through
-    // the engine).
+    // The elements mention the parameters, which are shielded (typed as
+    // declared, never read through the engine).
     const mask = BaseCompiler.userCallMask(literal);
     const nextVisited = new Set(BaseCompiler._userCallVisited);
     nextVisited.add(op);
@@ -4453,6 +4887,295 @@ export class BaseCompiler {
     const elt = collectionElementType(r);
     if (elt === undefined) return false;
     return BaseCompiler.typeHasComplexLeaf(elt, seen);
+  }
+
+  /**
+   * Whether the static type `t` proves that every entry of the value is a
+   * real number (`matrix<real>`, `list<integer>`, `tuple<real, real>`). A
+   * `number` or `unknown` entry is not proved real: a symbol declared
+   * `matrix<number>` can receive `{re, im}` entries when the code runs.
+   */
+  private static realEntriesType(t: Type, seen?: AliasDescent): boolean {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return false;
+    // A signed infinity is a real value on every target (`Infinity` in
+    // JavaScript), so the infinite members of a union entry type
+    // (`integer | signed_infinity`, the type of `Floor(x)`) do not make the
+    // entry wide. They are removed before the union is split, as the leaf
+    // test below removes them.
+    const r = finitePartOfType(unfolded.type);
+    seen = unfolded.seen;
+    if (typeof r !== 'string' && r.kind === 'tuple')
+      return r.elements.every((e) =>
+        BaseCompiler.realEntriesType(e.type, seen)
+      );
+    if (typeof r !== 'string' && r.kind === 'union')
+      return r.types.every((m) => BaseCompiler.realEntriesType(m, seen));
+    const elt = collectionElementType(r);
+    if (elt !== undefined) return BaseCompiler.realEntriesType(elt, seen);
+    return isSubtype(finitePartOfType(stripMissingFromType(r)), 'real');
+  }
+
+  /**
+   * The LANE of the entries of the collection operand `a` of a
+   * linear-algebra head (`Determinant`, `Dot`, `MatrixMultiply`, …):
+   *
+   * - `'complex'`: an entry is complex-valued. The type has a complex leaf
+   *   (`matrix<complex>`), an entry the compiler can identify is complex
+   *   (`[x, i]`), or the operand as a whole reads complex. Under
+   *   `mode: 'complex'` a wide operand is complex too, because that mode
+   *   reads every wide value as complex.
+   * - `'real'`: every entry is real. Either the compiler can identify every
+   *   entry (a literal collection, or a user function whose body is one) and
+   *   none of them is complex-valued, or the type proves every entry real
+   *   (`matrix<real>`).
+   * - `'wide'`: the type admits real and complex entries (`matrix<number>`,
+   *   `list<unknown>`, an undeclared collection) and the mode is `strict` or
+   *   `auto`. The heads READ A WIDE OPERAND AS REAL: the target emits the
+   *   real-only helper, and a parent reads the value of the head as real.
+   *   This is the reading of a `number`-typed scalar in the same modes. The
+   *   compiled runner checks the entries of each collection-valued binding
+   *   read this way when it is called (`realLaneEntryCheck`), so a
+   *   `{re, im}` entry throws a diagnostic instead of giving a wrong value.
+   *   The value is kept separate from `'real'` because a head whose value
+   *   is correct for either representation (`Distance`) still chooses the
+   *   helper that reads both.
+   *
+   * The same answer decides two things that must agree: which helper a
+   * target emits for the head (a real-only one, or one that computes with
+   * complex entries and returns complex values), and whether a PARENT
+   * expression reads the head's value as complex (`isComplexValued`).
+   *
+   * Decision of 2026-09-24 (option B): before it, a `'wide'` operand failed
+   * closed on the JavaScript target and asked the host for a precise type.
+   */
+  static linearAlgebraOperandLane(a: Expression): 'real' | 'complex' | 'wide' {
+    // A recorded WIDE lane gives way to the rules below: a body with a wide
+    // entry (a `number`-typed global `w` in `[[t, w]]`) under a declared
+    // `matrix<real>` is real by the declaration, which is the contract, as a
+    // scalar `number` body is under a declared `-> real`.
+    const recorded = BaseCompiler.userCallElementLane(a);
+    if (recorded !== undefined && recorded !== 'wide') return recorded;
+    if (BaseCompiler.mayHoldComplexElement(a)) return 'complex';
+    if (BaseCompiler.elementComplexness(a) !== undefined) return 'real';
+    if (BaseCompiler.realEntriesType(compilationType(a))) return 'real';
+    const structural = BaseCompiler.structuralOperandLane(a);
+    if (structural !== undefined) return structural;
+    return BaseCompiler.complexDiscipline ? 'complex' : 'wide';
+  }
+
+  /**
+   * The run-time entry check of a collection-valued binding (a free symbol,
+   * or an annotated parameter of a function literal) with the declared type
+   * `t`, whose entries the compiled code reads on the REAL lane:
+   *
+   * - `'numbers'`: every entry of the value must be a JavaScript number. The
+   *   type proves every entry a number (`matrix<real>`, `list<number>`,
+   *   `list<tuple<number, number>>`), so a `{re, im}` object or any other
+   *   value at an entry is an error, except `undefined`, an absent cell.
+   * - `'no-complex'`: no entry of the value may be a `{re, im}` object. The
+   *   type does not prove every entry a number (`list<tuple>`, an entry type
+   *   `unknown`), so another kind of entry (a string) is left to the
+   *   lowerings.
+   * - `undefined`: no check. The type has no collection member that lowers
+   *   to an array (a scalar, a set, a dictionary), a complex leaf decides
+   *   the complex lane (`matrix<complex>`), its entries cannot be numbers
+   *   (`list<string>`), or `complexMode` is set and the type does not prove
+   *   every entry real: `mode: 'complex'` reads a `number` entry as complex.
+   *
+   * The linear-algebra heads read a `number` entry as real in `strict` and
+   * `auto` mode (`linearAlgebraOperandLane`), and so do the other real
+   * lowerings of an array (`At(L, 1) + 1`). Without this check a `{re, im}`
+   * entry gives `NaN`, a string (`"[object Object]1"`), or a wrong number.
+   */
+  static realLaneEntryCheck(
+    t: Type,
+    complexMode: boolean
+  ): 'numbers' | 'no-complex' | undefined {
+    if (BaseCompiler.typeHasComplexLeaf(t)) return undefined;
+    const leaves: Type[] = [];
+    BaseCompiler.arrayEntryLeaves(t, false, leaves);
+    if (leaves.length === 0) return undefined;
+    // A leaf that cannot hold a number (`string`, `boolean`) needs no check.
+    if (!leaves.some((l) => isSubtype('integer', l) || isSubtype(l, 'number')))
+      return undefined;
+    if (
+      complexMode &&
+      !leaves.every((l) =>
+        isSubtype(finitePartOfType(stripMissingFromType(l)), 'real')
+      )
+    )
+      return undefined;
+    return leaves.every((l) => isSubtype(l, 'number'))
+      ? 'numbers'
+      : 'no-complex';
+  }
+
+  /**
+   * Collect in `out` the types of the entries of the ARRAYS that a value of
+   * type `t` can be at run time: the element types of a `list` or an
+   * `indexed_collection`, and the component types of a tuple, descended
+   * until they are not arrays. A bare `list` or `tuple` gives an `unknown`
+   * entry. `inside` is true below the top level: there, a type that is not
+   * an array (`number`, a set) is an entry; at the top level it is a scalar
+   * member of a union and gives nothing. A self-referential alias stops the
+   * descent at its second occurrence (`unfoldAliasOnDescent`).
+   */
+  private static arrayEntryLeaves(
+    t: Type,
+    inside: boolean,
+    out: Type[],
+    seen?: AliasDescent
+  ): void {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined) return;
+    const r = unfolded.type;
+    seen = unfolded.seen;
+    if (r === 'list' || r === 'tuple') {
+      out.push('unknown');
+      return;
+    }
+    if (typeof r !== 'string') {
+      if (r.kind === 'union') {
+        for (const m of r.types)
+          BaseCompiler.arrayEntryLeaves(m, inside, out, seen);
+        return;
+      }
+      if (r.kind === 'tuple') {
+        for (const e of r.elements)
+          BaseCompiler.arrayEntryLeaves(e.type, true, out, seen);
+        return;
+      }
+      if (r.kind === 'list' || r.kind === 'indexed_collection') {
+        const elt = collectionElementType(r);
+        BaseCompiler.arrayEntryLeaves(elt ?? 'unknown', true, out, seen);
+        return;
+      }
+    }
+    if (inside) out.push(r);
+  }
+
+  /**
+   * The lane of the entries of the collection that the call `a` of a
+   * USER-defined function returns, as the definition that the call uses
+   * emits it (`recordUserFunctionLane`), or `undefined` when `a` is not
+   * such a call, the definition is not emitted, or its body is not a
+   * collection. An inlined call has the lane of the substituted body. The
+   * definition is found, and emitted when needed, by the route of
+   * `userCallLane`.
+   */
+  private static userCallElementLane(
+    a: Expression
+  ): 'real' | 'complex' | 'wide' | undefined {
+    if (!isFunction(a)) return undefined;
+    const h = a.operator;
+    const target = BaseCompiler._callSiteTarget;
+    const registry = target?.userFunctions;
+    if (
+      target === undefined ||
+      registry === undefined ||
+      !BaseCompiler.LANE_RECORD_LANGUAGES.has(target.language ?? '')
+    )
+      return undefined;
+    const lanes = BaseCompiler.userFunctionLanes(registry);
+    let name = lanes.byNode.get(a);
+    if (name === undefined) {
+      const engine = a.engine;
+      if (!BaseCompiler.isUserDefinedFunction(engine, h)) return undefined;
+      const route = BaseCompiler.userCallDefinition(engine, h, a.ops, target);
+      if (route === undefined) return undefined;
+      if ('inlined' in route)
+        return route.inlined.type.matches('collection<any>')
+          ? BaseCompiler.linearAlgebraOperandLane(route.inlined)
+          : undefined;
+      name = route.name;
+      if (registry.compiling.has(name)) return undefined;
+      lanes.byNode.set(a, name);
+    }
+    return lanes.elementByName.get(name);
+  }
+
+  /**
+   * The lane of the collection operand `a` read from its STRUCTURE, when its
+   * type does not give it, or `undefined`. The result type of several heads
+   * loses the element type: `MatrixPower(A, 2)` types `matrix` and
+   * `Cross(u, u)` types `vector` for a `matrix<real>` `A` and a
+   * `vector<real>` `u`, so their lane read from the type is wide, although
+   * the value has real entries.
+   *
+   * - A linear-algebra head (`linearAlgebraLaneOperands`) has the lane of its
+   *   own collection operands (`linearAlgebraLane`): the helper that the
+   *   target emits for it is chosen with that lane, and it returns real
+   *   entries for a real lane.
+   * - A head that only moves the entries of its first operand (`Transpose`,
+   *   `Reverse`, `Flatten`, `Reshape`) has the lane of that operand.
+   *   `ConjugateTranspose` also conjugates the entries, which keeps a real
+   *   entry real and a complex entry complex.
+   *
+   * `Map(x ↦ body, c)` needs no structural answer: its type handler gives
+   * the element type of the result (`vector<real>` for a real body over a
+   * `vector<real>`).
+   */
+  private static structuralOperandLane(
+    a: Expression
+  ): 'real' | 'complex' | 'wide' | undefined {
+    if (!isFunction(a)) return undefined;
+    const h = a.operator;
+    const laneOperands = BaseCompiler.linearAlgebraLaneOperands(h, a.ops);
+    if (laneOperands !== undefined)
+      return BaseCompiler.linearAlgebraLane(laneOperands);
+    if (
+      (h === 'Transpose' ||
+        h === 'ConjugateTranspose' ||
+        h === 'Reverse' ||
+        h === 'Flatten' ||
+        h === 'Reshape') &&
+      a.ops.length >= 1
+    )
+      return BaseCompiler.linearAlgebraOperandLane(a.ops[0]);
+    return undefined;
+  }
+
+  /**
+   * The lane of a linear-algebra head over the collection operands
+   * `operands`: `'complex'` when one operand is complex (the complex helper
+   * lifts the real entries of the others), `'wide'` when no operand is
+   * complex and one is wide, and `'real'` otherwise. See
+   * {@link linearAlgebraOperandLane}.
+   */
+  static linearAlgebraLane(
+    operands: ReadonlyArray<Expression>
+  ): 'real' | 'complex' | 'wide' {
+    const lanes = operands.map((a) => BaseCompiler.linearAlgebraOperandLane(a));
+    if (lanes.includes('complex')) return 'complex';
+    if (lanes.includes('wide')) return 'wide';
+    return 'real';
+  }
+
+  /**
+   * The collection operands of the linear-algebra head `h` whose lane
+   * ({@link linearAlgebraLane}) decides the value of the head, or `undefined`
+   * when `h` is not such a head. `Distance` is not listed: its value is a
+   * real number for real and complex coordinates alike. `RowReduce` is not
+   * listed: it has no complex value, and a complex operand fails closed.
+   */
+  static linearAlgebraLaneOperands(
+    h: string,
+    ops: ReadonlyArray<Expression>
+  ): ReadonlyArray<Expression> | undefined {
+    switch (h) {
+      case 'Determinant':
+      case 'Inverse':
+      case 'Trace':
+      case 'MatrixPower':
+        return ops.slice(0, 1);
+      case 'Dot':
+      case 'MatrixMultiply':
+      case 'Cross':
+        return ops.slice(0, 2);
+      default:
+        return undefined;
+    }
   }
 
   /**
@@ -6624,16 +7347,17 @@ export class BaseCompiler {
       // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
       // `Erf`, …) whose array operand has a complex element lane, and the
       // list-arithmetic residue below would then fail the form closed before
-      // the real-only gates further down (`REAL_ONLY_CODEGEN_HEADS`, the
-      // string-helper rule) ever see it. Apply the element-wise D2/D6 rule
-      // here: the operands are projected onto the real lane and the head is
-      // re-emitted, which re-enters the closure above with real element
+      // the real-only gates further down (`isRealOnlyLowering`) ever see
+      // it. Apply the element-wise run-time realness rule here: at each
+      // position, the real lowering runs on the real part of an element whose
+      // imaginary part is exactly zero, and any other element gives NaN (the
+      // D2/D6 rule of `realOperandGuard`). The operands are projected onto
+      // the real lane and the head is re-emitted, which re-enters the closure above with real element
       // lanes — `⌊√L⌋` at `L = [4, -1]` compiles to `[2, NaN]`.
       // (A form without an array operand is left to those gates, so its
       // scalar emission is unchanged.)
       if (
-        (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) ||
-          BaseCompiler.isRealOnlyHelperHead(h)) &&
+        BaseCompiler.isRealOnlyLowering(target, h) &&
         args.some((a) => BaseCompiler.isArrayOperand(a))
       ) {
         const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
@@ -7997,8 +8721,9 @@ export class BaseCompiler {
       );
       if (selection !== null && selection !== undefined) return selection;
       BaseCompiler.assertScalarCondition(args[0]);
-      // Mixed real/complex arms: coerce to one convention (Tycho item 60 —
-      // see `branchComplexCoercion`). Computed over BOTH arms even when one
+      // Mixed real/complex arms: coerce every real arm to the `{re, im}`
+      // convention, so the node has one representation whichever arm runs
+      // (`branchComplexCoercion`; Tycho item 60). Computed over BOTH arms even when one
       // is dead (below): the node's shape, which its consumers read, still
       // counts the dead arm.
       const coerce = BaseCompiler.branchComplexCoercion(
@@ -8483,45 +9208,105 @@ export class BaseCompiler {
 
     // `Typed(value, type)` is a transparent runtime ascription — it constrains
     // the static type but has no runtime effect, so it compiles to its value
-    // operand on every target (the interpreter ignores it likewise). Without
+    // operand on every target (the interpreter ignores it likewise, and
+    // returns the value even when it contradicts the ascribed type). Without
     // this, a helper declared with a precise return type (e.g. `(number) ->
     // vector<11>`) wraps its body in `Typed`, and every compiled call throws
     // `Unknown operator \`Typed\`` at the dispatch below.
     //
-    // One exception on the plain JavaScript target: the ascription changes the
-    // emitted CONVENTION when it promises a complex value over an operand
-    // whose own analysis is real. Consumers read the ascribed type
-    // (`isComplexValued` sees `complex`) and access `{ re, im }` slots, so a
-    // real-emitted operand would NaN-poison them — e.g. the declared-signature
-    // canonicalization wraps an all-real function body in
-    // `Typed(body, "complex")` (Tycho item 60). Emit the complex object the
-    // ascription promises.
+    // A target that keeps complex values apart from real ones (a `{re, im}`
+    // object in JavaScript, a `vec2` in a shader) needs more. A consumer of
+    // the ascription (the enclosing lowering, or the call sites of a user
+    // function whose body is the ascription) reads the lane of the `Typed`
+    // node, which follows the ascribed type. The value operand is emitted in
+    // its own lane. The two must agree, or the consumer reads the value in
+    // the wrong representation:
+    //
+    //  - A complex ascription over a real scalar value is lifted: a real
+    //    number is a complex number. With `s: (complex) -> complex` and
+    //    `s := z ↦ Re(z)`, the body is `Typed(Re(z), complex)`, and the
+    //    definition returns a complex value. The declared-signature
+    //    canonicalization also wraps an all-real function body in
+    //    `Typed(body, "complex")`, so that a function declared to return a
+    //    complex value returns a `{re, im}` object from every body, a real
+    //    base case included (Tycho item 60).
+    //  - A complex ascription over a value that is not a scalar (a point,
+    //    a color, a boolean) contradicts the value. Fail closed.
+    //  - A real ascription over a complex value contradicts the value too:
+    //    with `q: (unknown) -> real` and `q := z ↦ z²`, the call `q(1+i)`
+    //    is `2i`. JavaScript read the `{re, im}` object that `_fn_q` returns
+    //    as a real number, and `q(w) + 1` returned the string
+    //    `"[object Object]1"`; a shader has no conversion from a `vec2` to a
+    //    `float` that keeps the value. Fail closed, and ask for a corrected
+    //    signature.
+    //
+    // With these rules, the lane of the `Typed` node is the lane of the value
+    // it emits, so the lane recorded for a user function whose body is the
+    // ascription (`recordUserFunctionLane`) is the lane of what its
+    // definition returns.
     if (h === 'Typed') {
       const code = BaseCompiler.compile(args[0], target);
-      if (target.language === 'javascript') {
-        const s = isString(args[1])
-          ? args[1].string
-          : isSymbol(args[1])
-            ? args[1].symbol
-            : undefined;
-        if (s !== undefined) {
-          let ascribed: Type | undefined = undefined;
-          try {
-            ascribed = parseType(s, engine._typeResolver);
-          } catch {}
-          if (ascribed !== undefined && isNonRealNumber(ascribed)) {
-            if (BaseCompiler.isProvablyRealValued(args[0], target))
-              return `({ re: ${code}, im: 0 })`;
-            // Neither provably real nor complex-shaped: the value emits as a
-            // plain number the ascription's consumers would slot-read
-            // (see `branchComplexCoercion` for the same inconclusive class);
-            // the idempotent `_SYS.cplx` settles the convention at run time.
-            if (!BaseCompiler.isComplexValued(args[0]))
-              return `_SYS.cplx(${code})`;
-          }
-        }
-      }
-      return code;
+      if (!BaseCompiler.LANE_RECORD_LANGUAGES.has(target.language ?? ''))
+        return code;
+      const typed = node ?? engine._fn('Typed', [...args]);
+      const value = args[0];
+      // A collection ascription whose entry type is real (`matrix<real>`,
+      // `list<real>`) over a collection that may hold a complex entry
+      // contradicts the value, as a real ascription over a complex scalar
+      // does below. A linear-algebra head over the value reads the lane of
+      // its entries from the ascribed type, and would emit its real helper
+      // over the complex entries.
+      if (
+        value.type.matches('collection<any>') &&
+        BaseCompiler.realEntriesType(typed.type.type) &&
+        BaseCompiler.mayHoldComplexElement(value)
+      )
+        throw new Error(
+          `Typed: the value \`${value.toString()}\` has a complex entry, ` +
+            `but its ascribed type \`${typed.type.toString()}\` says every ` +
+            `entry is real. The compiled code would read the complex entry ` +
+            `as a real number. When the ascription comes from a declared ` +
+            `signature, declare a result type that admits a complex entry, ` +
+            `for example \`matrix<complex>\` instead of \`matrix<real>\`. ` +
+            `Fail closed (D6).`
+        );
+      const ascribedComplex = BaseCompiler.isComplexValued(typed);
+      const valueComplex = BaseCompiler.isComplexValued(value);
+      if (ascribedComplex === valueComplex) return code;
+      const ascribed = isString(args[1])
+        ? args[1].string
+        : isSymbol(args[1])
+          ? args[1].symbol
+          : typed.type.toString();
+      if (!ascribedComplex)
+        throw new Error(
+          `Typed: the value \`${value.toString()}\` is complex, but its ` +
+            `ascribed type \`${ascribed}\` says it is real. The compiled ` +
+            `code would read the complex value as a real number. When the ` +
+            `ascription comes from a declared signature, declare a result ` +
+            `type that admits a complex value, for example ` +
+            `\`(unknown) -> complex\` instead of \`(unknown) -> real\`. ` +
+            `Fail closed (D6).`
+        );
+      if (
+        BaseCompiler.isNonScalarShape(value) ||
+        BaseCompiler.aggregateComponentCount(value) !== undefined ||
+        value.type.matches('boolean')
+      )
+        throw new Error(
+          `Typed: the ascribed type \`${ascribed}\` says the value is ` +
+            `complex, but the value \`${value.toString()}\` is not a ` +
+            `number. Fail closed (D6).`
+        );
+      if (target.language === 'javascript')
+        return BaseCompiler.isProvablyRealValued(value, target)
+          ? `({ re: ${code}, im: 0 })`
+          : // Not provably real, and not complex-shaped either: the
+            // idempotent `_SYS.cplx` settles the representation at run time
+            // (see `branchComplexCoercion` for the same class).
+            `_SYS.cplx(${code})`;
+      const vec2 = target.language === 'wgsl' ? 'vec2f' : 'vec2';
+      return `${vec2}(${code}, 0.0)`;
     }
 
     // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
@@ -8634,13 +9419,10 @@ export class BaseCompiler {
       // The same real-only rule the string-mapped branch below applies, for
       // the heads whose lowering is real-only but spelled as function codegen
       // (`Math.floor`, `sign(x)·round(|x|)`, `Math.max`, `np.floor`, …). See
-      // `REAL_ONLY_CODEGEN_HEADS` for the three families and the NaN each one
-      // was measured producing behind `success: true`.
-      if (
-        BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) &&
-        target.language !== undefined &&
-        !target.language.startsWith('interval')
-      ) {
+      // `REAL_ONLY_BY_DEFINITION` for the families and the NaN each one was
+      // measured producing behind `success: true`, and `isRealOnlyLowering`
+      // for the heads each target declares real-only.
+      if (BaseCompiler.isRealOnlyLowering(target, h)) {
         // The operands the gate scans and binds — the args themselves,
         // except `ColorFromColorspace`, whose maybe-complex scalars live
         // INSIDE its literal components tuple (`realOnlyGuardOperands`).
@@ -8748,16 +9530,15 @@ export class BaseCompiler {
       return code;
     }
 
-    // `fn` is a plain string: the target maps this head to a real-only helper
-    // (e.g. JS `_SYS.erf`, Python `scipy.special.erf`). Such a helper takes a
-    // real scalar; handing it a complex value silently returns garbage (compiled
-    // `Erf(z)` for complex z → −1, not NaN). Fail closed (D6) with the offending
-    // head. Heads that legitimately consume complex (`Real`/`Imaginary`/
-    // `Argument`/`Conjugate`) are string-mapped in some targets but are exempt.
+    // `fn` is a plain string: the target maps this head to a helper. When
+    // the target declares the helper real-only (`isRealOnlyLowering`: by
+    // default every helper name, e.g. JS `_SYS.erf`), it takes a real
+    // scalar, and handing it a complex value silently returns garbage
+    // (compiled `Erf(z)` for complex z → −1, not NaN). Fail closed (D6) with
+    // the offending head. A helper the target declares complex-capable
+    // (Python `scipy.special.erf`) receives the complex value as it is.
     if (
-      target.language !== undefined &&
-      !target.language.startsWith('interval') &&
-      !BaseCompiler.COMPLEX_TRANSPARENT_HEADS.has(h) &&
+      BaseCompiler.isRealOnlyLowering(target, h) &&
       args.some((a) => BaseCompiler.realGuardCandidate(a, engine, target))
     ) {
       // D6 runtime rule (design §8): `Erf(x)` for a maybe-complex `x` runs
@@ -8881,12 +9662,16 @@ export class BaseCompiler {
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
 
   /**
-   * Heads whose target lowering is real-only but which are spelled as FUNCTION
-   * codegen rather than as a plain helper name, so the real-only gate on the
-   * string-mapped branch of `compileExpr` never reached them. The
-   * function-codegen branch applies the same rule through this set.
+   * Heads whose lowering is real-only on EVERY target, because the operation
+   * has no complex extension to reach for. Each target includes them in the
+   * real-only lowerings it declares (`CompileTarget.isRealOnlyLowering`,
+   * read through `BaseCompiler.isRealOnlyLowering`), and adds the heads that
+   * are real-only in its OWN lowerings: the special functions (`Erf`,
+   * `BesselJ`, …) have a complex extension in the interpreter, and a target
+   * may or may not lower it (Python's `scipy.special.erf` takes a complex
+   * argument, JavaScript's `_SYS.erf` does not).
    *
-   * Five families, and none of them has a complex extension to reach for:
+   * Five families:
    *
    *  - ROUNDING (`Floor`, `Ceiling`, `Round`, `Truncate`, `Fract`) — there is
    *    no rounding of a complex number. They are function codegen for an
@@ -8895,11 +9680,19 @@ export class BaseCompiler {
    *    total order, which is the same reason `Less`/`Greater` fail closed on a
    *    complex operand.
    *  - INTEGER DIVISION (`Mod`, `Remainder`, `GCD`, `LCM`).
-   *  - STATISTICS (`Mean`, `Median`, the variance/deviation pair and their
-   *    population forms, `Mode`, `Kurtosis`, `Skewness`, `Quartiles`,
-   *    `InterquartileRange`) — the `_SYS.*` reducers behind them sum and
-   *    compare plain numbers. Measured: `Mean([i, 2i])` compiled to `NaN`
-   *    where the interpreter answers the complex mean.
+   *  - STATISTICS that order the sample or that no target lowers over
+   *    complex values (`Median`, the population forms of the variance and
+   *    the standard deviation, `Mode`, `Kurtosis`, `Skewness`, `Quartiles`,
+   *    `InterquartileRange`). The interpreter has no complex median (it
+   *    answers an `incompatible-type` error). `Mean`, `Variance` and
+   *    `StandardDeviation` are not listed: the interpreter computes them
+   *    over complex values (the variance is the sum of `|x − μ|²` over
+   *    `n − 1`), and the Python lowerings `np.mean`, `np.var(…, ddof=1)` and
+   *    `np.std(…, ddof=1)` compute the same values. They are real-only on
+   *    the JavaScript and shader targets only, whose reducers sum plain
+   *    numbers (`JS_REAL_ONLY_LOWERINGS`, `GPU_REAL_ONLY_LOWERINGS`).
+   *    Measured before the gate: `Mean([i, 2i])` compiled to `NaN` on
+   *    JavaScript where the interpreter answers the complex mean.
    *  - COLOR HEADS (`Rgb`, `Hsv`, `Hsl`, `Oklab`, `Oklch`, `Colormap`,
    *    `ColorMix`, `ColorFromColorspace`) — color components and mix ratios
    *    are real by definition; the `_SYS.*` converters behind them do plain
@@ -8930,8 +9723,8 @@ export class BaseCompiler {
    * | `Mod(x + (1+i), 2)`  | NaN      | `1`                  |
    *
    * `Sign`, `Erf`, `Gamma` and `Zeta` were already failing closed through the
-   * string gate, which is what shows this to be an omission rather than a
-   * policy.
+   * helper-name rule (`stringHelperIsRealOnly`), which is what showed these
+   * families to be an omission rather than a policy.
    *
    * `Ceil` and `Ceiling` are DISTINCT heads and both belong here: `Ceil` is the
    * one the library canonicalizes to and the JavaScript target lowers with
@@ -8943,48 +9736,39 @@ export class BaseCompiler {
    * a set holding only the aggregate spelling left them emitting
    * `Math.max({re, im})`.
    */
-  private static readonly REAL_ONLY_CODEGEN_HEADS: ReadonlySet<string> =
-    new Set([
-      'Floor',
-      // `Hypot` compiles to `Math.hypot`, which cannot take a complex value.
-      // The check above covers a head named by a plain string automatically;
-      // `Hypot` is named by a function instead, so that it can take a point
-      // operand as one leg, and it needs this list to be covered.
-      'Hypot',
-      'Ceil',
-      'Ceiling',
-      'Round',
-      'Truncate',
-      'Fract',
-      'Max',
-      'Min',
-      'ElementMax',
-      'ElementMin',
-      'Clamp',
-      'Mod',
-      'Remainder',
-      'GCD',
-      'LCM',
-      'Mean',
-      'Median',
-      'Variance',
-      'PopulationVariance',
-      'StandardDeviation',
-      'PopulationStandardDeviation',
-      'Mode',
-      'Kurtosis',
-      'Skewness',
-      'Quartiles',
-      'InterquartileRange',
-      'Rgb',
-      'Hsv',
-      'Hsl',
-      'Oklab',
-      'Oklch',
-      'Colormap',
-      'ColorMix',
-      'ColorFromColorspace',
-    ]);
+  static readonly REAL_ONLY_BY_DEFINITION: ReadonlySet<string> = new Set([
+    'Floor',
+    'Ceil',
+    'Ceiling',
+    'Round',
+    'Truncate',
+    'Fract',
+    'Max',
+    'Min',
+    'ElementMax',
+    'ElementMin',
+    'Clamp',
+    'Mod',
+    'Remainder',
+    'GCD',
+    'LCM',
+    'Median',
+    'PopulationVariance',
+    'PopulationStandardDeviation',
+    'Mode',
+    'Kurtosis',
+    'Skewness',
+    'Quartiles',
+    'InterquartileRange',
+    'Rgb',
+    'Hsv',
+    'Hsl',
+    'Oklab',
+    'Oklch',
+    'Colormap',
+    'ColorMix',
+    'ColorFromColorspace',
+  ]);
 
   /**
    * The operands the real-only gate scans and binds for head `h`: the args
@@ -9009,8 +9793,8 @@ export class BaseCompiler {
    * The failing-branch shape for a guarded real-only head (the `realGuard`
    * kind): a head that produces a COLOR answers the target's non-finite
    * color, so a caller reading the color's channels never sees the result
-   * shape flip at runtime on data. Everything else in
-   * `REAL_ONLY_CODEGEN_HEADS` returns a scalar. `Colormap`'s guarded form is
+   * shape flip at runtime on data. Every other real-only lowering returns
+   * a scalar. `Colormap`'s guarded form is
    * the two-argument sample — the one-argument palette form has no numeric
    * operand to promote — and `ColorMix` mixes to one color. An alpha is lost
    * on the FAILING branch, which the color representation absorbs: the color
@@ -9411,11 +10195,15 @@ export class BaseCompiler {
    * would change the meaning of the code that splices it. A NEGATIVE number
    * literal is refused for that reason, and not as an oversight: exponentiation
    * binds tighter than unary minus in Python, so an unparenthesized `-4` as
-   * the base of `**` reads as `-(4 ** k)`. The only caller,
-   * {@link arrayLiteralElements}, refuses any text that holds a quote, so no
-   * string literal reaches this scan and a bracket found here always nests.
+   * the base of `**` reads as `-(4 ** k)`. A text that holds a string
+   * literal is refused or wrapped, never wrongly admitted: a quote at depth
+   * zero is refused, and a bracket inside a quoted text at a deeper level
+   * can only leave the depth unbalanced, which is refused too.
+   * {@link arrayLiteralElements} refuses any text that holds a quote before
+   * it asks. The Python function lowerings of `Multiply` and `Power` read it
+   * to parenthesize an operand (`python-target.ts`).
    */
-  private static isAtomicSource(code: string): boolean {
+  static isAtomicSource(code: string): boolean {
     let depth = 0;
     for (const c of code) {
       if (c === '(' || c === '[' || c === '{') depth += 1;
@@ -9520,14 +10308,18 @@ export class BaseCompiler {
     const n = widths[0];
     if (n === undefined || widths[1] !== n) return undefined;
     if (n < 1 || n >= MIN_UNROLLED_WIDTH) return undefined;
+    // The written-out sum is the REAL computation, so a complex lane
+    // (`linearAlgebraLane`: a complex entry, or a wide entry under
+    // `mode: 'complex'`) goes to the helper choice, which emits the complex
+    // helper. This is the answer a parent reads for the value of the node.
+    // A WIDE lane (`tuple<number, number>`, `vector<3>` in `strict` and
+    // `auto` mode) is read as real, as the helper choice reads it: the
+    // written-out sum is scalar arithmetic on the coordinates, as the same
+    // sum written by hand (`p_0 q_0 + p_1 q_1`) is.
+    if (BaseCompiler.linearAlgebraLane(args) === 'complex') return undefined;
     for (const a of args) {
       if (a.isPure !== true) return undefined;
       if (isBoundPossiblyCollectionTyped(a, target)) return undefined;
-      if (
-        BaseCompiler.isComplexValued(a) ||
-        BaseCompiler.hasAnyComplexElement(a)
-      )
-        return undefined;
       const t = compilationType(a);
       if (typeof t === 'string') return undefined;
       if (t.kind === 'tuple') {
@@ -10412,7 +11204,7 @@ export class BaseCompiler {
     if (typeof fn !== 'function' && anyComplex) return null;
 
     // …and the same rule for a head whose codegen is real-only despite being a
-    // FUNCTION (`REAL_ONLY_CODEGEN_HEADS`). `compileExpr` gates those on its
+    // FUNCTION (`isRealOnlyLowering`). `compileExpr` gates those on its
     // scalar branch, which this method returns BEFORE reaching, so a broadcast
     // would slip past it: the closure below is built from the head's own scalar
     // codegen, and for these heads that codegen is `Math.floor`/`Math.max`/…
@@ -10422,7 +11214,7 @@ export class BaseCompiler {
     // `[NaN, NaN]` behind `success: true`, where the interpreter leaves the
     // elements inert at `[1+i, 2+i]`. Returning null hands the form to the
     // fail-closed D6 guard, which is where the scalar shape ends up too.
-    if (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(h) && anyComplex) return null;
+    if (anyComplex && BaseCompiler.isRealOnlyLowering(target, h)) return null;
     // Same decline for an ORDERING over a complex element lane: the scalar
     // body below is the target's raw comparison over the element
     // parameters, which has no realness guard — `√L < 1` compiled to
@@ -11751,9 +12543,7 @@ export class BaseCompiler {
     // the element-level analysis; this arm differs only in asking about the
     // body as a whole, because a body such as `[-y, x] / (x² + y²)` computes
     // its collection rather than writing one out.
-    if (typeof h === 'string' && BaseCompiler._userCallVisited.has(h))
-      BaseCompiler._userCallRecursionDeclines += 1;
-    else if (typeof h === 'string') {
+    if (typeof h === 'string' && !BaseCompiler._userCallVisited.has(h)) {
       const literal = BaseCompiler.userFunctionLiteral(coll.engine, h);
       const body =
         literal === undefined
@@ -14435,8 +15225,9 @@ export class BaseCompiler {
    * Like `_boundVarsCtx`, a shielded name is not a free engine symbol, so the
    * engine-value fallback must not read through it. Unlike `_localComplex`, a
    * shield leaves the name's declared type in play: a lambda parameter can
-   * legitimately be complex (Tycho item 60), so it is shielded but not forced
-   * real.
+   * legitimately be complex (a parameter declared `complex` receives a
+   * `{re, im}` value at every call; Tycho item 60), so it is shielded but
+   * not forced real.
    */
   private static _binderShield: Set<string>[] = [];
 
@@ -14747,7 +15538,6 @@ export class BaseCompiler {
    * `_boundVarsCtx` sync — so no new call site has to remember.
    */
   private static _invalidateComplexMemo(): void {
-    BaseCompiler._strictUserCallVerdicts = new Map();
     BaseCompiler._complexMemoStack = [new WeakMap()];
     BaseCompiler._elementLaneMemoStack = [new WeakMap()];
   }
@@ -15005,7 +15795,9 @@ export class BaseCompiler {
     const h = expr.operator;
     if (h === 'Function') {
       // ["Function", body, ...params]: a parameter may legitimately be
-      // complex, so shield only — never force it real (Tycho item 60). A
+      // complex (a parameter declared `complex` receives a `{re, im}` value
+      // at every call), so shield only — never force it real (Tycho item
+      // 60). A
       // destructuring parameter contributes its LEAF names, which is what the
       // body actually references.
       const params = functionLiteralBoundNames(expr.ops.slice(1));
@@ -15257,22 +16049,32 @@ export class BaseCompiler {
     // `Real(±∞)` can type `+oo | -oo` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
-    // A head whose lowering is REAL-ONLY (`Floor`, `Mod`, `Max`, the
-    // statistics family) yields a real value by construction: under the
-    // complex discipline its maybe-complex operands take the D2/D6 runtime
-    // rule (`realOperandGuard`: the real lowering, or `NaN`), and in strict
-    // mode a complex operand fails closed — either way the emitted value is
-    // never a `{re, im}` object, so a wide RESULT type (`Max(a, b)` over
-    // wide `a`, `b`) must not report complex.
-    if (BaseCompiler.REAL_ONLY_CODEGEN_HEADS.has(expr.operator)) return false;
-    // Same rule for a head the CURRENT compilation's target lowers through a
-    // real-only string helper (`Erf`, `Gamma`, `Zeta`, …): the emitted value
-    // is real by construction — the D2/D6 runtime rule around a maybe-complex
-    // operand yields the helper's real result or `NaN`, never `{re, im}` —
-    // while the wide result type of several such heads would send the
-    // analysis into the operand recursion and report complex. See
-    // `_realOnlyHelperLookup` for the measured disagreement.
-    if (BaseCompiler.isRealOnlyHelperHead(expr.operator)) return false;
+    // A head the CURRENT compilation's target lowers with a REAL-ONLY
+    // lowering (`Floor`, `Mod`, `Max`, the statistics family, a real-only
+    // helper such as JavaScript's `_SYS.erf`) yields a real value by
+    // construction: under the complex discipline each maybe-complex operand
+    // takes the run-time realness rule — the real lowering runs on the real
+    // part when the imaginary part is exactly zero, and the value is NaN
+    // otherwise (the D2/D6 rule of `realOperandGuard`) — and in strict mode a complex operand fails closed — either way
+    // the emitted value is never a `{re, im}` object, so a wide RESULT type
+    // (`Max(a, b)` over wide `a`, `b`) must not report complex. See
+    // `_realOnlyLowering` for the measured disagreement.
+    if (BaseCompiler.isRealOnlyLoweringHead(expr.operator)) return false;
+    // A linear-algebra head answers from the lane of its collection
+    // operands, the same answer that selects its target helper: a complex
+    // lane emits the helper that returns complex values, and a real lane the
+    // real-only one. The node's type cannot answer: `Dot(v, v)` over a
+    // `vector<complex>` symbol types `number`. A `'wide'` lane is read as
+    // real (`linearAlgebraOperandLane`), and the target emits the real-only
+    // helper for it.
+    {
+      const laneOperands = BaseCompiler.linearAlgebraLaneOperands(
+        expr.operator,
+        expr.ops
+      );
+      if (laneOperands !== undefined)
+        return BaseCompiler.linearAlgebraLane(laneOperands) === 'complex';
+    }
     // A `Sum`/`Product` whose clause the target UNROLLS answers from the
     // terms the target will actually emit: each term binds the index to a
     // literal integer, which can prove a radicand non-negative that has an
@@ -15422,9 +16224,6 @@ export class BaseCompiler {
         head !== undefined && isSymbol(head) ? head.symbol : undefined;
       const recursing =
         guard !== undefined && BaseCompiler._userCallVisited.has(guard);
-      // A skipped analysis is a verdict cut short by recursion, which must
-      // not be stored as the verdict of the enclosing call.
-      if (recursing) BaseCompiler._userCallRecursionDeclines += 1;
       if (!recursing) {
         if (guard !== undefined) BaseCompiler._userCallVisited.add(guard);
         try {
@@ -15468,23 +16267,15 @@ export class BaseCompiler {
       }
     }
 
-    // A call to a user function follows its BODY, analyzed with the
-    // parameters bound to the call site's complex lanes. Under the opt-in
-    // this is where the promotion above actually happens (item 190's witness
-    // puts the radical inside `z(t) := √(t−1)`); on the DEFAULT path the
-    // look-through answers only when some lane IS complex (it declines
-    // otherwise, see `isComplexValuedUserCall`), because that is the one case
-    // where the emitted definition is a lane specialization whose result
-    // shape the type-based answer below does not describe (`b(x) := 2x`
-    // called on a declared-complex `w`). Every other default-path call keeps
-    // its previous answer; a non-user-function head costs a definition
-    // lookup here and nothing more.
+    // A call to a user function returns the lane that its emitted definition
+    // records, whatever the call's type says (`userCallLane`): with
+    // `h(s) := s + i`, the call `h(t)` types `number`, and `_fn_h` returns a
+    // complex value. Under a promoting discipline the same record carries
+    // the promotion of a radical inside the body (`z(t) := √(t−1)`). A head
+    // that is not a user function costs a definition lookup here.
     {
-      const viaBody = BaseCompiler.isComplexValuedUserCall(
-        expr,
-        BaseCompiler._userCallVisited
-      );
-      if (viaBody !== undefined) return viaBody;
+      const viaDefinition = BaseCompiler.userCallLane(expr);
+      if (viaDefinition !== undefined) return viaDefinition;
     }
     // A loop-bound proof can settle a radical whose declared result remains
     // number (including poles and NaN). The real emitter then returns a plain
@@ -19235,6 +20026,11 @@ export class BaseCompiler {
     if (registry.defs.has(name)) return name;
     if (registry.compiling.has(name))
       throw new Error(BaseCompiler.selfReferenceRefusal(id));
+    // The definitions stored while this one compiles may call it by name
+    // (a re-entrant reference, see below); when its emission fails they
+    // are removed, so that no definition keeps a call of a name that is
+    // never emitted.
+    const definedBefore = new Set(registry.defs.keys());
     registry.compiling.add(name);
     try {
       const root = registry.valueRoot ?? registry.root ?? target;
@@ -19263,6 +20059,9 @@ export class BaseCompiler {
       const admission = BaseCompiler.cseAdmission(root, new Set());
       if (admission !== undefined && isCseAdmissible(value, admission))
         (registry.hoistable ??= new Set()).add(name);
+    } catch (e) {
+      BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+      throw e;
     } finally {
       registry.compiling.delete(name);
     }
@@ -19777,7 +20576,22 @@ export class BaseCompiler {
       const name = functionLiteralParameterName(p);
       if (!name) return;
       const pt = BaseCompiler.laneRequestParamType(engine, h, i);
-      if (pt === undefined || !isNonRealNumber(pt)) return;
+      if (pt === undefined) return;
+      // A parameter the signature declares REAL is real in the body. The
+      // stored literal does not carry the declared type of a scalar
+      // parameter (its parameter types `unknown`), so without this entry
+      // `mode: 'complex'` read the parameter as wide, hence complex, and
+      // lifted it: `f: (real) -> matrix<real>`, `f := t ↦ [[t, 1], [2, 3]]`
+      // emitted `[[_SYS.cplx(t), 1], [2, 3]]`, while a parent read the call
+      // with the real lane of its declared type. The argument of a call is
+      // real too: a use of a symbol as the argument narrows the symbol to
+      // `real`, and the compiled function checks at entry that its value is
+      // not a `{re, im}` object.
+      if (isSubtype(pt, 'real')) {
+        frames.complex.set(name, false);
+        return;
+      }
+      if (!isNonRealNumber(pt)) return;
       frames.complex.set(name, true);
       frames.vector.set(name, BaseCompiler.LOCAL_SCALAR);
     });
@@ -20926,99 +21740,6 @@ export class BaseCompiler {
     return a;
   }
 
-  /**
-   * Whether `a` is a point written out at the call site: a `Tuple`, or a
-   * `PointList` of scalars, possibly under a `Typed` ascription. Its
-   * coordinates are the operands, one per position.
-   */
-  private static isWrittenPointArg(a: Expression): boolean {
-    const t = BaseCompiler.throughTyped(a);
-    return (
-      (isFunction(t, 'Tuple') || isFunction(t, 'PointList')) &&
-      BaseCompiler.isSinglePointArg(t)
-    );
-  }
-
-  /** Counter for the names of the stand-ins of `userCallStandIns`. */
-  private static _standInCount = 0;
-
-  /**
-   * The body of the user function `literal` with the arguments `args` of one
-   * call replaced by stand-in symbols, for the analysis of that call
-   * (`isComplexValuedUserCall`). Returns `undefined` when an argument has no
-   * sound stand-in.
-   *
-   * The analysis must read the body without the caller's bindings: a free
-   * symbol of the body names a global, even when the caller binds the same
-   * name (a `Sum` index `k` around a call of `p(P) := P.x + k`). But the
-   * arguments name the caller's variables and must be read WITH the
-   * caller's bindings. Substituting the arguments themselves mixes the two
-   * kinds of names in one expression. So each argument is analyzed here, in
-   * the caller's context, and replaced by a fresh symbol that carries the
-   * result:
-   * - a written point becomes a `Tuple` of stand-ins, one per coordinate, so
-   *   an accessor such as `P.x` still reads one coordinate;
-   * - a coordinate or a scalar argument becomes a stand-in with the
-   *   argument's type, bound complex when the argument is complex-valued,
-   *   real otherwise;
-   * - any other argument becomes a stand-in with the argument's type only.
-   *   If such an argument is complex-valued, its type may not say so (a list
-   *   literal `[x, i]` types `list<number>`), so there is no sound stand-in.
-   *
-   * Each stand-in is declared in a scope that is popped at once
-   * (`typedTemp`), so the engine's scopes do not change.
-   */
-  private static userCallStandIns(
-    literal: Expression & FunctionInterface,
-    args: ReadonlyArray<Expression>
-  ): UserCallStandIns | undefined {
-    const ce = literal.engine;
-    const params = literal.ops.slice(1);
-    if (params.length !== args.length) return undefined;
-    const body = literal.ops[0];
-    if (body === undefined) return undefined;
-    const result: UserCallStandIns = {
-      body,
-      real: [],
-      complex: [],
-      typed: [],
-    };
-    // A counter value whose name is already a symbol of the body or of an
-    // argument is skipped, so a stand-in never captures an existing name.
-    const taken = new Set([...body.symbols, ...args.flatMap((a) => a.symbols)]);
-    const standIn = (
-      value: Expression,
-      lane: boolean | 'typed'
-    ): Expression => {
-      let name: string;
-      do name = `_ce_arg${++BaseCompiler._standInCount}`;
-      while (taken.has(name));
-      if (lane === 'typed') result.typed.push(name);
-      else if (lane) result.complex.push(name);
-      else result.real.push(name);
-      return BaseCompiler.typedTemp(ce, name, value.type.type);
-    };
-    const substitution: Record<string, Expression> = {};
-    for (const [i, p] of params.entries()) {
-      const name = functionLiteralParameterName(p);
-      if (name === undefined) return undefined;
-      const arg = BaseCompiler.throughTyped(args[i]);
-      if (BaseCompiler.isWrittenPointArg(arg) && isFunction(arg)) {
-        substitution[name] = ce.function(
-          'Tuple',
-          arg.ops.map((c) => standIn(c, BaseCompiler.isComplexValued(c)))
-        );
-      } else if (BaseCompiler.provablyScalarArg(arg)) {
-        substitution[name] = standIn(arg, BaseCompiler.isComplexValued(arg));
-      } else {
-        if (BaseCompiler.isComplexValued(arg)) return undefined;
-        substitution[name] = standIn(arg, 'typed');
-      }
-    }
-    result.body = body.subs(substitution);
-    return result;
-  }
-
   private static isSinglePointArg(a: Expression): boolean {
     if (isFunction(a, 'Tuple')) return true;
     if (
@@ -21494,12 +22215,41 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
+    const inlined = BaseCompiler.inlinedUserFunctionCall(
+      engine,
+      h,
+      args,
+      target
+    );
+    if (inlined === undefined) return undefined;
+    // The generated code bakes this definition, as an emitted one would.
+    target.symbolDeps?.add(h);
+    const inlining = (target.userFunctions!.inlining ??= new Set<string>());
+    inlining.add(h);
+    try {
+      return BaseCompiler.compile(inlined, target);
+    } finally {
+      inlining.delete(h);
+    }
+  }
+
+  /**
+   * The expression that `tryInlineUserFunctionCall` compiles for the call
+   * `h(args)`, or `undefined` when the call cannot be inlined. Nothing is
+   * compiled here. Also used to read the lane of an inlined call
+   * (`userCallDefinition`) before the call is compiled.
+   */
+  private static inlinedUserFunctionCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): Expression | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
     if (registry.compiling.has(BaseCompiler.userFunctionName(registry, h)))
       return undefined;
-    const inlining = (registry.inlining ??= new Set<string>());
-    if (inlining.has(h)) return undefined;
+    if (registry.inlining?.has(h)) return undefined;
     // The call may sit inside an emitted DEFINITION or a lambda, whose bound
     // names — the definition's parameters, the lambda's — are the target's
     // `boundVars` while their body is compiled. A free symbol of the callee's
@@ -21550,14 +22300,7 @@ export class BaseCompiler {
       }
     );
     if (!inlined.isValid) return undefined;
-    // The generated code bakes this definition, as an emitted one would.
-    target.symbolDeps?.add(h);
-    inlining.add(h);
-    try {
-      return BaseCompiler.compile(inlined, target);
-    } finally {
-      inlining.delete(h);
-    }
+    return inlined;
   }
 
   /**
@@ -22222,6 +22965,59 @@ export class BaseCompiler {
     args: readonly Expression[],
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
+    const emitted = BaseCompiler.ensureSpecializedUserCallEmitted(
+      engine,
+      h,
+      literal,
+      args,
+      target
+    );
+    if (emitted === undefined) return undefined;
+    const { name, scalarDefinition, listArgument, bindsListsWhole } = emitted;
+    // Scalar definitions already have a broadcast-aware call boundary and a
+    // memoization policy. Reuse it after preparing the typed body.
+    if (scalarDefinition) return undefined;
+    // A list argument the interpreter broadcasts is mapped over at the call
+    // boundary, the point arguments held whole: the "atomic argument beside
+    // a collection" form of `emitUserFunctionCall`, whose closure calls the
+    // specialized helper once per element. The helper's mapped parameters
+    // are scalars, which is what `paramsAreScalar` states there. A list the
+    // interpreter binds whole takes the direct call below.
+    if (listArgument && !bindsListsWhole)
+      return BaseCompiler.emitUserFunctionCall(
+        name,
+        args,
+        target,
+        args.map(() => false),
+        true
+      );
+    const registry = target.userFunctions;
+    if (registry?.lowering)
+      return registry.lowering.call({ id: h, name, args, target });
+    return `${name}(${args.map((a) => BaseCompiler.compileValueOperand(a, target)).join(', ')})`;
+  }
+
+  /**
+   * The emission part of `trySpecializedUserCall`: emit the call-shape
+   * specialization of `h` that the call `h(args)` uses, and return its name
+   * with what the call site needs to know. `undefined` when the call takes
+   * no specialization. Also used to find the definition whose lane a call
+   * returns (`userCallDefinition`), before the call is compiled.
+   */
+  private static ensureSpecializedUserCallEmitted(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    args: readonly Expression[],
+    target: CompileTarget<Expression>
+  ):
+    | {
+        name: string;
+        scalarDefinition: boolean;
+        listArgument: boolean;
+        bindsListsWhole: boolean;
+      }
+    | undefined {
     const registry = target.userFunctions;
     if (
       !registry ||
@@ -22257,6 +23053,7 @@ export class BaseCompiler {
     let narrower = false;
     let pointArgument = false;
     let listArgument = false;
+    let complexArgument = false;
     // How the interpreter binds a LIST argument at an untyped parameter
     // depends on the definition as a whole (`paramsAreScalar`): when every
     // parameter is scalar or untyped the call is BROADCAST over the list,
@@ -22306,10 +23103,32 @@ export class BaseCompiler {
         target.language === 'javascript'
           ? isConstructedScalar(a, target)
           : isSubtype(BaseCompiler.operandTypeInContext(a, target), 'number') ||
-            isSubtype(a.type.type, 'boolean')
+            isSubtype(a.type.type, 'boolean') ||
+            // A complex parameter of the enclosing shader definition (`w` in
+            // the complex copy of `g(w) := f(w) + 1`) is recorded in the
+            // local shape frame as a 2-component value, so its type in
+            // context reads as a pair, not a number. Its own type and its
+            // lane still say it is a complex scalar.
+            (isSubtype(a.type.type, 'number') &&
+              BaseCompiler.isComplexValued(a))
       ) {
-        if (BaseCompiler.isComplexValued(a)) return undefined;
-        t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
+        if (BaseCompiler.isComplexValued(a)) {
+          // A COMPLEX argument. JavaScript keeps its own rule: its complex
+          // lane is chosen by the compile mode, and a strict compile
+          // declines. A shader target has no such mode, and its ordinary
+          // definition types an undeclared parameter `float`, so the call
+          // would decline. Instead the call gets a copy of the definition
+          // whose parameter is typed `complex` (a `vec2`/`vec2f`
+          // parameter), and the body is compiled with that parameter
+          // complex. The copy has its own name (`_fn_f_complex`), since
+          // WGSL has no overloading, and is emitted only when a call needs
+          // it. A parameter declared `real` rejects the `complex` type
+          // below, so that call still declines: the declaration is a
+          // contract.
+          if (target.language === 'javascript') return undefined;
+          t = 'complex';
+          complexArgument = true;
+        } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
       } else if (
         target.language === 'javascript' &&
         (declared === 'unknown' ||
@@ -22378,8 +23197,13 @@ export class BaseCompiler {
     if (!narrower && !hasPointProof) return undefined;
     if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))
       return undefined;
+    // A complex copy is never the scalar definition: it has its own name and
+    // its own call boundary (a `vec2` argument), so it cannot share either
+    // with the real definition.
     const scalarDefinition =
-      !bindsListsWhole && types.every((t) => isSubtype(t, 'number'));
+      !bindsListsWhole &&
+      !complexArgument &&
+      types.every((t) => isSubtype(t, 'number'));
     // A declared tuple and a constructed point can have the same type.
     // Only the constructed variant may omit runtime shape checks.
     const proofKey = hasPointProof
@@ -22450,26 +23274,7 @@ export class BaseCompiler {
     }
     if (name === undefined) return undefined;
     target.symbolDeps?.add(h);
-    // Scalar definitions already have a broadcast-aware call boundary and a
-    // memoization policy. Reuse it after preparing the typed body.
-    if (scalarDefinition) return undefined;
-    // A list argument the interpreter broadcasts is mapped over at the call
-    // boundary, the point arguments held whole: the "atomic argument beside
-    // a collection" form of `emitUserFunctionCall`, whose closure calls the
-    // specialized helper once per element. The helper's mapped parameters
-    // are scalars, which is what `paramsAreScalar` states there. A list the
-    // interpreter binds whole takes the direct call below.
-    if (listArgument && !bindsListsWhole)
-      return BaseCompiler.emitUserFunctionCall(
-        name,
-        args,
-        target,
-        args.map(() => false),
-        true
-      );
-    if (registry.lowering)
-      return registry.lowering.call({ id: h, name, args, target });
-    return `${name}(${args.map((a) => BaseCompiler.compileValueOperand(a, target)).join(', ')})`;
+    return { name, scalarDefinition, listArgument, bindsListsWhole };
   }
 
   static ensureUserFunctionEmitted(
@@ -23311,6 +24116,11 @@ export class BaseCompiler {
           );
         return name;
       }
+      // The definitions stored while this one compiles may call it by name
+      // (a re-entrant reference, see below); when its emission fails they
+      // are removed, so that no definition keeps a call of a name that is
+      // never emitted.
+      const definedBefore = new Set(registry.defs.keys());
       registry.compiling.add(name);
       try {
         const { params, bodyExpr, bodyTarget } =
@@ -23453,8 +24263,15 @@ export class BaseCompiler {
             // emitted cleanly — exactly the case nothing else catches — and never
             // masks a better message. The `defs` entry is still written after the
             // body compiled, so a nested dependency it emitted precedes it (GLSL
-            // requires declaration before use); a throw here aborts the whole
-            // compilation, so the discarded entries do not matter.
+            // requires declaration before use). A throw here does not always end
+            // the compilation: when the definition was emitted because an
+            // analysis asked for the lane of a call before the call compiled
+            // (`userCallDefinition`), the throw is caught there and the call
+            // takes another route (it is inlined, or its own compilation fails).
+            // The nested dependencies that this emission already wrote into
+            // `defs` are then removed if nothing references them
+            // (`pruneUnreferencedVariantBases`, which receives every definition
+            // written during such an emission).
             //
             // The gate lives in this shared emission path keyed on a property the
             // TARGET declares, rather than inside the GPU `define` hook: the
@@ -23501,7 +24318,14 @@ export class BaseCompiler {
             prefixed !== undefined
           );
           if (loop === 'declined-variant') return undefined;
-          if (loop !== undefined) return loop;
+          if (loop !== undefined) {
+            // The loop form returns a list: its value is not a scalar.
+            BaseCompiler.userFunctionLanes(registry).byName.set(
+              loop,
+              undefined
+            );
+            return loop;
+          }
         }
         // Each emitted definition body gets its OWN nested harvest scope in
         // the same session (§5.4): its own regions and candidates — the body
@@ -23534,11 +24358,6 @@ export class BaseCompiler {
         // the lane here is that declaration being read back — which is why
         // the Tycho-190 rule ("the lane comes from the operand, never the
         // node type") is not in tension with it.
-        const frames = {
-          complex: new Map<string, boolean>(),
-          vector: new Map<string, number>(),
-        };
-        BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
         // Whether the emitted body returns a `{re, im}` object by
         // construction, decided inside the same frames the body compiled
         // under (`complexShapedEmission`), so a call site can skip the
@@ -23546,28 +24365,41 @@ export class BaseCompiler {
         let complexShaped = false;
         let body: TargetSource;
         try {
-          body = BaseCompiler.withLocalShapeFrame(
-            frames.complex,
-            frames.vector,
-            () =>
-              BaseCompiler.withEnforcedParams(literal, () =>
-                BaseCompiler.withNestedCseHarvest(
-                  bodyExpr,
-                  bodyTarget,
-                  params,
-                  () => {
-                    const code = BaseCompiler.compileDefinitionBody(
-                      bodyExpr,
-                      bodyTarget
-                    );
-                    complexShaped =
-                      BaseCompiler.complexShapedEmission(bodyExpr);
-                    return code;
-                  }
-                )
-              ),
-            true
-          );
+          body = BaseCompiler.emitWithRecursiveLaneRetry(registry, name, () => {
+            const frames = {
+              complex: new Map<string, boolean>(),
+              vector: new Map<string, number>(),
+            };
+            BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
+            return BaseCompiler.withLocalShapeFrame(
+              frames.complex,
+              frames.vector,
+              () =>
+                BaseCompiler.withEnforcedParams(literal, () =>
+                  BaseCompiler.withNestedCseHarvest(
+                    bodyExpr,
+                    bodyTarget,
+                    params,
+                    () => {
+                      const code = BaseCompiler.compileDefinitionBody(
+                        bodyExpr,
+                        bodyTarget
+                      );
+                      complexShaped =
+                        BaseCompiler.complexShapedEmission(bodyExpr);
+                      BaseCompiler.recordUserFunctionLane(
+                        bodyTarget,
+                        h,
+                        name,
+                        bodyExpr
+                      );
+                      return code;
+                    }
+                  )
+                ),
+              true
+            );
+          });
         } finally {
           for (const node of overridden)
             BaseCompiler._codeOverrides.delete(node);
@@ -23596,6 +24428,9 @@ export class BaseCompiler {
           )
         )
           (registry.memoizable ??= new Map()).set(name, { params, body });
+      } catch (e) {
+        BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+        throw e;
       } finally {
         registry.compiling.delete(name);
       }
@@ -24197,6 +25032,11 @@ export class BaseCompiler {
     // in the capture set (see `CompileTarget.symbolDeps`).
     target.symbolDeps?.add(h);
 
+    // The definitions stored while this one compiles may call it by name
+    // (a re-entrant reference, see below); when its emission fails they
+    // are removed, so that no definition keeps a call of a name that is
+    // never emitted.
+    const definedBefore = new Set(registry.defs.keys());
     registry.compiling.add(name);
     try {
       // One helper per clause, in declaration order. `$` cannot appear in a
@@ -24212,6 +25052,16 @@ export class BaseCompiler {
         plans.map((p) => p.literal.ops[0]),
         target
       );
+      // The lane of the dispatcher's value (`userCallLane`): complex when the
+      // clause bodies are coerced to the complex convention, real when no
+      // clause body is complex, and no lane when a clause body may be a
+      // collection. Recorded after the clause bodies compiled, so that a
+      // recursive call in them is checked (`setUserFunctionLane`).
+      const lane = plans.some((p) =>
+        BaseCompiler.mayBeCollectionValued(p.literal.ops[0])
+      )
+        ? undefined
+        : coerce !== undefined;
       for (let i = 0; i < plans.length; i++) {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(
@@ -24278,6 +25128,10 @@ export class BaseCompiler {
         name,
         `const ${name} = (..._$a) => { const _$n = _$a.map(_SYS.creal); ${branches.join(' ')} throw new Error(${JSON.stringify(`no-matching-clause: ${h}`)}); };`
       );
+      BaseCompiler.setUserFunctionLane(registry, h, name, lane);
+    } catch (e) {
+      BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+      throw e;
     } finally {
       registry.compiling.delete(name);
     }
@@ -24519,11 +25373,14 @@ export class BaseCompiler {
    * variant, not the base, but the base was already emitted by the
    * call-shape specialization the site's first call went through; and on a
    * target with its own call lowering a variant can be emitted and then
-   * refused at the call site, which falls back to the base. A definition's
-   * declaration has no effect on any target, so an unreferenced one is dead
-   * text. Only variants and their bases are removed: every other definition
-   * is kept whether or not the artifact names it, so an artifact without a
-   * variant is emitted exactly as before. Repeated to a fixed point, since
+   * refused at the call site, which falls back to the base. The definitions
+   * emitted because an analysis asked for the lane of a call before the
+   * call was compiled (`userCallDefinition`) are removed on the same terms:
+   * the call may have been folded, or compiled through another route. A
+   * definition's declaration has no effect on any target, so an
+   * unreferenced one is dead text. Only these definitions are removed: every
+   * other definition is kept whether or not the artifact names it, so an
+   * artifact without them is emitted exactly as before. Repeated to a fixed point, since
    * removing one definition can leave another that only it referenced
    * unreferenced in turn. Called by each target where it assembles its
    * preamble, before any pass that counts references to a definition.
@@ -24533,13 +25390,14 @@ export class BaseCompiler {
     rootCode: string
   ): void {
     const defs = registry.defs;
-    const variants = registry.variantBases;
-    if (variants === undefined || variants.size === 0) return;
-    const candidates = new Set<string>();
-    for (const [variant, base] of variants) {
+    const candidates = new Set<string>(
+      BaseCompiler._userFunctionLanes.get(registry)?.onAsk
+    );
+    for (const [variant, base] of registry.variantBases ?? []) {
       candidates.add(variant);
       candidates.add(base);
     }
+    if (candidates.size === 0) return;
     for (let changed = true; changed; ) {
       changed = false;
       for (const name of candidates) {
@@ -25024,6 +25882,11 @@ export class BaseCompiler {
       );
       helperNames.push(name);
       if (registry.defs.has(name) || registry.compiling.has(name)) continue;
+      // The definitions stored while this one compiles may call it by name
+      // (a re-entrant reference, see below); when its emission fails they
+      // are removed, so that no definition keeps a call of a name that is
+      // never emitted.
+      const definedBefore = new Set(registry.defs.keys());
       registry.compiling.add(name);
       try {
         const { params, bodyExpr, bodyTarget } =
@@ -25038,6 +25901,9 @@ export class BaseCompiler {
           name,
           `const ${name} = (${params.join(', ')}) => ${body};`
         );
+      } catch (e) {
+        BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+        throw e;
       } finally {
         registry.compiling.delete(name);
       }
@@ -25806,11 +26672,159 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     varsKeys?: ReadonlySet<string>
   ): R {
+    const refs = BaseCompiler.analyzeReferences(expr, target, varsKeys);
     return Object.assign(
       result,
-      BaseCompiler.analyzeReferences(expr, target, varsKeys),
+      refs,
+      {
+        freeSymbolTypes: BaseCompiler.freeSymbolTypes(
+          expr,
+          target,
+          refs.freeSymbols
+        ),
+      },
       BaseCompiler.modeReport()
     );
+  }
+
+  /**
+   * The type report of each free symbol in `names` (see
+   * `CompilationResult.freeSymbolTypes`): its engine type, the type the code
+   * compiled for `target` reads it as, and whether it was declared.
+   *
+   * The types are read from an occurrence of the symbol in `expr`, which is
+   * bound in the scope the expression was compiled in. A symbol reachable
+   * only through a folded value or a user-function body has no occurrence
+   * in `expr`; it is then read from its definition.
+   *
+   * The provenance is read from the definition the occurrence is bound to,
+   * not from a lookup in the current scope: an expression parsed in a scope
+   * that declared `q`, and compiled after that scope was popped, reads the
+   * declared `q`, and must report it `declared`.
+   *
+   * The type is spelled as a host writes it in a declaration
+   * (`declaredTypeText`), which is also the spelling of the run-time entry
+   * diagnostic of the JavaScript runner.
+   */
+  static freeSymbolTypes(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    names: ReadonlyArray<string>
+  ): Record<string, FreeSymbolType> {
+    const ce = expr.engine;
+    const wanted = new Set(names);
+    const found = new Map<string, Expression>();
+    const walk = (e: Expression): void => {
+      if (found.size === wanted.size) return;
+      if (isSymbol(e)) {
+        if (wanted.has(e.symbol) && !found.has(e.symbol))
+          found.set(e.symbol, e);
+        return;
+      }
+      if (isFunction(e)) for (const op of e.ops) walk(op);
+    };
+    walk(expr);
+    const result: Record<string, FreeSymbolType> = {};
+    for (const name of names) {
+      const occurrence = found.get(name);
+      const symbol = occurrence ?? ce.symbol(name);
+      let valueDef: { inferredType: boolean } | undefined;
+      if (occurrence !== undefined && isSymbol(occurrence))
+        valueDef = occurrence.valueDefinition;
+      else {
+        const def = ce.lookupDefinition(name);
+        valueDef = isValueDef(def) ? def.value : undefined;
+      }
+      const declared = valueDef !== undefined && !valueDef.inferredType;
+      let lowered: string | undefined;
+      try {
+        lowered =
+          target.loweredSymbolType?.(symbol) ??
+          BaseCompiler.defaultLoweredSymbolType(symbol, target.language);
+      } catch (e) {
+        throwIfCallerCancellation(e, ce._deadlineFrame);
+        lowered = undefined;
+      }
+      // Defined, not assigned: a symbol named `__proto__` must become an
+      // own entry, not replace the prototype of the report.
+      Object.defineProperty(result, name, {
+        value: {
+          type: BaseCompiler.declaredTypeText(symbol.type.type),
+          lowered: lowered ?? 'unknown',
+          provenance: declared ? 'declared' : 'inferred',
+        },
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * The type `t` as a host writes it in a declaration. The type printer
+   * leaves out the entry type `number` of a vector or a matrix
+   * (`matrix<number>` prints `matrix`), and a diagnostic that asks for
+   * `matrix<real>` must show the `number` it replaces. The type report of a
+   * compilation (`freeSymbolTypes`) and the run-time entry diagnostic of the
+   * JavaScript runner both use this spelling, so that one symbol has one
+   * spelling in both.
+   */
+  static declaredTypeText(t: Type): string {
+    if (
+      typeof t !== 'string' &&
+      t.kind === 'list' &&
+      t.elements === 'number' &&
+      t.dimensions !== undefined &&
+      (t.dimensions.length === 1 || t.dimensions.length === 2)
+    ) {
+      const head = t.dimensions.length === 1 ? 'vector' : 'matrix';
+      if (t.dimensions.every((d) => d < 0)) return `${head}<number>`;
+      const dims = t.dimensions.map((d) => (d < 0 ? '?' : `${d}`)).join('x');
+      return `${head}<number^${dims}>`;
+    }
+    return typeToString(t);
+  }
+
+  /**
+   * The type the code compiled for a target without a `loweredSymbolType`
+   * hook reads the free symbol `symbol` as, from its engine type and its
+   * lane: the runner's value convention on JavaScript (`number`, `complex`,
+   * `boolean`, `string`, `color`, `point`, `array`, `function`), `interval`
+   * for a real number on interval-js, and the Python value types on Python.
+   * `undefined` when the type says none of these.
+   */
+  private static defaultLoweredSymbolType(
+    symbol: Expression,
+    language: string | undefined
+  ): string | undefined {
+    const t = symbol.type.type;
+    const python = language === 'python';
+    if (BaseCompiler.isComplexValued(symbol) || isNonRealNumber(t))
+      return 'complex';
+    if (isSubtype(t, 'boolean')) return python ? 'bool' : 'boolean';
+    // A symbol with no type information (`unknown`) is read as a real
+    // number, as the shader targets read it as a `float`.
+    if (t === 'unknown' || isSubtype(t, 'number'))
+      return python
+        ? 'float'
+        : language === 'interval-javascript'
+          ? 'interval'
+          : 'number';
+    if (isSubtype(t, 'string')) return python ? 'str' : 'string';
+    // A colour, or a colour operand whose type admits the other colour
+    // spellings (`color | string | tuple`, the type of `a` after
+    // `ColorMix(a, b, 0.5)`).
+    if (
+      !python &&
+      (isSubtype(t, 'color') ||
+        (isSubtype('color', t) && isSubtype(t, 'color | string | tuple')))
+    )
+      return 'color';
+    if (isTupleShapedType(t)) return python ? 'tuple' : 'point';
+    if (isSubtype(t, COLLECTION_SHAPE_TYPE)) return python ? 'list' : 'array';
+    if (!python && isSubtype(t, 'function')) return 'function';
+    return undefined;
   }
 
   /**
@@ -26046,6 +27060,26 @@ export class BaseCompiler {
       throwIfCallerCancellation(e, ce._deadlineFrame);
     }
 
+    // The type report of the free symbols, read against the target the
+    // analysis used. Like the analysis, it never breaks the fallback.
+    const fallbackTypes = (): {
+      freeSymbolTypes?: Record<string, FreeSymbolType>;
+    } => {
+      if (!compileTarget) return {};
+      try {
+        return {
+          freeSymbolTypes: BaseCompiler.freeSymbolTypes(
+            expr,
+            compileTarget,
+            refs.freeSymbols
+          ),
+        };
+      } catch (e) {
+        throwIfCallerCancellation(e, ce._deadlineFrame);
+        return {};
+      }
+    };
+
     // A function literal (lambda) uses the positional `lambda` calling
     // convention — `run(a, b, ...)`. The fallback must mirror that by applying
     // the function to its positional arguments via the interpreter; otherwise
@@ -26074,6 +27108,7 @@ export class BaseCompiler {
         diagnostic,
         ...BaseCompiler.modeReport(),
         ...refs,
+        ...fallbackTypes(),
       } as CompilationResult<T>;
     }
 
@@ -26130,6 +27165,7 @@ export class BaseCompiler {
       diagnostic,
       ...BaseCompiler.modeReport(),
       ...refs,
+      ...fallbackTypes(),
     } as CompilationResult<T>;
   }
 

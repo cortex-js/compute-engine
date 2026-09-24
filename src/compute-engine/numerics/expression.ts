@@ -49,15 +49,9 @@ export function numberToExpression(
   if (num >= Number.MIN_SAFE_INTEGER && num <= Number.MAX_SAFE_INTEGER)
     return Number(num);
 
-  // Only use the machine-number shorthand when the float is *exactly* equal to
-  // the integer. A string-display comparison is unsound: e.g.
-  // `Number(10n ** 23n).toString() === '1e+23'` is true because
-  // `Number.prototype.toString()` returns the shortest uniquely-identifying
-  // decimal, yet the float ≠ 10^23. Emitting that float as a JSON number would
-  // corrupt the value on reconstruction. `BigInt(n)` of an integral float is
-  // its exact value, so equality guarantees losslessness.
-  const n = Number(num);
-  if (Number.isFinite(n) && BigInt(n) === num) return n;
-
+  // An integer past the safe integers is always a `{num}` string, even when a
+  // double holds it exactly (`2^127`): a JSON number there boxes as a FLOAT,
+  // since only a safe-integer double is boxed as an exact integer, so the
+  // shorthand would lose the exactness on reconstruction.
   return { num: numberToString(num) };
 }

@@ -292,11 +292,24 @@ describe('At index/source admissibility — fail closed, never diverge', () => {
     // `list<number>` is a subtype of NEITHER `list<complex>` nor `list<real>`
     // (`number` is a supertype of both), so no static gate can classify it —
     // which is exactly why the projection lives at run time.
+    //
+    // In `strict` and `auto` mode the entries of a `list<number>` binding are
+    // read as real (user decision of 2026-09-24, option B), as a scalar
+    // `number` index is, so the runner refuses a complex entry when it is
+    // called. Under `mode: 'complex'` the projection answers.
     const engine = new ComputeEngine();
     engine.declare('ys', 'list<number>');
     const r = compile(engine.box(['At', P, 'ys'] as any));
     expect(r?.success).toBe(true);
-    expect(r!.run!({ ys: [1, { re: 1, im: 2 }] })).toEqual([10, 10]);
+    expect(r!.run!({ ys: [1, 2] })).toEqual([10, 20]);
+    expect(() => r!.run!({ ys: [1, { re: 1, im: 2 }] })).toThrow(
+      /"ys" \(type `list<number>`\) was compiled with real entries, but its entry \[1\] is a complex/
+    );
+    const c = compile(engine.box(['At', P, 'ys'] as any), {
+      mode: 'complex',
+    } as any);
+    expect(c?.success).toBe(true);
+    expect(c!.run!({ ys: [1, { re: 1, im: 2 }] })).toEqual([10, 10]);
   });
 
   // A dictionary source takes the `isDictionary` branch at evaluate, which

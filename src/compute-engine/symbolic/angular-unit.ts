@@ -106,7 +106,9 @@ export function angularChainFactor(ce: Expression['engine']): Expression {
  * - direct trig arguments are scaled by the unit→radian factor
  *   (`Sin(u)` → `Sin(k·u)` with `k = π/180` in degree mode), and
  * - inverse trig results are scaled by the radian→unit factor
- *   (`Arcsin(u)` → `(1/k)·Arcsin(u)`).
+ *   (`Arcsin(u)` → `(1/k)·Arcsin(u)`), and
+ * - `Degrees(u)` is replaced by its value in the engine unit (`u`, `10u/9`
+ *   or `u/360`), because the targets lower `Degrees` to a radian value.
  *
  * A no-op when `angularUnit` is `"rad"`. Every compilation target applies
  * this rewrite at its public `compile()` entry so compiled output agrees
@@ -150,6 +152,19 @@ export function rewriteAngularUnit(expr: Expression): Expression {
     });
 
     const h = e.operator;
+    // `Degrees(u)` is an angle in the engine's unit (`evaluate()` gives `u`
+    // in degree mode, `10u/9` in grad mode, `u/360` in turn mode). The target
+    // lowerings of `Degrees` convert to RADIANS, which is correct only in
+    // radian mode, where this rewrite does not run. Replace the node here
+    // with the conversion to the engine unit, so that an enclosing trig
+    // call then scales it to radians like any other angle.
+    if (h === 'Degrees' && ops.length === 1) {
+      if (unit === 'deg') return ops[0];
+      return ce.function('Multiply', [
+        ce.number(unit === 'grad' ? 10 / 9 : 1 / 360),
+        ops[0],
+      ]);
+    }
     if (DIRECT_TRIG_OPERATORS.has(h) && ops.length === 1) {
       return ce.function(h, [
         ce.function('Multiply', [ce.number(toRad), ops[0]]),

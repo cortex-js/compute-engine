@@ -56,11 +56,10 @@ import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
 import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
-import { spectralNorm } from '../numerics/linear-algebra.js';
-import {
-  exactCompareNumbers,
-  float64HoldsNumber,
-} from '../boxed-expression/constraint-subject.js';
+import { singularValues, spectralNorm } from '../numerics/linear-algebra.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import { float64HoldsNumber } from '../boxed-expression/constraint-subject.js';
+import { exactOrder } from '../boxed-expression/compare.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -124,11 +123,11 @@ const MAX_POINT_LIST_DOT = 10000;
  * infiniteness is merely unknown proves nothing and leaves the ordinary
  * computation to decide.
  *
- * Exported because `Distance` obeys the same rule: `Distance(p, q)` is
- * `Norm(p − q)`, so `pointDistance` (`library/arithmetic.ts`) asks this of the
+ * `Distance` obeys the same rule: `Distance(p, q)` is `Norm(p − q)`, and
+ * `pointDistance` (`library/arithmetic.ts`) evaluates that norm of the
  * coordinate DIFFERENCES.
  */
-export function hasInfiniteMagnitudeComponent(
+function hasInfiniteMagnitudeComponent(
   components: readonly Expression[]
 ): boolean {
   return components.some((c) => infinitePoint(c) !== undefined);
@@ -162,14 +161,155 @@ function declineWideNormType(claim: string): string | undefined {
 const MAX_EXACT_SPECTRAL_SIDE = 16;
 
 /**
+ * Whether a float64 holds the big decimal `x` without overflow to infinity
+ * or underflow to zero. The value is `significand × 10^exponent`, so its
+ * magnitude is at least `10^exponent` and less than
+ * `10^(exponent + digits)`. The limits below are well inside the float64
+ * range (about 5e-324 to 1.8e308).
+ */
+function float64HoldsBigDecimal(x: BigDecimal): boolean {
+  if (x.isZero() || !x.isFinite()) return true;
+  return x.exponent > -300 && x.exponent + x._digitCount() < 300;
+}
+
+/** The decimal exponent of the leading digit of a nonzero big decimal:
+ * `e` such that `10^e ≤ |x| < 10^(e+1)`. */
+function decimalExponent(x: BigDecimal): number {
+  return x.exponent + x._digitCount() - 1;
+}
+
+/**
+ * The real and imaginary parts of the numeric values `values` (the `.N()`
+ * of the matrix entries, all finite numbers) as a machine matrix that a
+ * double kernel can use, with the power of ten `10^exponent` that the
+ * entries were divided by.
+ *
+ * When a float64 holds every part, `exponent` is 0 and the parts are the
+ * machine values. Otherwise, the machine value of some entry is infinite
+ * (`10^400`) or zero (`10^-400`), and the kernel would answer NaN, infinity
+ * or 0. The entries are then divided EXACTLY, as big decimals, by the power
+ * of ten of the largest part before they become machine numbers. The
+ * caller multiplies the result of the kernel by `10^exponent` as a big
+ * decimal: `‖[[10^400, 1], [0, 1]]‖₂` is `10^400`, not NaN.
+ *
+ * A part much smaller than the largest one can become 0 after the division.
+ * The double kernels (`spectralNorm()`, `singularValues()`) have an absolute
+ * error of about `ε·σ_max`, where `ε ≈ 2.2e-16` and `σ_max` is the largest
+ * singular value, so a singular value below that is not resolved, and a
+ * lost part changes the matrix by less than that error. This is harmless for
+ * the spectral norm, which is `σ_max`. It is not harmless for the smaller
+ * singular values: they can come back as 0. `wideRange` is true when the
+ * ratio of the largest to the smallest nonzero entry magnitude is more than
+ * `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT`. A caller that needs the small
+ * singular values (`SingularValues`) declines such a matrix.
+ */
+function scaledMachineMatrix(
+  values: readonly Expression[],
+  m: number,
+  n: number
+): { re: number[][]; im: number[][]; exponent: number; wideRange: boolean } {
+  const parts = values.map((v) => [
+    v.bignumRe ?? new BigDecimal(v.re),
+    v.bignumIm ?? new BigDecimal(v.im),
+  ]);
+  // The decimal exponent of the magnitude of each nonzero entry: the larger
+  // exponent of its two parts. A part much smaller than the other part of
+  // the same entry is below the precision of that entry, so only whole
+  // entries are compared.
+  let largestEntry: number | undefined = undefined;
+  let smallestEntry: number | undefined = undefined;
+  for (const [re, im] of parts) {
+    let e: number | undefined = undefined;
+    for (const x of [re, im])
+      if (!x.isZero()) {
+        const d = decimalExponent(x);
+        if (e === undefined || d > e) e = d;
+      }
+    if (e === undefined) continue;
+    if (largestEntry === undefined || e > largestEntry) largestEntry = e;
+    if (smallestEntry === undefined || e < smallestEntry) smallestEntry = e;
+  }
+  const wideRange =
+    largestEntry !== undefined &&
+    smallestEntry !== undefined &&
+    largestEntry - smallestEntry > MAX_SINGULAR_VALUE_RANGE_EXPONENT;
+  let exponent = 0;
+  if (
+    !parts.every(
+      ([re, im]) => float64HoldsBigDecimal(re) && float64HoldsBigDecimal(im)
+    )
+  ) {
+    let largest: number | undefined = undefined;
+    for (const part of parts)
+      for (const x of part)
+        if (!x.isZero()) {
+          const e = decimalExponent(x);
+          if (largest === undefined || e > largest) largest = e;
+        }
+    exponent = largest ?? 0;
+  }
+  const factor = new BigDecimal(`1e${-exponent}`);
+  const re: number[][] = [];
+  const im: number[][] = [];
+  for (let i = 0; i < m; i++) {
+    const row = Array.from({ length: n }, (_, j) => i * n + j);
+    if (exponent === 0) {
+      re.push(row.map((k) => values[k].re));
+      im.push(row.map((k) => values[k].im));
+    } else {
+      re.push(row.map((k) => parts[k][0].mul(factor).toNumber()));
+      im.push(row.map((k) => parts[k][1].mul(factor).toNumber()));
+    }
+  }
+  return { re, im, exponent, wideRange };
+}
+
+/**
+ * The largest decimal exponent of the ratio of the largest to the smallest
+ * nonzero entry magnitude of a matrix whose singular values are computed in
+ * machine precision. The Gram matrix squares that ratio: with the matrix
+ * scaled so that its largest entry is about 1, an entry of `10^-150` gives
+ * Gram terms of about `10^-300`, which a float64 still holds as a normal
+ * number. A smaller entry underflows to 0 in the Gram matrix (or already in
+ * the scaled matrix), and the singular values that depend on it come back as
+ * 0: the singular values of `[[1e200, 0], [0, 1e-200]]` were `[1e200, 0]`.
+ * `SingularValues` and `SVD` decline a matrix with a wider range, and the
+ * application stays unevaluated.
+ */
+const MAX_SINGULAR_VALUE_RANGE_EXPONENT = 150;
+
+/**
+ * The machine number `x` times `10^exponent`, as a number literal: a big
+ * decimal when `exponent` is not 0, so that a value outside the float64
+ * range keeps its magnitude.
+ *
+ * The big decimal is built from the shortest decimal spelling of `x`
+ * (`String(x)`), not from its exact binary value, and the same is done for
+ * an integer-valued `x` above `2^53`, so the result is a float with the
+ * digits the kernel computed (`1e200`, not the 200 digits of the binary
+ * value of the double, `99999999999999996973…`).
+ */
+function scaledNumber(
+  ce: ComputeEngine,
+  x: number,
+  exponent: number = 0
+): Expression {
+  if (!Number.isFinite(x)) return ce.number(x);
+  // Every double above `2^53` is an integer.
+  if (exponent === 0 && Math.abs(x) <= Number.MAX_SAFE_INTEGER)
+    return ce.number(x);
+  const big = new BigDecimal(String(x));
+  if (exponent === 0) return ce.number(big);
+  return ce.number(big.mul(new BigDecimal(`1e${exponent}`)));
+}
+
+/**
  * The spectral norm `‖A‖₂` of an `m × n` matrix: its largest singular value,
  * `√(λ_max(Aᴴ A))`. `entries` is the matrix row-major, and no entry has an
  * infinite magnitude (the caller answers `+∞` for that first).
  *
  * The answer follows the exactness contract of `evaluate()` and `.N()`:
  *
- * - A matrix with a symbolic entry (one with no numeric value) has no
- *   answer: the application stays unevaluated.
  * - A NaN entry makes the norm NaN.
  * - A matrix with one row or one column is a vector, and its spectral norm
  *   is the vector 2-norm, exact for exact entries.
@@ -183,11 +323,24 @@ const MAX_EXACT_SPECTRAL_SIDE = 16;
  *   `t = Σ|aᵢⱼ|²` is the trace of the Gram matrix and `d` is its determinant.
  *   By the Cauchy–Binet formula, `d` is the sum of `|M|²` over the 2 × 2
  *   minors `M` of the matrix. This is the answer the 2 × 2 `Eigenvalues`
- *   handler gives for the Gram matrix.
+ *   handler gives for the Gram matrix. The closed form also applies to a
+ *   matrix with a symbolic entry (one with no numeric value, such as an
+ *   unassigned `x`): `‖[[x, 1], [0, 1]]‖₂` is
+ *   `√((|x|² + 2 + √((|x|² + 2)² − 4|x|²)) / 2)`.
+ * - A matrix with rank 1 (every 2 × 2 minor is exactly 0) has one nonzero
+ *   singular value, so the norm is the Frobenius norm `√(Σ|aᵢⱼ|²)`, exact
+ *   for exact entries. At most `MAX_EXACT_SPECTRAL_SIDE²` entries are
+ *   tested.
+ * - Any other matrix with a symbolic entry has no answer: the application
+ *   stays unevaluated.
  * - Any other matrix of exact entries has no simple closed form, so under
  *   `evaluate()` the application stays unevaluated, like `ln(2)`. Under
- *   `.N()`, or when an entry is inexact, the norm is a machine number from
- *   `spectralNorm()` (`numerics/linear-algebra.ts`).
+ *   `.N()`, or when an entry is inexact, the norm is computed by
+ *   `spectralNorm()` (`numerics/linear-algebra.ts`) in machine precision.
+ *   When a float64 cannot hold an entry (`10^400`, `10^-400`), the entries
+ *   are first divided by a power of ten (`scaledMachineMatrix`), and the
+ *   norm is a big decimal: `‖[[10^400, 1, 0], [0, 1, 0], [0, 0, 1]]‖₂` is
+ *   `10^400` under `.N()`.
  *
  * An exact complex entry (`i`, `1 + 2i`) is exact here too: the packed
  * tensor keeps it as an exact expression, not as a machine complex
@@ -204,17 +357,33 @@ function spectralMatrixNorm(
 ): Expression | undefined {
   if (m === 1 || n === 1) return vectorNorm(entries);
 
-  // The numeric value of each entry. A symbolic entry leaves the norm
-  // undecided, and a NaN entry makes it NaN.
+  // The numeric value of each entry, and a NaN entry makes the norm NaN. A
+  // symbolic entry (with no numeric value) is recorded with a NaN machine
+  // value, which is never zero: only the closed form below can answer for
+  // such a matrix.
+  const numericValues: Expression[] = [];
   const values: { re: number; im: number }[] = [];
   let allExact = true;
+  let symbolic = false;
   for (const el of entries) {
     const v = el.N();
-    if (!isNumber(v)) return undefined;
+    if (!isNumber(v)) {
+      symbolic = true;
+      numericValues.push(v);
+      values.push({ re: NaN, im: NaN });
+      continue;
+    }
     if (Number.isNaN(v.re) || Number.isNaN(v.im)) return ce.NaN;
+    numericValues.push(v);
     values.push({ re: v.re, im: v.im });
     if (isNumber(el) && !el.isExact) allExact = false;
   }
+  // The 2 × 2 closed form below applies: two rows or two columns, and
+  // exact or symbolic entries.
+  const closedForm =
+    allExact &&
+    Math.min(m, n) === 2 &&
+    Math.max(m, n) <= MAX_EXACT_SPECTRAL_SIDE;
   // An entry is zero only when its value is exactly zero. A machine value of
   // 0 is not enough: an exact entry such as `10^{-400}` is below the smallest
   // machine number, and its machine value is 0. Such an entry counts as
@@ -238,67 +407,41 @@ function spectralMatrixNorm(
     if (count > 1) monomial = false;
   }
   if (monomial) {
-    let best = -1;
-    let bestModulus = -1;
-    // Whether the machine moduli are enough to find the largest entry. They
-    // are not when a nonzero entry has a machine modulus of 0 or of infinity
-    // (an exact entry outside the machine range), or when two nonzero exact
-    // entries have the same machine modulus (`10^{400}` and `10^{400} + 1`).
-    // An inexact entry is its machine value, so a tie with it is a real tie.
-    const isExactEntry = (k: number) =>
-      !(isNumber(entries[k]) && !entries[k].isExact);
-    let machineDecides = true;
-    const nonzero: number[] = [];
+    // The moduli are ordered by `exactOrder`, the order that `Max` and
+    // `Sort` also use: exactly for exact values, also where a float64 cannot
+    // hold or separate them (`10^{-400}` and `√2 · 10^{-400}`, `10^{400}` and
+    // `10^{400} + 1`). Two moduli that cannot be ordered (`|x|` and `1`)
+    // leave the application unevaluated, unless the closed form below
+    // applies.
+    let best: number | undefined = undefined;
+    let bestModulus: Expression | undefined = undefined;
+    let ordered = true;
     for (let k = 0; k < entries.length; k++) {
-      const modulus = Math.hypot(values[k].re, values[k].im);
-      if (!isZero(k)) {
-        if (
-          modulus === 0 ||
-          !Number.isFinite(modulus) ||
-          (isExactEntry(k) &&
-            nonzero.some(
-              (j) =>
-                isExactEntry(j) &&
-                Math.hypot(values[j].re, values[j].im) === modulus
-            ))
-        )
-          machineDecides = false;
-        nonzero.push(k);
+      if (isZero(k)) continue;
+      const modulus = ce.function('Abs', [entries[k]]).evaluate();
+      if (bestModulus !== undefined) {
+        const order = exactOrder(modulus, bestModulus);
+        if (order === undefined) {
+          ordered = false;
+          break;
+        }
+        if (order <= 0) continue;
       }
-      if (modulus > bestModulus) {
-        bestModulus = modulus;
-        best = k;
-      }
+      best = k;
+      bestModulus = modulus;
     }
-    if (!machineDecides) {
-      // Compare the moduli by their values (`exactCompareNumbers`): exact
-      // values (`10^{-400}`, `√2 · 10^{-400}`) exactly, and inexact values
-      // (the decimal `1e-400` under `.N()`) at working precision. Their
-      // machine values are 0 or infinity here, and `isGreater` reads those
-      // or applies the engine tolerance. A modulus that is not a real
-      // number literal leaves the application unevaluated.
-      const moduli = nonzero.map((k) =>
-        ce.function('Abs', [entries[k]]).evaluate()
-      );
-      let top = 0;
-      for (let i = 1; i < moduli.length; i++) {
-        const order = exactCompareNumbers(moduli[i], moduli[top]);
-        if (order === undefined) return undefined;
-        if (order > 0) top = i;
-      }
-      best = nonzero[top];
+    if (ordered) {
+      // Every entry is zero: the norm is zero.
+      if (best === undefined) return ce.Zero;
+      return ce
+        .function('Abs', [entries[best]])
+        .evaluate({ numericApproximation });
     }
-    return ce
-      .function('Abs', [entries[best]])
-      .evaluate({ numericApproximation });
+    if (!closedForm) return undefined;
   }
 
-  // Two rows or two columns, exact entries: the closed form.
-  if (
-    allExact &&
-    Math.min(m, n) === 2 &&
-    Math.max(m, n) <= MAX_EXACT_SPECTRAL_SIDE
-  ) {
+  // Two rows or two columns, exact or symbolic entries: the closed form.
+  if (closedForm) {
     // Built with `ce.function` rather than the `.add()`/`.mul()` methods,
     // which fold a sum of exact values such as `18 + 2√65` to a float.
     const at = (i: number, j: number) => entries[i * n + j];
@@ -347,15 +490,81 @@ function spectralMatrixNorm(
     return numericApproximation ? exact.N() : exact;
   }
 
+  if (symbolic) return undefined;
+
+  // Rank 1: the Frobenius norm. The test also runs for inexact entries: a
+  // matrix whose minors are exactly 0 in the values it holds has rank 1, and
+  // its Frobenius norm is then more accurate than the Jacobi iteration
+  // below, which answers `3.0000000000000004` for the 3 × 3 matrix of ones.
+  // A minor that rounds to 0 in a matrix that does not have rank 1 exactly
+  // is at most a rounding error of its products, so the matrix is then
+  // within a rounding error of rank 1, and the Frobenius norm differs from
+  // its spectral norm by much less than one rounding error.
+  if (entries.length <= MAX_EXACT_SPECTRAL_SIDE ** 2) {
+    const frobenius = rankOneSpectralNorm(ce, entries, m, n, isZero);
+    if (frobenius !== undefined)
+      return numericApproximation ? frobenius.N() : frobenius;
+  }
+
   if (allExact && !numericApproximation) return undefined;
 
-  const re: number[][] = [];
-  const im: number[][] = [];
+  const { re, im, exponent } = scaledMachineMatrix(numericValues, m, n);
+  return scaledNumber(ce, spectralNorm(re, im), exponent);
+}
+
+/**
+ * The spectral norm of an `m × n` matrix of numeric entries when its rank is
+ * 1, else `undefined`. `isZero(k)` tells whether entry `k` is exactly zero,
+ * and the matrix has a nonzero entry.
+ *
+ * The rank is 1 when every row is a multiple of the row of a nonzero pivot
+ * entry `a_pq`: `a_ij · a_pq − a_iq · a_pj = 0` for each entry. Each test is
+ * evaluated (exactly for exact entries), and only a result that is 0 counts: a matrix
+ * whose test cannot be decided is not taken to have rank 1. A matrix of rank
+ * 1 has one nonzero singular value, and the sum of the squared singular
+ * values is `Σ|aᵢⱼ|²`, so the norm is the Frobenius norm. For example, the
+ * 3 × 3 matrix with every entry `10^-400` has the norm `3 · 10^-400`.
+ */
+function rankOneSpectralNorm(
+  ce: ComputeEngine,
+  entries: readonly Expression[],
+  m: number,
+  n: number,
+  isZero: (k: number) => boolean
+): Expression | undefined {
+  let pivot = -1;
+  for (let k = 0; k < entries.length; k++)
+    if (!isZero(k)) {
+      pivot = k;
+      break;
+    }
+  if (pivot < 0) return undefined;
+  const p = Math.floor(pivot / n);
+  const q = pivot % n;
+  const at = (i: number, j: number) => entries[i * n + j];
   for (let i = 0; i < m; i++) {
-    re.push(values.slice(i * n, (i + 1) * n).map((v) => v.re));
-    im.push(values.slice(i * n, (i + 1) * n).map((v) => v.im));
+    if (i === p) continue;
+    for (let j = 0; j < n; j++) {
+      if (j === q) continue;
+      const minor = ce
+        .function('Subtract', [
+          ce.function('Multiply', [at(i, j), at(p, q)]),
+          ce.function('Multiply', [at(i, q), at(p, j)]),
+        ])
+        .evaluate();
+      if (!minor.isSame(0)) return undefined;
+    }
   }
-  return ce.number(spectralNorm(re, im));
+  return ce
+    .function('Sqrt', [
+      ce.function(
+        'Add',
+        entries.map((x) =>
+          ce.function('Power', [ce.function('Abs', [x]), ce.number(2)])
+        )
+      ),
+    ])
+    .evaluate();
 }
 
 /**
@@ -363,11 +572,17 @@ function spectralMatrixNorm(
  * when each line is a column, the order-∞ norm when each line is a row.
  * `lines[k]` holds the indices, in `entries`, of the entries of line `k`.
  *
- * The largest line is chosen from the numeric value (`.N()`) of each
- * magnitude. When no entry is an inexact number, the result is then the
- * EXACT sum of that line's magnitudes, so `‖[[1, 1+2i], [0, 1]]‖₁` is
- * `1 + √5` and `‖[[π, 1], [0, 1]]‖₁` is `π`, not a machine number. When an
- * entry is inexact, the result is the machine sum.
+ * When an entry is an inexact number, or under `.N()`, the result is the
+ * largest machine sum, or the largest sum of big decimals when a float64
+ * cannot hold a magnitude (`10^400`, `10^-400`). Otherwise the result is EXACT: the machine sums
+ * discard the lines that are clearly smaller than the largest one, the
+ * magnitudes of each other line are added exactly, and the largest exact
+ * sum is chosen by `exactOrder`, the
+ * order that `Max` and `Sort` also use. So `‖[[1, 1+2i], [0, 1]]‖₁` is
+ * `1 + √5`, `‖[[π, 1], [0, 1]]‖₁` is `π`, and `‖[[10^20, 0], [0, 10^20 +
+ * 1]]‖₁` is `10^20 + 1`, which a machine sum cannot separate from `10^20`.
+ * When two exact line sums cannot be ordered, the norm is undecided
+ * (`undefined`).
  *
  * A NaN entry makes the norm NaN, wherever it is: its line sum is NaN, so
  * the maximum over the lines is NaN. It is tested before the comparison
@@ -377,15 +592,6 @@ function spectralMatrixNorm(
  * numeric value (`|x|` for an unassigned `x`) leaves the norm undecided
  * (`undefined`). An infinite entry is handled by the caller, before this
  * function.
- *
- * The machine sums give the order only when they can tell the lines apart.
- * When no entry is inexact, the lines whose machine sum overflows, or is
- * within the machine precision of the largest one (which includes a tie,
- * and a sum of entries such as `10^-400` that underflow to 0), are ordered
- * by their EXACT sums instead: `‖[[10^20, 0], [0, 10^20 + 1]]‖₁` is
- * `10^20 + 1`, and `‖[[10^400, 0], [0, 2·10^400]]‖₁` is `2·10^400`. When
- * the exact sums of those lines cannot be ordered, the norm is undecided
- * (`undefined`).
  */
 function maxAbsoluteLineSum(
   ce: ComputeEngine,
@@ -393,95 +599,109 @@ function maxAbsoluteLineSum(
   lines: readonly (readonly number[])[],
   numericApproximation: boolean | undefined
 ): Expression | undefined {
+  let allExact = true;
+  for (const el of entries) if (isNumber(el) && !el.isExact) allExact = false;
+  const exact = allExact && !numericApproximation;
+
   const magnitudes: Expression[] = [];
   const values: number[] = [];
-  let allExact = true;
+  // The big decimal value of each magnitude on the machine route, or
+  // `undefined` when a float64 holds every one of them.
+  const bigValues: BigDecimal[] = [];
+  let machineHoldsAll = true;
   let undecided = false;
   for (const el of entries) {
     const magnitude = ce.function('Abs', [el]).evaluate();
-    const v = magnitude.N();
-    if (isNumber(v) && Number.isNaN(v.re)) return ce.NaN;
+    // The machine value. On the exact route it is only used to discard
+    // lines, so the cheap `.re` projection of a number literal is enough,
+    // and `.N()` is computed only for a constant expression such as
+    // `1 + π`, whose `.re` is NaN. On the machine route it is the value.
+    const v = exact && isNumber(magnitude) ? magnitude : magnitude.N();
+    if (isNumber(v) && v.isNaN === true) return ce.NaN;
+    // A magnitude with no numeric value (`|x|` for an unassigned `x`). A
+    // NaN in a later entry still makes the norm NaN.
     if (!isNumber(v)) undecided = true;
     magnitudes.push(magnitude);
     values.push(v.re);
-    if (isNumber(el) && !el.isExact) allExact = false;
+    if (!exact) {
+      const big = v.bignumRe ?? new BigDecimal(v.re);
+      if (!float64HoldsBigDecimal(big)) machineHoldsAll = false;
+      bigValues.push(big);
+    }
   }
   if (undecided) return undefined;
+  if (lines.length === 0) return ce.Zero;
 
-  let best = -1;
-  let bestSum = -Infinity;
-  const sums: number[] = [];
-  for (let k = 0; k < lines.length; k++) {
+  const machineSums = lines.map((line) => {
     let sum = 0;
-    for (const index of lines[k]) sum += values[index];
-    sums.push(sum);
-    if (sum > bestSum) {
-      bestSum = sum;
-      best = k;
+    for (const index of line) sum += values[index];
+    return sum;
+  });
+
+  if (!exact) {
+    // A magnitude that a float64 cannot hold (`10^400`, `10^-400`) would
+    // make its machine sum infinite or zero. The sums are then added as big
+    // decimals, at working precision: `‖[[10^400, 0], [0, 10^400]]‖₁` is
+    // `10^400` under `.N()`, not `+∞`.
+    if (!machineHoldsAll) {
+      let bestBig: BigDecimal | undefined = undefined;
+      for (const line of lines) {
+        let sum = BigDecimal.ZERO;
+        for (const index of line) sum = sum.add(bigValues[index]);
+        if (bestBig === undefined || sum.gt(bestBig)) bestBig = sum;
+      }
+      return ce.number(bestBig!);
     }
+    let bestSum = -Infinity;
+    for (const sum of machineSums) if (sum > bestSum) bestSum = sum;
+    return ce.number(bestSum);
   }
-  if (best < 0) return ce.Zero;
 
-  if (!allExact || numericApproximation) return ce.number(bestSum);
+  // The machine sums discard the lines that are clearly smaller than the
+  // largest one, so that only the few lines that may be the largest are
+  // added exactly. Each machine value is within one rounding of the exact
+  // magnitude, and a sum of `k` non-negative terms adds at most `k`
+  // roundings, so the machine sum of a line is within
+  // `(k + 1)·ε·sum` of its exact sum (`ε` is `Number.EPSILON`). The bound
+  // below is ten times that. A line whose machine sum is not a finite
+  // number (a magnitude that a float64 cannot hold, such as `10^400`) is
+  // always kept, and does not discard other lines.
+  let bestMachine = -Infinity;
+  let bestBound = 0;
+  lines.forEach((line, k) => {
+    const sum = machineSums[k];
+    if (Number.isFinite(sum) && sum > bestMachine) {
+      bestMachine = sum;
+      bestBound = 10 * (line.length + 1) * Number.EPSILON * sum;
+    }
+  });
 
-  // The exact sum of a line. Built with `ce.function` rather than the
-  // `.add()` method, which folds a sum of exact values such as `1 + √5` to a
-  // float.
-  const exactSum = (k: number): Expression =>
-    ce
+  // The exact sum of each remaining line. Built with `ce.function` rather
+  // than the `.add()` method, which folds a sum of exact values such as
+  // `1 + √5` to a float.
+  let best: Expression | undefined = undefined;
+  for (let k = 0; k < lines.length; k++) {
+    const line = lines[k];
+    const sum = machineSums[k];
+    if (Number.isFinite(sum)) {
+      const bound = 10 * (line.length + 1) * Number.EPSILON * sum;
+      if (sum + bound < bestMachine - bestBound) continue;
+    }
+    const exactSum = ce
       .function(
         'Add',
-        lines[k].map((index) => magnitudes[index])
+        line.map((index) => magnitudes[index])
       )
       .evaluate();
-
-  // The lines the machine sums cannot separate from the best line. When the
-  // best machine sum overflows, these are the other lines that overflow.
-  // Otherwise, they are the lines whose machine sum is within the rounding
-  // error of the best one: each magnitude and each addition can round by
-  // one unit in the last place.
-  const candidates: number[] = [];
-  for (let k = 0; k < lines.length; k++) {
-    const sum = sums[k];
-    if (!Number.isFinite(bestSum)) {
-      if (!Number.isFinite(sum)) candidates.push(k);
+    if (best === undefined) {
+      best = exactSum;
       continue;
     }
-    const tolerance =
-      4 * Number.EPSILON * (lines[k].length + 1) * Math.abs(bestSum);
-    if (bestSum - sum <= tolerance) candidates.push(k);
-  }
-
-  let bestExact = exactSum(candidates[0]);
-  for (const k of candidates.slice(1)) {
-    const candidate = exactSum(k);
-    const order = compareExactSums(ce, candidate, bestExact);
+    const order = exactOrder(exactSum, best);
     if (order === undefined) return undefined;
-    if (order > 0) bestExact = candidate;
+    if (order > 0) best = exactSum;
   }
-  return bestExact;
-}
-
-/**
- * The order of two exact line sums of `maxAbsoluteLineSum`: `-1`, `0` or
- * `1`, or `undefined` when it cannot be decided.
- *
- * Two number literals compare exactly (`exactCompareNumbers`). Other sums
- * (`1 + π`) are equal when they are the same expression, and are otherwise
- * ordered by the sign of their exact difference, when that difference
- * evaluates to a number literal.
- */
-function compareExactSums(
-  ce: ComputeEngine,
-  a: Expression,
-  b: Expression
-): -1 | 0 | 1 | undefined {
-  if (a.isSame(b)) return 0;
-  const order = exactCompareNumbers(a, b);
-  if (order !== undefined) return order;
-  const difference = ce.function('Subtract', [a, b]).evaluate();
-  if (difference.isSame(0)) return 0;
-  return exactCompareNumbers(difference, 0);
+  return best;
 }
 
 /** The shape gate `list<any>`: "is this operand list-shaped?", asked with
@@ -3324,10 +3544,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           if (normType === 2) {
             // L2 norm: sqrt of sum of squares
+            // Each square is a `Power`, not the product `absEl.mul(absEl)`:
+            // the product method distributes (`(π − 1)²` became
+            // `1 − 2π + π²`), and the square root of a sum of terms cannot
+            // take the square out, so `‖[1 − π]‖` was `√(1 − 2π + π²)`
+            // rather than `π − 1`.
             const sumSq = addAll(
               elements.map((el) => {
                 const absEl = ce.expr(['Abs', el]).evaluate();
-                return absEl.mul(absEl);
+                return ce.function('Power', [absEl, ce.number(2)]).evaluate();
               })
             );
             // Honor `.N()`: `Norm((1,1)).N()` must numericize to 1.414…,
@@ -3336,32 +3561,30 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
 
           if (normType === 'infinity') {
-            // L∞ norm: max absolute value
+            // L∞ norm: the largest magnitude. A broadcasting component
+            // evaluates to a List: the scalar maximum cannot represent the
+            // per-element result, so the norm stays symbolic rather than
+            // return a wrong scalar. A NaN magnitude makes the norm NaN, the
+            // answer the matrix branches below give. A magnitude with no
+            // numeric value (`|x|` for an unassigned `x`) leaves the norm
+            // undecided.
+            const magnitudes = elements.map((el) =>
+              ce.expr(['Abs', el]).evaluate()
+            );
+            if (magnitudes.some((m) => m.isCollection)) return undefined;
+            if (magnitudes.some((m) => isNumber(m) && m.isNaN === true))
+              return ce.NaN;
+            // The magnitudes are ordered by `exactOrder`, the order of `Max`:
+            // a constant such as `π` or `π − 1` takes part, and `10^20 + 1`
+            // is larger than `10^20`, which a machine comparison cannot
+            // see. When two magnitudes cannot be ordered, the norm is
+            // undecided.
             let maxVal: Expression = ce.Zero;
-            for (const el of elements) {
-              const absEl = ce.expr(['Abs', el]).evaluate();
-              // A broadcasting component evaluates to a List: the scalar
-              // max below cannot represent the per-element result (its
-              // `.re` is NaN, so the component would be silently DROPPED).
-              // Stay symbolic rather than return a wrong scalar.
-              if (absEl.isCollection) return undefined;
-              // Compare: use numeric comparison. A magnitude that is not a
-              // resolved real number cannot take part in the maximum, and
-              // the `>` test below cannot see it: it would leave the
-              // component out and answer the maximum of the REST. A
-              // magnitude that is still symbolic (`|x|` for an unassigned
-              // `x`) leaves the whole norm undecided; a NaN magnitude makes
-              // it NaN, the answer the matrix branches below give for the
-              // same reason. The literal test is what separates the two:
-              // `.re` reads NaN for BOTH a NaN literal and a symbolic
-              // magnitude.
-              const absNum = isNumber(absEl) ? absEl.re : undefined;
-              if (absNum === undefined) return undefined;
-              if (Number.isNaN(absNum)) return ce.NaN;
-              const maxNum = maxVal.re ?? 0;
-              if (absNum > maxNum) {
-                maxVal = absEl;
-              }
+            for (const m of magnitudes) {
+              if (!isNumber(m) && !m.isConstant) return undefined;
+              const order = exactOrder(m, maxVal);
+              if (order === undefined) return undefined;
+              if (order > 0) maxVal = m;
             }
             return numericApproximation ? maxVal.N() : maxVal;
           }
@@ -3876,15 +4099,32 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (exact !== undefined)
           return numericApproximation ? exact.N() : exact;
 
+        // Under `N()` the entries arrive as floats (`N()` of `10^20` is a
+        // big decimal), and the exact closed form above does not apply. A
+        // float is a decimal, so a 1×1 or 2×2 Gram matrix of those decimal
+        // values still has the closed form, computed exactly and then
+        // approximated at the working precision. The double kernel below
+        // has an absolute error of about ε·σ_max and returns 0 for a smaller
+        // singular value: `SingularValues([[10^20, 1], [1, 2]]).N()` was
+        // `[1e20, 0]`.
+        if (numericApproximation) {
+          const decimal = decimalRationalMatrix(M, m, n);
+          if (decimal !== undefined) {
+            const closed = rationalSingularValues(decimal, m, n, ce);
+            if (closed !== undefined) return closed.N();
+          }
+        }
+
         // Numeric fallback: extract the singular values from the float SVD,
         // sorted descending, keeping min(m, n) of them (zeros included).
         const result = computeSVD(M, m, n, ce);
-        if (!result) return undefined;
+        if (!result)
+          return numericSingularValues(M, m, n, ce, numericApproximation);
         const vals = result.singularValues
           .slice()
           .sort((a, b) => b - a)
           .slice(0, Math.min(m, n));
-        return ce.expr(['List', ...vals.map((v) => ce.number(v))]);
+        return ce.expr(['List', ...vals.map((v) => scaledNumber(ce, v))]);
       },
     },
   },
@@ -4153,8 +4393,34 @@ function computeSVD(
   // arithmetic only, so the conversion fails for an entry that is complex or
   // not numeric, and the application then stays unevaluated. Reading only the
   // real part of a complex entry would give a wrong result.
-  const A = tensorToNumericMatrix(M, m, n);
-  if (!A) return undefined;
+  const unscaled = tensorToNumericMatrix(M, m, n);
+  if (!unscaled) return undefined;
+
+  // Divide the matrix by a power of two near its largest magnitude, and
+  // multiply the singular values by it at the end. A^T·A squares the
+  // entries, so without the scale an entry above about 1e154 overflows to
+  // infinity and an entry below about 1e-154 underflows to zero: the SVD of
+  // `[[10^200, 0], [0, 10^200]]` was NaN. A power of two divides every
+  // entry exactly. U and V do not depend on the scale.
+  let largest = 0;
+  let smallest = Infinity;
+  for (const row of unscaled)
+    for (const x of row) {
+      largest = Math.max(largest, Math.abs(x));
+      if (x !== 0) smallest = Math.min(smallest, Math.abs(x));
+    }
+  // A matrix whose entry magnitudes span more than
+  // `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT` loses its small entries in the
+  // Gram matrix, and its small singular values would come back as 0 (and U
+  // and V would not be orthogonal): decline it.
+  if (
+    largest > 0 &&
+    Math.log10(largest) - Math.log10(smallest) >
+      MAX_SINGULAR_VALUE_RANGE_EXPONENT
+  )
+    return undefined;
+  const scale = largest === 0 ? 1 : 2 ** Math.floor(Math.log2(largest));
+  const A = unscaled.map((row) => row.map((x) => x / scale));
 
   // Compute A^T * A for right singular vectors
   const AtA: number[][] = Array(n)
@@ -4293,6 +4559,9 @@ function computeSVD(
     }
   }
 
+  // The singular values of the matrix itself, not of the scaled one.
+  for (let i = 0; i < singularValues.length; i++) singularValues[i] *= scale;
+
   // Build Σ matrix (m x n diagonal matrix)
   const S: number[][] = Array(m)
     .fill(null)
@@ -4308,7 +4577,9 @@ function computeSVD(
   ]);
   const SExpr = ce.expr([
     'List',
-    ...S.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...S.map((row) =>
+      ce.expr(['List', ...row.map((x) => scaledNumber(ce, x))])
+    ),
   ]);
   const VExpr = ce.expr([
     'List',
@@ -4316,6 +4587,60 @@ function computeSVD(
   ]);
 
   return { U: UExpr, S: SExpr, V: VExpr, singularValues };
+}
+
+/**
+ * The singular values of a matrix that `computeSVD` declines — a matrix with
+ * a complex entry, or with an entry that a float64 cannot hold (`10^400`) —
+ * in machine precision, sorted in descending order, or `undefined`.
+ *
+ * They are computed by `singularValues()` (`numerics/linear-algebra.ts`),
+ * which finds the eigenvalues of the Gram matrix `Aᴴ A` (or `A Aᴴ`) with
+ * the Jacobi method, for a complex matrix of any size. The entries are
+ * first divided by a power of ten when a float64 cannot hold one of them
+ * (`scaledMachineMatrix`), and the singular values are then big decimals.
+ *
+ * A matrix of exact entries has no numeric answer under `evaluate()`: the
+ * application stays unevaluated, and `.N()` answers. A symbolic entry, or a
+ * NaN or infinite entry, leaves the application unevaluated. So does a
+ * matrix whose nonzero entry magnitudes span more than
+ * `10^MAX_SINGULAR_VALUE_RANGE_EXPONENT`: its small singular values would
+ * come back as 0 (the singular values of
+ * `[[10^400, 1, 0], [0, 1, 0], [0, 0, 1]]` are `10^400, 1, 1`, not
+ * `10^400, 0, 0`).
+ */
+function numericSingularValues(
+  M: Expression,
+  m: number,
+  n: number,
+  ce: ComputeEngine,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const packed = packTensor(ce, M);
+  if (!packed) return undefined;
+  const isFiniteValue = (big: BigDecimal | undefined, x: number) =>
+    big !== undefined ? big.isFinite() : Number.isFinite(x);
+  const values: Expression[] = [];
+  let allExact = true;
+  for (let i = 0; i < m; i++)
+    for (let j = 0; j < n; j++) {
+      const entry = ce.box(packed.at(i + 1, j + 1) as Expression);
+      if (isNumber(entry) && !entry.isExact) allExact = false;
+      const v = entry.N();
+      if (!isNumber(v)) return undefined;
+      if (!isFiniteValue(v.bignumRe, v.re) || !isFiniteValue(v.bignumIm, v.im))
+        return undefined;
+      values.push(v);
+    }
+  if (allExact && !numericApproximation) return undefined;
+  const { re, im, exponent, wideRange } = scaledMachineMatrix(values, m, n);
+  // The small singular values of a matrix with a wide range of entry
+  // magnitudes would come back as 0 (see `scaledMachineMatrix`).
+  if (wideRange) return undefined;
+  return ce.expr([
+    'List',
+    ...singularValues(re, im).map((v) => scaledNumber(ce, v, exponent)),
+  ]);
 }
 
 /**
@@ -4390,6 +4715,22 @@ function exactSingularValues(
 
   const rational = tensorToRationalMatrix(M, m, n);
   if (rational === undefined) return exactComplexSingularValues(M, m, n, ce);
+  return rationalSingularValues(rational, m, n, ce);
+}
+
+/**
+ * The singular values of an `m × n` matrix of rationals whose Gram matrix
+ * is 1×1 or 2×2 (`min(m, n) ≤ 2`), by the closed form: `√λ` for `λ` an
+ * eigenvalue of the Gram matrix. `undefined` for a larger Gram matrix.
+ */
+function rationalSingularValues(
+  rational: BigRat[][],
+  m: number,
+  n: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  const g = Math.min(m, n);
+  if (g > 2) return undefined;
 
   // Gram entry: A^T·A when n ≤ m (g = n), else A·A^T (g = m).
   const useAtA = n <= m;
@@ -4422,15 +4763,98 @@ function exactSingularValues(
 
 /**
  * The two singular values √λ₁ ≥ √λ₂ of a matrix whose 2×2 Gram matrix has
- * the trace `tr` and the determinant `det`. The Gram matrix is Hermitian
- * positive semidefinite, so λ = (tr ± √(tr² − 4·det)) / 2 are real and
- * non-negative, and the list is already in descending order.
+ * the trace `tr` and the determinant `det`, two exact rationals. The Gram
+ * matrix is Hermitian positive semidefinite, so
+ * λ = (tr ± √(tr² − 4·det)) / 2 are real and non-negative, and the list is
+ * already in descending order.
+ *
+ * When the numerator or the denominator of the trace or of the radicand
+ * `tr² − 4·det` is not a safe integer (entries such as `10^200`), the
+ * evaluation of the closed form can give a sum such as
+ * `(7·10^400 + √(45·10^800)) / 2` a value that was computed as a float and
+ * read back as an exact integer, and the result was then
+ * `√6.85410196624968454462e+400`, an exact expression of a rounded value.
+ * So the Gram matrix is first divided by `10^(2k)`, for `10^k` near the
+ * square root of the trace, and the singular values are `10^k` times those
+ * of the smaller Gram matrix: `SingularValues([[10^200, 10^200], [10^200, 2 ·
+ * 10^200]])` is `10^200 · √((7 ± 3√5) / 2)`. When the scaled trace or
+ * radicand still does not fit a safe integer (entries such as `10^200 + 1`),
+ * the closed form is returned in its canonical form, not evaluated: it is
+ * exact, and `.N()` of it is the big decimal value.
  */
 function gram2x2SingularValues(
   tr: Expression,
   det: Expression,
   ce: ComputeEngine
 ): Expression {
+  const toBigRat = (x: Expression): BigRat | undefined => {
+    const r = asRational(x);
+    return r === undefined ? undefined : [BigInt(r[0]), BigInt(r[1])];
+  };
+  const trRat = toBigRat(tr);
+  const detRat = toBigRat(det);
+  if (trRat !== undefined && detRat !== undefined) {
+    const safe = ([p, q]: BigRat) =>
+      (p < 0n ? -p : p) <= BigInt(Number.MAX_SAFE_INTEGER) &&
+      q <= BigInt(Number.MAX_SAFE_INTEGER);
+    const radicand = (t: BigRat, d: BigRat) =>
+      ratSub(ratMul(t, t), ratMul([4n, 1n], d));
+    if (!safe(trRat) || !safe(radicand(trRat, detRat))) {
+      // The decimal exponent of the trace, and half of it.
+      const digits = (x: bigint) => (x < 0n ? -x : x).toString().length;
+      const k = Math.floor((digits(trRat[0]) - digits(trRat[1])) / 2);
+      const tenTo = (e: number): BigRat =>
+        e >= 0 ? [10n ** BigInt(e), 1n] : [1n, 10n ** BigInt(-e)];
+      const t = ratMul(trRat, tenTo(-2 * k));
+      const d = ratMul(detRat, tenTo(-4 * k));
+      if (safe(t) && safe(radicand(t, d)))
+        return ce.expr([
+          'List',
+          ...gram2x2Roots(ce.number(t), ce.number(d), ce).map((root) =>
+            ce
+              .function('Multiply', [ce.function('Power', [10, k]), root])
+              .evaluate()
+          ),
+        ]);
+      // The canonical closed form, not evaluated. The halving is a product
+      // with `1/2`, not a `Divide`: canonicalizing the quotient of such a
+      // sum by 2 folds it to a rounded number. The smaller eigenvalue is
+      // `λ₂ = det / λ₁ = 2·det / (tr + √(tr² − 4·det))`, not
+      // `(tr − √(tr² − 4·det)) / 2`: the difference loses every digit
+      // under `.N()` when `λ₂` is much smaller than `λ₁`, as in
+      // `[[10^200, 10^200], [10^200, 10^200 + 1]]`, whose singular values
+      // are about `2·10^200` and `1/2`.
+      const sum = ce.function('Add', [
+        tr,
+        ce.function('Sqrt', [ce.number(radicand(trRat, detRat))]),
+      ]);
+      return ce.expr([
+        'List',
+        ce.function('Sqrt', [
+          ce.function('Multiply', [ce.number([1, 2]), sum]),
+        ]),
+        ce.function('Sqrt', [
+          ce.function('Multiply', [
+            ce.number(ratMul([2n, 1n], detRat)),
+            ce.function('Power', [sum, -1]),
+          ]),
+        ]),
+      ]);
+    }
+  }
+  return ce.expr([
+    'List',
+    ...gram2x2Roots(tr, det, ce).map((root) => root.evaluate()),
+  ]);
+}
+
+/** The two roots `√λ₁`, `√λ₂` of the closed form of
+ * `gram2x2SingularValues`, not evaluated. */
+function gram2x2Roots(
+  tr: Expression,
+  det: Expression,
+  ce: ComputeEngine
+): [Expression, Expression] {
   const disc = ce.function('Sqrt', [
     ce.function('Subtract', [
       ce.function('Power', [tr, 2]),
@@ -4442,11 +4866,7 @@ function gram2x2SingularValues(
     ce.function('Subtract', [tr, disc]),
     2,
   ]);
-  return ce.expr([
-    'List',
-    ce.function('Sqrt', [lambda1]).evaluate(),
-    ce.function('Sqrt', [lambda2]).evaluate(),
-  ]);
+  return [ce.function('Sqrt', [lambda1]), ce.function('Sqrt', [lambda2])];
 }
 
 /**
@@ -4571,43 +4991,16 @@ function computeEigenvalues3x3(
 ): Expression | undefined {
   if (!isTensorValue(M)) return undefined;
 
-  // The cubic solver below is real-only. A matrix with a complex entry has a
-  // characteristic polynomial with complex coefficients, which it cannot
-  // solve, so the application stays unevaluated. (A symbolic entry still
-  // takes the QR fallback below, which declines it too.)
-  for (let i = 1; i <= 3; i++)
-    for (let j = 1; j <= 3; j++) {
-      const im = getElement(M, i, j, ce).im;
-      if (!isNaN(im) && im !== 0) return undefined;
-    }
-
-  // Get matrix elements
-  const a11 = getElement(M, 1, 1, ce).re ?? 0;
-  const a12 = getElement(M, 1, 2, ce).re ?? 0;
-  const a13 = getElement(M, 1, 3, ce).re ?? 0;
-  const a21 = getElement(M, 2, 1, ce).re ?? 0;
-  const a22 = getElement(M, 2, 2, ce).re ?? 0;
-  const a23 = getElement(M, 2, 3, ce).re ?? 0;
-  const a31 = getElement(M, 3, 1, ce).re ?? 0;
-  const a32 = getElement(M, 3, 2, ce).re ?? 0;
-  const a33 = getElement(M, 3, 3, ce).re ?? 0;
-
-  // If any element is not numeric, or its machine value is not finite, or a
-  // float64 cannot hold its magnitude (the exact `10^400` reads as +Infinity
-  // and makes every root NaN; a nonzero `10^-400` reads as 0), fall back to
-  // QR. QR declines such a matrix too (`tensorToNumericMatrix`).
-  let holdsAll = true;
-  for (let i = 1; i <= 3 && holdsAll; i++)
-    for (let j = 1; j <= 3 && holdsAll; j++)
-      holdsAll = float64HoldsNumber(getElement(M, i, j, ce));
-  if (
-    !holdsAll ||
-    [a11, a12, a13, a21, a22, a23, a31, a32, a33].some(
-      (x) => x === undefined || !Number.isFinite(x)
-    )
-  ) {
-    return computeEigenvaluesQR(M, 3, ce);
-  }
+  // The cubic solver below is real-only, and computes with machine numbers.
+  // `tensorToNumericMatrix` is the conversion every float kernel uses: it
+  // declines a matrix with a complex entry (its characteristic polynomial has
+  // complex coefficients, which the solver cannot solve), a symbolic entry,
+  // and an entry whose magnitude a float64 cannot hold (the exact `10^400`
+  // reads as +Infinity and makes every root NaN; a nonzero `10^-400` reads
+  // as 0). The application then stays unevaluated.
+  const A = tensorToNumericMatrix(M, 3, 3);
+  if (A === undefined) return undefined;
+  const [[a11, a12, a13], [a21, a22, a23], [a31, a32, a33]] = A;
 
   // Characteristic polynomial: -λ³ + c₂λ² + c₁λ + c₀ = 0
   // where c₂ = trace(A), c₁ = -(minor sums), c₀ = det(A)
@@ -5376,6 +5769,48 @@ function tensorToRationalMatrix(
         typeof n === 'bigint' ? n : BigInt(n),
         typeof d === 'bigint' ? d : BigInt(d),
       ]);
+    }
+    matrix.push(row);
+  }
+  return matrix;
+}
+
+/**
+ * The entries of an `m × n` matrix as exact rationals, reading a float by
+ * its decimal value (the big decimal `1.5e20` is `15·10^19`, the machine
+ * float `0.1` is `1/10`, its shortest decimal spelling). `undefined` when an
+ * entry is not a finite real number literal, or is exact but not rational
+ * (a radical).
+ */
+function decimalRationalMatrix(
+  tensor: Expression,
+  rows: number,
+  cols: number
+): BigRat[][] | undefined {
+  if (!isTensorValue(tensor) || tensor.rank !== 2) return undefined;
+  const ce = tensor.engine;
+  const packed = packTensor(ce, tensor);
+  if (!packed) return undefined;
+  const matrix: BigRat[][] = [];
+  for (let i = 0; i < rows; i++) {
+    const row: BigRat[] = [];
+    for (let j = 0; j < cols; j++) {
+      const boxed = ce.box(packed.at(i + 1, j + 1) as Expression);
+      if (!isNumber(boxed) || boxed.im !== 0) return undefined;
+      if (boxed.isExact) {
+        const r = asRational(boxed);
+        if (r === undefined) return undefined;
+        row.push([BigInt(r[0]), BigInt(r[1])]);
+        continue;
+      }
+      const d = boxed.bignumRe ?? new BigDecimal(boxed.re);
+      if (!d.isFinite()) return undefined;
+      const e = d.exponent;
+      row.push(
+        e >= 0
+          ? [d.significand * 10n ** BigInt(e), 1n]
+          : [d.significand, 10n ** BigInt(-e)]
+      );
     }
     matrix.push(row);
   }

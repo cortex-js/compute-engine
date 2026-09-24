@@ -10,6 +10,10 @@ import type {
   Sign,
 } from '../global-types.js';
 import type { NumericValue } from '../numeric-value/types.js';
+import {
+  ExactNumericValue,
+  orderExactAgainstInexact,
+} from '../numeric-value/exact-numeric-value.js';
 import type { Type } from '../../common/type/types.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -148,6 +152,31 @@ export function exactCompareNumbers(
   }
   if (typeof av === 'number' && typeof bv === 'number')
     return av < bv ? -1 : av > bv ? 1 : 0;
+  // An exact value against an inexact one: the inexact value is the exact
+  // rational it holds (a double or a big decimal), so the pair is ordered
+  // exactly. `lt`/`gt` of an exact value round it to the working precision
+  // first, and `1/3` against the 22-digit decimal `0.3333333333333333333333`
+  // got the wrong sign.
+  const inexactOf = (
+    v: number | NumericValue
+  ): number | NonNullable<NumericValue['bignumRe']> | undefined =>
+    typeof v === 'number'
+      ? Number.isSafeInteger(v)
+        ? undefined
+        : v
+      : v instanceof ExactNumericValue
+        ? undefined
+        : (v.bignumRe ?? v.re);
+  if (av instanceof ExactNumericValue) {
+    const y = inexactOf(bv);
+    if (y !== undefined) return orderExactAgainstInexact(av, y);
+  } else if (bv instanceof ExactNumericValue) {
+    const y = inexactOf(av);
+    if (y !== undefined) {
+      const o = orderExactAgainstInexact(bv, y);
+      return o === undefined ? undefined : (-o as -1 | 0 | 1);
+    }
+  }
   // The order is read from `lt` and `gt` only, never from `eq`: an exact
   // value's `eq(number)` answers `true` for an INTEGER only, so `1/2`
   // against the double `0.5` was "not equal", and the fallthrough ordered

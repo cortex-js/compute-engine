@@ -166,7 +166,6 @@ import {
 import './boxed-expression/serialize.js';
 import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
-import { bigint } from './numerics/bigint.js';
 import {
   deriveSubstream,
   frameDraw,
@@ -2198,7 +2197,13 @@ export class ComputeEngine implements IComputeEngine {
       | Complex
       | OneOf<[BigNum | NumericValueData | ExactNumericValueData]>
   ): NumericValue {
-    // Convert to an ExactNumericValue if possible
+    // Convert to an ExactNumericValue if possible.
+    //
+    // Only a machine double that is a SAFE integer becomes an exact integer.
+    // A double past the safe integers (`1e200`) is a rounded value, and a
+    // big decimal is a value at the working precision whose integer-valuedness
+    // depends on that precision: both stay floats. An exact integer beyond the
+    // safe range comes from a bigint or a string of digits.
     if (value instanceof NumericValue) return value.asExact ?? value;
 
     const makeNumericValue =
@@ -2208,7 +2213,7 @@ export class ComputeEngine implements IComputeEngine {
             new MachineNumericValue(x);
 
     if (typeof value === 'number') {
-      if (Number.isInteger(value))
+      if (Number.isSafeInteger(value))
         return new ExactNumericValue(value, makeNumericValue);
       return makeNumericValue(value);
     }
@@ -2219,13 +2224,7 @@ export class ComputeEngine implements IComputeEngine {
     if (isRational(value))
       return new ExactNumericValue({ rational: value }, makeNumericValue);
 
-    if (value instanceof BigDecimal) {
-      if (value.isInteger()) {
-        const n = bigint(value.toString());
-        if (n !== null) return new ExactNumericValue(n, makeNumericValue);
-      }
-      return makeNumericValue(value);
-    }
+    if (value instanceof BigDecimal) return makeNumericValue(value);
 
     if (value instanceof Complex) {
       if (value.im === 0) return this._numericValue(value.re);
@@ -2240,17 +2239,9 @@ export class ComputeEngine implements IComputeEngine {
       if (value.im !== undefined && value.im !== 0)
         return makeNumericValue(value);
 
-      // Check if decimal part is an integer
-      // console.assert(value.rational === undefined);
-      if (value.re instanceof BigDecimal && value.re.isInteger())
-        return new ExactNumericValue(
-          {
-            rational: [bigint(value.re.toString())!, BigInt(1)],
-            // radical: value.radical,
-          },
-          makeNumericValue
-        );
-      if (typeof value.re === 'number' && Number.isInteger(value.re))
+      // A real part that is a safe-integer double is an exact integer (a big
+      // decimal real part stays a float, see above)
+      if (typeof value.re === 'number' && Number.isSafeInteger(value.re))
         return new ExactNumericValue(
           {
             rational: [value.re, 1],

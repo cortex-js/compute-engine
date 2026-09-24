@@ -247,38 +247,70 @@ export function bigSkewness(values: Iterable<BigDecimal>): BigDecimal {
   return m3.div(m2.mul(m2.sqrt()));
 }
 
+/**
+ * The most frequent value of a machine sample. Among values that occur
+ * equally often, the SMALLEST one is the mode, the same tie rule as the exact
+ * kernel (`exactMode` in `library/statistics.ts`), so `evaluate()` and `.N()`
+ * agree on which value wins a tie.
+ *
+ * Two data count together only when their doubles are equal. That is the
+ * precision of the sample: two machine values that differ in the last bit
+ * are two values. (`0` and `-0` count together, and so do two `NaN`.)
+ */
 export function mode(values: Iterable<number>): number {
-  const counts: Record<number, number> = {};
-  for (const v of values) {
-    counts[v] = (counts[v] ?? 0) + 1;
-  }
+  const counts = new Map<number, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
   let max = 0;
   let mode = NaN;
-  for (const v in counts) {
-    const c = counts[v];
-    if (c > max) {
+  for (const [v, c] of counts) {
+    // `NaN` compares false with everything, so a `NaN` candidate loses every
+    // tie and a `NaN` datum wins only with a strictly higher count.
+    if (c > max || (c === max && (v < mode || Number.isNaN(mode)))) {
       max = c;
-      mode = +v;
+      mode = v;
     }
   }
   return mode;
 }
 
+/**
+ * The most frequent value of a big-decimal sample, with the same tie rule as
+ * `mode`: the smallest value among the most frequent ones.
+ *
+ * Two data count together when they agree within the working precision
+ * (`BigDecimal.precision`, p significant digits): when `|a - b|` is less
+ * than `max(|a|, |b|) · 10^(1-p)`. Two spellings of one real value, such as
+ * `ln 6` and `ln 2 + ln 3`, are computed by different operations and can
+ * differ by a few units in the last digit; a comparison of the digits would
+ * count them apart. Each group of equal values is anchored on its smallest
+ * member, so a chain of values that each differ from the next by less than
+ * the tolerance does not merge into one group.
+ */
 export function bigMode(values: Iterable<BigDecimal>): BigDecimal {
-  const counts: Record<string, number> = {};
-  for (const v of values) {
-    counts[v.toString()] = (counts[v.toString()] ?? 0) + 1;
+  const sorted = [...values].sort((x, y) => {
+    // `NaN` sorts last: `cmp` answers `NaN` for it, which `sort` cannot use.
+    if (x.isNaN()) return y.isNaN() ? 0 : 1;
+    if (y.isNaN()) return -1;
+    return x.cmp(y);
+  });
+  const epsilon = new BigDecimal(`1e${1 - BigDecimal.precision}`);
+  const same = (a: BigDecimal, b: BigDecimal): boolean => {
+    if (a.isNaN() || b.isNaN()) return a.isNaN() && b.isNaN();
+    // Equal infinities: their difference is `NaN`, not zero.
+    if (a.eq(b)) return true;
+    if (!a.isFinite() || !b.isFinite()) return false;
+    const scale = a.abs().gt(b.abs()) ? a.abs() : b.abs();
+    return a.sub(b).abs().lt(scale.mul(epsilon));
+  };
+  let best: { count: number; val: BigDecimal } | undefined;
+  let run: { count: number; val: BigDecimal } | undefined;
+  for (const v of sorted) {
+    if (run !== undefined && same(run.val, v)) run.count += 1;
+    else run = { count: 1, val: v };
+    // Strictly greater: an earlier run (a smaller value) keeps a tie.
+    if (best === undefined || run.count > best.count) best = run;
   }
-  let max = 0;
-  let mode = BigDecimal.NAN;
-  for (const v in counts) {
-    const c = counts[v];
-    if (c > max) {
-      max = c;
-      mode = new BigDecimal(v);
-    }
-  }
-  return mode;
+  return best ? best.val : BigDecimal.NAN;
 }
 
 // Quartile convention: Moore–McCabe (a.k.a. Tukey's exclusive hinges for the

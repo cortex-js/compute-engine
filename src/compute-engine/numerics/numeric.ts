@@ -331,25 +331,78 @@ export function factorial2(n: number): number {
 }
 
 /**
- * The machine-precision values of `Tan`, `Cot`, `Sec` and `Csc`, with the
- * interpreter's pole rule: when the magnitude of the value is more than a
- * million, the argument is taken to be a pole and the value is `Infinity`,
- * the double that stands for the unsigned pole `~oo`. Without this rule, a
- * float near `π/2` gives a large finite number (`Math.tan(π/2)` is
- * `16331239353195370`). The formulas and the bound are the ones of the
- * interpreter (`boxed-expression/trigonometry.ts`), so that compiled code
- * and `.N()` give the same value.
+ * The relative rounding error of a machine-precision angle that the pole
+ * rule of `Tan`, `Cot`, `Sec` and `Csc` allows: 100 ulps, `100·2⁻⁵³` (about
+ * `1.1·10⁻¹⁴`). `2⁻⁵³` is half an ulp of a double relative to its
+ * magnitude, the largest relative error of one rounding. The factor 100 is
+ * two decimal digits of guard, as in the big-decimal rule, whose allowed
+ * error is `10^(2 − precision)` (`dustScale` in
+ * `boxed-expression/trigonometry.ts`).
  */
-const TRIG_POLE_BOUND = 1e6;
+export const TRIG_POLE_EPSILON = 100 * 2 ** -53;
 
-function trigPole(y: number): number {
-  return y > TRIG_POLE_BOUND || y < -TRIG_POLE_BOUND ? Infinity : y;
+/**
+ * The largest magnitude of the argument that the pole rule of `Tan`, `Cot`,
+ * `Sec` and `Csc` uses to scale its allowed error: `2⁴⁰` (about
+ * `1.1·10¹²`). Above it, the allowed error stays
+ * `2⁴⁰·TRIG_POLE_EPSILON`, about `1.2·10⁻²` radians. Without this cap the
+ * allowed error of a huge argument would be a large fraction of `π`, and
+ * every double above about `10¹⁴` would be a pole. A double that large
+ * cannot resolve a multiple of `π`, so its finite value is the answer.
+ */
+export const TRIG_POLE_ARGUMENT_CAP = 2 ** 40;
+
+/**
+ * Is the machine value `y` of `Tan`, `Cot`, `Sec` or `Csc` at the angle `x`
+ * (in radians) the unsigned pole `~oo`? Near a pole `p`, the magnitude of
+ * the value is about `1/|x − p|`. The value is a pole when `x` is within its
+ * own rounding error of a pole, that is when
+ * `|y|·min(|x|, TRIG_POLE_ARGUMENT_CAP)·TRIG_POLE_EPSILON ≥ 1`. The allowed
+ * error is relative to the argument, because the rounding error of a double
+ * is relative to its magnitude: the double nearest to `kπ` is a pole of
+ * `cot` for `k = 1` and for `k = 10⁹` alike. The pole at 0 is exact, so
+ * `cot(10⁻¹³)` is `10¹³`, not a pole. The cap keeps the allowed error small
+ * for a huge argument: `cot(10²²)` is about `−0.61`, not a pole. An
+ * infinite value (`1/sin(0)`) is a pole, and `NaN` is not.
+ *
+ * The big-decimal rule (`bigPoleDust`) uses `min(1, |x|)` instead: there a
+ * large argument can be an exact integer that is reduced exactly, and
+ * `sin(10²²)` must keep its value. A double has no such exact reduction.
+ *
+ * Examples: `tan(1.5707963267948966)` (the double nearest to `π/2`) is
+ * `1.6·10¹⁶` and is a pole; `tan(1.5707954)` is `1078987.38…` and is not.
+ * This is the machine counterpart of `bigPoleDust`
+ * (`boxed-expression/trigonometry.ts`).
+ */
+export function isMachineTrigPole(y: number, x: number): boolean {
+  if (y === Infinity || y === -Infinity) return true;
+  const ax = Math.abs(x);
+  return (
+    Math.abs(y) *
+      (ax < TRIG_POLE_ARGUMENT_CAP ? ax : TRIG_POLE_ARGUMENT_CAP) *
+      TRIG_POLE_EPSILON >=
+    1
+  );
 }
 
-export const tanWithPole = (x: number): number => trigPole(Math.tan(x));
-export const cotWithPole = (x: number): number => trigPole(1 / Math.tan(x));
-export const secWithPole = (x: number): number => trigPole(1 / Math.cos(x));
-export const cscWithPole = (x: number): number => trigPole(1 / Math.sin(x));
+/**
+ * The machine-precision values of `Tan`, `Cot`, `Sec` and `Csc`, with the
+ * interpreter's pole rule (`isMachineTrigPole`): when the argument is within
+ * its rounding error of a pole, the value is `Infinity`, the double that
+ * stands for the unsigned pole `~oo`. Without this rule, a float near `π/2`
+ * gives a large finite number (`Math.tan(π/2)` is `16331239353195370`). The
+ * formulas and the rule are the ones of the interpreter
+ * (`boxed-expression/trigonometry.ts`), so that compiled code and `.N()` give
+ * the same value.
+ */
+function trigPole(y: number, x: number): number {
+  return isMachineTrigPole(y, x) ? Infinity : y;
+}
+
+export const tanWithPole = (x: number): number => trigPole(Math.tan(x), x);
+export const cotWithPole = (x: number): number => trigPole(1 / Math.tan(x), x);
+export const secWithPole = (x: number): number => trigPole(1 / Math.cos(x), x);
+export const cscWithPole = (x: number): number => trigPole(1 / Math.sin(x), x);
 
 export function chop(n: number, tolerance = DEFAULT_TOLERANCE): 0 | number {
   if (typeof n === 'number' && Math.abs(n) <= tolerance) return 0;

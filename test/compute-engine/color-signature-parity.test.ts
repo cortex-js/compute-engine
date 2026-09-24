@@ -975,8 +975,25 @@ describe('an out-of-range channel on the interpreter and the javascript target',
       ['AsRgb', ['AsOklab', ['Rgb', -0.5, 0.5, 0]]],
       [-0.5, 0.5, 0],
     ],
-    ['AsHsv(Rgb(2, 0, 0))', ['AsHsv', ['Rgb', 2, 0, 0]], [0, 1, 1]],
-    ['AsHsl(Rgb(2, 0.5, -1))', ['AsHsl', ['Rgb', 2, 0.5, -1]], [30, 1, 0.5]],
+    // HSV and HSL describe only the sRGB gamut, so an extended color is
+    // mapped into it with the CSS Color 4 gamut mapping (the OKLCh chroma is
+    // reduced at constant lightness and hue). `Rgb(2, 0, 0)` and
+    // `Rgb(2, 0.5, -1)` have an OKLCh lightness above 1, which maps to white.
+    ['AsHsv(Rgb(2, 0, 0))', ['AsHsv', ['Rgb', 2, 0, 0]], [0, 0, 1]],
+    ['AsHsl(Rgb(2, 0.5, -1))', ['AsHsl', ['Rgb', 2, 0.5, -1]], [0, 0, 1]],
+    // `Rgb(1.2, 0, 0)` maps to `Rgb(1, 0.410225, 0.339121)` (the value
+    // colorjs.io answers with its "css" gamut-mapping method), not to the
+    // clipped `Rgb(1, 0, 0)`.
+    [
+      'AsHsv(Rgb(1.2, 0, 0))',
+      ['AsHsv', ['Rgb', 1.2, 0, 0]],
+      [6.455435134724467, 0.6608788920453945, 1],
+    ],
+    [
+      'AsHsl(Rgb(1.2, 0, 0))',
+      ['AsHsl', ['Rgb', 1.2, 0, 0]],
+      [6.455435134724467, 1, 0.6695605539773027],
+    ],
     ['AsRgb(Hsv(30, 2, 1))', ['AsRgb', ['Hsv', 30, 2, 1]], [1, 0.5, 0]],
     ['AsHsv(Hsv(30, 2, 1))', ['AsHsv', ['Hsv', 30, 2, 1]], [30, 1, 1]],
     ['AsHsv(Hsv(390, 1, 1))', ['AsHsv', ['Hsv', 390, 1, 1]], [30, 1, 1]],
@@ -1057,8 +1074,9 @@ describe('an out-of-range channel on the interpreter and the javascript target',
 });
 
 describe('a shader passes an extended sRGB channel through', () => {
-  // The shader helpers do not clamp an sRGB channel (the canvas clamps at
-  // output) and do no gamut mapping. Their sRGB transfer functions and cube
+  // The shader conversion helpers do not clamp an sRGB channel and do no
+  // gamut mapping: only the output (and the conversion to HSV or HSL) maps a
+  // color into a gamut. Their sRGB transfer functions and cube
   // roots are sign-extended, so a negative channel survives a conversion to
   // OKLab and back. The shader computes in 32-bit floats with shorter
   // constants, hence the looser tolerance of a conversion.
@@ -1084,10 +1102,11 @@ describe('a shader passes an extended sRGB channel through', () => {
     expect(Math.abs(shader.z - expected[2])).toBeLessThan(1e-3);
   });
 
-  test('a conversion to HSV or HSL clips each channel into [0, 1]', () => {
+  test('a conversion to HSV or HSL maps the color into the sRGB gamut', () => {
     for (const expr of [
       ['AsHsv', ['Rgb', 2, 0, 0]],
       ['AsHsl', ['Rgb', 2, 0.5, -1]],
+      ['AsHsv', ['Rgb', 1.2, 0, 0]],
     ]) {
       const shader = evalGLSL(expr);
       const expected = interpNumbers(expr)!;
@@ -1100,5 +1119,59 @@ describe('a shader passes an extended sRGB channel through', () => {
   test('the APCA contrast of an extended color agrees with the interpreter', () => {
     const expr = ['ColorContrast', ['Rgb', 2, 0, 0], ['Rgb', 0, 0, 0]];
     expect(evalGLSL(expr)).toBeCloseTo(interpNumbers(expr)![0], 5);
+  });
+});
+
+describe('a shader maps a color into the gamut as the interpreter does', () => {
+  // `GamutMap` answers the mapped color in sRGB channels on every route. The
+  // shader helpers compute in 32-bit floats with shorter constants, so the
+  // binary search on the chroma can stop one step apart: the tolerance is
+  // about one chroma step (0.0001) in a channel.
+  test.each([
+    [['GamutMap', ['Oklch', 0.7, 0.4, 30]]],
+    [['GamutMap', ['Oklch', 0.9, 0.3, 140]]],
+    [['GamutMap', ['Oklch', 0.3, 0.3, 264]]],
+    [['GamutMap', ['Oklch', 0.6, -0.3, 30]]],
+    [['GamutMap', ['Rgb', 1.2, 0, 0]]],
+    [['GamutMap', ['Rgb', 2, 0, 0]]],
+    [['GamutMap', ['Rgb', 0.3, 0.55, 0.8]]],
+    [['GamutMap', ['Oklch', 0.7, 0.4, 30], "'display-p3'"]],
+    [['GamutMap', ['Oklch', 0.5, 0.25, 250], "'display-p3'"]],
+    [['GamutMap', ['Rgb', 1.05, 0, 0], "'display-p3'"]],
+    [['AsOklch', ['GamutMap', ['Oklch', 0.7, 0.4, 30]]]],
+  ])('%j agrees with the interpreter', (expr) => {
+    const shader = evalGLSL(expr);
+    const expected = interpNumbers(expr)!;
+    expect(Math.abs(shader.x - expected[0])).toBeLessThan(1e-3);
+    expect(Math.abs(shader.y - expected[1])).toBeLessThan(1e-3);
+    expect(Math.abs(shader.z - expected[2])).toBeLessThan(1e-2);
+  });
+
+  test('a NaN channel stays NaN', () => {
+    const shader = evalGLSL(['GamutMap', ['Oklch', 0.7, 'NaN', 30]]);
+    expect([shader.x, shader.y, shader.z].every(Number.isNaN)).toBe(true);
+  });
+
+  test('an unknown gamut fails closed', () => {
+    expect(() =>
+      glsl.compile(
+        ce.expr(['GamutMap', ['Rgb', 1, 0, 0], "'rec2020'"]),
+        NO_FOLD as any
+      )
+    ).toThrow(/rec2020/);
+  });
+
+  test('the WGSL preamble has the mapping helpers', () => {
+    const r = new WGSLTarget().compile(
+      ce.expr(['GamutMap', ['Oklch', 0.7, 0.4, 30], "'display-p3'"]),
+      NO_FOLD as any
+    ) as any;
+    expect(r.code).toContain('_gpu_gamut_map_oklch_p3(');
+    expect(r.preamble).toContain(
+      'fn _gpu_gamut_map_oklch_in(lch: vec3f, p3: bool) -> vec3f {'
+    );
+    expect(r.preamble).toContain(
+      'return all(rgb >= vec3f(-1e-6)) && all(rgb <= vec3f(1.000001));'
+    );
   });
 });

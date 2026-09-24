@@ -24,6 +24,9 @@ import type { CompiledColorSpace } from './types.js';
  *   components in their own space but the value they build is canonical.
  * - `AsRgb`, `AsHsv`, `AsHsl`, `AsOklab` and `AsOklch` answer the space they
  *   name.
+ * - `GamutMap` answers `rgb`: the interpreter answers an `Rgb` head, the
+ *   JavaScript runtime a color tagged `rgb`, and a shader the sRGB channels
+ *   of the mapped color.
  * - `ColorToColorspace(c, "<literal>")` and `ColorFromColorspace(comps,
  *   "<literal>")` answer the literal space (`lab` is the `oklab` spelling the
  *   interpreter also accepts). With a non-literal space operand the fact is
@@ -195,7 +198,8 @@ const OKLCH_VALUED_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The heads whose compiled value is channels in the space they name.
+ * The heads whose compiled value is channels in the space they name, and
+ * `GamutMap`, whose value is sRGB channels.
  *
  * A `Map` rather than an object, because the key is the operator name of an
  * arbitrary expression: a plain object answers an INHERITED value for a head
@@ -208,6 +212,7 @@ const CONVERSION_SPACE = new Map<string, CompiledColorSpace>([
   ['AsHsl', 'hsl'],
   ['AsOklab', 'oklab'],
   ['AsOklch', 'oklch'],
+  ['GamutMap', 'rgb'],
 ]);
 
 const COLOR_SPACE_NAMES: ReadonlySet<string> = new Set([

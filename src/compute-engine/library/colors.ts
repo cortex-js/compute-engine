@@ -27,8 +27,18 @@ import {
   oklchToRgb255,
   rgb255ToHsl,
   rgb255ToHsv,
+  gamutMapOklch,
+  gamutMapSrgb,
+  gamutToSrgb,
+  srgbToGamut,
+  inGamut,
+  readColorGamut,
+  displayP3String,
 } from '../numerics/color-conversion.js';
-import type { ColorChannelSpace } from '../numerics/color-conversion.js';
+import type {
+  ColorChannelSpace,
+  ColorGamut,
+} from '../numerics/color-conversion.js';
 
 /**
  * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
@@ -514,6 +524,29 @@ function rgbToHex(rgb: RgbColor): string {
   return hex;
 }
 
+/**
+ * Map a color into `gamut` with the CSS Color 4 gamut mapping, and answer
+ * its gamma-encoded coordinates in that gamut (0-1 scale), each in [0, 1].
+ *
+ * An `Oklab` or `Oklch` head is mapped from its own OKLCh channels, so its
+ * chroma does not go through sRGB first. Any other color is mapped from its
+ * extended sRGB channels `rgb` (0-255 scale), as `extractRgb` read them.
+ */
+function gamutMapColor(
+  arg: any,
+  rgb: RgbColor,
+  gamut: ColorGamut
+): [number, number, number] {
+  if (
+    isFunction(arg) &&
+    (arg.operator === 'Oklch' || arg.operator === 'Oklab')
+  ) {
+    const c = colorExprToOklch(arg);
+    if (c) return gamutMapOklch(c.L, c.C, c.H, gamut);
+  }
+  return gamutMapSrgb(rgb.r / 255, rgb.g / 255, rgb.b / 255, gamut);
+}
+
 export const COLORS_LIBRARY: SymbolDefinitions = {
   Color: {
     description: 'Parse a CSS-style color string to an Oklch color',
@@ -531,7 +564,15 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
   },
 
   ColorToString: {
-    description: 'Convert a color to a string in the specified format',
+    description:
+      'Convert a color to a string in the specified format: "hex" (the ' +
+      'default), "rgb", "hsl", "oklch", "srgb" (the same as "hex") or ' +
+      '"display-p3" (the CSS spelling `color(display-p3 r g b)`). The ' +
+      'hex, rgb, hsl and srgb formats map the color into the sRGB gamut, ' +
+      'and display-p3 maps it into the Display-P3 gamut, with the CSS Color ' +
+      '4 gamut mapping: the OKLCh chroma is reduced at constant lightness ' +
+      'and hue. The channels are not clipped one by one. The oklch format ' +
+      'has no gamut and is not mapped',
     complexity: 8000,
     signature: '(color | string | tuple, string?) -> string',
     evaluate: (ops, { engine: ce }) => {
@@ -543,44 +584,112 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           ? ops[1].string?.toLowerCase()
           : 'hex';
 
-      switch (format) {
-        case 'hex':
-          return ce.string(rgbToHex(rgb));
+      if (format === 'display-p3') {
+        const p3 = gamutMapColor(ops[0], rgb, 'display-p3');
+        return ce.string(displayP3String(p3, rgb.alpha));
+      }
 
-        case 'rgb': {
-          const r = Math.round(rgb.r);
-          const g = Math.round(rgb.g);
-          const b = Math.round(rgb.b);
+      // The formats below are sRGB: the color is first mapped into the sRGB
+      // gamut.
+      if (
+        format === 'hex' ||
+        format === 'srgb' ||
+        format === 'rgb' ||
+        format === 'hsl'
+      ) {
+        const [r, g, b] = gamutMapColor(ops[0], rgb, 'srgb');
+        const mapped: RgbColor = { r: r * 255, g: g * 255, b: b * 255 };
+        if (rgb.alpha !== undefined) mapped.alpha = rgb.alpha;
+
+        if (format === 'hex' || format === 'srgb')
+          return ce.string(rgbToHex(mapped));
+
+        if (format === 'rgb') {
+          const r = Math.round(mapped.r);
+          const g = Math.round(mapped.g);
+          const b = Math.round(mapped.b);
           if (rgb.alpha !== undefined)
             return ce.string(`rgb(${r} ${g} ${b} / ${rgb.alpha})`);
           return ce.string(`rgb(${r} ${g} ${b})`);
         }
 
-        case 'hsl': {
-          const hsl = rgb255ToHsl(rgb.r, rgb.g, rgb.b);
-          const h = Math.round(hsl.h * 10) / 10;
-          const s = Math.round(hsl.s * 1000) / 10;
-          const l = Math.round(hsl.l * 1000) / 10;
-          if (rgb.alpha !== undefined)
-            return ce.string(`hsl(${h} ${s}% ${l}% / ${rgb.alpha})`);
-          return ce.string(`hsl(${h} ${s}% ${l}%)`);
-        }
-
-        case 'oklch': {
-          // Wide-gamut path: prefer typed extraction so out-of-sRGB chroma
-          // serializes losslessly. Fall back to the already-extracted sRGB.
-          const c = colorExprToOklch(ops[0]) ?? asOklch(rgb);
-          const L = Math.round(c.L * 1000) / 1000;
-          const C = Math.round(c.C * 1000) / 1000;
-          const H = Math.round(c.H * 10) / 10;
-          if (c.alpha !== undefined)
-            return ce.string(`oklch(${L} ${C} ${H} / ${c.alpha})`);
-          return ce.string(`oklch(${L} ${C} ${H})`);
-        }
-
-        default:
-          return ce.error('expected-value');
+        const hsl = rgb255ToHsl(mapped.r, mapped.g, mapped.b);
+        const h = Math.round(hsl.h * 10) / 10;
+        const sat = Math.round(hsl.s * 1000) / 10;
+        const l = Math.round(hsl.l * 1000) / 10;
+        if (rgb.alpha !== undefined)
+          return ce.string(`hsl(${h} ${sat}% ${l}% / ${rgb.alpha})`);
+        return ce.string(`hsl(${h} ${sat}% ${l}%)`);
       }
+
+      if (format === 'oklch') {
+        // Wide-gamut path: prefer typed extraction so out-of-sRGB chroma
+        // serializes losslessly. Fall back to the already-extracted sRGB.
+        const c = colorExprToOklch(ops[0]) ?? asOklch(rgb);
+        const L = Math.round(c.L * 1000) / 1000;
+        const C = Math.round(c.C * 1000) / 1000;
+        const H = Math.round(c.H * 10) / 10;
+        if (c.alpha !== undefined)
+          return ce.string(`oklch(${L} ${C} ${H} / ${c.alpha})`);
+        return ce.string(`oklch(${L} ${C} ${H})`);
+      }
+
+      return ce.error('expected-value');
+    },
+  },
+
+  GamutMap: {
+    description:
+      'Map a color into a target gamut, "srgb" (the default) or ' +
+      '"display-p3", with the CSS Color 4 gamut-mapping algorithm: the ' +
+      'OKLCh chroma is reduced, at constant lightness and hue, until the ' +
+      'color is inside the gamut or until clipping each channel changes the ' +
+      'color by less than a just noticeable difference (ΔE_OK 0.02). A ' +
+      'lightness of 1 or more gives white, and 0 or less gives black. A ' +
+      'color already inside the gamut is returned unchanged. The result is ' +
+      'an Rgb color, in sRGB coordinates also for "display-p3": its ' +
+      'channels are in [0, 1] for "srgb", and for "display-p3" they can be ' +
+      'outside [0, 1] (extended sRGB) for a color that is inside the ' +
+      'Display-P3 gamut but outside the sRGB gamut. Color values themselves ' +
+      'have no gamut: only this operator and the string output map a color',
+    complexity: 8000,
+    signature: '(color | string | tuple, string?) -> color',
+    evaluate: (ops, { engine: ce }) => {
+      let gamut: ColorGamut = 'srgb';
+      if (ops.length >= 2 && ops[1] !== undefined) {
+        const name = isString(ops[1]) ? ops[1].string : undefined;
+        if (name === undefined) return ce.error('incompatible-type');
+        const g = readColorGamut(name);
+        if (g === undefined) return ce.error('expected-value');
+        gamut = g;
+      }
+
+      const arg = ops[0];
+      const rgb = extractRgb(ce, arg);
+      if (!rgb) return ce.error('incompatible-type');
+
+      // An `Rgb` color already inside the gamut is returned as it is, so an
+      // exact channel such as `1/2` stays exact. For `srgb` this requires
+      // every channel in [0, 1]: a channel a little outside [0, 1] (within
+      // the tolerance of the gamut test) goes to `gamutMapColor`, which
+      // clips it, so the result is always in [0, 1].
+      if (isFunction(arg) && arg.operator === 'Rgb') {
+        const channels: [number, number, number] = [
+          rgb.r / 255,
+          rgb.g / 255,
+          rgb.b / 255,
+        ];
+        const inside =
+          gamut === 'srgb'
+            ? channels.every((x) => x >= 0 && x <= 1)
+            : inGamut(srgbToGamut(channels, gamut));
+        if (inside) return normalizeColorHead(ce, arg);
+      }
+
+      const [r, g, b] = gamutToSrgb(gamutMapColor(arg, rgb, gamut), gamut);
+      const args = [ce.number(r), ce.number(g), ce.number(b)];
+      if (rgb.alpha !== undefined) args.push(ce.number(rgb.alpha));
+      return ce.function('Rgb', args);
     },
   },
 

@@ -73,16 +73,30 @@ export function asBigint(
     const exact = exactIntegerValue(num);
     if (exact !== null) return exact;
 
-    // Every lane answers `asExact` for an integer-valued number (the exact
-    // lane is its own, the machine and bignum lanes lift theirs), so a
-    // value `exactIntegerValue` declined is NOT an integer, and the only
-    // thing left to read would be its machine projection. That projection
-    // is a trap: `1/10^400` projects to the double `0` and
+    // An integer-valued INEXACT number is still read as an integer here: a
+    // number-theory predicate asks about the integer the value denotes
+    // (`IsPrime(7.0)`, `IsPrime(N(2^61 - 1))`), and reading it does not make
+    // the value exact. `asExact` cannot answer for these lanes: a big
+    // decimal is never exact, and a machine double is exact only up to
+    // `Number.MAX_SAFE_INTEGER`. So the machine and bignum lanes are read
+    // directly, from their own value. The bignum lane reads its raw
+    // `BigDecimal` (`bignumRe` is the stored decimal there, not a rounded
+    // rendering), so an integer of any number of digits is read in full.
+    if (!(num instanceof ExactNumericValue)) {
+      if (num.im !== 0) return null;
+      const big = num.bignumRe;
+      if (big !== undefined) return big.isInteger() ? bigint(big) : null;
+      return Number.isInteger(num.re) ? BigInt(num.re) : null;
+    }
+
+    // The exact lane is not read from its projections. `exactIntegerValue`
+    // declined it, so it is NOT an integer, and its machine or bignum
+    // projection is a trap: `1/10^400` projects to the double `0` and
     // `99999999999999999999/10^20` to `1`, both "integer-valued floats",
     // and the `Divide` boxing route (`box.ts`) read them as the integers
     // `0` and `1` — `Divide(1/10^400, 3)` folded to `0` and `Divide(r, 1)`
-    // to `1`, where `Multiply` kept the same values exact. A bignum
-    // `1e-400` projects to `0` the same way. So a non-integer declines.
+    // to `1`, where `Multiply` kept the same values exact. So a non-integer
+    // declines.
     return null;
   }
 

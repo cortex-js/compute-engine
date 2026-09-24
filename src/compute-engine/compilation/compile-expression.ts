@@ -45,6 +45,7 @@ export type CompileExpressionOptions<T extends string = string> = {
   cse?: boolean;
   constantFold?: boolean;
   storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
+  strictTypes?: boolean;
 };
 
 /**
@@ -289,7 +290,7 @@ export function compile<
         options.vars ? new Set(Object.keys(options.vars)) : undefined
       );
       if (escalation !== undefined) direct.escalation = escalation;
-      return direct;
+      return strictTypesChecked(expr, direct, options, undefined);
     }
 
     const targetName = (options?.to ?? 'javascript') as T;
@@ -342,10 +343,12 @@ export function compile<
     // in the strict attempt therefore never surfaces here: the target has
     // already redone the compilation under the complex discipline and set
     // `escalation` on the result.
-    return languageTarget.compile(expr, targetOptions) as CompilationResult<
-      T,
-      R
-    >;
+    return strictTypesChecked(
+      expr,
+      languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>,
+      options,
+      languageTarget
+    );
   } catch (e) {
     // A cancellation that is not a timeout (an abort, an iteration or
     // recursion limit), or a timeout of an expired enclosing span, belongs
@@ -390,6 +393,63 @@ export function compile<
     }
     throw e;
   }
+}
+
+/**
+ * Apply the `strictTypes` option to the result of a compilation: when it is
+ * set and the compilation succeeded, every free symbol must have a
+ * declaration. A free symbol whose type was inferred from its uses turns the
+ * result into a decline, whose error names the symbol, the inferred type and
+ * the type the code reads it as (`CompilationResult.freeSymbolTypes`).
+ *
+ * The decline follows the `fallback` option: it throws when `fallback` is
+ * `false`, and otherwise returns the `success: false` result with an
+ * interpreter-backed `run`. That result keeps the type report of the
+ * compilation, which a fresh analysis could not reproduce (a shader reads a
+ * colour operand as a `vec3` only because the emission recorded it). On
+ * interval-js the result keeps the compiled `run`, which already honours the
+ * interval value contract that the generic interpreter fallback does not.
+ */
+function strictTypesChecked<T extends string, R>(
+  expr: Expression,
+  result: CompilationResult<T, R>,
+  options: CompileExpressionOptions<T> | undefined,
+  languageTarget: { createTarget(): CompileTarget<Expression> } | undefined
+): CompilationResult<T, R> {
+  if (options?.strictTypes !== true || !result.success) return result;
+  const undeclared = Object.entries(result.freeSymbolTypes ?? {}).filter(
+    ([, t]) => t.provenance !== 'declared'
+  );
+  if (undeclared.length === 0) return result;
+  const error =
+    `strictTypes: ` +
+    undeclared
+      .map(
+        ([name, t]) =>
+          `declare \`${name}\` (inferred \`${t.type}\`, would lower to ` +
+          `\`${t.lowered}\`)`
+      )
+      .join(', ') +
+    `. Every free symbol must have a declaration (\`ce.declare\`) when the ` +
+    `\`strictTypes\` option is set. Fail closed (D6).`;
+  const e = new Error(error);
+  if (options.fallback === false) throw e;
+  console.warn(
+    `Compilation fallback for "${expr.operator}" (target: ${result.target}): ${error}`
+  );
+  const diagnostic = compileDiagnosticOf(e, error);
+  if ((result.target as string) === 'interval-js')
+    return { ...result, success: false, code: '', error, diagnostic };
+  const fallback = BaseCompiler.buildInterpreterFallback(
+    expr,
+    error,
+    result.target,
+    options.target ?? languageTarget?.createTarget(),
+    options.vars ? new Set(Object.keys(options.vars)) : undefined,
+    diagnostic
+  ) as CompilationResult<T, R>;
+  fallback.freeSymbolTypes = result.freeSymbolTypes;
+  return fallback;
 }
 
 /**

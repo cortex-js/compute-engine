@@ -661,9 +661,9 @@ function serializeAdd(
       const [second, secondSign] = unsign(ops[1]);
       if (firstSign < 0 && secondSign > 0) {
         result =
-          serializer.wrap(second, ADDITION_PRECEDENCE) +
+          wrapAddTerm(serializer, second) +
           '-' +
-          serializer.wrap(first, ADDITION_PRECEDENCE);
+          wrapAddTerm(serializer, first);
         serializer.level += 1;
         return result;
       }
@@ -683,7 +683,7 @@ function serializeAdd(
       arg = ops[i];
       if (serializer.options.prettify) {
         const [newArg, sign] = unsign(arg);
-        const term = serializer.wrap(newArg, ADDITION_PRECEDENCE);
+        const term = wrapAddTerm(serializer, newArg);
         if (sign > 0) {
           if (term.startsWith('+') || term.startsWith('-')) result += term;
           else result += '+' + term;
@@ -693,7 +693,7 @@ function serializeAdd(
           else result += '-' + term;
         }
       } else {
-        const term = serializer.wrap(arg, ADDITION_PRECEDENCE);
+        const term = wrapAddTerm(serializer, arg);
         if (term[0] === '-' || term[0] === '+') result += term;
         else result += '+' + term;
       }
@@ -704,6 +704,26 @@ function serializeAdd(
   serializer.level += 1;
 
   return result;
+}
+
+/**
+ * Serialize a term of a sum or a difference, in parentheses when its
+ * precedence is lower than `prec` (the precedence of `Add` by default). A pure imaginary number
+ * `['Complex', 0, im]` has no parentheses: it serializes as a product
+ * (`2\imaginaryI`, `-\frac{\sqrt{3}}{2}\imaginaryI`), which binds more
+ * tightly than `+`. The `Complex` precedence (one less than `Add`) is for a
+ * number with a real part, `a + b\imaginaryI`. Without this exception,
+ * `x + 2i` serialized as `x+(2\imaginaryI)`, and `1/2 − (√3/2)·i` as
+ * `\frac{1}{2}+(-\frac{\sqrt{3}}{2}\imaginaryI)`.
+ */
+function wrapAddTerm(
+  serializer: Serializer,
+  term: MathJsonExpression,
+  prec: number = ADDITION_PRECEDENCE
+): string {
+  if (operator(term) === 'Complex' && machineValue(operand(term, 1)) === 0)
+    return serializer.serialize(term);
+  return serializer.wrap(term, prec);
 }
 
 /**
@@ -1859,20 +1879,40 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       const im = machineValue(operand(expr, 2));
       if (im === 0) return rePart;
 
+      // An exact imaginary part is a symbolic expression (`√2` is
+      // `['Sqrt', 2]`), for which `machineValue` is `null`. Its sign comes
+      // from its shape: `['Negate', x]` and a product with a negative
+      // leading factor (`['Multiply', -2, ['Sqrt', 3]]`) are negative. The
+      // part is then written as a subtraction of its magnitude:
+      // `\sqrt{2}-\sqrt{2}\imaginaryI`, not `\sqrt{2}+-\sqrt{2}\imaginaryI`.
+      const negImMagnitude =
+        im === null ? negatedMagnitude(operand(expr, 2)) : null;
+
       const imPart =
-        im === 1
-          ? '\\imaginaryI'
-          : im === -1
-            ? '-\\imaginaryI'
-            : joinLatex([
-                serializer.serialize(operand(expr, 2)),
-                '\\imaginaryI',
-              ]);
+        negImMagnitude !== null
+          ? joinLatex([
+              '-',
+              machineValue(negImMagnitude) === 1
+                ? '\\imaginaryI'
+                : joinLatex([
+                    serializer.serialize(negImMagnitude),
+                    '\\imaginaryI',
+                  ]),
+            ])
+          : im === 1
+            ? '\\imaginaryI'
+            : im === -1
+              ? '-\\imaginaryI'
+              : joinLatex([
+                  serializer.serialize(operand(expr, 2)),
+                  '\\imaginaryI',
+                ]);
 
       const re = machineValue(operand(expr, 1));
       if (re === 0) return imPart;
 
-      if (im !== null && im < 0) return joinLatex([rePart, imPart]);
+      if ((im !== null && im < 0) || negImMagnitude !== null)
+        return joinLatex([rePart, imPart]);
 
       return joinLatex([rePart, '+', imPart]);
     },
@@ -2973,8 +3013,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return ['Subtract', lhs, rhs] as MathJsonExpression;
     },
     serialize: (serializer, expr) => {
-      const lhs = serializer.wrap(operand(expr, 1), ADDITION_PRECEDENCE + 2);
-      let rhs = serializer.wrap(operand(expr, 2), ADDITION_PRECEDENCE + 3);
+      const lhs = wrapAddTerm(
+        serializer,
+        operand(expr, 1)!,
+        ADDITION_PRECEDENCE + 2
+      );
+      let rhs = wrapAddTerm(
+        serializer,
+        operand(expr, 2)!,
+        ADDITION_PRECEDENCE + 3
+      );
       // If the right operand serializes with a leading `-` (a `Negate` or a
       // negative literal), wrap it in parentheses so we emit `x-(-y)` rather
       // than `x--y`, which would otherwise re-parse as double negation of a
@@ -3567,4 +3615,53 @@ function unsign(expr: MathJsonExpression): [MathJsonExpression, -1 | 1] {
     }
   } while (newExpr !== expr);
   return [expr, sign as -1 | 1];
+}
+
+/**
+ * The magnitude `x` of a negative symbolic number expression `-x`, or `null`
+ * when the expression is not recognized as negative. This reads the sign
+ * from the shape of the MathJSON that an exact number serializes to:
+ * `['Negate', x]`, `['Rational', n, d]` with `n < 0`, and
+ * `['Multiply', c, …]` with a negative number or rational `c`. The
+ * `Complex` serializer uses it to write a negative exact imaginary part as
+ * a subtraction.
+ */
+function negatedMagnitude(
+  expr: MathJsonExpression | null | undefined
+): MathJsonExpression | null {
+  if (expr === null || expr === undefined) return null;
+  const head = operator(expr);
+  if (head === 'Negate') return operand(expr, 1) ?? null;
+  if (head === 'Rational') {
+    const n = negatedNumber(operand(expr, 1));
+    if (n === null) return null;
+    return ['Rational', n, operand(expr, 2)!];
+  }
+  if (head === 'Multiply') {
+    const [first, ...rest] = operands(expr);
+    if (first === undefined || rest.length === 0) return null;
+    const c = negatedMagnitude(first) ?? negatedNumber(first);
+    if (c === null) return null;
+    if (machineValue(c) === 1)
+      return rest.length === 1 ? rest[0] : ['Multiply', ...rest];
+    return ['Multiply', c, ...rest];
+  }
+  return null;
+}
+
+/** `-x` of a negative MathJSON number `x`, `null` for any other value. */
+function negatedNumber(
+  expr: MathJsonExpression | null | undefined
+): MathJsonExpression | null {
+  const v = machineValue(expr);
+  if (v === null || !(v < 0)) return null;
+  if (typeof expr === 'number') return -expr;
+  const text =
+    typeof expr === 'string'
+      ? expr
+      : typeof expr === 'object' && expr !== null && 'num' in expr
+        ? String(expr.num)
+        : null;
+  if (text === null || !text.startsWith('-')) return null;
+  return { num: text.slice(1) };
 }

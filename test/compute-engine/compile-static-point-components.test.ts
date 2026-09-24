@@ -184,21 +184,44 @@ describe('the inner product of two static-width points is written out', () => {
 
   test('shapes that keep the run-time dispatch', () => {
     // Components of open type (an undeclared `x` may hold a list), a width
-    // of five or more, and a complex component are not written out.
-    const ce = newEngine({ V: 'vector<5>', W: 'vector<5>' });
+    // of five or more, and a complex component are not written out. The
+    // run-time dispatch is the real-only `_SYS.matmul` when the entries are
+    // real: the elements of a literal are read one by one, and an undeclared
+    // scalar is a real number in the default mode, so `(x, y)` is real; a
+    // `vector<real^5>` is real by its type. A `vector<5>` (whose entries are
+    // `number`) is read as real in the default mode too, and the runner
+    // refuses a complex entry when it is called.
+    const ce = newEngine({
+      V: 'vector<5>',
+      W: 'vector<5>',
+      A: 'vector<real^5>',
+      B: 'vector<real^5>',
+    });
     expect(compiled(ce, '\\operatorname{Dot}((x,y),(1,2))').code).toBe(
       '_SYS.matmul([_.x, _.y], [1, 2])'
     );
-    expect(compiled(ce, '\\operatorname{Dot}(V, W)').code).toBe(
-      '_SYS.matmul(_.V, _.W)'
+    const vw = compiled(ce, '\\operatorname{Dot}(V, W)');
+    expect(vw.code).toBe('_SYS.matmul(_.V, _.W)');
+    expect(vw.run({ V: [1, 2, 3, 4, 5], W: [1, 1, 1, 1, 2] })).toBe(20);
+    expect(() =>
+      vw.run({ V: [1, 2, 3, 4, { re: 0, im: 1 }], W: [1, 1, 1, 1, 1] })
+    ).toThrow(/"V" \(type `vector<number\^5>`\).*entry \[4\] is a complex/);
+    expect(compiled(ce, '\\operatorname{Dot}(A, B)').code).toBe(
+      '_SYS.matmul(_.A, _.B)'
     );
-    // A complex component is not written out, and the run-time dispatch
-    // `_SYS.matmul` is real-only: at `Q = (i, 1)` it answered NaN, where the
-    // interpreter answers `2 + i`. So the product fails closed.
+    // A complex component is not written out. The run-time dispatch takes
+    // the complex form of `_SYS.matmul`, so at `Q = (i, 1)` it answers
+    // `2 + i`, as the interpreter does.
     const cplx = newEngine({ Q: 'tuple<complex, complex>' });
-    expect(() => compiled(cplx, '\\operatorname{Dot}(Q, (1, 2))')).toThrow(
-      /Dot: .*cannot represent a complex entry/
-    );
+    const dot = compiled(cplx, '\\operatorname{Dot}(Q, (1, 2))');
+    expect(dot.code).toBe('_SYS.complexMatmul(_.Q, [1, 2])');
+    expect(dot.run({ Q: [{ re: 0, im: 1 }, 1] })).toEqual({ re: 2, im: 1 });
+    expect(
+      cplx
+        .parse('\\operatorname{Dot}((\\imaginaryI, 1), (1, 2))')
+        .N()
+        .toString()
+    ).toBe('(2 + i)');
   });
 });
 

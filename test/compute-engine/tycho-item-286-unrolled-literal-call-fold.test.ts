@@ -98,6 +98,11 @@ describe('the compiled value still agrees with the interpreter', () => {
       const got = r.run!({ x }) as number;
       const want = expr.subs({ x: ce.number(x) }).N();
       if (Number.isNaN(want.re)) expect(got).toBeNaN();
+      // A relative comparison: at `x = 1e300` the interpreter reads the
+      // double as the decimal 10^300 and computes `9e300`, where the double
+      // product is `9.000000000000001e300` (one unit in the last place).
+      else if (Math.abs(want.re) > 1)
+        expect(Math.abs(got - want.re) / Math.abs(want.re)).toBeLessThan(1e-12);
       else expect(got).toBeCloseTo(want.re, 10);
     }
   });

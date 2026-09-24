@@ -1,4 +1,6 @@
+import { BigDecimal } from '../../big-decimal/index.js';
 import { NumericValue } from '../numeric-value/types.js';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import type {
   BoxedBaseDefinition,
   BoxedValueDefinition,
@@ -492,12 +494,15 @@ function eqImpl(
   // definitive `false` in the finiteness branch below (CM-P1-3).
   //
   if (!a.isCanonical) a = a.canonical;
+  // The operands before `.N()`, for the assumptions database below.
+  const aExact = a;
   a = a.unknowns.length > 0 ? a : a.N();
   let b: Expression;
-  if (typeof inputB === 'number') b = a.engine.expr(inputB);
+  let bExact: Expression;
+  if (typeof inputB === 'number') b = bExact = a.engine.expr(inputB);
   else {
-    const b0 = inputB.isCanonical ? inputB : inputB.canonical;
-    b = b0.unknowns.length > 0 ? b0 : b0.N();
+    bExact = inputB.isCanonical ? inputB : inputB.canonical;
+    b = bExact.unknowns.length > 0 ? bExact : bExact.N();
   }
 
   //
@@ -675,10 +680,20 @@ function eqImpl(
     return true;
 
   //
-  // If we didn't come to a resolution yet, check the assumptions DB
+  // If we didn't come to a resolution yet, check the assumptions DB.
   //
-  if (ce.ask(ce.expr(['Equal', a, b])).length > 0) return true;
-  if (ce.ask(ce.expr(['NotEqual', a, b])).length > 0) return false;
+  // A fact is stated with the values the user wrote, and those are not the
+  // values of `.N()`: after `assume(x ≠ √2)`, the query `x = √2` must look
+  // for `√2`, not for `1.414…`, or the fact is not found. So the operands
+  // before `.N()` are looked up first. The operands after `.N()` are looked
+  // up too, for a fact that was stated with a float.
+  //
+  const pairs: [Expression, Expression][] = [[aExact, bExact]];
+  if (a !== aExact || b !== bExact) pairs.push([a, b]);
+  for (const [x, y] of pairs)
+    if (ce.ask(ce.expr(['Equal', x, y])).length > 0) return true;
+  for (const [x, y] of pairs)
+    if (ce.ask(ce.expr(['NotEqual', x, y])).length > 0) return false;
 
   // If a or b have some unknowns, we can't prove equality
   if (a.unknowns.length > 0 || b.unknowns.length > 0) return undefined;
@@ -810,10 +825,32 @@ export function cmp(
             Number.isFinite(bSymNum) &&
             b.im === 0
           ) {
+            // With no tolerance, the machine value of the symbol is not
+            // enough: `π.re` is the float `3.141592653589793`, which is
+            // not `π`. See `orderByValue`.
+            if (tolerance === 0) return orderByValue(a, b, tolerance);
             if (Math.abs(aNum - bSymNum) <= tolerance) return '=';
             return aNum < bSymNum ? '<' : '>';
           }
         }
+        // A signed infinity is ordered against a finite value.
+        if (aNum !== undefined && isSignedInfinity(aNum))
+          return orderByValue(a, b, tolerance);
+        return undefined;
+      }
+      // A function expression (`1 + π`): the branch below that orders a
+      // function expression against a number answers, and its relation is
+      // reversed here. Without this, `3 < 1 + π` had no answer while
+      // `1 + π > 3` had one.
+      if (isFunction(b)) {
+        // Against a zero, `cmp(b, 0)` reads the sign of `b` first, as
+        // `cmp(b, a)` with `b` a function expression does.
+        const r = cmp(b, a.isSame(0) ? 0 : a, tolerance);
+        if (r === '<') return '>';
+        if (r === '>') return '<';
+        if (r === '<=') return '>=';
+        if (r === '>=') return '<=';
+        return r;
       }
       return undefined;
     }
@@ -875,9 +912,12 @@ export function cmp(
       }
 
       // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
-      // Only order if the symbol's value is provably real.
+      // Only order if the symbol's value is provably real. With no
+      // tolerance, or with a signed infinity, see `orderByValue`.
       const aNum = a.re;
-      if (typeof aNum === 'number' && Number.isFinite(aNum) && a.im === 0) {
+      if (!Number.isNaN(aNum) && a.im === 0) {
+        if (tolerance === 0 || !Number.isFinite(aNum) || !Number.isFinite(b))
+          return orderByValue(a, a.engine.number(b), tolerance);
         if (Math.abs(aNum - b) <= tolerance) return '=';
         return aNum < b ? '<' : '>';
       }
@@ -893,11 +933,8 @@ export function cmp(
         if (s === 'non-negative') return '>=';
         if (s === 'non-positive') return '<=';
       }
-      const aNum = a.re;
-      if (typeof aNum === 'number' && Number.isFinite(aNum)) {
-        if (Math.abs(aNum - b) <= tolerance) return '=';
-        return aNum < b ? '<' : '>';
-      }
+      if (Number.isNaN(b)) return undefined;
+      return orderByValue(a, a.engine.number(b), tolerance);
     }
     return undefined;
   }
@@ -925,31 +962,7 @@ export function cmp(
     const cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp === true) return '=';
 
-    // Subtract the two expressions. A difference with unknowns can never
-    // numericize, so `.N()` would walk it only for the `isNumber` test below
-    // to reject it — and over nested user-function applications that walk is
-    // exponential in the nesting depth (see `constructibleValues`).
-    const diff0 = a.sub(b);
-    if (diff0.unknowns.length > 0) return undefined;
-    const diff = diff0.N();
-
-    // If the difference is not a number, we can't compare
-    // For example, '1 + y' and 'x - 1' can't be compared
-    if (!isNumber(diff)) return undefined;
-
-    if (typeof diff.numericValue === 'number') {
-      const v = diff.numericValue;
-      // A NaN difference is indeterminate, not "greater".
-      if (Number.isNaN(v)) return undefined;
-      // Compare within tolerance, consistent with the NumericValue path below.
-      if (Math.abs(v) <= tolerance) return '=';
-      return v < 0 ? '<' : '>';
-    }
-
-    // A NaN difference is indeterminate, not "greater".
-    if (diff.numericValue.isNaN) return undefined;
-    if (isZeroWithin(diff.numericValue)) return '=';
-    return diff.numericValue.lt(0) ? '<' : '>';
+    return orderByValue(a, b, tolerance);
   }
 
   //
@@ -1009,12 +1022,15 @@ export function cmp(
     }
 
     // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
-    // Only order if both sides are provably real.
+    // Only order if both sides are provably real. With no tolerance, or
+    // with a signed infinity, see `orderByValue`.
     const aNum = a.re;
-    if (typeof aNum === 'number' && Number.isFinite(aNum) && a.im === 0) {
-      const bNum = typeof b === 'number' ? b : b.re;
-      const bIm = typeof b === 'number' ? 0 : b.im;
-      if (typeof bNum === 'number' && Number.isFinite(bNum) && bIm === 0) {
+    if (!Number.isNaN(aNum) && a.im === 0) {
+      const bx = typeof b === 'number' ? a.engine.number(b) : b;
+      const bNum = bx.re;
+      if (!Number.isNaN(bNum) && bx.im === 0) {
+        if (tolerance === 0 || !Number.isFinite(aNum) || !Number.isFinite(bNum))
+          return orderByValue(a, bx, tolerance);
         if (Math.abs(aNum - bNum) <= tolerance) return '=';
         return aNum < bNum ? '<' : '>';
       }
@@ -1089,17 +1105,91 @@ export function cmp(
  * `√2 + 1`) compare by `cmp` with a zero tolerance, at working precision.
  * A weak relation (`'<='` or `'>='`, from an assumption) does not order
  * the operands and gives `undefined`.
+ *
+ * When the working precision does not decide the order of two constants
+ * (the computed difference is not larger than the bound on its error),
+ * these steps are tried, in this order:
+ *
+ * 1. A symbolic proof that the two constants are EQUAL: `a − b` simplifies
+ *    to the literal `0`. Two equal constants (`ln 6` and `ln 2 + ln 3`,
+ *    `sin²1 + cos²1` and `1`) have a difference of exactly zero, and no
+ *    precision can separate them: without this step, they are never
+ *    ordered. A proof is exact, so this step comes first. The
+ *    probabilistic verdict of `isIdenticallyEqual()` is not used: for two
+ *    constants its sampling is a numeric evaluation, which step 3 already
+ *    does.
+ * 2. The same comparison at a higher precision (`raisedPrecision`): two
+ *    DIFFERENT constants that are closer than the rounding error of the
+ *    working precision (`√(2 + 10⁻³⁰)` and `√2` at 21 digits) are ordered
+ *    at 50 digits. The result is exact, as at the working precision: the
+ *    order is known only when the difference is larger than its error
+ *    bound. Not done at machine precision (see `orderAtRaisedPrecision`).
+ * 3. Only when `options.tieWithinTolerance` is set: a TOLERANCE TIE. The
+ *    two constants are a tie (`0`) when their values at the working
+ *    precision differ by no more than the engine tolerance relative to
+ *    `max(|a|, |b|, 1)`. This was the order of `Max`, `Min` and `Sort`
+ *    before their order became exact. It is the last step because it can
+ *    be wrong: two different constants within the tolerance of each other
+ *    are a tie. It never orders two constants: it gives `0` or
+ *    `undefined`, never `-1` or `1`. The callers that choose an extremum
+ *    or sort a list set it (`Max`, `Min`, `Clamp`, `Sort`), because an
+ *    answer that is one of two nearly equal values is better for them than
+ *    no answer. A caller that reads a sign from the order (`Abs`, the
+ *    argument of a complex number) does not set it: a tie with zero would
+ *    make a negative value non-negative.
+ *
+ * Steps 1 and 2 are not run again inside themselves (`resolvingTie`): the
+ * simplification of step 1 and the evaluations of step 2 can evaluate an
+ * operator that calls `exactOrder` (`Abs`, `Max`), and a nested run would
+ * simplify inside a simplification, which can recurse without end. No
+ * simplification rule calls `exactOrder` directly; it is reached from the
+ * evaluate handlers of the operators above, which a simplification can
+ * call, and the guard bounds that case to one nested simplification.
  */
 export function exactOrder(
+  a: Expression,
+  b: Expression,
+  options?: { tieWithinTolerance?: boolean }
+): -1 | 0 | 1 | undefined {
+  const order = orderAtWorkingPrecision(a, b);
+  if (order !== undefined) return order;
+  if (resolvingTie || !isRealConstantPair(a, b)) return undefined;
+  resolvingTie = true;
+  try {
+    if (isProvedEqual(a, b)) return 0;
+    const raised = orderAtRaisedPrecision(a, b);
+    if (raised !== undefined) return raised;
+    if (options?.tieWithinTolerance === true && isWithinTolerance(a, b))
+      return 0;
+    return undefined;
+  } finally {
+    resolvingTie = false;
+  }
+}
+
+/** True while `exactOrder` runs its steps for an undecided order (a
+ *  symbolic proof, a higher precision). See `exactOrder`. */
+let resolvingTie = false;
+
+/**
+ * The precision of the second attempt of `exactOrder` (step 2): twice the
+ * working precision, at least 50 digits and at most 100 digits. At 21
+ * digits (the default), the attempt is at 50 digits: `cos(10⁻²⁰) − 1`, which
+ * is `−5·10⁻⁴¹`, needs about 44 digits. A precision of 100 digits or more is
+ * not raised.
+ */
+function raisedPrecision(digits: number): number {
+  return Math.min(100, Math.max(2 * digits, 50));
+}
+
+/** The order of `a` and `b` at the working precision: see `exactOrder`,
+ *  which adds the steps for an order that this one does not decide. */
+function orderAtWorkingPrecision(
   a: Expression,
   b: Expression
 ): -1 | 0 | 1 | undefined {
   const order = exactCompareNumbers(a, b);
   if (order !== undefined) return order;
-  // Complex numbers have no order. `cmp` can still answer for two complex
-  // values whose difference is real (`1 + i` and `(1 + i) + 10^-12`), so a
-  // value whose type is complex and not real is refused here.
-  if (isNonRealComplex(a) || isNonRealComplex(b)) return undefined;
   // Some branches of `cmp` decide only one operand order (a number against
   // a symbol with assumed bounds), so both directions are probed.
   const c = cmp(a, b, 0);
@@ -1113,8 +1203,788 @@ export function exactOrder(
   return undefined;
 }
 
+/**
+ * True when `a` and `b` are both constants (no unknowns) that can be real
+ * numbers: the steps of `exactOrder` for an undecided order apply only to
+ * them. A collection, a NaN and a value whose type is complex and not real
+ * are excluded.
+ */
+function isRealConstantPair(a: Expression, b: Expression): boolean {
+  for (const x of [a, b]) {
+    if (x.unknowns.length > 0) return false;
+    if (x.isCollection === true || x.isNaN === true) return false;
+    if (!x.type.matches('number') || isNonRealComplex(x)) return false;
+  }
+  return true;
+}
+
+/**
+ * True when `a − b` simplifies to the literal `0`: a proof that the
+ * constants `a` and `b` are equal. The difference is built with
+ * `ce.function`, not `a.sub(b)`, which can fold two exact radicals into
+ * a float (see `orderByValue`).
+ */
+function isProvedEqual(a: Expression, b: Expression): boolean {
+  const difference = a.engine.function('Subtract', [a, b]);
+  if (difference.isSame(0)) return true;
+  const simplified = difference.simplify();
+  return isNumber(simplified) && simplified.isSame(0);
+}
+
+/**
+ * The order of `a` and `b` (`orderAtWorkingPrecision`) with the precision
+ * of the engine raised to `raisedPrecision`, or `undefined` when it is not
+ * decided or when the precision cannot be raised.
+ *
+ * The precision is changed with the `precision` setter of the engine, which
+ * recomputes the values that depend on it (the value of `π`, the stored
+ * values of expressions). Setting only the precision of the big decimals
+ * would keep those values at the working precision, and the error bounds
+ * at the raised precision would then be wrong. Afterwards, the precision of
+ * the engine, the precision of the big decimals (global to the module, and
+ * another engine can have set it to another value) and the tolerance (the
+ * `precision` setter resets it) are restored.
+ *
+ * Not done at machine precision: a number literal made by an engine at
+ * machine precision keeps a machine factory (`ExactNumericValue.factory`),
+ * and its `.N()` is a double at any later precision. Its value would then
+ * have the error of a double, not the error of the raised precision that
+ * the bound assumes, and the order could be wrong: at 50 digits, the order
+ * of a new `√(2 + 10⁻³⁰)` against a `√2` made at machine precision was
+ * `−1`.
+ *
+ * Not done while a computation holds scratch declaration scopes
+ * (`_scratchDeclarationScopes`): a change of precision resets the engine,
+ * and the reset clears that list.
+ */
+function orderAtRaisedPrecision(
+  a: Expression,
+  b: Expression
+): -1 | 0 | 1 | undefined {
+  const ce = a.engine;
+  const precision = ce.precision;
+  const bigDecimalPrecision = BigDecimal.precision;
+  if (precision <= MACHINE_PRECISION) return undefined;
+  const raised = raisedPrecision(Math.min(precision, bigDecimalPrecision));
+  if (raised <= precision) return undefined;
+  if (ce._scratchDeclarationScopes.length > 0) return undefined;
+  const tolerance = ce.tolerance;
+  ce.precision = raised;
+  try {
+    return orderAtWorkingPrecision(a, b);
+  } finally {
+    ce.precision = precision;
+    BigDecimal.precision = bigDecimalPrecision;
+    ce.tolerance = tolerance;
+  }
+}
+
+/**
+ * True when the values of `a` and `b` at the working precision are real and
+ * differ by no more than the engine tolerance relative to
+ * `max(|a|, |b|, 1)`: the tolerance tie of `exactOrder` (step 3). The
+ * values are compared as big decimals, so a value outside the range of a
+ * double (`10^400`) is compared too.
+ */
+function isWithinTolerance(a: Expression, b: Expression): boolean {
+  const x = a.N();
+  const y = b.N();
+  if (!isNumber(x) || !isNumber(y) || x.im !== 0 || y.im !== 0) return false;
+  const u = bigDecimalOf(x);
+  const v = bigDecimalOf(y);
+  if (!u.isFinite() || !v.isFinite()) return false;
+  let scale = u.abs();
+  if (v.abs().gt(scale)) scale = v.abs();
+  if (scale.lt(1)) scale = BigDecimal.ONE;
+  return u
+    .sub(v)
+    .abs()
+    .lte(scale.mul(new BigDecimal(a.engine.tolerance)));
+}
+
+/**
+ * The machine value of `x` when it is a correctly rounded double: a real
+ * number literal, the constants `π` and `e`, or a symbol whose value is a
+ * real number literal. `undefined` otherwise, and for a value that is not a
+ * finite real number.
+ */
+function correctlyRoundedMachineValue(x: Expression): number | undefined {
+  let y: Expression | undefined = x;
+  if (isSymbol(x)) {
+    if (x.symbol === 'Pi') return Math.PI;
+    if (x.symbol === 'ExponentialE') return Math.E;
+    y = x.value;
+  }
+  if (y === undefined || !isNumber(y) || y.im !== 0) return undefined;
+  const v = y.re;
+  return Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * The order of two numeric operands `a` and `b`, at least one of which is
+ * not a number literal (`π`, `1 + π`, a symbol with a value), read from
+ * their values. `undefined` when the order is not known.
+ *
+ * - A difference `a − b` with unknowns (`1 + y` and `x − 1`) has no value,
+ *   and the order is not known. The test is made before any `.N()`: over
+ *   nested user-function applications the walk of `.N()` is exponential in
+ *   the nesting depth (see `constructibleValues`).
+ * - Complex numbers have no order: both values must be real. The values
+ *   are read, not the types, because a type such as `number` includes the
+ *   complex numbers: with `z: number := 1 + i`, `z + π < z + 4` has no
+ *   answer, although `(z + π) − (z + 4)` is real. Two equal complex values
+ *   are `'='`. An operand without a value (`x` in `x < x + 1`) is refused
+ *   only when its type is complex and not real.
+ * - A signed infinity is ordered against a finite value.
+ * - With a tolerance, two values within the tolerance are `'='`.
+ * - With no tolerance (`exactOrder`), the order is exact. An exact
+ *   difference has an exact sign. Otherwise the difference is computed at
+ *   the working precision together with a bound on its error
+ *   (`approximate`), and the order is known only when the computed
+ *   difference is larger than that bound. The error can be much larger
+ *   than the difference: `c = π − 314159265358979323846264338327950289/10^35`
+ *   is `−5.8·10⁻³⁶`, and at 21 digits it computes as `+2.6·10⁻²¹`. Then
+ *   `exactOrder(c, 0)` is `undefined` at 21 digits and `−1` at 60 digits.
+ *   A computed difference of zero is never `'='`: it can be a rounding of a
+ *   value that is not zero (`sin(r)` for a rational `r` near π). The
+ *   machine value of the operands is not used for the order: `π.re` is
+ *   `3.141592653589793`, so `π` and that float were a tie.
+ */
+function orderByValue(
+  a: Expression,
+  b: Expression,
+  tolerance: number
+): '<' | '=' | '>' | undefined {
+  // Fast order: when the machine value of each operand is correctly rounded
+  // and the two are far apart, the machine order is the exact order. This
+  // holds for a real number literal, `π`, `e`, and a symbol whose value is a
+  // number literal. It does NOT hold for a function expression: near a root
+  // its machine value can have the wrong sign, so it takes the bound below.
+  if (tolerance === 0) {
+    const am = correctlyRoundedMachineValue(a);
+    const bm = correctlyRoundedMachineValue(b);
+    if (
+      am !== undefined &&
+      bm !== undefined &&
+      Math.abs(am - bm) > 1e-12 * Math.max(Math.abs(am), Math.abs(bm), 1e-300)
+    )
+      return am < bm ? '<' : '>';
+  }
+
+  // With no tolerance, two operands without unknowns are ordered by the
+  // approximation of each one. This comes before `a.sub(b)`, which can
+  // round (see `orderOfApproximations`) and which costs more than the
+  // approximations that `Sort` keeps for each element.
+  if (tolerance === 0 && a.unknowns.length === 0 && b.unknowns.length === 0) {
+    const order = orderOfApproximations(a, b);
+    if (order !== undefined) return order;
+  }
+
+  const diff0 = a.sub(b);
+  if (diff0.unknowns.length > 0) return undefined;
+  // `a.sub(b)` folds two exact radicals into one float: `√(2 + 10⁻³⁰) − √2`
+  // is `−1.7·10⁻²¹` at 21 digits, with the wrong sign. The error of that
+  // float is not the error of its rounding, so its sign is not used.
+  const roundedDifference =
+    containsInexactLiteral(diff0) &&
+    !containsInexactLiteral(a) &&
+    !containsInexactLiteral(b);
+
+  // An exact difference has an exact sign (`(x + 1) − (x + 2)` is `−1`).
+  if (tolerance === 0 && isNumber(diff0) && diff0.isExact && diff0.im === 0) {
+    if (diff0.isSame(0)) return '=';
+    if (diff0.isNegative === true) return '<';
+    if (diff0.isPositive === true) return '>';
+    return undefined;
+  }
+
+  // An operand without a value: the order comes from the difference only.
+  if (a.unknowns.length > 0 || b.unknowns.length > 0) {
+    if (isNonRealComplex(a) || isNonRealComplex(b)) return undefined;
+    if (tolerance === 0)
+      return roundedDifference ? undefined : signOfApproximation(diff0);
+    return orderFromDifference(diff0.N(), tolerance);
+  }
+
+  const aN = a.N();
+  const bN = b.N();
+  if (!isNumber(aN) || !isNumber(bN)) return undefined;
+  if (aN.isNaN === true || bN.isNaN === true) return undefined;
+  if (aN.im !== 0 || bN.im !== 0) {
+    // With no tolerance, a computed zero can be the rounding of a value that
+    // is not zero, so only an EXACT zero difference is a tie.
+    if (tolerance === 0)
+      return isNumber(diff0) && diff0.isExact && diff0.isSame(0)
+        ? '='
+        : undefined;
+    const diff = diff0.N();
+    if (!isNumber(diff)) return undefined;
+    const d = diff.numericValue;
+    if (typeof d === 'number') return d === 0 ? '=' : undefined;
+    if (d.isNaN) return undefined;
+    return d.isZeroWithTolerance(tolerance) ? '=' : undefined;
+  }
+
+  const aInfinite = aN.isFinite === false;
+  const bInfinite = bN.isFinite === false;
+  if (aInfinite || bInfinite) {
+    const sa = aInfinite ? Math.sign(aN.re) : 0;
+    const sb = bInfinite ? Math.sign(bN.re) : 0;
+    if (sa === sb) return '=';
+    return sa < sb ? '<' : '>';
+  }
+
+  if (tolerance > 0) return orderFromDifference(diff0.N(), tolerance);
+  return roundedDifference ? undefined : signOfApproximation(diff0);
+}
+
+/** True when a number literal of `x`, at any depth, is not exact (a
+ *  float). The value of a symbol is not read. */
+function containsInexactLiteral(x: Expression): boolean {
+  if (isNumber(x)) return !x.isExact;
+  if (isFunction(x)) return x.ops.some((op) => containsInexactLiteral(op));
+  return false;
+}
+
+/**
+ * The order given by the sign of the difference `diff`, or `undefined`
+ * when `diff` is not a real number. A difference within the tolerance is
+ * `'='`.
+ */
+function orderFromDifference(
+  diff: Expression,
+  tolerance: number
+): '<' | '=' | '>' | undefined {
+  if (!isNumber(diff)) return undefined;
+  const v = diff.numericValue;
+  if (typeof v === 'number') {
+    if (Number.isNaN(v)) return undefined;
+    if (tolerance === 0 ? v === 0 : Math.abs(v) <= tolerance) return '=';
+    return v < 0 ? '<' : '>';
+  }
+  if (v.isNaN || v.im !== 0) return undefined;
+  if (tolerance === 0 ? v.isZero : v.isZeroWithTolerance(tolerance)) return '=';
+  return v.lt(0) ? '<' : '>';
+}
+
+/**
+ * The sign of the constant `diff`, as an order: `'<'` when it is negative,
+ * `'>'` when it is positive. `undefined` when the value computed at the
+ * working precision is not larger than the bound on its error
+ * (`approximate`), or when no bound is known. Never `'='`: a computed
+ * zero is not an exact zero.
+ */
+function signOfApproximation(diff: Expression): '<' | '>' | undefined {
+  const approximation = approximate(diff, roundingUnit(diff.engine));
+  if (approximation === undefined || approximation.sign === 0) return undefined;
+  if (!(approximation.logMagnitude > approximation.logError + LOG_SLACK))
+    return undefined;
+  return approximation.sign < 0 ? '<' : '>';
+}
+
+/**
+ * The order of the real constants `a` and `b`, from the approximation of
+ * each one (`approximate`): the difference of the two computed values,
+ * with a bound on its error that is the sum of the two bounds and of the
+ * rounding of the difference. `undefined` when the difference is not larger
+ * than that bound, or when there is no bound for one of the operands.
+ *
+ * Each operand is approximated alone, not their difference: the difference
+ * of two operands built with `a.sub(b)` can fold two exact radicals into
+ * one float (`√(2 + 10⁻³⁰) − √2` became `−1.7·10⁻²¹` at 21 digits, with
+ * the wrong sign), and a float has only the error of its own rounding.
+ * The approximation of an operand is kept (see `approximate`), so `Sort`
+ * approximates each element once, not once for each comparison.
+ */
+function orderOfApproximations(
+  a: Expression,
+  b: Expression
+): '<' | '>' | undefined {
+  const unit = roundingUnit(a.engine);
+  const x = approximate(a, unit);
+  if (x === undefined) return undefined;
+  const y = approximate(b, unit);
+  if (y === undefined) return undefined;
+  const d = bigDecimalOf(x.value).sub(bigDecimalOf(y.value));
+  if (!d.isFinite() || d.isZero()) return undefined;
+  const logError = logAdd(
+    logAdd(x.logError, y.logError),
+    Math.log(unit) + logAdd(x.logMagnitude, y.logMagnitude)
+  );
+  if (!(logAbs(d) > logError + LOG_SLACK)) return undefined;
+  return d.isNegative() ? '<' : '>';
+}
+
+/**
+ * The relative error allowed for one rounding at the working precision:
+ * `10^(2 − digits)`, that is 100 units in the last digit. The number of
+ * digits is the lower of the engine precision and the precision of the
+ * big decimals: the second one is global to the module, and another
+ * engine can change it (see `BigDecimal.precision`).
+ */
+function roundingUnit(engine: Expression['engine']): number {
+  const digits = Math.min(engine.precision, BigDecimal.precision);
+  return 10 ** (2 - Math.max(digits, MACHINE_PRECISION));
+}
+
+/**
+ * A margin for the comparison of a logarithm of a value with the logarithm
+ * of its error bound. The bounds are computed with the logarithms of
+ * values (see `Approximation`), in machine arithmetic, and the relative
+ * error of that arithmetic is about `10⁻¹⁶·|logarithm|`. A margin of
+ * `10⁻⁶` is much larger than that, and changes the bound by a factor of
+ * only `1.000001`.
+ */
+const LOG_SLACK = 1e-6;
+
+/**
+ * A real value computed at the working precision, and a bound on the
+ * absolute difference between it and the exact value.
+ *
+ * The magnitude and the error are kept as natural logarithms, so that a
+ * value outside the range of a double (`π·10^400`, `e^800`) has a bound
+ * too: as doubles, they were `Infinity`, and there was no bound.
+ */
+type Approximation = {
+  /** The computed value, a real number literal */
+  value: Expression;
+  sign: -1 | 0 | 1;
+  /** `ln |value|`, `-Infinity` when the value is 0 */
+  logMagnitude: number;
+  /** `ln` of the error bound, `-Infinity` when the value is exact */
+  logError: number;
+};
+
+/** `ln(eˣ + eʸ)`, without overflow. */
+function logAdd(x: number, y: number): number {
+  if (x === -Infinity) return y;
+  if (y === -Infinity) return x;
+  const m = Math.max(x, y);
+  return m + Math.log1p(Math.exp(Math.min(x, y) - m));
+}
+
+/** `ln(eˣ − eʸ)`, or `undefined` when `eˣ − eʸ` is not positive. */
+function logSub(x: number, y: number): number | undefined {
+  if (!(x > y)) return undefined;
+  if (y === -Infinity) return x;
+  return x + Math.log1p(-Math.exp(y - x));
+}
+
+/** `ln |d|` for a finite big decimal `d`. `-Infinity` when `d` is 0. */
+function logAbs(d: BigDecimal): number {
+  const s = d.significand < 0n ? -d.significand : d.significand;
+  if (s === 0n) return -Infinity;
+  const digits = s.toString();
+  // The leading 17 digits give `ln` to the precision of a double.
+  const k = Math.min(digits.length, 17);
+  return (
+    Math.log(Number(digits.slice(0, k))) +
+    (digits.length - k + d.exponent) * Math.LN10
+  );
+}
+
+/** The real part of the number literal `v`, as a big decimal. */
+function bigDecimalOf(v: Expression): BigDecimal {
+  if (!isNumber(v)) return BigDecimal.NAN;
+  const nv = v.numericValue;
+  if (typeof nv === 'number') return new BigDecimal(nv);
+  return nv.bignumRe ?? new BigDecimal(nv.re);
+}
+
+/** The sign and `ln` of the magnitude of `v`, when it is a finite real
+ *  number literal. Read on the big decimal value when there is one: its
+ *  double value can be `Infinity` (`10^400`) or `0` (`10^-400`). */
+function realParts(
+  v: Expression
+): { sign: -1 | 0 | 1; logMagnitude: number } | undefined {
+  if (!isNumber(v) || v.im !== 0) return undefined;
+  const nv = v.numericValue;
+  if (typeof nv === 'number') {
+    if (!Number.isFinite(nv)) return undefined;
+    return {
+      sign: nv < 0 ? -1 : nv > 0 ? 1 : 0,
+      logMagnitude: Math.log(Math.abs(nv)),
+    };
+  }
+  if (nv.isNaN) return undefined;
+  const big = nv.bignumRe;
+  if (big === undefined) {
+    const re = nv.re;
+    if (!Number.isFinite(re)) return undefined;
+    return {
+      sign: re < 0 ? -1 : re > 0 ? 1 : 0,
+      logMagnitude: Math.log(Math.abs(re)),
+    };
+  }
+  if (!big.isFinite()) return undefined;
+  return {
+    sign: big.isNegative() ? -1 : big.isZero() ? 0 : 1,
+    logMagnitude: logAbs(big),
+  };
+}
+
+/**
+ * The approximations already computed, by expression. An approximation
+ * depends only on the expression, the precision (of the engine and of the
+ * big decimals) and the angular unit, when every symbol in the expression
+ * is a constant. Only those approximations are kept: the value of a symbol
+ * that is not a constant can change. Boxed expressions are not modified,
+ * so the expression is a valid key, and the map does not keep it alive.
+ */
+const approximations = new WeakMap<
+  Expression,
+  { key: string; approximation: Approximation | undefined }
+>();
+
+/**
+ * The value of the real constant `x` at the working precision, with a
+ * bound on its absolute error. `undefined` when `x` is not a real
+ * constant, or when no bound is known.
+ *
+ * The error model. The value is computed bottom-up, one node at a time:
+ * each node is computed from the values of its operands, so every node is
+ * computed once. The error of a node is the sum of:
+ *
+ * - the error of its operands, propagated with a bound on the derivative
+ *   of the operator over the whole interval `[value − error, value + error]`
+ *   of each operand (by the mean value theorem). For example, `ln u` has
+ *   the error `e/(|u| − e)`, and `sin u` the error `e`. When the interval
+ *   contains a point where that bound does not exist (`ln` or `1/u` of an
+ *   interval that contains 0, `tan` of an interval that contains a pole),
+ *   there is no bound.
+ * - the rounding of the node: `|value|·unit`, and for a sum
+ *   `unit·Σ|term|`, since a sum is rounded relative to its terms. A
+ *   trigonometric function also reduces its argument by a multiple of π,
+ *   which costs `|argument|·unit`.
+ *
+ * A leaf is a number literal or a constant symbol: its error is
+ * `|value|·unit`, except for an integer smaller than `10^(digits − 4)`,
+ * which is exact. So a literal with more digits than the precision (a
+ * 37-digit rational) has the error of its rounding. A symbol with an
+ * assigned value is replaced by that value.
+ *
+ * The magnitudes and the errors are logarithms (see `Approximation`), so a
+ * value larger than a double (`e^800`) or smaller (`10^-400`) has a bound.
+ *
+ * Limit: the model assumes that each operator in the list below computes
+ * its value to within `unit` of the exact value of its (rounded) operands,
+ * which is true for the big decimal functions of this library. An operator
+ * that is not in the list has no known derivative bound, so there is no
+ * bound for an expression that contains it, and its order is not known.
+ * The list is: `Add`, `Subtract`, `Negate`, `Multiply`, `Divide`, `Square`,
+ * `Sqrt`, `Root`, `Power`, `Exp`, `Ln`, `Log`, `Lb`, `Lg`, `Abs`, `Sin`,
+ * `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arcsin`, `Arccos`, `Sinh`,
+ * `Cosh`, `Tanh`, `Arsinh`.
+ */
+function approximate(x: Expression, unit: number): Approximation | undefined {
+  return approximateNode(x, unit).approximation;
+}
+
+/** The approximation of `x` (see `approximate`), and whether it depends
+ *  only on `x` and the precision (`pure`: every symbol is a constant). The
+ *  pure approximations are kept in `approximations`. */
+function approximateNode(
+  x: Expression,
+  unit: number
+): { approximation: Approximation | undefined; pure: boolean } {
+  const ce = x.engine;
+  const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}`;
+  const known = approximations.get(x);
+  if (known !== undefined && known.key === key)
+    return { approximation: known.approximation, pure: true };
+  const result = computeApproximation(x, unit);
+  if (result.pure)
+    approximations.set(x, { key, approximation: result.approximation });
+  return result;
+}
+
+function computeApproximation(
+  x: Expression,
+  unit: number
+): { approximation: Approximation | undefined; pure: boolean } {
+  const ce = x.engine;
+  const logUnit = Math.log(unit);
+
+  const leaf = (y: Expression, exact: boolean): Approximation | undefined => {
+    const v = y.N();
+    const parts = realParts(v);
+    if (parts === undefined) return undefined;
+    return {
+      value: v,
+      ...parts,
+      logError: exact ? -Infinity : parts.logMagnitude + logUnit,
+    };
+  };
+
+  if (isNumber(x)) {
+    // An integer literal smaller than 10^(digits − 4) is converted exactly.
+    const exact = x.isInteger === true && Math.abs(x.re) < 0.01 / unit;
+    return { approximation: leaf(x, exact), pure: true };
+  }
+
+  if (isSymbol(x)) {
+    if (x.isConstant) return { approximation: leaf(x, false), pure: true };
+    const value = x.value;
+    if (value !== undefined && isFunction(value))
+      return { approximation: approximate(value, unit), pure: false };
+    return { approximation: leaf(x, false), pure: false };
+  }
+
+  if (!isFunction(x)) return { approximation: undefined, pure: true };
+
+  // When an operand has no approximation, neither has `x`, whatever the
+  // other operands are, so the walk stops there.
+  let pure = true;
+  const args: Approximation[] = [];
+  for (const operand of x.ops) {
+    const a = approximateNode(operand, unit);
+    pure &&= a.pure;
+    if (a.approximation === undefined)
+      return { approximation: undefined, pure };
+    args.push(a.approximation);
+  }
+  const value = ce
+    .function(
+      x.operator,
+      args.map((a) => a.value)
+    )
+    .N();
+  const parts = realParts(value);
+  if (parts === undefined) return { approximation: undefined, pure };
+
+  const propagated = propagatedError(
+    ce,
+    x.operator,
+    args,
+    parts.logMagnitude,
+    logUnit
+  );
+  // `NaN` (for example `0·∞`) is not a bound either.
+  if (
+    propagated === undefined ||
+    Number.isNaN(propagated) ||
+    propagated === Infinity
+  )
+    return { approximation: undefined, pure };
+  return {
+    approximation: {
+      value,
+      ...parts,
+      logError: logAdd(propagated, parts.logMagnitude + logUnit),
+    },
+    pure,
+  };
+}
+
+/**
+ * The error of `op(args)` that comes from the errors of `args`, plus the
+ * rounding that is specific to `op` (the terms of a sum, the reduction of
+ * a trigonometric argument), as a natural logarithm. `logMagnitude` is
+ * `ln |op(args)|`, and `logUnit` is `ln unit`. `undefined` when there is
+ * no bound. See `approximate`.
+ */
+function propagatedError(
+  ce: Expression['engine'],
+  op: string,
+  args: Approximation[],
+  logMagnitude: number,
+  logUnit: number
+): number | undefined {
+  const [u, w] = args;
+  // `ln` of the lower bound of `|u|` over its interval, or `undefined` when
+  // the interval contains 0.
+  const lower = (a: Approximation): number | undefined =>
+    logSub(a.logMagnitude, a.logError);
+  // `ln` of the upper bound of `|u|` over its interval.
+  const upper = (a: Approximation): number =>
+    logAdd(a.logMagnitude, a.logError);
+  // An operand that is an exact integer (`n` in `x^n`, `√[n]{x}`).
+  const exactInteger = (a: Approximation | undefined): number | undefined =>
+    a !== undefined && a.logError === -Infinity && Number.isInteger(a.value.re)
+      ? a.value.re
+      : undefined;
+  // Radians per unit of angle, and the error of a trigonometric argument:
+  // its own error and the reduction by a multiple of π.
+  const radians = {
+    rad: 1,
+    deg: Math.PI / 180,
+    grad: Math.PI / 200,
+    turn: 2 * Math.PI,
+  }[ce.angularUnit];
+  const logRadians = Math.log(radians);
+  const angleError = (a: Approximation): number =>
+    logRadians + logAdd(a.logError, a.logMagnitude + logUnit);
+  // A bound for a function `f` with `|f'| ≤ 1/g²`, where `g` is `sin` or
+  // `cos` (so `|g'| ≤ 1`), `|g| = m` at the computed argument and `e` is
+  // the error of the argument: `|g| ≥ m − e` over the interval, so the
+  // error is at most `e/(m − e)²`. No bound when `g` can be 0 (a pole).
+  // `logM` and `logE` are `ln m` and `ln e`.
+  const poleBound = (logM: number, logE: number): number | undefined => {
+    const gap = logSub(logM, logE);
+    return gap === undefined ? undefined : logE - 2 * gap;
+  };
+
+  switch (op) {
+    case 'Add':
+    case 'Subtract': {
+      let error = -Infinity;
+      for (const a of args)
+        error = logAdd(error, logAdd(a.logError, a.logMagnitude + logUnit));
+      return error;
+    }
+    case 'Negate':
+    case 'Abs':
+      return u.logError;
+    case 'Multiply': {
+      // |Π aᵢ − Π bᵢ| ≤ Σ |aᵢ − bᵢ|·Π_{j≠i} (|aⱼ| + eⱼ)
+      let error = -Infinity;
+      for (let i = 0; i < args.length; i++) {
+        let term = args[i].logError;
+        if (term === -Infinity) continue;
+        for (let j = 0; j < args.length; j++)
+          if (j !== i) term += upper(args[j]);
+        error = logAdd(error, term);
+      }
+      return logAdd(error, Math.log(args.length) + logMagnitude + logUnit);
+    }
+    case 'Divide': {
+      const m = lower(w);
+      if (m === undefined) return undefined;
+      return logAdd(u.logError, logMagnitude + w.logError) - m;
+    }
+    case 'Square':
+      return Math.LN2 + upper(u) + u.logError;
+    case 'Sqrt':
+      // |√x − √y| ≤ min(√|x − y|, |x − y|/√x) for x, y ≥ 0. When the
+      // interval contains 0, the exact value may not be real.
+      if (lower(u) === undefined) return undefined;
+      return Math.min(u.logError / 2, u.logError - u.logMagnitude / 2);
+    case 'Root': {
+      const n = exactInteger(w);
+      if (n === undefined || n < 2) return undefined;
+      // An even root of an interval that contains 0 may not be real.
+      if (n % 2 === 0 && lower(u) === undefined) return undefined;
+      // |x^(1/n) − y^(1/n)| ≤ 2·|x − y|^(1/n), also for opposite signs.
+      return Math.LN2 + u.logError / n;
+    }
+    case 'Power': {
+      const n = exactInteger(w);
+      if (n !== undefined) {
+        if (n === 0 || u.logError === -Infinity) return -Infinity;
+        if (n > 0) return Math.log(n) + (n - 1) * upper(u) + u.logError;
+        const m = lower(u);
+        if (m === undefined) return undefined;
+        return Math.log(-n) + (n - 1) * m + u.logError;
+      }
+      // A real exponent: the base must be positive.
+      if (u.sign <= 0) return undefined;
+      const m = lower(u);
+      if (m === undefined) return undefined;
+      // `ln` of the bounds of the base
+      const logBases = [m, upper(u)];
+      const p = w.value.re;
+      const pError = Math.exp(w.logError);
+      if (!Number.isFinite(p) || !Number.isFinite(pError)) return undefined;
+      const exponents = [p - pError, p + pError];
+      // The largest |b^x| and |b^(x − 1)| over the corners of the intervals
+      // (both are monotonic in each variable), as logarithms.
+      let logPower = -Infinity;
+      let logPowerLess1 = -Infinity;
+      for (const lb of logBases)
+        for (const x of exponents) {
+          logPower = Math.max(logPower, x * lb);
+          logPowerLess1 = Math.max(logPowerLess1, (x - 1) * lb);
+        }
+      // The largest |ln b| over the interval of the base
+      const log = Math.max(...logBases.map((lb) => Math.abs(lb)));
+      return logAdd(
+        Math.log(Math.abs(p) + pError) + logPowerLess1 + u.logError,
+        logPower + Math.log(log) + w.logError
+      );
+    }
+    case 'Exp': {
+      // |eˣ − eʸ| ≤ eˣ·(e^|x − y| − 1)
+      if (u.logError === -Infinity) return -Infinity;
+      const e = Math.exp(u.logError);
+      if (!Number.isFinite(e)) return undefined;
+      // ln(e^e − 1), without overflow for a large `e` and without
+      // underflow for a small one.
+      const logExpm1 =
+        e > 1
+          ? e + Math.log1p(-Math.exp(-e))
+          : u.logError + (e === 0 ? 0 : Math.log(Math.expm1(e) / e));
+      return logMagnitude + logExpm1;
+    }
+    case 'Ln': {
+      const m = lower(u);
+      return m === undefined ? undefined : u.logError - m;
+    }
+    case 'Lb':
+    case 'Lg':
+    case 'Log': {
+      const m = lower(u);
+      if (m === undefined) return undefined;
+      const lnError = u.logError - m;
+      if (op === 'Lb') return lnError - Math.log(Math.LN2);
+      if (op === 'Lg' || w === undefined) return lnError - Math.log(Math.LN10);
+      // log_b(u) = ln u / ln b
+      const mb = lower(w);
+      if (mb === undefined) return undefined;
+      const lnBase = Math.abs(w.logMagnitude);
+      const lnBaseError = Math.exp(w.logError - mb);
+      if (!(lnBase > lnBaseError)) return undefined;
+      return (
+        logAdd(lnError, logMagnitude + Math.log(lnBaseError)) -
+        Math.log(lnBase - lnBaseError)
+      );
+    }
+    case 'Sin':
+    case 'Cos':
+      return angleError(u);
+    case 'Tan':
+    case 'Cot':
+      // |tan'| = 1/cos², and |cos| = 1/√(1 + tan²) (the same for `cot`,
+      // with `sin`)
+      return poleBound(-0.5 * logAdd(0, 2 * logMagnitude), angleError(u));
+    case 'Sec':
+    case 'Csc':
+      // |sec'| ≤ 1/cos² and |csc'| ≤ 1/sin², with |cos| = 1/|sec|
+      return logMagnitude > -Infinity
+        ? poleBound(-logMagnitude, angleError(u))
+        : undefined;
+    case 'Arctan':
+      return u.logError - logRadians;
+    case 'Arcsin':
+    case 'Arccos': {
+      const m = upper(u);
+      if (!(m < 0)) return undefined;
+      // 1 − m², with `m = |u| + e`
+      const oneMinusSquare = -Math.expm1(2 * m);
+      return u.logError - 0.5 * Math.log(oneMinusSquare) - logRadians;
+    }
+    case 'Sinh':
+    case 'Cosh': {
+      // e·cosh(|u| + e), with ln cosh(x) = x + ln(1 + e^(−2x)) − ln 2
+      const x = Math.exp(upper(u));
+      if (!Number.isFinite(x)) return undefined;
+      return u.logError + x + Math.log1p(Math.exp(-2 * x)) - Math.LN2;
+    }
+    case 'Tanh':
+    case 'Arsinh':
+      return u.logError;
+  }
+  return undefined;
+}
+
+/** True for `+∞` and `−∞`. */
+function isSignedInfinity(x: number): boolean {
+  return x === Infinity || x === -Infinity;
+}
+
 /** True when the type of `x` is complex and excludes every real value
- *  (for example `1 + i`). An unknown or a real type gives `false`. */
+ *  (for example `π + i`, or a symbol declared `complex`). An unknown type,
+ *  a real type and the `number` type (which includes the reals) give
+ *  `false`. */
 function isNonRealComplex(x: Expression): boolean {
   const t = x.type;
   return t.matches('complex') && !t.matches('real | signed_infinity');

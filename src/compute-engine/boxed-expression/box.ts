@@ -573,8 +573,9 @@ function boxFunctionInternal(
             : box(ce, ops[1], options);
 
         // Exact components (integers, rationals, radicals) reconstruct an
-        // EXACT complex value when the pair is representable (a Gaussian
-        // rational, or a pure-imaginary radical). This is what makes
+        // EXACT complex value when the pair is representable (a pure-
+        // imaginary value, or two components with the same radical, as in
+        // `√2 + √2·i`). This is what makes
         // `ExactNumericValue.toJSON()` lossless: `['Complex', ['Rational',1,2], 3]`
         // re-boxes to the exact `1/2 + 3i`, not a machine float.
         {
@@ -584,7 +585,7 @@ function boxFunctionInternal(
             if (imC !== null && !isZero(imC.rational)) {
               const reIsZero = isZero(reC.rational);
               if (
-                (reIsZero || (reC.radical === 1 && imC.radical === 1)) &&
+                (reIsZero || reC.radical === imC.radical) &&
                 imC.radical <= SMALL_INTEGER &&
                 reC.radical <= SMALL_INTEGER
               )
@@ -597,6 +598,14 @@ function boxFunctionInternal(
                   }),
                   options
                 );
+              // Two exact components that one exact literal cannot hold
+              // (two different radicals, as in `√2 + √3·i`): the symbolic
+              // sum `re + im·i`, which keeps both parts exact. The float
+              // below would lose the exactness.
+              return ce.function('Add', [
+                reOp,
+                ce.function('Multiply', [imOp, ce.I]),
+              ]);
             }
           }
         }

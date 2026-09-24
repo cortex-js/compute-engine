@@ -19,15 +19,21 @@ describe('WP-2.12: P0-25 exact-integer overflow folds to exact BigInt (not NaN)'
     expect(e.toString().includes('NaN')).toBe(false);
   });
 
-  test('Multiply(1e200, 1e200).evaluate() is the exact integer product', () => {
+  test('Multiply(10^200, 10^200).evaluate() is the exact integer product', () => {
     const ce = new ComputeEngine();
-    const p = ce.box(['Multiply', 1e200, 1e200]).evaluate();
-    // 1e200 boxes as the exact integer value of the double, so the product is
-    // the exact BigInt product of those two doubles (consistent with the Add
-    // path). It must be an exact integer, not NaN.
+    // `10^200` is written as a string of digits, which boxes as an exact
+    // integer: the product is the exact BigInt product, not NaN.
+    const big = { num: '1e200' };
+    const p = ce.box(['Multiply', big, big]).evaluate();
     expect(p.isNaN).toBe(false);
     expect(p.isInteger).toBe(true);
-    expect(p.isSame(ce.number(BigInt(1e200) * BigInt(1e200)))).toBe(true);
+    expect(p.isSame(ce.number(10n ** 400n))).toBe(true);
+    // The JavaScript number `1e200` is past the safe integers, so it boxes as
+    // a float, and the product is the float `1e400`.
+    const f = ce.box(['Multiply', 1e200, 1e200]).evaluate();
+    expect(f.isNaN).toBe(false);
+    expect(f.isExact).toBe(false);
+    expect(f.toString()).toBe('1e+400');
   });
 
   test('Multiply(1e308, x, 1e308).N() is not NaN', () => {
@@ -38,22 +44,26 @@ describe('WP-2.12: P0-25 exact-integer overflow folds to exact BigInt (not NaN)'
 
   test('Terms coefficient reduce: Add(1.7e308 x, 1.7e308 x) exact under both evaluate and N', () => {
     const ce = new ComputeEngine();
+    // An exact coefficient past the float64 range (a string of digits: the
+    // JavaScript number `1.7e308` would box as a float).
+    const big = { num: '17e307' };
     const e = ce.box([
       'Add',
-      ['Multiply', 1.7e308, 'x'],
-      ['Multiply', 1.7e308, 'x'],
+      ['Multiply', big, 'x'],
+      ['Multiply', big, 'x'],
     ]);
-    const coef = ce.number(BigInt(1.7e308) * 2n);
+    const coef = ce.number(17n * 10n ** 307n * 2n);
     const expected = ce.box(['Multiply', coef, 'x']);
     expect(e.evaluate().isSame(expected)).toBe(true);
     expect(e.N().isSame(expected)).toBe(true);
   });
 
-  test('Add path still folds large integer doubles to exact BigInt', () => {
+  test('Add path still folds large exact integers to exact BigInt', () => {
     const ce = new ComputeEngine();
-    const a = ce.box(['Add', 1e200, 1e200]).evaluate();
+    const big = { num: '1e200' };
+    const a = ce.box(['Add', big, big]).evaluate();
     expect(a.isNaN).toBe(false);
-    expect(a.isSame(ce.number(BigInt(1e200) + BigInt(1e200)))).toBe(true);
+    expect(a.isSame(ce.number(2n * 10n ** 200n))).toBe(true);
   });
 
   test('Non-finite inputs still propagate (guard preserved)', () => {

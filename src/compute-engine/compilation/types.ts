@@ -357,6 +357,24 @@ export interface CompileTarget<Expr = unknown> {
    */
   constant?: (id: MathJsonSymbol) => string | undefined;
 
+  /**
+   * The type the emitted code expects for the value of the free symbol
+   * `symbol` (one of its occurrences in the compiled expression), spelled in
+   * the target's own terms, or `undefined` to use the default answer.
+   *
+   * This is what `CompilationResult.freeSymbolTypes` reports as `lowered`.
+   * The shader targets provide it: they answer the shader type the code
+   * reads the symbol as (`float`, `vec2` for a complex value, `vec3` for a
+   * colour, `mat2`, `float[5]`), which is the type the host must give the
+   * uniform. When the target does not provide it, the answer comes from the
+   * engine type of the symbol and the target language (for JavaScript,
+   * the runner's value convention: `number`, `complex`, `point`, …).
+   *
+   * Read after the compilation ended, while any record the target kept
+   * during the emission is still available.
+   */
+  loweredSymbolType?: (symbol: Expr) => string | undefined;
+
   /** Format string literals for the target language */
   string: (str: string) => string;
 
@@ -683,6 +701,29 @@ export interface CompileTarget<Expr = unknown> {
    * nested list rather than to the colors inside it.
    */
   collectionAwareHeads?: ReadonlySet<MathJsonSymbol>;
+
+  /**
+   * Whether this target lowers the head `head` with a REAL-ONLY lowering:
+   * one that computes with real numbers only, so that a complex operand has
+   * no value there. `lowering` is the target's own entry for the head
+   * (`functions(head)`).
+   *
+   * The same head can be real-only on one target and take a complex operand
+   * on another (`Erf` is `_SYS.erf` on JavaScript and `scipy.special.erf`
+   * on Python), so each target declares its own. A statically non-real
+   * operand of a real-only lowering fails closed; an operand that may be
+   * complex takes the run-time rule (the lowering runs on the real part when
+   * the imaginary part is exactly zero, and the value is NaN otherwise).
+   *
+   * When absent, the base compiler's default applies: the heads that are
+   * real-only on every target (`BaseCompiler.REAL_ONLY_BY_DEFINITION`), and
+   * every head the target maps to a plain helper name
+   * (`BaseCompiler.stringHelperIsRealOnly`).
+   */
+  isRealOnlyLowering?: (
+    head: MathJsonSymbol,
+    lowering: CompiledFunction<Expr> | undefined
+  ) => boolean;
 
   /**
    * Wrap a compiled `Which`/`When` condition that is **not** provably boolean so
@@ -2100,7 +2141,71 @@ export interface CompilationOptions<Expr = unknown> {
    *   behaves this way by default (pass `fallback: false` there to throw).
    */
   fallback?: boolean;
+
+  /**
+   * Require an explicit declaration for every free symbol (default `false`).
+   *
+   * Without this option, the compiler types an undeclared free symbol from
+   * the way the expression uses it: `x` in `f(x)` with `f: (complex) ->
+   * complex` is typed `complex`, so a shader reads it as a `vec2` uniform
+   * and JavaScript reads it as `{ re, im }`. The host must then supply a
+   * value of that type, which it can learn only from
+   * `CompilationResult.freeSymbolTypes`.
+   *
+   * With `strictTypes: true`, a compilation whose expression has a free
+   * symbol with no declaration (`ce.declare`) fails closed instead. The
+   * error names each such symbol, the type that was inferred for it and the
+   * type the code would read it as, so the host can add the declaration.
+   * The failure follows the `fallback` option like any other decline.
+   *
+   * Applied by the engine-level `compile()` function, which checks the
+   * result of a successful compilation.
+   */
+  strictTypes?: boolean;
 }
+
+/**
+ * The type report of one free symbol of a compiled expression (see
+ * `CompilationResult.freeSymbolTypes`).
+ */
+export type FreeSymbolType = {
+  /**
+   * The engine type of the symbol, as a type string (`real`, `complex`,
+   * `color | string | tuple`, …). For an undeclared symbol this is the type
+   * the engine inferred from the uses of the symbol.
+   */
+  type: string;
+
+  /**
+   * The type the compiled code reads the value of the symbol as, spelled for
+   * the target:
+   *
+   * - `glsl` / `wgsl`: the shader type the host must give the uniform:
+   *   `float` / `f32`, `bool`, `vec2` / `vec2f` for a complex value or a
+   *   two-component point, `vec3` / `vec3f` for a colour or a
+   *   three-component point, `vec4`, a matrix (`mat2`, `mat3x3f`) or an
+   *   array (`float[5]`, `array<f32, 5>`).
+   * - `javascript`: the runner value convention: `number`, `complex` (a
+   *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
+   *   numbers of a fixed width), `color`, `array` (a list), or `function`.
+   * - `interval-js`: `interval` for a real number (a number or a
+   *   `{ lo, hi }` interval), else as for `javascript`.
+   * - `python`: `float`, `complex`, `bool`, `str`, `tuple` or `list`.
+   *
+   * `unknown` when the target has no single static type for the value.
+   *
+   * This can differ from `type`: after `ColorMix(a, b, 0.5)` the engine type
+   * of `a` is `color | string | tuple`, but a shader reads a `vec3`.
+   */
+  lowered: string;
+
+  /**
+   * `'declared'` when the symbol has an explicit declaration (`ce.declare`),
+   * `'inferred'` otherwise (its type was inferred from its uses, or it has
+   * no definition at all).
+   */
+  provenance: 'declared' | 'inferred';
+};
 
 /**
  * Built-in targets that produce an executable `run` function.
@@ -2389,6 +2494,23 @@ export type CompilationResult<
    * references (including symbols reachable only through a folded value).
    */
   freeSymbols?: string[];
+
+  /**
+   * The type of each free symbol of `freeSymbols`, keyed by its name: its
+   * engine type, the type the compiled code reads it as on this target
+   * (`lowered`) and whether it was declared or inferred (`provenance`). See
+   * `FreeSymbolType`.
+   *
+   * Use `lowered` to declare the inputs the code expects: on a shader target
+   * it is the type of the uniform to declare and bind (`vec2` for a complex
+   * input, `vec3` for a colour), on JavaScript the shape of the value to put
+   * in the vars object. The engine type alone does not always say this: a
+   * symbol used as a colour operand has the engine type
+   * `color | string | tuple`, but the shader reads it as a `vec3`.
+   *
+   * Set by the built-in targets beside `freeSymbols`.
+   */
+  freeSymbolTypes?: Record<string, FreeSymbolType>;
 
   /**
    * Operator heads in the expression that this target cannot lower — they have

@@ -237,9 +237,9 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
 
   test('ON: the item-190 witness matches the interpreter', () => {
     // The radical sits inside the user function `z`, so this only works if the
-    // CALL SITE follows the body's lane — `z(t)` types the wide
-    // `number`, which says nothing about complexness on its own. See
-    // `isComplexValuedUserCall`.
+    // CALL SITE follows the lane that the emitted definition of `z` records
+    // — `z(t)` types the wide `number`, which says nothing about complexness
+    // on its own. See `userCallLane` in `base-compiler.ts`.
     const ce = new ComputeEngine();
     ce.parse(Z_DEF, { strict: false }).evaluate();
     const r = compile(ce.parse(Z_CHAIN, { strict: false }), {

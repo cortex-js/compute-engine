@@ -142,6 +142,7 @@ import {
   signatureSlotType,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
 
 import { findUnivariateRoots } from './solve.js';
@@ -1505,15 +1506,34 @@ export class BoxedFunction
       // @fastpasth
       if (rest.isSame(1) || rest.isSame(0)) {
         if (coef.isOne || coef.isZero) return [coef, rest];
-        return [coef.sqrt(), rest];
+        const root = coef.sqrt();
+        // The square root of an exact value that is not a perfect square is
+        // a big float. Such a float reports `isExact` when its value at the
+        // working precision is an integer: `√(1 + 10^-30)` at 21 digits is
+        // `1.000…`, and extracting it as the exact integer `1` made
+        // `2√(1 + 10^-30) − 2` an exact `0`. Only an `ExactNumericValue`
+        // is an exact root; for an exact radicand, keep the whole radical.
+        if (
+          !(root instanceof ExactNumericValue) &&
+          coef instanceof ExactNumericValue
+        )
+          return [ce._numericValue(1), this];
+        return [root, rest];
       }
       // √(k·u) = √k·√u only holds for k ≥ 0: for k < 0 it splits off a
       // constant imaginary phase, but the true value is region-dependent
       // (±i·√|k|·√|u| across u = 0). Fold the sign into the radicand
       // instead: √(k·u) = √|k|·√(−u).
-      if (coef.sgn() === -1)
-        return [coef.neg().sqrt(), ce.function('Sqrt', [rest.neg()])];
-      return [coef.sqrt(), ce.function('Sqrt', [rest])];
+      const root = coef.sgn() === -1 ? coef.neg().sqrt() : coef.sqrt();
+      // Same rule as above: an inexact root of an exact coefficient is not
+      // extracted (it would strand a float beside the symbolic remainder).
+      if (
+        !(root instanceof ExactNumericValue) &&
+        coef instanceof ExactNumericValue
+      )
+        return [ce._numericValue(1), this];
+      if (coef.sgn() === -1) return [root, ce.function('Sqrt', [rest.neg()])];
+      return [root, ce.function('Sqrt', [rest])];
     }
 
     if (isFunction(expr, 'Root')) {
@@ -1541,7 +1561,10 @@ export class BoxedFunction
       // was exact. (A genuinely inexact radicand — a float — may still
       // numericize, since there is no exactness to preserve.)
       const root = coef.root(exp);
-      if (!root.isExact && (!rest.isSame(1) || coef.isExact))
+      if (
+        !(root instanceof ExactNumericValue) &&
+        (!rest.isSame(1) || coef instanceof ExactNumericValue)
+      )
         return [ce._numericValue(1), this];
       return [root, ce.function('Root', [rest, expr.op2])];
     }

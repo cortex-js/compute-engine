@@ -11,12 +11,13 @@ import type {
   CompileMode,
   CompileTarget,
   CompiledOperators,
+  CompiledFunction,
   CompiledFunctions,
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
 } from './types.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { CompileDeclineError, compileDiagnosticOf } from './diagnostics.js';
 import type { ConditionDialect } from './base-compiler.js';
 import {
   BaseCompiler,
@@ -34,6 +35,10 @@ import {
 import { rewriteAngularUnit } from './angular-unit.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import { tryGetConstant } from './constant-folding.js';
+import {
+  TRIG_POLE_ARGUMENT_CAP,
+  TRIG_POLE_EPSILON,
+} from '../numerics/numeric.js';
 import {
   isFunction,
   isNumber,
@@ -1081,23 +1086,42 @@ function isPyCollectionOperand(e: Expression): boolean {
  *
  * `.rank` is the engine's static rank — the length of the `dimensions` read off
  * the type (`matrix` → 2, `vector<3>` → 1) — but it answers `0` both for a
- * scalar and for a dimension-less list. A dimension-less `list<T>` whose
- * element type is a NUMBER is still provably rank 1 (the `vector` spelling
- * parses to `list<number>`), so that case is recovered here; everything else
- * with no dimensions is reported as not statically known.
+ * scalar and for a dimension-less list. A list type whose element types nest
+ * down to a number type through lists that each carry `dimensions` or hold a
+ * list type still has a provable rank: `list<matrix<real>>` is rank 3 (one
+ * axis for the outer list, two for the `matrix` dimensions) and
+ * `list<vector<real>>` is rank 2. These cases are recovered here.
+ *
+ * A dimension-less list whose elements are a NUMBER type (`list<number>`, the
+ * `tensor` spelling) has NO statically known rank: a matrix and every higher
+ * tensor conform to it, not only a vector. So `list<number>`,
+ * `list<list<number>>` (a rank-3 tensor conforms to it) and
+ * `list<list<list<real>>>` are all reported as not statically known, and the
+ * caller tests the rank when the code runs. The `vector` spelling is
+ * different: it carries `dimensions: [-1]`, and a matrix does not conform to
+ * it.
  */
 function pyStaticRank(e: Expression): number | undefined {
   const rank = e.rank;
   if (rank > 0) return rank;
+  return pyListTypeRank(e.type.type);
+}
+
+/**
+ * The number of axes of a list type whose nested element types end in a
+ * NUMBER type, or `undefined` when the type does not fix it. A list with
+ * `dimensions` contributes one axis per dimension. A dimension-less list of
+ * LISTS contributes one axis. A dimension-less list of NUMBERS fixes no rank
+ * (a tensor of any rank conforms to it), so the answer is `undefined`.
+ */
+function pyListTypeRank(type: Type): number | undefined {
   // A type reference answers layout questions as its definition (§4.6 step 1).
-  const t = resolveTypeForCompilation(e.type.type);
-  if (
-    typeof t === 'object' &&
-    t.kind === 'list' &&
-    isSubtype(t.elements, 'number')
-  )
-    return 1;
-  return undefined;
+  const t = resolveTypeForCompilation(type);
+  if (typeof t !== 'object' || t.kind !== 'list') return undefined;
+  if (isSubtype(t.elements, 'number')) return t.dimensions?.length || undefined;
+  const own = t.dimensions?.length ?? 1;
+  const inner = pyListTypeRank(t.elements);
+  return inner === undefined ? undefined : own + inner;
 }
 
 /**
@@ -1124,6 +1148,127 @@ function assertPythonNormRankAtMost2(rank: number | undefined): void {
       `raises for any explicit order on an input with more than two axes. ` +
       `Fail closed (D6).`
   );
+}
+
+/**
+ * The Python source of `Norm(x, p)` for a LITERAL positive order `p` over an
+ * operand whose rank is not statically known: a lambda that tests the rank
+ * with `np.ndim` when it runs, and answers the value the interpreter
+ * (`library/linear-algebra.ts`) computes for that rank, or NaN where the
+ * interpreter leaves the application unevaluated.
+ *
+ * - Rank 0 (a scalar): its absolute value, for every positive order.
+ *   `np.linalg.norm` raises for a 0-d input with an explicit order, so the
+ *   emitted code calls `np.abs` instead.
+ * - Rank 1 (a vector): the p-norm, which `np.linalg.norm(v, p)` computes for
+ *   every positive order (and the maximum absolute entry for `np.inf`).
+ * - Rank 2 (a matrix): the interpreter computes only the orders 1 (maximum
+ *   absolute column sum), 2 (the spectral norm, the largest singular value)
+ *   and +Infinity (maximum absolute row sum). `np.linalg.norm(m, p)` computes
+ *   the same three norms for those orders, and raises for the others.
+ * - Rank 3 or more: the interpreter computes only the order 2, as the
+ *   entry-wise Frobenius norm over the flattened cells. That is
+ *   `np.linalg.norm(t)` with NO `ord` argument, which flattens the input;
+ *   `np.linalg.norm(t, p)` raises for every explicit order above rank 2.
+ *
+ * `orders` names the ranks at which the order `p` has a value: `'vector'`
+ * for an order that only a vector computes (every positive order other than
+ * 1, 2 and +Infinity), `'matrix'` for 1 and +Infinity (a vector or a
+ * matrix), and `'two'` for the order 2 (every rank). For `'matrix'` and
+ * `'two'`, rank 1 and rank 2 share the one `np.linalg.norm(_x, p)` call.
+ */
+function pythonNormRankTest(
+  x: string,
+  p: string,
+  orders: 'vector' | 'matrix' | 'two'
+): string {
+  const nan = "float('nan')";
+  const body =
+    orders === 'vector'
+      ? `np.linalg.norm(_x, ${p}) if np.ndim(_x) == 1 else ${nan}`
+      : `np.linalg.norm(_x, ${p}) if np.ndim(_x) <= 2 else ${orders === 'two' ? 'np.linalg.norm(_x)' : nan}`;
+  return `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${body})(${x})`;
+}
+
+/**
+ * The Python source of `Norm(x, p)` for an order `p` known only at RUN time,
+ * over an operand whose rank is not statically known. The emitted lambda
+ * tests the rank with `np.ndim` and then the order, and answers what the
+ * interpreter (`library/linear-algebra.ts`) computes, or NaN where the
+ * interpreter has no value:
+ *
+ * - rank 0: the absolute value when `p > 0` (`np.linalg.norm` raises for a
+ *   0-d input with an explicit order);
+ * - rank 1: `np.linalg.norm(v, p)` when `p > 0` (numpy also answers values for
+ *   `p = 0` and negative orders, which the interpreter refuses);
+ * - rank 2: `np.linalg.norm(m, p)` when `p` is 1, 2 (the spectral norm) or
+ *   `np.inf` — numpy raises for any other positive order on a matrix;
+ * - rank 3 or more: the entry-wise Frobenius norm `np.linalg.norm(t)` (no
+ *   `ord`, so numpy flattens the input) when `p == 2`; numpy raises for any
+ *   explicit order on an input with more than two axes.
+ *
+ * `pType` is the type of the order; see `pythonNormRuntimeOrder` for the
+ * string orders.
+ */
+function pythonNormRuntimeRankTest(x: string, p: string, pType: Type): string {
+  const nan = "float('nan')";
+  return pythonNormRuntimeOrder(
+    x,
+    p,
+    pType,
+    (fro) =>
+      `(np.abs(_x) if _p > 0 else ${nan}) if np.ndim(_x) == 0 else ` +
+      `(np.linalg.norm(_x, _p) if _p > 0 else ${nan}) if np.ndim(_x) == 1 else ` +
+      `(${pythonMatrixRuntimeNorm(fro)}) if np.ndim(_x) == 2 else ` +
+      `(np.linalg.norm(_x) if _p == 2 else ${nan})`
+  );
+}
+
+/**
+ * The Python source of a matrix norm `_x` for a run-time order `_p`: the
+ * orders 1, 2 (the spectral norm) and `np.inf` have the same meaning in the
+ * interpreter and in `np.linalg.norm`, and every other order answers NaN.
+ * `fro` is the Python test for the `"Frobenius"` string order, when the order
+ * can be a string: on a matrix that order is the Frobenius norm, which is not
+ * the spectral norm of the order 2, so it is spelled `'fro'`.
+ */
+function pythonMatrixRuntimeNorm(fro: string | undefined): string {
+  const nan = "float('nan')";
+  const numeric = `np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else ${nan}`;
+  return fro === undefined
+    ? numeric
+    : `np.linalg.norm(_x, 'fro') if ${fro} else ${numeric}`;
+}
+
+/**
+ * Wrap the Python source `body` of a norm with a run-time order in a lambda
+ * that binds the operand to `_x` and the order to `_p`.
+ *
+ * The signature of `Norm` admits a STRING order: `"Infinity"` (the order
+ * +Infinity) and `"Frobenius"` (the entry-wise L2 norm, which is the order 2
+ * at every rank except rank 2). When the type of the order admits a string,
+ * the order is normalized before `body` compares it with numbers: a Python
+ * `str` would otherwise raise a `TypeError` at `_p > 0`. `"Infinity"` becomes
+ * `np.inf`, `"Frobenius"` becomes `2`, and any other string becomes NaN, for
+ * which every comparison is false, so `body` answers NaN (the interpreter
+ * leaves `Norm` unevaluated for an order it does not know). `body` receives
+ * the Python test for the `"Frobenius"` string, so that its matrix branch can
+ * spell that norm as `'fro'`. When the type of the order admits no string,
+ * `body` receives `undefined` and the order is passed through unchanged.
+ */
+function pythonNormRuntimeOrder(
+  x: string,
+  p: string,
+  pType: Type,
+  body: (fro: string | undefined) => string
+): string {
+  if (isSubtype(pType, 'number') || !couldMatch(pType, 'string'))
+    return `(lambda _x, _p: ${body(undefined)})(${x}, ${p})`;
+  const ord =
+    `({'Infinity': np.inf, 'Frobenius': 2}.get(_q, float('nan')) ` +
+    `if isinstance(_q, str) else _q)`;
+  const fro = `(isinstance(_q, str) and _q == 'Frobenius')`;
+  return `(lambda _x, _q: (lambda _p: ${body(fro)})(${ord}))(${x}, ${p})`;
 }
 
 /**
@@ -1375,18 +1520,26 @@ def _ce_indexof(_l, _v):
  * raises `TypeError`).
  */
 /**
- * The pole rule of `Tan`, `Cot`, `Sec` and `Csc`: a value with a magnitude
- * of more than a million is taken to be a pole and becomes `np.inf`, the
+ * The pole rule of `Tan`, `Cot`, `Sec` and `Csc`: when the argument `x` is
+ * within its rounding error of a pole, that is when the value `y` is
+ * infinite or `|y|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1`, the value becomes `np.inf`, the
  * value that stands for the unsigned pole `~oo`. This is the rule of the
- * interpreter (`boxed-expression/trigonometry.ts`); without it `np.tan` of a
- * float near `π/2` gives a large finite number. `np.where` applies the rule
- * to each element of an array, and `[()]` makes the result of a scalar
- * argument a scalar again. The value is bound to the parameter of an inline
- * lambda, so it is computed once, and the code needs no module-level helper
- * (a bare lambda from `compileLambda` cannot carry one).
+ * interpreter (`isMachineTrigPole`, `numerics/numeric.ts`), with the same
+ * constant and the same order of operations; without it `np.tan` of a float
+ * near `π/2` gives a large finite number. `np.where` applies the rule to each
+ * element of an array, and `[()]` makes the result of a scalar argument a
+ * scalar again. The argument and the value are bound to the parameters of
+ * inline lambdas, so each is computed once, and the code needs no
+ * module-level helper (a bare lambda from `compileLambda` cannot carry one).
+ * `value` is the Python code of the value, in terms of `_x`.
  */
-function pythonPole(value: string): string {
-  return `(lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(${value})`;
+function pythonPole(arg: string, value: string): string {
+  return (
+    `(lambda _x: (lambda _y: np.where(np.isinf(_y) | ` +
+    `(np.abs(_y) * np.minimum(np.abs(_x), ${TRIG_POLE_ARGUMENT_CAP}.0) * ` +
+    `${TRIG_POLE_EPSILON} >= 1), ` +
+    `np.inf, _y)[()])(${value}))(${arg})`
+  );
 }
 
 const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
@@ -1856,6 +2009,11 @@ function pyFnArg(
  */
 const PYTHON_DECIDED_NUMBER = (x: string): string => `${x} == ${x}`;
 
+/** `code`, parenthesized unless it is a primary expression
+ * (`BaseCompiler.isAtomicSource`), for an operand of a binary operator. */
+const pyOperand = (code: string): string =>
+  BaseCompiler.isAtomicSource(code) ? code : `(${code})`;
+
 /** A fragment that is already a name or a constant, so naming it again costs
  * nothing and evaluates nothing. The base compiler applies the same test. */
 const PYTHON_ATOM = /^[\w.]+$/;
@@ -2202,6 +2360,43 @@ function compilePythonIfStatement(
   return `${bindings.map(([n, c]) => `${n} = ${c}`).join('\n')}\n${value}`;
 }
 
+/**
+ * The lowering of a head whose NumPy routine is real-only on this target for
+ * some complex values: `np.arctanh`, `np.arcsinh` and `np.sign`.
+ *
+ * An operand that is real lowers to the routine itself. An operand that may be
+ * complex is bound once, and:
+ *
+ *  - a value that is exactly real (imaginary part `0`) takes the routine of
+ *    its real part;
+ *  - any other value takes `nonReal(v)`, the value the interpreter computes
+ *    for a non-real `v`.
+ *
+ * An ARRAY operand whose elements may be complex keeps the element-wise real
+ * projection (`_ce_creal_elems`: each exactly-real element as its real part,
+ * every other element as `nan`), as the other real-only heads do.
+ */
+function pyComplexScalarLowering(
+  routine: string,
+  arg: Expression,
+  nonReal: (v: string) => string,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const isArray =
+    arg.isCollection === true || arg.type.matches('collection<any>');
+  if (
+    isArray
+      ? arg.type.matches('collection<real>')
+      : !BaseCompiler.isComplexValued(arg)
+  )
+    return `${routine}(${compile(arg)})`;
+  const v = BaseCompiler.tempVar(target);
+  if (isArray)
+    return `(lambda ${v}: ${routine}(_ce_creal_elems(${v})))(${compile(arg)})`;
+  return `(lambda ${v}: (${routine}(_ce_creal(${v})) if _ce_cisreal(${v}) else ${nonReal(v)}))(${compile(arg)})`;
+}
+
 const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Basic arithmetic (for when they're called as functions)
@@ -2210,10 +2405,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length === 1) return compile(args[0]);
     return args.map((x) => compile(x)).join(' + ');
   },
+  // The function lowerings of `Multiply` and `Power` are reached when the
+  // infix path declines, chiefly for a complex operand. The operand compiler
+  // emits an operand without outer parentheses, as for `Divide` below, so an
+  // operand that is not a primary expression is parenthesized: without this,
+  // `2(x + z)` over a complex `z` emitted `2 * x + z`.
   Multiply: (args, compile) => {
     if (args.length === 0) return '1';
     if (args.length === 1) return compile(args[0]);
-    return args.map((x) => compile(x)).join(' * ');
+    return args.map((x) => pyOperand(compile(x))).join(' * ');
   },
   // `Negate` lowers through the prefix `-` operator for a scalar operand; this
   // handler covers the paths the operator mapping declines — chiefly an
@@ -2255,7 +2455,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `cmath.tan(${compile(args[0])})`;
-    return pythonPole(`np.tan(${compile(args[0])})`);
+    return pythonPole(compile(args[0]), 'np.tan(_x)');
   },
   Arcsin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
@@ -2288,9 +2488,37 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return `cmath.tanh(${compile(args[0])})`;
     return `np.tanh(${compile(args[0])})`;
   },
-  Arsinh: 'np.arcsinh',
+  // `np.arcsinh` and `np.arctanh` take a complex argument, and they agree
+  // with the interpreter at every non-real value except on the BRANCH CUT,
+  // where NumPy takes the value of the other side of the cut. They were
+  // compared with the interpreter at `x + yi` for `x` in {−3, −2.5, −1, −0.5,
+  // 0, 0.5, 1, 2, 3} and `y` in {0, ±1e−9, ±1}, and at `x` in {0, ±1e−9} for
+  // `y` in {±0.5, ±2}. The cut of `arsinh` is the imaginary axis beyond ±i:
+  // at `0 − 2i`, `np.arcsinh` answers `1.3170 − 1.5708i` and the interpreter
+  // `−1.3170 − 1.5708i`, so a value on it is `nan`.
+  Arsinh: (args, compile, target) =>
+    pyComplexScalarLowering(
+      'np.arcsinh',
+      args[0],
+      (v) =>
+        `(float('nan') if ${v}.real == 0 and abs(${v}.imag) > 1 else np.arcsinh(${v}))`,
+      compile,
+      target
+    ),
   Arcosh: 'np.arccosh',
-  Artanh: 'np.arctanh',
+  // The cut of `artanh` is the real axis beyond ±1: at `2 + 0i`,
+  // `np.arctanh` answers `0.5493 + 1.5708i` and the interpreter
+  // `0.5493 − 1.5708i`. A value there is exactly real, so it takes the real
+  // routine, which answers `nan` outside [−1, 1]; every non-real value takes
+  // the complex routine.
+  Artanh: (args, compile, target) =>
+    pyComplexScalarLowering(
+      'np.arctanh',
+      args[0],
+      (v) => `np.arctanh(${v})`,
+      compile,
+      target
+    ),
 
   // Reciprocal trigonometric functions. A real argument gets the pole rule of
   // `pythonPole`; a complex argument does not, as in the interpreter, whose
@@ -2299,17 +2527,24 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Cot: no argument');
     if (BaseCompiler.isComplexValued(x))
       return `(np.cos(${compile(x)}) / np.sin(${compile(x)}))`;
-    return pythonPole(`1 / np.tan(${compile(x)})`);
+    return pythonPole(compile(x), '1 / np.tan(_x)');
   },
   Csc: ([x], compile) => {
     if (x === null) throw new Error('Csc: no argument');
     if (BaseCompiler.isComplexValued(x)) return `(1 / np.sin(${compile(x)}))`;
-    return pythonPole(`1 / np.sin(${compile(x)})`);
+    return pythonPole(compile(x), '1 / np.sin(_x)');
   },
   Sec: ([x], compile) => {
     if (x === null) throw new Error('Sec: no argument');
     if (BaseCompiler.isComplexValued(x)) return `(1 / np.cos(${compile(x)}))`;
-    return pythonPole(`1 / np.cos(${compile(x)})`);
+    return pythonPole(compile(x), '1 / np.cos(_x)');
+  },
+
+  // Degrees → radians. Only reached in radian mode: in the other angular
+  // units `rewriteAngularUnit` replaces the `Degrees` node before codegen.
+  Degrees: ([x], compile) => {
+    if (x === null) throw new Error('Degrees: no argument');
+    return `(${compile(x)} * np.pi / 180)`;
   },
 
   // Inverse trigonometric (reciprocal)
@@ -2428,7 +2663,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.isComplexValued(args[0]) ||
       BaseCompiler.isComplexValued(args[1])
     )
-      return `(${compile(args[0])} ** ${compile(args[1])})`;
+      return `(${pyOperand(compile(args[0]))} ** ${pyOperand(compile(args[1]))})`;
     const realPower = BaseCompiler.realPowerExponent(args);
     if (realPower !== undefined) {
       const value = BaseCompiler.tempVar(target);
@@ -2468,6 +2703,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // Root(x, n) = x^(1/n)
     if (args.length !== 2) return 'np.power';
     const [x, n] = args;
+    // A COMPLEX radicand or degree. The real lowerings below are wrong for
+    // it: `np.sign(z)` of a complex `z` is `z / |z|`, and `np.abs(z)` drops
+    // the argument of `z`. A radicand whose imaginary part is exactly zero,
+    // under an odd integer degree, has the REAL root the interpreter answers
+    // (`Root(-8, 3)` is `-2`); any other pair takes the principal value
+    // `z ** (1 / n)`, as the interpreter does. The parity test runs when the
+    // code runs because the value of the radicand is only known then.
+    if (BaseCompiler.isComplexValued(x) || BaseCompiler.isComplexValued(n))
+      return `(lambda _z, _n: complex(np.sign(_z.real) * np.power(abs(_z.real), 1.0 / _n.real)) if _z.imag == 0 and _n.imag == 0 and _n.real % 2 == 1 else _z ** (1.0 / _n))(complex(${compile(x)}), complex(${compile(n)}))`;
     const nConst = tryGetConstant(n);
     // Odd integer degree: `np.power` is NaN for a negative base, but the real
     // root exists (interpreter convention, e.g. Root(-8, 3) = -2). Emit the
@@ -2493,7 +2737,18 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       return `abs(${compile(args[0])})`;
     return `np.abs(${compile(args[0])})`;
   },
-  Sign: 'np.sign',
+  // The sign of a complex value is `z / |z|`, as the interpreter computes it.
+  // It is written out, not left to `np.sign`: NumPy 2 answers `z / |z|`, but
+  // NumPy 1 answered `sign(Re z) + 0j`. A non-real value is never `0`, so
+  // the division is safe.
+  Sign: (args, compile, target) =>
+    pyComplexScalarLowering(
+      'np.sign',
+      args[0],
+      (v) => `${v} / abs(${v})`,
+      compile,
+      target
+    ),
   Floor: 'np.floor',
   Ceil: 'np.ceil',
   // The interpreter rounds half away from zero (Round(-2.5) = -3, Round(2.5) =
@@ -2704,21 +2959,25 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // of failing closed. The interpreter answers the same value at rank 1
       // (`vectorNorm`) and at rank ≥ 3 (the `flatten()` branch), and so does
       // the JavaScript target.
-      if (p.string === 'Frobenius' && rank !== undefined && rank !== 2)
-        return `np.linalg.norm(${compile(args[0])})`;
+      //
       // The numpy SPELLING `'fro'` is nevertheless matrix-only:
       // `np.linalg.norm(v, 'fro')` raises a ValueError on anything but a 2-D
-      // input, so it may only be emitted for a statically rank-2 operand. An
-      // operand whose rank is not statically known fails closed rather than
-      // compile "successfully" to code that raises at run time.
+      // input, so it is emitted only for a statically rank-2 operand. An
+      // operand whose rank is not statically known also takes the default
+      // order, which needs no run-time rank test: with no `ord` argument
+      // `np.linalg.norm` flattens the input at every rank, including a 0-d
+      // scalar (whose norm is then its absolute value, as in the
+      // interpreter).
       if (p.string === 'Frobenius' && rank !== 2)
-        throw new Error(
-          `Norm: the numpy spelling of the "Frobenius" norm type is ` +
-            `matrix-only — \`np.linalg.norm(v, 'fro')\` raises a ValueError ` +
-            `unless the operand is 2-D — and the rank of this operand is not ` +
-            `statically known, so neither that spelling nor the rankless ` +
-            `default order can be emitted. Fail closed (D6).`
-        );
+        return `np.linalg.norm(${compile(args[0])})`;
+      // The `"Infinity"` norm type is the order +Infinity. Over an operand
+      // whose rank is not statically known, the emitted code tests the rank
+      // when it runs (`pythonNormRankTest`). A scalar answers its absolute
+      // value: `np.linalg.norm(x, np.inf)` raises for a 0-d input.
+      if (rank === undefined)
+        return args[0].type.matches('number')
+          ? `np.abs(${compile(args[0])})`
+          : pythonNormRankTest(compile(args[0]), ord, 'matrix');
       assertPythonNormRankAtMost2(rank);
       return `np.linalg.norm(${compile(args[0])}, ${ord})`;
     }
@@ -2729,28 +2988,46 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // interpreter reads the order 2 as the entry-wise Frobenius norm over the
     // flattened cells, which is numpy's DEFAULT order (no `ord` argument) —
     // `np.linalg.norm(t, 2)` raises on a 3-D input instead. When the rank is
-    // not statically known, `ord=2` would raise at run time on an operand of
-    // rank 3 or more, so this fails closed (D6).
+    // not statically known, the emitted code tests the rank when it runs
+    // (`pythonNormRankTest`).
+    //
+    // A scalar operand has no static rank (`pyStaticRank`), and the
+    // interpreter answers its absolute value for every positive order.
+    const scalar = rank === undefined && args[0].type.matches('number');
     if (p.isSame(2)) {
       if (rank !== undefined && rank >= 3)
         return `np.linalg.norm(${compile(args[0])})`;
-      if (rank !== 1 && rank !== 2)
-        throw new Error(
-          `Norm: the order-2 norm of an operand whose rank is not statically ` +
-            `known has no numpy spelling — \`np.linalg.norm(t, 2)\` raises ` +
-            `on an input with more than two axes, where the interpreter ` +
-            `answers the Frobenius norm. Fail closed (D6).`
-        );
+      if (scalar) return `np.abs(${compile(args[0])})`;
+      if (rank === undefined)
+        return pythonNormRankTest(compile(args[0]), compile(p), 'two');
     } else if (!isNumber(p) && !p.isInfinity) {
-      // The order is only known at RUN time. When the rank is not statically
-      // known there is no faithful emission (an operand of rank 3 or more
-      // makes numpy raise for any explicit order), so fail closed (D6).
-      if (rank !== 1 && rank !== 2)
-        throw new Error(
-          `Norm: a run-time norm order over an operand whose rank is not ` +
-            `statically known has no numpy spelling — \`np.linalg.norm\` ` +
-            `raises for an explicit order on an input with more than two ` +
-            `axes. Fail closed (D6).`
+      // The order is only known at RUN time. A scalar answers its absolute
+      // value for a positive order and has no value for any other one, as
+      // below. When the rank is not statically known, the emitted code tests
+      // both the rank and the order when it runs.
+      //
+      // The order can be a STRING at run time (`"Infinity"`,
+      // `"Frobenius"`) when its type admits one; `pythonNormRuntimeOrder`
+      // maps it to a number before the comparisons below.
+      const pType = p.type.type;
+      if (scalar)
+        return pythonNormRuntimeOrder(
+          compile(args[0]),
+          compile(p),
+          pType,
+          () => `np.abs(_x) if _p > 0 else float('nan')`
+        );
+      if (rank === undefined)
+        return pythonNormRuntimeRankTest(compile(args[0]), compile(p), pType);
+      // Above rank 2 the interpreter computes only the order 2, as the
+      // entry-wise Frobenius norm, which is `np.linalg.norm(t)` with no `ord`
+      // argument (numpy raises for an explicit order on more than two axes).
+      if (rank >= 3)
+        return pythonNormRuntimeOrder(
+          compile(args[0]),
+          compile(p),
+          pType,
+          () => `np.linalg.norm(_x) if _p == 2 else float('nan')`
         );
       // The interpreter (`library/linear-algebra.ts`) computes a vector norm
       // only for an order `p > 0` (the p-norms, and L∞ for `+∞`), and a
@@ -2760,9 +3037,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // value (`ord=-1`, `ord=0` on a vector, `ord=-inf`) or raises
       // (`ord=3` on a matrix). So the emitted code tests the order when it
       // runs and answers NaN for an order the interpreter does not compute.
-      const admitted =
-        rank === 1 ? '_p > 0' : '_p == 1 or _p == 2 or _p == np.inf';
-      return `(lambda _x, _p: np.linalg.norm(_x, _p) if ${admitted} else float('nan'))(${compile(args[0])}, ${compile(p)})`;
+      return pythonNormRuntimeOrder(
+        compile(args[0]),
+        compile(p),
+        pType,
+        (fro) =>
+          rank === 1
+            ? `np.linalg.norm(_x, _p) if _p > 0 else float('nan')`
+            : pythonMatrixRuntimeNorm(fro)
+      );
     }
     // A literal numeric order that is not positive (`0`, `-1`, `-∞`) has no
     // value in the interpreter at any rank: the `requires` precondition of
@@ -2795,17 +3078,20 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           `diverge for this order. Fail closed (D6).`
       );
     // A literal positive order (not 2, which is decided above) on an operand
-    // whose rank is not statically known. `np.linalg.norm(x, p)` raises for a
-    // scalar and for an input with more than two axes, and for a matrix when
-    // `p` is not 1, 2 or `inf`. So the emitted code tests the rank when it
-    // runs, and matches the interpreter: a scalar answers its absolute value
-    // for every order, a vector answers its p-norm, a matrix answers its norm
-    // for the orders 1 and +Infinity, and every other case (which the
-    // interpreter leaves unevaluated) answers NaN.
+    // whose rank is not statically known. The interpreter answers the
+    // absolute value of a scalar for every such order, but
+    // `np.linalg.norm(x, p)` raises for a scalar, for an input with more than
+    // two axes, and for a matrix when `p` is not 1, 2 or `inf`. So the
+    // emitted code tests the rank when it runs (`pythonNormRankTest`).
     if (rank === undefined) {
-      const matrixOrder = p.isSame(1) || p.isInfinity === true;
-      const admitted = matrixOrder ? 'np.ndim(_x) <= 2' : 'np.ndim(_x) == 1';
-      return `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else np.linalg.norm(_x, ${compile(p)}) if ${admitted} else float('nan'))(${compile(args[0])})`;
+      if (scalar) return `np.abs(${compile(args[0])})`;
+      const matrixOrder =
+        p.isSame(1) || (p.isInfinity === true && p.isPositive === true);
+      return pythonNormRankTest(
+        compile(args[0]),
+        compile(p),
+        matrixOrder ? 'matrix' : 'vector'
+      );
     }
     assertPythonNormRankAtMost2(rank);
     return `np.linalg.norm(${compile(args[0])}, ${compile(p)})`;
@@ -2993,7 +3279,55 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       args[1]
     )}) * scipy.special.gamma(${cs}))`;
   },
-  GammaLn: 'scipy.special.loggamma',
+  // On the real axis the interpreter's `GammaLn` is ln|Γ(x)|, which is
+  // `scipy.special.gammaln`: at −2.5 both answer −0.0562, while
+  // `scipy.special.loggamma` of a real float answers `nan` for x < 0.
+  //
+  // Off the real axis `scipy.special.loggamma` is the analytic continuation of
+  // ln Γ, not the principal logarithm of Γ that the interpreter computes: at
+  // `−2.5 + 1e−9i` the interpreter answers `−0.0562 − 3.1416i`, and the
+  // imaginary parts differ by a multiple of 2π. No SciPy routine computes the
+  // interpreter's value, so a complex value fails closed and never becomes a
+  // silent `nan`:
+  //
+  //  - a value that is certainly not real (`t + i`) declines at compile time;
+  //  - a value that may be complex (a `complex`-typed `z`, `√t`) is tested
+  //    when the code runs, as `Artanh` is (`pyComplexScalarLowering`): the
+  //    real routine runs on the real part when the imaginary part is exactly
+  //    zero, and otherwise the code raises `ValueError`, since there is no
+  //    complex routine to run instead. An array operand is tested whole.
+  //    In strict mode the operand declines at compile time instead, as a
+  //    maybe-complex operand of every real-only head does there.
+  GammaLn: ([x], compile, target) => {
+    if (x === null) throw new Error('GammaLn: no argument');
+    const reason =
+      'GammaLn: scipy.special.loggamma takes another branch than the ' +
+      'interpreter off the real axis; the compiled value would differ. ' +
+      'Fail closed (D6)';
+    const decline = () =>
+      new CompileDeclineError({
+        code: 'non-real-operand',
+        kind: 'capability',
+        message: `${reason}.`,
+      });
+    if (BaseCompiler.isProvablyNonReal(x)) throw decline();
+    const isArray =
+      x.isCollection === true || x.type.matches('collection<any>');
+    if (
+      isArray
+        ? x.type.matches('collection<real>')
+        : !BaseCompiler.isComplexValued(x)
+    )
+      return `scipy.special.gammaln(${compile(x)})`;
+    if (!BaseCompiler.runtimeRealGuards) throw decline();
+    // `raise` is a statement; throwing into an empty generator raises from
+    // inside an expression.
+    const raise = `(_ for _ in ()).throw(ValueError('${reason}'))`;
+    const v = BaseCompiler.tempVar(target);
+    if (isArray)
+      return `(lambda ${v}: scipy.special.gammaln(_ce_creal_elems(${v})) if np.all(np.isreal(${v})) else ${raise})(${compile(x)})`;
+    return `(lambda ${v}: scipy.special.gammaln(_ce_creal(${v})) if _ce_cisreal(${v}) else ${raise})(${compile(x)})`;
+  },
   // `x! = Γ(x+1)`, matching the interpreter and the JavaScript target.
   // `scipy.special.factorial` is integer-only — it returns 0 for a negative or
   // non-integer argument — so `(-1/2)!` came out 0 instead of Γ(1/2) = √π
@@ -3577,7 +3911,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Trace: (args, compile) => {
     if (args.length > 1)
       throw new Error(`Trace: explicit axes do not compile. Fail closed (D6).`);
-    return `float(np.trace(np.asarray(${pyCollArg('Trace', args[0], compile)})))`;
+    // `float()` of a complex trace drops its imaginary part, so a complex
+    // lane (`BaseCompiler.linearAlgebraLane`, the answer a parent reads for
+    // the value of the node) converts with `complex()`.
+    const convert =
+      BaseCompiler.linearAlgebraLane([args[0]]) === 'complex'
+        ? 'complex'
+        : 'float';
+    return `${convert}(np.trace(np.asarray(${pyCollArg('Trace', args[0], compile)})))`;
   },
 };
 
@@ -3598,6 +3939,68 @@ const PYTHON_SUPPORTED_MODES: readonly CompileMode[] = [
   'complex',
   'auto',
 ];
+
+/**
+ * The heads this target maps to a helper name that takes a complex argument.
+ * A helper name is real-only by default (`BaseCompiler.stringHelperIsRealOnly`),
+ * but these NumPy and `scipy.special` routines compute the complex value that
+ * the interpreter computes, so a complex operand reaches them as it is
+ * instead of taking the run-time realness rule (which answered NaN):
+ *
+ *  - `scipy.special.erf` and `erfc`;
+ *  - `np.arccosh`, `np.emath.log2` (`Lb`, `Log2`), `np.emath.log10` and
+ *    `np.exp2`;
+ *  - `np.linalg.det`, `np.linalg.inv`, `np.matmul`,
+ *    `np.linalg.matrix_power`, `np.cross` and `np.diag`, which compute with
+ *    complex entries without conjugation, as the interpreter does.
+ *
+ * The special functions were compared with the interpreter at `x + yi` for
+ * `x` in {−3, −2.5, −1, −0.5, 0, 0.5, 1, 2, 3} and `y` in {0, ±1e−9, ±1},
+ * and at `x` in {0, ±1e−9} for `y` in {±0.5, ±2}: on the real axis, on both
+ * sides of the branch cuts, and at 0. `scipy.special.loggamma` takes a
+ * different branch than the interpreter, so `GammaLn` is a function lowering
+ * that fails closed on a complex value (see its entry in `PYTHON_FUNCTIONS`):
+ * it is the analytic continuation of log Γ, not the principal logarithm of Γ.
+ * At `−2.5 + 0i` it answers `−0.0562 − 9.4248i`, the interpreter `−0.0562`,
+ * and off the axis the imaginary parts differ by a multiple of 2π.
+ *
+ * `Artanh`, `Arsinh` and `Sign` are function lowerings
+ * (`pyComplexScalarLowering`): `np.arctanh` and `np.arcsinh` differ from the
+ * interpreter only on their branch cuts, and `np.sign` of a complex value
+ * depends on the NumPy version. `np.arctan2` and `scipy.special.gammaincc`
+ * take real arguments only.
+ *
+ * `Gamma` and `Factorial` are function lowerings through
+ * `scipy.special.gamma`, which takes a complex argument too, and are not
+ * real-only on this target.
+ */
+const PYTHON_COMPLEX_CAPABLE_HELPERS: ReadonlySet<string> = new Set([
+  'Erf',
+  'Erfc',
+  'Arcosh',
+  'Lb',
+  'Log2',
+  'Log10',
+  'Exp2',
+  'Determinant',
+  'Inverse',
+  'MatrixMultiply',
+  'MatrixPower',
+  'Cross',
+  'Diagonal',
+]);
+
+/** `CompileTarget.isRealOnlyLowering` of this target. */
+function pythonIsRealOnlyLowering(
+  head: string,
+  lowering: CompiledFunction<Expression> | undefined
+): boolean {
+  if (BaseCompiler.REAL_ONLY_BY_DEFINITION.has(head)) return true;
+  return (
+    BaseCompiler.stringHelperIsRealOnly(head, lowering) &&
+    !PYTHON_COMPLEX_CAPABLE_HELPERS.has(head)
+  );
+}
 
 export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
@@ -3624,6 +4027,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): CompileTarget<Expression> {
     return {
       language: 'python',
+      isRealOnlyLowering: pythonIsRealOnlyLowering,
       // The compile modes this target offers (`CompileMode`) and the two
       // lowering hooks the complex discipline is emitted through: Python's
       // own `complex()` is the idempotent lift, and `.imag == 0` the exact
@@ -4145,11 +4549,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // closed rather than emit a reference to an undefined name. (`_ce_bcast` is
     // the collection-operand ElementMax/ElementMin/Clamp lowering; `_ce_indexof`
     // is IndexOf's element test; `_ce_eqcoll` is collection/tuple equality;
-    // `_ce_ord` is the ordering shape guard; `_ce_cplx`, `_ce_cisreal`,
-    // `_ce_creal` and `_ce_creal_elems` are the complex-value helpers of the
-    // complex modes.)
+    // `_ce_ord` is the ordering shape guard; `_ce_rref` is RowReduce's
+    // elimination; `_ce_cplx`, `_ce_cisreal`, `_ce_creal` and
+    // `_ce_creal_elems` are the complex-value helpers of the complex modes.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
+      ['_ce_rref(', 'RowReduce'],
       ['_ce_indexof(', 'IndexOf'],
       ['_ce_eqcoll(', 'equality over a collection or tuple operand'],
       ['_ce_ord(', 'an ordering over a collection operand'],

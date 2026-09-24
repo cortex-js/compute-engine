@@ -363,9 +363,10 @@ describe('functions of one machine number on doubles', () => {
     ['Exp', 'S', SMALL],
   ] as const)('%s under N() and under evaluate()', (head, symbol, source) => {
     sameAsScalar([head, symbol], source, 'N', (x) => [head, x]);
-    // Under evaluate() too: the arguments that evaluate() recognizes
-    // (`Exp(0.5)` is `√e`, `Arcsin(0.5)` is `π/6`) are declined one by one
-    // (`avoid`), and these lists hold none of them.
+    // Under evaluate() too. The one argument that evaluate() answers exactly
+    // (`Exp(0.5)` is `√e`) is declined (`avoid`), and these lists do not hold
+    // it. A float argument of an inverse trigonometric function is never
+    // special (`Arcsin(0.5)` is a float, not `π/6`).
     sameAsScalar([head, symbol], source, 'evaluate', (x) => [head, x]);
   });
 
@@ -408,16 +409,20 @@ describe('functions of one machine number on doubles', () => {
     expect(ce.box(['Power', 'K', -2]).evaluate().operator).toBe('Map');
   });
 
-  // `evaluate()` of a trigonometric function answers an exact value for a
-  // float within `1e-12` of a special angle, and `0` for a tiny argument.
-  test('a special angle in the list keeps the lazy form under evaluate()', () => {
+  // A float is never a special angle: `evaluate()` answers an exact value
+  // only for an exact rational multiple of π. `Sin(3.141592653589793)` is the
+  // float `Math.sin` gives, and `Sin(1e-300)` is `1e-300`, so a list that
+  // holds them computes on doubles under both routes.
+  test('a float near a special angle computes on doubles', () => {
     for (const angle of [Math.PI, Math.PI / 3 + 1e-13, 1e-300]) {
       ce.declare('A', { value: ce.box(['List', ...FLOATS, angle]) });
-      const lazy = ce.box(['Sin', 'A']).evaluate();
-      expect(lazy.operator).toBe('Map');
-      const last = [...lazy.each()].pop()!;
-      expect(last.json).toEqual(ce.box(['Sin', angle]).evaluate().json);
-      expect(isUnboxedList(ce.box(['Sin', 'A']).N())).toBe(true);
+      for (const route of ['evaluate', 'N'] as const)
+        sameAsScalar(['Sin', 'A'], [...FLOATS, angle], route, (x) => [
+          'Sin',
+          x,
+        ]);
+      const last = [...ce.box(['Sin', 'A']).evaluate().each()].pop()!;
+      expect(last.re).toBe(Math.sin(angle));
       ce.forget('A');
     }
   });
@@ -427,11 +432,31 @@ describe('functions of one machine number on doubles', () => {
     expect(ce.box(['Sqrt', 'L']).evaluate().operator).toBe('Map');
     expect(ce.box(['Ln', 'L']).N().operator).toBe('Map');
     expect(ce.box(['Arcsin', 'L']).N().operator).toBe('Map');
-    // A value past a million in magnitude is the pole `~oo`.
+    // An argument within its rounding error of a pole gives the pole `~oo`
+    // (`isMachineTrigPole`): the double nearest to `π/2` is one.
     ce.declare('Pole', {
-      value: ce.box(['List', ...FLOATS, Math.PI / 2 + 1e-9]),
+      value: ce.box(['List', ...FLOATS, Math.PI / 2]),
     });
     expect(ce.box(['Tan', 'Pole']).N().operator).toBe('Map');
+    // The allowed error is relative to the argument: the double nearest to
+    // `1000π` is a pole of `Cot` too.
+    ce.declare('FarPole', {
+      value: ce.box(['List', ...FLOATS, 1000 * Math.PI]),
+    });
+    expect(ce.box(['Cot', 'FarPole']).N().operator).toBe('Map');
+    // A huge argument is not a pole: `Cot(10²²)` is about `−0.61`.
+    ce.declare('Huge', { value: ce.box(['List', ...FLOATS, 1e22]) });
+    const huge = ce.box(['Cot', 'Huge']).N();
+    expect(huge.operator).toBe('List');
+    expect(huge.ops!.at(-1)!.re).toBe(1 / Math.tan(1e22));
+    // `π/2 + 10⁻⁹` is far from the pole relative to its rounding error: its
+    // value, about `−10⁹`, is the double, and the kernel answers it.
+    ce.declare('NearPole', {
+      value: ce.box(['List', ...FLOATS, Math.PI / 2 + 1e-9]),
+    });
+    const near = ce.box(['Tan', 'NearPole']).N();
+    expect(near.operator).toBe('List');
+    expect(near.ops!.at(-1)!.re).toBe(Math.tan(Math.PI / 2 + 1e-9));
     // A zero base with a negative exponent.
     ce.declare('Zero', { value: ce.box(['List', ...FLOATS, 0]) });
     expect(ce.box(['Power', 'Zero', -2]).evaluate().operator).toBe('Map');
@@ -459,10 +484,12 @@ describe('functions of one machine number on doubles', () => {
     for (const x of FLOATS) exps += Math.exp(x * 0.01);
     expect(ce.box(['Sum', ['Exp', ['Divide', 'L', 100]]]).N().re).toBe(exps);
     // The numeric route is used only when it gives a finite list of machine
-    // numbers. `1e308 · K` overflows the doubles to infinities, and the exact
+    // numbers. `10^308 · K` overflows the doubles to infinities, and the exact
     // route answers the exact big integer; `1/X` with a zero in `X` has the
-    // pole `~oo` in the exact route.
-    const huge = ce.box(['Sum', ['Multiply', 1e308, 'K']]).N();
+    // pole `~oo` in the exact route. (`10^308` is written as a string of
+    // digits: the JavaScript number `1e308` is past the safe integers, so it
+    // boxes as a float and the sum is a float.)
+    const huge = ce.box(['Sum', ['Multiply', { num: '1e308' }, 'K']]).N();
     expect(huge.isNaN).toBe(false);
     expect(huge.isInteger).toBe(true);
     ce.declare('X0', { value: ce.box(['List', ...FLOATS, 0]) });
@@ -514,14 +541,23 @@ describe('reductions of a list of machine numbers fold its doubles', () => {
   // A partial sum of floats that has an integer value is an exact integer in
   // the element-by-element fold (`0.5 + 0.5` is `1`), which then adds
   // integers exactly. A sum of doubles would lose the `1` against `2^53`.
+  // `2^53` is written as a string of digits, which boxes as an exact
+  // integer; the JavaScript number `2^53` is past the safe integers and
+  // boxes as a float, so that sum is a sum of floats and loses the `1`.
   test('Sum keeps an integer partial sum exact past the safe range', () => {
-    const big = 9007199254740992;
+    const big = { num: '9007199254740992' };
+    const negBig = { num: '-9007199254740992' };
     expect(
-      ce.box(['Sum', ['List', 0.5, 0.5, big, -big]]).evaluate().json
+      ce.box(['Sum', ['List', 0.5, 0.5, big, negBig]]).evaluate().json
     ).toEqual(1);
     expect(
-      ce.box(['Sum', ['List', 0.5, 0.5, big, -big, 0.25]]).evaluate().json
+      ce.box(['Sum', ['List', 0.5, 0.5, big, negBig, 0.25]]).evaluate().json
     ).toEqual(1.25);
+    expect(
+      ce
+        .box(['Sum', ['List', 0.5, 0.5, 9007199254740992, -9007199254740992]])
+        .evaluate().json
+    ).toEqual(0);
   });
 
   test('a symbol that does not hold a list of machine numbers', () => {
@@ -753,22 +789,33 @@ describe('an exact rational scalar, a power of e and the inverse trigonometric f
 
   test('a value evaluate() answers exactly keeps the lazy form', () => {
     const ce = machineEngine();
-    // `Exp(0.5)` is `√e`; `Arcsin(0.5)` is `π/6`; `Arctan(1)` is `π/4` — a
-    // float within 1e-10 of such a value is recognized too.
+    // `Exp(0.5)` is `√e`.
+    ce.declare('S', { value: ce.box(['List', ...FLOATS2, 0.5]) });
+    const lazy = ce.box(['Exp', 'S']).evaluate();
+    expect(lazy.operator).toBe('Map');
+    expect([...lazy.each()].pop()!.json).toEqual(
+      ce.box(['Exp', 0.5]).evaluate().json
+    );
+    ce.forget('S');
+  });
+
+  test('a float argument of an inverse trigonometric function is not special', () => {
+    // `Arcsin(0.5)` is the float `Math.asin` gives, not `π/6`: the list
+    // computes on doubles, and each value is the scalar route's.
+    const ce = machineEngine();
     for (const [head, special] of [
-      ['Exp', 0.5],
       ['Arcsin', 0.5],
       ['Arccos', Math.SQRT1_2],
       ['Arctan', 1 - 1e-12],
-      // Near ±1 the angle moves fastest with the argument.
       ['Arcsin', 1 - 1e-11],
       ['Arccos', -1 + 1e-11],
     ] as const) {
       ce.declare('S', { value: ce.box(['List', ...FLOATS2, special]) });
-      const lazy = ce.box([head, 'S']).evaluate();
-      expect([head, lazy.operator]).toEqual([head, 'Map']);
-      expect([...lazy.each()].pop()!.json).toEqual(
-        ce.box([head, special]).evaluate().json
+      const r = ce.box([head, 'S']).evaluate();
+      expect([head, isUnboxedList(r)]).toEqual([head, true]);
+      const els = [...r.each()];
+      [...FLOATS2, special].forEach((x, i) =>
+        expect(els[i].isSame(ce.box([head, x]).evaluate())).toBe(true)
       );
       ce.forget('S');
     }
@@ -818,17 +865,19 @@ describe('Norm of a lazy collection', () => {
   });
 });
 
-describe('the inverse trigonometric guard follows the engine tolerance', () => {
-  test('a wider tolerance widens what evaluate() recognizes', () => {
-    // The recognizer compares within `ce.tolerance`: with 1e-6, `0.5000001`
-    // is the special value 0.5, and `Arcsin` of it is `π/6`.
+describe('the engine tolerance does not make a float special', () => {
+  test('a wider tolerance does not change the inverse trigonometric values', () => {
+    // A special value is recognized from an exact argument only, never within
+    // `ce.tolerance`: with 1e-6, `Arcsin(0.5000001)` is still a float, and
+    // the list computes on doubles.
     const ce = machineEngine();
     ce.tolerance = 1e-6;
     ce.declare('T', { value: ce.box(['List', ...FLOATS2, 0.5000001]) });
     const r = ce.box(['Arcsin', 'T']).evaluate();
-    expect(r.operator).toBe('Map');
-    expect([...r.each()].pop()!.json).toEqual(
-      ce.box(['Arcsin', 0.5000001]).evaluate().json
-    );
+    expect(isUnboxedList(r)).toBe(true);
+    expect([...r.each()].pop()!.re).toBe(Math.asin(0.5000001));
+    expect(
+      [...r.each()].pop()!.isSame(ce.box(['Arcsin', 0.5000001]).evaluate())
+    ).toBe(true);
   });
 });

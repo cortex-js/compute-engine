@@ -51,9 +51,63 @@ export function determinant(matrix: number[][]): number {
  * converges slowly.
  */
 export function spectralNorm(re: number[][], im: number[][]): number {
+  const gram = gramEigenvalues(re, im);
+  if (gram === undefined) return 0;
+  let lambdaMax = 0;
+  for (const lambda of gram.eigenvalues)
+    lambdaMax = Math.max(lambdaMax, lambda);
+  return gram.scale * Math.sqrt(lambdaMax);
+}
+
+/**
+ * The singular values of a finite `m × n` matrix, in machine precision,
+ * sorted in descending order: `min(m, n)` values, zeros included.
+ *
+ * The input is the same as for `spectralNorm()`: the real parts `re` and the
+ * imaginary parts `im` of the entries, row-major, every entry finite. The
+ * singular values are the square roots of the eigenvalues of the Gram
+ * matrix of the smaller side, which the same Jacobi run finds (see
+ * `spectralNorm()`). For a complex matrix, the real symmetric embedding has
+ * each eigenvalue of the Gram matrix twice, so the sorted list of its
+ * eigenvalues is taken one value in two.
+ *
+ * The absolute error of each value is about `ε·σ_max` (`ε ≈ 2.2e-16`,
+ * `σ_max` the largest singular value): a smaller singular value is not
+ * resolved. An entry whose magnitude is below about `1e-154` times the
+ * largest one underflows to 0 in the scaled Gram matrix, and the singular
+ * values that depend on it can come back as 0. A caller that needs the
+ * small singular values must decline such a matrix.
+ */
+export function singularValues(re: number[][], im: number[][]): number[] {
   const m = re.length;
   const n = m === 0 ? 0 : re[0].length;
-  if (m === 0 || n === 0) return 0;
+  const count = Math.min(m, n);
+  const gram = gramEigenvalues(re, im);
+  if (gram === undefined) return new Array(count).fill(0);
+  const sorted = gram.eigenvalues.slice().sort((a, b) => b - a);
+  const step = gram.isReal ? 1 : 2;
+  const result: number[] = [];
+  for (let r = 0; r < count; r++)
+    result.push(gram.scale * Math.sqrt(Math.max(0, sorted[r * step])));
+  return result;
+}
+
+/**
+ * The eigenvalues of the Gram matrix of the smaller side of a finite matrix,
+ * scaled: the matrix is first divided by `scale`, the largest magnitude of
+ * a real or imaginary part of its entries. `isReal` is true when every
+ * imaginary part of the Gram matrix is zero: `eigenvalues` then has the
+ * `min(m, n)` eigenvalues of the Gram matrix. Otherwise it has the `2·min(m,
+ * n)` eigenvalues of the real symmetric embedding, each eigenvalue of the
+ * Gram matrix twice. `undefined` when the matrix is empty or zero.
+ */
+function gramEigenvalues(
+  re: number[][],
+  im: number[][]
+): { scale: number; eigenvalues: number[]; isReal: boolean } | undefined {
+  const m = re.length;
+  const n = m === 0 ? 0 : re[0].length;
+  if (m === 0 || n === 0) return undefined;
 
   // Scale the matrix so that its largest real or imaginary part is 1, and
   // multiply the norm by the scale at the end. The Gram matrix squares the
@@ -63,7 +117,7 @@ export function spectralNorm(re: number[][], im: number[][]): number {
   for (let i = 0; i < m; i++)
     for (let j = 0; j < n; j++)
       scale = Math.max(scale, Math.abs(re[i][j]), Math.abs(im[i][j]));
-  if (scale === 0) return 0;
+  if (scale === 0) return undefined;
   re = re.map((row) => row.map((v) => v / scale));
   im = im.map((row) => row.map((v) => v / scale));
 
@@ -123,7 +177,7 @@ export function spectralNorm(re: number[][], im: number[][]): number {
   // off-diagonal mass is negligible relative to the whole matrix.
   let total = 0;
   for (const row of S) for (const v of row) total += v * v;
-  if (total === 0) return 0;
+  if (total === 0) return undefined;
   for (let sweep = 0; sweep < 100; sweep++) {
     let off = 0;
     for (let p = 0; p < size; p++)
@@ -154,9 +208,9 @@ export function spectralNorm(re: number[][], im: number[][]): number {
       }
   }
 
-  let lambdaMax = 0;
-  for (let r = 0; r < size; r++) lambdaMax = Math.max(lambdaMax, S[r][r]);
-  return scale * Math.sqrt(lambdaMax);
+  const eigenvalues: number[] = [];
+  for (let r = 0; r < size; r++) eigenvalues.push(S[r][r]);
+  return { scale, eigenvalues, isReal };
 }
 
 // export function transpose(

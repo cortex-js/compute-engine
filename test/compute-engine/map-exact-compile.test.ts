@@ -564,7 +564,9 @@ describe('exact Map compile — the proof declines', () => {
     expect(stats.compiledHits).toBe(0);
     // The interpreter's EXACT integer, which float64 could not have held.
     expect(m.at(200).isExact).toBe(true);
-    expect(m.at(200).json).toBe(200000000000000000);
+    // Past the safe integers, an exact integer serializes as a string of
+    // digits (a JSON number there would box as a float).
+    expect(m.at(200).json).toEqual({ num: '2e+17' });
   });
 
   test('a Divide body declines (not integer-closed)', () => {

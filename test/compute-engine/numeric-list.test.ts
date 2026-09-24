@@ -432,11 +432,16 @@ describe('isMachineNumeric — does array reproduce the list, exactness included
     expect(l.isMachineNumeric).toBe(false);
   });
 
-  test('an exact integer counts as a machine number when a double holds it', () => {
-    // `ce.number(2 ** 70)` is the exact bigint `2^70`: re-boxing the double
-    // reproduces the element, so the answer stays true.
+  test('an exact integer past the safe integers is not a machine number', () => {
+    // A double holds the exact `2^70`, but `ce.number(2 ** 70)` is the FLOAT
+    // `2^70` (only a safe-integer double boxes as an exact integer): re-boxing
+    // the double does not reproduce the element, so the answer is false. The
+    // float `2^70` is reproduced.
     expect(
       ce.function('List', [ce.number(2n ** 70n), ce.number(1)]).isMachineNumeric
+    ).toBe(false);
+    expect(
+      ce.function('List', [ce.number(2 ** 70), ce.number(1)]).isMachineNumeric
     ).toBe(true);
     expect(
       ce.function('List', [ce.number(2n ** 53n + 1n)]).isMachineNumeric
@@ -455,7 +460,8 @@ describe('isMachineNumeric — does array reproduce the list, exactness included
     expect(ce.number(3).isMachineNumeric).toBe(true);
     expect(ce.number(NaN).isMachineNumeric).toBe(true);
     expect(ce.number(-Infinity).isMachineNumeric).toBe(true);
-    expect(ce.number(2n ** 70n).isMachineNumeric).toBe(true);
+    expect(ce.number(2n ** 70n).isMachineNumeric).toBe(false);
+    expect(ce.number(2 ** 70).isMachineNumeric).toBe(true);
     expect(ce.number(2n ** 53n + 1n).isMachineNumeric).toBe(false);
     expect(ce.parse('\\frac{1}{2}').isMachineNumeric).toBe(false);
     expect(ce.parse('\\frac{1}{3}').isMachineNumeric).toBe(false);

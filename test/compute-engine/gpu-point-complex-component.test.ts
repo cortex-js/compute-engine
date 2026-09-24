@@ -9,7 +9,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 //
 // The call `h(t)` of a function declared `(unknown) -> unknown` types
 // `number`, although the body `s + i` is complex. The compiler reads the
-// complex result from the body (`isComplexValuedUserCall` in
+// lane that the emitted definition of `h` records (`userCallLane` in
 // `base-compiler.ts`).
 
 function engine(): ComputeEngine {
@@ -486,4 +486,100 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       ).code
     ).toBe('_fn_p_tuple_number_number(vec2(x, 1.0)) + vec2(1.0, 0.0)');
   });
+});
+
+describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
+  // A call reads the lane that the emitted definition of its function
+  // records. A recursive call inside the body of `r` is compiled before that
+  // record exists, so its lane comes from its type. `r: (integer) -> number`
+  // says nothing about the lane: the recursive call is first read as real,
+  // and when the body `If(n ≤ 0, i, r(n − 1) + 1)` then proves complex, the
+  // definition is compiled again with the recursive call read as complex
+  // (`emitWithRecursiveLaneRetry`). Before 2026-09-24 the first compilation
+  // failed closed and asked for a signature, and before that (HEAD of
+  // 2026-09-23) the body added `1` to the `{re, im}` object as a string.
+  const BODY =
+    'n \\mapsto \\operatorname{If}(n \\le 0, \\imaginaryI, r(n-1) + 1)';
+
+  function recursive(signature: string): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('r', { signature });
+    ce.assign('r', ce.parse(BODY));
+    return ce;
+  }
+
+  for (const mode of ['strict', 'auto', 'complex'] as const) {
+    it(`javascript ${mode}: a wide signature compiles with the complex recursive call`, () => {
+      const ce = recursive('(integer) -> number');
+      const result = compile(ce.parse('r(n) + x'), {
+        to: 'javascript',
+        mode,
+        fallback: false,
+      } as any) as any;
+      expect(result.success).toBe(true);
+      expect(result.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
+      const alone = compile(ce.parse('r(n)'), {
+        to: 'javascript',
+        mode,
+        fallback: false,
+      } as any) as any;
+      expect(alone.run({ n: 3 })).toEqual({ re: 3, im: 1 });
+    });
+  }
+
+  for (const mode of ['strict', 'auto'] as const) {
+    // Without a declaration, `r` types `broadcastable<number>`: a call may
+    // be a scalar or a list, so the body's `+ 1` over the complex recursive
+    // call has no compiled form, and the compilation fails closed. Before,
+    // the body added `1` to the `{re, im}` object of the recursive call as a
+    // string, and `r(n) + x` answered `"1[object Object]111"`.
+    it(`javascript ${mode}: an undeclared function fails closed`, () => {
+      const ce = new ComputeEngine();
+      ce.assign('r', ce.parse(BODY));
+      for (const latex of ['r(n) + x', 'r(n)'])
+        expect(() =>
+          compile(ce.parse(latex), {
+            to: 'javascript',
+            mode,
+            fallback: false,
+          } as any)
+        ).toThrow(/list-valued operand|Declare the signature of `r`/);
+      const fallback = compile(ce.parse('r(n) + x'), {
+        to: 'javascript',
+        mode,
+      } as any) as any;
+      expect(fallback.success).toBe(false);
+      expect(fallback.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
+    });
+
+    it(`javascript ${mode}: the declared complex signature compiles`, () => {
+      const ce = recursive('(integer) -> complex');
+      const expr = ce.parse('r(n) + x');
+      const value = expr.subs({ n: 3, x: 1 }).N();
+      expect({ re: value.re, im: value.im }).toEqual({ re: 4, im: 1 });
+      const result = compile(expr, {
+        to: 'javascript',
+        mode,
+        fallback: false,
+      } as any) as any;
+      expect(result.success).toBe(true);
+      expect(result.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
+    });
+
+    it(`javascript ${mode}: a real recursive body still compiles`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('r', { signature: '(integer) -> number' });
+      ce.assign(
+        'r',
+        ce.parse('n \\mapsto \\operatorname{If}(n \\le 0, 1, r(n-1) + 1)')
+      );
+      const result = compile(ce.parse('r(n) + x'), {
+        to: 'javascript',
+        mode,
+        fallback: false,
+      } as any) as any;
+      expect(result.success).toBe(true);
+      expect(result.run({ n: 3, x: 1 })).toBe(5);
+    });
+  }
 });

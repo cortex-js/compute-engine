@@ -76,8 +76,14 @@ export class MachineNumericValue extends NumericValue {
     return 'real';
   }
 
+  // A machine double is exact only when it is a SAFE integer
+  // (`Number.isSafeInteger`): every integer of that range has exactly one
+  // double, so the value denotes that integer and nothing else. A double
+  // past the safe integers (`1e200`) is a rounded value — its integer
+  // reading (the binary value of the double) is an artifact of the
+  // rounding, so it stays a float.
   get isExact(): boolean {
-    return this.im === 0 && Number.isInteger(this.decimal);
+    return this.im === 0 && Number.isSafeInteger(this.decimal);
   }
 
   get asExact(): NumericValue | undefined {

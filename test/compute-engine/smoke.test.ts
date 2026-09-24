@@ -747,10 +747,11 @@ describe('NUMERIC EVALUATION arithmetic', () => {
     ));
 
   test(`N('\\frac34 + 1e199') // Precision is at 100 digits, so loss of 3/4 is expected`, () =>
-    // The result is exactly 10^199, which is NOT float-representable — the
-    // lossless `.json` contract emits the `{num}` string form (a JSON float
-    // here would change the value; see CORRECTNESS_FINDINGS P0-32/33).
-    expect(NToJson('\\frac34 + 1e199')).toEqual('1e+199'));
+    // The result is the big decimal 10^199, a float. Its shortest decimal
+    // form is `1e199`, which boxes again as the decimal 10^199 (a double is
+    // read by its shortest decimal digits, as `0.1` is), so the `.json` is the
+    // JSON number.
+    expect(NToJson('\\frac34 + 1e199')).toEqual(1e199));
 
   test(`NToJson('12345678^3 + \\frac{1}{3} = 1.1.88167596026655860575233333333333333333333333333333333333333*10^21')`, () =>
     expect(NToJson('12345678^3 + \\frac{1}{3}')).toMatch(

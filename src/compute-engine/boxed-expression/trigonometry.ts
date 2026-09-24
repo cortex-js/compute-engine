@@ -6,9 +6,10 @@ import type { LatexString } from '../latex-syntax/types.js';
 
 import { apply } from './apply.js';
 
-import { canonicalAngle } from './utils.js';
+import { bignumPreferred, canonicalAngle } from './utils.js';
 
 import type {
+  AngularUnit,
   Expression,
   IComputeEngine as ComputeEngine,
   Sign,
@@ -16,7 +17,13 @@ import type {
 import { asLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { isNumber, isSymbol, isFunction } from './type-guards.js';
-import { chop, ROUNDOFF_TOLERANCE } from '../numerics/numeric.js';
+import {
+  chop,
+  isMachineTrigPole,
+  ROUNDOFF_TOLERANCE,
+} from '../numerics/numeric.js';
+import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
+import { asRational } from './numerics.js';
 
 type ConstructibleTrigValues = [
   [numerator: number, denominator: number],
@@ -276,6 +283,30 @@ export function radiansToAngle(
   const n = x.N();
   const theta = n.re;
   if (Number.isNaN(theta)) return x;
+
+  // A real angle computed at a precision above the machine's is converted
+  // at that precision: a conversion with machine numbers answers
+  // `arcsin(0.5)` in degrees as `30.000000000000004`, which is not the
+  // value at the working precision.
+  const nv = isNumber(n) ? n.numericValue : undefined;
+  if (
+    nv !== undefined &&
+    typeof nv !== 'number' &&
+    nv.im === 0 &&
+    nv.bignumRe !== undefined
+  ) {
+    const big = nv.bignumRe;
+    const converted =
+      angularUnit === 'deg'
+        ? big.mul(180).div(BigDecimal.PI)
+        : angularUnit === 'grad'
+          ? big.mul(200).div(BigDecimal.PI)
+          : angularUnit === 'turn'
+            ? big.div(BigDecimal.PI.mul(2))
+            : undefined;
+    if (converted !== undefined) return ce.number(converted);
+  }
+
   const scale =
     angularUnit === 'deg'
       ? 180 / Math.PI
@@ -296,17 +327,129 @@ export function radiansToAngle(
 }
 
 /**
- * Chop numericization dust from a bignum trig kernel. `.N()` substitutes a
- * precision-limited approximation for a symbolic zero-crossing argument
- * (`Sin(π)` becomes sin of π-to-`precision`-digits ≈ 10^−precision), so the
- * dust scale is the BIGNUM roundoff, 10^(2−precision) — NOT `ce.tolerance`,
- * which destroyed legitimately-computed small results (`sin(3.141592653588793)`
- * ≈ 1.0e−12 chopped to 0 at the default 1e-10 tolerance; the #231 failure
- * class). See ARCHITECTURE.md § "Chopping and the `im === 0` convention".
+ * Chop numericization dust from the value of a bignum `sin` or `cos` kernel
+ * at the angle `x` (in radians). `.N()` substitutes a precision-limited
+ * approximation for a symbolic zero-crossing argument (`Sin(π)` becomes sin
+ * of π-to-`precision`-digits ≈ 10^−precision), and that value is noise.
+ *
+ * The limit is `min(1, |x|)·10^(2−precision)`. A rounded argument has an
+ * absolute error of about `|x|·10^−precision`, and the derivatives of `sin`
+ * and `cos` are at most 1, so for `|x| < 1` the limit follows the argument:
+ * a value that is small because the argument is small is kept (`sin(10⁻²⁵)`
+ * is `10⁻²⁵`). For `|x| ≥ 1` the limit stays `10^(2−precision)`: a large
+ * argument can be exact (`sin(10²²)` is `−0.852…`, and the kernel reduces
+ * it exactly), and a limit that grows with `|x|` would chop its value.
+ *
+ * The limit is not `ce.tolerance`, which destroyed legitimately-computed
+ * small results (`sin(3.141592653588793)` ≈ 1.0e−12 chopped to 0 at the
+ * default 1e-10 tolerance). See ARCHITECTURE.md § "Chopping and the
+ * `im === 0` convention".
  */
-function chopBignumDust(ce: ComputeEngine, value: BigDecimal): BigDecimal | 0 {
-  if (value.abs().lte(new BigDecimal(`1e${2 - ce.precision}`))) return 0;
+function chopBignumDust(
+  ce: ComputeEngine,
+  value: BigDecimal,
+  x: BigDecimal
+): BigDecimal | 0 {
+  if (value.abs().lte(dustScale(ce, x))) return 0;
   return value;
+}
+
+/**
+ * The rounding error of the angle `x` (in radians) that `chopBignumDust`
+ * and `bigPoleDust` allow: `min(1, |x|)·10^(2−precision)`.
+ */
+function dustScale(ce: ComputeEngine, x: BigDecimal): BigDecimal {
+  const limit = new BigDecimal(`1e${2 - ce.precision}`);
+  const ax = x.abs();
+  return ax.lt(BigDecimal.ONE) ? ax.mul(limit) : limit;
+}
+
+/**
+ * The value `~oo` for a computed value of `tan`, `cot`, `sec` or `csc` at
+ * the angle `x` (in radians) when `x` is a pole within its rounding error
+ * (the counterpart of `chopBignumDust`). Near a pole `p`, the magnitude of
+ * the value is about `1/|x − p|`, so the value is `~oo` when its magnitude
+ * is at least the reciprocal of the rounding error that `chopBignumDust`
+ * allows, `1/(min(1, |x|)·10^(2−precision))`. `.N()` substitutes π to the
+ * working precision, and `Cot(π)` computes as a very large number that is
+ * only rounding.
+ *
+ * A value that is large because the argument is legitimately near a pole
+ * is kept: `tan(π/2 + 10⁻¹⁵)` is about `−10¹⁵` at 21 digits, and
+ * `cot(10⁻²⁵)` is `10²⁵` (the pole at 0 is exact, and the rounding error of
+ * `10⁻²⁵` is about `10⁻⁴⁶`).
+ */
+function bigPoleDust(
+  ce: ComputeEngine,
+  value: BigDecimal,
+  x: BigDecimal
+): BigDecimal | Expression {
+  if (!value.isFinite()) return ce.ComplexInfinity;
+  if (value.abs().mul(dustScale(ce, x)).gte(BigDecimal.ONE))
+    return ce.ComplexInfinity;
+  return value;
+}
+
+/**
+ * The machine counterpart of `bigPoleDust`: the value `~oo` when the angle
+ * `x` (in radians) is within its rounding error of a pole, that is when
+ * `|value|·min(|x|, 2⁴⁰)·100·2⁻⁵³ ≥ 1` (`isMachineTrigPole`). Compiled
+ * JavaScript and Python use the same rule, and the routes must agree at
+ * every argument (`test/compute-engine/compile-trig-poles.test.ts`).
+ */
+function poleDust(
+  ce: ComputeEngine,
+  value: number,
+  x: number
+): number | Expression {
+  if (isMachineTrigPole(value, x)) return ce.ComplexInfinity;
+  return value;
+}
+
+/**
+ * The value of an inverse trigonometric function, an angle in the engine's
+ * angular unit. `fn`, `bigFn` and `complexFn` compute it in radians.
+ *
+ * In another unit than radians, the bignum kernel runs with guard digits,
+ * and its result is converted to the unit before it is rounded to the
+ * working precision. A conversion of the rounded value keeps the rounding
+ * error of the radian value: `arccos(0.5)` in degrees at 21 digits was
+ * `59.9999999999999999998`, not `60`. The machine and complex results are
+ * converted by `radiansToAngle`.
+ */
+function inverseAngle(
+  op: Expression,
+  fn: (x: number) => number,
+  bigFn: (x: BigDecimal) => BigDecimal,
+  complexFn: (x: Complex) => number | Complex
+): Expression | undefined {
+  const unit = op.engine.angularUnit;
+  if (unit === 'rad') return apply(op, fn, bigFn, complexFn);
+  let converted = false;
+  const result = apply(
+    op,
+    fn,
+    (x) => {
+      const saved = BigDecimal.precision;
+      BigDecimal.precision = saved + 10;
+      try {
+        const theta = bigFn(x);
+        if (!theta.isFinite()) return theta;
+        const angle =
+          unit === 'deg'
+            ? theta.mul(180).div(BigDecimal.PI)
+            : unit === 'grad'
+              ? theta.mul(200).div(BigDecimal.PI)
+              : theta.div(BigDecimal.PI.mul(2));
+        converted = true;
+        return angle.toPrecision(saved);
+      } finally {
+        BigDecimal.precision = saved;
+      }
+    },
+    complexFn
+  );
+  return converted ? result : radiansToAngle(result);
 }
 
 export function evalTrig(
@@ -318,31 +461,25 @@ export function evalTrig(
 
   switch (name) {
     case 'Arccos':
-      return radiansToAngle(
-        apply(
-          op,
-          Math.acos,
-          (x) => x.acos(),
-          (x) => x.acos()
-        )
+      return inverseAngle(
+        op,
+        Math.acos,
+        (x) => x.acos(),
+        (x) => x.acos()
       );
     case 'Arccot':
-      return radiansToAngle(
-        apply(
-          op,
-          (x) => Math.atan2(1, x),
-          (x) => BigDecimal.atan2(BigDecimal.ONE, x),
-          (x) => x.inverse().atan()
-        )
+      return inverseAngle(
+        op,
+        (x) => Math.atan2(1, x),
+        (x) => BigDecimal.atan2(BigDecimal.ONE, x),
+        (x) => x.inverse().atan()
       );
     case 'Arccsc':
-      return radiansToAngle(
-        apply(
-          op,
-          (x) => Math.asin(1 / x),
-          (x) => BigDecimal.ONE.div(x).asin(),
-          (x) => x.inverse().asin()
-        )
+      return inverseAngle(
+        op,
+        (x) => Math.asin(1 / x),
+        (x) => BigDecimal.ONE.div(x).asin(),
+        (x) => x.inverse().asin()
       );
     // Inverse HYPERBOLIC functions return an area (a dimensionless real),
     // NOT an angle: they are unit-independent and must not be scaled by
@@ -351,8 +488,9 @@ export function evalTrig(
       return apply(
         op,
         Math.acosh,
-        // acosh(x) = ln(x + sqrt(x^2 - 1))
-        (x) => x.add(x.mul(x).sub(BigDecimal.ONE).sqrt()).ln(),
+        // `BigDecimal.acosh()`, not `ln(x + √(x² − 1))`: the direct formula
+        // loses relative precision near 1 and for a large `x`.
+        (x) => x.acosh(),
         (x) => x.acosh()
       );
     case 'Arcoth':
@@ -387,23 +525,19 @@ export function evalTrig(
       );
 
     case 'Arcsec':
-      return radiansToAngle(
-        apply(
-          op,
-          (x) => Math.acos(1 / x),
-          (x) => BigDecimal.ONE.div(x).acos(),
-          (x) => x.inverse().acos()
-        )
+      return inverseAngle(
+        op,
+        (x) => Math.acos(1 / x),
+        (x) => BigDecimal.ONE.div(x).acos(),
+        (x) => x.inverse().acos()
       );
 
     case 'Arcsin':
-      return radiansToAngle(
-        apply(
-          op,
-          Math.asin,
-          (x) => x.asin(),
-          (x) => x.asin()
-        )
+      return inverseAngle(
+        op,
+        Math.asin,
+        (x) => x.asin(),
+        (x) => x.asin()
       );
 
     case 'Arsech':
@@ -423,19 +557,19 @@ export function evalTrig(
       return apply(
         op,
         Math.asinh,
-        // asinh(x) = ln(x + sqrt(x^2 + 1))
-        (x) => x.add(x.mul(x).add(BigDecimal.ONE).sqrt()).ln(),
+        // `BigDecimal.asinh()`, not `ln(x + √(x² + 1))`: the direct formula
+        // cancels near 0 (a relative error of 5e-11 at x = 10⁻¹⁰), which
+        // breaks the error bound that exact ordering relies on.
+        (x) => x.asinh(),
         (x) => x.asinh()
       );
 
     case 'Arctan':
-      return radiansToAngle(
-        apply(
-          op,
-          Math.atan,
-          (x) => x.atan(),
-          (x) => x.atan()
-        )
+      return inverseAngle(
+        op,
+        Math.atan,
+        (x) => x.atan(),
+        (x) => x.atan()
       );
 
     case 'Artanh':
@@ -455,7 +589,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.cos,
-        (x) => chopBignumDust(ce, x.cos()),
+        (x) => chopBignumDust(ce, x.cos(), x),
         (x) => x.cos()
       );
 
@@ -471,21 +605,16 @@ export function evalTrig(
       );
 
     case 'Cot':
-      // Poles at multiples of π (tan → 0): detect the blow-up and return the
-      // pole `~oo`, mirroring `Tan` — otherwise `.N()` substitutes the float
-      // π and returns huge finite garbage (e.g. −2.6e24 for `Cot(π)`).
+      // Poles at multiples of π. A pole is recognized from the structure of
+      // the argument (`isTrigPole`) when it has one. Under `.N()` the
+      // argument is already a number, so a value larger than the reciprocal
+      // of the rounding dust is the pole (`poleDust`): `.N()` substitutes π
+      // to the working precision, and `Cot(π)` computes as −2.6e24.
+      if (isTrigPole('Cot', op)) return ce.ComplexInfinity;
       return applyAngle(
         op,
-        (x): number | Complex | Expression => {
-          const y = 1 / Math.tan(x);
-          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
-          return y;
-        },
-        (x): BigDecimal | Complex | number | Expression => {
-          const y = BigDecimal.ONE.div(x.tan());
-          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
-          return y;
-        },
+        (x) => poleDust(ce, 1 / Math.tan(x), x),
+        (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.tan()), x),
         (x) => x.tan().inverse()
       );
     case 'Coth':
@@ -496,20 +625,12 @@ export function evalTrig(
         (x) => x.tanh().inverse()
       );
     case 'Csc':
-      // Poles at multiples of π (sin → 0): detect the blow-up and return `~oo`,
-      // mirroring `Tan` (otherwise `Csc(π).N()` → huge finite garbage).
+      // Poles at multiples of π, recognized as for `Cot`.
+      if (isTrigPole('Csc', op)) return ce.ComplexInfinity;
       return applyAngle(
         op,
-        (x): number | Complex | Expression => {
-          const y = 1 / Math.sin(x);
-          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
-          return y;
-        },
-        (x): BigDecimal | Complex | number | Expression => {
-          const y = BigDecimal.ONE.div(x.sin());
-          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
-          return y;
-        },
+        (x) => poleDust(ce, 1 / Math.sin(x), x),
+        (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin()), x),
         (x) => x.sin().inverse()
       );
     case 'Csch':
@@ -520,20 +641,12 @@ export function evalTrig(
         (x) => x.sinh().inverse()
       );
     case 'Sec':
-      // Poles at π/2 + kπ (cos → 0): detect the blow-up and return `~oo`,
-      // mirroring `Tan` (otherwise `Sec(π/2).N()` → huge finite garbage).
+      // Poles at π/2 + kπ, recognized as for `Cot`.
+      if (isTrigPole('Sec', op)) return ce.ComplexInfinity;
       return applyAngle(
         op,
-        (x): number | Complex | Expression => {
-          const y = 1 / Math.cos(x);
-          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
-          return y;
-        },
-        (x): BigDecimal | Complex | number | Expression => {
-          const y = BigDecimal.ONE.div(x.cos());
-          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
-          return y;
-        },
+        (x) => poleDust(ce, 1 / Math.cos(x), x),
+        (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos()), x),
         (x) => x.cos().inverse()
       );
     case 'Sech':
@@ -547,7 +660,7 @@ export function evalTrig(
       return applyAngle(
         op,
         Math.sin,
-        (x) => chopBignumDust(ce, x.sin()),
+        (x) => chopBignumDust(ce, x.sin(), x),
         (x) => x.sin()
       );
     case 'Sinh':
@@ -558,23 +671,13 @@ export function evalTrig(
         (x) => x.sinh()
       );
     case 'Tan': {
-      const result = applyAngle(
+      if (isTrigPole('Tan', op)) return ce.ComplexInfinity;
+      return applyAngle(
         op,
-        (x): number | Complex | Expression => {
-          const y = Math.tan(x);
-          if (y > 1e6 || y < -1e6) return ce.ComplexInfinity;
-          return y;
-        },
-
-        (x): BigDecimal | Complex | number | Expression => {
-          const y = x.tan();
-          if (y.gt(1e6) || y.lt(-1e6)) return ce.ComplexInfinity;
-          return y;
-        },
+        (x) => poleDust(ce, Math.tan(x), x),
+        (x) => bigPoleDust(ce, x.tan(), x),
         (x) => x.tan()
       );
-
-      return result;
     }
     case 'Tanh':
       return apply(
@@ -645,7 +748,12 @@ function constructibleValuesInverse(
   specialValues: ConstructibleTrigValues
 ): undefined | Expression {
   if (!x) return undefined;
-  let x_N = x.N().re;
+  // An inexact argument (`arcsin(0.5)`) numericizes: it has no exact value.
+  if (isNumber(x) && x.isExact === false) return undefined;
+  const xN = x.N();
+  // If the argument has an imaginary part, it's not a constructible value
+  if (xN.im !== 0) return undefined;
+  let x_N = xN.re;
   if (Number.isNaN(x_N)) return undefined;
   // operator is arcFn, and inv_operator is Fn
   const inv_operator = inverseTrigFuncName(operator);
@@ -693,8 +801,15 @@ function constructibleValuesInverse(
     x = x.neg();
   }
 
-  for (const [[_match_arg, match_arg_N], [n, d]] of specialInverseValues) {
-    if (ce.chop(x_N - match_arg_N) === 0) {
+  // The machine values select the candidates, and an EXACT difference of
+  // zero confirms one: `arcsin(1/2 + 10⁻³⁰)` is not `π/6`, and an inexact
+  // argument (`arcsin(0.5)`) is not a special value (only `.N()` and an
+  // inexact argument numericize).
+  for (const [[match_arg, match_arg_N], [n, d]] of specialInverseValues) {
+    if (
+      Math.abs(x_N - match_arg_N) <= 1e-9 * Math.max(1, Math.abs(x_N)) &&
+      isExactZero(x.sub(match_arg))
+    ) {
       // The angle is (n/d)·halfTurn, expressed exactly in the engine's
       // angular unit (π rad, 180 deg, …) so evaluate() agrees with the
       // unit-converted numeric path (e.g. deg mode: arcsin(1) → exact 90).
@@ -709,6 +824,11 @@ function constructibleValuesInverse(
   return undefined;
 }
 
+/** True when `x` is the exact number literal 0. */
+function isExactZero(x: Expression): boolean {
+  return isNumber(x) && x.isExact === true && x.isSame(0);
+}
+
 export function trigSign(operator: string, x: Expression): Sign | undefined {
   const [q, pos] = quadrant(x);
   if (q === undefined) return undefined;
@@ -717,6 +837,11 @@ export function trigSign(operator: string, x: Expression): Sign | undefined {
       return 'zero';
     if ((operator === 'Cos' || operator === 'Cot') && (pos === 1 || pos === 3))
       return 'zero';
+    // A pole (`tan(π/2)`, `csc(π)`) has no sign.
+    if ((operator === 'Tan' || operator === 'Sec') && (pos === 1 || pos === 3))
+      return undefined;
+    if ((operator === 'Cot' || operator === 'Csc') && (pos === 0 || pos === 2))
+      return undefined;
   }
   // `quadrant()` numbers the quadrants 1..4; the tables below are indexed
   // 0..3. Indexing them with `q` itself shifted every sign one quadrant
@@ -752,22 +877,13 @@ export function constructibleValues(
     return undefined;
   const ce = x.engine;
 
-  // An argument with unknowns cannot numericize, so the `.N()` below would
-  // walk the whole expression only for `x.im !== 0` to reject it. Gate on
-  // `.unknowns` (a symbol with an assigned value is NOT unknown, so
-  // `sin(y)` with `y := π/4` still reduces): the walk is a single linear pass
-  // (NOT cached — it allocates a `Set` and resolves each symbol per access),
-  // while the wasted `.N()` is not — over nested applications of a user
-  // function it re-evaluates shared sub-chains and grows exponentially with
-  // the nesting depth (44 s for a 17-element list of such chains).
+  // An argument with unknowns is not a constant angle. Gate on `.unknowns`
+  // (a symbol with an assigned value is NOT unknown, so `sin(y)` with
+  // `y := π/4` still reduces): the walk is a single linear pass, while a
+  // numeric evaluation of the argument over nested applications of a user
+  // function re-evaluates shared sub-chains and grows exponentially with the
+  // nesting depth (44 s for a 17-element list of such chains).
   if (x.unknowns.length > 0) return undefined;
-
-  x = x.N();
-  // If the argument has an imaginary part, it's not a constructible value
-  if (x.im !== 0) return undefined;
-
-  let theta = x.re;
-  if (Number.isNaN(theta)) return undefined;
 
   //
   // Create the cache of special values
@@ -800,29 +916,33 @@ export function constructibleValues(
   if (isInverseTrigFunc(operator))
     return constructibleValuesInverse(ce, operator, x, specialValues);
 
-  const angularUnit = ce.angularUnit;
-  if (angularUnit !== 'rad') {
-    if (angularUnit === 'deg') theta *= Math.PI / 180;
-    if (angularUnit === 'grad') theta *= Math.PI / 200;
-    if (angularUnit === 'turn') theta *= 2 * Math.PI;
-  }
+  // A special value is used only when the angle is EXACTLY a rational
+  // multiple of a half-turn, read from its structure (`halfTurns`). The
+  // machine value of the angle is not used: an angle within 10⁻¹² of a
+  // special angle (`π − 10⁻³⁰`) is not that angle, and `sin(π − 10⁻³⁰)` is
+  // not 0.
+  const turns = halfTurns(x);
+  if (turns === undefined) return undefined;
+  const [n0, d] = turns;
 
   // Odd-even identities
-  const identitySign = trigFuncParity(operator) == -1 ? Math.sign(theta) : +1;
+  const identitySign = trigFuncParity(operator) == -1 && n0 < 0n ? -1 : +1;
 
-  theta = Math.abs(theta % (2 * Math.PI));
+  // The angle modulo a full turn, in [0, 2) half-turns
+  const n = (n0 < 0n ? -n0 : n0) % (2n * d);
+  const quadrant = Number((2n * n) / d); // 0..3
 
-  const quadrant = Math.floor((theta * 2) / Math.PI); // 0..3
-
-  theta = theta % (Math.PI / 2); // 0..π/2
+  // The angle in the quadrant, in [0, 1/2) half-turns: `rn/rd`
+  const rn = 2n * n - BigInt(quadrant) * d;
+  const rd = 2n * d;
 
   // Adjusting for the position in the quadrant
   let sign: number;
   [sign, operator] = TRIG_IDENTITIES[operator]?.[quadrant] ?? [1, operator];
 
-  for (const [[n, d], value] of specialValues) {
+  for (const [[num, den], value] of specialValues) {
     const r = value[operator];
-    if (r && Math.abs(theta - (Math.PI * n) / d) <= 1e-12) {
+    if (r && rn * BigInt(den) === BigInt(num) * rd) {
       if (isSymbol(r, 'ComplexInfinity')) return r;
       return identitySign * sign < 0 ? r.neg() : r;
     }
@@ -830,22 +950,186 @@ export function constructibleValues(
   return undefined;
 }
 
+/**
+ * The rational `n/d` (with `d > 0`) such that the angle `x`, in the
+ * engine's angular unit, is exactly `n/d` half-turns (`n/d·π` rad), or
+ * `undefined` when that is not known. The value is read from the
+ * structure of `x`, never from its numeric value: `π`, `3π/4`,
+ * `−π/6 + 2π` and (in degrees) `30` are exact multiples, but a float
+ * such as `3.14159`, or `π − 10⁻³⁰`, is not.
+ *
+ * A symbol with an assigned value is replaced by that value.
+ *
+ * `unit` is the angular unit in which `x` is read, the engine's by default:
+ * the exponent of `e^{iθ}` is in radians whatever the engine's unit is.
+ */
+export function halfTurns(
+  x: Expression,
+  unit: AngularUnit = x.engine.angularUnit
+): [bigint, bigint] | undefined {
+  const reduce = (n: bigint, d: bigint): [bigint, bigint] => {
+    if (d < 0n) [n, d] = [-n, -d];
+    const g = bigGcd(n, d);
+    return g > 1n ? [n / g, d / g] : [n, d];
+  };
+  const exactRational = (y: Expression): [bigint, bigint] | undefined => {
+    if (!isNumber(y) || y.isExact !== true) return undefined;
+    const r = asRational(y);
+    if (r === undefined) return undefined;
+    return reduce(BigInt(r[0]), BigInt(r[1]));
+  };
+  const walk = (y: Expression): [bigint, bigint] | undefined => {
+    if (isNumber(y)) {
+      const r = exactRational(y);
+      if (r === undefined) return undefined;
+      // In radians, only 0 is a rational multiple of π.
+      if (unit === 'rad') return r[0] === 0n ? [0n, 1n] : undefined;
+      if (unit === 'deg') return reduce(r[0], r[1] * 180n);
+      if (unit === 'grad') return reduce(r[0], r[1] * 200n);
+      if (unit === 'turn') return reduce(2n * r[0], r[1]);
+      return undefined;
+    }
+    if (isSymbol(y)) {
+      if (y.symbol === 'Pi') return unit === 'rad' ? [1n, 1n] : undefined;
+      if (y.isConstant) return undefined;
+      const value = y.value;
+      return value === undefined ? undefined : walk(value);
+    }
+    if (!isFunction(y)) return undefined;
+    if (y.operator === 'Negate') {
+      const r = walk(y.op1);
+      return r === undefined ? undefined : [-r[0], r[1]];
+    }
+    if (y.operator === 'Add') {
+      let n = 0n;
+      let d = 1n;
+      for (const term of y.ops) {
+        const r = walk(term);
+        if (r === undefined) return undefined;
+        [n, d] = reduce(n * r[1] + r[0] * d, d * r[1]);
+      }
+      return [n, d];
+    }
+    if (y.operator === 'Multiply') {
+      // Exact rational factors, and exactly one factor that is an angle.
+      let n = 1n;
+      let d = 1n;
+      let angle: [bigint, bigint] | undefined = undefined;
+      for (const factor of y.ops) {
+        const r = exactRational(factor);
+        if (r !== undefined) {
+          [n, d] = reduce(n * r[0], d * r[1]);
+          continue;
+        }
+        if (angle !== undefined) return undefined;
+        angle = walk(factor);
+        if (angle === undefined) return undefined;
+      }
+      if (angle === undefined) return undefined;
+      return reduce(n * angle[0], d * angle[1]);
+    }
+    if (y.operator === 'Divide') {
+      const r = walk(y.op1);
+      const q = exactRational(y.op2);
+      if (r === undefined || q === undefined || q[0] === 0n) return undefined;
+      return reduce(r[0] * q[1], r[1] * q[0]);
+    }
+    return undefined;
+  };
+  return walk(x);
+}
+
+/**
+ * Whether the angle `x` is exactly a pole of `operator`: an odd multiple
+ * of a quarter-turn for `Tan` and `Sec`, a multiple of a half-turn for
+ * `Cot` and `Csc` (see `halfTurns`).
+ */
+function isTrigPole(operator: string, x: Expression): boolean {
+  const turns = halfTurns(x);
+  if (turns === undefined) return false;
+  const [n, d] = turns;
+  if (operator === 'Tan' || operator === 'Sec')
+    return d === 2n && n % 2n !== 0n;
+  if (operator === 'Cot' || operator === 'Csc') return d === 1n;
+  return false;
+}
+
 // Return the quadrant of the angle (1..4) and the position on the
 // circle 0...4 corresponding to 0, π/2, π, 3π/2, 2π.
+//
+// Only a number literal has a quadrant. The position is known only for a
+// literal that is exactly a multiple of a quarter-turn (`halfTurns`: 0, or
+// `90` in degrees). For another literal, the quadrant is read from its
+// value, in the engine's angular unit, and it is `undefined` when that value
+// is too near a multiple of a quarter-turn for the computation to decide it.
+//
+// Above machine precision, the value is reduced at the working precision,
+// as `evaluate()` computes the value of the function: `sin(3.1415926536)`
+// is negative, and `sin(10⁻¹⁰)` positive. The literal is exact, and the
+// reduction by π has an error of about `|t|·10^−precision`; the margin is
+// `max(1, |t|)·10^(3−precision)`. At machine precision, the reduction uses
+// machine numbers, and the margin is `(1 + |t|)·10⁻¹⁴`: the conversion of
+// the literal to a machine number and the machine value of π each have a
+// relative error of about 10⁻¹⁶.
 function quadrant(theta: Expression): [number | undefined, number | undefined] {
-  // theta = theta.N();
+  if (!isNumber(theta)) return [undefined, undefined];
+  const turns = halfTurns(theta);
+  if (turns !== undefined) {
+    const [n0, d] = turns;
+    const n = ((n0 % (2n * d)) + 2n * d) % (2n * d);
+    const q = Number((2n * n) / d); // 0..3
+    return [q + 1, (2n * n) % d === 0n ? q : undefined];
+  }
+
   if (!theta.isValid || !isNumber(theta)) return [undefined, undefined];
   if (theta.im !== 0) return [undefined, undefined];
+  if (!Number.isFinite(theta.re)) return [undefined, undefined];
+
+  const ce = theta.engine;
+  const unit = ce.angularUnit;
+
+  if (bignumPreferred(ce)) {
+    const value = theta.bignumRe ?? ce.bignum(theta.re);
+    // The angle in radians
+    const t =
+      unit === 'deg'
+        ? value.mul(BigDecimal.PI).div(180)
+        : unit === 'grad'
+          ? value.mul(BigDecimal.PI).div(200)
+          : unit === 'turn'
+            ? value.mul(BigDecimal.PI.mul(2))
+            : value;
+    const quarter = BigDecimal.PI.div(2);
+    const k = t.div(quarter).floor();
+    // The distance of the angle above the multiple `k` of a quarter-turn
+    const r = t.sub(quarter.mul(k));
+    const at = t.abs();
+    const margin = (at.gt(BigDecimal.ONE) ? at : BigDecimal.ONE).mul(
+      new BigDecimal(`1e${3 - ce.precision}`)
+    );
+    if (r.lte(margin) || quarter.sub(r).lte(margin))
+      return [undefined, undefined];
+    const q = Number(((k.toBigInt() % 4n) + 4n) % 4n);
+    return [q + 1, undefined];
+  }
+
+  // The angle in radians
+  const radians = {
+    rad: 1,
+    deg: Math.PI / 180,
+    grad: Math.PI / 200,
+    turn: 2 * Math.PI,
+  }[unit];
+  const t = theta.re * radians;
+  if (!Number.isFinite(t)) return [undefined, undefined];
 
   // Normalize the angle to the range [0, 2π)
-  const t = theta.re;
-  if (isNaN(t)) return [undefined, undefined];
   const normalizedTheta = ((t % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
-  if (Math.abs(normalizedTheta) < 1e-12) return [1, 0];
-  if (Math.abs(normalizedTheta - Math.PI / 2) < 1e-12) return [2, 1];
-  if (Math.abs(normalizedTheta - Math.PI) < 1e-12) return [3, 2];
-  if (Math.abs(normalizedTheta - (3 * Math.PI) / 2) < 1e-12) return [4, 3];
+  const margin = (1 + Math.abs(t)) * 1e-14;
+  for (let k = 0; k <= 4; k++)
+    if (Math.abs(normalizedTheta - (k * Math.PI) / 2) <= margin)
+      return [undefined, undefined];
 
   // Use Math.floor to determine the quadrant
   return [Math.floor(normalizedTheta / (Math.PI / 2)) + 1, undefined];

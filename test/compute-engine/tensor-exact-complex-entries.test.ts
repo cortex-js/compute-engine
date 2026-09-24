@@ -88,11 +88,28 @@ describe('PACKED TENSOR: EXACT COMPLEX ENTRIES', () => {
   });
 
   test('under .N() an exact complex entry packs as a machine complex', () => {
-    expect(packTensor(ce, ce.box(A), { numeric: true })!.dtype).toBe(
-      'complex128'
-    );
-    expect(packTensor(ce, ce.box(B), { numeric: true })!.dtype).toBe(
-      'complex128'
+    // `.N()` makes every complex number literal inexact (`i`, `1 + 2i`), so
+    // the operand of a kernel under `.N()` has machine complex cells.
+    for (const m of [A, B]) {
+      const numericOperand = ce.box(m).N();
+      expect(allLeavesExact(numericOperand)).toBe(false);
+      expect(packTensor(ce, numericOperand, { numeric: true })!.dtype).toBe(
+        'complex128'
+      );
+    }
+    // The inverse under `.N()` is a machine answer, not exact rationals.
+    const inverse = ce
+      .box([
+        'Inverse',
+        [
+          'List',
+          ['List', 2, ['Complex', 1, 1]],
+          ['List', ['Complex', 1, -1], 3],
+        ],
+      ])
+      .N();
+    expect(inverse.toString()).toBe(
+      '[[0.75,(-0.25 - 0.25i)],[(-0.25 + 0.25i),0.5]]'
     );
   });
 

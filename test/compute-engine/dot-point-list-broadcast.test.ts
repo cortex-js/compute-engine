@@ -268,9 +268,12 @@ describe('Dot over a list of points', () => {
   });
 
   describe('the compiled JavaScript route agrees with the interpreter', () => {
+    // `L` is declared `list<real>`: the coordinates of `PointList(1, L)` must
+    // be known to be real (or complex) for the compiled `Dot` to choose its
+    // arithmetic. A `list<number>` fails closed (see below).
     function compiled(expr: MathJsonExpression, vars: Record<string, unknown>) {
       const ce = new ComputeEngine();
-      ce.declare('L', 'list<number>');
+      ce.declare('L', 'list<real>');
       const r = compile(ce.box(expr), {
         fallback: false,
         constantFold: false,
@@ -319,8 +322,8 @@ describe('Dot over a list of points', () => {
       // `incompatible-dimensions` onto NaN, as the rest of the linear-algebra
       // runtime does.
       const ce = new ComputeEngine();
-      ce.declare('L', 'list<number>');
-      ce.declare('M', 'list<number>');
+      ce.declare('L', 'list<real>');
+      ce.declare('M', 'list<real>');
       const r = compile(
         ce.box(['Dot', ['PointList', 1, 'L'], ['PointList', 1, 'M']]),
         {
@@ -416,8 +419,8 @@ describe('Dot over a list of points', () => {
       // answered NaN, and two empty lists answered the scalar `0`.
       function emptyRun(expr: MathJsonExpression, vars: Record<string, any>) {
         const ce = new ComputeEngine();
-        ce.declare('P', 'list<tuple<number, number>>');
-        ce.declare('Q', 'list<tuple<number, number>>');
+        ce.declare('P', 'list<tuple<real, real>>');
+        ce.declare('Q', 'list<tuple<real, real>>');
         const r = compile(ce.box(expr), {
           fallback: false,
           constantFold: false,
@@ -454,12 +457,12 @@ describe('Dot over a list of points', () => {
       });
     });
 
-    describe('non-numeric and complex coordinates are declined', () => {
+    describe('non-numeric coordinates are declined, complex ones computed', () => {
       // The compiled `*` answers a number for a pair of strings (`"1" * "2"`
-      // is `2`) where the interpreter leaves the product symbolic, and
-      // answers NaN for a `{ re, im }` object with nothing to say why. The
-      // sibling tuple broadcast (`BaseCompiler.compileBroadcastInnerProduct`)
-      // declines complex coordinates with the same message.
+      // is `2`) where the interpreter leaves the product symbolic, so string
+      // coordinates fail closed. A complex coordinate takes
+      // `_SYS.complexPointdot`, which computes with `{ re, im }` coordinates.
+      // A `number` coordinate may be either, and fails closed.
       test('string coordinates fail closed, where the interpreter stays symbolic', () => {
         const ce = new ComputeEngine();
         const expr = ce.box([
@@ -473,15 +476,61 @@ describe('Dot over a list of points', () => {
         ).toThrow(/is not a number/);
       });
 
-      test('complex coordinates fail closed', () => {
+      test('complex coordinates answer the interpreter value', () => {
         const ce = new ComputeEngine();
         ce.declare('P', 'list<tuple<complex, complex>>');
-        expect(() =>
-          compile(ce.box(['Dot', 'P', TUPLE_POINT]), {
-            fallback: false,
-            constantFold: false,
+        const expr = ce.box(['Dot', 'P', TUPLE_POINT]);
+        const r = compile(expr, { fallback: false, constantFold: false });
+        expect(r.code).toContain('_SYS.complexPointdot(');
+        // (i, 1)·(3, 4) = 4 + 3i and (2, 1 + i)·(3, 4) = 10 + 4i, without
+        // conjugation, as the interpreter answers.
+        const interpreted = expr
+          .subs({ P: ce.parse('[(\\imaginaryI, 1), (2, 1+\\imaginaryI)]') })
+          .N();
+        expect(interpreted.toString()).toBe('[(4 + 3i),(10 + 4i)]');
+        expect(
+          r.run!({
+            P: [
+              [{ re: 0, im: 1 }, 1],
+              [2, { re: 1, im: 1 }],
+            ],
           })
-        ).toThrow(/complex point coordinates/);
+        ).toEqual([
+          { re: 4, im: 3 },
+          { re: 10, im: 4 },
+        ]);
+      });
+
+      // A `number` coordinate is read as real in the default mode (user
+      // decision of 2026-09-24, option B), and the runner refuses a complex
+      // coordinate when it is called. Under `mode: 'complex'` it is complex.
+      test('a `number` coordinate is read as real, and a complex one is refused at run time', () => {
+        const ce = new ComputeEngine();
+        ce.declare('P', 'list<tuple<number, number>>');
+        const expr = ce.box(['Dot', 'P', TUPLE_POINT]);
+        const r = compile(expr, { fallback: false, constantFold: false });
+        expect(r.code).toContain('_SYS.pointdot(');
+        const P = [
+          [1, 2],
+          [5, -1],
+        ];
+        const interpreted = expr.subs({ P: ce.parse('[(1, 2), (5, -1)]') }).N();
+        expect(interpreted.toString()).toBe('[11,11]');
+        expect(r.run!({ P })).toEqual([11, 11]);
+        const complexP = [
+          [{ re: 0, im: 1 }, 1],
+          [2, 1],
+        ];
+        expect(() => r.run!({ P: complexP })).toThrow(
+          /"P" \(type `list<tuple<number, number>>`\) was compiled with real entries, but its entry \[0\]\[0\] is a complex/
+        );
+        const c = compile(expr, {
+          fallback: false,
+          constantFold: false,
+          mode: 'complex',
+        } as any);
+        expect(c.code).toContain('_SYS.complexPointdot(');
+        expect(c.run!({ P: complexP })).toEqual([{ re: 4, im: 3 }, 10]);
       });
 
       test('a bare `list<tuple>` names no coordinate type and fails closed', () => {

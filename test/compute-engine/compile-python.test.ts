@@ -55,9 +55,10 @@ describe('PYTHON TARGET', () => {
     it('should compile multiple trig functions', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y) + \\tan(z)');
       const code = python.compile(expr).code;
-      // `Tan` answers the pole `np.inf` past a magnitude of a million.
+      // `Tan` answers the pole `np.inf` when its argument is within its
+      // rounding error of a pole (`isMachineTrigPole`).
       expect(code).toBe(
-        'np.sin(x) + np.cos(y) + (lambda _y: np.where(np.abs(_y) > 1e6, np.inf, _y)[()])(np.tan(z))'
+        'np.sin(x) + np.cos(y) + (lambda _x: (lambda _y: np.where(np.isinf(_y) | (np.abs(_y) * np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 >= 1), np.inf, _y)[()])(np.tan(_x)))(z)'
       );
     });
 
@@ -983,9 +984,7 @@ describe('PYTHON TARGET', () => {
         expect(code).toContain(
           "if _x.dtype.kind in 'iuf' and _y.dtype.kind in 'iuf':"
         );
-        expect(code.split('\n').at(-1)).toBe(
-          '_ce_eqcoll(["1"], ["1.0"])'
-        );
+        expect(code.split('\n').at(-1)).toBe('_ce_eqcoll(["1"], ["1.0"])');
       });
 
       // The helper compares with the exact `==`: matching infinities are
@@ -1048,15 +1047,16 @@ describe('PYTHON TARGET', () => {
           noFold
         ).code
       ).toBe('np.linalg.norm([3, 4])');
-      // An operand whose rank is NOT statically known still fails closed:
-      // `'fro'` would raise at run time if it turned out to be a vector.
+      // An operand whose rank is NOT statically known takes numpy's default
+      // order too: `'fro'` would raise at run time on anything but a matrix,
+      // while the default order flattens the input at every rank.
       const scoped = new ComputeEngine();
       scoped.declare('anyRank', 'unknown');
-      expect(() =>
+      expect(
         python.compile(
           scoped.box(['Norm', 'anyRank', { str: 'Frobenius' }] as any)
-        )
-      ).toThrow(/matrix-only.*Fail closed/s);
+        ).code
+      ).toBe('np.linalg.norm(anyRank)');
     });
 
     // A rank-3 literal: √(1² + 2² + … + 8²) = √204 = 14.2828568570857.
@@ -1160,27 +1160,99 @@ describe('PYTHON TARGET', () => {
       );
     });
 
-    it('a run-time order over an operand of unknown rank fails closed (D6)', () => {
+    it('a run-time order over an operand of unknown rank is tested when the code runs', () => {
+      // The emitted code tests the rank (`np.ndim`) and then the order, and
+      // answers NaN where the interpreter has no value.
       const scoped = new ComputeEngine();
       scoped.declare('normP2', 'real');
       scoped.declare('normOpaque2', 'unknown');
-      expect(() =>
+      expect(
         python.compile(scoped.box(['Norm', 'normOpaque2', 'normP2'] as any))
-      ).toThrow(/run-time norm order.*Fail closed/s);
+          .code
+      ).toBe(
+        "(lambda _x, _p: (np.abs(_x) if _p > 0 else float('nan')) if np.ndim(_x) == 0 else (np.linalg.norm(_x, _p) if _p > 0 else float('nan')) if np.ndim(_x) == 1 else (np.linalg.norm(_x, _p) if _p == 1 or _p == 2 or _p == np.inf else float('nan')) if np.ndim(_x) == 2 else (np.linalg.norm(_x) if _p == 2 else float('nan')))(normOpaque2, normP2)"
+      );
     });
   });
 
   // CO-P1-3: a complex argument into a real-only helper returned garbage.
   describe('CO-P1-3 complex into a real-only helper fails closed (D6)', () => {
-    it('Erf of a complex value throws with the offending head, in strict mode', () => {
+    it('GammaLn of a complex value throws with the offending head, in strict mode', () => {
       // Under the default mode `auto` a MAYBE-complex operand takes the D2/D6
       // runtime rule instead of declining (compile-mode step 4, 2026-08-16);
-      // the compile-time decline is the strict-lane behavior.
+      // the compile-time decline is the strict-lane behavior. (`Erf` and then
+      // `Sign` were the fixture here; `scipy.special.erf` takes a complex
+      // argument, and `Sign` of a complex value is now written out as
+      // `z / |z|`, so the Python target declares neither real-only.)
       const scoped = new ComputeEngine();
       scoped.declare('z', 'complex');
       expect(() =>
-        python.compile(scoped.box(['Erf', 'z']), { mode: 'strict' })
-      ).toThrow(/Erf: real-only target helper/);
+        python.compile(scoped.box(['GammaLn', 'z']), { mode: 'strict' })
+      ).toThrow(
+        /GammaLn: scipy\.special\.loggamma takes another branch than the interpreter off the real axis/
+      );
+      expect(
+        python.compile(scoped.box(['Erf', 'z']), { mode: 'strict' }).code
+      ).toBe('scipy.special.erf(z)');
+    });
+
+    // User ruling 2026-09-24: `scipy.special.loggamma` takes another branch
+    // than the interpreter off the real axis, so a complex value of `GammaLn`
+    // fails closed and never becomes a silent `nan`.
+    const GAMMALN_REASON =
+      'GammaLn: scipy.special.loggamma takes another branch than the ' +
+      'interpreter off the real axis; the compiled value would differ. ' +
+      'Fail closed (D6)';
+
+    it('GammaLn of a real value is ln|Γ|, `scipy.special.gammaln`', () => {
+      // The interpreter's GammaLn(−2.5) is −0.0562 = ln|Γ(−2.5)|;
+      // `scipy.special.loggamma(-2.5)` is `nan`, `gammaln(-2.5)` −0.0562.
+      const scoped = new ComputeEngine();
+      scoped.declare('t', 'real');
+      expect(python.compile(scoped.box(['GammaLn', 't'])).code).toBe(
+        'scipy.special.gammaln(t)'
+      );
+    });
+
+    it('GammaLn of a value that is certainly not real declines at compile time', () => {
+      const scoped = new ComputeEngine();
+      scoped.declare('t', 'real');
+      scoped.declare('m', 'imaginary');
+      for (const mode of ['auto', 'strict', 'complex'] as const) {
+        for (const arg of [['Add', 't', 'ImaginaryUnit'], 'm'] as any[]) {
+          let message = '';
+          try {
+            python.compile(scoped.box(['GammaLn', arg]), { mode });
+          } catch (e) {
+            message = (e as Error).message;
+          }
+          expect([mode, JSON.stringify(arg), message]).toEqual([
+            mode,
+            JSON.stringify(arg),
+            `${GAMMALN_REASON}.`,
+          ]);
+        }
+      }
+    });
+
+    it('GammaLn of a value that may be complex raises when the code runs', () => {
+      // The real routine on the real part when the imaginary part is exactly
+      // zero, `ValueError` otherwise: the same run-time test as `Artanh`,
+      // which has an agreeing complex routine to run instead.
+      const scoped = new ComputeEngine();
+      scoped.declare('z', 'complex');
+      scoped.declare('L', 'list<complex>');
+      const raise = `(_ for _ in ()).throw(ValueError('${GAMMALN_REASON}'))`;
+      expect(
+        python.compile(scoped.box(['GammaLn', 'z'])).code.split('\n').pop()
+      ).toBe(
+        `(lambda _tv1: scipy.special.gammaln(_ce_creal(_tv1)) if _ce_cisreal(_tv1) else ${raise})(z)`
+      );
+      expect(
+        python.compile(scoped.box(['GammaLn', 'L'])).code.split('\n').pop()
+      ).toBe(
+        `(lambda _tv1: scipy.special.gammaln(_ce_creal_elems(_tv1)) if np.all(np.isreal(_tv1)) else ${raise})(L)`
+      );
     });
 
     it('Real / Conjugate of a complex value are allowed (complex-transparent)', () => {
