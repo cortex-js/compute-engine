@@ -110,7 +110,12 @@ import {
   lookupApplicable,
 } from '../function-utils.js';
 import { canonicalNegate } from './negate.js';
-import { canonical } from './canonical-utils.js';
+import {
+  canonical,
+  imaginaryNumber,
+  exactComplexParts,
+  exactComplexLiteral,
+} from './canonical-utils.js';
 import {
   isNumber,
   isFunction,
@@ -547,15 +552,12 @@ function boxFunctionInternal(
     if (name === 'Complex') {
       if (ops.length === 1) {
         // If single argument, assume it's imaginary
-        const op1 = ops[0];
-        if (op1 instanceof _BoxedExpression && op1.isNumberLiteral)
-          return ce.number(ce.complex(0, op1.re), options);
-
-        const im = machineValue(ops[0] as MathJsonExpression);
-        if (im !== null && im !== 0)
-          return ce.number(ce.complex(0, im), options);
-
-        return ce.expr(op1).mul(ce.I);
+        const imOp =
+          ops[0] instanceof _BoxedExpression
+            ? ops[0]
+            : box(ce, ops[0], options);
+        if (isNumber(imOp)) return imaginaryNumber(ce, imOp, options);
+        return imOp.mul(ce.I);
       }
       if (ops.length === 2) {
         // Box the real operand so a high-precision bignum literal (e.g. a
@@ -573,41 +575,20 @@ function boxFunctionInternal(
             : box(ce, ops[1], options);
 
         // Exact components (integers, rationals, radicals) reconstruct an
-        // EXACT complex value when the pair is representable (a pure-
-        // imaginary value, or two components with the same radical, as in
-        // `√2 + √2·i`). This is what makes
-        // `ExactNumericValue.toJSON()` lossless: `['Complex', ['Rational',1,2], 3]`
-        // re-boxes to the exact `1/2 + 3i`, not a machine float.
-        {
-          const reC = exactRealComponent(reOp);
-          if (reC !== null) {
-            const imC = exactRealComponent(imOp);
-            if (imC !== null && !isZero(imC.rational)) {
-              const reIsZero = isZero(reC.rational);
-              if (
-                (reIsZero || reC.radical === imC.radical) &&
-                imC.radical <= SMALL_INTEGER &&
-                reC.radical <= SMALL_INTEGER
-              )
-                return ce.number(
-                  ce._numericValue({
-                    rational: reC.rational,
-                    radical: reC.radical,
-                    imRational: imC.rational,
-                    imRadical: imC.radical,
-                  }),
-                  options
-                );
-              // Two exact components that one exact literal cannot hold
-              // (two different radicals, as in `√2 + √3·i`): the symbolic
-              // sum `re + im·i`, which keeps both parts exact. The float
-              // below would lose the exactness.
-              return ce.function('Add', [
-                reOp,
-                ce.function('Multiply', [imOp, ce.I]),
-              ]);
-            }
-          }
+        // EXACT complex value when the pair is representable
+        // (`exactComplexLiteral`, `canonical-utils.ts`).
+        const parts = exactComplexParts(reOp, imOp);
+        if (parts !== null) {
+          const exact = exactComplexLiteral(ce, parts, options);
+          if (exact !== null) return exact;
+          // Two exact components that one exact literal cannot hold
+          // (two different radicals, as in `√2 + √3·i`): the symbolic
+          // sum `re + im·i`, which keeps both parts exact. The float
+          // below would lose the exactness.
+          return ce.function('Add', [
+            reOp,
+            ce.function('Multiply', [imOp, ce.I]),
+          ]);
         }
 
         const re = reOp.re;
@@ -3734,28 +3715,6 @@ function makeNumericFunction(
   }
 
   return null;
-}
-
-/**
- * The exact real component (`rational · √radical`) of a boxed expression that
- * is an exact real number literal, or `null`. Used to reconstruct exact
- * complex values when boxing `['Complex', re, im]`.
- */
-function exactRealComponent(
-  op: Expression
-): { rational: Rational; radical: number } | null {
-  if (!isNumber(op)) return null;
-  const nv = op.numericValue;
-  if (typeof nv === 'number') {
-    if (!Number.isInteger(nv)) return null;
-    return { rational: [nv, 1], radical: 1 };
-  }
-  if (nv.im !== 0) return null;
-  const exact = nv.asExact;
-  if (!(exact instanceof ExactNumericValue)) return null;
-  if (exact.isNaN || exact.isPositiveInfinity || exact.isNegativeInfinity)
-    return null;
-  return { rational: exact.rational, radical: exact.radical };
 }
 
 function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {

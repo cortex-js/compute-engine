@@ -1674,6 +1674,41 @@ function withoutNaN(t: Type): Type {
   return { kind: 'union', types: rest };
 }
 
+/**
+ * Thread the operands of a lazy `Add` or `Multiply` that BECAME a
+ * restriction when they were evaluated (`2·[1,2]{c}` is `[2,4]{c}`, `2·x{c}`
+ * is `2x{c}`): the operation is computed on the present values and
+ * re-wrapped, so `2·[1,2]{c} + 3·[1,2]{c}` is `[5,10]{c}`.
+ *
+ * The threading step of the evaluation driver (step 4c, `boxed-function.ts`)
+ * runs BEFORE the operator's handler, on the RAW operands, which is where a
+ * lazy operator's operands still are: a raw `When` operand is threaded
+ * there, one hidden inside a product was not, and the sum stayed symbolic,
+ * `[2,4]{c} + [3,6]{c}` (and `2{c} + 3{c}` for scalars). So the evaluated
+ * operands are handed back to the driver as raw operands. The re-entered
+ * call sees the `When`s raw and does not come back here for them (its own
+ * operands are already restrictions), so the re-entry happens at most once.
+ * Answers `undefined` when no operand became a restriction.
+ */
+function threadOperandsThatBecameConditional(
+  engine: ComputeEngine,
+  op: 'Add' | 'Multiply',
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (
+    !evaluated.some(
+      (x, i) =>
+        (isFunction(x, 'When') || isFunction(x, 'Which')) &&
+        !isFunction(ops[i], 'When') &&
+        !isFunction(ops[i], 'Which')
+    )
+  )
+    return undefined;
+  return engine._fn(op, [...evaluated]).evaluate({ numericApproximation });
+}
+
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -1795,6 +1830,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
+        const rethreaded = threadOperandsThatBecameConditional(
+          engine!,
+          'Add',
+          ops,
+          evaluated,
+          numericApproximation
+        );
+        if (rethreaded !== undefined) return rethreaded;
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
         // A tuple with a list coordinate is data, not a point: arithmetic
@@ -4328,6 +4371,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
+        const rethreaded = threadOperandsThatBecameConditional(
+          engine!,
+          'Multiply',
+          ops,
+          evaluated,
+          numericApproximation
+        );
+        if (rethreaded !== undefined) return rethreaded;
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
         // A tuple with a list coordinate is data, not a point: arithmetic

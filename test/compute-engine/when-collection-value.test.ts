@@ -8,10 +8,13 @@ import '../utils'; // For snapshot serializers
  * indeterminate condition produced a held `When` with no collection
  * interface, so `isCollection`/`count`/`each()` disagreed with `.type`.
  *
- * The distribution is HYBRID-lazy (mirroring `PointList`): at or below
- * `MAX_SIZE_EAGER_COLLECTION` (100) it materializes into a `List`; past the
- * threshold the `When` stays held but its collection handlers expose the
- * elements lazily.
+ * The `When` stays HELD over the evaluated collection, whatever its size,
+ * and its collection handlers expose the restricted cells (user decision
+ * 2026-09-25). It used to be copied into a `List` of `When`s at or below
+ * `MAX_SIZE_EAGER_COLLECTION` (100): the copy forgot that its cells came from
+ * one restriction, so it re-evaluated to `[Missing, Missing, …]` once the
+ * condition failed, where the same expression evaluated fresh — and its
+ * compiled code — answered the whole-list `Missing`.
  */
 describe('When: collection-valued restriction', () => {
   const engine = () => {
@@ -20,14 +23,14 @@ describe('When: collection-valued restriction', () => {
     return ce;
   };
 
-  describe('eager distribution (<= 100 elements)', () => {
-    test('scalar indeterminate condition distributes over a list value', () => {
+  describe('held and enumerable (any size)', () => {
+    test('scalar indeterminate condition presents a list value elementwise', () => {
       const ce = engine();
       const r = ce
         .parse('\\mathrm{When}([1,2,3], 0\\le t\\le 6)', { strict: false })
         .evaluate();
 
-      expect(r.operator).toEqual('List');
+      expect(r.operator).toEqual('When');
       expect(r.isCollection).toBe(true);
       expect(r.count).toEqual(3);
       expect(Array.from(r.each()).length).toEqual(3);
@@ -78,7 +81,7 @@ describe('When: collection-valued restriction', () => {
       expect(r.isCollection).toBe(false);
     });
 
-    test('exactly at the eager threshold (100) it distributes', () => {
+    test('at 100 elements it is held like any other size', () => {
       const ce = engine();
       ce.assign(
         'L',
@@ -88,8 +91,19 @@ describe('When: collection-valued restriction', () => {
         .parse('\\mathrm{When}(L, 0\\le t\\le 6)', { strict: false })
         .evaluate();
 
-      expect(r.operator).toEqual('List');
+      expect(r.operator).toEqual('When');
       expect(r.count).toEqual(100);
+    });
+
+    test('once the condition fails, the held form and a fresh evaluation agree', () => {
+      const ce = engine();
+      const e = ce.parse('\\mathrm{When}([1,2,3], 0<t)', { strict: false });
+      const held = e.evaluate();
+      expect(held.operator).toEqual('When');
+      ce.assign('t', -1);
+      // The copied form answered `[Missing, Missing, Missing]` here.
+      expect(held.evaluate().symbol).toEqual('Missing');
+      expect(e.evaluate().symbol).toEqual('Missing');
     });
   });
 
@@ -180,12 +194,22 @@ describe('When collection predicate is consistent (review follow-up)', () => {
     expect(r.op1.json).toEqual(['Tuple', 1, 2]);
   });
 
-  test('a List-valued When is both', () => {
+  // A List-valued `When` stays held (user decision 2026-09-25) and presents
+  // its cells through the collection handlers, so it IS a collection. It is
+  // NOT an indexed collection: the broadcast machinery decides what to map
+  // over cell by cell through that predicate, and a restriction is threaded
+  // whole instead (`Sin([1,2,3]{0<t})` is `[sin 1, sin 2, sin 3]{0<t}`,
+  // `Missing` once `t = -1`; mapped cell by cell it was `[NaN, NaN, NaN]`).
+  // Before the decision the small case was copied into a `List`, which was
+  // indexed.
+  test('a List-valued When is a collection, threaded whole rather than indexed', () => {
     const r = engine()
       .parse('\\mathrm{When}([1,2,3], 0\\le t\\le 6)', { strict: false })
       .evaluate();
+    expect(r.operator).toBe('When');
     expect(r.isCollection).toBe(true);
-    expect(r.isIndexedCollection).toBe(true);
+    expect(r.isIndexedCollection).toBe(false);
+    expect(r.count).toBe(3);
   });
 
   // A tuple-typed value is excluded BEFORE it is evaluated: evaluating it would

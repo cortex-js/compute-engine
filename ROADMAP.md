@@ -443,50 +443,30 @@ about `ε·σ_max` even when the entries are within the double range:
 1×1/2×2 closed form under `.N()` on exact decimal entries is fixed; the general
 kernel is not). Pre-existing, wrong value.
 
-### A simplification rule passes an integer too large for `primeFactors` (OPEN, small — found 2026-09-24)
-
-Simplifying `sin(10^{30}π)`-like expressions fires the `console.assert` in
-`primeFactors` (`numerics/primes.ts:109`) with `1e+30` (also `1e+40`, `1e+25`),
-reached from the rule at `symbolic/simplify-rules.ts:1104`. The assert is
-stripped in production, but the rule is handing `primeFactors` an integer
-outside the range it accepts. Make the rule skip integers above that range.
-
 ### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
 
-Found while fixing 312 (not fixed, small): `Multiply(Undefined, [1,2,3])` is
-typed `vector<integer^3>` while its value is `[NaN, NaN, NaN]`;
-`Norm([[1,2],[3,Missing]])` stays unevaluated instead of giving `NaN`;
-`Trace(Missing)` is still an `incompatible-type` error while `Norm(Missing)` is
-now `NaN` (both were set by precedent, not by a user decision); the scalar
-`Multiply(Missing, 1)` and `Add(Missing, 0)` fold to `Missing` at
-canonicalization while `2·Missing` is `NaN`; and a MATRIX of restricted points
-keeps `NaN` in an absent cell although its type says `missing | tuple<…>`
-(`markAbsentPointCells`, `boxed-expression/validate.ts`, corrects a rank-1
-`List` only).
+Found while fixing 312 (not fixed, small; the `Multiply(Undefined, [1,2,3])`
+type, the matrix `Norm` with an absent cell, and the matrix of restricted points
+landed 2026-09-25): `Trace(Missing)` is still an `incompatible-type` error while
+`Norm(Missing)` is `NaN` (both were set by precedent, not by a user decision);
+and the scalar `Multiply(Missing, 1)` and `Add(Missing, 0)` fold to `Missing` at
+canonicalization while `2·Missing` is `NaN`.
 
-Found while fixing the type of a restricted list (not fixed, 2026-09-25; needs a
-decision): a numeric cell held by an undecided restriction inside a broadcast is
-typed as a number while its value, once the condition fails, is `Missing`.
-`\sin([1,2]\{0<t\})` is typed `missing | list<number>` and evaluates, with `t`
-free, to `[\sin 1\{0<t\}, \sin 2\{0<t\}]`, whose type is `list<missing | real>`;
-that value is not admitted by the type, because the broadcast lift types an
-absent numeric cell as `number` (the `NaN` it contributes to arithmetic,
-`absorbNumericAbsence`) while a held `When` cell is typed `missing | real` (the
-2026-09-09 rule that a false restriction masks to `Missing`). The two rules also
-give different VALUES for the same input on two routes: evaluated fresh with
-`t = -1`, `\sin([1,2]\{0<t\})` is `Missing` (the whole list is absent);
-evaluated first with `t` free and then again with `t = -1`, the held result
-becomes `[Missing, Missing]`; and `\sin([1, 2\{0<t\}])` with `t = -1` is
-`[\sin 1, NaN]`. The same applies to `Dot`, `Norm` and `Distance` over a
-restricted list of points, and to `[1,2]\{0<t\}` itself (fresh: `Missing`;
-two-step: `[Missing, Missing]`). To decide: whether a restriction that is
-distributed into the cells while undecided should, once decided false, answer
-the whole-list `Missing` (then the distributed cells must remember that they
-came from one restriction, or the distribution should stop now that a held
-`When` over a list presents as a collection through `whenCollectionHandlers`),
-or the per-cell `[Missing, Missing]` (then fresh evaluation and the compiled
-code, which answer `Missing` and `undefined`, change). The type follows the
-decision.
+Found while making a restricted list one held restriction (not fixed,
+2026-09-25; needs a decision on what a collection operator answers for an ABSENT
+collection): with `L := [1,2]`, `Length(L\{0<t\})` at `t = -1` is an
+`incompatible-type` error (`Length(Missing)`), and so are `Reverse`, `Filter`
+and `Map` over it, while `Sum` answers `NaN` and `Max` answers `NaN`;
+`Map(f, L\{c\})` with `c` undecided materializes as a `Set` of restricted cells,
+`Set(2\{c\}, 4\{c\})`, because the held restriction is not an indexed collection
+for `Map`'s result kind (it must not be one for the broadcast machinery, which
+would map it cell by cell), and `Filter(L\{c\}, p)` fails with "predicate must
+return True or False". These are the same questions as `Trace(Missing)` versus
+`Norm(Missing)` above; the answers were set by precedent, not by a decision.
+Proposed: a collection operator over an absent collection answers `Missing` (the
+position-preserving absent datum, as `When` does), a numeric reduction (`Sum`,
+`Max`) answers `NaN`, and `Map`/`Filter` over a held restriction thread it whole
+(`Map(f, L\{c\})` is `Map(f, L)\{c\}`).
 
 Not fixed, accepted rule: on `javascript`, a list held by a free point
 coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with
@@ -597,17 +577,26 @@ the working precision (the real-only branch does), so that part prints 25
 digits. Related: `numericCostFunction` (`cost-function.ts`) prices the imaginary
 radical of a complex literal but not its real radical.
 
-### `4i` typed as LaTeX is an inexact number, and `√i` stays symbolic (OPEN, small — found 2026-09-24)
+### `√i` stays a `Sqrt` head while `√(i/4)` evaluates to an exact literal (OPEN, decision — found 2026-09-24)
 
-`invisible-operator.ts:124` builds `2i`, `4i` and similar with
-`ce.number(ce.complex(0, n))`, a `BigNumericValue`, so `\sqrt{4i}` evaluates to
-a float while `ce.box(['Sqrt', ['Complex', 0, 4]])` gives `√2(1 + i)`, `i4`
-parses exact and `4i` does not, and `(4i)^2` is computed from the inexact value.
-The fix is one line (build the exact Gaussian integer), but every parsed literal
-like `2i` changes its exactness, so measure the snapshot blast radius first.
-Separately, `√i` stays a `Sqrt` head because
-`imaginary-unit-spelling.test.ts:210` requires it, while `√(i/4)` is the exact
-`(√2/4)(1 + i)`; decide whether that pin should change.
+`√i` stays a `Sqrt` head because `imaginary-unit-spelling.test.ts:210` requires
+it (the exactness contract: a transcendental of an exact argument stays
+symbolic), while `√(i/4)` evaluates to the exact `(√2/4)(1 + i)` and, since
+2026-09-25, `√(4i)` to `√2(1 + i)`. Decide whether that pin should change: `√i`
+is `(√2/2)(1 + i)`, an exact Gaussian radical the engine can hold.
+
+### The distribution test of `RandomSample` under a pinned seed fails under load (OPEN, test determinism — found 2026-09-25)
+
+`random.test.ts`, "the sparse Fisher-Yates of `RandomSample` is uniform":
+`WithRandomSeed(42, Map(First(RandomSample(Range(1,5), 1)), Range(1, 10000)))`
+gave one count 151 away from 2000 (the band is 150) in one full-suite run of two
+on the 18-core box, and passes when the file or the test runs alone. The test's
+comment says the pinned seed fixes the sequence, so the band is a correctness
+band; a sequence that differs under load means the draws do not come from one
+fixed stream on every route (a candidate: `Map` choosing the compiled route or
+the interpreter by a time budget, with the two routes consuming the seeded
+stream differently). Not caused by the exact-imaginary change of 2026-09-25 (the
+test involves no complex number).
 
 ### `interval-js` gives a finite enclosure inside the machine pole zone (OPEN, small — found 2026-09-24)
 

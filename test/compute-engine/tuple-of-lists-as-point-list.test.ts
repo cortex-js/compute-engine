@@ -891,11 +891,7 @@ describe('Absences in a list of points', () => {
     const ce = absenceEngine(true);
     const call = ce.parse(latex);
     expect(call.isValid).toBe(true);
-    // A restricted list of points is `missing | list<missing | tuple<…>>`
-    // (absent as a whole, or a list of restricted points while the condition
-    // is undecided), so the values at its points may each be absent too. It
-    // was `list<real> | missing`.
-    expect(call.type.toString()).toBe('list<missing | real> | missing');
+    expect(call.type.toString()).toBe('list<real> | missing');
     ce.assign('t', 1);
     expect(call.evaluate().toString()).toBe('[3sqrt(2),sqrt(13)]');
     ce.assign('t', -1);

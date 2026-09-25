@@ -2340,7 +2340,7 @@ function hasPointElementTypeD(d: OperandDescriptor): boolean {
   const elt = d.facts.elementType ?? collectionElementType(d.type);
   // A restricted point cell, typed `missing | tuple<…>`, is a point cell: a
   // restricted list of points reports its elements that way
-  // (`restrictedValueType`, `library/control-structures.ts`), as the
+  // (the `When` type handler, `library/control-structures.ts`), as the
   // list-literal branch of `collectionBroadcastsPointsD` already reads a
   // restricted point as its point.
   return elt !== undefined && isPointElementType(stripMissingFromType(elt));

@@ -398,14 +398,15 @@ export function absorbOperandAbsence(
     if (!typeContainsMissing(ot)) continue;
     const wholeAbsence = hasTopLevelMissing(ot);
     const present = wholeAbsence ? stripTopMissing(ot) : ot;
-    // Absent CELLS (`list<T | missing>`). A restricted list carries both
-    // kinds of absence: its type is `missing | list<T | missing>`
-    // (`restrictedValueType`, `library/control-structures.ts`), because it
-    // is absent as a whole when its condition is false and a list of
-    // restricted cells while the condition is undecided. Both readings must
-    // count. Reading the cells only lost the whole-absence arm:
-    // `Sin([1, 2]{c})` was typed `list<number>` while it answers `Missing`
-    // when `c` is false.
+    // Absent CELLS (`list<T | missing>`). An operand can carry both kinds
+    // of absence, `missing | list<T | missing>` — a symbol declared with
+    // that type, or a list of restricted cells that may itself be absent —
+    // and both readings must count: reading the cells only lost the
+    // whole-absence arm, so such an operand under `Sin` was typed
+    // `list<number>` while it answers `Missing` when it is absent as a
+    // whole. (A restricted list, `[1, 2]{c}`, is typed
+    // `missing | vector<integer^2>`, whole absence only: it stays one held
+    // `When` while its condition is undecided.)
     if (typeContainsMissing(present)) {
       cells = true;
       if (missingOutsideTuples(present)) wholeCells = true;

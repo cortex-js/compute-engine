@@ -1,4 +1,5 @@
 import { flatten } from './flatten.js';
+import { imaginaryNumber } from './canonical-utils.js';
 import { isImaginaryUnit, isOperatorDef } from './utils.js';
 import { isInferredDefinition } from './definition-guards.js';
 import type {
@@ -121,7 +122,16 @@ export function canonicalInvisibleOperator(
       !(isSymbol(rhs) && shadowed?.has(rhs.symbol)) &&
       isImaginaryUnit(rhs)
     ) {
-      return ce.number(ce.complex(0, lhsInteger));
+      // The exact pure-imaginary literal, as `i4` and `2i \cdot 3` give:
+      // the inexact `ce.complex(0, n)` made `\sqrt{4i}` a float where
+      // `\sqrt{i4}` is `\sqrt2(1 + i)`. The coefficient is read from the
+      // literal itself, not from `lhsInteger`, which is a double: a
+      // coefficient past the safe integers (`12345678901234567890i`) keeps
+      // every digit.
+      return imaginaryNumber(
+        ce,
+        coefficientLiteral(lhs) ?? ce.number(lhsInteger)
+      );
     }
 
     //
@@ -1087,6 +1097,22 @@ function couldBecomeFunction(
   if (def === undefined) return true;
   if (isOperatorDef(def)) return false;
   return def.value.type.isUnknown;
+}
+
+/**
+ * The number literal a juxtaposed coefficient denotes: the literal itself, or
+ * the negation of one under `Negate` (the parser spells `-3i` as
+ * `InvisibleOperator(Negate(3), i)`), or `null`. Read structurally, as
+ * `asInteger()` is: in the partial-form pipeline (`canonical.ts`) the
+ * `.canonical` of such a `Negate` is not a number literal.
+ */
+function coefficientLiteral(expr: Expression): Expression | null {
+  if (isNumber(expr)) return expr;
+  if (isFunction(expr, 'Negate')) {
+    const inner = coefficientLiteral(expr.op1);
+    return inner === null ? null : inner.neg();
+  }
+  return null;
 }
 
 function asInteger(expr: Expression): number {

@@ -8,6 +8,11 @@ import type {
 import { canonicalInvisibleOperator } from './invisible-operator.js';
 
 import { flatten } from './flatten.js';
+import {
+  exactComplexLiteral,
+  exactComplexParts,
+  imaginaryNumber,
+} from './canonical-utils.js';
 import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
 import { canonicalPower } from './arithmetic-power.js';
@@ -297,11 +302,15 @@ function numberForm(
       // If single argument, assume it's imaginary, i.e.
       // `["Complex", 2]` -> `2i`
       const op1 = ops[0];
-      if (isNumber(op1)) return ce.number(ce.complex(0, op1.re));
+      if (isNumber(op1)) return imaginaryNumber(ce, op1);
 
       return ce._fn('Multiply', [op1, ce.I], { canonical: false });
     }
     if (ops.length === 2) {
+      // Two exact components give the exact literal, as boxing does.
+      const parts = exactComplexParts(ops[0], ops[1]);
+      const exact = parts === null ? null : exactComplexLiteral(ce, parts);
+      if (exact !== null) return exact;
       const re = ops[0].re;
       const im = ops[1].re;
       if (im !== null && re !== null && !isNaN(im) && !isNaN(re)) {

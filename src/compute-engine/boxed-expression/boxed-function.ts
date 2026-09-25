@@ -3292,8 +3292,18 @@ export class BoxedFunction
     // If there is an `at` handler, it _may_ be indexed.
     // We check the actual result type, e.g. Map has an at handler
     // (to access its keys), but can be indexed or not, depending on the
-    // input collection
-
+    // input collection.
+    //
+    // The type is read WITH its absence arm, so a restricted list,
+    // `[1,2]{c}`, typed `missing | vector<integer^2>` and held as one `When`
+    // while its condition is undecided (user decision 2026-09-25), answers
+    // `false` here although it enumerates its cells (`isCollection` is
+    // `true`). That is deliberate: the broadcast machinery decides what to
+    // map over cell by cell through this predicate
+    // (`isFiniteBroadcastParticipant`), and a conditional value must be
+    // threaded WHOLE instead (`threadConditional`): `Sin([1,2,3]{0<t})` is
+    // `[sin 1, sin 2, sin 3]{0<t}`, `Missing` once `t = -1`, where a
+    // cell-by-cell map gave `[NaN, NaN, NaN]`.
     return this.type.matches('indexed_collection<any>');
   }
 

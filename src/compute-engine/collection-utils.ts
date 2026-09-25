@@ -2201,7 +2201,7 @@ export function isPointListValue(expr: Expression): boolean {
   // over a point list and `PointX` over it agree on what a point list is.
   // A point cell that may be absent, `missing | tuple<…>`, is a point cell:
   // a restricted list of points is typed `missing | list<missing | tuple<…>>`
-  // (`restrictedValueType`, `library/control-structures.ts`), and a symbol
+  // (the `When` type handler, `library/control-structures.ts`), and a symbol
   // declared `list<missing | tuple<…>>` with no value is a point list too.
   // Without this `Dot(R, (1, 1))` for such a symbol was an `incompatible-type`
   // error at evaluation, where a valueless point list stays symbolic.

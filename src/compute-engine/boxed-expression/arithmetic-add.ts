@@ -241,10 +241,27 @@ export function canonicalAdd(
   // Combine pure-real and pure-imaginary BoxedNumber operands into complex numbers.
   // Exact complex literals (already folded above) are NOT captured: routing
   // them through the float `im` accessor would degrade them to inexact.
+  // The one exception is an exact pure-imaginary literal with an INTEGER
+  // coefficient (`2i`, `-3i`) beside an inexact real or pure-imaginary
+  // literal: `1.5 + 2i` and `3i + 1.5i` are one inexact literal (`1.5 + 2i`,
+  // `4.5i`) however they are spelled, since the sum is inexact whatever is
+  // done with the exact part, and an integer coefficient is exact as a float,
+  // so the pairing loses nothing. A rational or radical coefficient (`i/3`,
+  // `√2·i`) would be rounded by the pairing, so it is kept exact. With no
+  // inexact partner (`2i + x`, `2i + 3`), or with a partner the pairing cannot
+  // use (an inexact complex literal with a real part, `(1.5 + 2.5i) + 2i`),
+  // the exact literal is left alone.
+  const hasInexactPartner = ops.some((op) => {
+    if (!isNumber(op) || op.isInfinity || op.isNaN) return false;
+    const nv = op.numericValue;
+    if (typeof nv === 'number' || nv.isExact) return false;
+    return nv.im === 0 || nv.re === 0;
+  });
   const isExactComplexLiteral = (op: Expression): boolean => {
     if (!isNumber(op)) return false;
     const nv = op.numericValue;
-    return typeof nv !== 'number' && nv.im !== 0 && nv.isExact;
+    if (typeof nv === 'number' || nv.im === 0 || !nv.isExact) return false;
+    return !(hasInexactPartner && nv.re === 0 && Number.isSafeInteger(nv.im));
   };
 
   // First pass: check if there are any imaginary terms (otherwise skip entirely)

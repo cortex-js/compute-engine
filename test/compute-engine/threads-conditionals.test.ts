@@ -45,7 +45,7 @@ describe('Distance of a restricted point or list of points', () => {
     [
       'a restricted list of points',
       ['Distance', RL, O],
-      '[5 {0 < t},10 {0 < t}]',
+      '[5,10] {0 < t}',
       '[5,10]',
       '"Missing"',
     ],
@@ -96,7 +96,7 @@ describe('Norm of a restricted point or list of points', () => {
     [
       'a restricted list of points',
       ['Norm', RL],
-      '[5 {0 < t},10 {0 < t}]',
+      '[5,10] {0 < t}',
       '[5,10]',
       '"Missing"',
     ],

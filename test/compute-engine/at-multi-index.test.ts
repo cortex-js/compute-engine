@@ -127,12 +127,7 @@ describe('At: two indices through a row that may be absent', () => {
   const rows = engine.parse('[[1,2]\\{0<t\\}, [3,4]]');
 
   test('the list type', () =>
-    // A restricted row is `missing | list<integer | missing>` (rank-free:
-    // its undecided value is a list of restricted cells), and the present
-    // row `[3,4]` is admitted by that list type, so the union collapses.
-    expect(rows.type.toString()).toBe(
-      'list<list<integer | missing> | missing>'
-    ));
+    expect(rows.type.toString()).toBe('list<missing | vector<integer^2>>'));
 
   test('At(…, 1, 2) is typed with the missing arm carried', () => {
     const at = engine.box(['At', rows, 1, 2]);

@@ -2,31 +2,60 @@
 
 ### Behavior Changes
 
-- **A restricted list is typed as a list of cells that may be absent.**
-  `[1,2,3]\{c\}` (`When([1,2,3], c)`) is typed
-  `missing | list<integer | missing>`; it was `missing | vector<integer^3>`,
-  which did not admit its own evaluated value while `c` is undecided, the list
-  of restricted cells `[1\{c\}, 2\{c\}, 3\{c\}]`. A restricted list of points is
-  `missing | list<missing | tuple<…>>` (it was `missing | list<tuple<…>^2>`),
-  and a restricted matrix is a list of restricted rows. The accessors and
-  broadcasts over a restricted list follow: `PointX([(1,2),(3,4)]\{0<t\})` is
-  `missing | list<missing | number>` (it was `missing | vector<2>`);
-  `\sin([1,2,3]\{0<t\})`, and `Dot`, `Norm` and `Distance` over a restricted
-  list of points, are `missing | list<number>` (`Dot` lost the `missing` arm
-  before, although it answers `Missing` when the condition is false); a
-  single-index `At` of a restricted matrix is a restricted row,
-  `missing | list<integer | missing>`; and `Dot([1,2,3]\{0<t\}, [1,1,1])` is a
-  `number`. `Dot` and `Cross` of a vector restricted element by element,
-  `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, now evaluate (they stay symbolic until the
+- **A restriction over a list stays one restriction while its condition is
+  undecided.** `[1,2,3]\{c\}` (`When([1,2,3], c)`) evaluates to the held
+  `[1,2,3]\{c\}`, whose MathJSON is `["When",["List",1,2,3],"c"]`; it used to be
+  copied into a list of restricted cells, `["List",["When",1,"c"],…]`, which
+  forgot that its cells came from one restriction: evaluated again once `c` was
+  false it gave `[Missing, Missing, Missing]`, where the same expression
+  evaluated fresh — and its compiled code — gave `Missing`. Both routes now
+  agree, for the list and for everything computed from it (`PointX`, `Dot`,
+  `Norm`, `Distance`, `\sin`, `At`, arithmetic). The held form is a collection
+  (`count`, `each()`, `At`) whose type is the list's own type under the
+  `missing` arm, `missing | vector<integer^3>`, and so are the applications over
+  it (`PointX([(1,2),(3,4)]\{0<t\})` is `missing | vector<2>`,
+  `\sin([1,2,3]\{0<t\})` is `missing | vector<3>`, `Dot` of a restricted list of
+  points keeps its `missing` arm). A sum or product whose operands become
+  restrictions only when evaluated is threaded too: `2[1,2]\{c\} + 3[1,2]\{c\}`
+  is `[5,10]\{c\}` and `2·1\{c\} + 3·1\{c\}` is `5\{c\}` (both stayed symbolic).
+  `Dot` and `Cross` of a vector restricted element by element,
+  `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, evaluate (they stay symbolic until the
   conditions are decided) instead of being an `incompatible-type` error, and
   `Dot([1, Missing], [1,1])` is `NaN`, as `Norm((1, Missing))` is, instead of an
   error. A symbol declared `list<missing | tuple<number, number>>` with no value
-  stays symbolic under `Dot` instead of an `incompatible-type` error. A union
-  element type that holds a list, under a length, is spelled with parentheses,
+  stays symbolic under `Dot`. A union element type that holds a list, under a
+  length, is spelled with parentheses,
   `list<(list<integer | missing^2> | missing)^2>`: the bare spelling did not
   parse back to the same type. A union of scalars keeps its spelling
-  (`list<nan | real^3>`). The evaluated values of restricted lists are
-  unchanged.
+  (`list<nan | real^3>`).
+- **`Map` with its arguments reversed is an error on every route.** `Map(P, fn)`
+  (the function must come first) is an `incompatible-type` error when the
+  expression is created, whether the source is a literal list, a symbol that
+  holds a list, or a symbol declared as a list with no value. It used to stay as
+  the unevaluated `Map(P, (u) => ||u||)` when `P` was a symbol. An undeclared
+  symbol still keeps the call inert and is not declared.
+- **The sign of a trigonometric function of an exact special angle is known.**
+  `Cos(π/3).isPositive` is `true` (it was `undefined`) and
+  `Cos(2π/3).isNegative` is `true`: the sign is read from the exact angle
+  (`halfTurns()`) for any argument that is an exact rational multiple of π, not
+  only for a number literal. A pole (`Tan(π/2)`), an angle that is not an exact
+  multiple of π, and a symbolic angle stay `undefined`.
+- **`e^{a + bπi}` with an exact real part `a` evaluates to an exact product.**
+  `e^{1 + iπ}` is `-e`, `e^{1 + iπ/3}` is `e(1/2 + (√3/2)i)`, `e^{ln 2 + iπ}` is
+  `-2`; before, such a power stayed unevaluated. `e^{1 + 0.5iπ}` is
+  `2.718281828459045i` with no dust (it was `5.2e-17 + 2.718i`); the float `0.5`
+  keeps the result numeric, as a float exponent does everywhere.
+- **`Csc` and `Cot` of a tiny angle answer the signed infinity at machine
+  precision.** `Csc(5e-324)` is `+oo` and `Csc(-5e-324)` is `-oo` (both were the
+  unsigned pole `~oo`): the double overflows, but the angle is a nonzero number
+  below `π/2` in magnitude, where the sign of the value is the sign of the
+  angle. An exact angle that underflows to the double 0 (`Csc(10^{-400})`)
+  answers the same way. The pole at 0 and the poles near `kπ` stay `~oo`.
+  Compiled JavaScript and Python answer the same signed `Infinity` / `np.inf`.
+- **`Last` compiles on the GLSL and WGSL targets** for a point or a list of 2 to
+  4 numbers of known length, and to the scalar NaN for an absent operand
+  (`Last(Missing)`), as `First` does. It declined with "no lowering" before, for
+  every operand that was not a literal.
 - **A `Range` whose end point lies on the step grid in exact arithmetic keeps
   its last element.** The element count of `Range(lower, upper, step)` is
   `floor((upper − lower) / step) + 1`, and the quotient is computed in floating
@@ -69,6 +98,21 @@
 
 ### Bug Fixes
 
+- **An imaginary literal with an integer coefficient is exact on every route.**
+  `4i` typed as LaTeX, `-2i`, `4\imaginaryI` and the one-argument
+  `["Complex", 4]` were built as inexact floating-point values, while `i4`,
+  `2i \cdot 3` and `["Complex", 0, 4]` were exact. So `\sqrt{4i}` evaluated to
+  `1.414… + 1.414…i` where `\sqrt{i4}` is `\sqrt2(1 + i)`, and `(4i)^2` was
+  computed from the inexact value. All spellings now give the exact Gaussian
+  integer: `\sqrt{4i}` is `\sqrt2(1 + i)` and `(4i)^2` canonicalizes to `-16`.
+  The one-argument `Complex` also keeps a rational, a radical or an integer
+  past the safe range exact (`["Complex", ["Rational", 1, 2]]` is `i/2`,
+  `12345678901234567890i` keeps every digit), and the `Number` canonical form
+  of `["Complex", 0, 4]` is the same exact literal as boxing gives. A
+  coefficient with a fractional part (`1.5i`) stays inexact, and `.N()` still
+  gives a float. A float added to an integer imaginary literal is still one
+  inexact literal (`1.5 + 2i` is `["Complex", 1.5, 2]`, `3i + 1.5i` is
+  `4.5i`).
 - **A large double prints in exponent form at machine precision.** With
   `precision: 'machine'`, `ce.box(1e300).toString()` printed the 301-digit
   exact binary value of the double, and `1e23` printed as

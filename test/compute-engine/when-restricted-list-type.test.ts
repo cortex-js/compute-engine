@@ -3,15 +3,16 @@ import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import { isSubtype } from '../../src/common/type/subtype';
 
-// A restriction over a list value, `When(L, c)`, distributes an undecided
-// scalar condition into the cells when it is evaluated (`[1,2]{c}` is
-// `[1{c}, 2{c}]`), so its type must admit that list of cells as well as the
-// whole list (condition true) and `Missing` (condition false). The type was
-// `missing | vector<integer^2>`, which the list of cells, typed
-// `list<integer | missing>`, did not match; every accessor over the restricted
-// list inherited the mismatch. (ROADMAP, residues of the Tycho 306–315 round,
-// item 4, and item 2 for `Dot`/`Cross` of a vector restricted element by
-// element.)
+// A restriction over a list value, `When(L, c)`, stays ONE held `When` while
+// its condition is undecided, and presents as a collection of restricted
+// cells through its collection handlers (user decision 2026-09-25). Its type
+// is the list's own type under the `missing` arm, `missing | vector<integer^2>`
+// for `[1,2]{c}`, and every route agrees once the condition is decided: the
+// whole list, or `Missing`. Before, the cells were copied into a `List` of
+// `When`s, `[1{c}, 2{c}]`, a value typed `list<integer | missing>` that the
+// type did not admit, and that re-evaluated to `[Missing, Missing]` once the
+// condition failed while a fresh evaluation answered `Missing`. (ROADMAP,
+// residues of the Tycho 306–315 round, items 2 and 4.)
 
 const engine = () => {
   const ce = new ComputeEngine();
@@ -26,42 +27,70 @@ const RL = [
   ['Less', 0, 't'],
 ];
 
-/** The static type of `json`, and whether it admits the evaluated value. */
-function typeAndValue(ce: ComputeEngine, json: unknown) {
+/** The static type of `json`, its evaluated value with `t` free, whether the
+ * type admits that value, and the value once `t` is decided against. */
+function probe(ce: ComputeEngine, json: unknown) {
   const e = ce.box(json as never);
-  const v = e.evaluate();
-  return {
+  const held = e.evaluate();
+  const free = {
     type: e.type.toString(),
-    value: v.toString(),
-    valueType: v.type.toString(),
-    admitted: isSubtype(v.type.type, e.type.type),
+    value: held.toString(),
+    valueType: held.type.toString(),
+    admitted: isSubtype(held.type.type, e.type.type),
   };
+  ce.assign('t', -1);
+  // The held form and a fresh evaluation must agree.
+  const decided = {
+    twoStep: held.evaluate().toString(),
+    fresh: e.evaluate().toString(),
+  };
+  ce.assign('t', ce.symbol('t'));
+  return { ...free, ...decided };
 }
 
-describe('the type of a restricted list admits its undecided value', () => {
+describe('a restricted list is one held restriction', () => {
   test('a list of numbers', () => {
-    const r = typeAndValue(engine(), ['When', ['List', 1, 2], 'c']);
-    expect(r.type).toBe('list<integer | missing> | missing');
-    expect(r.value).toBe('[1 {c},2 {c}]');
-    expect(r.valueType).toBe('list<integer | missing>');
+    const r = probe(engine(), ['When', ['List', 1, 2], ['Less', 0, 't']]);
+    expect(r.type).toBe('missing | vector<integer^2>');
+    expect(r.value).toBe('[1,2] {0 < t}');
     expect(r.admitted).toBe(true);
+    expect(r.twoStep).toBe('"Missing"');
+    expect(r.fresh).toBe('"Missing"');
+  });
+
+  test('the held form is an indexed collection of restricted cells', () => {
+    const ce = engine();
+    const r = ce.box(['When', ['List', 1, 2], 'c']).evaluate();
+    expect(r.operator).toBe('When');
+    expect(r.isCollection).toBe(true);
+    // Not an INDEXED collection: the broadcast machinery decides what to map
+    // over cell by cell through that predicate, and a restriction is threaded
+    // whole instead (`Sin([1,2,3]{0<t})` is `[sin 1, sin 2, sin 3]{0<t}`).
+    expect(r.isIndexedCollection).toBe(false);
+    expect(r.count).toBe(2);
+    expect(Array.from(r.each()).map((x) => x.toString())).toEqual([
+      '1 {c}',
+      '2 {c}',
+    ]);
   });
 
   test('a list of points', () => {
-    const r = typeAndValue(engine(), RL);
-    expect(r.type).toBe('list<missing | tuple<integer, integer>> | missing');
+    const r = probe(engine(), RL);
+    expect(r.type).toBe('list<tuple<integer, integer>^2> | missing');
     expect(r.admitted).toBe(true);
+    expect(r.twoStep).toBe('"Missing"');
   });
 
-  test('a matrix is a list of restricted rows', () => {
-    const r = typeAndValue(engine(), [
+  test('a matrix', () => {
+    const r = probe(engine(), [
       'When',
       ['List', ['List', 1, 2], ['List', 3, 4]],
-      'c',
+      ['Less', 0, 't'],
     ]);
-    expect(r.type).toBe('list<list<integer | missing> | missing> | missing');
-    expect(r.value).toBe('[[1,2] {c},[3,4] {c}]');
+    expect(r.type).toBe('matrix<integer^(2x2)> | missing');
+    expect(r.value).toBe('[[1,2],[3,4]] {0 < t}');
     expect(r.admitted).toBe(true);
+    expect(r.twoStep).toBe('"Missing"');
   });
 
   test('a decided condition keeps the whole list or masks it', () => {
@@ -96,33 +125,44 @@ describe('the type of a restricted list admits its undecided value', () => {
 
 describe('the applications over a restricted list follow', () => {
   test('a coordinate accessor', () => {
-    const r = typeAndValue(engine(), ['PointX', RL]);
-    // Absent as a whole when the condition is false, a list of coordinates
-    // that may each be absent while it is undecided.
-    expect(r.type).toBe('list<missing | number> | missing');
-    expect(r.value).toBe('[1 {0 < t},3 {0 < t}]');
+    const r = probe(engine(), ['PointX', RL]);
+    expect(r.type).toBe('missing | vector<2>');
+    expect(r.value).toBe('[1,3] {0 < t}');
     expect(r.admitted).toBe(true);
+    expect(r.twoStep).toBe('"Missing"');
+    expect(r.fresh).toBe('"Missing"');
   });
 
-  test('Dot, Norm, Distance and a broadcast keep the whole-absence arm', () => {
-    const ce = engine();
-    const L = ['List', ['Tuple', 1, 1], ['Tuple', 1, 1]];
-    for (const json of [
-      ['Dot', RL, L],
-      ['Norm', RL],
-      ['Distance', RL, ['Tuple', 0, 0]],
+  test.each([
+    [
+      'Dot',
+      ['Dot', RL, ['List', ['Tuple', 1, 1], ['Tuple', 1, 1]]],
+      'list<integer> | missing',
+    ],
+    ['Norm', ['Norm', RL], 'list<number> | missing'],
+    ['Distance', ['Distance', RL, ['Tuple', 0, 0]], 'list<number> | missing'],
+    [
+      'Sin',
       ['Sin', ['When', ['List', 1, 2, 3], ['Less', 0, 't']]],
+      'missing | vector<3>',
+    ],
+    [
+      'Add',
       ['Add', ['When', ['List', 1, 2], ['Less', 0, 't']], 1],
-    ]) {
-      const e = ce.box(json as never);
+      'missing | vector<integer^2>',
+    ],
+  ])(
+    '%s keeps the whole-absence arm and both routes agree',
+    (_op, json, type) => {
+      const r = probe(engine(), json);
       // `Dot` lost the arm before, although it answers `Missing` for an
       // absent list beside a list: it threads its conditional operands whole.
-      expect(e.type.toString()).toBe('list<number> | missing');
-      ce.assign('t', -1);
-      expect(e.evaluate().toString()).toBe('"Missing"');
-      ce.assign('t', ce.symbol('t'));
+      expect(r.type).toBe(type);
+      expect(r.admitted).toBe(true);
+      expect(r.twoStep).toBe('"Missing"');
+      expect(r.fresh).toBe('"Missing"');
     }
-  });
+  );
 
   test('an absent operand beside a list still lands in each cell of a broadcast', () => {
     const ce = engine();
@@ -139,17 +179,90 @@ describe('the applications over a restricted list follow', () => {
       ['List', ['List', 1, 2], ['List', 3, 4]],
       ['Less', 0, 't'],
     ];
-    // A row is a restricted list; it was `missing | vector<integer^2>`, which
-    // did not admit the row `[3{0 < t}, 4{0 < t}]`.
-    expect(ce.box(['At', M, 2]).type.toString()).toBe(
-      'list<integer | missing> | missing'
-    );
-    // Two indices reach the cell through the row's union type; it was
-    // `unknown`.
-    expect(ce.box(['At', M, 2, 1]).type.toString()).toBe(
-      'integer | missing | nan'
-    );
-    expect(ce.box(['At', M, 2, 1]).evaluate().toString()).toBe('3 {0 < t}');
+    const row = probe(ce, ['At', M, 2]);
+    expect(row.type).toBe('missing | vector<integer^2>');
+    expect(row.value).toBe('[3,4] {0 < t}');
+    expect(row.admitted).toBe(true);
+    expect(row.twoStep).toBe('"Missing"');
+    const cell = probe(ce, ['At', M, 2, 1]);
+    expect(cell.type).toBe('integer | missing | nan');
+    expect(cell.value).toBe('3 {0 < t}');
+    expect(cell.twoStep).toBe('"Missing"');
+  });
+});
+
+describe('a sum or product whose operands become restrictions when evaluated', () => {
+  // `Add` and `Multiply` are lazy: the driver's threading step sees their
+  // RAW operands, so a restriction hidden inside a product was not threaded
+  // and the sum stayed symbolic, `[2,4]{c} + [3,6]{c}`.
+  test.each([
+    [
+      '2·[1,2]{c} + 3·[1,2]{c}',
+      [
+        'Add',
+        ['Multiply', 2, ['When', ['List', 1, 2], 'c']],
+        ['Multiply', 3, ['When', ['List', 1, 2], 'c']],
+      ],
+      '[5,10] {c}',
+    ],
+    [
+      '2·[1,2]{c} − 3·[1,2]{c}',
+      [
+        'Subtract',
+        ['Multiply', 2, ['When', ['List', 1, 2], 'c']],
+        ['Multiply', 3, ['When', ['List', 1, 2], 'c']],
+      ],
+      '[-1,-2] {c}',
+    ],
+    [
+      'sin([1,2]{c}) + cos([1,2]{c})',
+      [
+        'Add',
+        ['Sin', ['When', ['List', 1, 2], 'c']],
+        ['Cos', ['When', ['List', 1, 2], 'c']],
+      ],
+      '[sin(1) + cos(1),sin(2) + cos(2)] {c}',
+    ],
+    [
+      '2·1{c} + 3·1{c}',
+      [
+        'Add',
+        ['Multiply', 2, ['When', 1, 'c']],
+        ['Multiply', 3, ['When', 1, 'c']],
+      ],
+      '5 {c}',
+    ],
+    [
+      '(2·x{c})·(3·y{d})',
+      [
+        'Multiply',
+        ['Multiply', 2, ['When', 'x', 'c']],
+        ['Multiply', 3, ['When', 'y', 'd']],
+      ],
+      '6x * y {c && d}',
+    ],
+  ])('%s', (_label, json, expected) => {
+    expect(
+      engine()
+        .box(json as never)
+        .evaluate()
+        .toString()
+    ).toBe(expected);
+  });
+
+  test('a convex combination of a restricted list of points', () => {
+    const ce = engine();
+    ce.assign('P', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    const G = ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]];
+    const e = ce.box([
+      'Add',
+      ['Multiply', 't', ['When', 'P', G]],
+      ['Multiply', ['Subtract', 1, 't'], ['When', 'P', G]],
+    ]);
+    const r = e.evaluate();
+    expect(r.toString()).toBe('[(1, 2),(3, 4)] {0 <= t && t <= 1}');
+    expect(r.isCollection).toBe(true);
+    expect(r.count).toBe(2);
   });
 });
 

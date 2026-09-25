@@ -306,21 +306,21 @@ describe('Dot of a restricted point or a restricted list of points', () => {
     [
       'a restricted list of points and a point',
       ['Dot', RL, ['Tuple', 1, 1]],
-      '[3 {0 < t},7 {0 < t}]',
+      '[3,7] {0 < t}',
       '[3,7]',
       '"Missing"',
     ],
     [
       'a point and a restricted list of points',
       ['Dot', ['Tuple', 1, 1], RL],
-      '[3 {0 < t},7 {0 < t}]',
+      '[3,7] {0 < t}',
       '[3,7]',
       '"Missing"',
     ],
     [
       'a restricted list of points and a list of points',
       ['Dot', RL, ['List', ['Tuple', 1, 0], ['Tuple', 0, 1]]],
-      '[1 {0 < t},4 {0 < t}]',
+      '[1,4] {0 < t}',
       '[1,4]',
       '"Missing"',
     ],
@@ -334,7 +334,7 @@ describe('Dot of a restricted point or a restricted list of points', () => {
     [
       'a restricted point and a restricted list of points',
       ['Dot', RP, RL],
-      '[5 {0 < t},11 {0 < t}]',
+      '[5,11] {0 < t}',
       '[5,11]',
       '"Missing"',
     ],
@@ -362,7 +362,7 @@ describe('Dot of a restricted point or a restricted list of points', () => {
       ['Tuple', 1, 1],
     ] as never);
     expect(e.isValid).toBe(true);
-    expect(e.evaluate().toString()).toBe('[3 {0 < t},7 {0 < t}]');
+    expect(e.evaluate().toString()).toBe('[3,7] {0 < t}');
   });
 
   test('an element-wise restriction answers NaN at an absent point', () => {
@@ -381,14 +381,8 @@ describe('Dot of a restricted point or a restricted list of points', () => {
 
   test('the type carries the absent case of a list result only', () => {
     const ce = new ComputeEngine();
-    // The cells are `number`, not `integer`: a restricted list of points is
-    // `missing | list<missing | tuple<…>>`, and a point cell that is absent
-    // contributes `NaN` to the product (`Dot([P{c}, Q], (1, 1))` is
-    // `[NaN, 7]` when `c` is false). It was `list<integer> | missing`, read
-    // off the bare `list<tuple<integer, integer>^2>` the restriction used to
-    // be typed with.
     expect(ce.box(['Dot', RL, ['Tuple', 1, 1]] as never).type.toString()).toBe(
-      'list<number> | missing'
+      'list<integer> | missing'
     );
     expect(ce.box(['Dot', RP, ['Tuple', 1, 1]] as never).type.toString()).toBe(
       'number'
