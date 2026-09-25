@@ -1234,48 +1234,6 @@ here.
   (`src/compute-engine/function-utils.ts:2761`) rather than returning an error
   value. Wanted: an unknown protocol name should say so.
 
-### A `sgn` handler infers symbol types, which the type-handler purity check reports (OPEN — found 2026-09-24)
-
-The full test suite logs
-`ComputeEngine: error canonicalizing Subtract: The type handler of "Power" modified engine state while deriving a type (moved: callable)`,
-from the test "anchor fits neither family: 1 + 2 + 4 + … + n² stays inert" in
-`test/compute-engine/interpret.test.ts`. The test passes. The check that reports
-it runs only when `NODE_ENV` is `test` or `CE_TYPE_PURITY_GUARD` is set
-(`guardedTypeHandlerCall()` in
-`src/compute-engine/boxed-expression/operand-descriptor.ts`), so it reproduces
-outside Jest with `CE_TYPE_PURITY_GUARD=1` and
-`ce.function('Interpret', [ce.parse('1 + 2 + 4 + \\dots + n^2')]).evaluate()`.
-
-The chain, measured with a hook on `noteStateEvent()`:
-
-1. `tryGeometric()` in `src/compute-engine/symbolic/interpret.ts` builds
-   `Subtract(term(U), anchor)`, where the upper bound `U` holds a `Log`.
-2. The type handler of `Power` (`library/arithmetic.ts`) reads the sign of an
-   operand (`operandSgnOnTypes()` → the `.sgn` of the operand descriptor). For
-   an application, that runs the operator's `sgn` handler.
-3. The `sgn` handler of `Log` calls `lnSign()`, which compares the argument with
-   1 through `cmp()` → `orderByValue()` in `boxed-expression/compare.ts`, which
-   computes `a.sub(b)`.
-4. `a.sub(b)` boxes a new expression; validating it narrows the type of the
-   valueless symbol `n` (a value-type inference), and the `inference` event
-   advances the `callable` counter inside the type handler's window.
-
-The comment on the `.sgn` getter of the operand descriptor states that it is "a
-pure read for every operand kind"; the `sgn` handler of `Log` breaks that. The
-engine otherwise expects inferences during a type or sign computation:
-`noteStateEvent()` defers the advance of the `any` counter for them until the
-engine is idle, but it advances the `callable` counter at once
-(`callableAxisSelects()` returns true for every `inference` event).
-
-Possible fixes, not decided: (a) defer the `callable` advance of a value-type
-inference like the `any` advance, or make it depend on whether the inferred type
-is callable (a value-type narrowing to `number` does not change what is
-callable); (b) make `lnSign()`, or `orderByValue()` when it is reached from a
-sign computation, compare without boxing new expressions (validation has a
-`noInference` option, but only as an argument of one internal call). (a) is
-smaller but changes cache invalidation, which needs a review of what the
-`callable` counter protects.
-
 ### Fungrim Stage-2 residues: `Fibonacci` growth class, the corpus manifest fork id, `CartesianPower` (OPEN, low — Stage-2 triage of 2026-08-29)
 
 **Left from the Stage-2 triage of 2026-08-29.** (With the deadline restored,

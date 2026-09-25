@@ -218,14 +218,25 @@ describe('Interpret — geometric', () => {
 
 describe('Interpret — v2 negative gates stay inert', () => {
   test('anchor fits neither family: 1 + 2 + 4 + … + n² stays inert', () => {
-    expect(interpret('1 + 2 + 4 + \\dots + n^2').json).toEqual([
-      'Add',
-      1,
-      2,
-      4,
-      'ContinuationPlaceholder',
-      ['Power', 'n', 2],
-    ]);
+    // The geometric check builds a `Log` in `n`. Its sign, read by the type
+    // handler of `Power`, compared the `Log` argument with 1 by building
+    // their difference, which inferred the type of `n` inside the handler:
+    // the type-handler purity guard (`CE_TYPE_PURITY_GUARD`, always on under
+    // test) logged an error.
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(interpret('1 + 2 + 4 + \\dots + n^2').json).toEqual([
+        'Add',
+        1,
+        2,
+        4,
+        'ContinuationPlaceholder',
+        ['Power', 'n', 2],
+      ]);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   test('overfit guard: 1 + 2 + 4 + … + m (bare symbol confirms nothing) stays inert', () => {

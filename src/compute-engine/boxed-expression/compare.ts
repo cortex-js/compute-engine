@@ -1456,6 +1456,25 @@ function orderByValue(
     if (order !== undefined) return order;
   }
 
+  // When exactly one operand has unknowns (symbols with no value), so does
+  // `a − b`, and the order is undecided: answer before building it. The
+  // subtraction boxes a new expression, and boxing can infer the type of a
+  // symbol it holds; a sign computation reaches this function from a type
+  // handler (`lnSign()` in `library/arithmetic.ts`), where that inference
+  // is a state change that the type-handler purity guard
+  // (`CE_TYPE_PURITY_GUARD`, `guardedTypeHandlerCall()` in
+  // `operand-descriptor.ts`, always on under test) reports. Only when both
+  // operands have unknowns can they cancel, as in `(x + 1) − x`. The guard
+  // needs canonical operands: `.unknowns` lists the symbols written in the
+  // expression without simplifying it, so a structural `Multiply(0, x)` lists
+  // `x` although its value is 0; canonical form folds such a product.
+  if (
+    a.isCanonical &&
+    b.isCanonical &&
+    a.unknowns.length > 0 !== b.unknowns.length > 0
+  )
+    return undefined;
+
   const diff0 = a.sub(b);
   if (diff0.unknowns.length > 0) return undefined;
   // `a.sub(b)` folds two exact radicals into one float: `√(2 + 10⁻³⁰) − √2`

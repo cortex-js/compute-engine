@@ -287,3 +287,21 @@ describe('A TIE IS PROVED', () => {
     expect(sorted.ops![0].isSame(ce.box(['Ln', 6]))).toBe(true);
   });
 });
+
+// With no tolerance, `orderByValue` answers `undefined` without building
+// `a − b` when exactly one canonical operand has unknowns (see the comment
+// in `boxed-expression/compare.ts`). A structural operand lists the symbols
+// written in it even when its value does not depend on them, so it still
+// goes through the subtraction.
+describe('ordering an operand with unknowns against one without', () => {
+  test('a structural 0·x is ordered by its value', () => {
+    const a = ce.function('Multiply', [ce.number(0), ce.symbol('x')], {
+      form: 'structural',
+    });
+    expect(a.isLess(5)).toBe(true);
+  });
+
+  test('a canonical expression in x is not ordered against a number', () => {
+    expect(ce.parse('x + 1').isLess(5)).toBeUndefined();
+  });
+});
