@@ -4,7 +4,10 @@ import type {
   ParsingDiagnostic,
 } from '../epsil/diagnostics.js';
 
-export type OutputMode = 'value' | 'json' | 'epsil';
+export type OutputMode = 'value' | 'json' | 'epsil' | 'latex';
+
+/** The notation of the source: an Epsil program or a LaTeX expression. */
+export type InputFormat = 'epsil' | 'latex';
 
 export type DiagnosticsFormat = 'text' | 'json';
 
@@ -14,6 +17,7 @@ export interface CliOptions {
   help: boolean;
   version: boolean;
   outputMode: OutputMode;
+  inputFormat: InputFormat;
   /** With `outputMode: 'epsil'`, write the Unicode notations (`√x`, `x²`,
    * `×`, `⩽`, …) instead of the ASCII spellings. */
   fancySymbols: boolean;
@@ -70,6 +74,10 @@ export interface EpsilSession {
   readonly engine: ComputeEngine;
   readonly timeLimit: number;
   evaluate(source: string, url?: string): EvaluationResult;
+  /** Evaluate a single LaTeX expression. A LaTeX parse error, or a deadline
+   * breach, is an error in the value (`value.errors`): there are no
+   * diagnostics, since the error expressions carry no source offsets. */
+  evaluateLatex(latex: string): EvaluationResult;
   parse(source: string, url?: string): ParsingDiagnostic[];
   reset(): void;
 }

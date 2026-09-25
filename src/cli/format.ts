@@ -66,8 +66,10 @@ export function formatValue(
   // whose last statement is a `print(…)` (or a declaration, or a loop)
   // produces Nothing, and printing the word after the program's own output
   // is noise (the Python REPL treats None the same way). The machine modes
-  // above keep the value — their consumers asked for the value itself.
+  // above keep the value — their consumers asked for the value itself. The
+  // LaTeX mode is for display, and suppresses it too.
   if (isSymbol(result.value, 'Nothing')) return '';
+  if (mode === 'latex') return result.value.latex;
   return result.value.toString();
 }
 

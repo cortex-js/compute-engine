@@ -49,6 +49,8 @@ if (!syntaxError.stderr.includes('Unexpected symbol "+"'))
 // stdio server must answer a handshake, a tool call, and a resource read.
 if (!existsSync(join(dirname(CLI), 'for-agents.md')))
   fail('for-agents.md was not copied beside the CLI bundle.');
+if (!existsSync(join(dirname(CLI), 'compute-engine-for-agents.md')))
+  fail('compute-engine-for-agents.md was not copied beside the CLI bundle.');
 
 const mcp = run(
   ['mcp'],
@@ -72,6 +74,12 @@ const mcp = run(
       method: 'resources/read',
       params: { uri: 'epsil://docs/for-agents' },
     },
+    {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'resources/read',
+      params: { uri: 'epsil://docs/compute-engine-api' },
+    },
   ]
     .map((message) => `${JSON.stringify(message)}\n`)
     .join('')
@@ -81,8 +89,8 @@ const responses = mcp.stdout
   .split('\n')
   .filter((line) => line.length > 0)
   .map((line) => JSON.parse(line));
-if (responses.length !== 3)
-  fail(`mcp returned ${responses.length} responses, expected 3`);
+if (responses.length !== 4)
+  fail(`mcp returned ${responses.length} responses, expected 4`);
 if (responses[0].result?.serverInfo?.name !== 'epsil')
   fail(`mcp initialize mismatch:\n${mcp.stdout}`);
 const evaluated = JSON.parse(responses[1].result?.content?.[0]?.text ?? '{}');
@@ -90,6 +98,12 @@ if (evaluated.value !== '3/2')
   fail(`mcp evaluate returned ${evaluated.value}, expected 3/2`);
 if (!responses[2].result?.contents?.[0]?.text?.includes('Epsil'))
   fail(`mcp language card resource missing:\n${mcp.stdout}`);
+if (
+  !responses[3].result?.contents?.[0]?.text?.includes(
+    'Compute Engine for AI Agents'
+  )
+)
+  fail(`mcp API card resource missing:\n${mcp.stdout}`);
 
 // Native Streamable HTTP transport: start on a free loopback port and call
 // the built bundle through the advertised /mcp endpoint.

@@ -30,18 +30,20 @@ export function* factorial2(n: BigNum): Generator<BigNum, BigNum> {
 }
 
 /**
- * If the BigDecimal can be *faithfully* (losslessly) represented as a machine
- * number, return true.
+ * If the BigDecimal is exactly the value of a machine number (a double),
+ * return true.
  *
- * This is used to decide whether a value can be serialized as a plain JSON
- * number without losing information. A ≤17-significant-digit heuristic is NOT
- * sufficient: only decimals with ≤15 significant digits are guaranteed to
- * round-trip through float64, and some 16–17 digit values silently change
- * (e.g. `0.12345678901234567` → `0.12345678901234566`). So we test the exact
- * round-trip condition: the value must equal the BigDecimal reconstructed from
- * its own `toNumber()` (via the shortest-string form a JSON number would emit).
+ * A ≤17-significant-digit heuristic is NOT sufficient: only decimals with ≤15
+ * significant digits are guaranteed to round-trip through float64, and some
+ * 16–17 digit values silently change (e.g. `0.12345678901234567` →
+ * `0.12345678901234566`). So we test the exact round-trip condition: the value
+ * must equal the BigDecimal reconstructed from its own `toNumber()`.
+ *
+ * This does not check the JSON text of the double: `2^56` is exactly a double,
+ * but `String(2 ** 56)` is `72057594037927940`. Use `isInMachineRange()` to
+ * decide whether a value can be written as a JSON number.
  */
-export function isInMachineRange(d: BigNum): boolean {
+export function isExactDouble(d: BigNum): boolean {
   if (!d.isFinite()) return true; // Infinity and NaN are in machine range
   if (d.isZero()) return true;
 
@@ -62,4 +64,37 @@ export function isInMachineRange(d: BigNum): boolean {
 
   // Exact round-trip test: representable iff it survives float64 conversion.
   return d.eq(new BigDecimal(d.toNumber()));
+}
+
+/**
+ * If the BigDecimal can be serialized as a plain JSON number without losing
+ * information, return true: the value is exactly a double (`isExactDouble()`),
+ * and the JSON text of that double is exactly the value too.
+ */
+export function isInMachineRange(d: BigNum): boolean {
+  if (!d.isFinite() || d.isZero()) return true; // Infinity, NaN, zero
+  return isExactDouble(d) && isExactJsonNumber(d.toNumber(), d);
+}
+
+/**
+ * Whether the double `n` can stand for `value` as a JSON number: both the
+ * double and its JSON text — its shortest round-tripping decimal, as
+ * `JSON.stringify()` and `String()` write it — are exactly `value`.
+ *
+ * Either can hold without the other. `2 ** 60` is exactly 1152921504606846976,
+ * but is written `1152921504606847000`: a reader that parses JSON integers
+ * exactly (Python, a big-number JSON parser, a person) would get the wrong
+ * value. `Number(10n ** 23n)` is written `1e+23`, but the double is not 10^23:
+ * a JavaScript reader would get the wrong value. Such a number must be
+ * serialized as a `{ num: "…" }` string instead.
+ */
+export function isExactJsonNumber(
+  n: number,
+  value: BigDecimal | bigint
+): boolean {
+  if (!Number.isFinite(n)) return false;
+  const exact = typeof value === 'bigint' ? new BigDecimal(value) : value;
+  // `new BigDecimal(n)` converts an integer double exactly, and any other
+  // double through its text; `String(n)` is the text in both cases.
+  return exact.eq(new BigDecimal(n)) && exact.eq(new BigDecimal(String(n)));
 }

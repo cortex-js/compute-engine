@@ -8,14 +8,19 @@ import {
 import type { AddressInfo } from 'node:net';
 
 import { ComputeEngine, serializeEpsil, version } from '../epsil.js';
-import { isSymbol } from '../compute-engine/boxed-expression/type-guards.js';
+import type { BoxedExpression } from '../compute-engine.js';
+import {
+  isFunction,
+  isString,
+  isSymbol,
+} from '../compute-engine/boxed-expression/type-guards.js';
 import { explainErrorCode } from '../epsil/error-explanations.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
 import { checkSource, effectSummaryToJson, parseSource } from './check.js';
 import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
-import type { CliIo } from './io.js';
+import type { AgentCard, CliIo } from './io.js';
 import { makeEpsilSession } from './session.js';
 import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
 
@@ -26,6 +31,10 @@ import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
  * as a resource. It is implemented directly rather than through the MCP SDK
  * to keep the package dependency-free.
  *
+ * `evaluate` and `parse` also accept a LaTeX expression (`format: "latex"`),
+ * and `serialize` can write LaTeX: agents often hold a formula in LaTeX
+ * already, and a single formula needs no Epsil program around it.
+ *
  * Tool calls are stateless: each one runs against a fresh engine, so a
  * program must be self-contained. (A persistent session would also let one
  * call contaminate the next — e.g. boolean use retypes a symbol for the
@@ -33,6 +42,7 @@ import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
  */
 
 const CARD_URI = 'epsil://docs/for-agents';
+const API_CARD_URI = 'epsil://docs/compute-engine-api';
 const MAX_HTTP_BODY_BYTES = 1024 * 1024;
 
 /** Newest first; `initialize` echoes the client's version when supported. */
@@ -46,17 +56,22 @@ const STREAMABLE_HTTP_PROTOCOL_VERSIONS = new Set(
   PROTOCOL_VERSIONS.filter((x) => x !== '2024-11-05')
 );
 
-const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions.`;
+const INSTRUCTIONS = `Tools for Epsil, the programming language of the Compute Engine (https://cortexjs.io). Before writing Epsil source, read the language card resource (${CARD_URI}). Each "evaluate" call runs a complete, self-contained program in a fresh session; definitions do not persist between calls. Use "check" for fast syntax validation and "doc" to look up library functions. To compute a single formula you already have in LaTeX, pass it to "evaluate" with "format": "latex" instead of translating it; write Epsil for anything with several steps or definitions. Every "evaluate" result includes a "latex" form of the value, ready to display. To write JavaScript or TypeScript code that uses the Compute Engine library (@cortex-js/compute-engine), read the API card resource (${API_CARD_URI}) first.`;
 
 const TOOLS = [
   {
     name: 'evaluate',
     description:
-      'Evaluate a complete Epsil program and return its value (the value of the last statement) in display, Epsil and MathJSON forms, along with any diagnostics. Anything the program prints with `print` is returned as the `output` lines. Each call runs in a fresh session: definitions do not persist between calls, so the program must be self-contained.',
+      'Evaluate a complete Epsil program and return its value (the value of the last statement) in display, Epsil, LaTeX and MathJSON forms, along with any diagnostics. Anything the program prints with `print` is returned as the `output` lines. With "format": "latex", the source is a single LaTeX expression (e.g. "\\int_0^1 x^2\\,dx") instead of a program. Each call runs in a fresh session: definitions do not persist between calls, so the program must be self-contained.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Epsil source code' },
+        source: {
+          type: 'string',
+          description:
+            'Epsil source code, or a LaTeX expression with "format": "latex"',
+        },
+        format: sourceFormatSchema(),
         timeLimit: {
           type: 'number',
           description:
@@ -113,11 +128,16 @@ const TOOLS = [
   {
     name: 'parse',
     description:
-      'Parse an Epsil program into MathJSON without evaluating it. Returns the MathJSON expression and any diagnostics.',
+      'Parse an Epsil program, or a LaTeX expression with "format": "latex", into MathJSON without evaluating it. Returns the MathJSON expression and any diagnostics.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Epsil source code' },
+        source: {
+          type: 'string',
+          description:
+            'Epsil source code, or a LaTeX expression with "format": "latex"',
+        },
+        format: sourceFormatSchema(),
       },
       required: ['source'],
     },
@@ -125,17 +145,24 @@ const TOOLS = [
   },
   {
     name: 'serialize',
-    description: 'Convert a MathJSON expression to Epsil source.',
+    description:
+      'Convert a MathJSON expression to Epsil source, or to LaTeX with "format": "latex".',
     inputSchema: {
       type: 'object',
       properties: {
         mathjson: {
           description: 'A MathJSON expression, e.g. ["Add", "x", 1]',
         },
+        format: {
+          type: 'string',
+          enum: ['epsil', 'latex'],
+          description:
+            'The notation to write: "epsil" returns an `epsil` field, "latex" a `latex` field (default: "epsil")',
+        },
         fancySymbols: {
           type: 'boolean',
           description:
-            'Write the Unicode notations (√x, x², ×, ⩽, …) instead of the ASCII spellings (default: false)',
+            'For Epsil output, write the Unicode notations (√x, x², ×, ⩽, …) instead of the ASCII spellings (default: false)',
         },
       },
       required: ['mathjson'],
@@ -144,14 +171,35 @@ const TOOLS = [
   },
 ];
 
-const CARD_RESOURCE = {
-  uri: CARD_URI,
-  name: 'epsil-language-card',
-  title: 'Epsil language card',
-  description:
-    'A compact guide to the Epsil language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Epsil.',
-  mimeType: 'text/markdown',
-};
+const RESOURCES = [
+  {
+    card: 'epsil',
+    uri: CARD_URI,
+    name: 'epsil-language-card',
+    title: 'Epsil language card',
+    description:
+      'A compact guide to the Epsil language for agents: syntax, semantics, idioms, common traps and a roster of the standard library. Read this before writing Epsil.',
+    mimeType: 'text/markdown',
+  },
+  {
+    card: 'compute-engine',
+    uri: API_CARD_URI,
+    name: 'compute-engine-api-card',
+    title: 'Compute Engine API card',
+    description:
+      'A compact guide for agents writing JavaScript or TypeScript with the Compute Engine library: creating expressions, exact and numeric evaluation, symbolic operations, comparison, compilation and the common traps. Read this before writing code that uses @cortex-js/compute-engine.',
+    mimeType: 'text/markdown',
+  },
+] as const;
+
+function sourceFormatSchema(): Record<string, unknown> {
+  return {
+    type: 'string',
+    enum: ['epsil', 'latex'],
+    description:
+      'The notation of `source`: an Epsil program or a single LaTeX expression (default: "epsil")',
+  };
+}
 
 function readOnlyAnnotations(): Record<string, boolean> {
   return {
@@ -288,7 +336,7 @@ async function runMcpHttp(
  */
 export function createMcpHttpServer(
   options: McpOptions,
-  loadCard?: () => Promise<string>
+  loadCard?: (card: AgentCard) => Promise<string>
 ): Server {
   return createMcpHttpServerForDispatcher(
     new McpServer(options.timeLimit, loadCard),
@@ -405,7 +453,7 @@ class HttpTransportError extends Error {
 class McpServer {
   constructor(
     private timeLimit: number,
-    private loadCard?: () => Promise<string>
+    private loadCard?: (card: AgentCard) => Promise<string>
   ) {}
 
   /** Handle one incoming message (or batch) and return the responses. */
@@ -479,15 +527,18 @@ class McpServer {
       case 'tools/call':
         return this.callTool(args);
       case 'resources/list':
-        return { resources: [CARD_RESOURCE] };
+        return {
+          resources: RESOURCES.map(({ card: _card, ...resource }) => resource),
+        };
       case 'resources/templates/list':
         return { resourceTemplates: [] };
       case 'resources/read': {
-        if (args.uri !== CARD_URI)
+        const resource = RESOURCES.find((x) => x.uri === args.uri);
+        if (resource === undefined)
           throw new McpError(-32002, `Resource not found: ${args.uri}`);
-        const text = await (this.loadCard ?? defaultLoadCard)();
+        const text = await (this.loadCard ?? defaultLoadCard)(resource.card);
         return {
-          contents: [{ uri: CARD_URI, mimeType: 'text/markdown', text }],
+          contents: [{ uri: resource.uri, mimeType: 'text/markdown', text }],
         };
       }
       default:
@@ -537,11 +588,19 @@ class McpServer {
         : requireTimeLimit(args.timeLimit);
 
     const fancySymbols = optionalBoolean(args, 'fancySymbols');
+    const format = optionalFormat(args);
 
-    const { result, output } = evaluateWithConsoleCaptured(
-      makeEpsilSession(timeLimit),
-      source
-    );
+    const session = makeEpsilSession(timeLimit);
+    let result: EvaluationResult;
+    let output: string[] = [];
+    let diagnostics: unknown[];
+    if (format === 'latex') {
+      result = session.evaluateLatex(source);
+      diagnostics = latexDiagnostics(result.value.errors);
+    } else {
+      ({ result, output } = evaluateWithConsoleCaptured(session, source));
+      diagnostics = result.diagnostics.map((x) => diagnosticToJson(x, source));
+    }
     const json = formatValue(result, 'json');
     return toolResult({
       ok: !hasErrors(result),
@@ -553,9 +612,10 @@ class McpServer {
         ? 'Nothing'
         : formatValue(result, 'value'),
       epsil: formatValue(result, 'epsil', { fancySymbols }),
+      latex: source.trim() === '' ? '' : result.value.latex,
       mathjson: json ? JSON.parse(json) : null,
       ...(output.length > 0 ? { output } : {}),
-      diagnostics: result.diagnostics.map((x) => diagnosticToJson(x, source)),
+      diagnostics,
     });
   }
 
@@ -596,6 +656,16 @@ class McpServer {
 
   private static parse(args: Record<string, unknown>): unknown {
     const source = requireString(args, 'source');
+    if (optionalFormat(args) === 'latex') {
+      // Non-canonical, like the Epsil path: the structure as written.
+      const expr = new ComputeEngine().parse(source, { form: 'raw' });
+      const diagnostics = latexDiagnostics(expr.errors);
+      return toolResult({
+        ok: diagnostics.length === 0,
+        mathjson: expr.json,
+        diagnostics,
+      });
+    }
     const { ast, diagnostics } = parseSource(source);
     // The raw AST is annotated with source offsets; a non-canonical box
     // round-trip normalizes it to plain MathJSON without resolving sugar.
@@ -611,13 +681,85 @@ class McpServer {
   private static serialize(args: Record<string, unknown>): unknown {
     if (args.mathjson === undefined)
       throw new Error('Expected a "mathjson" argument.');
+    const fancySymbols = optionalBoolean(args, 'fancySymbols');
+    if (optionalFormat(args) === 'latex') {
+      // Boxed without canonicalization, so the LaTeX keeps the operand order
+      // and structure of the input (as the Epsil serialization does).
+      const expr = new ComputeEngine().box(
+        args.mathjson as Parameters<ComputeEngine['box']>[0],
+        { form: 'raw' }
+      );
+      return toolResult({ latex: expr.latex });
+    }
     return toolResult({
       epsil: serializeEpsil(
         args.mathjson as Parameters<typeof serializeEpsil>[0],
-        { fancySymbols: optionalBoolean(args, 'fancySymbols') }
+        { fancySymbols }
       ),
     });
   }
+}
+
+/** A diagnostic for a LaTeX source, derived from an error expression: a
+ * LaTeX parse error, a timeout, or an error of the evaluated value. The error
+ * expressions do not carry source offsets, so unlike an Epsil diagnostic it
+ * has no location: `latex` is the fragment the parser stopped at, when there
+ * is one. */
+interface LatexDiagnostic {
+  severity: 'error';
+  code: string;
+  message: string;
+  latex?: string;
+}
+
+function latexDiagnostics(
+  errors: readonly BoxedExpression[]
+): LatexDiagnostic[] {
+  return errors.map((error) => {
+    const [first, ...rest] = isFunction(error) ? error.ops : [];
+    // A timeout is `["Error", message, "timeout"]`, the error value of a
+    // deadline breach.
+    if (isString(rest[0]) && rest[0].string === 'timeout')
+      return {
+        severity: 'error',
+        code: 'timeout',
+        message: isString(first) ? first.string : 'Timeout exceeded',
+      };
+    // The cause is a plain string code (`"unexpected-operator"`), or an
+    // `["ErrorCode", code, ...details]` whose details name what the parser
+    // saw, such as the name of an unknown environment.
+    let code = 'error';
+    const details: string[] = [];
+    if (isString(first)) code = first.string;
+    else if (isFunction(first, 'ErrorCode')) {
+      const [head, ...tail] = first.ops;
+      if (isString(head)) code = head.string;
+      for (const x of tail) details.push(isString(x) ? x.string : x.toString());
+    }
+    const where = rest.find((x) => isFunction(x, 'LatexString'));
+    const fragment =
+      isFunction(where) && isString(where.op1) ? where.op1.string : undefined;
+    const summary =
+      details.length === 0 ? code : `${code} (${details.join(', ')})`;
+    return {
+      severity: 'error',
+      code,
+      message:
+        fragment === undefined
+          ? summary
+          : `${summary}: ${JSON.stringify(fragment)}`,
+      ...(fragment === undefined ? {} : { latex: fragment }),
+    };
+  });
+}
+
+/** The optional `format` argument of `evaluate`, `parse` and `serialize`. */
+function optionalFormat(args: Record<string, unknown>): 'epsil' | 'latex' {
+  const value = args.format;
+  if (value === undefined) return 'epsil';
+  if (value !== 'epsil' && value !== 'latex')
+    throw new Error('Expected "format" to be "epsil" or "latex".');
+  return value;
 }
 
 /** An optional boolean argument: `false` when absent, an error for any other
@@ -774,13 +916,13 @@ function displayHost(host: string): string {
   return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
 
-/** Locate the language card when the caller did not supply a loader (the
- * installed CLI resolves it relative to its own bundle; see `epsil.ts`).
- * This fallback covers running from a checkout of the repository. */
-async function defaultLoadCard(): Promise<string> {
+/** Locate a card when the caller did not supply a loader (the installed CLI
+ * resolves it relative to its own bundle; see `epsil.ts`). This fallback
+ * covers running from a checkout of the repository. */
+async function defaultLoadCard(card: AgentCard): Promise<string> {
   try {
-    return await readFile('src/epsil/docs/for-agents.md', 'utf8');
+    return await readFile(`src/${card}/docs/for-agents.md`, 'utf8');
   } catch {
-    throw new McpError(-32002, `Resource not available: ${CARD_URI}`);
+    throw new McpError(-32002, `Resource not available: the ${card} card`);
   }
 }

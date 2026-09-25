@@ -15,11 +15,19 @@ import {
   formatRuntimeError,
   formatValue,
 } from './format.js';
-import type { EpsilSession, EvaluationResult, OutputMode } from './types.js';
+import type {
+  EpsilSession,
+  EvaluationResult,
+  InputFormat,
+  OutputMode,
+} from './types.js';
 
 export interface ReplOptions {
   color: boolean;
   outputMode: OutputMode;
+  /** With `'latex'`, each entry is a LaTeX expression (`.load` still reads
+   * an Epsil file). */
+  inputFormat?: InputFormat;
   /** See `CliOptions.fancySymbols`. Applies whenever the output mode is
    * `epsil`, including after `.ast` has toggled JSON output on and off. */
   fancySymbols?: boolean;
@@ -53,6 +61,17 @@ export function runRepl(
     ),
     ignoreUndefined: true,
     eval(source, _context, filename, callback) {
+      if (options.inputFormat === 'latex') {
+        try {
+          callback(null, new ReplEvaluation(session.evaluateLatex(source)));
+        } catch (error) {
+          callback(
+            error instanceof Error ? error : new Error(String(error)),
+            null
+          );
+        }
+        return;
+      }
       const diagnostics = session.parse(source, filename);
       if (isRecoverable(source, diagnostics)) {
         callback(

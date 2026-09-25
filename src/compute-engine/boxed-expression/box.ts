@@ -35,7 +35,7 @@ import { isOne, isZero } from '../numerics/rationals.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
 import type { Rational } from '../numerics/types.js';
 import { asBigint } from './numerics.js';
-import { isInMachineRange } from '../numerics/numeric-bignum.js';
+import { isExactDouble } from '../numerics/numeric-bignum.js';
 
 import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply, canonicalDivide } from './arithmetic-mul-div.js';
@@ -3770,7 +3770,9 @@ function fromNumericValue(ce: ComputeEngine, value: NumericValue): Expression {
     const im = value.im;
     if (im === 0) return ce.number(value.bignumRe ?? value.re);
     if (value.re === 0) return ce.number(ce.complex(0, im));
-    if (value.bignumRe !== undefined && !isInMachineRange(value.bignumRe)) {
+    // A complex literal holds its real part as a double, so a big-decimal real
+    // part that is not exactly a double is kept in a separate term.
+    if (value.bignumRe !== undefined && !isExactDouble(value.bignumRe)) {
       return canonicalAdd(ce, [
         ce.number(value.bignumRe),
         ce.number(ce.complex(0, im)),

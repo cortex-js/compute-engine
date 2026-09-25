@@ -8,7 +8,7 @@ import { createMcpHttpServer } from '../../src/cli/mcp';
 /** Run `epsil mcp` over a scripted stdin and return the JSON responses. */
 async function runServer(
   requests: unknown[],
-  options?: { loadCard?: () => Promise<string>; raw?: string[] }
+  options?: { loadCard?: (card: string) => Promise<string>; raw?: string[] }
 ): Promise<any[]> {
   let out = '';
   let err = '';
@@ -354,6 +354,117 @@ describe('MCP server tools', () => {
     expect(checked.result.isError).toBe(true);
   });
 
+  test('evaluate includes a LaTeX form of the value', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', { source: '1/2 + 1' }),
+    ]);
+    expect(payload(response).latex).toBe('\\frac{3}{2}');
+  });
+
+  test('evaluate accepts a LaTeX expression', async () => {
+    const [integral, sum] = await runServer([
+      callTool(1, 'evaluate', {
+        source: '\\int_0^1 x^2\\,dx',
+        format: 'latex',
+      }),
+      callTool(2, 'evaluate', {
+        source: '\\sum_{k=1}^{10} \\frac{1}{k^2}',
+        format: 'latex',
+      }),
+    ]);
+    const result = payload(integral);
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('1/3');
+    expect(result.epsil).toBe('1 / 3');
+    expect(result.latex).toBe('\\frac{1}{3}');
+    expect(result.mathjson).toEqual(['Rational', 1, 3]);
+    expect(result.diagnostics).toEqual([]);
+    expect(payload(sum).mathjson).toEqual(['Rational', 1968329, 1270080]);
+  });
+
+  test('evaluate reports LaTeX parse errors as diagnostics', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', { source: '1+', format: 'latex' }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toEqual([
+      {
+        severity: 'error',
+        code: 'unexpected-operator',
+        message: 'unexpected-operator: "+"',
+        latex: '+',
+      },
+    ]);
+  });
+
+  // Some LaTeX parse errors carry details: `["ErrorCode", code, ...details]`.
+  // The diagnostic keeps the code and names the details in the message.
+  test('a LaTeX parse error with details keeps its code', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', {
+        source: '\\begin{foo}x\\end{foo}',
+        format: 'latex',
+      }),
+    ]);
+    const [diagnostic] = payload(response).diagnostics;
+    expect(diagnostic.code).toBe('unknown-environment');
+    expect(diagnostic.message).toMatch(/^unknown-environment \(foo\)/);
+  });
+
+  test('evaluate applies the deadline to a LaTeX expression', async () => {
+    const [response] = await runServer([
+      callTool(1, 'evaluate', {
+        source: '\\sum_{k=1}^{10^{9}} \\frac{1}{k^2}',
+        format: 'latex',
+        timeLimit: 100,
+      }),
+    ]);
+    const result = payload(response);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatchObject({
+      severity: 'error',
+      code: 'timeout',
+    });
+  });
+
+  test('parse converts LaTeX to MathJSON as written', async () => {
+    const [clean, broken] = await runServer([
+      callTool(1, 'parse', { source: '\\frac{1}{2}+x', format: 'latex' }),
+      callTool(2, 'parse', { source: '\\frac{1}', format: 'latex' }),
+    ]);
+    const result = payload(clean);
+    expect(result.ok).toBe(true);
+    expect(result.mathjson).toEqual(['Add', ['Divide', 1, 2], 'x']);
+    expect(result.diagnostics).toEqual([]);
+    const failed = payload(broken);
+    expect(failed.ok).toBe(false);
+    expect(failed.diagnostics[0]).toMatchObject({ code: 'missing' });
+  });
+
+  test('serialize converts MathJSON to LaTeX', async () => {
+    const [response] = await runServer([
+      callTool(1, 'serialize', {
+        mathjson: ['Divide', 1, ['Sqrt', 'x']],
+        format: 'latex',
+      }),
+    ]);
+    expect(payload(response)).toEqual({ latex: '\\frac{1}{\\sqrt{x}}' });
+  });
+
+  test('an unknown format is refused as a tool error', async () => {
+    const responses = await runServer([
+      callTool(1, 'evaluate', { source: '1', format: 'tex' }),
+      callTool(2, 'parse', { source: '1', format: 'tex' }),
+      callTool(3, 'serialize', { mathjson: 1, format: 'tex' }),
+    ]);
+    for (const response of responses) {
+      expect(response.result.isError).toBe(true);
+      expect(response.result.content[0].text).toContain('format');
+    }
+  });
+
   test('rejects an unknown tool as a protocol error', async () => {
     const [response] = await runServer([callTool(1, 'bogus', {})]);
     expect(response.error.code).toBe(-32602);
@@ -361,31 +472,55 @@ describe('MCP server tools', () => {
 });
 
 describe('MCP server resources', () => {
-  test('lists and reads the language card', async () => {
-    const loadCard = async () => '# Epsil card fixture';
+  test('lists and reads the language and API cards', async () => {
+    const loadCard = async (card: string) => `# ${card} card fixture`;
     const responses = await runServer(
       [
         request(1, 'resources/list'),
         request(2, 'resources/read', { uri: 'epsil://docs/for-agents' }),
-        request(3, 'resources/read', { uri: 'epsil://bogus' }),
+        request(3, 'resources/read', {
+          uri: 'epsil://docs/compute-engine-api',
+        }),
+        request(4, 'resources/read', { uri: 'epsil://bogus' }),
       ],
       { loadCard }
     );
-    expect(responses[0].result.resources).toHaveLength(1);
-    expect(responses[0].result.resources[0]).toMatchObject({
-      uri: 'epsil://docs/for-agents',
+    const resources = responses[0].result.resources;
+    expect(resources.map((x: any) => x.uri)).toEqual([
+      'epsil://docs/for-agents',
+      'epsil://docs/compute-engine-api',
+    ]);
+    for (const resource of resources) {
+      expect(resource.mimeType).toBe('text/markdown');
+      expect(resource.card).toBeUndefined();
+    }
+    expect(responses[1].result.contents[0].text).toBe('# epsil card fixture');
+    expect(responses[2].result.contents[0]).toEqual({
+      uri: 'epsil://docs/compute-engine-api',
       mimeType: 'text/markdown',
+      text: '# compute-engine card fixture',
     });
-    expect(responses[1].result.contents[0].text).toBe('# Epsil card fixture');
-    expect(responses[2].error.code).toBe(-32002);
+    expect(responses[3].error.code).toBe(-32002);
   });
 
-  test('serves the real card from a repository checkout', async () => {
+  test('serves the real cards from a repository checkout', async () => {
     // No loadCard injected: the default reads from the working directory.
-    const [response] = await runServer([
+    const [epsil, api] = await runServer([
       request(1, 'resources/read', { uri: 'epsil://docs/for-agents' }),
+      request(2, 'resources/read', { uri: 'epsil://docs/compute-engine-api' }),
     ]);
-    expect(response.result.contents[0].text).toContain('Epsil');
+    expect(epsil.result.contents[0].text).toContain('# Epsil for AI Agents');
+    expect(api.result.contents[0].text).toContain(
+      '# Compute Engine for AI Agents'
+    );
+  });
+
+  test('the instructions point to both cards', async () => {
+    const [response] = await runServer([request(1, 'initialize', {})]);
+    expect(response.result.instructions).toContain('epsil://docs/for-agents');
+    expect(response.result.instructions).toContain(
+      'epsil://docs/compute-engine-api'
+    );
   });
 });
 

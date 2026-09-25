@@ -2106,6 +2106,12 @@ export function describeError(error: MathJsonExpression): string {
 
 /** The text of a MathJSON string operand, or its Epsil form. */
 function text(expr: MathJsonExpression): string {
+  // The site of a LaTeX parse error is the LaTeX fragment the parser stopped
+  // at: quote the LaTeX itself, not its Epsil spelling `LatexString("…")`.
+  if (operator(expr) === 'LatexString') {
+    const latex = stringValue(operand(expr, 1));
+    if (latex !== null) return latex;
+  }
   return stringValue(expr) ?? epsilSnippet(expr);
 }
 

@@ -44,6 +44,9 @@ Options:
   -e, --eval <source>     evaluate source text
       --json              print the result as MathJSON
       --epsil             print the result as Epsil source
+      --latex             print the result as LaTeX
+      --from <format>     the notation of the source: "epsil" (default) or
+                          "latex", a single LaTeX expression
       --fancy-symbols     with --epsil, write the Unicode notations
                           (√x, x², ×, ⩽, …) instead of the ASCII spellings
       --diagnostics <fmt> print diagnostics as "text" (default) or "json"
@@ -106,6 +109,7 @@ export async function main(
     return runRepl(session, {
       color: options.color && Boolean(io.stdout.isTTY),
       outputMode: options.outputMode,
+      inputFormat: options.inputFormat,
       fancySymbols: options.fancySymbols,
       input: io.stdin,
       output: io.stdout,
@@ -113,7 +117,10 @@ export async function main(
 
   try {
     const { source, url } = await readSource(options.eval, options.file, io);
-    const result = session.evaluate(source, url);
+    const result =
+      options.inputFormat === 'latex'
+        ? session.evaluateLatex(source)
+        : session.evaluate(source, url);
     if (options.diagnosticsFormat === 'json') {
       if (result.diagnostics.length > 0)
         io.stderr.write(
@@ -134,7 +141,7 @@ export async function main(
     if (!result.diagnostics.some((x) => x.severity === 'error')) {
       // In the human-facing text mode, an error-valued result renders as an
       // annotated report on stderr, not as a raw `Error(…)` value on stdout;
-      // the machine modes (--json / --epsil) keep the value itself.
+      // the other modes (--json / --epsil / --latex) keep the value itself.
       const errorReport =
         options.outputMode === 'value' && options.diagnosticsFormat === 'text'
           ? formatRuntimeError(

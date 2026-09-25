@@ -1,6 +1,7 @@
 import { Expression } from '../../src/math-json/types.ts';
 import type { Expression } from '../../src/compute-engine/global-types.ts';
 import { engine as ce } from '../utils';
+import { BigDecimal } from '../../src/big-decimal';
 
 describe('BOXING OF NUMBER', () => {
   test('Boxing numbers including whitespace', () => {
@@ -606,6 +607,33 @@ describe('JSON round-trip fidelity (lossless .json contract)', () => {
       expect(rt.isSame(orig)).toBe(true);
       expect(rt.sub(orig).evaluate().isSame(0)).toBe(true);
     }
+  });
+
+  // The JSON TEXT of a shorthand must denote the value too, not only the
+  // double: `2 ** 60` is an exact double, but `JSON.stringify` writes it
+  // `1152921504606847000`, which a reader that parses integers exactly
+  // (Python, a big-number JSON parser) takes for a different integer.
+  test('exact big integers whose double is exact serialize as text', () => {
+    const integers = [2n ** 56n, 2n ** 60n, 2n ** 100n, -(2n ** 64n)];
+    for (const b of [...integers, 3n * 2n ** 70n]) {
+      const orig = ce.box({ num: b.toString() });
+      expect(orig.json).toEqual({ num: b.toString() });
+      const rt = ce.expr(JSON.parse(JSON.stringify(orig.json)));
+      expect(rt.isSame(orig)).toBe(true);
+    }
+    expect(ce.parse('2^{60}').evaluate().json).toEqual({
+      num: '1152921504606846976',
+    });
+  });
+
+  // A big decimal is written as a JSON number only when both the double and
+  // its text are exactly the value. (An integer past the safe integers is
+  // always a `{num}` string: a JSON number there boxes as a float.)
+  test('a shorthand is kept when both the double and its text are exact', () => {
+    expect(ce.number(new BigDecimal('0.1')).json).toBe(0.1);
+    expect(ce.number(new BigDecimal('72057594037927936')).json).toEqual({
+      num: '72057594037927936',
+    });
   });
 
   // RT-P0-2: 16–17 significant-digit decimals are not guaranteed to round-trip
