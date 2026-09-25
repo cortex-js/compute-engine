@@ -5,7 +5,10 @@
 - When `Max`, `Min`, `Clamp` or `Sort` compare two constants that are closer
   than the working precision can separate, the comparison at a higher precision
   no longer resets the engine, so it no longer discards every cached value twice
-  per comparison: `Sort` of 200 such values is about 1.5× faster.
+  per comparison, and it runs before the attempt to prove the two constants
+  equal, which is much slower and fails for two constants that are close but
+  different: `Sort` of 200 such values is about 3× faster (two equal constants
+  pay for both steps; the answers are the same).
 - **The Epsil MCP server speaks LaTeX.** The `evaluate` and `parse` tools accept
   `format: "latex"` to take a single LaTeX expression instead of an Epsil
   program (`\int_0^1 x^2\,dx`, `\sum_{k=1}^{10} \frac{1}{k^2}`), and `serialize`

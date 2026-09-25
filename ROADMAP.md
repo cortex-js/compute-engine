@@ -443,6 +443,14 @@ about `ε·σ_max` even when the entries are within the double range:
 1×1/2×2 closed form under `.N()` on exact decimal entries is fixed; the general
 kernel is not). Pre-existing, wrong value.
 
+### A simplification rule passes an integer too large for `primeFactors` (OPEN, small — found 2026-09-24)
+
+Simplifying `sin(10^{30}π)`-like expressions fires the `console.assert` in
+`primeFactors` (`numerics/primes.ts:109`) with `1e+30` (also `1e+40`, `1e+25`),
+reached from the rule at `symbolic/simplify-rules.ts:1104`. The assert is
+stripped in production, but the rule is handing `primeFactors` an integer
+outside the range it accepts. Make the rule skip integers above that range.
+
 ### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
 
 A host now declares plot variables and list seams as
@@ -524,19 +532,6 @@ Separately, `√i` stays a `Sqrt` head because
 `imaginary-unit-spelling.test.ts:210` requires it, while `√(i/4)` is the exact
 `(√2/4)(1 + i)`; decide whether that pin should change.
 
-### The equality proof of the exact ordering dominates the cost of sorting near-equal constants (OPEN, performance — measured 2026-09-24)
-
-When the working precision cannot order two constants, `exactOrder`
-(`compare.ts`) first tries to prove them equal (`simplify()` of `a − b`), then
-compares at a raised precision. For values that are close but different, the
-common case, the proof always fails and the raised comparison decides, so the
-proof is pure cost: `Sort` of 200 near-equal logarithms spends 65% of its time
-(282 of 437 ms) in the proof. Running the raised-precision comparison first and
-the proof only when it stays undecided gives the same answers (a sound order and
-a sound equality proof cannot disagree) and removes that cost; equal constants
-then pay both steps. Also: `.N()`-based `resolvingTie` is per engine since
-2026-09-24, and the raised step no longer resets the engine.
-
 ### `interval-js` gives a finite enclosure inside the machine pole zone (OPEN, small — found 2026-09-24)
 
 The machine pole rule (2026-09-24) declares `Tan(x)` the pole `~oo` when
@@ -570,6 +565,14 @@ reduces it modulo π, so the argument itself is wrong at the working precision.
 The kernel reduces an exact large integer exactly when it receives it
 (`Sin(10^22).N()` is `−0.852…`, correct). Pass an exact integer argument to the
 kernel unrounded, or reduce it modulo 2π in exact arithmetic first.
+
+The same class, found 2026-09-24 by the review of the ordering step swap: an
+argument `k·π` with a large integer `k` is rounded to the working precision
+before the reduction, so `\sin(10^{30}\pi).N()` is `0.8838…` and
+`\cos(10^{20}\pi).N()` is `0.99999999926…` at 21 digits (exact values `0` and
+`1`). The exact ordering is not affected (its error bound rejects the value).
+Fix: reduce `Multiply(integer, Pi)` modulo `2π` exactly before the kernel, or
+compute the product with enough guard digits.
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 

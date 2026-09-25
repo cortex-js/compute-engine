@@ -5,9 +5,9 @@ import { exactOrder } from '../../src/compute-engine/boxed-expression/compare';
 import { BigDecimal } from '../../src/big-decimal';
 
 // When the working precision does not decide the order of two constants,
-// `exactOrder` tries, in this order: (1) a symbolic proof that they are
-// equal (`a − b` simplifies to 0), (2) the same comparison at 50 digits,
-// (3) for `Max`, `Min`, `Clamp` and `Sort` only, a tie when the two values
+// `exactOrder` tries, in this order: (1) the same comparison at 50 digits,
+// (2) a symbolic proof that they are equal (`a − b` or `b − a` simplifies to
+// 0), (3) for `Max`, `Min`, `Clamp` and `Sort` only, a tie when the two values
 // agree within the engine tolerance. Step 3 gives a tie (`0`), never an
 // order. Every true value below is checked at a higher precision.
 
@@ -45,7 +45,7 @@ const COS_20: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -20]], 1];
 // cos(10⁻³⁰) − 1 = −5·10⁻⁶¹: not decided at 50 digits.
 const COS_30: MathJsonExpression = ['Subtract', ['Cos', ['Power', 10, -30]], 1];
 
-describe('STEP 1: EQUAL CONSTANTS ARE A PROVED TIE', () => {
+describe('STEP 2: EQUAL CONSTANTS ARE A PROVED TIE', () => {
   test('the order is 0', () => {
     expect(exactOrder(evaluate(LN6), evaluate(LN2_LN3))).toBe(0);
     expect(exactOrder(evaluate(LN2_LN3), evaluate(LN6))).toBe(0);
@@ -96,7 +96,7 @@ describe('STEP 1: EQUAL CONSTANTS ARE A PROVED TIE', () => {
   });
 });
 
-describe('STEP 2: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
+describe('STEP 1: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
   test('√(2 + 10⁻³⁰) is larger than √2', () => {
     // An independent check: the difference at 60 digits is 3.5·10⁻³¹.
     const d = valueAt(60, ['Subtract', SQRT2_PLUS, ['Sqrt', 2]]);
@@ -123,7 +123,7 @@ describe('STEP 2: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
   });
 
   // A number literal made at machine precision keeps a machine value at a
-  // higher precision, so step 2 is not done at machine precision: the order
+  // higher precision, so step 1 is not done at machine precision: the order
   // would be read from doubles with the error bound of 50 digits. The two
   // square roots are then a tie within the tolerance (step 3), and `Max`
   // prefers the number literal `√2` to the function `√(2 + 10⁻³⁰)`. This is
@@ -142,7 +142,7 @@ describe('STEP 2: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
           .evaluate()
           .isSame(b)
       ).toBe(true);
-      // Step 1 is done at machine precision.
+      // Step 2 is done at machine precision.
       expect(e.box(['Max', ZERO_SUM, 0]).evaluate().toString()).toBe('0');
     } finally {
       ce.precision = 30;
@@ -168,17 +168,17 @@ describe('STEP 2: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
   });
 });
 
-// Step 2 raises the precision without the `precision` setter of the engine,
+// Step 1 raises the precision without the `precision` setter of the engine,
 // which resets the engine (every cached value is discarded and the cache
-// axes advance). Before, each pair that reached step 2 reset the engine
+// axes advance). Before, each pair that reached step 1 reset the engine
 // twice.
-describe('STEP 2 DOES NOT RESET THE ENGINE', () => {
+describe('STEP 1 DOES NOT RESET THE ENGINE', () => {
   test('no advance of the cache axis', () => {
     const e = new ComputeEngine();
     const max = e.box(['Max', SQRT2_PLUS, ['Sqrt', 2]]);
     const before = e._anyVersion;
     const result = max.evaluate();
-    // The maximum is decided by step 2
+    // The maximum is decided by step 1
     expect(result.isSame(e.box(SQRT2_PLUS).evaluate())).toBe(true);
     expect(e._anyVersion - before).toBe(0);
   });
@@ -231,7 +231,7 @@ describe('STEP 2 DOES NOT RESET THE ENGINE', () => {
     const precision = e.precision;
     const bigDecimalPrecision = BigDecimal.precision;
     // A constant whose value is computed by a host function, which throws
-    // at a precision higher than 30 digits: step 2 computes the values of
+    // at a precision higher than 30 digits: step 1 computes the values of
     // the constants again at 50 digits.
     e.declare('Boom', {
       isConstant: true,
@@ -250,7 +250,7 @@ describe('STEP 2 DOES NOT RESET THE ENGINE', () => {
     expect(BigDecimal.precision).toBe(bigDecimalPrecision);
     // The value of the constant is still the one at the working precision.
     expect(e.box('Boom').N().toString()).toBe('2');
-    // Step 2 is done again after the throw.
+    // Step 1 is done again after the throw.
     expect(
       exactOrder(e.box(SQRT2_PLUS).evaluate(), e.box(['Sqrt', 2]).evaluate())
     ).toBe(1);
@@ -292,7 +292,7 @@ describe('STEP 2 DOES NOT RESET THE ENGINE', () => {
 
   test('also during a computation that holds a scratch scope', () => {
     // A computation registers the scopes it will pop in
-    // `_scratchDeclarationScopes`. Step 2 was skipped while the list was
+    // `_scratchDeclarationScopes`. Step 1 was skipped while the list was
     // not empty when it reset the engine, because the reset clears the
     // list. Without a reset, the list does not change.
     const e = new ComputeEngine();
@@ -358,4 +358,20 @@ describe('A SYMBOL VALUE READ INSIDE THE TRANSIENT WINDOW IS NOT STORED', () => 
     clean.assign('x', clean.parse('2\\pi'));
     expect(ce.box('x').N().json).toEqual(clean.box('x').N().json);
   });
+});
+
+describe('THE EQUALITY PROOF IS SYMMETRIC', () => {
+  // `simplify()` reduces `(sin²1 + cos²1) − 1` to 0 but not `1 − sin²1 −
+  // cos²1`, and `ln 8 − 3 ln 2` but not `3 ln 2 − ln 8`: the proof tries both
+  // differences, so the order of the operands does not decide the answer.
+  for (const [a, b] of [
+    ['\\sin^2 1+\\cos^2 1', '1'],
+    ['\\ln 8', '3\\ln 2'],
+  ])
+    test(`${a} and ${b} are a tie in both orders`, () => {
+      const x = ce.parse(a);
+      const y = ce.parse(b);
+      expect(exactOrder(x, y)).toBe(0);
+      expect(exactOrder(y, x)).toBe(0);
+    });
 });

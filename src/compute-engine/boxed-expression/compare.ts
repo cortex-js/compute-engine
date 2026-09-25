@@ -1110,20 +1110,31 @@ export function cmp(
  * (the computed difference is not larger than the bound on its error),
  * these steps are tried, in this order:
  *
- * 1. A symbolic proof that the two constants are EQUAL: `a − b` simplifies
- *    to the literal `0`. Two equal constants (`ln 6` and `ln 2 + ln 3`,
- *    `sin²1 + cos²1` and `1`) have a difference of exactly zero, and no
- *    precision can separate them: without this step, they are never
- *    ordered. A proof is exact, so this step comes first. The
- *    probabilistic verdict of `isIdenticallyEqual()` is not used: for two
- *    constants its sampling is a numeric evaluation, which step 3 already
- *    does.
- * 2. The same comparison at a higher precision (`raisedPrecision`): two
+ * 1. The same comparison at a higher precision (`raisedPrecision`): two
  *    DIFFERENT constants that are closer than the rounding error of the
  *    working precision (`√(2 + 10⁻³⁰)` and `√2` at 21 digits) are ordered
  *    at 50 digits. The result is exact, as at the working precision: the
  *    order is known only when the difference is larger than its error
  *    bound. Not done at machine precision (see `orderAtRaisedPrecision`).
+ * 2. A symbolic proof that the two constants are EQUAL: `a − b` simplifies
+ *    to the literal `0` (or `b − a` does). Two equal constants (`ln 6` and `ln 2 + ln 3`,
+ *    `sin²1 + cos²1` and `1`) have a difference of exactly zero, and no
+ *    precision can separate them: without this step, they are never
+ *    ordered. The probabilistic verdict of `isIdenticallyEqual()` is not
+ *    used: for two constants its sampling is a numeric evaluation, which
+ *    step 3 already does.
+ *
+ *    Steps 1 and 2 are both exact, so they cannot disagree: a pair that the
+ *    raised precision orders is not equal, and a proved-equal pair is never
+ *    ordered by an error bound. Their order changes only the cost, with one
+ *    exception: an error thrown by a host value function at the raised
+ *    precision now reaches the caller also for a pair that the proof would
+ *    have decided (a host constant that fails at a higher precision). The
+ *    raised comparison runs first because it is much cheaper than a
+ *    simplification and decides the common case, two constants that are
+ *    close but different: a `Sort` of 200 such logarithms spent 65% of its
+ *    time in failed proofs when the proof came first (measured
+ *    2026-09-24). Two equal constants pay for both steps.
  * 3. Only when `options.tieWithinTolerance` is set: a TOLERANCE TIE. The
  *    two constants are a tie (`0`) when their values at the working
  *    precision differ by no more than the engine tolerance relative to
@@ -1139,7 +1150,7 @@ export function cmp(
  *    make a negative value non-negative.
  *
  * Steps 1 and 2 are not run again inside themselves, for the same engine
- * (`resolvingTie`): the simplification of step 1 and the evaluations of
+ * (`resolvingTie`): the evaluations of step 1 and the simplification of
  * step 2 can evaluate an operator that calls `exactOrder` (`Abs`, `Max`),
  * and a nested run would simplify inside a simplification, which can
  * recurse without end. No simplification rule calls `exactOrder` directly;
@@ -1158,9 +1169,9 @@ export function exactOrder(
   if (resolvingTie.has(ce) || !isRealConstantPair(a, b)) return undefined;
   resolvingTie.add(ce);
   try {
-    if (isProvedEqual(a, b)) return 0;
     const raised = orderAtRaisedPrecision(a, b);
     if (raised !== undefined) return raised;
+    if (isProvedEqual(a, b)) return 0;
     if (options?.tieWithinTolerance === true && isWithinTolerance(a, b))
       return 0;
     return undefined;
@@ -1176,7 +1187,7 @@ export function exactOrder(
 const resolvingTie = new WeakSet<Expression['engine']>();
 
 /**
- * The precision of the second attempt of `exactOrder` (step 2): twice the
+ * The precision of the raised comparison of `exactOrder` (step 1): twice the
  * working precision, at least 50 digits and at most 100 digits. At 21
  * digits (the default), the attempt is at 50 digits: `cos(10⁻²⁰) − 1`, which
  * is `−5·10⁻⁴¹`, needs about 44 digits. A precision of 100 digits or more is
@@ -1229,10 +1240,20 @@ function isRealConstantPair(a: Expression, b: Expression): boolean {
  * a float (see `orderByValue`).
  */
 function isProvedEqual(a: Expression, b: Expression): boolean {
-  const difference = a.engine.function('Subtract', [a, b]);
-  if (difference.isSame(0)) return true;
-  const simplified = difference.simplify();
-  return isNumber(simplified) && simplified.isSame(0);
+  // Both differences are tried: `simplify()` is not symmetric, it reduces
+  // `(sin²1 + cos²1) − 1` and `ln 8 − 3 ln 2` to 0 but not `1 − sin²1 − cos²1`
+  // or `3 ln 2 − ln 8`, and the answer must not depend on the order of the
+  // operands.
+  for (const [x, y] of [
+    [a, b],
+    [b, a],
+  ]) {
+    const difference = a.engine.function('Subtract', [x, y]);
+    if (difference.isSame(0)) return true;
+    const simplified = difference.simplify();
+    if (isNumber(simplified) && simplified.isSame(0)) return true;
+  }
+  return false;
 }
 
 /**
