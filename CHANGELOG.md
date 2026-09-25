@@ -33,18 +33,28 @@
   `python` or `interval-js`, and `mode` is `auto`, `strict` or `complex`.
   `declarations` gives the types of free symbols (`{"z": "complex"}`). The
   result has the generated `code` and, for each free symbol, its type and the
-  type the target reads it as (`freeSymbolTypes`). When the target declines,
-  the result has no code, and `error` and `diagnostic` give the reason.
+  type the target reads it as (`freeSymbolTypes`). When the target declines, the
+  result has no code, and `error` and `diagnostic` give the reason.
 
 ### Resolved Issues
 
+- The polynomial GCD behind `simplify` no longer runs over inexact coefficients:
+  `PolynomialGCD` and the cancelling of common factors give the trivial GCD `1`
+  when a coefficient is a long float (more than 15 significant digits, the value
+  of an irrational number), while a short decimal such as `1.5` is read as its
+  exact rational (`PolynomialGCD(x² − 1.5x + 0.5, x − 1)` is `x − 1`), and
+  polynomial division keeps exact radical coefficients such as `√2 − 1` exact
+  (it folded them to floats). With the integration rules, `∫ 1/(2+3x⁴)² dx`
+  takes 0.1 s instead of reaching the 30 s time limit, and
+  `BigDecimal.toNumber()` of a value with thousands of digits no longer prints
+  every digit (4 µs instead of 70 µs for 3,000 digits).
 - `freeSymbols` and `freeSymbolTypes` of a compiled block with a local
   declaration are complete and exact. The symbols read by the initial value of
-  `let y = x + 1` were missing (the code read `x`, but `freeSymbols` was
-  empty), and the type of a declaration without a value (`Declare(w, number)`)
-  was listed as a free symbol (`number`).
-- The message of a compilation that declines now starts with what could not
-  be compiled, then gives the reason, and no longer ends with the unexplained
+  `let y = x + 1` were missing (the code read `x`, but `freeSymbols` was empty),
+  and the type of a declaration without a value (`Declare(w, number)`) was
+  listed as a free symbol (`number`).
+- The message of a compilation that declines now starts with what could not be
+  compiled, then gives the reason, and no longer ends with the unexplained
   `Fail closed (D6).`:
   `SinIntegral: cannot compile — the operator is known to the engine but target 'glsl' has no lowering for it. Fail closed (D6).`
   is now

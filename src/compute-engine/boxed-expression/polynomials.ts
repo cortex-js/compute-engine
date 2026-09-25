@@ -1,4 +1,5 @@
 import { checkDeadline } from '../../common/interruptible.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression } from '../global-types.js';
 import { asSmallInteger } from './numerics.js';
 import { add } from './arithmetic-add.js';
@@ -350,10 +351,12 @@ export function polynomialDivide(
   variable: string
 ): [Expression, Expression] | null {
   // Respect the engine deadline: the Euclidean loop in polynomialGCD (via
-  // the cancel-common-factors simplify rule) calls this repeatedly, and on
-  // polynomials with exact radical coefficients the remainder coefficients
-  // grow without bound — single simplify() calls were observed running for
-  // minutes. Each division is ms-scale, so an unstrided check is cheap.
+  // the cancel-common-factors simplify rule) calls this repeatedly, and the
+  // coefficient expressions of its remainders can grow at each step. A single
+  // simplify() call was observed running for minutes: the `.sub()` method had
+  // turned exact radical coefficients into floats, whose big-decimal digits
+  // grew at each division. Each division is ms-scale, so an unstrided check is
+  // cheap.
   checkDeadline(dividend.engine._deadlineFrame);
 
   const ce = dividend.engine;
@@ -408,11 +411,19 @@ export function polynomialDivide(
     quotientCoeffs[i - divisorDeg] = quotientCoef;
 
     // Subtract quotientCoef * divisor * x^(i - divisorDeg) from remainder
-    for (let j = 0; j <= divisorDeg; j++) {
+    for (let j = 0; j < divisorDeg; j++) {
       const product = quotientCoef.mul(divisorCoeffs[j]);
-      remainder[i - divisorDeg + j] =
-        remainder[i - divisorDeg + j].sub(product);
+      remainder[i - divisorDeg + j] = exactSub(
+        remainder[i - divisorDeg + j],
+        product
+      );
     }
+    // The leading term cancels by construction (quotientCoef·lc = remainder[i]).
+    // Set it to an exact zero instead of computing `remainder[i] − quotientCoef·lc`:
+    // with symbolic or radical coefficients that difference is not always
+    // recognized as structurally 0, and a leading coefficient that is zero in
+    // value but not in form keeps the degree from dropping.
+    remainder[i] = ce.Zero;
   }
 
   const quotient = fromCoefficients(quotientCoeffs, variable);
@@ -424,8 +435,75 @@ export function polynomialDivide(
 }
 
 /**
+ * `a − b` for two polynomial coefficients, exact when both are exact.
+ *
+ * The `.sub()` method folds two exact number literals whose radicals differ
+ * (`√2 − 1`, `√3 + √2`) to a float, because such a sum has no exact
+ * number-literal form. A canonical `Add` keeps that sum exact and symbolic
+ * (`−1 + √2`). Other operands go through `.sub()`, which also expands and
+ * collects like terms.
+ */
+function exactSub(a: Expression, b: Expression): Expression {
+  if (isNumber(a) && isNumber(b) && a.isExact && b.isExact)
+    return a.engine.function('Add', [a, b.neg()]);
+  return a.sub(b);
+}
+
+/** True if `expr` holds an inexact number literal (a machine or big float)
+ * at any depth. */
+function hasInexactNumber(expr: Expression): boolean {
+  if (isNumber(expr)) return !expr.isExact;
+  if (isFunction(expr)) return expr.ops.some(hasInexactNumber);
+  return false;
+}
+
+/**
+ * The maximum number of significant digits of a float coefficient that
+ * `polynomialGCD` reads as the exact decimal it spells (`1.5` as `3/2`).
+ *
+ * A double always keeps 15 significant decimal digits (DBL_DIG), so a double
+ * written with at most 15 digits is that decimal. A double computed from an
+ * irrational value (`√2` → `1.4142135623730951`) almost always needs 16 or 17
+ * digits to round-trip, and a big decimal computed at the default working
+ * precision has about 21 digits (`1.27788620849254495171`): neither qualifies,
+ * so the GCD of such values is still refused.
+ */
+const SHORT_DECIMAL_DIGITS = 15;
+
+/**
+ * The exact rational value of a polynomial coefficient, or `undefined` when
+ * there is none that `polynomialGCD` can use.
+ *
+ * An exact coefficient is returned unchanged. A finite real float literal
+ * whose decimal form has at most `SHORT_DECIMAL_DIGITS` significant digits
+ * becomes the exact rational of that decimal. Any other inexact coefficient
+ * (a long float, a complex float, or a float nested inside an expression)
+ * gives `undefined`.
+ */
+function shortExactCoefficient(coef: Expression): Expression | undefined {
+  if (!hasInexactNumber(coef)) return coef;
+  if (!isNumber(coef) || coef.im !== 0) return undefined;
+  const d = coef.bignumRe ?? new BigDecimal(coef.re);
+  if (!d.isFinite() || d._digitCount() > SHORT_DECIMAL_DIGITS) return undefined;
+  if (d.exponent >= 0)
+    return coef.engine.number(d.significand * 10n ** BigInt(d.exponent));
+  return coef.engine.number([d.significand, 10n ** BigInt(-d.exponent)]);
+}
+
+/**
  * Compute the GCD of two polynomials using the Euclidean algorithm.
  * Returns a monic polynomial (leading coefficient = 1).
+ *
+ * The GCD is computed over exact coefficients only. A float coefficient with
+ * few digits (`1.5`) is first replaced by the exact rational it spells
+ * (`3/2`, see `shortExactCoefficient()`); the GCD of the two polynomials is
+ * then exact, and is also a GCD of the float operands up to a constant factor.
+ * When another coefficient of either operand, or a coefficient of a
+ * remainder, is inexact, the result is the trivial GCD `1`: with floats, a
+ * remainder that is zero in exact arithmetic is a small nonzero value, so the
+ * Euclidean loop does not find the common factor. It continues with
+ * remainders whose big-decimal coefficients keep every digit and grow at each
+ * step.
  *
  * Examples:
  * - `polynomialGCD(x^2-1, x-1, 'x')` → x-1
@@ -459,6 +537,17 @@ export function polynomialGCD(
   let p = a;
   let q = b;
 
+  // Inexact coefficients: use their exact values when they are short decimals,
+  // otherwise no GCD (see the function comment).
+  if (aCoeffs.some(hasInexactNumber) || bCoeffs.some(hasInexactNumber)) {
+    const aExact = aCoeffs.map(shortExactCoefficient);
+    const bExact = bCoeffs.map(shortExactCoefficient);
+    if (aExact.some((c) => c === undefined)) return ce.One;
+    if (bExact.some((c) => c === undefined)) return ce.One;
+    p = fromCoefficients(aExact as Expression[], variable);
+    q = fromCoefficients(bExact as Expression[], variable);
+  }
+
   while (true) {
     // Bound the remainder sequence by the engine deadline (defense in depth):
     // with symbolic coefficients a single step's remainder can fail to reduce
@@ -472,6 +561,7 @@ export function polynomialGCD(
     // a non-divisor as the "GCD" (e.g. gcd(a + bx⁴, x⁶) → x⁴ + a/b), which
     // cancelCommonFactors then used to silently drop terms.
     if (!qCoeffs) return ce.One; // cannot continue: no provable common factor
+    if (qCoeffs.some(hasInexactNumber)) return ce.One;
     if (qCoeffs.every((c) => c.isSame(0))) break;
     // A nonzero *constant* remainder (degree 0 in `variable`) means the
     // operands are coprime over the coefficient field, so the GCD is a unit
@@ -719,6 +809,10 @@ function makeMonic(poly: Expression, variable: string): Expression {
   // IMPORTANT: Don't call .simplify() to avoid infinite recursion when called
   // from simplification rules. Arithmetic operations produce canonical forms.
   const monicCoeffs = coeffs.map((c) => c.div(leadingCoef!));
+  // The leading coefficient is 1 by construction. Set it to an exact 1: with a
+  // float leading coefficient, `1.5 / 1.5` is the float 1, which prints as
+  // `1x`.
+  monicCoeffs[coeffs.lastIndexOf(leadingCoef)] = poly.engine.One;
   return fromCoefficients(monicCoeffs, variable);
 }
 

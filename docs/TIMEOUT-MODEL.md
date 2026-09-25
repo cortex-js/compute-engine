@@ -155,9 +155,13 @@ changes when it gives up therefore uses a step budget
   count on the frame, not in a module-level variable. So the steps of a span
   do not depend on the work that ran before it.
 - A large `ms` stays beside the steps, only as a guard against a hang in code
-  that does not count steps. Such code exists: a polynomial GCD whose
-  big-decimal coefficients grow to thousands of digits spends seconds between
-  two steps. There the wall-clock guard still decides.
+  that does not count steps. Such code existed: a polynomial GCD whose
+  big-decimal coefficients grew to thousands of digits spent seconds between
+  two steps (`∫ 1/(2+3x⁴)² dx` hit the guard). Since 2026-09-24 the GCD refuses
+  inexact coefficients and the coefficients of that integral stay exact, so it
+  takes 0.1 s; one problem of a 200-problem chapter-1 sample
+  (1.2.2.4 #214, time spent in the rule matcher) still reaches the guard,
+  which therefore still decides there.
 
 The Rubi integration driver (300,000 steps per integral, 30 s guard) and the
 compiler's closed-form attempt of `Integrate` (300,000 steps per attempt,

@@ -854,24 +854,21 @@ on the call: for example a per-activation stamp in the key of the value and
 facet caches of a node that reads a parameter, or an axis that only activation
 declarations advance.
 
-### Big-decimal coefficients grow to thousands of digits in the polynomial GCD of a Rubi simplification (OPEN, performance — found 2026-09-23)
+### Rubi 1.2.2.4 #214 reaches the 30 s guard in the rule matcher (OPEN, performance — found 2026-09-24)
 
-The Rubi driver and the compiler's closed-form attempt now give up after a
-number of steps (`StepBudget`, `docs/TIMEOUT-MODEL.md` §7.4), with a 30 s
-wall-clock guard only against a hang. On seeded samples of Rubi chapters 1 to 7
-(1,400 problems), 8 unsolved problems still reach the 30 s guard, because they
-spend their time in code that counts few steps; their result is still decided by
-the clock. Example: `∫ 1/(2+3x⁴)² dx` (Rubi test 1.1.3.2 #703) reaches the 30 s
-guard after about 6,000 steps. The profile: a `simplify` inside the driver's
-`safeSimplify` runs `cancelCommonFactors` → `polynomialGCD` →
-`polynomialDivide`, whose coefficients are big decimals with significands of
-about 10,000 bits (3,000 digits). Sums and products of big decimals keep every
-digit, so the remainders of the Euclidean loop grow, and reading the type of
-such a literal calls `BigDecimal.toNumber()`, which prints the whole significand
-(12.8 s of the 15 s). Open questions: why an exact integrand gives big-decimal
-coefficients at all, and whether the GCD should round them to the working
-precision or refuse inexact coefficients. Fixing this would also let the
-wall-clock guard go back to a shorter value.
+After the polynomial GCD fix, one problem of a 200-problem chapter-1 sample
+(`--sample 200 --seed 14`) still reaches the 30 s wall-clock guard: 1.2.2.4
+#214, unsolved after about 80,000 steps. Its profile has no time in the GCD: the
+time is in the rule matcher (`match.ts`), garbage collection, and about 3.6 s of
+`console.assert` calls in the `ExactNumericValue` constructor
+(`exact-numeric-value.ts`) and near `get isCollection`. The production build
+strips `console.*`, so that part is a cost of development and test runs only;
+the matcher time is real. The other guard problems of chapters 2–7 were not
+re-measured; measure them before shortening the guard. Also: the
+`.sub()`/`.add()`/`.div()` methods fold exact radicals to floats (`√2 − 2` →
+`-0.5857…`); `polynomialDivide` no longer uses them on coefficients, but
+`makeMonic` (`.div()`), `resultantRec` and `polyDivide` in `rubi-utils.ts` were
+not audited.
 
 ### At machine precision, `N()` of an `Add` that holds the pole spells it as a number (OPEN, consistency — found 2026-09-23)
 

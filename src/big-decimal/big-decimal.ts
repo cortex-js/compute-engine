@@ -1085,6 +1085,19 @@ export class BigDecimal {
     // For exponent === 0, just convert significand directly
     if (this.exponent === 0) return Number(this.significand);
 
+    // A long significand (thousands of digits after a chain of exact big-
+    // decimal sums and products) makes the string conversion below expensive:
+    // it prints every digit. Divide in binary instead, keeping only about 70
+    // bits of the quotient.
+    const digits = this._digitCount();
+    const adjustedExp = digits + this.exponent - 1;
+    if (digits > 40 && adjustedExp > -300 && adjustedExp < 300)
+      return longSignificandToNumber(
+        this.significand,
+        this.exponent,
+        adjustedExp
+      );
+
     // For non-zero exponents, parse the string representation to avoid
     // double-rounding errors from `Number(sig) * 10**exp`
     // (e.g., 184 * 0.1 = 18.400000000000002, not 18.4)
@@ -1593,4 +1606,43 @@ function fromString(s: string): [bigint, number] {
   const implicitExp = -fracPart.length;
 
   return normalize(sig, implicitExp + explicitExp);
+}
+
+/**
+ * The double nearest to `significand · 10^exponent`, rounded to nearest with
+ * ties to even, exactly as `Number()` rounds the decimal string of the value.
+ * `adjustedExp` is the decimal exponent of the leading digit; the caller
+ * keeps it in (−300, 300), so the result is a normal double (no overflow, no
+ * subnormal).
+ *
+ * The value is scaled by 2^s so that the integer quotient `q` has about 70
+ * bits. When the division leaves a remainder, the lowest bit of `q` is set (a
+ * "sticky" bit): `q` then has more than 54 bits, so this bit is below the
+ * rounding position and only tells `Number(q)` that the true value is above
+ * `q`. A value exactly half-way between two doubles thus rounds to even, and a
+ * value just above or below it rounds away from it, as with the exact
+ * decimal. `Number(q)` rounds correctly, and the final scaling by a power of
+ * two is exact for a normal double.
+ */
+function longSignificandToNumber(
+  significand: bigint,
+  exponent: number,
+  adjustedExp: number
+): number {
+  const negative = significand < 0n;
+  let num = negative ? -significand : significand;
+  let den = 1n;
+  if (exponent >= 0) num *= pow10(exponent);
+  else den = pow10(-exponent);
+  // |value| is in [10^adjustedExp, 10^(adjustedExp+1)): a scale of 2^s gives
+  // a quotient between about 2^66 and 2^74.
+  const s = 70 - Math.floor(adjustedExp * 3.321928094887362); // log2(10)
+  if (s > 0) num <<= BigInt(s);
+  else if (s < 0) den <<= BigInt(-s);
+  let q = num / den;
+  if (q * den !== num) q |= 1n;
+  // Scale by 2^−s in two steps: a single 2^−s can overflow or underflow.
+  const half = Math.trunc(-s / 2);
+  const result = Number(q) * 2 ** half * 2 ** (-s - half);
+  return negative ? -result : result;
 }

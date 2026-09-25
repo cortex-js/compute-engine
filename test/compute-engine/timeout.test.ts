@@ -16,6 +16,10 @@ beforeEach(() => {
 // labelled span — 200ms is short enough to catch hangs, long enough for CI.
 const limited = <T>(fn: () => T, ms = 200): T =>
   ce.withTimeLimit({ ms, label: 'test:timeout' }, fn);
+// A span that runs out at the third deadline check: the same point on every
+// machine, whatever the load.
+const stepLimited = <T>(fn: () => T): T =>
+  ce._withBudget({ steps: 2, label: 'test:timeout' }, fn);
 
 describe('TIMEOUT', () => {
   describe('Factorial', () => {
@@ -325,7 +329,11 @@ describe('TIMEOUT', () => {
                 [
                   'Divide',
                   1,
-                  ['Add', 1, ['Multiply', ['Power', 'x', 2], ['Power', 'y', 2]]],
+                  [
+                    'Add',
+                    1,
+                    ['Multiply', ['Power', 'x', 2], ['Power', 'y', 2]],
+                  ],
                 ],
                 ['Limits', 'x', 0, 1],
               ],
@@ -345,11 +353,17 @@ describe('TIMEOUT', () => {
       expect(result.toString()).toBe('x + 1');
     });
 
-    it('runaway polynomial cancellation throws CancellationError', () => {
-      // Divide of two expanded radical-coefficient polynomials: the
-      // cancel-common-factors rule runs a Euclidean polynomialGCD whose
-      // remainder coefficients (exact radicals) grow without bound —
-      // observed running for minutes before the deadline check.
+    it('polynomial GCD throws CancellationError when its span is spent', () => {
+      // The GCD of two expanded radical-coefficient polynomials, as the
+      // cancel-common-factors simplify rule computes it for their quotient.
+      // The Euclidean loop of polynomialGCD, and each polynomialDivide it
+      // calls, checks the deadline of the enclosing span: 5 checks for this
+      // pair. This GCD once ran for minutes (its remainders got float
+      // coefficients that grew without bound); it now takes about 50 ms, so a
+      // step budget of 2, not a wall-clock limit, is what makes the span run
+      // out inside the loop. `polynomialGCD` is called directly: through
+      // `simplify()`, the per-node deadline check of the simplify traversal
+      // spends the budget before the rule reaches the GCD.
       const num = ce
         .expr([
           'Expand',
@@ -362,13 +376,12 @@ describe('TIMEOUT', () => {
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
         ])
         .evaluate();
-      // Throwing IS the assertion: a GCD loop that never consults the deadline
-      // does not raise `CancellationError` at all, it runs for minutes. No
-      // elapsed-time check is needed to distinguish the two, and adding one
-      // only exposed the test to load on the machine running the suite.
-      expect(() =>
-        limited(() => ce.function('Divide', [num, den]).simplify())
-      ).toThrow(CancellationError);
+      // Throwing IS the assertion: nothing else inside polynomialGCD checks
+      // the deadline on these operands, so a GCD loop that does not check it
+      // returns 1 instead of throwing.
+      expect(() => stepLimited(() => polynomialGCD(num, den, 'x'))).toThrow(
+        CancellationError
+      );
     });
 
     it('deadline is reset after simplify timeout', () => {
@@ -384,9 +397,9 @@ describe('TIMEOUT', () => {
           ['Power', ['Add', ['Multiply', ['Sqrt', 2], 'x'], ['Sqrt', 5]], 8],
         ])
         .evaluate();
-      expect(() =>
-        limited(() => ce.function('Divide', [num, den]).simplify())
-      ).toThrow(CancellationError);
+      expect(() => stepLimited(() => polynomialGCD(num, den, 'x'))).toThrow(
+        CancellationError
+      );
       expect(ce._deadline).toBeUndefined();
       // Subsequent simplify still works
       expect(ce.parse('x+x').simplify().toString()).toBe('2x');
@@ -700,7 +713,9 @@ describe('withTimeLimit', () => {
 
     it('an unlabelled span still throws, with attribution undefined', () => {
       const engine = new ComputeEngine();
-      const e = grabCancellation(() => engine.withTimeLimit(50, () => slowEval(engine)));
+      const e = grabCancellation(() =>
+        engine.withTimeLimit(50, () => slowEval(engine))
+      );
       expect(e).toBeInstanceOf(CancellationError);
       expect(e.attribution).toBeUndefined();
       expect(e.spans).toEqual([]);
@@ -709,7 +724,9 @@ describe('withTimeLimit', () => {
     it('the numeric withTimeLimit(ms, fn) form still bounds and returns', () => {
       const engine = new ComputeEngine();
       // Returns normally when the work fits.
-      expect(engine.withTimeLimit(5000, () => engine.parse('2+3').evaluate().re)).toBe(5);
+      expect(
+        engine.withTimeLimit(5000, () => engine.parse('2+3').evaluate().re)
+      ).toBe(5);
       // And still enforces the bound.
       expect(() => engine.withTimeLimit(50, () => slowEval(engine))).toThrow(
         CancellationError
