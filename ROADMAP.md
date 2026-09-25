@@ -464,23 +464,18 @@ keeps `NaN` in an absent cell although its type says `missing | tuple<…>`
 (`markAbsentPointCells`, `boxed-expression/validate.ts`, corrects a rank-1
 `List` only).
 
-Found while making restricted points canonical errors (decision needed,
-2026-09-25): `Distance` and `Norm` do not read a restricted point while its
-condition is undecided. `Distance((3,4){0<t}, (0,0))` with `t` free is an
-`incompatible-type` error but 5 at `t = 2`; `Distance([(3,4), Missing], (0,0))`
-is an error at every `t`; `Norm([(3,4),(6,8)]{0<t})` with `t` free is an error;
-`Norm((3,4){0<t})` stays unevaluated. `PointX`, `At`, `Dot` and `Cross` now
-each move the restriction onto their result with their own code
-(`restrictedComponent` in `library/collections.ts`,
-`restrictedOperandProduct` in `library/linear-algebra.ts`). The engine already
-does this generically for broadcastable operators (`threadConditional`,
-`boxed-expression/boxed-function.ts`). Question: add an operator-definition
-flag that lets any operator use `threadConditional` (a change to the public
-definition surface), or extend the per-operator code to `Distance` and `Norm`?
-Types in the same area that do not match the value: `At([[1,2],[3,4]]{0<t}, 2,
-1)` is typed `missing | vector<integer^2>` but its value is 3; `At((1,2){0<t},
-2)` is typed `unknown`; `First((1,2){0<t})` is typed `integer` but can be
-`Missing`; `PointX(Missing)` is typed `missing` but its value is `NaN`.
+Found while adding the `threadsConditionals` flag (not fixed, 2026-09-25):
+(1) `PointX(Missing)` compiles to `_gpu_nan().x` on GLSL and to a `.x` read of
+an `f32` on WGSL, which WGSL rejects. (2) `Dot` and `Cross` of a vector
+restricted element by element, `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, are an
+`incompatible-type` error at boxing (the operand is typed
+`list<integer | missing>`); a list of points restricted the same way works.
+(3) `At([[1,2]\{0<t\}, [3,4]], 1, 2)` is `2\{0<t\}` but is typed `unknown`.
+(4) With its condition undecided, a restricted list `When([1,2], c)` is typed
+`missing | vector<integer^2>`, but its value, the list of restricted cells
+`[1\{c\}, 2\{c\}]`, is typed `list<integer | missing>`, which that type does
+not admit. The applications over it inherit the mismatch at `t` free:
+`PointX`, `Dot`, `Distance` and `Norm` of `[(1,2),(3,4)]\{0<t\}`.
 
 Not fixed, accepted rule: on `javascript`, a list held by a free point
 coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with

@@ -19,9 +19,12 @@ import {
   type SolveActual,
 } from './generic-instantiation.js';
 import {
+  ABSENT_CELLS_STAY_MISSING,
   absorbOperandAbsence,
   broadcastLiftType,
+  threadedPresentType,
   viewOfDescriptor,
+  withThreadedAbsence,
 } from './broadcast-lift-type.js';
 
 /**
@@ -127,13 +130,33 @@ export function deriveApplicationType(
   const propagate = def.resolvedMissingBehavior === 'propagate';
   const absorbMissing =
     propagate && operands.some((d) => typeContainsMissing(d.type));
+  // An operator that threads conditional values without propagating absence
+  // (`threadsConditionals`): a threaded operand that can be absent as a
+  // whole is typed from its present value, and the result of a `handle`
+  // operator gains a `missing` arm, as at the call site
+  // (`threadedPresentType`).
+  const threadedPresent =
+    !propagate && def.threadsConditionals !== false
+      ? operands.map((d, i) =>
+          def.threadsConditionalsAt(i) && typeContainsMissing(d.type)
+            ? threadedPresentType(d.type)
+            : undefined
+        )
+      : undefined;
+  const threadedPresence =
+    threadedPresent?.some((t) => t !== undefined) === true;
+  const threadedAbsence =
+    threadedPresence && def.resolvedMissingBehavior === 'handle';
   const absorb = (t: Type): Type =>
     absorbMissing
       ? absorbOperandAbsence(
           t,
-          operands.map((d) => d.type)
+          operands.map((d) => d.type),
+          ABSENT_CELLS_STAY_MISSING.has(operator)
         )
-      : t;
+      : threadedAbsence
+        ? withThreadedAbsence(t)
+        : t;
 
   if (typeof def.type === 'function') {
     const handlerOperands = propagate
@@ -145,7 +168,14 @@ export function deriveApplicationType(
           if (stripped === 'never') return d;
           return { type: stripped, facts: d.facts, structureOf: d.structureOf };
         })
-      : operands;
+      : threadedPresence
+        ? operands.map((d, i) => {
+            const present = threadedPresent![i];
+            return present === undefined
+              ? d
+              : { type: present, facts: d.facts, structureOf: d.structureOf };
+          })
+        : operands;
     const raw = guardedTypeHandlerCall(engine, operator, () =>
       def.type!(handlerOperands, typeHandlerContext(engine))
     );

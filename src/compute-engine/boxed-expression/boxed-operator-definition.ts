@@ -86,6 +86,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'bindingSites',
   'broadcastable',
   'broadcastExemptions',
+  'threadsConditionals',
   'inspectsErrors',
   'selectsOperands',
   'namedArgumentsRequired',
@@ -245,6 +246,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   broadcastable = false;
   broadcastExemptions: ReadonlyArray<BroadcastExemption> = [];
+  threadsConditionals: boolean | number[] = false;
 
   inspectsErrors = false;
   selectsOperands = false;
@@ -868,6 +870,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     return this.missingStrip === 'all' || this.missingStrip.includes(i);
   }
 
+  threadsConditionalsAt(i: number): boolean {
+    const t = this.threadsConditionals;
+    return t === true || (Array.isArray(t) && t.includes(i));
+  }
+
   /**
    * The *resolved* Contract B NaN policy for parameter position `i`
    * (`docs/ERROR-MODEL.md` §4). For a USER-DEFINED callable the
@@ -1340,6 +1347,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       wikidata: this.wikidata,
       broadcastable: this.broadcastable,
       broadcastExemptions: this.broadcastExemptions,
+      threadsConditionals: this.threadsConditionals,
       inspectsErrors: this.inspectsErrors,
       selectsOperands: this.selectsOperands,
       namedArgumentsRequired: this.namedArgumentsRequired,
@@ -1408,6 +1416,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.wikidata = s.wikidata;
     this.broadcastable = s.broadcastable;
     this.broadcastExemptions = s.broadcastExemptions ?? [];
+    this.threadsConditionals = s.threadsConditionals ?? false;
     this.inspectsErrors = s.inspectsErrors;
     this.selectsOperands = s.selectsOperands;
     this.namedArgumentsRequired = s.namedArgumentsRequired;
@@ -1531,6 +1540,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.broadcastable = def.broadcastable ?? this.broadcastable;
     this.broadcastExemptions =
       def.broadcastExemptions ?? this.broadcastExemptions;
+    this.threadsConditionals =
+      def.threadsConditionals ?? this.threadsConditionals;
     this.inspectsErrors = def.inspectsErrors ?? this.inspectsErrors;
     this.selectsOperands = def.selectsOperands ?? this.selectsOperands;
     // `selectsOperands` says the operator decides at evaluation WHICH held

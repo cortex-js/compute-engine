@@ -315,6 +315,7 @@ import {
   isSymbol,
   isContinuationOperand,
   isAbsentValue,
+  isAbsentSymbol,
 } from '../boxed-expression/type-guards.js';
 import { cmp, exactOrder } from '../boxed-expression/compare.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
@@ -6517,6 +6518,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // handled in `evaluate` below: the §3.E gate cannot substitute the NaN
       // because a tuple operand IS a collection, which the gate defers to.
       missingBehavior: 'propagate',
+      // A restricted point `P {c}`, or a restricted list of points, whose
+      // condition is not decided moves out of the application:
+      // `Distance((3, 4) {0 < t}, (0, 0))` is `5 {0 < t}`
+      // (`threadsConditionals`, see `types-definitions.ts`).
+      threadsConditionals: true,
       // A point-list operand broadcasts: one distance per point.
       type: ([a, b], context) => {
         const pa = a ? isPointListType(a.type) : false;
@@ -6568,20 +6574,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([a, b], { engine: ce, numericApproximation }) => {
-        // An absent point absorbs: a distance is numeric, so the marker is
-        // `NaN` (§3.C) — substituted here because the §3.E gate defers to the
-        // collection operand (see `missingBehavior` above). Both symbols that
-        // name an absent datum are read here (user ruling of 2026-09-22); the
-        // same two names are tested by `isAbsentScalarSymbol`
-        // (`boxed-expression/validate.ts`).
-        if (
-          isSymbol(a, 'Missing') ||
-          isSymbol(b, 'Missing') ||
-          isSymbol(a, 'Undefined') ||
-          isSymbol(b, 'Undefined')
-        )
-          return ce.NaN;
+      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
+        // An absent point absorbs — substituted here because the §3.E gate
+        // defers to the collection operand (see `missingBehavior` above).
+        // The marker is the one of the codomain, read off the type of the
+        // application (`absentScalarMarker`): `NaN` for the distance between
+        // two points, a number (§3.C), and `Missing` for the distances of a
+        // list of points, a list — the value of a restricted list of points
+        // whose condition is false, as for `Dot` and `Norm`. Both symbols
+        // that name an absent datum are read here (user ruling of
+        // 2026-09-22); the same two names are tested by
+        // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
+        if (isAbsentSymbol(a) || isAbsentSymbol(b))
+          return absentScalarMarker(ce, expression);
         const pa = pointOperand(a);
         const pb = pointOperand(b);
         // Point-to-point: the scalar distance.
@@ -6601,12 +6606,39 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const n = (la ?? lb!).length;
         const results: Expression[] = [];
         for (let i = 0; i < n; i++) {
-          const d = pointDistance(
-            la ? la[i] : pa!,
-            lb ? lb[i] : pb!,
-            ce,
-            numericApproximation
-          );
+          const ca = la ? la[i] : pa!;
+          const cb = lb ? lb[i] : pb!;
+          // A cell that is not a point (`pointListOperand`): an absent point
+          // has no distance, and the marker of a numeric cell is `NaN`; a
+          // restricted point is applied `Distance` again, and the
+          // conditional-value lift moves its condition to its distance.
+          if (!Array.isArray(ca) || !Array.isArray(cb)) {
+            // The other side of the pair is the point at position `i`: the
+            // point operand itself, or the cell `i` of a list of points, not
+            // the whole list (which would broadcast a second time and put a
+            // list in cell `i`).
+            const xa = Array.isArray(ca)
+              ? la
+                ? ce.function('Tuple', ca)
+                : a
+              : (ca as Expression);
+            const xb = Array.isArray(cb)
+              ? lb
+                ? ce.function('Tuple', cb)
+                : b
+              : (cb as Expression);
+            if (isAbsentSymbol(xa) || isAbsentSymbol(xb)) {
+              results.push(ce.NaN);
+              continue;
+            }
+            const d = ce
+              .function('Distance', [xa, xb])
+              .evaluate({ numericApproximation });
+            if (isFunction(d, 'Error')) return d;
+            results.push(d);
+            continue;
+          }
+          const d = pointDistance(ca, cb, ce, numericApproximation);
           // A malformed point (a dimension mismatch, a non-numeric coordinate)
           // is the whole call's error, not one element of the result list. A
           // non-finite coordinate is not malformed and has an in-band value,
@@ -7484,20 +7516,37 @@ function isCoordinate(x: Expression): boolean {
  * The points of `xs` read as a LIST of points, or `undefined` when `xs` is not
  * one. Both spellings broadcast: a list of tuples `[(0,0),(3,4)]` and the list
  * of lists `[[0,0],[3,4]]` a data import produces (Tycho item 138).
+ *
+ * A cell of a written-out `List` may also be an absent point (`Missing` or
+ * `Undefined`, such as the point of an element-wise restriction whose
+ * condition is false) or a restricted point whose condition is not decided
+ * (`When`, `Which`). Such a cell is returned as the expression itself, not
+ * as coordinates, and the caller answers for it. At least one cell must be
+ * a point or a restricted point, so a list of absent values is not read as a
+ * list of points.
  */
 function pointListOperand(
   xs: Expression
-): readonly (readonly Expression[])[] | undefined {
+): readonly (readonly Expression[] | Expression)[] | undefined {
   if (xs.isFiniteCollection !== true || xs.isIndexedCollection !== true)
     return undefined;
   const count = xs.count;
   if (count === undefined || count > MAX_DISTANCE_BROADCAST) return undefined;
-  const points: (readonly Expression[])[] = [];
+  const cells = isFunction(xs, 'List');
+  const points: (readonly Expression[] | Expression)[] = [];
+  let sawPoint = false;
   for (const el of xs.each()) {
     const p = pointOperand(el);
-    if (p === undefined) return undefined;
-    points.push(p);
+    if (p !== undefined) {
+      sawPoint = true;
+      points.push(p);
+    } else if (cells && (isFunction(el, 'When') || isFunction(el, 'Which'))) {
+      sawPoint = true;
+      points.push(el);
+    } else if (cells && isAbsentSymbol(el)) points.push(el);
+    else return undefined;
   }
+  if (!sawPoint && points.length > 0) return undefined;
   return points;
 }
 

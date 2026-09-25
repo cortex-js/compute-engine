@@ -2121,7 +2121,10 @@ function compilePointComponent(
   }
   const direct = pointConstructorComponent(arg, idx, compile, target, eltType);
   if (direct !== undefined) return direct;
-  return `(${compiled()}[${idx}]${pointComponentAbsence(eltType)})`;
+  // An operand that may be absent (the `Missing` symbol, `undefined` at run
+  // time) has an absent coordinate, not a `TypeError` thrown by reading
+  // `undefined[idx]`: `PointX(Missing)` is `NaN`, as in the interpreter.
+  return `(${compiled()}${absentRead(arg)}[${idx}]${pointComponentAbsence(eltType)})`;
 }
 
 /**
@@ -2280,6 +2283,23 @@ export function isPointListOperand(e: Expression): boolean {
     );
   }
   return false;
+}
+
+/**
+ * True when `e` is a LIST of points once its absence arms are removed: the
+ * type without its `missing` arms is a list whose elements are points. This
+ * is the type of a restricted list of points (`missing | list<tuple<…>>`)
+ * and of a list that holds absent or restricted points
+ * (`list<missing | tuple<…>>`), which `isPointListOperand` does not read as
+ * a list of points.
+ */
+function isAbsentablePointListOperand(e: Expression): boolean {
+  const t = jsType(e);
+  if (!typeContainsMissing(t)) return false;
+  const elt = collectionElementType(
+    resolveTypeForCompilation(stripMissingFromType(t))
+  );
+  return elt !== undefined && isPointElementType(elt);
 }
 
 /**
@@ -5353,7 +5373,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // binds atomically, so `_SYS.norm` — which FLATTENS — would return a
     // single scalar behind `success: true`). Tycho item 138. A list of numeric
     // LISTS is a matrix and keeps the Frobenius/operator norms below.
-    if (isPointListOperand(args[0])) {
+    //
+    // The list is also read through its absence arms
+    // (`isAbsentablePointListOperand`): a restricted list of points
+    // `L {c}` is `undefined` when `c` is false, and `?.map` answers that
+    // `undefined`, the run-time spelling of the interpreter's `Missing`. A
+    // cell that is an absent or restricted point is `undefined` too, and
+    // `_SYS.norm(undefined)` is `NaN`, the interpreter's answer for it.
+    // Read as a matrix, such a list had its Frobenius norm taken: one wrong
+    // scalar where the interpreter answers one norm per point.
+    if (isPointListOperand(args[0]) || isAbsentablePointListOperand(args[0])) {
       let ord = '';
       if (args[1] != null) {
         if (isString(args[1])) {
@@ -5363,7 +5392,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
             );
         } else ord = `, ${compile(args[1])}`;
       }
-      return `(${compile(args[0])}).map((_pt) => _SYS.norm(_pt${ord}))`;
+      const read = absentRead(args[0]) === '' ? '.' : '?.';
+      return `(${compile(args[0])})${read}map((_pt) => _SYS.norm(_pt${ord}))`;
     }
     if (args[1] != null) {
       if (isString(args[1])) {
@@ -7095,6 +7125,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.linearAlgebraLane([a, b]) === 'real'
         ? '_SYS.distance'
         : '_SYS.distanceAny';
+    // An operand that may be absent as a whole (a restricted point or list of
+    // points, `undefined` at run time when its condition is false) answers
+    // the absence marker of the codomain, as the interpreter does: `NaN` for
+    // the distance between two points, and `undefined`, the run-time
+    // spelling of `Missing`, for the distances of a list of points.
+    if (typeContainsMissing(a.type.type) || typeContainsMissing(b.type.type)) {
+      const list = [a, b].some((x) => isAbsentablePointListOperand(x));
+      return (
+        `((_a, _b) => (_a == null || _b == null) ? ${list ? 'undefined' : 'NaN'} : ` +
+        `${helper}(_a, _b))(${compile(a)}, ${compile(b)})`
+      );
+    }
     return `${helper}(${compile(a)}, ${compile(b)})`;
   },
   // Block-scoped seeding. A prologue pushes a frame onto the SAME per-engine
@@ -7784,6 +7826,18 @@ function gamutMapInput(
   };
 }
 
+/**
+ * True when the run-time array `a` is a LIST of points rather than one point:
+ * its first cell is a point (an array). A first cell that is `undefined` or
+ * `null` is an absent point (the run-time spelling of `Missing`), and the
+ * array is a list of points when another cell is a point. A point's own
+ * coordinates are numbers or `{re, im}` objects, never arrays.
+ */
+function isPointArrayList(a: readonly unknown[]): boolean {
+  if (Array.isArray(a[0])) return true;
+  return a[0] == null && a.some((x) => Array.isArray(x));
+}
+
 /** Color runtime helpers shared by both SYS objects. */
 const colorHelpers = {
   color(input: unknown): CompiledColor {
@@ -8295,16 +8349,21 @@ const colorHelpers = {
       throw new Error('Could not compile `Distance`: expected two arrays');
     // An EMPTY array reads as an empty list of points (a 0-dimensional point
     // has no distance), matching the interpreter's `Distance([], p) → []`.
-    const aList = a.length === 0 || Array.isArray(a[0]);
-    const bList = b.length === 0 || Array.isArray(b[0]);
+    const aList = a.length === 0 || isPointArrayList(a);
+    const bList = b.length === 0 || isPointArrayList(b);
+    // An absent point of a list (`undefined`, the run-time spelling of
+    // `Missing`, such as a restricted point whose condition is false) has no
+    // distance: its cell is `NaN`, as in the interpreter.
+    const leg = (p: unknown, q: unknown): number =>
+      p == null || q == null ? NaN : colorHelpers.pointDistance(p, q);
     if (!aList && !bList) return colorHelpers.pointDistance(a, b);
     if (aList && bList) {
       if (a.length !== b.length)
         throw new Error('Could not compile `Distance`: dimension mismatch');
-      return a.map((p, i) => colorHelpers.pointDistance(p, b[i]));
+      return a.map((p, i) => leg(p, b[i]));
     }
-    if (aList) return a.map((p) => colorHelpers.pointDistance(p, b));
-    return b.map((p) => colorHelpers.pointDistance(a, p));
+    if (aList) return a.map((p) => leg(p, b));
+    return b.map((p) => leg(a, p));
   },
 
   // The scalar leg of `distance`: the Euclidean distance between two points,
@@ -8347,16 +8406,19 @@ const colorHelpers = {
   distanceAny(a: unknown, b: unknown): number | number[] {
     if (!Array.isArray(a) || !Array.isArray(b))
       throw new Error('Could not compile `Distance`: expected two arrays');
-    const aList = a.length === 0 || Array.isArray(a[0]);
-    const bList = b.length === 0 || Array.isArray(b[0]);
+    const aList = a.length === 0 || isPointArrayList(a);
+    const bList = b.length === 0 || isPointArrayList(b);
+    // An absent point of a list is `NaN`, as in `distance`.
+    const leg = (p: unknown, q: unknown): number =>
+      p == null || q == null ? NaN : colorHelpers.pointDistanceAny(p, q);
     if (!aList && !bList) return colorHelpers.pointDistanceAny(a, b);
     if (aList && bList) {
       if (a.length !== b.length)
         throw new Error('Could not compile `Distance`: dimension mismatch');
-      return a.map((p, i) => colorHelpers.pointDistanceAny(p, b[i]));
+      return a.map((p, i) => leg(p, b[i]));
     }
-    if (aList) return a.map((p) => colorHelpers.pointDistanceAny(p, b));
-    return b.map((p) => colorHelpers.pointDistanceAny(a, p));
+    if (aList) return a.map((p) => leg(p, b));
+    return b.map((p) => leg(a, p));
   },
 
   // The scalar leg of `distanceAny`. The distance is the norm of the

@@ -241,6 +241,10 @@ type OperatorDefinitionFlags = {
     | 'whole-collection-compare'
     | 'single-collection-join'
   >;
+  /** Whether a conditional value (`When`, `Which`) in an operand moves out
+   * of the application: `true` for every position, or the 0-based
+   * positions. See `types-definitions.ts`. */
+  threadsConditionals: boolean | number[];
   inspectsErrors: boolean;
   /** True when this operator decides at evaluation which of its held operands
    * to evaluate, so an error in an operand it does not choose is dead code.
@@ -423,6 +427,9 @@ interface BoxedOperatorDefinition
     | 'handle'
     | 'pass-through';
   stripsMissingAt(i: number): boolean;
+  /** True if a conditional value in operand position `i` moves out of the
+   * application at evaluation. See `types-definitions.ts`. */
+  threadsConditionalsAt(i: number): boolean;
   /** The resolved Contract B NaN policy for parameter position `i`. See
    * `types-definitions.ts`. */
   resolvedNanBehaviorAt(

@@ -1997,6 +1997,61 @@ export type OperatorDefinitionFlags = {
   broadcastExemptions: ReadonlyArray<BroadcastExemption>;
 
   /**
+   * Whether a CONDITIONAL VALUE in an operand — a restriction
+   * `["When", value, condition]` or a piecewise `["Which", …]` whose
+   * condition is not decided yet — moves out of the application:
+   * `f(When(v, c))` evaluates to `When(f(v), c)`, and `f(Which(c₁, v₁, …))`
+   * to `Which(c₁, f(v₁), …)`.
+   *
+   * A broadcastable operator already does this (except the logical
+   * connectives, which are not strict). Set this flag on an operator that is
+   * NOT broadcastable but reads a whole value, such as a point or a vector,
+   * so that it gets the same treatment without code of its own. Without the
+   * flag, the handler receives the `When` itself, which is not a point or a
+   * collection, and usually answers an `incompatible-type` error.
+   *
+   * - `true` — every operand position threads.
+   * - an array of 0-based positions — only these positions thread. Use this
+   *   when another position is not a value the function is applied to: `At`
+   *   threads its collection (position `0`) and not its indices, and `Norm`
+   *   threads its operand and not its order.
+   *
+   * The engine also recognizes the form a restricted LIST takes after
+   * evaluation. With the condition undecided, `When([a, b], c)` evaluates to
+   * the list of restricted cells `[When(a, c), When(b, c)]`. When every cell
+   * of a `List` in a threaded position has the same condition, the list is
+   * read as `When([a, b], c)` and the condition moves out as above. A list
+   * whose cells have different conditions, or only some of them a condition,
+   * is given to the handler as it is: only the operator knows whether it
+   * maps over the cells (a list of points) or reads the list whole (a
+   * vector).
+   *
+   * The rules that apply are those of broadcastable operators:
+   * - The type of the application, when a threaded operand can be absent as
+   *   a whole (its type has a `missing` arm, as the type of a `When` does),
+   *   is computed from the operand without the `missing` arm. The `missing`
+   *   arm then goes to the result as for a `propagate` operator: it is kept
+   *   when the result is not a number, and replaced by `NaN` when it is. For
+   *   a `handle` operator the result keeps a `missing` arm: the handler is
+   *   expected to answer `Missing` for an absent operand, as `At` and
+   *   `First` do.
+   * - When the condition is decided, nothing threads: the operand is its
+   *   value, or `Missing`, and `missingBehavior` decides what an absent
+   *   operand gives. Declare `missingBehavior` too (`propagate` or
+   *   `handle`): with the default for a signature that is not all-numeric,
+   *   an absent operand is an `incompatible-type` error.
+   * - A `Which` distributes over at most 16 combinations of branches;
+   *   past that the application is given to the handler unchanged.
+   *
+   * For example, with `t` free, `PointX(When((1, 2), 0 < t))` is
+   * `When(1, 0 < t)`, which is `1` when `t = 2` and `NaN` (the marker of the
+   * numeric coordinate) when `t = -1`.
+   *
+   * **Default**: `false`
+   */
+  threadsConditionals: boolean | number[];
+
+  /**
    * If `true`, this operator's `evaluate` handler runs even when the
    * expression is **invalid** — that is, when an operand is, or embeds, an
    * `Error` value.
@@ -2516,6 +2571,13 @@ export interface BoxedOperatorDefinition
    * validation (§3.A). Only `propagate`/`handle` operators strip; `missingStrip`
    * selects the positions. */
   stripsMissingAt(i: number): boolean;
+
+  /** True if the `threadsConditionals` flag of
+   * {@link OperatorDefinitionFlags} selects operand position `i`: a
+   * conditional value (`When`, `Which`) there moves out of the application at
+   * evaluation. A broadcastable operator threads every position whatever this
+   * answers. */
+  threadsConditionalsAt(i: number): boolean;
 
   /**
    * The *resolved* NaN policy for parameter position `i` (Contract B,

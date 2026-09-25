@@ -84,8 +84,10 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
     expect(value(['PointX', ['List', 'Missing', ['Tuple', 1, 2]]])).toBe(
       '["Missing",1]'
     );
+    // A masked cell is `Missing`, and the list is typed `list<T | missing>`
+    // (user decision of 2026-09-09, `docs/ERROR-MODEL.md`).
     expect(type(['PointX', ['List', 'Missing', ['Tuple', 1, 2]]])).toBe(
-      'list<number>'
+      'list<missing | number>'
     );
     // An element-wise restriction whose first condition is false.
     const elementwise = [
@@ -115,7 +117,7 @@ describe('Coordinate accessors of a restricted point or list of points', () => {
     expect(type(['PointX', RL])).toBe('missing | vector<2>');
     expect(type(['PointX', RP])).toBe('number');
     expect(type(['PointY', ['List', RP, ['Tuple', 3, 4]]])).toBe(
-      'list<number>'
+      'list<missing | number>'
     );
   });
 });

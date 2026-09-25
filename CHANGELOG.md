@@ -68,6 +68,21 @@
 
 ### Improvements
 
+- **New operator-definition flag `threadsConditionals`.** A conditional value
+  whose condition is not decided (a restriction `P\{c\}`, which is
+  `["When", P, c]`, or a piecewise `["Which", …]`) now moves out of an
+  application of an operator that sets the flag: `f(When(v, c))` evaluates to
+  `When(f(v), c)`, as it already did for a broadcastable operator. The flag is
+  `true` (every operand) or a list of 0-based operand positions (`At` threads
+  its collection and not its indices). A list whose every cell has the same
+  condition, which is the value of a restricted list, is read as one restricted
+  list first. The type of the application is computed from the operand without
+  its `missing` arm; for a `missingBehavior: 'handle'` operator the result type
+  then has a `missing` arm. `Dot`, `Cross`, `Norm`, `Distance`, `At`, `First`,
+  `Second`, `Third`, `Last`, `PointX`, `PointY` and `PointZ` set the flag, and
+  their own code for restricted operands is removed. A custom operator that
+  reads a point or a vector whole can set it too.
+
 - At machine precision, `Apply(Derivative(f, n), x).N()` evaluated at many
   points computes and simplifies the closed form of the derivative once, not at
   each point (100 points: 326 ms → 77 ms; 1,000 points: 1.94 s → 0.16 s). The
@@ -142,6 +157,49 @@
   result has no code, and `error` and `diagnostic` give the reason.
 
 ### Resolved Issues
+
+- `Distance` and `Norm` now read a restricted point or a restricted list of
+  points whose condition is not decided. With `t` free,
+  `Distance((3,4)\{0<t\}, (0,0))` was an `incompatible-type` error; it is now
+  `5\{0<t\}`, which is `5` when `t = 2` and `NaN` when `t = -1`.
+  `Distance([(3,4),(6,8)]\{0<t\}, (0,0))` and `Norm([(3,4),(6,8)]\{0<t\})`
+  are `[5\{0<t\}, 10\{0<t\}]`, and `Missing` when the condition is false (the
+  distance was `NaN` there, while its type said a list or `Missing`).
+  `Norm((3,4)\{0<t\})` stayed unevaluated; it is now `5\{0<t\}`. A list that
+  holds an absent point is one value per point: `Distance([(3,4), Missing],
+  (0,0))` was an error and is now `[5, NaN]`, and `Norm([(3,4), Missing])`
+  stayed unevaluated and is now `[5, NaN]`. The same holds for a list whose
+  points have different conditions, such as `[(3,4),(6,8)]\{[0<t, t<0]\}`.
+- The norm of a list of points whose first point is restricted,
+  `Norm([(3,4)\{0<t\}, (6,8)])`, was typed `number`, while its value is a list
+  of norms. It is now typed `list<number>`.
+- Compiled to JavaScript, the norm of a restricted list of points was the
+  Frobenius norm of the points read as a matrix (`11.18` for
+  `Norm([(3,4),(6,8)]\{0<t\})` at `t = 2`, where the interpreter gives
+  `[5, 10]`). It is now one norm per point, and `undefined` (the run-time
+  spelling of `Missing`) when the condition is false. The compiled `Distance`
+  of a restricted point, or of a list that holds an absent point, threw at run
+  time when the point was absent; it now gives the interpreter's value. The
+  Python target now refuses `Norm` of a list of points that may hold absent
+  points, which `np.linalg.norm` flattened into one scalar.
+- The types of element access of a restricted value now admit the value.
+  `At([[1,2],[3,4]]\{0<t\}, 2, 1)` was typed `missing | vector<integer^2>` and
+  `At((1,2)\{0<t\}, 2)` was typed `unknown`; `First((1,2)\{0<t\})` was typed
+  `integer` although its value is `Missing` when the condition is false. Each
+  is now typed as an integer or `Missing`. `PointX(Missing)` was typed
+  `missing` while its value is `NaN` (the coordinate of an absent point is a
+  numeric slot); it is now typed `number`, and its compiled JavaScript gives
+  `NaN` instead of throwing a `TypeError`.
+- The coordinates of a list of points that holds an absent or restricted
+  point are now typed with an absent cell. `PointY([(1,2)\{0<t\}, (3,4)])` is
+  `["Missing", 4]` when `t = -1`, and was typed `list<number>`; it is now typed
+  `list<missing | number>`, as a masked list cell is `Missing` and the list is
+  typed `list<T | missing>`. The same holds for `PointX`, `PointZ`, and for
+  `PointX([Missing, (1,2)])`.
+- `First`, `Last`, `PointX` and the other accessors of a symbol declared as a
+  restricted point (`missing | tuple<integer, integer>`) with no value were an
+  `incompatible-type` error. They now stay unevaluated, as for a symbol
+  declared `tuple<integer, integer>`.
 
 - A compiled product of a list and a point whose coordinate type is not known
   now gives the value the interpreter gives. With `t` free,

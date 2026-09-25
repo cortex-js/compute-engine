@@ -39,7 +39,10 @@ import {
   typeHandlerContext,
 } from './derive-application-type.js';
 import {
+  ABSENT_CELLS_STAY_MISSING,
   absorbOperandAbsence,
+  threadedPresentType,
+  withThreadedAbsence,
   broadcastLiftType,
   skipBroadcastForVectorOpsOnViews,
   type BroadcastOperandView,
@@ -5057,21 +5060,62 @@ export class BoxedFunction
       // arithmetic evaluate handler is what stops a fold from silently dropping
       // a guard (`When − When`, `0·When`; see decision 5).
       //
-      if (
-        def.broadcastable &&
-        !CONDITIONAL_THREADING_SKIP.has(this.operator) &&
-        tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which'))
+      // An operator that is not broadcastable threads the positions its
+      // `threadsConditionals` flag selects (`Dot`, `PointX`, `At`, …: the
+      // operators that read a point or a vector whole). For those positions,
+      // a `List` whose every cell is restricted by the same condition — the
+      // value of a restricted list whose condition is not decided — is first
+      // read back as that restricted list (`regroupRestrictedCells`).
+      //
+      if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(this.operator)) {
+        if (tail.some((x) => isFunction(x, 'When') || isFunction(x, 'Which'))) {
+          const threaded = threadConditional(
+            this.engine,
+            this.operator,
+            tail,
+            def.lazy === true,
+            options,
+            this,
+            def.resolvedMissingBehavior === 'propagate'
+          );
+          if (threaded) return threaded;
+        }
+      } else if (
+        def.threadsConditionals !== false &&
+        // A cheap test first, so that an application with no conditional
+        // operand (the common case) allocates nothing: only a `When`, a
+        // `Which`, or a `List` (which can hold restricted cells) at a
+        // threaded position can be lifted.
+        tail.some(
+          (x, i) =>
+            def.threadsConditionalsAt(i) &&
+            (isFunction(x, 'When') ||
+              isFunction(x, 'Which') ||
+              isFunction(x, 'List'))
+        )
       ) {
-        const threaded = threadConditional(
-          this.engine,
-          this.operator,
-          tail,
-          def.lazy === true,
-          options,
-          this,
-          def.resolvedMissingBehavior === 'propagate'
+        const threadsAt = (i: number) => def.threadsConditionalsAt(i);
+        const regrouped = tail.map((x, i) =>
+          threadsAt(i) ? regroupRestrictedCells(this.engine, x) : x
         );
-        if (threaded) return threaded;
+        if (
+          regrouped.some(
+            (x, i) =>
+              threadsAt(i) && (isFunction(x, 'When') || isFunction(x, 'Which'))
+          )
+        ) {
+          const threaded = threadConditional(
+            this.engine,
+            this.operator,
+            regrouped,
+            def.lazy === true,
+            options,
+            this,
+            def.resolvedMissingBehavior === 'propagate',
+            threadsAt
+          );
+          if (threaded) return threaded;
+        }
       }
 
       //
@@ -6359,6 +6403,68 @@ const CONDITIONAL_THREADING_SKIP = new Set([
 ]);
 
 /**
+ * `x` read back as a restricted list when it is the EVALUATED form of one, or
+ * `x` itself otherwise.
+ *
+ * With its condition undecided, a restricted list `When([a, b], c)`
+ * evaluates to the list of its restricted cells `[When(a, c), When(b, c)]`
+ * (the `When` evaluate handler distributes the condition, so that the value
+ * is a collection). An operator that reads the list whole — the inner
+ * product of a vector, the norm, the coordinates of a list of points — gets
+ * no point or number from such a cell. When every cell of the `List` is
+ * restricted by the same condition, this returns `When([a, b], c)`, so that
+ * the conditional-value lift moves the condition out of the application:
+ * `Dot([1 {c}, 2 {c}], [1, 1])` is `Dot([1, 2], [1, 1]) {c}`, that is
+ * `3 {c}`. A nested `List` whose cells regroup to the same condition counts
+ * as a restricted cell.
+ *
+ * A list whose cells have different conditions (the value of an element-wise
+ * restriction, `When(L, [c₁, c₂])`), or where only some cells are
+ * restricted, is returned unchanged: there is no single condition to move
+ * out, and only the operator knows whether it maps over the cells.
+ */
+function regroupRestrictedCells(ce: ComputeEngine, x: Expression): Expression {
+  if (!isFunction(x, 'List') || x.nops === 0) return x;
+  let guard: Expression | undefined;
+  const bodies: Expression[] = [];
+  for (const op of x.ops) {
+    const cell = isFunction(op, 'List') ? regroupRestrictedCells(ce, op) : op;
+    if (!isFunction(cell, 'When') || cell.nops !== 2) return x;
+    // A cell restricted by a LIST of conditions is itself an element-wise
+    // restriction, not one cell of a restricted list.
+    if (isFunction(cell.op2, 'List')) return x;
+    if (guard === undefined) guard = cell.op2;
+    else if (!guard.isSame(cell.op2)) return x;
+    bodies.push(cell.op1);
+  }
+  return ce._fn('When', [ce._fn('List', bodies), guard!]);
+}
+
+/**
+ * True when `value` already carries the condition of every guard in
+ * `guards` (all the same condition): it is `When(v, g)`, or a `List` or
+ * `Tuple` whose every cell is. Restricting it again would give
+ * `When(When(v, g), g)`, which prints as `v {g} {g}`: the `When` evaluate
+ * handler distributes a condition into the cells of a list without merging
+ * it with the condition a cell already has.
+ */
+function sameRestriction(
+  value: Expression,
+  guards: ReadonlyArray<Expression>
+): boolean {
+  const g = guards[0];
+  if (g === undefined || !guards.every((x) => x.isSame(g))) return false;
+  const restricted = (x: Expression): boolean =>
+    isFunction(x, 'When') && x.nops === 2 && x.op2.isSame(g);
+  if (restricted(value)) return true;
+  return (
+    (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
+    value.nops > 0 &&
+    value.ops.every(restricted)
+  );
+}
+
+/**
  * Threading pre-pass for conditional values (`When`/`Which`), modeled on the
  * broadcast lift (step 4b). Given the already-evaluated `tail` of operator
  * `op`, lift a conditional operand outward:
@@ -6386,6 +6492,12 @@ const CONDITIONAL_THREADING_SKIP = new Set([
  * `When − When`) and is a cheap cache hit for the already-evaluated tail of a
  * strict operator.
  *
+ * `threadsAt` restricts the lift to some operand positions (the
+ * `threadsConditionals` flag of an operator that is not broadcastable): a
+ * conditional operand in another position is left in place, as a plain
+ * operand. When it is given, a result that already carries the lifted
+ * condition is not restricted a second time (`sameRestriction`).
+ *
  * Returns `undefined` when there is nothing to thread, so the caller falls
  * through to normal evaluation — except for a `lazy` operator whose tail was
  * evaluated here and no longer holds a conditional, where the folded
@@ -6399,35 +6511,51 @@ function threadConditional(
   lazy: boolean,
   options: Partial<EvaluateOptions> | undefined,
   application: Expression,
-  propagate: boolean
+  propagate: boolean,
+  threadsAt?: (i: number) => boolean
 ): Expression | undefined {
   const tail = lazy ? rawTail.map((x) => x.evaluate(options)) : rawTail;
+  const isThreaded = (x: Expression, i: number, head: 'When' | 'Which') =>
+    isFunction(x, head) && (threadsAt === undefined || threadsAt(i));
 
   // --- `When` lift (guard-outermost) ---
-  if (tail.some((x) => isFunction(x, 'When'))) {
+  if (tail.some((x, i) => isThreaded(x, i, 'When'))) {
     const guards: Expression[] = [];
-    const stripped = tail.map((x) => {
-      if (isFunction(x, 'When')) {
+    const stripped = tail.map((x, i) => {
+      if (isThreaded(x, i, 'When') && isFunction(x)) {
         guards.push(x.op2);
         return x.op1;
       }
       return x;
     });
-    const guard = guards.length === 1 ? guards[0] : ce._fn('And', guards);
+    // Two operands restricted by the same condition (`Cross(P {c}, Q {c})`)
+    // are restricted once.
+    const distinct =
+      threadsAt === undefined
+        ? guards
+        : guards.filter((g, k) => guards.findIndex((h) => h.isSame(g)) === k);
+    const guard = distinct.length === 1 ? distinct[0] : ce._fn('And', distinct);
     const inner = ce._fn(op, stripped).evaluate(options);
+    // An error of the inner application (two points of different widths) is
+    // an error whatever the condition, as it is once the condition holds.
+    if (
+      threadsAt !== undefined &&
+      (isFunction(inner, 'Error') || sameRestriction(inner, distinct))
+    )
+      return inner;
     return ce._fn('When', [inner, guard]).evaluate(options);
   }
 
   // --- `Which` distribution ---
-  if (tail.some((x) => isFunction(x, 'Which'))) {
+  if (tail.some((x, i) => isThreaded(x, i, 'Which'))) {
     // Each operand contributes a list of (condition, value) branches; a
     // non-`Which` operand is a single unconditional branch (condition = null).
-    const branchSets = tail.map((x) => {
-      if (isFunction(x, 'Which')) {
+    const branchSets = tail.map((x, i) => {
+      if (isThreaded(x, i, 'Which') && isFunction(x)) {
         const branches: { cond: Expression | null; value: Expression }[] = [];
         const ops = x.ops;
-        for (let i = 0; i + 1 < ops.length; i += 2)
-          branches.push({ cond: ops[i], value: ops[i + 1] });
+        for (let k = 0; k + 1 < ops.length; k += 2)
+          branches.push({ cond: ops[k], value: ops[k + 1] });
         return branches;
       }
       return [{ cond: null as Expression | null, value: x }];
@@ -6698,6 +6826,27 @@ function type(expr: BoxedFunction): Type | BoxedType {
       def.resolvedMissingBehavior === 'propagate' &&
       expr.ops.some((x) => x.type.facts.containsMissing);
 
+    // Conditional-value threading (`threadsConditionals`) for an operator
+    // that does not propagate absence: a threaded operand that can be absent
+    // as a whole (a restriction, typed `missing | T`) is given to the type
+    // handler as its present type `T`. For a `handle` operator the result
+    // gains a `missing` arm, because such an operator answers `Missing` for
+    // an absent operand (`threadedPresentType`, `broadcast-lift-type.ts`).
+    // For a `reject` or `pass-through` operator an absent operand is an
+    // error, which the type of the success does not describe.
+    const threadedPresent =
+      def.threadsConditionals !== false &&
+      def.resolvedMissingBehavior !== 'propagate'
+        ? expr.ops.map((x, i) =>
+            def.threadsConditionalsAt(i) && x.type.facts.containsMissing
+              ? threadedPresentType(x.type.type)
+              : undefined
+          )
+        : undefined;
+    const threadedAbsence =
+      def.resolvedMissingBehavior === 'handle' &&
+      threadedPresent?.some((t) => t !== undefined) === true;
+
     // Contract B derived application type (`docs/ERROR-MODEL.md` §4; Phase
     // C of `docs/plans/2026-08-30-error-model-implementation.md`). Applied
     // only when NO per-operator type handler answered: a handler's claim
@@ -6783,9 +6932,12 @@ function type(expr: BoxedFunction): Type | BoxedType {
         absorbMissing
           ? absorbOperandAbsence(
               t,
-              expr.ops.map((x) => x.type.type)
+              expr.ops.map((x) => x.type.type),
+              ABSENT_CELLS_STAY_MISSING.has(expr.operator)
             )
-          : t
+          : threadedAbsence
+            ? withThreadedAbsence(t)
+            : t
       );
       return result === boxedHandlerResult?.type ? boxedHandlerResult : result;
     };
@@ -6826,7 +6978,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
       // `describe` must not be attributed to this handler.
       let calculatedType: BoxedType | undefined;
       const strippedFor = (i: number) => {
-        if (def.resolvedMissingBehavior !== 'propagate') return undefined;
+        if (def.resolvedMissingBehavior !== 'propagate')
+          return threadedPresent?.[i];
         const stripped = operandTypes?.[i];
         // A BARE `missing` operand strips to `never`, and a `never`-typed
         // descriptor proves numeric claims vacuously (`never` is the

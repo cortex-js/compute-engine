@@ -258,6 +258,61 @@ function hasTopLevelMissing(t: Type): boolean {
   );
 }
 
+/**
+ * The operators whose result cell for an ABSENT cell of a collection operand
+ * is `Missing`, whatever the type of the cell: the point-coordinate
+ * accessors. They read the coordinate of each point of a list of points,
+ * and the coordinate of an absent point (`Missing`, the masked cell of a
+ * restriction whose condition is false) is itself `Missing`, as the masked
+ * cell of a list is (`docs/ERROR-MODEL.md`: a masked list cell is `Missing`
+ * and the list is typed `list<T | missing>`). The operators that COMPUTE a
+ * number from each point (`Distance`, `Norm`, `Dot`) answer the numeric
+ * marker `NaN` there instead, which the numeric absorption of
+ * `absorbOperandAbsence` describes.
+ */
+export const ABSENT_CELLS_STAY_MISSING: ReadonlySet<string> = new Set([
+  'PointX',
+  'PointY',
+  'PointZ',
+]);
+
+/**
+ * The type of a THREADED operand without its top-level `missing` arm, or
+ * `undefined` when it has none (or has nothing else).
+ *
+ * An operator that threads conditional values at a position (the
+ * `threadsConditionals` flag of `types-definitions.ts`) applies itself to
+ * the value of a restriction and moves the condition out: `f(When(v, c))` is
+ * `When(f(v), c)`. Its type handler must then see the operand as the value
+ * it is applied to, without the absent case (a restriction is typed
+ * `missing | T`), and the absent case goes to the result. A `handle`
+ * operator answers `Missing` when the operand is, so its result type gains
+ * a `missing` arm (`withThreadedAbsence`). A `propagate` operator strips the
+ * arm with its own machinery (`absorbOperandAbsence`).
+ */
+export function threadedPresentType(t: Type): Type | undefined {
+  if (!hasTopLevelMissing(t)) return undefined;
+  const present = stripTopMissing(t);
+  return present === 'never' ? undefined : present;
+}
+
+/**
+ * `t` with the `missing` arm of an application whose threaded operand can be
+ * absent (`threadedPresentType`). The empty type and the error type are
+ * kept as they are: they say the application has no value at all.
+ */
+export function withThreadedAbsence(t: Type): Type {
+  if (t === 'never' || t === 'error') return t;
+  // `unknown` says nothing about the result yet, and `widen` treats it as
+  // the empty case: `widen('missing', 'unknown')` is `missing`, which claims
+  // the application is always absent. `At(At(m, 1), 2)` with `m` valueless
+  // was typed `missing`, and the use of the result as a number then
+  // inferred `m`'s elements as `real` instead of `number`. The result stays
+  // `unknown`, which admits the absent case.
+  if (t === 'unknown' || t === 'any') return t;
+  return widen('missing', t);
+}
+
 /** Whether `t` is a collection that is not a tuple and not a string: an
  * operand beside which an absent scalar broadcasts cell by cell. */
 function isCellCollectionType(t: Type): boolean {
@@ -317,10 +372,17 @@ function isCellCollectionType(t: Type): boolean {
  * (`withAbsentPointCells`): `Sin([P{c}, (2, 3)])` and `2 · [P{c}, (2, 3)]`
  * are `list<missing | tuple<…>>`. An absence inside a point's coordinate
  * (`tuple<integer | missing, integer>`) does not make the point absent.
+ *
+ * `absentCellsStayMissing` extends that exception to every result cell,
+ * numeric ones included, for an operator that READS each cell rather than
+ * computing a number from it (`ABSENT_CELLS_STAY_MISSING`): the coordinate
+ * of an absent point of a list is `Missing`, as the masked cell is, so
+ * `PointY([P{c}, (3, 4)])` is `list<number | missing>`.
  */
 export function absorbOperandAbsence(
   t: Type,
-  operandTypes: ReadonlyArray<Type>
+  operandTypes: ReadonlyArray<Type>,
+  absentCellsStayMissing = false
 ): Type {
   let cells = false;
   let wholeCells = false;
@@ -348,7 +410,7 @@ export function absorbOperandAbsence(
     }
   }
   let result = cells ? absorbNumericAbsence(t) : t;
-  if (wholeCells) result = withAbsentPointCells(result);
+  if (wholeCells) result = withAbsentPointCells(result, absentCellsStayMissing);
   if (!whole) return result;
   if (isSubtype(stripMissingFromType(result), 'number'))
     return absorbNumericAbsence(result);
@@ -387,12 +449,12 @@ function missingOutsideTuples(t: Type): boolean {
  * that is not in a collection, and a cell with a non-tuple arm are kept as
  * they are.
  */
-function withAbsentPointCells(t: Type): Type {
+function withAbsentPointCells(t: Type, anyCell = false): Type {
   const r = resolveTypeAlias(t);
   if (typeof r === 'string') return t;
   switch (r.kind) {
     case 'union': {
-      const arms = r.types.map(withAbsentPointCells);
+      const arms = r.types.map((x) => withAbsentPointCells(x, anyCell));
       if (arms.every((x, i) => x === r.types[i])) return t;
       return widen(...arms);
     }
@@ -409,10 +471,12 @@ function withAbsentPointCells(t: Type): Type {
           e.kind === 'indexed_collection' ||
           e.kind === 'broadcastable')
       ) {
-        const inner = withAbsentPointCells(cell);
+        const inner = withAbsentPointCells(cell, anyCell);
         return inner === cell ? t : { ...r, elements: inner };
       }
-      return isPointCellType(cell) ? { ...r, elements: widen('missing', cell) } : t;
+      return anyCell || isPointCellType(cell)
+        ? { ...r, elements: widen('missing', cell) }
+        : t;
     }
     default:
       return t;

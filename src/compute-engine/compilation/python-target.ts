@@ -54,7 +54,10 @@ import { isPointListValue, isTuple } from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
+  isPointElementType,
   resolveTypeForCompilation,
+  stripMissingFromType,
+  typeContainsMissing,
 } from '../../common/type/utils.js';
 import type { Type, TypeReference } from '../../common/type/types.js';
 import { declarationOf } from '../../common/type/reference.js';
@@ -2973,6 +2976,23 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           'flattens it into one scalar, but the interpreter answers one norm ' +
           'per point.'
       );
+    // The same holds for a list of points read through its absence arms: a
+    // restricted list of points (`L {c}` lowers to `(…) if c else None`), or
+    // a list that holds an absent or restricted point. `isPointListValue`
+    // does not see it as a list of points, and `np.linalg.norm` flattened it
+    // into one scalar where the interpreter answers one norm per point.
+    const t = args[0].type.type;
+    if (typeContainsMissing(t)) {
+      const elt = collectionElementType(
+        resolveTypeForCompilation(stripMissingFromType(t))
+      );
+      if (elt !== undefined && isPointElementType(elt))
+        throw new Error(
+          'Could not compile `Norm`: a list of points that may hold absent ' +
+            'points has no numpy spelling — `np.linalg.norm` flattens it ' +
+            'into one scalar, but the interpreter answers one norm per point.'
+        );
+    }
     if (args.length < 2) return `np.linalg.norm(${compile(args[0])})`;
     const p = args[1];
     const rank = pyStaticRank(args[0]);

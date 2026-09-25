@@ -2451,6 +2451,14 @@ function tupleComponentType(t: Type, position: number): Type | undefined {
 /** Descriptor twin of {@link pointComponentType}. */
 function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   const t = xs.type;
+  // An ABSENT operand (the `Missing` symbol) has no coordinate, and the
+  // accessors are `propagate` operators: the absence gate answers the marker
+  // of a numeric slot, `NaN`, so `PointX(Missing)` is `NaN`, a number. Read
+  // as a collection, `missing` gave its own type, `missing`, which the value
+  // `NaN` does not have. (A restricted point, `missing | tuple<…>`, is
+  // typed from its point: the `missing` arm is stripped before this handler
+  // runs.)
+  if (t === 'missing') return 'number';
   if (typeof t !== 'string' && t.kind === 'tuple') {
     const ct = componentTypeD(xs, position);
     if (ct === 'unknown') {
@@ -3453,25 +3461,19 @@ function chainAbsorbMarker(
 }
 
 /**
- * The component `read(body)` of a restriction `When(body, c)`, restricted by
- * the same condition, or `null` when `xs` is not a restriction.
+ * True when `e` is a conditional value whose condition is not decided yet:
+ * a restriction `When(v, c)` or a piecewise `Which(…)`.
  *
- * `undefined` from `read` (the component stays symbolic) is returned as it
- * is, and so is an error: an error of the body is the error of the
- * application whatever the condition, as it is once the condition is true.
- * The restricted component is evaluated so that a decided condition, or a
- * component that is itself a list, takes the usual form of a restriction.
+ * The accessors thread such an OPERAND through their `threadsConditionals`
+ * flag (`types-definitions.ts`) before their evaluate handler runs. A
+ * conditional value can still reach a handler as a CELL of a list whose
+ * cells do not all have the same condition (`[(1, 2) {0 < t}, (3, 4)]`), or
+ * as an intermediate value of a chained `At`. The handler then applies the
+ * operator to that cell again, and the lift moves the condition out of the
+ * cell's application.
  */
-function restrictedComponent(
-  xs: Expression,
-  ce: ComputeEngine,
-  read: (body: Expression) => Expression | undefined
-): Expression | undefined | null {
-  if (!isFunction(xs, 'When') || xs.nops !== 2) return null;
-  const component = read(xs.op1);
-  if (component === undefined || isFunction(component, 'Error'))
-    return component;
-  return ce.function('When', [component, xs.op2]).evaluate();
+function isConditionalValue(e: Expression): boolean {
+  return isFunction(e, 'When') || isFunction(e, 'Which');
 }
 
 /** `e` without its restrictions: the body of `When(body, c)`, repeatedly. */
@@ -3526,16 +3528,6 @@ function componentAt(
   // `IsMissing`/`Coalesce`. The same two names are tested by
   // `isAbsentScalarSymbol` (`boxed-expression/validate.ts`).
   if (isSymbol(xs, 'Missing') || isSymbol(xs, 'Undefined')) return ce.Missing;
-  // A RESTRICTED operand whose condition is not decided yet — the point
-  // `(1, 2) {0 < t}` with `t` free — stays a `When` after evaluation. It is
-  // not a collection, and it was refused with an `incompatible-type` error.
-  // The restriction moves to the element: `First((1, 2) {0 < t})` is
-  // `1 {0 < t}`, which is `1` when the condition holds and `Missing` when it
-  // does not, the values the application has once the condition is decided.
-  const restricted = restrictedComponent(xs, ce, (body) =>
-    componentAt(body, position, ce)
-  );
-  if (restricted !== null) return restricted;
   if (xs.isCollection) {
     // Runtime re-validation of the `indexed_collection` parameter (the static
     // gate is overlap-deferred, so an `unknown`-typed operand can arrive
@@ -3552,6 +3544,16 @@ function componentAt(
     return xs.at(position) ?? absenceMarker(ce, xs);
   }
   if (xs.type.matches('indexed_collection<any>')) return undefined;
+  // A symbolic operand that may be absent as a whole — a symbol declared
+  // `missing | tuple<…>`, the type of a restricted point — is an indexed
+  // collection when it is present, so it stays symbolic too.
+  if (
+    isSubtype(
+      stripMissingFromType(resolveTypeAlias(xs.type.type)),
+      INDEXED_COLLECTION_SHAPE_TYPE
+    )
+  )
+    return undefined;
   return ce.error([
     'incompatible-type',
     'indexed_collection',
@@ -3693,7 +3695,6 @@ function concretePointArity(e: Expression): number | undefined {
 // is not a concrete point or list of points (a list of scalars element-indexes
 // like First/Second/Third, and proves nothing about a point arity).
 function runtimePointArity(xs: Expression): number | undefined {
-  xs = unrestricted(xs);
   const t = xs.type.type;
   if (
     (typeof t !== 'string' && t.kind === 'tuple') ||
@@ -3815,13 +3816,14 @@ function pointComponentOf(
   position: number,
   ce: ComputeEngine
 ): Expression {
-  // A restricted point (`(1, 2) {0 < t}`, the element of a restricted list
-  // of points whose condition is not decided yet) gives its coordinate,
-  // restricted: `1 {0 < t}`.
-  const restricted = restrictedComponent(e, ce, (body) =>
-    pointComponentOf(body, position, ce)
-  );
-  if (restricted) return restricted;
+  // A restricted point (`(1, 2) {0 < t}`, a cell of a list whose cells do
+  // not all have the same condition) gives its coordinate, restricted:
+  // `1 {0 < t}`. The accessor is applied to the cell, and the
+  // conditional-value lift moves the condition out (`isConditionalValue`).
+  if (isConditionalValue(e))
+    return ce
+      .function(POINT_ACCESSOR_BY_POSITION[position - 1], [e])
+      .evaluate();
   const component = e.at(position);
   if (component !== undefined) return component;
   if (e.isCollection) return absenceMarker(ce, e);
@@ -3872,17 +3874,6 @@ function pointComponentAt(
   numericApproximation = false,
   raw?: Expression
 ): Expression | undefined {
-  // A restricted point whose condition is not decided yet, such as
-  // `(1, 2) {0 < t}` with `t` free, stays a `When` after evaluation. Its
-  // coordinate is the coordinate of the point, restricted: `1 {0 < t}`.
-  // (A restricted LIST of points does not reach this: it evaluates to the
-  // list of its restricted points, which the broadcast below reads.)
-  const restricted = restrictedComponent(xs, ce, (body) =>
-    ce
-      .function(POINT_ACCESSOR_BY_POSITION[position - 1], [body])
-      .evaluate({ numericApproximation })
-  );
-  if (restricted !== null) return restricted;
   // A single point (tuple): the coordinate.
   const t = xs.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple')
@@ -8326,6 +8317,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // machinery (§3.B) now admits a `Missing`/`T | missing` base or index.
     missingBehavior: 'handle',
     missingStrip: 'all',
+    // A restricted COLLECTION `L {c}` whose condition is not decided moves
+    // out of the application: `At((1, 2) {0 < t}, 2)` is `2 {0 < t}`
+    // (`threadsConditionals`, see `types-definitions.ts`). The indices do
+    // not thread: an index list is a gather or a boolean mask, which `At`
+    // reads cell by cell itself.
+    threadsConditionals: [0],
     inferOperandTypes: elementRequirementOfAt,
     // An integer GATHER knows its own length without evaluating: the gather is
     // position-preserving (an out-of-range index contributes the absence
@@ -8713,20 +8710,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (isAbsentValue(expr))
           return chainAbsorbMarker(ce, expr.type.type, ops, index);
 
-        // A RESTRICTED value whose condition is not decided yet — the point
-        // `(1, 2) {0 < t}` with `t` free — stays a `When` after evaluation.
-        // The `When` operator has no elements of its own, so the dispatch
-        // below read every position of it as absent: `At((1, 2) {0 < t}, 2)`
-        // was `Missing`. The access is made in the body and the restriction
-        // moves to the result: `2 {0 < t}`. An error in the body is an error
-        // whatever the condition; an access that stays symbolic leaves `At`
-        // unevaluated.
-        const rest = ops.slice(index);
-        const restricted = restrictedComponent(expr, ce, (body) => {
-          const inner = ce.function('At', [body, ...rest]).evaluate();
-          return isFunction(inner, 'At') ? undefined : inner;
-        });
-        if (restricted !== null) return restricted;
+        // An INTERMEDIATE value that is a restriction whose condition is not
+        // decided yet — the row `[1, 2] {0 < t}` of `[[1, 2] {0 < t}, [3, 4]]`
+        // — has no elements of its own, and the dispatch below would read
+        // every position of it as absent. The remaining indices are applied
+        // to it as a new `At`, whose conditional-value lift moves the
+        // condition out: `At([[1, 2] {0 < t}, [3, 4]], 1, 2)` is `2 {0 < t}`.
+        // The base itself (`index === 1`) was already lifted before this
+        // handler ran (`threadsConditionals`), so a conditional base here
+        // is one the lift left in place, and is not applied again.
+        if (index > 1 && isConditionalValue(expr))
+          return ce.function('At', [expr, ...ops.slice(index)]).evaluate();
 
         const opAtIndex = ops[index];
 
@@ -9115,6 +9109,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
+    // A restricted collection `L {c}` whose condition is not decided moves
+    // out of the application: `First((1, 2) {0 < t})` is `1 {0 < t}`
+    // (`threadsConditionals`, see `types-definitions.ts`).
+    threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
         componentResultTypeD(presentArmOf(xs), 1),
@@ -9129,6 +9127,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
+    threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
         componentResultTypeD(presentArmOf(xs), 2),
@@ -9143,6 +9142,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
+    threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
         componentResultTypeD(presentArmOf(xs), 3),
@@ -9182,6 +9182,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
+    // A restricted point `P {c}` whose condition is not decided moves out of
+    // the application: `PointX((1, 2) {0 < t})` is `1 {0 < t}`
+    // (`threadsConditionals`, see `types-definitions.ts`).
+    threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
         pointComponentTypeD(xs, 1),
@@ -9203,6 +9207,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
+    threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
         pointComponentTypeD(xs, 2),
@@ -9224,6 +9229,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: collection<any> | tuple) -> any',
     missingBehavior: 'propagate',
+    threadsConditionals: true,
     // A point with no z-coordinate is a DIMENSION mismatch, not an absent
     // slot (item 138 clarified ask — see `pointArityError`). When the operand
     // type statically proves 2-D, report it here, at type-check time, so the
@@ -9265,6 +9271,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(xs: indexed_collection<any>) -> any',
     missingBehavior: 'handle',
+    threadsConditionals: true,
     type: ([xs], context) =>
       BoxedType.forResult(
         componentResultTypeD(presentArmOf(xs), -1),
