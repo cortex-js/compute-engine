@@ -30,6 +30,12 @@
 
 ### Bug Fixes
 
+- **A large double prints in exponent form at machine precision.** With
+  `precision: 'machine'`, `ce.box(1e300).toString()` printed the 301-digit
+  exact binary value of the double, and `1e23` printed as
+  `99999999999999991611392`; the default precision printed `1e+300` and
+  `1e+23`. The machine value now prints as JavaScript prints the double, so
+  the two precisions agree.
 - **The pole `ComplexInfinity` has one MathJSON spelling at every precision.**
   At machine precision (`ce.precision = 'machine'`), a complex number with an
   infinite imaginary part serialized as `["Complex", 1, "PositiveInfinity"]`,

@@ -253,34 +253,25 @@ export function numberToString(
   if (typeof fractionalDigits === 'number' && typeof num === 'number')
     return num.toFixed(fractionalDigits);
 
-  // Use scientific notation if the exponent is too large or too small
-  // Convert the number to a string
   const numStr = num.toString();
 
-  // Check if the number is in scientific notation
-  if (
-    typeof num === 'number' &&
-    Number.isInteger(num) &&
-    numStr.includes('e')
-  ) {
-    // Convert the number to a fixed notation string with no decimal places
-    // (note that Number.toFixed() will use scientific notations for large numbers)
-    const fixedStr = BigInt(num).toString();
+  // A double is printed as JavaScript prints it: the shortest digit string
+  // that reads back as the same double, with an exponent when the magnitude
+  // is at or beyond 1e21 or below 1e-6 (`1e+300`, `1.1805916207174113e+21`,
+  // `1e-7`). Expanding such a double to its full integer value
+  // (`BigInt(num).toString()`) would print the exact binary value of the
+  // double, `1000000000000000052504760255204420248704` for `1e300`, whose
+  // digits past the first 17 are not information the number holds. This
+  // keeps the machine-precision spelling the same as the big-decimal
+  // spelling (`1e+300`, `1e+23`).
+  if (typeof num === 'number') return numStr;
 
-    // Check the number of trailing zeros
-    const trailingZeros = fixedStr.match(/0+$/);
-    const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
+  // A bigint is exact, so every digit is information; a long run of trailing
+  // zeros is compacted to an exponent (`1e+30` for `10n ** 30n`).
+  const trailingZeros = numStr.match(/0+$/);
+  const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
+  if (trailingZerosCount > 5)
+    return `${numStr.slice(0, -trailingZerosCount)}e+${trailingZerosCount}`;
 
-    // If there are 5 or fewer trailing zeros, return the fixed notation string
-    if (trailingZerosCount <= 5) return fixedStr;
-  } else if (typeof num === 'bigint') {
-    const trailingZeros = numStr.match(/0+$/);
-    const trailingZerosCount = trailingZeros ? trailingZeros[0].length : 0;
-    // Add an 'e' exponent
-    if (trailingZerosCount > 5)
-      return `${numStr.slice(0, -trailingZerosCount)}e+${trailingZerosCount}`;
-  }
-
-  // If the number is not in scientific notation or doesn't meet the criteria, return the original string
   return numStr;
 }
