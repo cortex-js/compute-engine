@@ -1,6 +1,8 @@
 import {
   couldBeUnkeyedCollectionOperand,
   isFiniteIndexedCollection,
+  isPointListArgumentType,
+  isTupleWithListCoordinate,
   typeCouldBeCollection,
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
@@ -754,6 +756,44 @@ export function nonNumericOperandError(
   );
   if (bad === undefined) return undefined;
   return ce.typeError('number', bad.type, bad);
+}
+
+/**
+ * The error for an arithmetic operand that is a `Tuple` with a LIST
+ * coordinate, such as `Tuple(A, B)` with `A = [1, 2, 3]` and
+ * `B = [10, 20, 30]` (see `isTupleWithListCoordinate`). Returns `undefined`
+ * when no operand is such a tuple.
+ *
+ * Such a tuple is data, not a point. Before, `Tuple(1, 1) + Tuple(A, B)`
+ * combined the lists coordinate by coordinate and gave the tuple of lists
+ * `([2, 3, 4], [11, 21, 31])`, which is neither a point nor a list of points,
+ * so no consumer (a plot, a compiled function) could use it. A list of points
+ * is written `PointList(A, B)`, or `(A, B)` in LaTeX.
+ *
+ * The error is the operand-type error the arithmetic operators already use
+ * (`incompatible-type`, see `nonNumericOperandError`), wrapping the offending
+ * tuple. The expected type is a point with the same number of coordinates.
+ * The actual type is the type of the EVALUATED tuple, so the message reads,
+ * for example, "expected `tuple<number, number>`, got
+ * `tuple<vector<integer^3>, vector<integer^3>>`" for `A = [1, 2, 3]` and
+ * `B = [10, 20, 30]`.
+ *
+ * The arithmetic evaluate handlers (`Add`, `Multiply`, `Divide`, `Negate`,
+ * `Power`) and the component-wise tuple broadcast of `Power`, `Sqrt` and
+ * `Root` (`tupleBroadcastCells`) call this on their EVALUATED operands, so
+ * the check happens at evaluation and the canonical form is unchanged.
+ */
+export function listCoordinateTupleOperandError(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  const bad = ops.find((x) => isTupleWithListCoordinate(x));
+  if (bad === undefined || !isFunction(bad)) return undefined;
+  const expected: Type = {
+    kind: 'tuple',
+    elements: bad.ops.map(() => ({ type: 'number' })),
+  };
+  return ce.typeError(expected, bad.type, bad);
 }
 
 /**
@@ -1941,6 +1981,13 @@ export interface ValidateArgumentsInternals {
    * broadcast reports a mismatch per cell, with the broadcast context, at
    * evaluation. */
   checkNumericCollections?: boolean;
+  /** The callee is a USER function, whose application maps over a list of
+   * points at a parameter declared as a point (`tuple<real, real>`), see
+   * `isPointListArgumentType`. An argument typed as such a list is admitted
+   * at that parameter; the evaluation binds each point to the parameter and
+   * checks it there. Library operators leave this unset: a tuple parameter
+   * of theirs takes one tuple. */
+  mapsPointLists?: boolean;
 }
 
 export function validateArguments(
@@ -2353,6 +2400,15 @@ export function validateArguments(
       if (!checked.isValid) isValid = false;
       continue;
     }
+    // A list of points at a parameter declared as a point: the
+    // application maps over the points (`isPointListArgumentType`).
+    if (
+      internals?.mapsPointLists &&
+      isPointListArgumentType(op.type.type, param)
+    ) {
+      result.push(op);
+      continue;
+    }
     // D8 provisional admission (see `provisionalIdx`).
     if (provisionalIdx.has(idx)) {
       result.push(op);
@@ -2628,6 +2684,16 @@ export function validateArguments(
         : op;
       result.push(checked);
       if (!checked.isValid) isValid = false;
+      i += 1;
+      continue;
+    }
+    // A list of points at a parameter declared as a point, as at the
+    // required parameters above.
+    if (
+      internals?.mapsPointLists &&
+      isPointListArgumentType(op.type.type, param)
+    ) {
+      result.push(op);
       i += 1;
       continue;
     }

@@ -266,18 +266,49 @@ describe('A point with an undecided component type beside a list', () => {
         [12, 6],
       ],
     ],
-    [
-      'a list times a point with a list component',
-      ['Multiply', ['List', 1, 2, 3], ['Tuple', -6, ['List', 4, 5, 6]]],
-      [
-        [-6, [4, 5, 6]],
-        [-12, [8, 10, 12]],
-        [-18, [12, 15, 18]],
-      ],
-    ],
   ])('%s is a list of points on JavaScript', (_l, json, expected) => {
     expect(interpretedValue(json, 2)).toEqual(expected);
     expect(compiledValue(json, 2)).toEqual(expected);
+  });
+
+  // A point with a list component, `(−6, [4, 5, 6])`, is a LIST OF POINTS
+  // when written in LaTeX (user decision 2026-09-24: the Desmos reading,
+  // `PointList(−6, [4, 5, 6])`), so a list times it pairs point by point.
+  // The same value built in code as a MathJSON `Tuple` is data, and
+  // arithmetic over it is an `incompatible-type` error that the compiled
+  // targets decline (user decision 2026-09-25): before, both routes answered
+  // three "points" whose second coordinate was a list.
+  test('a list times a point with a list component', () => {
+    const latex = '[1,2,3]\\cdot(-6,[4,5,6])';
+    const expected = [
+      [-6, 4],
+      [-12, 10],
+      [-18, 18],
+    ];
+    const toJS = (e: ReturnType<typeof ce.box>): unknown =>
+      e.operator === 'List' || e.operator === 'Tuple' ? e.ops!.map(toJS) : e.re;
+    expect(toJS(new ComputeEngine().parse(latex).evaluate())).toEqual(expected);
+    const r = compile(new ComputeEngine().parse(latex), { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.run!({} as never)).toEqual(expected);
+
+    const tuple = [
+      'Multiply',
+      ['List', 1, 2, 3],
+      ['Tuple', -6, ['List', 4, 5, 6]],
+    ];
+    expect(
+      new ComputeEngine()
+        .box(tuple as never)
+        .evaluate()
+        .toString()
+    ).toMatch(/incompatible-type/);
+    expect(() =>
+      compile(new ComputeEngine().box(tuple as never), {
+        to: 'javascript',
+        fallback: false,
+      })
+    ).toThrow(/tuple with a list coordinate/);
   });
 
   test('the parsed product is a list of points', () => {

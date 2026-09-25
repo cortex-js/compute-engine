@@ -1258,12 +1258,14 @@ describe('POINT/TUPLE ARITHMETIC — component accessors on non-indexed collecti
 });
 
 /**
- * The Desmos point-list idiom now lives in an explicit `PointList` operator,
- * NOT in the `Tuple` evaluate handler. A plain `Tuple` is inert data: `(-6, n)`
- * with `n` a list stays a `Tuple` with a list component — it never transposes
- * into a `List` of points. The zip-to-shortest / scalars-broadcast / fail-closed
- * transpose is what `PointList(-6, n)` produces. Importers emit `PointList`;
- * default parsing of `(a, b)` never produces it.
+ * The Desmos point-list idiom lives in the `PointList` operator, NOT in the
+ * `Tuple` evaluate handler. A MathJSON `Tuple` is inert data:
+ * `["Tuple", -6, "n"]` with `n` a list stays a `Tuple` with a list component —
+ * it never transposes into a `List` of points. The zip-to-shortest /
+ * scalars-broadcast / fail-closed transpose is what `PointList(-6, n)`
+ * produces. Importers emit `PointList`, and the LaTeX parenthesized list
+ * `(-6, n)` with a list coordinate canonicalizes to it (user decision
+ * 2026-09-24).
  *
  * Two contracts are locked here:
  *   1. Plain tuples are data: they evaluate their operands but do not zip, and
@@ -1282,15 +1284,18 @@ describe('POINT/TUPLE ARITHMETIC — plain Tuple is data (no zip)', () => {
       ce.parse('\\frac{2}{20}\\cdot\\lbrack0\\ldots20\\rbrack - 1').evaluate()
     );
 
-  test('(a) (-6, n) evaluates to an INERT Tuple (list component intact)', () => {
+  test('(a) the LaTeX (-6, n) is the list of points, as PointList(-6, n) is', () => {
+    // The parenthesized LaTeX list with a list coordinate is read as a list
+    // of points (user decision 2026-09-24): `(-6, n)` canonicalizes to
+    // `PointList(-6, n)`, 21 points. The MathJSON `Tuple` below stays data.
     const ce = new ComputeEngine();
     declN(ce);
-    const r = ce.parse('(-6, n)').evaluate();
-    expect(r.operator).toBe('Tuple');
-    expect(r.op1.json).toEqual(-6);
-    // The list component is preserved, not transposed away.
-    expect(r.op2.operator).toBe('List');
-    expect(r.op2.count).toBe(21);
+    const e = ce.parse('(-6, n)');
+    expect(e.operator).toBe('PointList');
+    const r = e.evaluate();
+    expect(r.operator).toBe('List');
+    expect(r.count).toBe(21);
+    expect(r.at(1)!.json).toEqual(['Tuple', -6, -1]);
   });
 
   test('(a) explicit Tuple(-6, [1,2,3]) stays an inert Tuple', () => {
@@ -1310,22 +1315,25 @@ describe('POINT/TUPLE ARITHMETIC — plain Tuple is data (no zip)', () => {
     expect(JSON.stringify(r.json).includes('Error')).toBe(false);
   });
 
-  test('(b) 2·(1, 0.3n) with n a list scales component-wise, no zip, no error', () => {
+  test('(b) 2·Tuple(1, 0.3n) with n a list is an error; 2·(1, 0.3n) in LaTeX scales the points', () => {
+    // A MathJSON `Tuple` with a list coordinate is data, not a point, and
+    // arithmetic over it is an `incompatible-type` error (user decision
+    // 2026-09-25): the old answer, the tuple `(2, [0.6·n…])` of a number and
+    // a list, was neither a point nor a list of points. The LaTeX spelling is
+    // the list of points, which scales point by point.
     const ce = new ComputeEngine();
     declN(ce);
     const r = ce
       .box(['Multiply', 2, ['Tuple', 1, ['Multiply', 0.3, 'n']]])
       .evaluate();
-    // Component-wise: the tuple stays a tuple, the scalar distributes into the
-    // list component (`(2, 0.6n)`) — never transposes into a List of points.
-    expect(r.operator).toBe('Tuple');
-    expect(r.op1.isSame(2)).toBe(true);
-    expect(r.op2.operator).toBe('List');
-    expect(r.op2.count).toBe(21);
-    expect(r.op2.at(1)!.re).toBeCloseTo(-0.6, 12); // 0.6·(-1)
-    expect(r.op2.at(21)!.re).toBeCloseTo(0.6, 12); // 0.6·1
-    // No baked Error anywhere.
-    expect(JSON.stringify(r.json).includes('Error')).toBe(false);
+    expect(r.operator).toBe('Error');
+    expect(errorCode(r)).toBe('incompatible-type');
+
+    const points = [...ce.parse('2\\cdot(1, 0.3n)').evaluate().each()];
+    expect(points.length).toBe(21);
+    expect(points[0].op1.re).toBe(2);
+    expect(points[0].op2.re).toBeCloseTo(-0.6, 12); // 0.6·(-1)
+    expect(points[20].op2.re).toBeCloseTo(0.6, 12); // 0.6·1
   });
 
   test('(b′) point-list + point broadcasts the point over the list', () => {
@@ -1770,9 +1778,11 @@ describe('POINT/TUPLE ARITHMETIC — could-be-numeric elements match the validat
     expect(p.operator).toBe('Multiply');
     // Phase C representation unification: literal lists type honestly
     // (list<finite_…^dims>). The float factor folds INTO the cells, so the
-    // component is a vector of REALS — the value is `[0.6, 1.2, 1.8]`, which
-    // the previous `integer` cell claim did not admit (Tycho item 194).
-    expect(p.type.toString()).toBe('tuple<integer, vector<real^3>>');
+    // coordinate is a REAL — the value is `[0.6, 1.2, 1.8]`, which the
+    // previous `integer` cell claim did not admit (Tycho item 194). The LaTeX
+    // `(1, 0.3m)` with the list coordinate is a list of three points (user
+    // decision 2026-09-24), so the product is a list of three scaled points.
+    expect(p.type.toString()).toBe('list<tuple<integer, real>^3>');
   });
 
   test('provably non-numeric component: tuple<number, list<string>> symbol still groups as Tuple', () => {
@@ -2212,54 +2222,63 @@ describe('POINT/TUPLE ARITHMETIC — zipped point-list quotient folds its elemen
   });
 });
 
-describe('POINT/TUPLE ARITHMETIC — a zipped point-list negates component-wise', () => {
+describe('POINT/TUPLE ARITHMETIC — a point list negates point by point', () => {
   /**
-   * A "zipped" point list is a tuple whose components are lists of
-   * coordinates — `([1,2], [3,4])` holds the points (1,3) and (2,4). Scaling
-   * such a tuple by a scalar has always distributed over its components, but
-   * negation used to gate on every element TYPE being a subtype of `number`,
-   * which a list component fails. `-P` therefore stayed an inert `Negate`, and
-   * because the `Add` fold cancels terms only after the negation distributes,
-   * `P - P` never reduced either. Both now count tuple-ness structurally.
+   * `([1,2], [3,4])` in LaTeX is the list of points (1,3) and (2,4): it
+   * canonicalizes to `PointList([1,2], [3,4])` (user decision 2026-09-24).
+   * Negation, `P - P` and the linear interpolation `(1-t)P - tP` (the
+   * production symptom of Tycho integration item 229) work point by point.
    *
-   * Reported as Tycho integration item 229 (the interpreted half); the
-   * production symptom was the linear interpolation `(1-t)P - tP`.
+   * The same value built as a MathJSON `Tuple` is data, not a point, and
+   * arithmetic over it is an `incompatible-type` error (user decision
+   * 2026-09-25). It used to negate its list coordinates and give a tuple of
+   * lists that no consumer could use.
    */
-  const zippedPointList = (ce: ComputeEngine) =>
+  const pointList = (ce: ComputeEngine) => ce.parse('([1,2], [3,4])');
+  const dataTuple = (ce: ComputeEngine) =>
     ce.box(['Tuple', ['List', 1, 2], ['List', 3, 4]]);
 
-  test('−P distributes over the list components', () => {
+  test('−P negates every point', () => {
     const ce = new ComputeEngine();
-    ce.assign('P', zippedPointList(ce));
-    const r = ce.parse('-P').evaluate();
-    expect(r.operator).toBe('Tuple');
-    expect(r.toString()).toBe('([-1,-2], [-3,-4])');
-
-    // Same answer from the explicit `Negate`, and from the scalar product it
-    // canonicalizes from (`Multiply(-1, P)`), which already worked.
+    ce.assign('P', pointList(ce));
+    expect(ce.parse('-P').evaluate().toString()).toBe('[(-1, -3),(-2, -4)]');
     expect(ce.box(['Negate', 'P']).evaluate().toString()).toBe(
-      '([-1,-2], [-3,-4])'
+      '[(-1, -3),(-2, -4)]'
     );
     expect(ce.box(['Multiply', -1, 'P']).evaluate().toString()).toBe(
-      '([-1,-2], [-3,-4])'
+      '[(-1, -3),(-2, -4)]'
     );
   });
 
-  test('P − P and P + (−P) cancel to zero components', () => {
+  test('P − P and P + (−P) cancel to zero points', () => {
     const ce = new ComputeEngine();
-    ce.assign('P', zippedPointList(ce));
-    expect(ce.parse('P - P').evaluate().toString()).toBe('([0,0], [0,0])');
-    expect(ce.parse('P + (-P)').evaluate().toString()).toBe('([0,0], [0,0])');
-    expect(ce.parse('-(-P)').evaluate().toString()).toBe('([1,2], [3,4])');
+    ce.assign('P', pointList(ce));
+    expect(ce.parse('P - P').evaluate().toString()).toBe('[(0, 0),(0, 0)]');
+    expect(ce.parse('P + (-P)').evaluate().toString()).toBe('[(0, 0),(0, 0)]');
+    expect(ce.parse('-(-P)').evaluate().toString()).toBe('[(1, 3),(2, 4)]');
   });
 
   test('the interpolation (1−t)P − tP vanishes at t = 0.5', () => {
     const ce = new ComputeEngine();
-    ce.assign('P', zippedPointList(ce));
-    // (1 − 0.5)·P − 0.5·P = 0 for every component, on both routes.
+    ce.assign('P', pointList(ce));
     const expr = ce.parse('(1-t)P - tP').subs({ t: 0.5 });
-    expect(expr.evaluate().toString()).toBe('([0,0], [0,0])');
-    expect(expr.N().toString()).toBe('([0,0], [0,0])');
+    expect(expr.evaluate().toString()).toBe('[(0, 0),(0, 0)]');
+    expect(expr.N().toString()).toBe('[(0, 0),(0, 0)]');
+  });
+
+  test('negating a MathJSON Tuple with list coordinates is an error', () => {
+    const ce = new ComputeEngine();
+    ce.assign('P', dataTuple(ce));
+    for (const r of [
+      ce.parse('-P').evaluate(),
+      ce.box(['Negate', 'P']).evaluate(),
+      ce.box(['Multiply', -1, 'P']).evaluate(),
+      ce.parse('P - P').evaluate(),
+      ce.parse('(1-t)P - tP').subs({ t: 0.5 }).N(),
+    ]) {
+      expect(r.operator).toBe('Error');
+      expect(errorCode(r)).toBe('incompatible-type');
+    }
   });
 
   test('a nested point negates component-wise, as the product does', () => {
@@ -2273,22 +2292,21 @@ describe('POINT/TUPLE ARITHMETIC — a zipped point-list negates component-wise'
     );
   });
 
-  test('a component that cannot distribute stays inert instead of recursing', () => {
+  test('a Range coordinate with a symbolic bound is a list coordinate: an error, no recursion', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    // `Range(1, n)` has a symbolic bound, so its negation cannot be computed
-    // now. The component-wise negation must leave that component as the engine
-    // renders an undistributed negation (a lazy `Map`) rather than re-entering
-    // the `Negate` handler with the same operand.
-    const r = ce.box(['Negate', ['Tuple', 1, ['Range', 1, 'n']]]).evaluate();
-    expect(r.operator).toBe('Tuple');
-    expect(r.op1.toString()).toBe('-1');
-    expect(r.toString()).toBe(
-      ce
-        .box(['Multiply', -1, ['Tuple', 1, ['Range', 1, 'n']]])
-        .evaluate()
-        .toString()
-    );
+    // `Range(1, n)` is a list of integers whose length is not known yet. A
+    // tuple holding it is data, so its negation is the `incompatible-type`
+    // error, from the explicit `Negate` and from the scalar product alike
+    // (it used to negate component-wise, which had to avoid re-entering the
+    // `Negate` handler with the same operand).
+    for (const r of [
+      ce.box(['Negate', ['Tuple', 1, ['Range', 1, 'n']]]).evaluate(),
+      ce.box(['Multiply', -1, ['Tuple', 1, ['Range', 1, 'n']]]).evaluate(),
+    ]) {
+      expect(r.operator).toBe('Error');
+      expect(errorCode(r)).toBe('incompatible-type');
+    }
   });
 
   test('a tuple-typed SYMBOL with no accessible components stays symbolic', () => {
@@ -2301,75 +2319,46 @@ describe('POINT/TUPLE ARITHMETIC — a zipped point-list negates component-wise'
   });
 });
 
-describe('POINT/TUPLE ARITHMETIC — a zipped point-list divides component-wise', () => {
+describe('POINT/TUPLE ARITHMETIC — a MathJSON Tuple with list coordinates does not divide', () => {
   /**
-   * The quotient twin of the negation block above. `Divide` gated its
-   * `tuple / scalar` scaling arm on every element TYPE being a subtype of
-   * `number`, so a "zipped" point list — a tuple whose components are lists of
-   * coordinates, such as `([1,2], [3,4])` — fell through to the generic
-   * rational rules. Two things went wrong there: `P / 0` collapsed to a bare
-   * scalar `~oo` instead of dividing each component, and `P / s` with a
-   * declared scalar symbol stayed an inert `Divide` that never folded, while
-   * the algebraically identical `s^{-1}·P` scaled component-wise.
-   *
-   * Reported as Tycho integration item 229; the same predicate asymmetry the
-   * negation block fixes, one operator over.
+   * `Tuple([1,2], [3,4])` built as MathJSON is data, not a point (the LaTeX
+   * `([1,2], [3,4])` is the point list `PointList([1,2], [3,4])`). Dividing
+   * it by a scalar is an `incompatible-type` error (user decision
+   * 2026-09-25); it used to divide each list coordinate (Tycho integration
+   * item 229) and give a tuple of lists that no consumer could use.
    */
   const zippedPointList = (ce: ComputeEngine) =>
     ce.box(['Tuple', ['List', 1, 2], ['List', 3, 4]]);
 
-  test('P/2 folds, and agrees with the scalar product 0.5·P', () => {
-    const ce = new ComputeEngine();
-    ce.assign('P', zippedPointList(ce));
-    const q = ce.parse('\\frac{P}{2}').evaluate();
-    expect(q.operator).toBe('Tuple');
-    expect(q.toString()).toBe('([1/2,1], [3/2,2])');
-
-    // The quotient and the product reach the same value on the float route.
-    expect(ce.parse('\\frac{P}{2}').N().toString()).toBe('([0.5,1], [1.5,2])');
-    expect(ce.box(['Multiply', 0.5, 'P']).evaluate().toString()).toBe(
-      '([0.5,1], [1.5,2])'
-    );
-  });
-
-  test('a symbolic scalar divisor folds into the components', () => {
+  test('P/2, 0.5·P, P/s and P/0 are errors; the point list divides point by point', () => {
     const ce = new ComputeEngine();
     ce.declare('s', 'number');
-    const q = ce.box(['Divide', zippedPointList(ce), 's']).evaluate();
-    expect(q.operator).toBe('Tuple');
-    expect(q.toString()).toBe('([1 / s,2 / s], [3 / s,4 / s])');
-  });
-
-  test('a zero divisor answers as the numeric-tuple form does', () => {
-    const ce = new ComputeEngine();
-    // Each COMPONENT is divided before the scalar `a/0` rule applies to it, so
-    // the point shape survives at the tuple level exactly as it does for a
-    // tuple of numbers. A list component divided by zero broadcasts to a list
-    // of `~oo` — the scalar `a/0` shortcut exempts shape-carrying numerators
-    // (see the collection-numerator suite in this file), so the coordinate
-    // lists keep their shape too.
-    expect(
-      ce
-        .box(['Divide', zippedPointList(ce), 0])
-        .evaluate()
-        .toString()
-    ).toBe('([~oo,~oo], [~oo,~oo])');
+    ce.assign('P', zippedPointList(ce));
+    for (const r of [
+      ce.parse('\\frac{P}{2}').evaluate(),
+      ce.parse('\\frac{P}{2}').N(),
+      ce.box(['Multiply', 0.5, 'P']).evaluate(),
+      ce.box(['Divide', zippedPointList(ce), 's']).evaluate(),
+      ce.box(['Divide', zippedPointList(ce), 0]).evaluate(),
+      ce.box(['Divide', zippedPointList(ce), -1]).evaluate(),
+    ]) {
+      expect(r.operator).toBe('Error');
+      expect(errorCode(r)).toBe('incompatible-type');
+    }
+    // A tuple of numbers still divides component-wise.
     expect(ce.box(['Divide', ['Tuple', 1, 2], 0]).evaluate().toString()).toBe(
       '(~oo, ~oo)'
     );
-    // A NaN divisor stays a scalar NaN, as it does for a tuple of numbers.
-    expect(
-      ce
-        .box(['Divide', zippedPointList(ce), NaN])
-        .evaluate()
-        .toString()
-    ).toBe('NaN');
+    ce.assign('Q', ce.parse('([1,2], [3,4])'));
+    expect(ce.parse('\\frac{Q}{2}').evaluate().toString()).toBe(
+      '[(1/2, 3/2),(1, 2)]'
+    );
   });
 
-  test('the trivial divisors ±1 keep their existing answers', () => {
+  test('the trivial divisor 1 and a NaN divisor keep their answers', () => {
     const ce = new ComputeEngine();
-    // `Divide(tuple, 1)` must collapse to the tuple: an inert quotient here
-    // sends the pretty-JSON serializer into infinite recursion.
+    // `Divide(tuple, 1)` collapses to the tuple at canonicalization (no
+    // arithmetic is left to report), and a NaN divisor is a scalar NaN.
     expect(
       ce
         .box(['Divide', zippedPointList(ce), 1])
@@ -2378,10 +2367,10 @@ describe('POINT/TUPLE ARITHMETIC — a zipped point-list divides component-wise'
     ).toBe('([1,2], [3,4])');
     expect(
       ce
-        .box(['Divide', zippedPointList(ce), -1])
+        .box(['Divide', zippedPointList(ce), NaN])
         .evaluate()
         .toString()
-    ).toBe('([-1,-2], [-3,-4])');
+    ).toBe('NaN');
   });
 
   test('dividing BY a zipped point list is still refused', () => {
@@ -2418,22 +2407,20 @@ describe('POINT/TUPLE ARITHMETIC — a zipped point-list divides component-wise'
     );
   });
 
-  test('a component that cannot fold stays inert instead of recursing', () => {
+  test('a Range coordinate with a symbolic bound is a list coordinate: an error, no recursion', () => {
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    // `Range(1, n)` has a symbolic bound, so the component quotient cannot be
-    // computed now. The tuple arm must leave it in whatever form the engine
-    // gives an undistributed scale (a lazy `Map`) rather than looping.
+    // `Range(1, n)` is a list of integers whose length is not known yet, so
+    // the tuple is data and its quotient is the `incompatible-type` error, as
+    // its product with 1/2 is.
     const component = ['Tuple', 1, ['Range', 1, 'n']];
-    const q = ce.box(['Divide', component, 2]).evaluate();
-    expect(q.operator).toBe('Tuple');
-    expect(q.op1.toString()).toBe('1/2');
-    expect(q.toString()).toBe(
-      ce
-        .box(['Multiply', ['Rational', 1, 2], component])
-        .evaluate()
-        .toString()
-    );
+    for (const r of [
+      ce.box(['Divide', component, 2]).evaluate(),
+      ce.box(['Multiply', ['Rational', 1, 2], component]).evaluate(),
+    ]) {
+      expect(r.operator).toBe('Error');
+      expect(errorCode(r)).toBe('incompatible-type');
+    }
   });
 
   test('a tuple-typed SYMBOL with no accessible components stays symbolic', () => {

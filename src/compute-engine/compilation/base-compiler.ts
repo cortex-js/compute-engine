@@ -54,6 +54,9 @@ import {
   isTextAtom,
   isTuple,
   isTupleShapedType,
+  isTupleWithListCoordinate,
+  isPointListArgumentType,
+  isPointParameterType,
 } from '../collection-utils.js';
 import {
   collectionElementType,
@@ -1759,6 +1762,20 @@ const UNREADABLE_OPERAND: object = new Proxy(Object.create(null), {
   },
 });
 
+/**
+ * Whether the tuple type `t` declares a coordinate `broadcastable<…>`, which
+ * admits a list at that coordinate (`tuple<broadcastable<number>,
+ * broadcastable<number>>`).
+ */
+function hasBroadcastableCoordinate(t: Type): boolean {
+  if (typeof t === 'string') return false;
+  if (t.kind === 'union') return t.types.some(hasBroadcastableCoordinate);
+  if (t.kind !== 'tuple') return false;
+  return t.elements.some(
+    (e) => typeof e.type !== 'string' && e.type.kind === 'broadcastable'
+  );
+}
+
 export class BaseCompiler {
   /**
    * Precedence used when compiling a folded symbol value. Higher than any
@@ -1826,6 +1843,17 @@ export class BaseCompiler {
    */
   private static readonly WORD_KEYWORD_OPERATORS: ReadonlySet<string> = new Set(
     ['And', 'Or', 'Not']
+  );
+
+  /**
+   * The arithmetic heads that fail closed over a `Tuple` with a list
+   * coordinate (see the check in `compileExpr`). They are the heads whose
+   * evaluate handlers, or whose component-wise tuple broadcast
+   * (`tupleBroadcastCells`: `Power`, `Sqrt`, `Root`), report
+   * `listCoordinateTupleOperandError`.
+   */
+  private static readonly TUPLE_ARITHMETIC_HEADS: ReadonlySet<string> = new Set(
+    ['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power', 'Sqrt', 'Root']
   );
 
   /**
@@ -7328,6 +7356,23 @@ export class BaseCompiler {
       }
     }
 
+    // Arithmetic over a `Tuple` with a LIST coordinate (`Tuple(A, B)` with
+    // `A`, `B` declared lists, built as MathJSON) fails closed. Such a tuple
+    // is data, not a point, and the interpreter answers an
+    // `incompatible-type` error for it (`listCoordinateTupleOperandError`).
+    // Without this decline the broadcast lowering combined the lists
+    // coordinate by coordinate and returned a pair of arrays that is neither
+    // a point nor a list of points. A list of points is `PointList(A, B)`,
+    // which is what the LaTeX `(A, B)` canonicalizes to.
+    if (
+      BaseCompiler.TUPLE_ARITHMETIC_HEADS.has(h) &&
+      args.some((x) => isTupleWithListCoordinate(x))
+    )
+      throw new Error(
+        `Could not compile \`${h}\`: an operand is a tuple with a list coordinate, ` +
+          `which is not a point. Write \`PointList(…)\` for a list of points.`
+      );
+
     // |(x,y)| over a fixed-arity point is the Euclidean norm (`Abs(Tuple)`
     // routes to `Norm` at evaluation). A point binds ATOMICALLY — it must
     // never be broadcast into component-wise `abs`, so this rewrite sits
@@ -11073,9 +11118,12 @@ export class BaseCompiler {
     if (h === 'Multiply') {
       // A POINT operand is read by the COULD-form (`couldBeNumericTuple`):
       // a tuple whose component types are only possibly numeric is a point
-      // too. `PointList(t, 1)` with `t` free types `tuple<unknown, integer>`,
-      // and `(-6, [4, 5, 6])` types `tuple<integer, vector<integer^3>>`.
-      // The strict `isNumericTuple` rejects both, so the point was not kept
+      // too. `PointList(t, 1)` with `t` free types `tuple<unknown, integer>`.
+      // (A tuple with a LIST coordinate never reaches this route: the LaTeX
+      // `(-6, [4, 5, 6])` is a `PointList` of three points, and a code-built
+      // `Tuple` with a list coordinate is declined before the lowerings run,
+      // see `isTupleWithListCoordinate` in `compileExpr`.)
+      // The strict `isNumericTuple` rejects it, so the point was not kept
       // atomic and the flat `_SYS.bcast` zipped its components against the
       // list: `[1, 2, 3]·PointList(t, 1)` ran to `NaN` where the
       // interpreter answers `[(t, 1), (2t, 2), (3t, 3)]`.
@@ -20891,6 +20939,18 @@ export class BaseCompiler {
      * compiles as the ordinary call. */
     node?: Expression
   ): TargetSource | undefined {
+    // A list of points at a parameter declared as a point maps over the
+    // points, as the interpreter does (`pointListParamSlots`).
+    const pointList = BaseCompiler.tryCompilePointListCall(
+      engine,
+      h,
+      args,
+      target
+    );
+    if (pointList !== undefined) return pointList;
+    BaseCompiler.checkListCoordinateTupleArgs(engine, h, args);
+    BaseCompiler.checkPointListAtMatrixUnionArgs(engine, h, args);
+
     // Fail closed BEFORE emission: whether the callee can be emitted at
     // all is irrelevant to whether an emitted call would be sound, and the
     // caller's generic "no lowering" message hides the real reason.
@@ -21177,6 +21237,274 @@ export class BaseCompiler {
       paramsAreScalar,
       generic
     );
+  }
+
+  /**
+   * Compile a call of user function `h` in which an argument is a LIST OF
+   * POINTS at a parameter declared as a point (`tuple<real, real>`, see
+   * `isPointListArgumentType`). The interpreter maps such a call over the
+   * points and answers the list of the function's values at each point (user
+   * decision 2026-09-25, `pointListParamSlots`); the compiled call does the
+   * same. Returns `undefined` when no argument is such a list.
+   *
+   * On JavaScript a list of points is an array of `[x, y]` arrays, so the
+   * call is `list.map((p) => _fn_h(p, …))`, with every other argument
+   * evaluated once, before the map, and passed whole. The emitted definition
+   * receives one point at a time, which is what it is compiled for.
+   *
+   * Every other target fails closed: on the shader targets (GLSL, WGSL) a
+   * list of points is not a value, and the interval target has no lowering
+   * for a call that maps over points. The call also fails closed when more
+   * than one argument is a list of points (the interpreter pairs the lists
+   * and reports a length mismatch, which this lowering does not reproduce),
+   * or when another argument is bound to a complex-typed parameter (that
+   * argument would need the `{ re, im }` coercion of the ordinary call).
+   *
+   * A parameter with NO declared type (`unknown`, `any` or `value`: the
+   * function has no signature, or declares `(unknown) -> number`) is mapped
+   * too, when its argument is typed as a list of points
+   * (`list<tuple<real, real>>`, see `untypedPointListElement`). The
+   * interpreter broadcasts a list at such a parameter element by element, and
+   * each element is one point. The generic definition cannot be used there:
+   * its body was compiled with the parameter a scalar. The map calls the
+   * call-shape specialization of the function for ONE point instead
+   * (`ensureSpecializedUserCallEmitted`, the same definition the call
+   * `k((1, 3))` uses), with the parameter typed as the list's element type.
+   */
+  private static tryCompilePointListCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const params = args.map((_a, i) =>
+      BaseCompiler.userFunctionParamType(engine, h, i)
+    );
+    const mapped = args.map((a, i) => {
+      const pt = params[i];
+      return (
+        pt !== undefined &&
+        !isTuple(a) &&
+        isPointListArgumentType(a.type.type, pt)
+      );
+    });
+    let at = mapped.indexOf(true);
+    // The type of one point of the list, when the list is at a parameter
+    // with no declared type.
+    let untypedElement: Type | undefined;
+    if (at < 0) {
+      at = args.findIndex(
+        (a, i) =>
+          BaseCompiler.untypedPointListElement(engine, h, a, params[i]) !==
+          undefined
+      );
+      if (at < 0) return undefined;
+      // Only the plain form is handled: every other argument is a scalar.
+      // Other calls keep their ordinary route (another list argument is
+      // paired with this one by the interpreter's broadcast).
+      if (args.some((a, i) => i !== at && !BaseCompiler.provablyScalarArg(a)))
+        return undefined;
+      untypedElement = BaseCompiler.untypedPointListElement(
+        engine,
+        h,
+        args[at],
+        params[at]
+      );
+    }
+    const reason =
+      `Could not compile a call of \`${h}\`: argument ${at + 1} is a list ` +
+      `of points at a parameter ` +
+      (untypedElement === undefined
+        ? `declared as a point`
+        : `with no declared type`) +
+      `, and the call maps over the points.`;
+    if (target.language !== 'javascript' || target.userFunctions?.lowering)
+      throw new Error(
+        `${reason} A list of points is not a value the ` +
+          `'${target.language ?? 'unknown'}' target can map a function over.`
+      );
+    if (untypedElement === undefined && mapped.lastIndexOf(true) !== at)
+      throw new Error(
+        `${reason} More than one argument is a list of points, and the ` +
+          `compiled call maps over one list only.`
+      );
+    if (
+      params.some(
+        (pt, i) => i !== at && pt !== undefined && isNonRealNumber(pt)
+      )
+    )
+      throw new Error(
+        `${reason} Another argument is bound to a complex-typed parameter, ` +
+          `which the compiled map does not convert.`
+      );
+    let name: string | undefined;
+    if (untypedElement === undefined)
+      name = BaseCompiler.ensureUserFunctionEmitted(engine, h, target);
+    else {
+      // The specialization is chosen from the argument shapes of one call:
+      // the list argument is replaced by its first point, ascribed the
+      // list's element type (`At` alone is typed `missing | tuple<…>`). The
+      // replacement is only read for its type and shape, never compiled.
+      const literal = BaseCompiler.userFunctionLiteral(engine, h);
+      const onePoint = engine.function('Typed', [
+        engine.function('At', [args[at], engine.number(1)]),
+        engine.box({ str: typeToString(untypedElement) }),
+      ]);
+      const emitted =
+        literal === undefined || !isTupleShapedType(onePoint.type.type)
+          ? undefined
+          : BaseCompiler.ensureSpecializedUserCallEmitted(
+              engine,
+              h,
+              literal,
+              args.map((a, i) => (i === at ? onePoint : a)),
+              target
+            );
+      if (emitted === undefined)
+        throw new Error(
+          `${reason} No definition of \`${h}\` for one point of type ` +
+            `\`${typeToString(untypedElement)}\` could be compiled.`
+        );
+      name = emitted.name;
+    }
+    if (name === undefined) return undefined;
+    const codes = args.map((a) => BaseCompiler.compileValueOperand(a, target));
+    const temps = args.map(() => BaseCompiler.tempVar(target));
+    const point = BaseCompiler.tempVar(target);
+    const callArgs = temps.map((t, i) => (i === at ? point : t));
+    // A list that may be absent (`(A, B)\{0 < t\}`), or whose points may be
+    // absent (`[(3, 4)\{0 < t\}, (6, 8)]`): `Missing` lowers to
+    // `undefined`, and the interpreter answers `Missing` for an absent list
+    // and for the cell of an absent point, so the map does the same.
+    const absent = typeContainsMissing(args[at].type.type);
+    const listGuard = absent ? `${temps[at]} === undefined ? undefined : ` : '';
+    const pointGuard = absent ? `${point} === undefined ? undefined : ` : '';
+    return (
+      `((${temps.join(', ')}) => ${listGuard}${temps[at]}.map((${point}) => ` +
+      `${pointGuard}${name}(${callArgs.join(', ')})))(${codes.join(', ')})`
+    );
+  }
+
+  /**
+   * The type of one point of argument `a` of a call of user function `h`,
+   * when `a` is a LIST OF POINTS at a parameter with no declared type
+   * (`param` is `unknown`, `any` or `value`), and the interpreter maps the
+   * call over the points. Otherwise `undefined`.
+   *
+   * `a` is a list of points when it is not a tuple and its type is an
+   * indexed collection whose element type is a tuple type
+   * (`list<tuple<real, real>>`, the type of `PointList(x, y)`). The
+   * interpreter maps such an argument only when it broadcasts the call, that
+   * is when every parameter of `h` is a scalar or has no type
+   * (`userFunctionParamsAreScalar`); otherwise it binds the list whole.
+   */
+  private static untypedPointListElement(
+    engine: ComputeEngine,
+    h: string,
+    a: Expression,
+    param: Type | undefined
+  ): Type | undefined {
+    if (param !== 'unknown' && param !== 'any' && param !== 'value')
+      return undefined;
+    if (isTuple(a)) return undefined;
+    const t = resolveTypeForCompilation(a.type.type);
+    if (typeof t === 'string' || t.kind === 'tuple') return undefined;
+    const element = collectionElementType(t);
+    if (element === undefined || !isPointParameterType(element))
+      return undefined;
+    if (!isPointListArgumentType(t, element)) return undefined;
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return undefined;
+    return element;
+  }
+
+  /**
+   * Fail closed for a call of user function `h` with an argument typed as a
+   * LIST OF POINTS (`list<tuple<real, real>>`, such as `PointList(x, y)`) at
+   * a parameter whose type is a union that admits both a list of points and
+   * a MATRIX. `k := P ↦ Dot(P, P)` has such a parameter: its inferred type
+   * is `list<tuple> | matrix | tuple | vector`.
+   *
+   * The interpreter binds the list whole (the parameter is not a point, so
+   * the call is not mapped over the points), and the body reads its value:
+   * `Dot` of a list of points pairs the points, `[10, 13]` for the points
+   * `(1, 3), (2, 3)`. The compiled definition is compiled once for the
+   * whole union, and on JavaScript a list of points and a matrix are both
+   * arrays of arrays, so its body cannot tell them apart at run time: `Dot`
+   * lowered to the matrix product and answered `[[7, 12], [8, 15]]`. The
+   * call is declined rather than compiled to a different value.
+   */
+  private static checkPointListAtMatrixUnionArgs(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    const isListOfPoints = (t: Type): boolean => {
+      const stripped = stripMissingFromType(t);
+      const r = resolveTypeForCompilation(stripped);
+      if (typeof r === 'string' || r.kind === 'tuple' || r.kind === 'union')
+        return false;
+      if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+      const e = collectionElementType(r);
+      if (e === undefined) return false;
+      const re = resolveTypeForCompilation(e);
+      return re === 'tuple' || (typeof re !== 'string' && re.kind === 'tuple');
+    };
+    args.forEach((a, i) => {
+      if (isTuple(a) || !isListOfPoints(a.type.type)) return;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      if (pt === undefined) return;
+      const r = resolveTypeForCompilation(pt);
+      if (typeof r === 'string' || r.kind !== 'union') return;
+      if (!r.types.some((arm) => isSubtype(arm, 'matrix'))) return;
+      if (!r.types.some(isListOfPoints)) return;
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${i + 1} is a list ` +
+          `of points at a parameter of type \`${typeToString(pt)}\`, which ` +
+          `also admits a matrix. The compiled definition cannot tell a list ` +
+          `of points from a matrix at run time.`
+      );
+    });
+  }
+
+  /**
+   * Fail closed for a call of user function `h` with an argument that is a
+   * `Tuple` with a LIST coordinate (`isTupleWithListCoordinate`), such as the
+   * MathJSON `["Tuple", "x", "y"]` with `x` a declared list. Such a tuple is
+   * data, not a point and not a list of points (the LaTeX `(x, y)` is a
+   * `PointList`), and the interpreter answers an `incompatible-type` error
+   * for it: at the call when the parameter is declared as a point it does
+   * not conform to, or in the body's arithmetic otherwise. The emitted
+   * definition cannot see either: it read the nested array as a point
+   * (`tuple<real, real>`: one number, where the interpreter errors) or
+   * dispatched on its shape at run time (one value per element).
+   *
+   * The call is accepted when the parameter is declared with a type the
+   * tuple conforms to and whose coordinates are not `broadcastable`, such as
+   * `tuple<list<real>, real>`: that declaration asks for the data tuple, and
+   * the definition is compiled for it.
+   */
+  private static checkListCoordinateTupleArgs(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    args.forEach((a, i) => {
+      if (!isTupleWithListCoordinate(a)) return;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      if (
+        pt !== undefined &&
+        pt !== 'unknown' &&
+        pt !== 'any' &&
+        isSubtype(a.type.type, pt) &&
+        !hasBroadcastableCoordinate(pt)
+      )
+        return;
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${i + 1} is a tuple ` +
+          `with a list coordinate, which is not a point. Write ` +
+          `\`PointList(…)\` for a list of points.`
+      );
+    });
   }
 
   /**

@@ -2,6 +2,43 @@
 
 ### Behavior Changes
 
+- **A parenthesized LaTeX list with a list coordinate is a list of points** (the
+  Desmos reading). `(A, B)` with `A = [1, 2, 3]` and `B = [10, 20, 30]`
+  canonicalizes to `PointList(A, B)` and evaluates to
+  `[(1, 10), (2, 20), (3, 30)]`, typed `list<tuple<…>>`. `Length((A, B))` is 3;
+  `P + (A, B)` and `(A, B) + (1, 1)` pair point by point; `2(A, B)` scales each
+  point; `Distance((A, B), (0, 0))` is a list of distances; `(\cos A, \sin A)`
+  is the list of circle points. A scalar coordinate is repeated at every point
+  (`(A, 0)`), and lists of unequal lengths stop at the shortest, as `PointList`
+  does. The reading applies only when every coordinate is a number or a list of
+  numbers (`(A, \text{hi})`, a `list<string>` coordinate, or a symbol declared
+  as a bare `list` keep a tuple), and only to parentheses; it is fixed when the
+  expression is canonicalized, from the types known then. The compiled
+  `javascript` and `interval-js` code gives the same points; GLSL and WGSL still
+  decline. `(A, B)` serializes back as `\operatorname{PointList}(A, B)`.
+  - A MathJSON `["Tuple", …]` built by code stays data (the result of `Tally`,
+    `Eigen`, `LU`, `QR`, `SVD`, an Epsil tuple literal). Arithmetic (`+`, `−`,
+    `·`, `/`, negation, powers, `Sqrt`, `Root`) over such a tuple with a list
+    coordinate is an `incompatible-type` error, and the compiled targets decline
+    it; it used to combine the lists coordinate by coordinate into a tuple of
+    lists that is neither a point nor a list of points. Write `PointList(A, B)`
+    for a list of points. Reading such a tuple (`PointX`, `Norm`, `Dot`,
+    `Length`) is unchanged.
+  - A user function whose parameter is declared as a point (`tuple<real, real>`,
+    `tuple<number, number>`, `tuple<broadcastable<number>, …>`) or has no
+    declared type maps over a list of points: `k((x, y))` with `x = [1, 2]` and
+    `y = 3` answers `[k((1, 3)), k((2, 3))]` on the interpreter and in compiled
+    JavaScript, typed `list<R>` for the declared result `R`. An empty list of
+    points answers `[]`. A restricted list of points (`k((A, B)\{0<t\})`)
+    answers `Missing` when absent, and an absent point makes that cell `Missing`
+    (`undefined` compiled). A parameter declared as a list still takes the list
+    whole. Compiling such a call to a function whose parameter type admits both
+    a list of points and a matrix (`k := P ↦ Dot(P, P)`) now fails with an
+    explicit message, where it computed a matrix product.
+  - `PointList` with a source that may be absent (`PointList(A\{0<t\}, B)`) is
+    typed `list<tuple<…>> | missing` and evaluates to `Missing` when the source
+    is absent (it repeated `Missing` in every point), and compiles to
+    JavaScript.
 - `Dot` with an absent operand (`Missing` or `Undefined`) is now valid and
   evaluates to `Missing` (to `NaN` when the result is a number), as `Norm` does.
   Before, `Dot(Missing, (1, 1))` was an `incompatible-type` error when the
@@ -10,8 +47,8 @@
   `[1,2,3][1:2]` parses to `At(List(1,2,3), Colon(1,2))`, and the colon is now
   an `incompatible-type` error, so the expression is invalid. Before, it was
   valid, never evaluated, and was typed as one element (`integer | nan`), so a
-  function that used it got the result type `number`. The engine does not read
-  a colon as a slice: use the range notation, `[1,2,3][1...2]` is `[1,2]`. The
+  function that used it got the result type `number`. The engine does not read a
+  colon as a slice: use the range notation, `[1,2,3][1...2]` is `[1,2]`. The
   same applies to the other library heads with no value (`Triangle`, `Segment`,
   `Perpendicular`, …) used as an index. This happens only when `ce.strict` is
   true.
@@ -28,43 +65,42 @@
   vector code; it declines, as the interpreter answers `incompatible-type`.
 - `Sin`, `Power` and a scalar factor applied to a restricted point whose
   condition is false answer `Missing`, not `NaN` (`\sin((0,1)\{t<0\})` at
-  `t = 1`). Code that tested such a result with `isNaN` must test for
-  `Missing`.
-- `Norm` accepts an absent operand and gives `NaN`, as `Abs` does: `Norm(Missing)`,
-  `Norm(P{c})` with a false condition, and `Norm([1, Missing])` were
-  `incompatible-type` errors.
-- A restricted point — a point with a condition, such as
-  `P = (0,1)\{0<t\}`, or a `Which` with point branches and no default — is now
-  rejected in a product, a division and a sum with a list of numbers when the
-  expression is created, as a point without a condition already was. `P·Q`,
-  `P·(2,3)`, `t/P`, `P/Q` and `(2,3)/P` are now invalid expressions with the
-  errors `no-product-between-points` and `no-division-by-point`. Before, they
-  were valid, and evaluated to the error when the condition was true and to
-  `NaN` or `Missing` when it was false. This matches Desmos, which rejects
-  these expressions whatever the value of the condition. `P/t`, `t·P`, `-P`,
-  `P + Q` and `Dot(P, Q)` do not change.
+  `t = 1`). Code that tested such a result with `isNaN` must test for `Missing`.
+- `Norm` accepts an absent operand and gives `NaN`, as `Abs` does:
+  `Norm(Missing)`, `Norm(P{c})` with a false condition, and `Norm([1, Missing])`
+  were `incompatible-type` errors.
+- A restricted point — a point with a condition, such as `P = (0,1)\{0<t\}`, or
+  a `Which` with point branches and no default — is now rejected in a product, a
+  division and a sum with a list of numbers when the expression is created, as a
+  point without a condition already was. `P·Q`, `P·(2,3)`, `t/P`, `P/Q` and
+  `(2,3)/P` are now invalid expressions with the errors
+  `no-product-between-points` and `no-division-by-point`. Before, they were
+  valid, and evaluated to the error when the condition was true and to `NaN` or
+  `Missing` when it was false. This matches Desmos, which rejects these
+  expressions whatever the value of the condition. `P/t`, `t·P`, `-P`, `P + Q`
+  and `Dot(P, Q)` do not change.
 - A point plus a list of numbers is now an `incompatible-type` error when the
   expression is created: `(0,1) + [10,20,30]` was valid and evaluated to a list
   of three errors, and `P + [10,20,30]` with a restricted point `P` evaluated to
   `[NaN, NaN, NaN]` when the condition was false. This applies also when the
-  list has a condition (`P + [10,20,30]\{[1,2,3]>2\}`) and to a symbol
-  declared as a list of numbers. This matches Desmos ("Cannot add a point and a
-  list of numbers"). A point plus a list of POINTS is not changed: it adds the
-  point to each point of the list.
+  list has a condition (`P + [10,20,30]\{[1,2,3]>2\}`) and to a symbol declared
+  as a list of numbers. This matches Desmos ("Cannot add a point and a list of
+  numbers"). A point plus a list of POINTS is not changed: it adds the point to
+  each point of the list.
 - The same rules now apply to a list of points, with or without a condition
-  (`L = [(0,1),(4,5)]` or `L = [(0,1),(4,5)]\{0<t\}`), and to a symbol
-  declared or assigned as a list of points. Arithmetic with a list of points
-  applies to each point, so these expressions are now invalid when they are
-  created: `L·(1,1)`, `L·P` and `L·L` (`no-product-between-points`); `2/L`,
-  `t/L`, `[1,2]/L`, `(1,1)/L` and `L/(1,1)` (`no-division-by-point`); `L + 1`,
+  (`L = [(0,1),(4,5)]` or `L = [(0,1),(4,5)]\{0<t\}`), and to a symbol declared
+  or assigned as a list of points. Arithmetic with a list of points applies to
+  each point, so these expressions are now invalid when they are created:
+  `L·(1,1)`, `L·P` and `L·L` (`no-product-between-points`); `2/L`, `t/L`,
+  `[1,2]/L`, `(1,1)/L` and `L/(1,1)` (`no-division-by-point`); `L + 1`,
   `L + [1,2]` (`incompatible-type`). Before, most of them were valid and
   evaluated to a list of errors, and `L/L` evaluated to `[1, 1]`. This matches
-  Desmos ("Cannot multiply a list of points by a point", "Cannot divide a
-  number by a list of points", "Cannot add a list of points and a number").
-  `L·2`, `L/2`, `-L`, `L + (1,1)`, `L + L`, `L·[1,2]` and `[1,2,3]·(0,1)` (a
-  list of numbers times a point, which gives a list of points) do not change.
-  A product with a list of points does not suggest `Cross`, which does not
-  accept a list of points.
+  Desmos ("Cannot multiply a list of points by a point", "Cannot divide a number
+  by a list of points", "Cannot add a list of points and a number"). `L·2`,
+  `L/2`, `-L`, `L + (1,1)`, `L + L`, `L·[1,2]` and `[1,2,3]·(0,1)` (a list of
+  numbers times a point, which gives a list of points) do not change. A product
+  with a list of points does not suggest `Cross`, which does not accept a list
+  of points.
 
 ### Improvements
 
@@ -162,14 +198,15 @@
   points whose condition is not decided. With `t` free,
   `Distance((3,4)\{0<t\}, (0,0))` was an `incompatible-type` error; it is now
   `5\{0<t\}`, which is `5` when `t = 2` and `NaN` when `t = -1`.
-  `Distance([(3,4),(6,8)]\{0<t\}, (0,0))` and `Norm([(3,4),(6,8)]\{0<t\})`
-  are `[5\{0<t\}, 10\{0<t\}]`, and `Missing` when the condition is false (the
+  `Distance([(3,4),(6,8)]\{0<t\}, (0,0))` and `Norm([(3,4),(6,8)]\{0<t\})` are
+  `[5\{0<t\}, 10\{0<t\}]`, and `Missing` when the condition is false (the
   distance was `NaN` there, while its type said a list or `Missing`).
   `Norm((3,4)\{0<t\})` stayed unevaluated; it is now `5\{0<t\}`. A list that
-  holds an absent point is one value per point: `Distance([(3,4), Missing],
-  (0,0))` was an error and is now `[5, NaN]`, and `Norm([(3,4), Missing])`
-  stayed unevaluated and is now `[5, NaN]`. The same holds for a list whose
-  points have different conditions, such as `[(3,4),(6,8)]\{[0<t, t<0]\}`.
+  holds an absent point is one value per point:
+  `Distance([(3,4), Missing], (0,0))` was an error and is now `[5, NaN]`, and
+  `Norm([(3,4), Missing])` stayed unevaluated and is now `[5, NaN]`. The same
+  holds for a list whose points have different conditions, such as
+  `[(3,4),(6,8)]\{[0<t, t<0]\}`.
 - The norm of a list of points whose first point is restricted,
   `Norm([(3,4)\{0<t\}, (6,8)])`, was typed `number`, while its value is a list
   of norms. It is now typed `list<number>`.
@@ -177,29 +214,29 @@
   Frobenius norm of the points read as a matrix (`11.18` for
   `Norm([(3,4),(6,8)]\{0<t\})` at `t = 2`, where the interpreter gives
   `[5, 10]`). It is now one norm per point, and `undefined` (the run-time
-  spelling of `Missing`) when the condition is false. The compiled `Distance`
-  of a restricted point, or of a list that holds an absent point, threw at run
-  time when the point was absent; it now gives the interpreter's value. The
-  Python target now refuses `Norm` of a list of points that may hold absent
-  points, which `np.linalg.norm` flattened into one scalar.
+  spelling of `Missing`) when the condition is false. The compiled `Distance` of
+  a restricted point, or of a list that holds an absent point, threw at run time
+  when the point was absent; it now gives the interpreter's value. The Python
+  target now refuses `Norm` of a list of points that may hold absent points,
+  which `np.linalg.norm` flattened into one scalar.
 - The types of element access of a restricted value now admit the value.
   `At([[1,2],[3,4]]\{0<t\}, 2, 1)` was typed `missing | vector<integer^2>` and
   `At((1,2)\{0<t\}, 2)` was typed `unknown`; `First((1,2)\{0<t\})` was typed
-  `integer` although its value is `Missing` when the condition is false. Each
-  is now typed as an integer or `Missing`. `PointX(Missing)` was typed
-  `missing` while its value is `NaN` (the coordinate of an absent point is a
-  numeric slot); it is now typed `number`, and its compiled JavaScript gives
-  `NaN` instead of throwing a `TypeError`.
-- The coordinates of a list of points that holds an absent or restricted
-  point are now typed with an absent cell. `PointY([(1,2)\{0<t\}, (3,4)])` is
+  `integer` although its value is `Missing` when the condition is false. Each is
+  now typed as an integer or `Missing`. `PointX(Missing)` was typed `missing`
+  while its value is `NaN` (the coordinate of an absent point is a numeric
+  slot); it is now typed `number`, and its compiled JavaScript gives `NaN`
+  instead of throwing a `TypeError`.
+- The coordinates of a list of points that holds an absent or restricted point
+  are now typed with an absent cell. `PointY([(1,2)\{0<t\}, (3,4)])` is
   `["Missing", 4]` when `t = -1`, and was typed `list<number>`; it is now typed
   `list<missing | number>`, as a masked list cell is `Missing` and the list is
   typed `list<T | missing>`. The same holds for `PointX`, `PointZ`, and for
   `PointX([Missing, (1,2)])`.
 - `First`, `Last`, `PointX` and the other accessors of a symbol declared as a
   restricted point (`missing | tuple<integer, integer>`) with no value were an
-  `incompatible-type` error. They now stay unevaluated, as for a symbol
-  declared `tuple<integer, integer>`.
+  `incompatible-type` error. They now stay unevaluated, as for a symbol declared
+  `tuple<integer, integer>`.
 
 - A compiled product of a list and a point whose coordinate type is not known
   now gives the value the interpreter gives. With `t` free,
@@ -211,31 +248,31 @@
   can be a point or a list of points. On the GLSL and WGSL targets, a point
   times a list and a point divided by a list, such as `(x,1)\cdot[1,2]`, now
   fail to compile. They compiled to one vector, where the interpreter gives a
-  list of points for the product and no value for the quotient. The
-  interval target now also refuses a point divided by a list.
-- `Dot` now accepts a restricted point and a restricted list of points, which
-  is what the error for a product of a list of points and a point suggests.
+  list of points for the product and no value for the quotient. The interval
+  target now also refuses a point divided by a list.
+- `Dot` now accepts a restricted point and a restricted list of points, which is
+  what the error for a product of a list of points and a point suggests.
   `Dot([(1,2),(3,4)]\{0<t\}, (1,1))` with `t` free was an `incompatible-type`
   error. It is now `[3\{0<t\}, 7\{0<t\}]`; it is `[3,7]` when `t = 2`, and
-  `Missing` when the condition is false. The product of a restricted point and
-  a point is `NaN` when the condition is false. The Python target refuses a
+  `Missing` when the condition is false. The product of a restricted point and a
+  point is `NaN` when the condition is false. The Python target refuses a
   restricted operand of `Dot`, because `np.dot` fails at run time when the
   operand is absent.
-- The point accessors now read a restricted point or a restricted list of
-  points whose condition is not decided. With `t` free,
-  `PointX([(1,2),(3,4)]\{0<t\})` was the first point, `(1,2)\{0<t\}`; it is
-  now the list of x-coordinates `[1\{0<t\}, 3\{0<t\}]`, which is `[1,3]` when
-  `t = 2` and `Missing` when the condition is false. `PointX((1,2)\{0<t\})`,
-  `First((1,2)\{0<t\})` and `Last` of it were an `incompatible-type` error and
-  `At((1,2)\{0<t\}, 2)` was `Missing`; they are now `1\{0<t\}`, `1\{0<t\}`,
-  `2\{0<t\}` and `2\{0<t\}`. The same applies to `PointY` and `PointZ`.
-  `PointZ((1,2)\{0<t\})` with `t` free is now the dimension error it is when
-  the condition is true, not an `incompatible-type` error.
-- `PointX([Missing, (1,2)])` is now the list of x-coordinates
-  `[Missing, 1]`, as `PointX([(1,2), Missing])` is `[1, Missing]`. Before, an
-  absent first point made the accessor read the list as one point, and the
-  answer was `Missing`. This also happens with an element-wise restriction
-  whose first condition is false.
+- The point accessors now read a restricted point or a restricted list of points
+  whose condition is not decided. With `t` free, `PointX([(1,2),(3,4)]\{0<t\})`
+  was the first point, `(1,2)\{0<t\}`; it is now the list of x-coordinates
+  `[1\{0<t\}, 3\{0<t\}]`, which is `[1,3]` when `t = 2` and `Missing` when the
+  condition is false. `PointX((1,2)\{0<t\})`, `First((1,2)\{0<t\})` and `Last`
+  of it were an `incompatible-type` error and `At((1,2)\{0<t\}, 2)` was
+  `Missing`; they are now `1\{0<t\}`, `1\{0<t\}`, `2\{0<t\}` and `2\{0<t\}`. The
+  same applies to `PointY` and `PointZ`. `PointZ((1,2)\{0<t\})` with `t` free is
+  now the dimension error it is when the condition is true, not an
+  `incompatible-type` error.
+- `PointX([Missing, (1,2)])` is now the list of x-coordinates `[Missing, 1]`, as
+  `PointX([(1,2), Missing])` is `[1, Missing]`. Before, an absent first point
+  made the accessor read the list as one point, and the answer was `Missing`.
+  This also happens with an element-wise restriction whose first condition is
+  false.
 - `Cross` now accepts a restricted point and an absent operand. With `t` free,
   `Cross((1,2,3)\{0<t\}, (1,1,1))` stayed unevaluated; it is now
   `(-1,2,-1)\{0<t\}`. When the condition is false, it is `Missing`; it was an
@@ -243,8 +280,8 @@
   components, and `[NaN, NaN, NaN]` when the condition is false, as
   `[1,2,3] + Missing` does. The Python target refuses a restricted operand of
   `Cross`, because `np.cross` fails at run time when the operand is absent.
-- `Dot` of a restricted list of points and a point of a different width, such
-  as `Dot([(1,2),(3,4)]\{0<t\}, (1,1,1))`, is now one `incompatible-dimensions`
+- `Dot` of a restricted list of points and a point of a different width, such as
+  `Dot([(1,2),(3,4)]\{0<t\}, (1,1,1))`, is now one `incompatible-dimensions`
   error with `t` free, as it is when the condition is true. Before, it was a
   list of one error for each point.
 - Compiled to JavaScript, `PointX` of a list that holds a restricted point, and
@@ -258,9 +295,9 @@
   `R\bmod 2\sin(a)`, which read back as `Mod(R, 2 sin a)`; `y\times(-x)`, not
   `y-x`, which read back as a subtraction. A juxtaposition inside an operator
   that binds more tightly also gets parentheses: `(2x)^2` and `(2x)!`, not
-  `2x^2` and `2x!`. When added parentheses follow a symbol, a `\times`
-  separates them, so `x\times(R\bmod 2)` is not read as a call of `x`; two
-  digits that would touch are separated the same way (`2\times3`, not `23`).
+  `2x^2` and `2x!`. When added parentheses follow a symbol, a `\times` separates
+  them, so `x\times(R\bmod 2)` is not read as a call of `x`; two digits that
+  would touch are separated the same way (`2\times3`, not `23`).
 - A number directly before a bracketed list parses as a product: `4[1,2]`,
   `4\left[1,2\right]`, `-4[1,2]`, `\frac12[1,2]` and `t-4\left[1,2\right]`
   failed with an `unexpected-operator` error; `4[1,2]` now evaluates to
@@ -271,12 +308,12 @@
   `a [1,2]`, `a \left[1,2\right]` and `[1,2,3] [2]` parse like `a[1,2]`
   (`At(a, 1, 2)`); they were an `unexpected-operator` error. `\sin x [1,2]` now
   parses like `\sin x[1,2]`. A visual-space command (`\,`, `\;`, `\quad`,
-  `\hspace{…}`) before a bracketed list makes a product: `a\,[1,2]` evaluates
-  to `[a, 2a]`. Before, the list indexed the spacing command, which gave an
-  invalid `Tuple`.
+  `\hspace{…}`) before a bracketed list makes a product: `a\,[1,2]` evaluates to
+  `[a, 2a]`. Before, the list indexed the spacing command, which gave an invalid
+  `Tuple`.
 - A bracketed list directly after a function name is the argument of the
-  function, not an index: `\sin[a,b]`, `\sin\left[a,b\right]`, `\Gamma[a]`
-  and `f[1,2]` (with `f` declared as a function) parse as `Sin(List(a, b))`,
+  function, not an index: `\sin[a,b]`, `\sin\left[a,b\right]`, `\Gamma[a]` and
+  `f[1,2]` (with `f` declared as a function) parse as `Sin(List(a, b))`,
   `Gamma(List(a))` and `f(List(1, 2))`, and broadcast. Before, they parsed as
   `At(Sin, a, b)`, an `incompatible-type` error. `D` and `N` are still read as
   variables, so `D[1]` is still an index. `u\lbrack 1\rbrack` is now the index
@@ -286,10 +323,10 @@
   components on the `javascript` target; before, the product was compiled as a
   scalar `*` on an array and ran to `null`. The shapes the interpreter refuses
   for a point — the product of two points, a division by a point, a point added
-  to a number, an ordering of a point — now fail to compile on the
-  `javascript`, `glsl`, `wgsl` and `python` targets, where they compiled to a
-  wrong value. On `python`, the magnitude of a restricted point is its norm, not
-  the component-wise absolute value. A list of numbers times a restricted point
+  to a number, an ordering of a point — now fail to compile on the `javascript`,
+  `glsl`, `wgsl` and `python` targets, where they compiled to a wrong value. On
+  `python`, the magnitude of a restricted point is its norm, not the
+  component-wise absolute value. A list of numbers times a restricted point
   (`[1,2,3]·P`) compiles on the `javascript` target to a list of points, as the
   interpreter computes it (each element is `NaN` when the point is absent);
   before, it failed to compile.
@@ -303,8 +340,8 @@
   `NaN`; this is what the restriction itself answers. Compiled code still
   answers `NaN` for an absent value.
 - A numeric function of a list restricted by a list of conditions is computed
-  cell by cell: `\sin([10,20,30]\{[1,2,3]>2\})` is `[NaN, NaN, sin(30)]`; it
-  was a 3×3 matrix. Compiled `javascript` code gives the same values.
+  cell by cell: `\sin([10,20,30]\{[1,2,3]>2\})` is `[NaN, NaN, sin(30)]`; it was
+  a 3×3 matrix. Compiled `javascript` code gives the same values.
 - An absent scalar combined with a numeric list gives `NaN` in every cell, for
   every arithmetic operator: `Missing · [1, 2, 3]` was `[Missing, NaN, NaN]`.
 - `Map` over a list that holds a restricted point gives `Missing` for the absent
@@ -313,27 +350,25 @@
   `Sin([P{c}, (2, 3)])`, `2·[P{c}, (2, 3)]` and
   `P{c} + [(1,2),(3,4)]\{[1,2] > 1\}` are typed `list<missing | tuple<…>>`, and
   an absent point cell answers `Missing` for `evaluate()` and `N()`. Before, the
-  type had no absent case, and the absent cell was `NaN`, or `NaN` and
-  `Missing` in the same list. A cell whose present value is a number still
-  answers `NaN`.
-- When the `javascript` target declines arithmetic over an operand that can be
-  a list, and a user-function call in that operand cannot be compiled, the
-  message names the call's reason (for example "argument 2 is a point with a
+  type had no absent case, and the absent cell was `NaN`, or `NaN` and `Missing`
+  in the same list. A cell whose present value is a number still answers `NaN`.
+- When the `javascript` target declines arithmetic over an operand that can be a
+  list, and a user-function call in that operand cannot be compiled, the message
+  names the call's reason (for example "argument 2 is a point with a
   complex-valued coordinate") instead of the generic "scalar arithmetic over a
   list-valued operand".
 - The type of a numeric function of a value that can be absent, a number or a
   list keeps the `missing` part: `PointX(V)^2` is
-  `list<number> | missing | number`, because the application can give
-  `Missing`.
-- An element-wise operation over more than 100 elements gives a value whose
-  type matches the type of the expression. Such a result is a lazy `Map`, which
-  was typed `indexed_collection<T>` while the expression was typed `list<T>`:
-  with `k = [1...101]`, assigning the value of
+  `list<number> | missing | number`, because the application can give `Missing`.
+- An element-wise operation over more than 100 elements gives a value whose type
+  matches the type of the expression. Such a result is a lazy `Map`, which was
+  typed `indexed_collection<T>` while the expression was typed `list<T>`: with
+  `k = [1...101]`, assigning the value of
   `PointList(0, k) + PointList(cos k, sin k)` to a symbol declared with the
   expression's type threw a `TypeCompatibilityError`. The result stays lazy.
-- Assigning an invalid function (a lambda whose body holds an error) to a
-  symbol declared with a signature no longer says that the initializer "is not
-  a function".
+- Assigning an invalid function (a lambda whose body holds an error) to a symbol
+  declared with a signature no longer says that the initializer "is not a
+  function".
 
 - The polynomial GCD behind `simplify` no longer runs over inexact coefficients:
   `PolynomialGCD` and the cancelling of common factors give the trivial GCD `1`

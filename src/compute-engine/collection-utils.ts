@@ -3295,3 +3295,142 @@ export function defaultCollectionHandlers(
   }
   return result;
 }
+
+/**
+ * Whether an operand of a parenthesized LaTeX list `(a, b, …)` makes that
+ * list a LIST OF POINTS rather than one point: the operand is a finite indexed
+ * collection (a list, a vector, a `Range`) whose elements are NUMBERS. The
+ * decision reads the operand's TYPE, so a symbol declared or assigned a
+ * `list<real>` counts and a symbol of unknown type does not.
+ *
+ * A `missing` arm is removed from the operand's type and from its element
+ * type first: a restricted list `A\{0 < t\}` (typed `list<real> | missing`)
+ * is a source, and its absence makes the whole point list absent (see the
+ * `PointList` evaluate handler).
+ *
+ * - A tuple or a string operand is one coordinate, never a source: the same
+ *   exclusions as the `PointList` type handler.
+ * - A collection whose elements are not known to be numbers is not a source:
+ *   a matrix, a list of points, a list of strings or of booleans, and a list
+ *   whose element type is `unknown` or `any` (a symbol declared a bare
+ *   `list`, which could later hold a matrix). The list stays a plain `Tuple`.
+ * - A collection known to be infinite (`Range(1, +oo)`) is not a source: a
+ *   point list of it has no value.
+ */
+export function isPointListCoordinateSource(op: Expression): boolean {
+  if (op.isFiniteCollection === false) return false;
+  return isListCoordinateType(op.type.type);
+}
+
+/**
+ * The type-level half of {@link isPointListCoordinateSource}: whether `type`,
+ * with its `missing` arm removed, is a finite-shaped indexed collection (not a
+ * tuple, not a string) whose element type, with its `missing` arm removed, is
+ * a subtype of `number`.
+ */
+export function isListCoordinateType(type: Type): boolean {
+  const stripped = stripMissingFromType(type);
+  const t = resolveTypeReference(stripped) ?? stripped;
+  if (t === 'string' || t === 'never') return false;
+  if (typeof t !== 'string' && t.kind === 'tuple') return false;
+  if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+  const element = collectionElementType(t);
+  if (element === undefined) return false;
+  const e = stripMissingFromType(element);
+  if (e === 'never') return false;
+  return isSubtype(e, 'number');
+}
+
+/**
+ * Whether the operands of a parenthesized LaTeX list `(a, b, …)` make it a
+ * LIST OF POINTS: at least one operand is a list coordinate
+ * ({@link isPointListCoordinateSource}), and every other operand is a number
+ * coordinate. A number coordinate is an operand whose type, with its
+ * `missing` arm removed, is a subtype of `number`, or is `unknown` (a symbol
+ * with no declared type, which may hold a number).
+ *
+ * A list with another coordinate, such as a string, a set, a boolean or a
+ * matrix (`(A, "hi")`, `(A, {1, 2})`), stays a plain `Tuple`: it has no
+ * reading as a list of points.
+ */
+export function isPointListReading(ops: ReadonlyArray<Expression>): boolean {
+  let source = false;
+  for (const op of ops) {
+    if (isPointListCoordinateSource(op)) {
+      source = true;
+      continue;
+    }
+    const t = stripMissingFromType(op.type.type);
+    if (t !== 'unknown' && !isSubtype(t, 'number')) return false;
+  }
+  return source;
+}
+
+/**
+ * Whether `x` is a `Tuple` with at least one LIST coordinate: a coordinate
+ * that {@link isPointListCoordinateSource} accepts (a finite indexed
+ * collection of scalars, such as `([1, 2, 3], [10, 20, 30])`).
+ *
+ * Such a tuple is data: operators such as `Tally`, `Eigen` and `LU`, and Epsil
+ * tuple literals, use it to hold several results side by side. It is not a
+ * point, and it is not a list of points either (a list of points is written
+ * `PointList(A, B)`, or `(A, B)` in LaTeX). So arithmetic over it (`+`, `-`,
+ * `·`, `/`, negation, a power) has no value any consumer can use, and the
+ * arithmetic operators report an error for it instead of combining the lists
+ * coordinate by coordinate. Operators that only read the tuple (`PointX`,
+ * `Norm`, `Dot`, `Length`) are not affected.
+ *
+ * Only a literal `Tuple` expression is recognized, which is what an
+ * evaluated operand is. A coordinate that is a matrix or a list of points is
+ * not a list coordinate (see `isPointListCoordinateSource`).
+ */
+export function isTupleWithListCoordinate(x: Expression): boolean {
+  return isFunction(x, 'Tuple') && x.ops.some(isPointListCoordinateSource);
+}
+
+/**
+ * Whether `param`, the declared type of a user-function parameter, declares a
+ * POINT: a plain tuple type such as `tuple<real, real>` or
+ * `tuple<broadcastable<number>, broadcastable<number>>`. A union (`tuple<…> |
+ * list<tuple<…>>`) is not a point parameter: it already says what it admits.
+ */
+export function isPointParameterType(param: Type): boolean {
+  const t = resolveTypeReference(param) ?? param;
+  return typeof t !== 'string' && t.kind === 'tuple';
+}
+
+/**
+ * Whether an argument of type `arg` is a LIST OF POINTS that a user function
+ * whose parameter is declared as the point type `param` maps over: `arg` is a
+ * finite-shaped indexed collection (a list, not a tuple) whose element type is
+ * a subtype of `param`. For example, `list<tuple<real, real>>` (the type of
+ * `PointList(x, y)` with `x` a list of reals and `y` a real) conforms to the
+ * parameter `tuple<real, real>`.
+ *
+ * Such a call answers the list of the function's values at each point: the
+ * application maps over the points, and each point is bound whole to the
+ * parameter (user decision 2026-09-25). A list whose elements are not known
+ * to be points (`list<real>`, `list<unknown>`) does not conform, and neither
+ * does an empty list typed `list<never>`: those are bound whole, as before.
+ *
+ * A `missing` arm is removed from `arg` and from its element type first, as
+ * the broadcast typing does: a restricted list of points (`(A, B)\{0 < t\}`,
+ * typed `list<tuple<real, real>> | missing`) and a list that holds a
+ * restricted point (`[(3, 4)\{0 < t\}, (6, 8)]`, typed
+ * `list<missing | tuple<integer, integer>>`) conform. The map absorbs the
+ * absence: an absent list makes the call `Missing`, and an absent point makes
+ * that cell `Missing`.
+ */
+export function isPointListArgumentType(arg: Type, param: Type): boolean {
+  if (!isPointParameterType(param)) return false;
+  const stripped = stripMissingFromType(arg);
+  const a = resolveTypeReference(stripped) ?? stripped;
+  if (typeof a === 'string') return false;
+  if (a.kind === 'tuple') return false;
+  if (!isSubtype(a, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+  const element = collectionElementType(a);
+  if (element === undefined) return false;
+  const e = stripMissingFromType(element);
+  if (e === 'never') return false;
+  return isSubtype(e, param);
+}

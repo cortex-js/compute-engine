@@ -65,9 +65,13 @@ describe('Dot over a tuple with collection components', () => {
       expect(e.type.toString()).toBe('value');
     });
 
-    test('unequal component counts keep `value`', () => {
+    test('unequal component counts type as the point-list product', () => {
+      // `(1, L)` with `L` a list is a list of 2-D points (the LaTeX
+      // parenthesized list, user decision 2026-09-24), so this is the
+      // `PointList(1, L)` product: the claim is `list<number>`, and the
+      // evaluate handler reports the width mismatch.
       const e = engine().parse('\\operatorname{Dot}((1,L),(3,4,5))');
-      expect(e.type.toString()).toBe('value');
+      expect(e.type.toString()).toBe('list<number>');
     });
 
     test('a vector paired with a broadcastable tuple keeps `value`', () => {
@@ -214,10 +218,12 @@ describe('Dot over a tuple with collection components', () => {
       );
     });
 
-    test('unequal component counts stay symbolic without throwing', () => {
-      expect(evaluated('\\operatorname{Dot}((1,L),(3,4,5))').toString()).toBe(
-        'Dot((1, [1,2]), (3, 4, 5))'
-      );
+    test('unequal component counts report the width mismatch without throwing', () => {
+      // A list of 2-D points against a 3-D point: the same answer as
+      // `Dot(PointList(1, L), (3, 4, 5))`.
+      expect(
+        engine().parse('\\operatorname{Dot}((1,L),(3,4,5))').evaluate().toString()
+      ).toBe('Error("incompatible-dimensions", "2 vs 3")');
     });
   });
 
@@ -240,13 +246,15 @@ describe('Dot over a tuple with collection components', () => {
       expect(e.isEnumerableCollection).not.toBe(false);
     });
 
-    test('a point dotted with a vector stays symbolic', () => {
-      // The `type` handler has no tier for a tuple paired with a list, so this
-      // shape types the wide `value`. The evaluate route refuses it for the
-      // same reason, instead of answering a list the type does not describe.
+    test('a point list dotted with a vector stays symbolic', () => {
+      // `(1, L)` is a list of points (the LaTeX parenthesized list with a list
+      // coordinate). The `type` handler has no tier for a list of points
+      // paired with a vector, so this shape types the wide `value`. The
+      // evaluate route refuses it for the same reason, instead of answering
+      // a list the type does not describe.
       const e = engine().parse('\\operatorname{Dot}((1,L),[2,3])');
       expect(e.type.toString()).toBe('value');
-      expect(e.evaluate().toString()).toBe('Dot((1, [1,2]), [2,3])');
+      expect(e.evaluate().toString()).toBe('Dot([(1, 1),(1, 2)], [2,3])');
     });
   });
 

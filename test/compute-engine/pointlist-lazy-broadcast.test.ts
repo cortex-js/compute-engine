@@ -54,68 +54,83 @@ describe('Tycho item 52 — lazy PointList transpose and projections', () => {
     expect(r.at(7)?.re).toBe(1);
   });
 
-  test('probe F: scalar × Tuple of projections stays lazy, with correct values', () => {
-    const ce = engineWithL(400);
-    const tup = [
-      'Tuple',
+  // Probes F–H: the document writes the rotated point list as the LaTeX
+  // parenthesized list `(-y(P), z(P), x(P))`. Its coordinates are lists, so it
+  // canonicalizes to `PointList(…)` (user decision 2026-09-24), written here
+  // on the box route as the `Delimiter` the parser produces. The arithmetic
+  // over it stays lazy and gives one point per element. The same list built
+  // as a MathJSON `Tuple` is data, not a point, and arithmetic over it is an
+  // `incompatible-type` error (user decision 2026-09-25).
+  const ROTATED = [
+    'Delimiter',
+    [
+      'Sequence',
       ['Negate', ['PointY', PT_LIST]],
       ['PointZ', PT_LIST],
       ['PointX', PT_LIST],
-    ];
-    const r = ce.box(['Multiply', 0.2, tup]).N();
-    expect(r.operator).toBe('Tuple');
-    expect(r.ops!.map((o) => o.operator)).toEqual(['Map', 'Map', 'Map']);
-    // Component 1 is 0.2·(−(mod(k,11)−5)): elements 1..3 → 1, 0.8, 0.6
-    expect(r.ops![0].at(1)?.re).toBeCloseTo(1, 12);
-    expect(r.ops![0].at(2)?.re).toBeCloseTo(0.8, 12);
-    expect(r.ops![0].at(3)?.re).toBeCloseTo(0.6, 12);
+    ],
+    "'(,)'",
+  ];
+
+  test('probe F: scalar × parenthesized list of projections stays lazy, with correct values', () => {
+    const ce = engineWithL(400);
+    const r = ce.box(['Multiply', 0.2, ROTATED]).N();
+    expect(r.operator).toBe('Map');
+    expect(r.count).toBe(401);
+    // Point k is 0.2·(−(mod(k,11)−5), mod(k,11)−5, mod(k,11)−5): points 1..3
+    // have the first coordinate 1, 0.8, 0.6
+    expect(r.at(1)!.op1.re).toBeCloseTo(1, 12);
+    expect(r.at(2)!.op1.re).toBeCloseTo(0.8, 12);
+    expect(r.at(3)!.op1.re).toBeCloseTo(0.6, 12);
+    expect(r.at(2)!.op2.re).toBeCloseTo(-0.8, 12);
+  });
+
+  test('probe F′: scalar × MathJSON Tuple of projections is an error', () => {
+    const ce = engineWithL(400);
+    const tup = ['Tuple', ...(ROTATED[1] as unknown[]).slice(1)];
+    const r = ce.box(['Multiply', 0.2, tup] as any).N();
+    expect(r.operator).toBe('Error');
+    expect(r.op1.op1.string).toBe('incompatible-type');
   });
 
   test('probe G: the subs route is equivalent to the literal-scalar route', () => {
     const ce = engineWithL(400);
-    const tup = [
-      'Tuple',
-      ['Negate', ['PointY', PT_LIST]],
-      ['PointZ', PT_LIST],
-      ['PointX', PT_LIST],
-    ];
     const r = ce
-      .box(['Multiply', 's', tup])
+      .box(['Multiply', 's', ROTATED])
       .subs({ s: 0.2 })
       .N();
-    expect(r.operator).toBe('Tuple');
-    expect(r.ops![0].at(1)?.re).toBeCloseTo(1, 12);
+    expect(r.operator).toBe('Map');
+    expect(r.at(1)!.op1.re).toBeCloseTo(1, 12);
   });
 
   test('probe H: the full B22 arg0 composes lazily with correct elements', () => {
     const ce = engineWithL(400);
-    const tup = [
-      'Tuple',
-      ['Negate', ['PointY', PT_LIST]],
-      ['PointZ', PT_LIST],
-      ['PointX', PT_LIST],
-    ];
     const arg0 = [
       'Add',
-      ['Multiply', ['Rational', -1, 2], 's', tup],
+      ['Multiply', ['Rational', -1, 2], 's', ROTATED],
       [
-        'Tuple',
-        ['PointX', PT_LIST],
-        ['PointY', PT_LIST],
-        ['PointZ', PT_LIST],
+        'Delimiter',
+        [
+          'Sequence',
+          ['PointX', PT_LIST],
+          ['PointY', PT_LIST],
+          ['PointZ', PT_LIST],
+        ],
+        "'(,)'",
       ],
     ];
     const r = ce.box(arg0).subs({ s: 0.2 }).N();
-    expect(r.operator).toBe('Tuple');
-    expect(r.ops!.map((o) => o.operator)).toEqual(['Map', 'Map', 'Map']);
-    // Component 1, element 1: −0.1·(−(−5)) + (−5) = −5.5; element 12 starts
+    expect(r.operator).toBe('Map');
+    expect(r.count).toBe(401);
+    // Point 1, first coordinate: −0.1·(−(−5)) + (−5) = −5.5; point 12 starts
     // the second mod cycle → −5.5 again.
-    expect(r.ops![0].at(1)?.re).toBeCloseTo(-5.5, 12);
-    expect(r.ops![0].at(12)?.re).toBeCloseTo(-5.5, 12);
+    expect(r.at(1)!.op1.re).toBeCloseTo(-5.5, 12);
+    expect(r.at(12)!.op1.re).toBeCloseTo(-5.5, 12);
     // Fully drainable via each().
     let count = 0;
-    for (const el of r.ops![0].each()) {
-      expect(el.N().isNumberLiteral).toBe(true);
+    for (const el of r.each()) {
+      expect(el.operator).toBe('Tuple');
+      expect(el.op1.N().isNumberLiteral).toBe(true);
       count++;
       if (count > 3) break;
     }
@@ -421,14 +436,16 @@ describe('Tycho item 222 — PointList over UNKNOWN-length views', () => {
     expect(drain(exactly).slice(0, 2)).toEqual(exact);
   });
 
-  test('route parity: the box route is the product route; `(a, b)` stays a Tuple', () => {
-    // `PointList` is an IMPORTER-emitted head: default parsing never produces
-    // it from `(a, b)` — that stays inert `Tuple` data — so the box route is
-    // the one the consumer actually uses. The explicit `\operatorname` spelling
-    // reaches the same transpose, which is what makes this a route-parity
-    // probe rather than a second implementation.
+  test('route parity: the box route, `\\operatorname{PointList}` and `(a, b)` agree', () => {
+    // The LaTeX parenthesized list `(A, A)` with a list coordinate is
+    // canonicalized to `PointList(A, A)` (user decision 2026-09-24), and the
+    // explicit `\operatorname` spelling reaches the same transpose, which is
+    // what makes this a route-parity probe rather than a second
+    // implementation.
     const ce = viewEngine();
-    expect(ce.parse('(A, A)').evaluate().operator).toBe('Tuple');
+    const tuple = ce.parse('(A, A)');
+    expect(tuple.operator).toBe('PointList');
+    expect(tuple.evaluate().operator).toBe('Map');
     const parsed = ce.parse('\\operatorname{PointList}(A, A)').evaluate();
     expect(parsed.operator).toBe('Map');
     expect(parsed.isCollection).toBe(true);
@@ -436,5 +453,6 @@ describe('Tycho item 222 — PointList over UNKNOWN-length views', () => {
     expect(drain(parsed)).toEqual(
       drain(ce.box(['PointList', 'A', 'A']).evaluate())
     );
+    expect(drain(tuple.evaluate())).toEqual(drain(parsed));
   });
 });

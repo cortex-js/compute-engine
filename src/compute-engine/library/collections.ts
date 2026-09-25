@@ -2126,6 +2126,25 @@ function presentArmOf(d: OperandDescriptor): OperandDescriptor {
   return { type: stripped, facts: d.facts, structureOf: d.structureOf };
 }
 
+/**
+ * Whether `t` is the type of a `PointList` SOURCE that may be absent: a type
+ * with a `missing` arm whose present part is an indexed collection (not a
+ * tuple, not a string), such as `list<real> | missing`, the type of the
+ * restricted list `A\{0 < t\}`.
+ *
+ * When such a source is absent, the whole point list is absent: there is no
+ * list to pair the other coordinates with, so there are no points. The
+ * `PointList` type handler adds the `missing` arm to its result for it, and
+ * its evaluate handler answers `Missing`.
+ */
+function isAbsentablePointListSourceType(t: Type): boolean {
+  if (!typeContainsMissing(t)) return false;
+  const present = stripMissingFromType(t);
+  if (present === 'never' || present === 'string') return false;
+  if (typeof present !== 'string' && present.kind === 'tuple') return false;
+  return isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE);
+}
+
 /** Descriptor twin of {@link isIndexSpan}.
  *
  * The literal reader is the type channel alone: a literal whose exact value
@@ -4443,13 +4462,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
-    // explicit `PointList` operator that importers emit; plain tuples stay data.
+    // explicit `PointList` operator. The LaTeX spelling `(A, B)` with a list
+    // coordinate is canonicalized to that operator by the `Delimiter`
+    // canonical handler (`library/core.ts`), so it never reaches this one; a
+    // MathJSON `Tuple` stays data, because operators (`Tally`, `Eigen`, `LU`)
+    // and Epsil tuple literals use it to hold several results side by side.
     eq: defaultCollectionEq,
     collection: basicIndexedCollectionHandlers(),
   },
 
-  // The Desmos point-list surface form. Explicit: importers emit it, default
-  // parsing NEVER produces it from `(a, b)` (that stays an inert `Tuple`). A
+  // The Desmos point-list surface form. Importers emit it, and the LaTeX
+  // parenthesized list `(A, B)` with a list coordinate canonicalizes to it
+  // (see the `Delimiter` canonical handler in `library/core.ts`); a tuple of
+  // scalars and a MathJSON `Tuple` stay an inert `Tuple`. A
   // `PointList` with one or more finite-collection components transposes to
   // the list of point-tuples (zip-to-shortest, scalars broadcast) — e.g.
   // `PointList(-6, n)` with `n` a 21-element list is 21 points. The transpose
@@ -4499,7 +4524,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
     complexity: 8200,
     signature: '(any+) -> any',
-    type: (ops, context) => {
+    type: (operands, context) => {
+      // A source that may be absent (`A\{0 < t\}`, typed `list<real> |
+      // missing`) is typed as its present part, and the point list as a
+      // whole may be absent (`isAbsentablePointListSourceType`).
+      const absentSource = operands.some((op) =>
+        isAbsentablePointListSourceType(op.type)
+      );
+      const ops = operands.map((op) =>
+        isAbsentablePointListSourceType(op.type) ? presentArmOf(op) : op
+      );
       // A list component (for typing): an indexed-collection type that is not
       // itself a tuple. Mirrors the `evaluate` predicate, but type-based.
       const isListType = (op: OperandDescriptor): boolean => {
@@ -4545,12 +4579,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           else if (width === undefined) width = w;
           else width = Math.min(width, w);
         }
+        const list: Type = {
+          kind: 'list',
+          elements: { kind: 'tuple', elements: coordinates },
+          ...(typeof width === 'number' ? { dimensions: [width] } : {}),
+        };
         return BoxedType.forResult(
-          {
-            kind: 'list',
-            elements: { kind: 'tuple', elements: coordinates },
-            ...(typeof width === 'number' ? { dimensions: [width] } : {}),
-          },
+          absentSource ? { kind: 'union', types: [list, 'missing'] } : list,
           context.engine._typeResolver
         );
       }
@@ -4559,7 +4594,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       );
     },
-    evaluate: (ops, { engine: ce, numericApproximation }) => {
+    evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
+      // A source that may be absent (`A\{0 < t\}`) and IS absent makes the
+      // whole point list absent (`isAbsentablePointListSourceType`): there
+      // is no list to pair the other coordinates with. Without this, the
+      // absent source was repeated in every point, `[(Missing, 10), …]`.
+      if (
+        isFunction(expression) &&
+        ops.some(
+          (op, i) =>
+            isAbsentValue(op) &&
+            expression.ops[i] !== undefined &&
+            isAbsentablePointListSourceType(expression.ops[i].type.type)
+        )
+      )
+        return ce.Missing;
       const isListComponent = (op: Expression): boolean =>
         isFiniteBroadcastParticipant(op);
       // A component whose length is NOT YET KNOWN — a view over `Range(0, n)`

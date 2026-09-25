@@ -210,6 +210,7 @@ import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
 import {
   canEnumerateOperand,
   isEnumerableSource,
+  isPointListReading,
   isTupleShapedType,
 } from '../collection-utils.js';
 import { numericDerivativeOfApply } from './calculus.js';
@@ -2740,25 +2741,64 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // the sequence, like `(a, b, c)`. The sequence is used to group
         // the arguments, so it needs to be preserved.
         // If there is a single element, unpack it.
-        if (isFunction(body, 'Sequence'))
-          return ce._fn(
-            'Tuple',
-            // This site builds the `Tuple` DIRECTLY (`_fn` does not run
-            // `Tuple`'s canonical handler), so it has to apply the same two
-            // operand-list rules that handler applies, or the two routes to a
-            // tuple disagree: a `Sequence` operand is SPLICED (it is the
-            // engine-wide "these operands, inlined here" marker and must
-            // never be stored as an element) and `Nothing` is ERASED, so
-            // `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. Both are what
-            // `flatten` does. In practice the enclosing `Sequence` has
-            // already flattened recursively by the time it gets here, so the
-            // splice half is defensive; the erasure half is load-bearing.
-            flatten(canonical(ce, body.ops))
-          );
+        //
+        // A parenthesized list with at least one LIST coordinate (a finite
+        // indexed collection of numbers, see `isPointListCoordinateSource`)
+        // and only number coordinates otherwise (`isPointListReading`) is a
+        // LIST OF POINTS, the Desmos reading: `(A, B)` with
+        // `A = [1, 2, 3]` and `B = [10, 20, 30]` is the points `(1, 10),
+        // (2, 20), (3, 30)`. It is canonicalized to `PointList(…)`, so its
+        // value, its type, its compiled code and every operator that reads
+        // it (`+`, `Length`, `Norm`, `PointX`…) see the same list of points.
+        // The pairing is therefore the `PointList` one: a scalar coordinate
+        // is repeated at every point (`(A, 0)` is the points `(aᵢ, 0)`), and
+        // sources of unequal lengths stop at the SHORTEST one. That rule was
+        // chosen so that `(A, B)` and `PointList(A, B)` are the same value.
+        //
+        // The reading is decided ONCE, when the expression is canonicalized,
+        // from the operand types known at that moment: a symbol declared or
+        // assigned a list of numbers before that makes it a point list. A
+        // symbol of unknown type, or one declared a bare `list` (whose
+        // elements are not known to be numbers), keeps it a plain `Tuple`,
+        // and that reading stays even if the symbol is assigned a list of
+        // numbers later. A host that assigns values after parsing re-parses
+        // the expression to get the point-list reading (a document manager
+        // that declares every head before parsing, and re-parses every row
+        // after a change, always sees the current types).
+        //
+        // A coordinate that is not a number or a list of numbers (a string,
+        // a set, a boolean, a matrix, a point list) is not in scope: that
+        // list stays a `Tuple` whose coordinates are kept whole.
+        //
+        // Only this LaTeX surface form, with no delimiter or with
+        // parentheses, is read this way. A MathJSON `Tuple` (the box route,
+        // an Epsil tuple literal, the result of `Tally` or `Eigen`) holds
+        // several values side by side and stays a `Tuple`, and so does a
+        // list with other delimiters (`Delimiter(Sequence(A, B), "[,]")`).
+        //
+        // Otherwise this site builds the `Tuple` DIRECTLY (`_fn` does not run
+        // `Tuple`'s canonical handler), so it has to apply the same two
+        // operand-list rules that handler applies, or the two routes to a
+        // tuple disagree: a `Sequence` operand is SPLICED (it is the
+        // engine-wide "these operands, inlined here" marker and must never be
+        // stored as an element) and `Nothing` is ERASED, so `(1, Nothing, 3)`
+        // is the 2-tuple `(1, 3)`. Both are what `flatten` does. In practice
+        // the enclosing `Sequence` has already flattened recursively by the
+        // time it gets here, so the splice half is defensive; the erasure
+        // half is load-bearing.
+        const delim = isString(args[1]) ? args[1].string : undefined;
+
+        if (isFunction(body, 'Sequence')) {
+          const xs = flatten(canonical(ce, body.ops));
+          if (
+            (delim === undefined || delim === '(,)') &&
+            isPointListReading(xs)
+          )
+            return ce._fn('PointList', xs);
+          return ce._fn('Tuple', xs);
+        }
 
         body = body.canonical;
-
-        const delim = isString(args[1]) ? args[1].string : undefined;
 
         // If we have a single argument and parentheses, i.e. `(2)`, return
         // the argument

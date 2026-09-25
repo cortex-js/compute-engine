@@ -56,9 +56,15 @@ describe('lazy broadcast over a declared-unknown symbol (Tycho item 42)', () => 
       )
       .evaluate();
     expect(P.isValid).toBe(true);
-    expect(P.operator).toBe('Tuple');
-    // Second component at L=91: floor(91/85)/85 = 1/85.
-    expect(P.op2.at(92)?.evaluate().json).toEqual(['Rational', 1, 85]);
+    // The parenthesized list with list coordinates is a list of points
+    // (user decision 2026-09-24), here the lazy transpose of `PointList`.
+    expect(P.isCollection).toBe(true);
+    // Point 92 is L=91: (mod(91, 85)/85, floor(91/85)/85) = (6/85, 1/85).
+    expect(P.at(92)?.evaluate().json).toEqual([
+      'Tuple',
+      ['Rational', 6, 85],
+      ['Rational', 1, 85],
+    ]);
   });
 
   test('x.N() ≡ x.evaluate().N() on the lazy divide (item-39 contract)', () => {

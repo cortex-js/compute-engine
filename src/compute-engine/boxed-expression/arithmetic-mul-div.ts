@@ -36,6 +36,7 @@ import {
   broadcastLengthMismatch,
   broadcastOverIndexedCollections,
   typeMayCarryQuotientShape,
+  isTupleWithListCoordinate,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -1084,10 +1085,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       if (isLiteral(op2, -1)) return op1.neg();
       // `tuple / scalar`: scale each component when the divisor is provably a
       // scalar number and the components are accessible; else stay symbolic.
+      // A tuple with a LIST coordinate is data, not a point: it is not
+      // scaled here, so the `Divide` stays and its evaluate handler reports
+      // the error (see `isTupleWithListCoordinate`).
       if (
         hasAccessibleComponents(op1) &&
         isFunction(op1) &&
-        isSubtype(op2.type.type, 'number')
+        isSubtype(op2.type.type, 'number') &&
+        !isTupleWithListCoordinate(op1)
       )
         return ce.tuple(...op1.ops.map((c) => canonicalDivide(c, op2)));
       return ce._fn('Divide', [op1, op2]);

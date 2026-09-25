@@ -7,6 +7,7 @@ import { sortAddTerms, sortProductOperands } from './order.js';
 import {
   couldBeNumericTuple,
   hasAccessibleComponents,
+  isTupleWithListCoordinate,
 } from '../collection-utils.js';
 
 /**
@@ -49,10 +50,15 @@ function negateTupleComponents(
   // is not free for a component reached through many paths.
   const cached = negated.get(expr);
   if (cached !== undefined) return cached;
+  // A tuple with a LIST coordinate (`Tuple(A, B)` with `A`, `B` lists) is
+  // data, not a point, and arithmetic over it is an error at evaluation (see
+  // `isTupleWithListCoordinate`). It is not distributed here, so the
+  // `Negate` stays and its evaluate handler reports that error.
   if (
     !couldBeNumericTuple(expr) ||
     !hasAccessibleComponents(expr) ||
-    !isFunction(expr)
+    !isFunction(expr) ||
+    isTupleWithListCoordinate(expr)
   )
     return undefined;
   const result = expr.engine.tuple(

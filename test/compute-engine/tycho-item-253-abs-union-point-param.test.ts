@@ -188,17 +188,50 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
         expect.closeTo(Math.hypot(3, 3), 12),
         expect.closeTo(Math.hypot(2, 3), 12),
       ]);
+      // On the interpreter, the LaTeX `(x, y)` with `x` a list is the list
+      // of points `PointList(x, y)` (user decision 2026-09-24), so the call
+      // answers one norm per point: bound whole under `unknown`, mapped over
+      // the points under the point declaration (user decision 2026-09-25).
       ce.assign('x', ce.box(['List', 1, 2]));
       ce.assign('y', 3);
-      expect(
-        ce
-          .box(['k', ['Tuple', 'x', 'y']])
-          .N()
-          .ops!.map((op) => op.re)
-      ).toEqual([
+      const call = ce.parse('k\\left(\\left(x,y\\right)\\right)');
+      expect(call.json).toEqual(['k', ['PointList', 'x', 'y']]);
+      expect(call.N().ops!.map((op) => op.re)).toEqual([
         expect.closeTo(Math.hypot(3, 3), 12),
         expect.closeTo(Math.hypot(2, 3), 12),
       ]);
+    }
+  });
+
+  test('a code-built Tuple with a list coordinate is an error, not a point', () => {
+    // A MathJSON `Tuple` with a list coordinate is data, not a point and not
+    // a list of points (user decision 2026-09-25): the arithmetic in the
+    // body is an `incompatible-type` error on the interpreter, and the
+    // compiled call fails closed.
+    for (const type of [
+      'unknown',
+      'tuple<broadcastable<number>, broadcastable<number>>',
+      'tuple<real, real>',
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('k', { signature: `(${type}) -> number` });
+      ce.assign(
+        'k',
+        ce.box(['Function', ['Abs', ['Subtract', 'P', ['Tuple', 4, 0]]], 'P'])
+      );
+      ce.declare('x', 'list<real>');
+      ce.declare('y', 'real');
+      expect(() =>
+        compile(ce.box(['k', ['Tuple', 'x', 'y']]), {
+          to: 'javascript',
+          fallback: false,
+        } as any)
+      ).toThrow(/tuple with a list coordinate/);
+      ce.assign('x', ce.box(['List', 1, 2]));
+      ce.assign('y', 3);
+      const r = ce.box(['k', ['Tuple', 'x', 'y']]).N();
+      expect(r.operator).toBe('Error');
+      expect(r.op1.op1.string).toBe('incompatible-type');
     }
   });
 

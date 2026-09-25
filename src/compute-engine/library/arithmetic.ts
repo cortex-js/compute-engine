@@ -13,6 +13,7 @@ import {
   absentScalarMarker,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
+  listCoordinateTupleOperandError,
   markAbsentPointCells,
   nonNumericOperandError,
 } from '../boxed-expression/validate.js';
@@ -1796,6 +1797,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A tuple with a list coordinate is data, not a point: arithmetic
+        // over it is an error (see `listCoordinateTupleOperandError`).
+        const listTuple = listCoordinateTupleOperandError(engine!, evaluated);
+        if (listTuple !== undefined) return listTuple;
         // The driver's missing-value gate saw the operands UNEVALUATED
         // (`Add` is lazy), so an absence produced by the evaluation above —
         // a piecewise with no default arm, `g(3)` — has not been absorbed
@@ -2291,6 +2296,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // driver (`_computeValue` step 4) — do not re-evaluate them.
         const nonNumeric = nonNumericOperandError(engine!, [num, den]);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A tuple with a list coordinate is data, not a point: arithmetic
+        // over it is an error (see `listCoordinateTupleOperandError`).
+        const listTuple = listCoordinateTupleOperandError(engine!, [num, den]);
+        if (listTuple !== undefined) return listTuple;
         const evalNum = num;
         const evalDen = den;
         if (
@@ -4321,6 +4330,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         );
         const nonNumeric = nonNumericOperandError(engine!, evaluated);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A tuple with a list coordinate is data, not a point: arithmetic
+        // over it is an error (see `listCoordinateTupleOperandError`).
+        const listTuple = listCoordinateTupleOperandError(engine!, evaluated);
+        if (listTuple !== undefined) return listTuple;
         // See the matching note in `Add`: `Multiply` is lazy, so the driver's
         // missing-value gate never saw the EVALUATED operands, and the
         // absence normalization to the codomain's quiet marker — `NaN` in a
@@ -4474,6 +4487,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Non-lazy: `x` is already evaluated by the driver.
         const nonNumeric = nonNumericOperandError(engine!, [x]);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A tuple with a list coordinate is data, not a point: arithmetic
+        // over it is an error (see `listCoordinateTupleOperandError`).
+        const listTuple = listCoordinateTupleOperandError(engine!, [x]);
+        if (listTuple !== undefined) return listTuple;
         const evalX = x;
         if (isQuantity(evalX)) {
           if (isMeasurement(evalX.op1)) {
@@ -4926,6 +4943,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // evaluation.
         const nonNumeric = nonNumericOperandError(engine!, [x, n]);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A tuple with a list coordinate is data, not a point: arithmetic
+        // over it is an error (see `listCoordinateTupleOperandError`).
+        const listTuple = listCoordinateTupleOperandError(engine!, [x, n]);
+        if (listTuple !== undefined) return listTuple;
         // The exponent carrier, enforced at the evaluate seam (see the
         // comment on the signature above): a `~oo` exponent — infinite
         // with no signed direction — is off-carrier, and gets the same

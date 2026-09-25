@@ -20,6 +20,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  */
 
 const TUPLE3 = 'tuple<number, number, number>';
+const TUPLE2 = 'tuple<number, number>';
 const UNION3 = `${TUPLE3} | list<${TUPLE3}>`;
 
 function engineWith(declaredType: string, name = 'pt'): ComputeEngine {
@@ -51,25 +52,37 @@ describe('a provably disjoint declared type is rejected at the call boundary', (
     // A multi-letter name would parse as implicit multiplication, so use a
     // single-letter symbol for the LaTeX route.
     const ce = engineWith('string', 'V');
-    expect(
-      JSON.stringify(ce.parse('\\operatorname{sx}(V)').json)
-    ).toContain('incompatible-type');
+    expect(JSON.stringify(ce.parse('\\operatorname{sx}(V)').json)).toContain(
+      'incompatible-type'
+    );
   });
 
   test('`ce.function` route agrees with the box route', () => {
     const ce = engineWith('string');
-    expect(
-      JSON.stringify(ce.function('sx', [ce.symbol('pt')]).json)
-    ).toContain('incompatible-type');
+    expect(JSON.stringify(ce.function('sx', [ce.symbol('pt')]).json)).toContain(
+      'incompatible-type'
+    );
   });
 
   test('other provably disjoint declared types are rejected too', () => {
-    for (const t of ['number', 'boolean', `list<${TUPLE3}>`]) {
+    for (const t of ['number', 'boolean', `list<${TUPLE2}>`]) {
       const ce = engineWith(t);
       expect(JSON.stringify(ce.box(['sx', 'pt']).json)).toContain(
         'incompatible-type'
       );
     }
+  });
+
+  test('a list of conforming points is not rejected: the call maps over it', () => {
+    // A parameter declared as a point, applied to a list of points whose
+    // element conforms to it, maps over the points (user decision
+    // 2026-09-25): `sx(pt)` with `pt: list<tuple<number, number, number>>`
+    // is the list of `sx` at each point. A list of points of another width
+    // (`list<tuple<number, number>>`, above) is still rejected.
+    const ce = engineWith(`list<${TUPLE3}>`);
+    const call = ce.box(['sx', 'pt']);
+    expect(call.isValid).toBe(true);
+    expect(call.type.toString()).toBe('list<unknown>');
   });
 
   test('a compound operand with free variables is judged on its type', () => {

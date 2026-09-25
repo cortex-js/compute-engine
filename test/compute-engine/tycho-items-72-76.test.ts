@@ -138,8 +138,12 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     expect(norm.type.toString()).toEqual('list<number>');
     expect(norm.evaluate().operator).toEqual('List');
 
+    // `(x+[0.5,1], y)` is a list of two points (the LaTeX parenthesized list
+    // with a list coordinate, user decision 2026-09-24), so `Abs` is one
+    // non-negative norm per point.
     const abs = ce.parse('\\left|(x+[0.5,1],y)\\right|');
-    expect(abs.type.toString()).toEqual('list<number>');
+    expect(abs.type.toString()).toEqual('list<real<0..> | signed_infinity^2>');
+    expect(abs.type.matches('list<number>')).toBe(true);
     expect(abs.evaluate().operator).toEqual('List');
   });
 

@@ -2646,7 +2646,13 @@ function makeCanonicalFunctionCore(
         threadableGate(checkedType, paramsAreScalar(checkedType)),
         undefined,
         undefined,
-        { resolutionOut: valueResolutionOut, operatorName: name }
+        {
+          resolutionOut: valueResolutionOut,
+          operatorName: name,
+          // A list of points at a parameter declared as a point is mapped
+          // over at evaluation (`isPointListArgumentType`).
+          mapsPointLists: true,
+        }
       );
       if (invalid) {
         // Only reject *closed* operands — literals and constant expressions
@@ -3322,6 +3328,9 @@ function applyOperatorDefinition(
           // (`isUserFunctionDefinition`).
           checkNumericCollections:
             opDef.broadcastable === true && !opDef.isUserFunctionDefinition,
+          // A user function maps over a list of points at a parameter
+          // declared as a point (`isPointListArgumentType`).
+          mapsPointLists: opDef.isUserFunctionDefinition,
         }
       );
 

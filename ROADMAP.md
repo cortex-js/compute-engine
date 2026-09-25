@@ -464,26 +464,26 @@ keeps `NaN` in an absent cell although its type says `missing | tuple<…>`
 (`markAbsentPointCells`, `boxed-expression/validate.ts`, corrects a rank-1
 `List` only).
 
-Found while adding the `threadsConditionals` flag (not fixed, 2026-09-25):
-(1) `PointX(Missing)` compiles to `_gpu_nan().x` on GLSL and to a `.x` read of
-an `f32` on WGSL, which WGSL rejects. (2) `Dot` and `Cross` of a vector
-restricted element by element, `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, are an
+Found while adding the `threadsConditionals` flag (not fixed, 2026-09-25): (1)
+`PointX(Missing)` compiles to `_gpu_nan().x` on GLSL and to a `.x` read of an
+`f32` on WGSL, which WGSL rejects. (2) `Dot` and `Cross` of a vector restricted
+element by element, `Dot([1,2]\{[0<t, t<0]\}, [1,1])`, are an
 `incompatible-type` error at boxing (the operand is typed
-`list<integer | missing>`); a list of points restricted the same way works.
-(3) `At([[1,2]\{0<t\}, [3,4]], 1, 2)` is `2\{0<t\}` but is typed `unknown`.
-(4) With its condition undecided, a restricted list `When([1,2], c)` is typed
+`list<integer | missing>`); a list of points restricted the same way works. (3)
+`At([[1,2]\{0<t\}, [3,4]], 1, 2)` is `2\{0<t\}` but is typed `unknown`. (4) With
+its condition undecided, a restricted list `When([1,2], c)` is typed
 `missing | vector<integer^2>`, but its value, the list of restricted cells
-`[1\{c\}, 2\{c\}]`, is typed `list<integer | missing>`, which that type does
-not admit. The applications over it inherit the mismatch at `t` free:
-`PointX`, `Dot`, `Distance` and `Norm` of `[(1,2),(3,4)]\{0<t\}`.
+`[1\{c\}, 2\{c\}]`, is typed `list<integer | missing>`, which that type does not
+admit. The applications over it inherit the mismatch at `t` free: `PointX`,
+`Dot`, `Distance` and `Norm` of `[(1,2),(3,4)]\{0<t\}`.
 
 Not fixed, accepted rule: on `javascript`, a list held by a free point
 coordinate becomes `NaN` (`_SYS.pointSlot`), so `[1,2]·PointList(t,t)` run with
 `t = [1,2]` gives `[[NaN,NaN],[NaN,NaN]]` where the interpreter answers
 `[(1,1),(4,4)]`. Refusing the compile whenever a coordinate type is `unknown`
 would also refuse ordinary plot expressions. On `interval-js`,
-`2·PointList(t,1)` with `t = [1,2]` gives the point `([2,4], 2)`; plot
-variables on that target are numbers.
+`2·PointList(t,1)` with `t = [1,2]` gives the point `([2,4], 2)`; plot variables
+on that target are numbers.
 
 Found while fixing 313 (not fixed; each gives a visible error, not a wrong
 value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
@@ -498,6 +498,34 @@ correct) stays as the unevaluated `Map(P, (u) => ||u||)` when `P` is a symbol
 holding a list, but gives an `incompatible-type` error when the same list is
 written as a literal. The two routes should report the misuse the same way (the
 error, since the operand types are known once `P`'s value is read).
+
+### Threaded functions over a code-built tuple with a list coordinate (OPEN, decision — 2026-09-25)
+
+`Sin(Tuple(A, B))`, and the other functions that apply to each coordinate of a
+tuple (other than `Power`, `Sqrt` and `Root`), still evaluate to a tuple of
+lists when `A` and `B` are lists, for example `(sin([1,2,3]), sin([10,20,30]))`.
+The 2026-09-25 decision makes only arithmetic over such a tuple an
+`incompatible-type` error. Decide whether the functions that apply to each
+coordinate should also be an error, stay a tuple of lists, or read the tuple as
+a list of points.
+
+### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
+
+(1) The static type of arithmetic over a code-built tuple with a list coordinate
+(`Add(Tuple(1,1), Tuple(A,B))`) is still `tuple<list<real>, list<real>>` though
+it always evaluates to an error. Typing it `error` makes the canonicalization of
+an enclosing arithmetic expression wrap the operand in
+`Error(incompatible-type, "number", "error")`, so `(1−t)P − tP` with a data
+tuple `P` gives a sum of errors after `.N()`; `checkNumericArgs` must first stop
+wrapping error-typed operands. (2) Compiled `(A\{0<t\}, B) + (1, 1)` declines
+("scalar arithmetic over a list-valued operand") where the interpreter answers;
+a reachable decline. (3) `Length(Missing)` is
+`Error(incompatible-type, collection, missing)` while its type says `integer`.
+(4) For a parameter with no declared type, the compiled route does not handle a
+restricted list of points (`untypedPointListElement` does not remove `missing`).
+(5) A point list at an untyped parameter beside another collection argument
+still declines to compile to JavaScript (the interpreter pairs the lists). (6)
+Block-local functions and variadic parameters do not map over a list of points.
 
 ### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
 
@@ -590,20 +618,6 @@ whether the interval target should answer `singular` inside that zone. Also:
 `Csc(5e-324)` overflows to `Infinity` and is read as the pole `~oo` although the
 true value is `+2.02e323` (beyond the largest double); the sign is known, so
 `+oo` would be more precise.
-
-### `Tuple(list, list)` is read as a list of points by `PointX` and as one point by `+` (OPEN, wrong values — found 2026-09-24 by the review of `168de97d`)
-
-With `A` a 2-element list, `(cos A, sin A)` is a tuple of lists. `PointX` reads
-it as a LIST OF POINTS and answers `[cos A₁, cos A₂]`; the point-list sum
-`PointList([1,2],[3,4]) + (cos A, sin A)` reads it as ONE point and broadcasts
-it over the list, giving two "points" whose coordinates are lists
-(`[([1.995, 1.980], [3.0998, 3.1987]), …]`) and no dimension error for a
-3-element `A`. Desmos reads `(cos a, sin a)` with a list `a` as a list of points
-and pairs element by element (2 points). The reply to Tycho ask 307 said the sum
-is an "outer combination" (N² points); it is not. Decide one reading (Desmos's
-element-wise pairing is the natural one) and apply it to `PointX`/`PointY`, the
-point-list arithmetic, and the `javascript`/`interval-js` lowerings, which
-reproduce the interpreter's structure today.
 
 ### An exact integer argument of a trigonometric function is rounded to the working precision before the kernel runs (OPEN, wrong values — found 2026-09-24)
 

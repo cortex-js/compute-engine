@@ -2442,6 +2442,23 @@ function isPointListSource(e: Expression): boolean {
 }
 
 /**
+ * Whether `e` is a `PointList` source that may be absent: its type has a
+ * `missing` arm, and its present part is an indexed collection (not a tuple,
+ * not a string), such as `list<real> | missing` for the restricted list
+ * `A\{0 < t\}`. The twin of `isAbsentablePointListSourceType` in
+ * `library/collections.ts`.
+ */
+function isAbsentablePointListSource(e: Expression): boolean {
+  const t = jsType(e);
+  if (!typeContainsMissing(t)) return false;
+  const present = stripMissingFromType(t);
+  if (present === 'never' || present === 'string' || present === 'tuple')
+    return false;
+  if (typeof present !== 'string' && present.kind === 'tuple') return false;
+  return isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE);
+}
+
+/**
  * A type that is provably a collection — directly, or through any member of a
  * union. Mirrors the guard in the `PointList` definition handler
  * (`library/collections.ts`): such a component is not a scalar slot.
@@ -2490,6 +2507,10 @@ function isProvablyNonScalarType(t: Type): boolean {
  *   sources is the source lowering's own, pre-existing behavior. Truncation
  *   semantics all the way down: a budget below 1 (`0.5`) floors to `0`, so the
  *   compiled point list is empty.
+ * - A source that **may be absent** (a restricted list `A\{0 < t\}`, typed
+ *   `list<real> | missing`) makes the whole point list absent when its value
+ *   is `undefined` (the JavaScript form of `Missing`): the IIFE returns
+ *   `undefined`, as the interpreter's `PointList` answers `Missing`.
  * - A source not proven to be a constructed array is checked with
  *   `Array.isArray` and throws a `RangeError` naming the component when it is
  *   not an array: a `vars`-splice
@@ -2522,6 +2543,23 @@ function compileJSPointList(
     // read as a zip SOURCE (`matches` answers "could be a collection" for a
     // top type).
     const constructedScalarSlot = isConstructedScalar(a, target);
+    // A source that may be absent (`list<real> | missing`): an absent value
+    // makes the whole point list absent, as in the interpreter.
+    const absentableSource =
+      !constructedScalarSlot && isAbsentablePointListSource(a);
+    if (absentableSource) {
+      const name = BaseCompiler.tempVar(target);
+      bindings.push(`const ${name} = ${compile(a)};`);
+      bindings.push(`if (${name} === undefined) return undefined;`);
+      bindings.push(
+        `if (!Array.isArray(${name})) throw new RangeError('PointList: ` +
+          `source component ${i + 1} is not an array at run time');`
+      );
+      widths.push(undefined);
+      sources.push(name);
+      parts.push(`${name}[${idx}]`);
+      continue;
+    }
     if (!constructedScalarSlot && isPointListSource(a)) {
       if (a.isCollection && a.isFiniteCollection === false)
         throw new Error(
@@ -5313,7 +5351,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         args[1] != null && !isString(args[1]) ? compile(args[1]) : undefined
       );
     }
-    if (pointHasBroadcastComponent(args[0])) {
+    // A `PointList` with a list component is a LIST of points (zipped to the
+    // shortest source, as the interpreter zips it), not a point whose
+    // components broadcast: it takes the list-of-points branch below, which
+    // computes one norm per zipped point. `(A, B)` with `A`, `B` lists is
+    // canonicalized to this form.
+    if (
+      pointHasBroadcastComponent(args[0]) &&
+      !isFunction(args[0], 'PointList')
+    ) {
       if (
         args[1] != null &&
         isString(args[1]) &&

@@ -66,13 +66,29 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
         ['Divide', ['Power', -1, ['Range', 1, ['Add', 'N', -1]]], ['Cos', 'a']],
       ])
     );
+    // The document writes `(Dc + X, Y)` as a LaTeX parenthesized list, which
+    // is `PointList(Dc + X, Y)` because `X` and `Y` are lists (user decision
+    // 2026-09-24): it is written here as the `Delimiter` the parser produces.
     const expr = ce.box([
       'Add',
       ['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
-      ['Tuple', ['Add', 'Dc', 'X'], 'Y'],
+      ['Delimiter', ['Sequence', ['Add', 'Dc', 'X'], 'Y'], "'(,)'"],
     ]);
+    expect(expr.op2.operator).toBe('PointList');
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
+    // The same list built as a MathJSON `Tuple` is data, not a point, and
+    // arithmetic over it declines (user decision 2026-09-25).
+    expect(() =>
+      compile(
+        ce.box([
+          'Add',
+          ['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
+          ['Tuple', ['Add', 'Dc', 'X'], 'Y'],
+        ]),
+        { fallback: false }
+      )
+    ).toThrow(/tuple with a list coordinate/);
   });
 
   test('a direct Range binding (type `range`) scales a point and matches the interpreter', () => {

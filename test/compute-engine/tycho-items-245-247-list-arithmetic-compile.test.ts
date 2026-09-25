@@ -338,14 +338,30 @@ describe('Tycho item 246 (c) — point + (list, list) types as the broadcast tup
   ce.declare('G', 'tuple<number, number>');
   ce.declare('L2', 'list<number>');
 
-  test('G + (L, L2) is tuple<list<number>, list<number>>, not a union', () => {
+  test('G + Tuple(L, L2) is tuple<list<number>, list<number>>, not a union', () => {
+    // The static type is unchanged. The value is an error, and the compiled
+    // code declines: a MathJSON `Tuple` with list coordinates is data, not a
+    // point, and arithmetic over it fails closed (user decision 2026-09-25).
     const e = ce.box(['Add', 'G', ['Tuple', 'L', 'L2']] as never);
     expect(e.type.toString()).toBe('tuple<list<number>, list<number>>');
     const r = compile(e, { to: 'javascript' });
+    expect(r.success).toBe(false);
+  });
+
+  test('G + (L, L2) in LaTeX is the list of points shifted by G', () => {
+    // The parenthesized list `(L, L2)` is `PointList(L, L2)` (user decision
+    // 2026-09-24), so the sum is one point per element.
+    const e = ce.box([
+      'Add',
+      'G',
+      ['Delimiter', ['Sequence', 'L', 'L2'], "'(,)'"],
+    ] as never);
+    expect(e.type.toString()).toBe('list<tuple<number, number>>');
+    const r = compile(e, { to: 'javascript' });
     expect(r.success).toBe(true);
     expect(r.run({ G: [10, 20], L: [0.1, 0.2], L2: [4, 5] })).toEqual([
-      [10.1, 10.2],
-      [24, 25],
+      [10.1, 24],
+      [10.2, 25],
     ]);
   });
 
@@ -358,14 +374,20 @@ describe('Tycho item 246 (c) — point + (list, list) types as the broadcast tup
     ).toBe('tuple<number, list<number>>');
   });
 
-  test('the interpreter answers the same tuple of lists', () => {
+  test('the interpreter agrees: an error for the Tuple, the points for (L, L2)', () => {
     const ce2 = new ComputeEngine();
     ce2.assign('G', ce2.box(['Tuple', 10, 20]));
     ce2.assign('L', ce2.box(['List', 1, 2]));
     ce2.assign('L2', ce2.box(['List', 4, 5]));
+    const r = ce2.box(['Add', 'G', ['Tuple', 'L', 'L2']] as never).evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.op1.op1.string).toBe('incompatible-type');
     expect(
-      ce2.box(['Add', 'G', ['Tuple', 'L', 'L2']] as never).evaluate().json
-    ).toEqual(['Tuple', ['List', 11, 12], ['List', 24, 25]]);
+      ce2
+        .box(['Add', 'G', ['Delimiter', ['Sequence', 'L', 'L2'], "'(,)'"]] as never)
+        .evaluate()
+        .toString()
+    ).toBe('[(11, 24),(12, 25)]');
   });
 
   test('all-scalar tuples keep their exact component-wise type', () => {
