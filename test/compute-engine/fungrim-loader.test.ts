@@ -255,6 +255,35 @@ describe('loadIdentities (full artifact)', () => {
     expect(result.isSame(expected)).toBe(true);
   });
 
+  it('(1+i)/√(2y) · θ₃(0, 1 + i/y) → θ₂(0, 1 + iy) for a symbolic y > 0  [fungrim:e2288d]', () => {
+    // The built-in `expand` rule rewrites this product to one quotient,
+    // `((√2/2)(1+i)·θ₃(…))/√y`, which the identity's pattern does not match.
+    // The identity fires only because the loader places the identities ahead
+    // of the built-in rules. A fresh engine keeps the declaration of `y` out
+    // of the shared one.
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2, { topics: ['jacobi_theta'] });
+    ce2.declare('y', 'real');
+    ce2.assume(ce2.expr(['Greater', 'y', 0]));
+    const result = ce2
+      .expr([
+        'Multiply',
+        ['Divide', ['Complex', 1, 1], ['Sqrt', ['Multiply', 2, 'y']]],
+        ['JacobiTheta', 3, 0, ['Add', ['Divide', ['Complex', 0, 1], 'y'], 1]],
+      ])
+      .simplify();
+    expect(
+      result.isSame(
+        ce2.expr([
+          'JacobiTheta',
+          2,
+          0,
+          ['Add', 1, ['Multiply', 'y', 'ImaginaryUnit']],
+        ])
+      )
+    ).toBe(true);
+  });
+
   it('Arctan(1 + √2) → 3π/8  [fungrim:c6c92a]', () => {
     expect(
       ce.expr(['Arctan', ['Add', 1, ['Sqrt', 2]]]).simplify().isSame(
@@ -1222,8 +1251,11 @@ describe("M5 before/after: purpose 'expand' rules", () => {
     expect(boxed.simplify().isSame(boxed)).toBe(true);
     // … and not via the standard (expand-filtered) rule set …
     expect(boxed.replace(ce.getRuleSet('standard-simplification')!)).toBeNull();
-    // … but via the full set
-    const result = boxed.replace(allRules);
+    // … but via the full set. `once` stops the pass after the identity: the
+    // loader places the identities ahead of the built-in rules, so without
+    // it a later built-in rule of the same pass (`expand`) may rewrite the
+    // identity's result, e.g. distribute `(n + 1)(-1)^n`.
+    const result = boxed.replace(allRules, { once: true });
     expect(result).not.toBeNull();
     expect(
       result!.isSame(ce.expr(expected as Parameters<ComputeEngine['box']>[0]))
@@ -1256,6 +1288,55 @@ describe("M5 before/after: purpose 'expand' rules", () => {
 // shape and, more importantly, that the wrapped rules behave identically to
 // pattern rules through every engine channel.
 // ---------------------------------------------------------------------------
+
+describe('registration order of the loaded identities', () => {
+  // The loader places the identities ahead of the built-in simplification
+  // rules, so that a built-in rewrite (such as `expand`) cannot change the
+  // shape of an input before an identity is tried on it.
+  const idOf = (r: unknown): string | undefined =>
+    typeof r === 'object' && r !== null && 'id' in r
+      ? String((r as { id: unknown }).id)
+      : undefined;
+
+  it('puts the identities ahead of the built-in rules', () => {
+    const ce = new ComputeEngine();
+    const builtins = [...ce.simplificationRules];
+    const report = loadIdentities(ce, { topics: ['gamma'] });
+    expect(report.loaded).toBeGreaterThan(0);
+    const rules = ce.simplificationRules;
+    expect(
+      rules
+        .slice(0, report.loaded)
+        .every((r) => idOf(r)?.startsWith('fungrim:'))
+    ).toBe(true);
+    expect(rules.slice(report.loaded)).toEqual(builtins);
+  });
+
+  it('keeps a host rule placed at the front ahead of a later batch', () => {
+    const ce = new ComputeEngine();
+    const first = loadIdentities(ce, { topics: ['gamma'] });
+    const hostRule = {
+      match: 'HostOnlyHead(_x)',
+      replace: '_x',
+      id: 'host-rule',
+    };
+    ce.simplificationRules.unshift(hostRule);
+    const second = loadIdentities(ce, { topics: ['sine'] });
+    expect(second.loaded).toBeGreaterThan(0);
+    const rules = ce.simplificationRules;
+    expect(rules[0]).toBe(hostRule);
+    // The second batch follows the first one, and the built-in rules follow
+    // both batches.
+    const ids = rules.map(idOf);
+    const lastLoader = ids
+      .map((id) => id?.startsWith('fungrim:') ?? false)
+      .lastIndexOf(true);
+    expect(lastLoader).toBe(first.loaded + second.loaded);
+    expect(
+      ids.slice(1, lastLoader + 1).every((id) => id?.startsWith('fungrim:'))
+    ).toBe(true);
+  });
+});
 
 describe('hot-head pre-screened dispatch', () => {
   let ce: ComputeEngine;

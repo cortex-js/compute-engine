@@ -1010,7 +1010,7 @@ function simplifyNonCommutativeFunction(
   options: Partial<InternalSimplifyOptions>,
   steps: RuleSteps
 ): RuleSteps {
-  const result = replace(expr, rules, {
+  let result = replace(expr, rules, {
     recursive: false,
     form: 'canonical',
     useVariations: options.useVariations ?? false,
@@ -1071,12 +1071,32 @@ function simplifyNonCommutativeFunction(
       return false;
     })();
   // Steps from rules tagged `purpose: 'transform'` are mathematically
-  // preferred rewrites: they are exempt from the cost gate.
-  const isTransformPurpose = result.at(-1)!.purpose === 'transform';
-  if (
+  // preferred rewrites: they are exempt from the cost gate. A pass applies
+  // every rule in order, so other rules can fire AFTER the transform, on its
+  // result (for example `expand` reordering the sum that
+  // `Digamma(1/2) → -2 ln 2 - γ` produced). Those later steps are not
+  // exempt: they are gated against the value right after the last transform
+  // step, and when they are not cheaper than it the pass stops at that
+  // transform step.
+  let lastTransform = -1;
+  for (let i = result.length - 1; i >= 0; i--) {
+    if (result[i].purpose === 'transform') {
+      lastTransform = i;
+      break;
+    }
+  }
+  if (lastTransform >= 0) {
+    if (
+      lastTransform < result.length - 1 &&
+      !isExpandWithSimplification &&
+      !isCheaper(result[lastTransform].value, last, options?.costFunction)
+    ) {
+      result = result.slice(0, lastTransform + 1);
+      last = simplifyOperands(result.at(-1)!.value, options);
+    }
+  } else if (
     !isCheaper(expr, last, options?.costFunction) &&
-    !isExpandWithSimplification &&
-    !isTransformPurpose
+    !isExpandWithSimplification
   )
     return steps;
 

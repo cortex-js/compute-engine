@@ -18,10 +18,11 @@
 //     predicate must return a definitive positive; `undefined` (unknown)
 //     means the rule does not fire (fail-closed) and the `onGuardUndecided`
 //     hook is invoked so the non-firing is observable,
-//  4. registers the rules (with `id` and `purpose`) via
-//     `ce.simplificationRules.push` — or `ce.solveRules.push` /
-//     `ce.harmonizationRules.push` for `target: 'solve' | 'harmonization'`
-//     rules when `options.solve === true`,
+//  4. registers the rules (with `id` and `purpose`): simplify-target rules
+//     go AHEAD of the built-in rules of `ce.simplificationRules` (see
+//     `insertAheadOfBuiltins()` for why), while `target: 'solve' |
+//     'harmonization'` rules are appended with `ce.solveRules.push` /
+//     `ce.harmonizationRules.push` when `options.solve === true`,
 //  5. returns the §2.8 load report.
 //
 // PERFORMANCE (§2.4 fallback, M5): simplify-target rules whose canonical
@@ -663,6 +664,47 @@ function wrapHotHeadRule(parts: BoxedRuleParts): Rule {
 /** Rule ids already registered, per engine (idempotence, §2.1). */
 const loadedIdsByEngine = new WeakMap<IComputeEngine, Set<string>>();
 
+/** The simplify-rule objects this loader registered (any engine). */
+const loaderSimplifyRules = new WeakSet<object>();
+
+/**
+ * Insert the loaded simplify rules ahead of the built-in simplification
+ * rules. The first call inserts them at the front of the array. A later call
+ * inserts them right after the last rule an earlier call registered, so the
+ * artifact order is kept across calls, and a rule the host placed at the
+ * front after the first call (`unshift()`) stays ahead of the identities.
+ *
+ * Why ahead: `simplify()` applies the rules of one pass in array order, and
+ * each rule sees the result of the rules before it. The built-in rules
+ * include rewrites that change the shape of a product without making it
+ * simpler: `expand` moves a quotient factor out (`(a/√y)·f` becomes
+ * `(a·f)/√y`) and splits a radical of a product (`√(πz/2)` becomes
+ * `(√2/2)·√π·√z`). A Fungrim pattern is in canonical form, so after such a
+ * rewrite it no longer matches, and when the rewritten pass is not cheaper
+ * the cost check of `simplify()` rejects the whole pass. The identity is
+ * then lost although it fires on the input. Measured 2026-09-24 over the
+ * left sides of the bundled identities: appended at the end, `simplify()`
+ * lost 135 of the 871 identities that fire with `replace()`; ahead of the
+ * built-in rules, it loses 38, and none that it applied before.
+ *
+ * A rule the host adds with `ce.simplificationRules.push()` still goes after
+ * the built-in rules.
+ */
+function insertAheadOfBuiltins(rules: Rule[], added: Rule[]): void {
+  let at = 0;
+  for (let i = rules.length - 1; i >= 0; i--) {
+    if (loaderSimplifyRules.has(rules[i] as object)) {
+      at = i + 1;
+      break;
+    }
+  }
+  // `splice()` changes the array length, which is what the engine's
+  // length-based mutation detection needs to invalidate the cached boxed
+  // rule set.
+  rules.splice(at, 0, ...added);
+  for (const r of added) loaderSimplifyRules.add(r as object);
+}
+
 /**
  * Load the compiled Fungrim identities into a Compute Engine instance.
  *
@@ -803,10 +845,10 @@ export function loadIdentities(
     report.byPurpose[r.purpose] += 1;
   }
 
-  // Registering via push() lets the engine's length-based mutation detection
-  // invalidate the cached boxed rule sets.
+  // Registering by changing the array length (splice/push) lets the engine's
+  // length-based mutation detection invalidate the cached boxed rule sets.
   if (buckets.simplify.length > 0)
-    ce.simplificationRules.push(...buckets.simplify);
+    insertAheadOfBuiltins(ce.simplificationRules, buckets.simplify);
   if (buckets.solve.length > 0) ce.solveRules.push(...buckets.solve);
   if (buckets.harmonization.length > 0)
     ce.harmonizationRules.push(...buckets.harmonization);
