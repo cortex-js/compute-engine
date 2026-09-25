@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Bug Fixes
+
+- **The pole `ComplexInfinity` has one MathJSON spelling at every precision.**
+  At machine precision (`ce.precision = 'machine'`), a complex number with an
+  infinite imaginary part serialized as `["Complex", 1, "PositiveInfinity"]`,
+  so `Add(1.5, 2.5, ComplexInfinity).N()` gave that number while `evaluate()`
+  and the default precision gave the symbol `ComplexInfinity`. The machine-
+  precision value now serializes as the symbol, as the big-decimal value does.
+  An infinite real part with a finite imaginary part is not the pole and keeps
+  its `Complex` spelling.
+
 ## 0.135.0 _2026-09-25_
 
 ### Behavior Changes

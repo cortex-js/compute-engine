@@ -953,19 +953,6 @@ re-measured; measure them before shortening the guard. Also: the
 `makeMonic` (`.div()`), `resultantRec` and `polyDivide` in `rubi-utils.ts` were
 not audited.
 
-### At machine precision, `N()` of an `Add` that holds the pole spells it as a number (OPEN, consistency — found 2026-09-23)
-
-With `ce.precision = 'machine'`, `Add(1.5, 2.5, ComplexInfinity)` evaluates to
-the symbol `ComplexInfinity` under `evaluate()`, but to the number
-`["Complex", "PositiveInfinity", "PositiveInfinity"]` under `N()`. At the
-default precision both routes give the symbol. The two spellings print the same
-(`~oo`) and mean the same value, but the MathJSON differs, and a comparison of
-the two routes by their MathJSON fails. `Sum` normalizes its result to the
-symbol (`finishSum`, `library/arithmetic.ts`), which keeps its former answer;
-other callers of `Add` see the number. The fix is one spelling for the pole on
-every route, probably in the boxing of a complex number whose two parts are
-infinite.
-
 ### Slow operations and slow tests found by a review of the slowest test files (OPEN, performance — found 2026-09-22)
 
 The sample cache of complex integrands, the NaN stop in adaptive quadrature, the

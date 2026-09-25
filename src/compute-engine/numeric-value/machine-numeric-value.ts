@@ -95,6 +95,14 @@ export class MachineNumericValue extends NumericValue {
     if (this.isNaN) return 'NaN';
     if (this.isPositiveInfinity) return 'PositiveInfinity';
     if (this.isNegativeInfinity) return 'NegativeInfinity';
+    // A complex value whose imaginary part is infinite (and not NaN) is the
+    // single point at infinity of the Riemann sphere, spelled `ComplexInfinity`.
+    // An infinite real part with a finite imaginary part is not that point and
+    // keeps the `Complex` spelling below. The big-decimal value and the
+    // serializer both use the `ComplexInfinity` spelling; without this line
+    // the machine value emitted `["Complex", <re>, "PositiveInfinity"]`, so
+    // the MathJSON of the same pole differed between the two precisions.
+    if (this.isComplexInfinity) return 'ComplexInfinity';
 
     if (this.im === 0) return numberToExpression(this.decimal);
     return [

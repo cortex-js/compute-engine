@@ -477,6 +477,33 @@ describe('NON-FINITE TYPING CONVENTION', () => {
       expect(render(['Complex', inf, 1])).not.toBe('~oo');
     });
 
+    test('the MathJSON follows the printed form on both lanes', () => {
+      // A value that prints `~oo` serializes as the symbol `ComplexInfinity`
+      // on both numeric-value lanes. The machine lane used to emit
+      // `["Complex", "PositiveInfinity", "PositiveInfinity"]`, so the MathJSON
+      // of the same pole differed between the two precisions, and at machine
+      // precision `N()` of an `Add` holding the pole gave the number spelling
+      // while `evaluate()` gave the symbol (ROADMAP, found 2026-09-23).
+      for (const engine of [ce, ceMachine]) {
+        expect(engine.box(['Complex', 1, inf]).json).toBe('ComplexInfinity');
+        expect(engine.box(['Complex', 0, inf]).json).toBe('ComplexInfinity');
+        const sum = engine.box(['Add', 1.5, 2.5, 'ComplexInfinity']);
+        expect(sum.evaluate().json).toBe('ComplexInfinity');
+        expect(sum.N().json).toBe('ComplexInfinity');
+        const product = engine.box(['Multiply', 2.5, 'ComplexInfinity']);
+        expect(product.evaluate().json).toBe('ComplexInfinity');
+        expect(product.N().json).toBe('ComplexInfinity');
+      }
+      // An infinite REAL part with a finite imaginary part is not `~oo`, and
+      // keeps its `Complex` spelling on both lanes.
+      for (const engine of [ce, ceMachine])
+        expect(engine.box(['Complex', inf, 1]).json).toEqual([
+          'Complex',
+          'PositiveInfinity',
+          1,
+        ]);
+    });
+
     test('finite complex values keep their finite types', () => {
       expect(typeOf(['Complex', 2, 3])).toBe('complex');
       expect(typeOf(['Complex', 0, 3])).toBe('imaginary');
