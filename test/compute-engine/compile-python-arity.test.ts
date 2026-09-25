@@ -422,7 +422,6 @@ describe('PYTHON ARITY — a run-time Norm order the interpreter does not comput
         }
       });
     });
-  });
 
     it('a run-time STRING order is the norm type the interpreter reads', () => {
       // `normRunP` is not declared, so the emitted code accepts the string
@@ -471,6 +470,7 @@ describe('PYTHON ARITY — a run-time Norm order the interpreter does not comput
         }
       });
     });
+  });
 });
 
 // A norm order over an operand whose rank is not known when it compiles.

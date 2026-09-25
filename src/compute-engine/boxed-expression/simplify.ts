@@ -1,5 +1,6 @@
 import { checkDeadline } from '../../common/interruptible.js';
 import { replace } from './rules.js';
+import { isPatternRule } from './rule-index.js';
 import { sameSyntactic } from './compare.js';
 import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
@@ -207,6 +208,23 @@ function expandedTermBound(expr: Expression): number {
  * shadowed valueless, so `assignedVariableNames` returns nothing and no scope
  * is pushed.
  */
+/** The pattern rules of each rule set (see `isPatternRule()`), computed once
+ *  per rule set object. The standard rule set is cached by the engine and
+ *  rebuilt when its rules change, so the key changes with it. The nested
+ *  `simplify()` calls on the operands receive the same rule set object as the
+ *  call that started them (see the rule set selection in `simplify()`), so
+ *  one computation serves the whole expression tree. */
+const patternRulesCache = new WeakMap<BoxedRuleSet, BoxedRuleSet>();
+
+function patternRulesOf(rules: BoxedRuleSet): BoxedRuleSet {
+  let result = patternRulesCache.get(rules);
+  if (result === undefined) {
+    result = { rules: rules.rules.filter(isPatternRule) };
+    patternRulesCache.set(rules, result);
+  }
+  return result;
+}
+
 export function simplifyValueBlind(
   expr: Expression,
   options?: Partial<InternalSimplifyOptions>
@@ -378,7 +396,13 @@ export function simplify(
     rules = { rules: [] };
   } else if (options?.rules !== undefined) {
     const boxed = ce.rules(options.rules, { canonical: true });
-    rules = { rules: boxed.rules.filter((r) => r.purpose !== 'expand') };
+    // Reuse a set that has no 'expand' rule left, as is: the nested
+    // `simplify()` calls on the operands receive the set that this call
+    // filtered, and keeping the same object lets `patternRulesOf()` find the
+    // pattern subset it computed for it.
+    rules = boxed.rules.some((r) => r.purpose === 'expand')
+      ? { rules: boxed.rules.filter((r) => r.purpose !== 'expand') }
+      : boxed;
   } else rules = ce.getRuleSet('standard-simplification')!;
 
   options = { ...options, rules };
@@ -967,8 +991,11 @@ function simplifyExpression(
   const substeps: RuleSteps | undefined = options.collectSubsteps
     ? []
     : undefined;
+  const original = expr;
+  const stepsBefore = steps;
   const alt = simplifyOperands(expr, options, substeps);
-  if (!sameSyntactic(alt, expr)) {
+  const operandsChanged = !sameSyntactic(alt, expr);
+  if (operandsChanged) {
     const aggregate: RuleStep =
       substeps && substeps.length > 0
         ? { value: alt, because: 'simplified operands', substeps }
@@ -979,6 +1006,39 @@ function simplifyExpression(
 
   // Try to simplify the function expression
   const result = simplifyNonCommutativeFunction(expr, rules, options, steps);
+
+  // A pattern rule (a rule with a `match` pattern, or a compiled one such as
+  // a Fungrim identity) expects the canonical spelling of its operands.
+  // Simplifying the operands can change that spelling (`-(1/2)·π` becomes
+  // `-π/2`, `√(πz/2)` is split into `(√2/2)·√π·√z`), and the pattern then
+  // no longer matches. So when the operands changed, also try the pattern
+  // rules on the node as it was before, and keep that result when it is
+  // cheaper. The other rules are written for simplified operands and are not
+  // tried again: measured on 2026-09-24 over the 6,087 distinct `simplify()`
+  // inputs of the test suite, trying all rules again made `simplify()` about
+  // three times slower and gave worse results (`10!/(3!·7!)` became
+  // `Binomial(10, 3)` instead of `120`); trying only the pattern rules had
+  // no measurable cost, changed none of those results, and let `simplify()`
+  // apply 35 more of the bundled Fungrim identities.
+  if (operandsChanged) {
+    const patternRules = patternRulesOf(rules);
+    if (patternRules.rules.length > 0) {
+      const pre = simplifyNonCommutativeFunction(
+        original,
+        patternRules,
+        options,
+        stepsBefore
+      );
+      if (pre.length > stepsBefore.length) {
+        const costFn =
+          options.costFunction ??
+          ((e: Expression) => original.engine.costFunction(e));
+        const post = result.length > steps.length ? result : steps;
+        if (costFn(pre.at(-1)!.value) < costFn(post.at(-1)!.value)) return pre;
+      }
+    }
+  }
+
   if (result.length > steps.length) return result;
 
   // NOTE: Trying permutations of operands for commutative functions is
@@ -1018,12 +1078,45 @@ function simplifyNonCommutativeFunction(
 
   if (result.length === 0) return steps;
 
+  // The pass applies every rule in order, each to the result of the one
+  // before, and the cost check below compares only its LAST value with
+  // `expr`. A later rule can rewrite a cheaper intermediate value into a more
+  // expensive one: the built-in `sin(x)·sin(y) → (cos(x−y) − cos(x+y))/2`
+  // turns the `sin(a)·sin(b)` that an identity just produced back into the
+  // input, and `expand` distributes a product that an identity produced. So
+  // when the pass ends where it started, or its last value is rejected, keep
+  // the cheapest value that the pass reached, if it is cheaper than `expr`.
+  // This cannot cycle: the next pass applies the same later rule to that
+  // value, and the cost check rejects its more expensive result.
+  const cheapestPrefix = (): RuleSteps | undefined => {
+    if (result.length < 2) return undefined;
+    const costFn =
+      options.costFunction ?? ((e: Expression) => expr.engine.costFunction(e));
+    let best = -1;
+    let bestCost = costFn(expr);
+    for (let i = 0; i < result.length - 1; i++) {
+      const c = costFn(result[i].value);
+      if (c < bestCost) {
+        best = i;
+        bestCost = c;
+      }
+    }
+    if (best < 0) return undefined;
+    const kept = result.slice(0, best + 1);
+    const value = simplifyOperands(kept.at(-1)!.value, options);
+    // Strictly cheaper, not `isCheaper()` (which accepts an equal cost): the
+    // cost then decreases from pass to pass, which is what rules out a cycle.
+    if (!(costFn(value) < costFn(expr))) return undefined;
+    kept[kept.length - 1] = { ...kept.at(-1)!, value };
+    return [...steps, ...kept];
+  };
+
   // Two rules could be conflicting, for example: `ln(xy) = ln(x) + ln(y)`
   // and `ln(x) + ln(y) = ln(xy)`, resulting in a loop. In this case,
-  // we bail out.
+  // we bail out, unless a value on the way was cheaper.
 
   let last = result.at(-1)!.value;
-  if (sameSyntactic(last, expr)) return steps;
+  if (sameSyntactic(last, expr)) return cheapestPrefix() ?? steps;
 
   // Post-rule operand cleanup: NOT captured as substeps — it stays absorbed
   // into the rule step (as today), so `explain()` attributes it to the rule.
@@ -1098,7 +1191,7 @@ function simplifyNonCommutativeFunction(
     !isCheaper(expr, last, options?.costFunction) &&
     !isExpandWithSimplification
   )
-    return steps;
+    return cheapestPrefix() ?? steps;
 
   result.at(-1)!.value = last;
   return [...steps, ...result];

@@ -2,6 +2,34 @@
 
 ### Improvements
 
+- **`simplify()` applies the loaded Fungrim identities it used to miss.** Of the
+  bundled identities that fire on their own left side with `replace()`,
+  `simplify()` applied 736 of 871. With the changes below, more identities are
+  available to `simplify()` (the last item), 895 fire that way, and `simplify()`
+  applies all of them. Four causes are fixed:
+  - `loadIdentities()` places the identities ahead of the built-in
+    simplification rules. Before, a built-in rule such as `expand` changed the
+    shape of the input first (`(a/√y)·f` to `(a·f)/√y`), and the identity no
+    longer matched.
+  - `simplify()` simplifies the operands of an expression before it tries the
+    rules on it, which can change how an argument is written. It now also tries
+    the pattern rules on the expression as it was before, and keeps the cheaper
+    result: `LambertW(-π/2)` simplifies to `iπ/2`, and
+    `Hypergeometric0F1(3/2, -z²/4)` to `Sinc(z)`. A host rule written as a
+    pattern (a rule with a `match`) is also tried on that original form, so it
+    can apply where it did not before. The built-in rules are not tried again.
+  - When a later rule of the same rule pass rewrites a result into a more
+    expensive one, `simplify()` now keeps the cheapest value that the pass
+    reached, instead of rejecting the whole pass. The identity
+    `(cos(a−b) − cos(a+b))/2 → sin(a)·sin(b)` was undone by the built-in rule in
+    the other direction. This also applies without identities:
+    `3x/(x+1)² + 5/(x+1)²` now simplifies to `(3x+5)/(x+1)²`. It adds about 5%
+    to the time of `simplify()` on the inputs of the test suite, and nothing
+    when the identities are loaded.
+  - An identity whose result is cheaper than its left side by less than 10% was
+    kept out of `simplify()`. It is now used when its result is strictly cheaper
+    (46 identities, for example `RisingFactorial(1, n) → n!` and
+    `CarlsonRJ(x, y, z, z) → CarlsonRD(x, y, z)`).
 - When `Max`, `Min`, `Clamp` or `Sort` compare two constants that are closer
   than the working precision can separate, the comparison at a higher precision
   no longer resets the engine, so it no longer discards every cached value twice

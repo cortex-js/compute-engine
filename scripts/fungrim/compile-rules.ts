@@ -763,8 +763,34 @@ export type Orientation = {
   costs: { lhs: number; rhs: number };
 };
 
-/** The 10% static-shrink margin (§2.3). */
+/** The 10% static-shrink margin (§2.3). A side at most 90% of the cost of the
+ *  other is the clear `simplify` direction. Inside the margin (the tie
+ *  band), the rule is oriented toward the special-function side, and it is
+ *  still tagged `simplify` when its result is strictly cheaper than its
+ *  match (see `tieBandPurpose()`). */
 const MARGIN = 0.9;
+
+/**
+ * The purpose of a rule oriented inside the tie band: `simplify` when its
+ * replacement is strictly cheaper than its match, else `expand`.
+ *
+ * Tagging `expand` keeps a rule out of `simplify()`. That is needed for a
+ * rule whose result is not cheaper, but it also excluded rules such as
+ * `CarlsonRJ(x, y, z, z) → CarlsonRD(x, y, z)` (cost 15 → 14) or
+ * `RisingFactorial(1, k) → k!`, and `simplify()` then stopped halfway through
+ * a chain of identities. A strictly cheaper rule cannot cycle under
+ * `simplify()`: its cost check keeps a rewrite only when the result is not
+ * more expensive, so the opposite rewrite, strictly more expensive, is
+ * rejected. Measured 2026-09-24: 47 bundled rules changed from `expand` to
+ * `simplify` (before the definitional-expansion guard below), with no
+ * changed result and no extra time on the 6,088 `simplify()` inputs of the
+ * test suite.
+ */
+function tieBandPurpose(o: Orientation): RulePurpose {
+  const cMatch = o.direction === 'lhs-rhs' ? o.costs.lhs : o.costs.rhs;
+  const cReplace = o.direction === 'lhs-rhs' ? o.costs.rhs : o.costs.lhs;
+  return cReplace < cMatch ? 'simplify' : 'expand';
+}
 
 /**
  * Orient an entry. `lhsW`/`rhsW` are the wildcardized sides; costs are
@@ -836,9 +862,7 @@ export function orientEntry(
     const viable = forcedDirection === 'lhs-rhs' ? viableLR : viableRL;
     if (!viable)
       return { error: 'unorientable', detail: `forced ${forcedDirection} not viable` };
-    const shrinks =
-      forcedDirection === 'lhs-rhs' ? cRhs <= MARGIN * cLhs : cLhs <= MARGIN * cRhs;
-    return { ...o, purpose: shrinks ? 'simplify' : 'expand' };
+    return { ...o, purpose: tieBandPurpose(o) };
   }
 
   // Specific values: always value-form → closed-form, purpose 'simplify'
@@ -851,13 +875,17 @@ export function orientEntry(
   if (cLhs <= MARGIN * cRhs && viableRL) return { ...RL, purpose: 'simplify' };
 
   // Tie band (or the cheap side is un-patternable): orient the match toward
-  // the side rooted in a named special-function head, tag 'expand'
+  // the side rooted in a named special-function head; the tag is 'simplify'
+  // only when the result is strictly cheaper (`tieBandPurpose()`)
   const sLhs = isSpecialHeaded(lhsW);
   const sRhs = isSpecialHeaded(rhsW);
-  if (sLhs && !sRhs && viableLR) return LR;
-  if (sRhs && !sLhs && viableRL) return RL;
-  if (viableLR) return LR; // both/neither special: keep corpus orientation
-  if (viableRL) return RL;
+  if (sLhs && !sRhs && viableLR)
+    return { ...LR, purpose: tieBandPurpose(LR) };
+  if (sRhs && !sLhs && viableRL)
+    return { ...RL, purpose: tieBandPurpose(RL) };
+  // both/neither special: keep corpus orientation
+  if (viableLR) return { ...LR, purpose: tieBandPurpose(LR) };
+  if (viableRL) return { ...RL, purpose: tieBandPurpose(RL) };
   return { error: 'unorientable', detail: 'no viable direction' };
 }
 

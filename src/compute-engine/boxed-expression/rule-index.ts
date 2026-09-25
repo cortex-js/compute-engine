@@ -332,6 +332,34 @@ export function* candidateRules(
 // snapshot pins it; the differential equivalence test guards against a real
 // divergence.
 
+/**
+ * Key of the property that marks the `replace` function of a functional rule
+ * as a compiled PATTERN rule: a function that only matches a fixed pattern,
+ * checks its guards and substitutes, as a rule with a `match` pattern does.
+ * The Fungrim loader (`src/compute-engine/fungrim/loader.ts`) registers such
+ * functions for the identities whose pattern has a high-traffic head, so that
+ * they can be pre-screened quickly.
+ *
+ * `simplify()` needs to know which rules are pattern rules: it also tries
+ * them on an expression before its operands were simplified (see
+ * `patternRulesOf()` in `simplify.ts`). The mark is a property of the
+ * function, not an entry in a module-level set, because the identities
+ * entry point is a separate bundle that can hold its own copy of engine
+ * modules, and `Symbol.for()` returns the same symbol in every copy. The
+ * loader imports engine types only, so it spells the same key itself.
+ */
+export const PATTERN_RULE_MARK = Symbol.for(
+  '@cortex-js/compute-engine:pattern-rule'
+);
+
+/** True if the rule matches a fixed pattern: it has a `match` pattern, or
+ *  its `replace` function carries `PATTERN_RULE_MARK`. */
+export function isPatternRule(rule: BoxedRule): boolean {
+  if (rule.match !== undefined) return true;
+  const fn = rule.replace as unknown as Record<symbol, unknown>;
+  return typeof rule.replace === 'function' && fn[PATTERN_RULE_MARK] === true;
+}
+
 /** A boxed rule the per-head dispatcher can fold: a functional rule with no
  *  match pattern, no top-level condition, no variations, and exactly one
  *  `operators` head — i.e. dispatch fully described by that head, with all
@@ -389,6 +417,10 @@ function makeHeadDispatcher(
     // net value, `because`, and `purpose`.
     return last;
   };
+
+  // A dispatcher of pattern rules is itself a pattern rule.
+  if (inner.every(isPatternRule))
+    (replace as unknown as Record<symbol, unknown>)[PATTERN_RULE_MARK] = true;
 
   return {
     _tag: 'boxed-rule',

@@ -116,9 +116,12 @@ describe('loadIdentities (full artifact)', () => {
       // Finite-by-default flip: −1 (310f36).
       // 09c107 (`Sign(i) -> i`) is back since `Sign` extends to the complex
       // plane.
-      simplify: 1303,
+      // 46 rules moved expand → simplify on 2026-09-24: a rule inside the
+      // 10% cost margin is now tagged 'simplify' when its result is strictly
+      // cheaper (`tieBandPurpose()` in scripts/fungrim/compile-rules.ts).
+      simplify: 1349,
       transform: 8,
-      expand: 123,
+      expand: 77,
     });
     expect(
       report.byPurpose.simplify +
@@ -280,6 +283,60 @@ describe('loadIdentities (full artifact)', () => {
           0,
           ['Add', 1, ['Multiply', 'y', 'ImaginaryUnit']],
         ])
+      )
+    ).toBe(true);
+  });
+
+  // `simplify()` simplifies the operands first, which changes how the
+  // argument is written (`-(1/2)·π`, `-(1/4)·z²`), so the canonical pattern
+  // of the identity no longer matches. The identity applies because
+  // `simplify()` also tries the pattern rules on the expression as it was
+  // before its operands were simplified.
+  it('LambertW(-π/2) → iπ/2 under simplify()  [fungrim:e1dd64]', () => {
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2, { topics: ['lambertw'] });
+    const result = ce2
+      .expr(['LambertW', ['Negate', ['Multiply', ['Rational', 1, 2], 'Pi']]])
+      .simplify();
+    expect(
+      result.isSame(
+        ce2.expr(['Multiply', ['Complex', 0, ['Rational', 1, 2]], 'Pi'])
+      )
+    ).toBe(true);
+  });
+
+  it('0F1(3/2, -z²/4) → Sinc(z) under simplify()  [fungrim:e2878f]', () => {
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2, { topics: ['sinc'] });
+    ce2.declare('z', 'complex');
+    const result = ce2
+      .expr([
+        'Hypergeometric0F1',
+        ['Rational', 3, 2],
+        ['Negate', ['Multiply', ['Rational', 1, 4], ['Power', 'z', 2]]],
+      ])
+      .simplify();
+    expect(result.isSame(ce2.expr(['Sinc', 'z']))).toBe(true);
+  });
+
+  it('(-1)^n sin((2n+1)x) → ChebyshevT(2n+1, sin x) under simplify()  [fungrim:9789ee]', () => {
+    // The pattern has a `Multiply` head, so the loader registers the identity
+    // as a pre-screened function marked as a pattern rule; the mark is what
+    // lets `simplify()` try it before the operands are simplified.
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2, { topics: ['chebyshev'] });
+    ce2.declare('n', 'integer');
+    ce2.declare('x', 'complex');
+    const result = ce2
+      .expr([
+        'Multiply',
+        ['Sin', ['Multiply', 'x', ['Add', ['Multiply', 2, 'n'], 1]]],
+        ['Power', -1, 'n'],
+      ])
+      .simplify();
+    expect(
+      result.isSame(
+        ce2.expr(['ChebyshevT', ['Add', ['Multiply', 2, 'n'], 1], ['Sin', 'x']])
       )
     ).toBe(true);
   });
@@ -1262,20 +1319,147 @@ describe("M5 before/after: purpose 'expand' rules", () => {
     ).toBe(true);
   };
 
-  it('RisingFactorial(1, n) → n!  [fungrim:0feb19]', () =>
-    expandsTo(['RisingFactorial', 1, 'n'], ['Factorial', 'n']));
-
-  it('BernoulliPolynomial(n, 0) → BernoulliB(n)  [fungrim:a1d2d7]', () =>
-    expandsTo(['BernoulliPolynomial', 'n', 0], ['BernoulliB', 'n']));
-
   it('ChebyshevU(n, −1) → (−1)^n (n + 1)  [fungrim:be9a45]', () =>
     expandsTo(
       ['ChebyshevU', 'n', -1],
       ['Multiply', ['Power', -1, 'n'], ['Add', 'n', 1]]
     ));
+});
+
+// ---------------------------------------------------------------------------
+// Rules inside the 10% cost margin whose result is strictly cheaper are tagged
+// 'simplify' (`tieBandPurpose()` in scripts/fungrim/compile-rules.ts), so
+// simplify() applies them. They were tagged 'expand' before 2026-09-24.
+// ---------------------------------------------------------------------------
+
+describe('tie-band rules with a strictly cheaper result apply under simplify()', () => {
+  let ce: ComputeEngine;
+
+  beforeAll(() => {
+    ce = new ComputeEngine();
+    loadIdentities(ce);
+    ce.declare('n', 'integer');
+    ce.assume(ce.expr(['Greater', 'n', 0]));
+  });
+
+  const simplifiesTo = (input: unknown, expected: unknown) =>
+    expect(
+      ce
+        .expr(input as Parameters<ComputeEngine['box']>[0])
+        .simplify()
+        .isSame(ce.expr(expected as Parameters<ComputeEngine['box']>[0]))
+    ).toBe(true);
+
+  it('RisingFactorial(1, n) → n!  [fungrim:0feb19]', () =>
+    simplifiesTo(['RisingFactorial', 1, 'n'], ['Factorial', 'n']));
+
+  it('BernoulliPolynomial(n, 0) → BernoulliB(n)  [fungrim:a1d2d7]', () =>
+    simplifiesTo(['BernoulliPolynomial', 'n', 0], ['BernoulliB', 'n']));
 
   it('StieltjesGamma(n, 1) → StieltjesGamma(n)  [fungrim:51206a]', () =>
-    expandsTo(['StieltjesGamma', 'n', 1], ['StieltjesGamma', 'n']));
+    simplifiesTo(['StieltjesGamma', 'n', 1], ['StieltjesGamma', 'n']));
+
+  it('a chain of two identities ends at CarlsonRD  [fungrim:0aa9ac, 3dd30a]', () => {
+    // Entry 0aa9ac gives CarlsonRJ(x, y, y, y) (cost 15); entry 3dd30a,
+    // CarlsonRJ(x, y, z, z) → CarlsonRD(x, y, z) (cost 14), finishes the
+    // rewrite. Before 2026-09-24 3dd30a was tagged 'expand' and simplify()
+    // stopped at CarlsonRJ.
+    const ce2 = new ComputeEngine();
+    loadIdentities(ce2, { topics: ['carlson_elliptic'] });
+    ce2.declare('x', 'complex');
+    ce2.declare('y', 'complex');
+    const result = ce2
+      .expr([
+        'Which',
+        ['NotEqual', 'x', 'y'],
+        [
+          'Multiply',
+          ['Divide', 3, ['Multiply', 2, ['Add', ['Negate', 'x'], 'y']]],
+          [
+            'Add',
+            ['Divide', ['Negate', ['Sqrt', 'x']], 'y'],
+            ['CarlsonRC', 'x', 'y'],
+          ],
+        ],
+        ['Equal', 'x', 'y'],
+        ['Power', 'x', ['Rational', -3, 2]],
+      ])
+      .simplify();
+    expect(result.isSame(ce2.expr(['CarlsonRD', 'x', 'y', 'y']))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A later rule of the same simplify() pass can rewrite an identity's result
+// into a more expensive form. simplify() keeps the cheapest value that the
+// pass reached (see `simplifyNonCommutativeFunction()` in
+// src/compute-engine/boxed-expression/simplify.ts).
+// ---------------------------------------------------------------------------
+
+describe('simplify() keeps the cheapest value of a rule pass', () => {
+  it('sin(a)·sin(b) is not turned back into the input  [fungrim:ad6c1c]', () => {
+    // The identity gives sin(a)·sin(b); the built-in rule
+    // sin(x)·sin(y) → (cos(x−y) − cos(x+y))/2, later in the same pass,
+    // turns it back into the input.
+    const ce = new ComputeEngine();
+    loadIdentities(ce, { topics: ['sine'] });
+    ce.declare('a', 'complex');
+    ce.declare('b', 'complex');
+    const result = ce
+      .expr([
+        'Multiply',
+        ['Rational', 1, 2],
+        [
+          'Add',
+          ['Negate', ['Cos', ['Add', 'a', 'b']]],
+          ['Cos', ['Add', 'a', ['Negate', 'b']]],
+        ],
+      ])
+      .simplify();
+    expect(
+      result.isSame(ce.expr(['Multiply', ['Sin', 'a'], ['Sin', 'b']]))
+    ).toBe(true);
+  });
+
+  it('the product an identity gives is not distributed  [fungrim:55d23d]', () => {
+    // The identity gives (1/3)·m·(1−m)·CarlsonRD(0, 1, 1−m) (cost 35, input
+    // 41); `expand`, later in the same pass, distributes it (cost 62).
+    const ce = new ComputeEngine();
+    loadIdentities(ce, { topics: ['legendre_elliptic'] });
+    ce.declare('m', 'complex');
+    const result = ce
+      .expr([
+        'Add',
+        [
+          'Negate',
+          ['Multiply', ['Add', ['Negate', 'm'], 1], ['EllipticK', 'm']],
+        ],
+        ['EllipticE', 'm'],
+      ])
+      .simplify();
+    expect(
+      result.isSame(
+        ce.expr([
+          'Multiply',
+          ['Rational', 1, 3],
+          'm',
+          ['Add', ['Negate', 'm'], 1],
+          ['CarlsonRD', 0, 1, ['Add', ['Negate', 'm'], 1]],
+        ])
+      )
+    ).toBe(true);
+  });
+
+  it('without identities: a sum of two fractions over one denominator', () => {
+    // No identity involved: simplify() used to leave this sum unchanged.
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .parse('\\frac{3x}{(x+1)^2}+\\frac{5}{(x+1)^2}')
+        .simplify()
+        .isSame(ce.parse('\\frac{3x+5}{(x+1)^2}'))
+    ).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

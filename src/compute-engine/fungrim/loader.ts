@@ -654,6 +654,17 @@ function wrapHotHeadRule(parts: BoxedRuleParts): Rule {
     };
   };
 
+  // Mark the function as a compiled pattern rule, so that `simplify()` also
+  // tries it on an expression before its operands were simplified, as it
+  // does for a rule with a `match` pattern. This key must stay equal to
+  // `PATTERN_RULE_MARK` in `src/compute-engine/boxed-expression/rule-index.ts`
+  // (this module imports engine types only, so it cannot import the
+  // constant). `Symbol.for()` returns the same symbol for the same key in
+  // every bundle.
+  (replaceFn as unknown as Record<symbol, unknown>)[
+    Symbol.for('@cortex-js/compute-engine:pattern-rule')
+  ] = true;
+
   return { replace: replaceFn, operators: [head], id, purpose };
 }
 
