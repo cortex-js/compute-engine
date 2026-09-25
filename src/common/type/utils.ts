@@ -6,7 +6,7 @@ import { parseType } from './parse.js';
 import { isValidType, NUMERIC_TYPES_SET } from './primitive.js';
 import { isComplexInfinityValue } from './types.js';
 import { declarationOf } from './reference.js';
-import { typeToString } from './serialize.js';
+import { typeToDedupKey, typeToString } from './serialize.js';
 import { isSubtype, provablyDisjoint, widen } from './subtype.js';
 
 // Re-export isValidType from primitive for backward compatibility
@@ -121,7 +121,20 @@ export function stripNumericRanges(t: Type): Type {
     case 'union': {
       const types = t.types.map((x) => stripNumericRanges(x));
       if (types.every((x, i) => x === t.types[i])) return t;
-      return { ...t, types };
+      // Two members can strip to the same tier: the two signed infinities of
+      // `signed_infinity` (`+oo | -oo`) both strip to `infinity`, and
+      // `integer<0..> | integer<..-5>` strips to `integer` twice. Keep one
+      // of each, or the union prints the same member twice
+      // (`infinity | infinity | nan | real`).
+      const seen = new Set<string>();
+      const unique = types.filter((x) => {
+        const key = typeToDedupKey(x);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (unique.length === 1) return unique[0];
+      return { ...t, types: unique };
     }
     case 'list':
     case 'set':

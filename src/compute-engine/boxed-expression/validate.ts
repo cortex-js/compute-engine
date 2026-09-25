@@ -915,9 +915,28 @@ export function markAbsentPointCells(
   result: Expression
 ): Expression {
   if (expression === undefined || !isFunction(result, 'List')) return result;
-  if (!result.ops.some((x) => isNumber(x) && x.isNaN)) return result;
-  const cell = collectionElementType(expression.type.type);
-  if (cell === undefined) return result;
+  // The cells can be at any depth: a MATRIX of points (a list of lists of
+  // points) has its absent points in the inner lists. A `NaN` is looked for
+  // in nested `List`s only, never inside a `Tuple`, where it is a coordinate
+  // of a present point.
+  const isNaNCell = (x: Expression) => isNumber(x) && x.isNaN;
+  // The walk is not bounded by the type: a list type without dimensions
+  // (`list<missing | tuple<…>>`) describes the leaf cells at ANY depth, so a
+  // matrix of points can carry it, and the value's own nesting is the only
+  // bound. That nesting is the shape of a data list, a few levels at most.
+  const hasNaNCell = (x: Expression): boolean =>
+    isFunction(x, 'List') && x.ops.some((y) => isNaNCell(y) || hasNaNCell(y));
+  if (!hasNaNCell(result)) return result;
+  let cell = collectionElementType(expression.type.type);
+  // The LEAF cell type: a list type whose cells are lists (a matrix type
+  // written `list<list<…>>`, or a row type) is read one level further down.
+  // A dimensioned list type keeps its leaf in `elements`.
+  for (;;) {
+    if (cell === undefined) return result;
+    const inner = resolveTypeAlias(cell);
+    if (typeof inner === 'string' || inner.kind !== 'list') break;
+    cell = inner.elements;
+  }
   const r = resolveTypeAlias(cell);
   if (typeof r === 'string' || r.kind !== 'union') return result;
   let absent = false;
@@ -929,10 +948,14 @@ export function markAbsentPointCells(
     else return result;
   }
   if (!absent || !point) return result;
-  return ce._fn(
-    'List',
-    result.ops.map((x) => (isNumber(x) && x.isNaN ? ce.Missing : x))
-  );
+  const mark = (x: Expression): Expression =>
+    isFunction(x, 'List') && hasNaNCell(x)
+      ? ce._fn(
+          'List',
+          x.ops.map((y) => (isNaNCell(y) ? ce.Missing : mark(y)))
+        )
+      : x;
+  return mark(result);
 }
 
 // ————————————————————————————————————————————————————————————————————————

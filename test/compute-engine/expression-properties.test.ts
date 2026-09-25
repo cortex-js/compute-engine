@@ -199,8 +199,43 @@ describe('IS_POSITIVE', () => {
     expect(expression.isPositive).toBeUndefined();
   });
 
-  it('should return undefined for constant expressions with trig functions', () => {
+  it('should return true for a trig function of an exact positive special angle', () => {
+    // cos(π/3) = 1/2
     const expression = engine.parse('\\cos{\\pi/3}');
+    expect(expression.isPositive).toBe(true);
+  });
+
+  // The sign of a trig function of an exact rational multiple of π is read
+  // from the quadrant of the angle. Each expected sign was checked against
+  // the value of `.N()`.
+  it.each([
+    ['\\cos(2\\pi/3)', 'negative'], // -1/2
+    ['\\cos(-\\pi/3)', 'positive'], // 1/2
+    ['\\sin(\\pi/6)', 'positive'], // 1/2
+    ['\\sin(7\\pi/6)', 'negative'], // -1/2
+    ['\\sin(-5\\pi/4)', 'positive'], // √2/2
+    ['\\sin(\\pi/3 + 2\\pi)', 'positive'], // √3/2
+    ['\\tan(3\\pi/4)', 'negative'], // -1
+    ['\\sec(2\\pi/3)', 'negative'], // -2
+    ['\\csc(-\\pi/6)', 'negative'], // -2
+    ['\\sin(\\pi)', 'zero'],
+    ['\\cos(\\pi/2)', 'zero'],
+  ])('sign of %s is %s', (latex, sign) => {
+    const expression = engine.parse(latex);
+    expect(expression.sgn).toBe(sign);
+    expect(expression.isPositive).toBe(sign === 'positive');
+  });
+
+  it.each([
+    // A pole has no sign
+    '\\tan(\\pi/2)',
+    '\\cot(\\pi)',
+    // An angle that is not exactly a rational multiple of π
+    '\\cos(\\pi/3 + 10^{-30})',
+    '\\cos(x)',
+  ])('sign of %s is unknown', (latex) => {
+    const expression = engine.parse(latex);
+    expect(expression.sgn).toBeUndefined();
     expect(expression.isPositive).toBeUndefined();
   });
 

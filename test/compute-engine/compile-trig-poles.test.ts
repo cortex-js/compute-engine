@@ -28,7 +28,7 @@ for (let k = -12; k <= 12; k++) {
   const a = (k * Math.PI) / 12;
   ANGLES.push(a, a + 1e-13, a - 1e-13, a + 1e-7, a + 1e-3);
 }
-ANGLES.push(1e-13, -1e-13, 0.5, -2.5, 100, 1e18, 1e22, -1e22);
+ANGLES.push(1e-13, -1e-13, 5e-324, -5e-324, 0.5, -2.5, 100, 1e18, 1e22, -1e22);
 // The double nearest to `kπ` and to `(2k + 1)π/2` for a large `k`: a pole,
 // as the allowed error is relative to the argument.
 for (const k of [100, 200, 500, 1000, 1e4, 1e6, 1e9, -1000])
@@ -75,6 +75,15 @@ describe('compiled JavaScript answers the pole where the interpreter does', () =
     expect(at('Sec', 1.5707963267948966)).toBe(Infinity);
     expect(at('Csc', 0)).toBe(Infinity);
     expect(at('Csc', Math.PI)).toBe(Infinity);
+    // An overflow at a nonzero angle below `π/2` is not a pole but `csc` or
+    // `cot` of a tiny angle, above the largest double: the value keeps the
+    // sign of the angle, `-Infinity` being the compiled `-oo` (the
+    // interpreter answers `-oo` at machine precision).
+    expect(at('Csc', 5e-324)).toBe(Infinity);
+    expect(at('Csc', -5e-324)).toBe(-Infinity);
+    expect(at('Cot', 5e-324)).toBe(Infinity);
+    expect(at('Cot', -5e-324)).toBe(-Infinity);
+    expect(ce.box(['Csc', -5e-324]).N().toString()).toBe('-oo');
     expect(at('Tan', 1)).toBe(Math.tan(1));
     expect(at('Cot', 500 * Math.PI)).toBe(Infinity);
     expect(at('Cot', 1000 * Math.PI)).toBe(Infinity);
@@ -88,9 +97,7 @@ describe('compiled JavaScript answers the pole where the interpreter does', () =
     expect(compile(ce.box(['Add', ['Tan', 'x'], ['Tan', 1]])).code).toBe(
       `_SYS.tan(_.x) + ${Math.tan(1)}`
     );
-    expect(compile(ce.box(['Tan', 1.5707963267948966])).code).toBe(
-      'Infinity'
-    );
+    expect(compile(ce.box(['Tan', 1.5707963267948966])).code).toBe('Infinity');
   });
 });
 
@@ -107,9 +114,7 @@ describe('a lazy Map over a list with a pole', () => {
   test.each(HEADS)('%s', (head) => {
     const lazy = ce.box([head, 'L']).N();
     const actual = [...lazy.each()].slice(0, 4).map((x) => x.json);
-    const expected = xs
-      .slice(0, 4)
-      .map((x) => ce.box([head, x]).N().json);
+    const expected = xs.slice(0, 4).map((x) => ce.box([head, x]).N().json);
     expect(actual).toEqual(expected);
   });
 
@@ -154,16 +159,21 @@ describe('compiled Python answers the pole', () => {
   test('a complex argument does not get the pole rule', () => {
     const z = ce.box(['Complex', 0, 1e-7]);
     for (const head of ['Cot', 'Csc', 'Sec'])
-      expect(py.compile(ce.box([head, ['Multiply', z, 'x']])).code).not.toContain(
-        'np.where'
-      );
+      expect(
+        py.compile(ce.box([head, ['Multiply', z, 'x']])).code
+      ).not.toContain('np.where');
   });
 
   test('the emitted code', () => {
+    // An infinite value at a nonzero angle below `π/2` keeps its sign (an
+    // overflow of `csc` or `cot` of a tiny angle, not a pole); the inner
+    // `np.where` is the pole rule itself.
     const rule =
-      '(lambda _y: np.where(np.isinf(_y) | (np.abs(_y) * ' +
+      '(lambda _y: np.where(np.isinf(_y) & (_x != 0) & ' +
+      '(np.abs(_x) < 1.5707963267948966), _y, ' +
+      'np.where(np.isinf(_y) | (np.abs(_y) * ' +
       'np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 ' +
-      '>= 1), np.inf, _y)[()])';
+      '>= 1), np.inf, _y))[()])';
     expect(py.compileFunction(ce.box(['Tan', 'x']), 'f', ['x'])).toContain(
       `(lambda _x: ${rule}(np.tan(_x)))(x)`
     );
@@ -192,23 +202,28 @@ describe('compiled Python answers the pole', () => {
     let src = 'import numpy as np\nimport json\n\n';
     for (const head of HEADS)
       src += py.compileFunction(ce.box([head, 'x']), `f_${head}`, ['x']) + '\n';
-    const expected: Array<number | 'inf'> = [];
+    // A signed infinity (`csc` of `±5·10⁻³²⁴`) is `'inf'`/`'-inf'`, the
+    // unsigned pole `'inf'`.
+    const spell = (v: Expression): number | 'inf' | '-inf' =>
+      isPole(v) || v.re === Infinity
+        ? 'inf'
+        : v.re === -Infinity
+          ? '-inf'
+          : v.re;
+    const expected: Array<number | 'inf' | '-inf'> = [];
     src += 'r = []\n';
     for (const head of HEADS) {
       for (const x of ANGLES) {
-        const v = ce.box([head, x]).N();
-        expected.push(isPole(v) ? 'inf' : v.re);
+        expected.push(spell(ce.box([head, x]).N()));
         src += `r.append(f_${head}(${x}))\n`;
       }
       // An array argument: the rule applies to each element.
       src += `r.extend(f_${head}(np.array([${ANGLES.join(', ')}])).tolist())\n`;
-      for (const x of ANGLES) {
-        const v = ce.box([head, x]).N();
-        expected.push(isPole(v) ? 'inf' : v.re);
-      }
+      for (const x of ANGLES) expected.push(spell(ce.box([head, x]).N()));
     }
     src +=
-      'print(json.dumps(["inf" if np.isinf(v) else float(v) for v in r]))\n';
+      'print(json.dumps([("inf" if v > 0 else "-inf") if np.isinf(v) ' +
+      'else float(v) for v in r]))\n';
     const file = path.join(os.tmpdir(), `ce-py-poles-${process.pid}.py`);
     fs.writeFileSync(file, src);
     let out = '';
@@ -219,12 +234,12 @@ describe('compiled Python answers the pole', () => {
     } finally {
       fs.unlinkSync(file);
     }
-    const actual = JSON.parse(out) as Array<number | 'inf'>;
+    const actual = JSON.parse(out) as Array<number | 'inf' | '-inf'>;
     expect(actual.length).toBe(expected.length);
     for (let i = 0; i < expected.length; i++) {
       const e = expected[i];
       const a = actual[i];
-      if (e === 'inf') expect(a).toBe('inf');
+      if (e === 'inf' || e === '-inf') expect([i, a]).toEqual([i, e]);
       // Relative: a value near a pole that is not a pole is large (`cot` of
       // `π/12·k + 10⁻⁷` is about `10⁷`), and numpy and V8 can differ in the
       // last bit of it.

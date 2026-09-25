@@ -78,6 +78,19 @@ describe('deriveApplicationType', () => {
     ).toBe('integer');
   });
 
+  test('an Undefined operand of a propagate operator is absorbed like Missing', () => {
+    // `Undefined` is typed `unknown`, which a join drops: the result claimed
+    // `integer` for `Undefined + 1`, whose value is `NaN`.
+    const t = deriveApplicationType(ce, 'Add', [
+      describeOperand(ce.box('Undefined')),
+      describeType(ce.type('1').type),
+    ]);
+    expect(typeToString(t!)).toBe('number');
+    expect(typeToString(t!)).toBe(
+      ce.box(['Add', 'Undefined', 1]).type.toString()
+    );
+  });
+
   test('closedness unknown is conservative at a circular pole; a bound variable is not closed', () => {
     // A type-only descriptor may stand for `π/2`, so `Tan` keeps `number`;
     // a bound variable's stand-in is a free symbol and keeps `real`.

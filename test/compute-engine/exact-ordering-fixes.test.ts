@@ -1,6 +1,7 @@
 import type { MathJsonExpression } from '../../src/math-json/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { ComputeEngine } from '../../src/compute-engine';
+import { exactOrder } from '../../src/compute-engine/boxed-expression/compare';
 
 // The order of `Max`, `Min` and `Sort` (`exactOrder`) is exact: at a
 // precision that cannot separate two values, the operator stays
@@ -303,5 +304,137 @@ describe('ordering an operand with unknowns against one without', () => {
 
   test('a canonical expression in x is not ordered against a number', () => {
     expect(ce.parse('x + 1').isLess(5)).toBeUndefined();
+  });
+});
+
+// `approximate()` had no error bound for Γ, erf, erfc, erfi, ζ, arcosh and
+// artanh, so a constant that contained one of them was never ordered:
+// `Max(Γ(1/3), 3)` stayed unevaluated. The true values, from mpmath at 30
+// digits: Γ(1/3) = 2.67893853470774763365569294097, Γ(−7/2) = 0.27008820585,
+// erf(1) = 0.842700792949714869341, erfc(1) = 0.157299207050285130659,
+// erfi(1) = 1.65042575879754287603, ζ(3) = 1.20205690315959428540,
+// arsinh(1) = 0.881373587019543025232, arcosh(2) = 1.31695789692481670863,
+// artanh(1/2) = 0.549306144334054845698.
+describe('A CONSTANT WITH A SPECIAL FUNCTION IS ORDERED', () => {
+  const G3: MathJsonExpression = ['Gamma', ['Rational', 1, 3]];
+  const cases: [MathJsonExpression, string][] = [
+    [['Max', G3, 3], '3'],
+    [['Max', G3, 2], 'Gamma(1/3)'],
+    [['Max', ['Gamma', ['Rational', -7, 2]], 0], 'Gamma(-7/2)'],
+    [['Min', ['Erf', 1], ['Rational', 1, 2]], '1/2'],
+    [['Max', ['Erfc', 1], 1], '1'],
+    [['Max', ['Erfi', 1], 1], 'Erfi(1)'],
+    [['Max', ['Zeta', 3], 1], 'Zeta(3)'],
+    [['Max', ['Arsinh', 1], 1], '1'],
+    [['Max', ['Arcosh', 2], 1], 'arcosh(2)'],
+    [['Max', ['Artanh', ['Rational', 1, 2]], 1], '1'],
+    [['Max', ['Add', G3, 1], 3], '1 + Gamma(1/3)'],
+  ];
+  test.each(cases)('%j', (expr, expected) => {
+    expect(ce.box(expr).evaluate().toString()).toBe(expected);
+  });
+
+  test('also at 50 digits', () => {
+    atPrecision(50, (e) => {
+      for (const [expr, expected] of cases)
+        expect(e.box(expr).evaluate().toString()).toBe(expected);
+    });
+  });
+
+  test('the relational predicates agree', () => {
+    expect(ce.box(G3).isLess(3)).toBe(true);
+    expect(ce.box(G3).isGreater(2)).toBe(true);
+    expect(ce.box(['Less', G3, 3]).evaluate().symbol).toBe('True');
+    expect(
+      ce.box(['Less', ['Erf', 1], ['Rational', 1, 2]]).evaluate().symbol
+    ).toBe('False');
+    expect(ce.box(['Greater', ['Zeta', 3], 1]).evaluate().symbol).toBe('True');
+  });
+
+  test('a float closer than the precision of a double is ordered exactly', () => {
+    // The double 2.6789385347077476 is 2.678938534707747454…, below Γ(1/3)
+    // = 2.678938534707747633…
+    const f = ce.number(2.6789385347077476);
+    expect(exactOrder(ce.box(G3), f)).toBe(1);
+    expect(ce.box(['Max', G3, f]).evaluate().toString()).toBe('Gamma(1/3)');
+    atPrecision(50, (e) => {
+      // Γ(1/3) is between these two 49-digit values
+      const below = e.number(
+        '2.678938534707747633655692940974677644128689377957'
+      );
+      const above = e.number(
+        '2.678938534707747633655692940974677644128689377958'
+      );
+      expect(exactOrder(e.box(G3), below)).toBe(1);
+      expect(exactOrder(e.box(G3), above)).toBe(-1);
+    });
+  });
+
+  test('near a pole of Γ', () => {
+    // Γ(−3 + 10⁻¹⁰) ≈ −1/(6·10⁻¹⁰) is negative (Γ < 0 on (−3, −2)).
+    const near: MathJsonExpression = ['Gamma', ['Add', -3, ['Power', 10, -10]]];
+    expect(exactOrder(ce.box(near), ce.Zero)).toBe(-1);
+    // The bound on |Γ′| is computed with doubles, and at 10⁻³⁰ from the
+    // pole the interval of the argument, as doubles, contains the pole:
+    // there is no bound, and the order is not known (never a wrong order).
+    const nearer: MathJsonExpression = [
+      'Gamma',
+      ['Add', -3, ['Power', 10, -30]],
+    ];
+    expect(exactOrder(ce.box(nearer), ce.Zero)).toBe(undefined);
+  });
+
+  test('artanh of a small value keeps its digits', () => {
+    // artanh(x) = x + x³/3 + …: artanh(10⁻³⁰) was 0 at 21 digits
+    const a: MathJsonExpression = ['Artanh', ['Power', 10, -30]];
+    expect(ce.box(a).N().toString()).toBe('1e-30');
+    expect(exactOrder(ce.box(a), ce.box(['Power', 10, -31]).evaluate())).toBe(
+      1
+    );
+    expect(
+      exactOrder(
+        ce.box(a),
+        ce
+          .box(['Multiply', ['Rational', 11, 10], ['Power', 10, -30]])
+          .evaluate()
+      )
+    ).toBe(-1);
+  });
+
+  test('at machine precision, from the machine values', () => {
+    const e = new ComputeEngine({ precision: 'machine' });
+    try {
+      expect(e.box(['Max', G3, 3]).evaluate().toString()).toBe('3');
+      expect(e.box(['Max', G3, 2]).evaluate().toString()).toBe('Gamma(1/3)');
+      expect(
+        e
+          .box(['Min', ['Erf', 1], ['Rational', 1, 2]])
+          .evaluate()
+          .toString()
+      ).toBe('1/2');
+      expect(
+        e
+          .box(['Max', ['Zeta', 3], 1])
+          .evaluate()
+          .toString()
+      ).toBe('Zeta(3)');
+      // Closer than 10⁻⁶: not ordered from the machine values, but the
+      // raised-precision step (which runs at machine precision since a
+      // literal follows the engine's current precision) decides it
+      // rigorously: Γ(1/3) = 2.67893853470774763365… is above the double.
+      expect(exactOrder(e.box(G3), e.number(2.6789385347077476))).toBe(1);
+      // ζ near its pole: the rounding of the argument to a double is
+      // amplified by |ζ′| ≈ 10²⁰, so the machine values do not decide it;
+      // the raised-precision step does (ζ(1 + 10⁻¹⁰) ≈ 10¹⁰ + 0.577 > 9.9·10⁹).
+      expect(
+        exactOrder(
+          e.box(['Zeta', ['Rational', 10000000001, 10000000000]]),
+          e.number(9.9e9)
+        )
+      ).toBe(1);
+    } finally {
+      ce.precision = 30;
+      ce.precision = 'auto';
+    }
   });
 });

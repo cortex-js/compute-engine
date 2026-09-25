@@ -432,6 +432,22 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   private _numericConfiguration: EngineNumericConfiguration;
 
+  /** @internal The factory of the inexact (float) numeric values of this
+   * engine. Every exact numeric value that this engine makes keeps this
+   * function (`ExactNumericValue.factory`) and calls it for its float
+   * value (`.N()`) and for its float arithmetic. The function reads the
+   * precision of the engine at each call, not when the exact value is
+   * made: a literal made at machine precision gets a big decimal value
+   * with all the digits of a precision that is raised later (with the
+   * `precision` setter or with `_withTransientPrecision`), and a machine
+   * value again when the precision is lowered back to machine. */
+  readonly _inexactNumericValue = (
+    x: number | BigDecimal | NumericValueData
+  ): NumericValue =>
+    this._numericConfiguration.precision > MACHINE_PRECISION
+      ? new BigNumericValue(x)
+      : new MachineNumericValue(x);
+
   /** @internal */
   private _cacheStore = new EngineCacheStore();
 
@@ -2218,13 +2234,39 @@ export class ComputeEngine implements IComputeEngine {
     // big decimal is a value at the working precision whose integer-valuedness
     // depends on that precision: both stay floats. An exact integer beyond the
     // safe range comes from a bigint or a string of digits.
-    if (value instanceof NumericValue) return value.asExact ?? value;
+    if (value instanceof NumericValue) {
+      const exact = value.asExact;
+      if (exact === undefined) return value;
+      // An exact value made by another numeric value (the exact integer of
+      // an integer-valued machine float, `MachineNumericValue.asExact`, and
+      // the exact results of its arithmetic) or by another engine has a
+      // factory that does not follow the precision of this engine: the
+      // factory of a machine float always makes a machine float. A finite
+      // value of this kind gets the factory of this engine.
+      if (
+        exact instanceof ExactNumericValue &&
+        exact.factory !== this._inexactNumericValue &&
+        !exact.isNaN &&
+        !exact.isPositiveInfinity &&
+        !exact.isNegativeInfinity &&
+        !exact.isComplexInfinity
+      ) {
+        return new ExactNumericValue(
+          exact.im === 0
+            ? { rational: exact.rational, radical: exact.radical }
+            : {
+                rational: exact.rational,
+                radical: exact.radical,
+                imRational: exact.imRational,
+                imRadical: exact.imRadical,
+              },
+          this._inexactNumericValue
+        );
+      }
+      return exact;
+    }
 
-    const makeNumericValue =
-      this._numericConfiguration.precision > MACHINE_PRECISION
-        ? (x: number | BigDecimal | NumericValueData) => new BigNumericValue(x)
-        : (x: number | BigDecimal | NumericValueData) =>
-            new MachineNumericValue(x);
+    const makeNumericValue = this._inexactNumericValue;
 
     if (typeof value === 'number') {
       if (Number.isSafeInteger(value))

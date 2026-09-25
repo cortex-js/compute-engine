@@ -122,26 +122,35 @@ describe('STEP 1: A HIGHER PRECISION DECIDES CLOSE CONSTANTS', () => {
     expect(evaluate(['Min', COS_20, 0]).isSame(evaluate(COS_20))).toBe(true);
   });
 
-  // A number literal made at machine precision keeps a machine value at a
-  // higher precision, so step 1 is not done at machine precision: the order
-  // would be read from doubles with the error bound of 50 digits. The two
-  // square roots are then a tie within the tolerance (step 3), and `Max`
-  // prefers the number literal `√2` to the function `√(2 + 10⁻³⁰)`. This is
-  // a tie, not the true maximum: the documented cost of step 3.
-  test('not at machine precision', () => {
+  // Step 1 is also done at machine precision. A number literal made at
+  // machine precision gets its value at the raised precision (the factory
+  // of its float value reads the precision of the engine when it is
+  // called), so the order is read from 50-digit values, as the error bound
+  // assumes. `√(2 + 10⁻³⁰)` is larger than `√2`, and `Max` gives it, not a
+  // tie within the tolerance.
+  test('at machine precision', () => {
     const e = new ComputeEngine({ precision: 'machine' });
     try {
       const a = e.box(SQRT2_PLUS).evaluate();
       const b = e.box(['Sqrt', 2]).evaluate();
-      expect(exactOrder(a, b)).toBeUndefined();
-      expect(exactOrder(a, b, { tieWithinTolerance: true })).toBe(0);
-      expect(exactOrder(b, a, { tieWithinTolerance: true })).toBe(0);
+      expect(exactOrder(a, b)).toBe(1);
+      expect(exactOrder(b, a)).toBe(-1);
+      expect(exactOrder(a, b, { tieWithinTolerance: true })).toBe(1);
       expect(
         e
           .box(['Max', SQRT2_PLUS, ['Sqrt', 2]])
           .evaluate()
+          .isSame(a)
+      ).toBe(true);
+      expect(
+        e
+          .box(['Min', SQRT2_PLUS, ['Sqrt', 2]])
+          .evaluate()
           .isSame(b)
       ).toBe(true);
+      // The machine precision of the engine is restored.
+      expect(e.precision).toBeLessThanOrEqual(16);
+      expect(b.N().toString()).toBe('1.4142135623730951');
       // Step 2 is done at machine precision.
       expect(e.box(['Max', ZERO_SUM, 0]).evaluate().toString()).toBe('0');
     } finally {
@@ -327,9 +336,10 @@ describe('STEP 3: A TIE WITHIN THE TOLERANCE, NEVER AN ORDER', () => {
   });
 
   test('two values farther apart than the tolerance are not a tie', () => {
-    // Γ has no error bound: the order of Γ(1/3) ≈ 2.679 against 3 is not
-    // known, and the two values are not within the tolerance.
-    const g = evaluate(['Gamma', ['Rational', 1, 3]]);
+    // The Lambert W function has no error bound: the order of W(1) ≈ 0.567
+    // against 3 is not known, and the two values are not within the
+    // tolerance.
+    const g = evaluate(['LambertW', 1]);
     expect(exactOrder(g, ce.number(3), { tieWithinTolerance: true })).toBe(
       undefined
     );

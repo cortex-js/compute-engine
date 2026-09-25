@@ -256,6 +256,49 @@ describe('a list that holds a restricted point or masked points', () => {
     expect(missingCount(at(json, -1, true))).toBe(missingCount(absent));
   });
 
+  test('a MATRIX of points: an absent point cell is Missing at any depth', () => {
+    // The cells of a list of lists of points are in the inner lists. The
+    // correction of an absent point cell from `NaN` to `Missing` looked at
+    // the cells of the outer list only, so a restricted point added to a
+    // matrix of points left `NaN` in an inner cell:
+    // `[[Missing, (3, 4)], [(5, 6), (7, 8)]] + (1, 1){0 < t}` with `t = -1`
+    // was `[[NaN, Missing], [Missing, Missing]]`.
+    const M = [
+      'List',
+      ['List', 'Missing', ['Tuple', 3, 4]],
+      ['List', ['Tuple', 5, 6], ['Tuple', 7, 8]],
+    ];
+    const json = ['Add', M, ['When', ['Tuple', 1, 1], ['Less', 0, 't']]];
+    expect(new ComputeEngine().box(json).type.toString()).toBe(POINTS);
+    expect(at(json, -1)).toBe('[["Missing","Missing"],["Missing","Missing"]]');
+    expect(at(json, -1, true)).toBe(
+      '[["Missing","Missing"],["Missing","Missing"]]'
+    );
+    // A present point beside the matrix leaves the absent cell `Missing`
+    // and computes the others.
+    expect(at(json, 1)).toBe('[["Missing",(4, 5)],[(6, 7),(8, 9)]]');
+  });
+
+  test('a MATRIX of restricted points, parse route', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'real');
+    ce.assign('t', 1);
+    const src = String.raw`[[(1,2)\{0<t\}, (3,4)], [(5,6), (7,8)\{t<0\}]]`;
+    for (const expr of [
+      src,
+      String.raw`2${src}`,
+      String.raw`${src}+(1,1)`,
+      // The added point is absent, so every cell is.
+      String.raw`${src}+(1,1)\{t<0\}`,
+    ]) {
+      const e = ce.parse(expr);
+      const v = e.evaluate();
+      expect(v.type.matches(e.type)).toBe(true);
+      expect(v.toString()).not.toContain('NaN');
+      expect(v.ops![1].ops![1].symbol).toBe('Missing');
+    }
+  });
+
   test('numeric cells still answer NaN', () => {
     const json = ['Multiply', ['When', 2, ['Less', 0, 't']], NUMS];
     expect(new ComputeEngine().box(json).type.toString()).toBe('list<number>');
@@ -283,6 +326,117 @@ describe('a list that holds a restricted point or masked points', () => {
     expect((await e.evaluateAsync()).toString()).toBe(
       '["Missing","Missing","Missing"]'
     );
+  });
+
+  describe('the generic broadcast of a function marks an absent point cell', () => {
+    // `Sin`, `Negate` and `Sqrt` broadcast over a list with the generic
+    // element-wise broadcast, not with a handler of their own. The absent
+    // cell reaches the cell application as the bare `Missing` symbol, and
+    // the numeric operator answers `NaN` for it, while the type of the
+    // broadcast says the cell is `missing | tuple<…>`: `Sin([Missing,
+    // (3, 4)])` was `[NaN, (sin(3), sin(4))]`. Two routes reach the generic
+    // broadcast with the absent cell: a literal `Missing` cell (the broadcast
+    // before evaluation of the operands), and a symbol whose VALUE holds the
+    // absent cell (the broadcast after evaluation of the operands).
+    const ROW = ['List', 'Missing', ['Tuple', 3, 4]];
+    const MATRIX = ['List', ROW, ['List', ['Tuple', 1, 4], ['Tuple', 9, 16]]];
+    const cases: [string, string, string][] = [
+      ['Sin', '["Missing",(sin(3), sin(4))]', '\\sin'],
+      ['Negate', '["Missing",(-3, -4)]', '-'],
+      ['Sqrt', '["Missing",(sqrt(3), 2)]', '\\sqrt'],
+    ];
+    const MATRIX_ROW2: Record<string, string> = {
+      Sin: '[(sin(1), sin(4)),(sin(9), sin(16))]',
+      Negate: '[(-1, -4),(-9, -16)]',
+      Sqrt: '[(1, 2),(3, 4)]',
+    };
+
+    test.each(cases)('%s, box route, rank 1', async (op, expected) => {
+      const ce = new ComputeEngine();
+      const e = ce.box([op, ROW]);
+      expect(e.type.toString()).toBe(POINTS);
+      const v = e.evaluate();
+      expect(v.type.matches(e.type)).toBe(true);
+      expect(v.toString()).toBe(expected);
+      const n = e.N();
+      expect(n.type.matches(e.type)).toBe(true);
+      expect(n.ops![0].symbol).toBe('Missing');
+      expect((await e.evaluateAsync()).toString()).toBe(expected);
+    });
+
+    test.each(cases)('%s, box route, rank 2', async (op, expected) => {
+      const ce = new ComputeEngine();
+      const e = ce.box([op, MATRIX]);
+      expect(e.type.toString()).toBe(POINTS);
+      const want = `[${expected},${MATRIX_ROW2[op]}]`;
+      const v = e.evaluate();
+      expect(v.type.matches(e.type)).toBe(true);
+      expect(v.toString()).toBe(want);
+      const n = e.N();
+      expect(n.type.matches(e.type)).toBe(true);
+      expect(n.toString()).not.toContain('NaN');
+      expect(n.ops![0].ops![0].symbol).toBe('Missing');
+      expect((await e.evaluateAsync()).toString()).toBe(want);
+    });
+
+    test.each(cases)(
+      '%s, parse route, a symbol that holds the list',
+      async (op, expected, cmd) => {
+        const ce = new ComputeEngine();
+        ce.assign('t', -1);
+        ce.assign('L', ce.parse(String.raw`[(1,2)\{0<t\}, (3,4)]`).evaluate());
+        ce.assign(
+          'M',
+          ce
+            .parse(String.raw`[[(1,2)\{0<t\}, (3,4)], [(1,4), (9,16)]]`)
+            .evaluate()
+        );
+        const call = (x: string) =>
+          cmd === '\\sqrt' ? `\\sqrt{${x}}` : `${cmd}(${x})`;
+        for (const [src, want] of [
+          [call('L'), expected],
+          [call('M'), `[${expected},${MATRIX_ROW2[op]}]`],
+        ]) {
+          const e = ce.parse(src);
+          expect(e.operator).toBe(op);
+          expect(e.type.toString()).toBe(POINTS);
+          const v = e.evaluate();
+          expect(v.type.matches(e.type)).toBe(true);
+          expect(v.toString()).toBe(want);
+          const n = e.N();
+          expect(n.type.matches(e.type)).toBe(true);
+          expect(n.toString()).not.toContain('NaN');
+          expect((await e.evaluateAsync()).toString()).toBe(want);
+        }
+      }
+    );
+
+    test('the parse route with a restricted point in a literal list', () => {
+      const ce = new ComputeEngine();
+      ce.assign('t', -1);
+      for (const [src, want] of [
+        [String.raw`\sin([(1,2)\{0<t\}, (3,4)])`, cases[0][1]],
+        [String.raw`-[(1,2)\{0<t\}, (3,4)]`, cases[1][1]],
+        [String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`, cases[2][1]],
+        [
+          String.raw`\sin([[(1,2)\{0<t\}, (3,4)], [(1,4), (9,16)]])`,
+          `[${cases[0][1]},${MATRIX_ROW2.Sin}]`,
+        ],
+      ]) {
+        const e = ce.parse(src);
+        expect(e.type.toString()).toBe(POINTS);
+        expect(e.evaluate().toString()).toBe(want);
+        expect(e.N().toString()).not.toContain('NaN');
+      }
+    });
+
+    test('a numeric list keeps NaN in the absent cell', () => {
+      const ce = new ComputeEngine();
+      const e = ce.box(['Sin', ['List', 'Missing', 1]]);
+      expect(e.type.toString()).toBe('list<number>');
+      expect(e.evaluate().toString()).toBe('[NaN,sin(1)]');
+      expect(e.N().ops![0].isNaN).toBe(true);
+    });
   });
 
   test('an absent coordinate does not make the point absent', () => {

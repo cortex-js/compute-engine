@@ -1686,7 +1686,7 @@ function trigFunction(
       ops = ce.strict ? flatten(ops) : checkArity(ce, ops, 1);
       return ce._fn(operator, ops);
     },
-    evaluate: ([x], { numericApproximation, engine }) => {
+    evaluate: ([x], { numericApproximation, engine, expression }) => {
       // The boxing seam reports a statically provable carrier violation.
       // This complements it for an operand whose static type is a UNION that
       // could still be numeric — the element type of a heterogeneous list,
@@ -1720,7 +1720,18 @@ function trigFunction(
         const r = measurementTrig(engine, operator, evalX);
         if (r !== undefined) return numericApproximation ? r.N() : r;
       }
-      if (numericApproximation) return evalTrig(operator, x);
+      // The operand before its numeric evaluation lets the kernel read an
+      // exact large angle without rounding it first (`12345678901234567890123`
+      // or `10³⁰·π`). It is the operand of `x` only when the node has one
+      // operand.
+      if (numericApproximation)
+        return evalTrig(
+          operator,
+          x,
+          isFunction(expression) && expression.nops === 1
+            ? expression.op1
+            : undefined
+        );
       // Literal poles of the inverse hyperbolic functions are exact non-finite
       // values, so fold them in `evaluate()` too (not just `.N()`).
       const pole = inverseHyperbolicPole(operator, x, engine);

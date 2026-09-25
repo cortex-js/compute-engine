@@ -1570,11 +1570,16 @@ def _ce_indexof(_l, _v):
  * `value` is the Python code of the value, in terms of `_x`.
  */
 function pythonPole(arg: string, value: string): string {
+  // An infinite value at a nonzero angle below `π/2` in magnitude is not a
+  // pole but an overflow of `csc` or `cot` of a tiny angle, and it keeps
+  // its sign (`-np.inf` stands for `-oo`), as the JavaScript helper
+  // `trigPole` (`numerics/numeric.ts`) and the interpreter do.
   return (
-    `(lambda _x: (lambda _y: np.where(np.isinf(_y) | ` +
+    `(lambda _x: (lambda _y: np.where(np.isinf(_y) & (_x != 0) & ` +
+    `(np.abs(_x) < ${Math.PI / 2}), _y, np.where(np.isinf(_y) | ` +
     `(np.abs(_y) * np.minimum(np.abs(_x), ${TRIG_POLE_ARGUMENT_CAP}.0) * ` +
     `${TRIG_POLE_EPSILON} >= 1), ` +
-    `np.inf, _y)[()])(${value}))(${arg})`
+    `np.inf, _y))[()])(${value}))(${arg})`
   );
 }
 

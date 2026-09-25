@@ -128,6 +128,18 @@ export function deriveApplicationType(
   const def = binding.operator;
 
   const propagate = def.resolvedMissingBehavior === 'propagate';
+  // An operand that is the library `Undefined` symbol stands for an absent
+  // value in a numeric slot, as `Missing` does (`isAbsentScalarSymbol`,
+  // `validate.ts`), so it is typed `missing` here, as at the call site.
+  // Its declared type, `unknown`, is dropped by a join, and the result then
+  // claimed the type of the present operands.
+  if (propagate)
+    operands = operands.map((d) => {
+      const s = d.structureOf?.();
+      return s?.kind === 'symbol' && s.name === 'Undefined'
+        ? { type: 'missing', facts: d.facts, structureOf: d.structureOf }
+        : d;
+    });
   const absorbMissing =
     propagate && operands.some((d) => typeContainsMissing(d.type));
   // An operator that threads conditional values without propagating absence

@@ -148,7 +148,10 @@ describe('Symbolic trivial zeros (fungrim:zeta-trivial-zeros)', () => {
     ce2.declare('n', 'integer');
     ce2.assume(ce2.expr(['Greater', 'n', 0]));
     expect(
-      ce2.expr(['Zeta', ['Multiply', -2, 'n']]).simplify().isSame(0)
+      ce2
+        .expr(['Zeta', ['Multiply', -2, 'n']])
+        .simplify()
+        .isSame(0)
     ).toBe(true);
   });
 
@@ -158,5 +161,21 @@ describe('Symbolic trivial zeros (fungrim:zeta-trivial-zeros)', () => {
     ce2.declare('m', 'integer');
     const r = ce2.expr(['Zeta', ['Multiply', -2, 'm']]).simplify();
     expect(r.operator).toBe('Zeta');
+  });
+});
+
+describe('An exact rational within a double of an integer is not that integer', () => {
+  // `asSmallInteger` (`boxed-expression/numerics.ts`) read the double
+  // projection of an exact rational, so `(10^30 + 1)/10^30` counted as the
+  // integer 1 and `Zeta` of it took the pole branch and answered `~oo`.
+  test('Zeta(1 + 10^-30) is not the pole', () => {
+    const ce = new ComputeEngine();
+    const z = ce.box(['Zeta', ['Add', 1, ['Power', 10, -30]]]).evaluate();
+    expect(z.symbol).not.toBe('ComplexInfinity');
+    expect(z.operator).toBe('Zeta');
+    // Its numeric value is about 1/ε + γ = 10^30 + 0.577…
+    const n = ce.box(['Zeta', ['Add', 1, ['Power', 10, -30]]]).N().re;
+    expect(Math.abs(n - 1e30) / 1e30).toBeLessThan(1e-12);
+    expect(ce.box(['Zeta', 1]).evaluate().json).toBe('ComplexInfinity');
   });
 });

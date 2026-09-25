@@ -4485,7 +4485,18 @@ export class BoxedFunction
         // (rule of 2026-09-21, `docs/BROADCAST-MODEL.md`). An empty operand
         // beside a NON-empty one is a length mismatch instead, and the check
         // above has already answered `incompatible-dimensions` for it.
-        return this.engine._fn('List', results);
+        //
+        // An absent cell of a list of POINTS (`Sin([Missing, (3, 4)])`)
+        // reaches the cell application as the bare `Missing` symbol, and the
+        // numeric operator answers `NaN` for it. The type of this application
+        // says the cell is `missing | tuple<…>`, so an absent point, which is
+        // `Missing`. `markAbsentPointCells()` makes that correction, the same
+        // one the `Add` and `Multiply` handlers make.
+        return markAbsentPointCells(
+          this.engine,
+          this,
+          this.engine._fn('List', results)
+        );
       }
 
       //
@@ -5018,7 +5029,12 @@ export class BoxedFunction
               'List',
               annotateBroadcastErrors(this.operator, results)
             );
-          return this.engine._fn('List', results);
+          // An absent point cell answers `Missing`, not `NaN` (see step 2).
+          return markAbsentPointCells(
+            this.engine,
+            this,
+            this.engine._fn('List', results)
+          );
         }
       }
 
@@ -5395,9 +5411,14 @@ export class BoxedFunction
 
         // Always wrap in a `List` — even a single-element broadcast — so the
         // value matches the `list<E>` broadcast type, and a lone empty
-        // operand answers the empty list (mirrors the sync path).
+        // operand answers the empty list (mirrors the sync path). An absent
+        // point cell answers `Missing`, not `NaN` (mirrors the sync path).
         return Promise.all(results).then((resolved) =>
-          this.engine._fn('List', resolved)
+          markAbsentPointCells(
+            this.engine,
+            this,
+            this.engine._fn('List', resolved)
+          )
         );
       }
 
@@ -5869,9 +5890,14 @@ export class BoxedFunction
           // An operand that became the EMPTY collection only at evaluation
           // yields the empty list, the same answer a literal `[]` gets
           // (rule of 2026-09-21, `docs/BROADCAST-MODEL.md`; mirrors the sync
-          // path's step 4b).
+          // path's step 4b). An absent point cell answers `Missing`, not
+          // `NaN` (mirrors the sync path).
           return Promise.all(results).then((resolved) =>
-            this.engine._fn('List', resolved)
+            markAbsentPointCells(
+              this.engine,
+              this,
+              this.engine._fn('List', resolved)
+            )
           );
         }
       }
@@ -6888,9 +6914,21 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // stripped and every numeric result cell widens to `number` (an absent
     // numeric cell contributes `NaN` — Q2/I6). Gated on `typeContainsMissing`,
     // so a Missing-free program's type is byte-identical.
+    //
+    // An `Undefined` operand is an absence too: the runtime gate reads it as
+    // `Missing` (`isAbsentScalarSymbol`, `validate.ts`), so `Undefined + 1`
+    // is `NaN` and `Undefined · [1, 2, 3]` is `[NaN, NaN, NaN]`. Its declared
+    // type is `unknown`, which a join drops, so without this the result
+    // claimed the type of the present operands (`integer`,
+    // `vector<integer^3>`). For the absorption it is typed `missing`.
+    const absenceTypes = expr.ops.map((x) =>
+      isAbsentScalarSymbol(x) ? 'missing' : x.type.type
+    );
     const absorbMissing =
       def.resolvedMissingBehavior === 'propagate' &&
-      expr.ops.some((x) => x.type.facts.containsMissing);
+      expr.ops.some(
+        (x) => x.type.facts.containsMissing || isAbsentScalarSymbol(x)
+      );
 
     // Conditional-value threading (`threadsConditionals`) for an operator
     // that does not propagate absence: a threaded operand that can be absent
@@ -6998,7 +7036,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
         absorbMissing
           ? absorbOperandAbsence(
               t,
-              expr.ops.map((x) => x.type.type),
+              absenceTypes,
               ABSENT_CELLS_STAY_MISSING.has(expr.operator),
               def.broadcastable
             )
@@ -7047,6 +7085,11 @@ function type(expr: BoxedFunction): Type | BoxedType {
       const strippedFor = (i: number) => {
         if (def.resolvedMissingBehavior !== 'propagate')
           return threadedPresent?.[i];
+        // An `Undefined` operand is typed as the bare `missing` marker it
+        // stands for in a numeric slot, so the handler types it exactly as
+        // it types `Missing` (its declared type, `unknown`, made
+        // `Negate(Undefined)` an `unknown` result).
+        if (isAbsentScalarSymbol(expr.ops[i])) return 'missing';
         const stripped = operandTypes?.[i];
         // A BARE `missing` operand strips to `never`, and a `never`-typed
         // descriptor proves numeric claims vacuously (`never` is the

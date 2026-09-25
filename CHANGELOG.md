@@ -114,11 +114,10 @@
   inexact literal (`1.5 + 2i` is `["Complex", 1.5, 2]`, `3i + 1.5i` is
   `4.5i`).
 - **A large double prints in exponent form at machine precision.** With
-  `precision: 'machine'`, `ce.box(1e300).toString()` printed the 301-digit
-  exact binary value of the double, and `1e23` printed as
-  `99999999999999991611392`; the default precision printed `1e+300` and
-  `1e+23`. The machine value now prints as JavaScript prints the double, so
-  the two precisions agree.
+  `precision: 'machine'`, `ce.box(1e300).toString()` printed the 301-digit exact
+  binary value of the double, and `1e23` printed as `99999999999999991611392`;
+  the default precision printed `1e+300` and `1e+23`. The machine value now
+  prints as JavaScript prints the double, so the two precisions agree.
 - Compiled to JavaScript, a three-operand `Range` whose step points away from
   its end (`Range(5, 1, 1)`) threw a `RangeError` at run time, and a zero step
   gave an infinite length; both now give `[]`, as the interpreter does. The
@@ -141,12 +140,115 @@
 
 - **The pole `ComplexInfinity` has one MathJSON spelling at every precision.**
   At machine precision (`ce.precision = 'machine'`), a complex number with an
-  infinite imaginary part serialized as `["Complex", 1, "PositiveInfinity"]`,
-  so `Add(1.5, 2.5, ComplexInfinity).N()` gave that number while `evaluate()`
-  and the default precision gave the symbol `ComplexInfinity`. The machine-
+  infinite imaginary part serialized as `["Complex", 1, "PositiveInfinity"]`, so
+  `Add(1.5, 2.5, ComplexInfinity).N()` gave that number while `evaluate()` and
+  the default precision gave the symbol `ComplexInfinity`. The machine-
   precision value now serializes as the symbol, as the big-decimal value does.
   An infinite real part with a finite imaginary part is not the pole and keeps
   its `Complex` spelling.
+- **Trigonometric functions of a large exact integer, or of a large integer
+  multiple of π, are computed exactly under `.N()`.**
+  `Sin(12345678901234567890123).N()` is `−0.4205828591…` (it was `0.9918…`: the
+  23-digit integer was rounded to the 21-digit working precision before the
+  kernel reduced it modulo π), `\sin(10^{30}\pi).N()` is `0` (it was `0.8838…`),
+  `\cos(10^{20}\pi).N()` is `1`, `\sin(10^{30}\pi/3).N()` is `−0.8660…`. The
+  handler reads the unrounded operand, reduces a rational multiple of π modulo 2
+  exactly, and keeps the integer part of a large argument exact. A symbol that
+  holds such an exact angle is read the same way. The ordering
+  `\sin(12345678901234567890123) < 0`, which was `False`, is `True`. Small
+  arguments and `Sin(10^22)` are unchanged.
+- **A number literal follows the engine's current precision.** An exact literal
+  made at machine precision (`new ComputeEngine({precision: 'machine'})`, then
+  `ce.box(['Sqrt', 2])`) kept the machine numeric factory, so after
+  `ce.precision = 50` its `.N()` was still the double `1.4142135623730951`; it
+  is now the 50-digit value, and lowering the precision again gives the double.
+  The same applied to a rational folded by `Add` and to an exact value made from
+  a machine float (`3/7`). Because of this, the exact ordering skipped its
+  raised-precision step at machine precision and ordered `√(2 + 10⁻³⁰)` below
+  `√2`; `Max`, `Min` and `Sort` now order them correctly at machine precision.
+- **A perfect-power root of an integer past the safe range is extracted.**
+  `∛(10^60)` evaluates to the exact `10^20` (it stayed `root(3)(1e+60)`), and
+  the partial extraction of small radicands (`∛16 = 2∛2`) now applies to large
+  ones: `∛(10^61)` is `10^20·∛10`. `∛(10^60 + 1)` stays a root. Radicands above
+  4096 bits are not decomposed.
+- **A simplification rule no longer passes an integer outside the safe range to
+  `primeFactors`.** Simplifying `\sin(10^{30}\pi)` fired the assertion in
+  `primeFactors` with `1e+30`; the rule that combines powers with the same base
+  now skips a coefficient that is not a safe integer, and also skips an
+  integer-valued float that came from a product such as `10^{30}√2`.
+- **A mutually recursive pair whose body has no lowering reports the real
+  cause.** Compiling `h(2)` where `h` calls `g` and `g` calls `h` through
+  `Simplify` failed with "Cannot compile a call of `h`: its type is `number`…";
+  it now reports "Could not compile `Simplify`: … target 'javascript' has no
+  lowering for it". The compiler kept a cached route to a definition that a
+  failed emission had removed.
+- **`PointX(Missing)` and the other component reads of an absent operand compile
+  to the scalar NaN on the GLSL and WGSL targets.** They compiled to
+  `_gpu_nan().x` on GLSL and to a `.x` read of an `f32` on WGSL, which WGSL
+  rejects. `PointY`, `PointZ`, `First`, `Second`, `Third` and `Undefined` are
+  covered too, and a read of several components of an absent operand is a vector
+  of the NaN.
+- **`At` with two indices through a row that may be absent is typed.**
+  `At([[1,2]\{0<t\}, [3,4]], 1, 2)` is typed `integer | missing | nan` (it was
+  `unknown`): the type walk now reads through a union of a collection type and
+  `missing`.
+- **A chain of `Delimiter` nested a thousand levels deep boxes to its operand.**
+  `Delimiter` canonicalized its operand recursively; past about 999 levels the
+  recovery caught the stack overflow, logged `console.error` and returned a
+  non-canonical `Delimiter` with no error. The wrappers are now removed
+  iteratively (a 60,000-deep chain boxes to `1`), and the walk that looks for
+  objects owned by another engine no longer recurses either.
+
+- **A constant that contains a special function is ordered.** `Max(Γ(1/3), 3)`
+  evaluates to `3` (it stayed unevaluated: the exact ordering had no error bound
+  for `Gamma`). Bounds on the derivative of `Gamma`, `Erf`, `Erfc`, `Erfi`,
+  `Zeta`, `Arcosh` and `Artanh` are propagated (each is stated in `compare.ts`
+  with its interval assumption; an argument near a pole is refused), and at
+  machine precision two such values that differ by more than `10⁻⁶` relative are
+  ordered from the machine values. `Min(erf(1), 1/2)` is `1/2`, `Max(ζ(3), 1)`
+  is `ζ(3)`, `Max(arsinh(1), 1)` is `1`.
+- **`Artanh` of a tiny argument is computed at the working precision.**
+  `Artanh(10⁻³⁰).N()` was `0` at 21 digits (the kernel computed
+  `½·ln((1+x)/(1−x))`, which cancels); it now uses the big-decimal `atanh`,
+  which keeps a tiny argument and guards the cancellation near 1, within a unit
+  of the last digit.
+- **An exact rational within a double of an integer is not read as that
+  integer.** `Zeta(1 + 10⁻³⁰).evaluate()` was the pole `~oo`: the small-integer
+  reader (`asSmallInteger`) projected the exact rational `(10³⁰ + 1)/10³⁰` to
+  the double `1`. It now reads the exact type first.
+
+- **An `Undefined` operand of a propagating operator is typed as absent.**
+  `Multiply(Undefined, [1, 2, 3])` was typed `vector<integer^3>` while its value
+  is `[NaN, NaN, NaN]`, and `Undefined + 1` was typed `integer`: the declared
+  type of `Undefined` is `unknown`, which a type join drops. Such an operand is
+  now read as `missing` when the type is derived, as the run-time check reads
+  it, so the types are `vector<3>` and `number`, the same as with `Missing`.
+  `Negate([1, Undefined])` gives `[-1, NaN]` (it gave `[-1, "Missing"]`, because
+  the per-cell `Negate(Undefined)` was typed `missing`).
+- **`Norm` of a matrix with an absent cell is `NaN`.**
+  `Norm([[1, 2], [3, Missing]])` stayed unevaluated (the row's type,
+  `list<integer | missing>`, is not a tensor type); it is now `NaN`, as
+  `Norm([3, Missing])` is, for the 1, 2 and ∞ norms. A text cell at rank 1 or 2
+  (`‖[3, "a", Missing]‖`) is the `incompatible-type` error instead of staying
+  unevaluated.
+- **An absent point cell inside a matrix of points is `Missing`.** A restricted
+  point added to a matrix of points,
+  `[[Missing, (3,4)], [(5,6), (7,8)]] + (1,1)\{c\}` with `c` false, kept `NaN`
+  in the first cell; the correction (`markAbsentPointCells`) now walks nested
+  lists, never inside a tuple.
+- **A union type no longer prints a member twice.** `C + 1` with `C` declared
+  `list<real | signed_infinity | nan>` was typed
+  `list<infinity | infinity | nan | real>`; the two signed infinities widened to
+  the same `infinity` are now one member (`stripNumericRanges`).
+
+- **A function broadcast over a list of points answers `Missing` in an absent
+  cell.** `Sin([Missing, (3,4)])`, `Negate(…)`, `Sqrt(…)` and any operator that
+  maps element by element gave `NaN` in the absent cell while the type says
+  `missing | tuple<…>`; `Add` and `Multiply` already answered `Missing`. The
+  generic broadcast (sync and async, before and after operand evaluation) now
+  applies the same correction, at rank 1 and inside matrices, also when a symbol
+  holds the list. A numeric list keeps `NaN` (`Sin([Missing, 1])` is
+  `[NaN, sin 1]`, typed `list<number>`).
 
 ## 0.135.0 _2026-09-25_
 

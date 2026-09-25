@@ -223,7 +223,9 @@ describe('SUBTRACT', () => {
   test(`Subtract with single argument`, () =>
     expect(ce.expr(['Subtract', 2.5]).evaluate()).toMatchSnapshot());
   test(`Subtract with multiple arguments`, () =>
-    expect(ce.expr(['Subtract', 2.5, -1.1, 18.4]).evaluate()).toMatchSnapshot());
+    expect(
+      ce.expr(['Subtract', 2.5, -1.1, 18.4]).evaluate()
+    ).toMatchSnapshot());
 });
 
 describe('NEGATE', () => {
@@ -374,22 +376,37 @@ describe('MULTIPLY', () => {
   // number by a complex literal whose imaginary part is 1 silently
   // dropped the real part (e.g. 2·(1+i) became 2i instead of 2+2i).
   test(`Multiplying by a complex literal with im === 1 preserves the real part`, () => {
-    expect(ce.expr(['Multiply', 2, ['Complex', 1, 1]]).evaluate().toString()).toBe(
-      '(2 + 2i)'
-    );
-    expect(ce.expr(['Multiply', 5, ['Complex', 2, 1]]).evaluate().toString()).toBe(
-      '(10 + 5i)'
-    );
     expect(
-      ce.expr(['Multiply', 2, ['Complex', 1.1, 1]]).evaluate().toString()
+      ce
+        .expr(['Multiply', 2, ['Complex', 1, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('(2 + 2i)');
+    expect(
+      ce
+        .expr(['Multiply', 5, ['Complex', 2, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('(10 + 5i)');
+    expect(
+      ce
+        .expr(['Multiply', 2, ['Complex', 1.1, 1]])
+        .evaluate()
+        .toString()
     ).toBe('(2.2 + 2i)');
     // Controls: still correct
-    expect(ce.expr(['Multiply', 2, ['Complex', 0, 1]]).evaluate().toString()).toBe(
-      '2i'
-    );
-    expect(ce.expr(['Multiply', 2, ['Complex', 1, 2]]).evaluate().toString()).toBe(
-      '(2 + 4i)'
-    );
+    expect(
+      ce
+        .expr(['Multiply', 2, ['Complex', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('2i');
+    expect(
+      ce
+        .expr(['Multiply', 2, ['Complex', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('(2 + 4i)');
   });
 
   test(`2x(2/3)`, () =>
@@ -446,33 +463,48 @@ describe('MULTIPLY', () => {
     test('x · +∞ stays symbolic (sign of x unknown)', () => {
       const c = new ComputeEngine();
       expect(
-        c.box(['Multiply', 'x', { num: '+Infinity' }]).evaluate().toString()
+        c
+          .box(['Multiply', 'x', { num: '+Infinity' }])
+          .evaluate()
+          .toString()
       ).toBe('+oo * x');
     });
     test('x · −∞ stays symbolic', () => {
       const c = new ComputeEngine();
       expect(
-        c.box(['Multiply', 'x', { num: '-Infinity' }]).evaluate().toString()
+        c
+          .box(['Multiply', 'x', { num: '-Infinity' }])
+          .evaluate()
+          .toString()
       ).toBe('-oo * x');
     });
     test('(x, x<0) · +∞ = −∞', () => {
       const c = new ComputeEngine();
       c.assume(['Less', 'x', 0]);
       expect(
-        c.box(['Multiply', 'x', { num: '+Infinity' }]).evaluate().toString()
+        c
+          .box(['Multiply', 'x', { num: '+Infinity' }])
+          .evaluate()
+          .toString()
       ).toBe('-oo');
     });
     test('(y, y>0) · +∞ = +∞', () => {
       const c = new ComputeEngine();
       c.assume(['Greater', 'y', 0]);
       expect(
-        c.box(['Multiply', 'y', { num: '+Infinity' }]).evaluate().toString()
+        c
+          .box(['Multiply', 'y', { num: '+Infinity' }])
+          .evaluate()
+          .toString()
       ).toBe('+oo');
     });
     test('0 · +∞ = NaN', () => {
       const c = new ComputeEngine();
       expect(
-        c.box(['Multiply', 0, { num: '+Infinity' }]).evaluate().toString()
+        c
+          .box(['Multiply', 0, { num: '+Infinity' }])
+          .evaluate()
+          .toString()
       ).toBe('NaN');
     });
   });
@@ -536,12 +568,12 @@ describe('ROOT', () => {
   // agree between evaluate() and N() (evaluate() used to return NaN)
   test(`Root of negative perfect cube evaluates exactly`, () => {
     expect(ce.expr(['Root', -8, 3]).evaluate().json).toEqual(-2);
-    expect(
-      ce.expr(['Power', -8, ['Rational', 1, 3]]).evaluate().json
-    ).toEqual(-2);
-    expect(
-      ce.expr(['Power', -32, ['Rational', 1, 5]]).evaluate().json
-    ).toEqual(-2);
+    expect(ce.expr(['Power', -8, ['Rational', 1, 3]]).evaluate().json).toEqual(
+      -2
+    );
+    expect(ce.expr(['Power', -32, ['Rational', 1, 5]]).evaluate().json).toEqual(
+      -2
+    );
   });
 
   // NU-P1-7: Root(x,n).N() used Math.pow / a.pow(1/n), rounding the reciprocal
@@ -579,7 +611,9 @@ describe('ROOT', () => {
   test(`Complex numeric result prints an honest (machine-precision) real part`, () => {
     const s = ce.expr(['Sqrt', ['Complex', 2, 3]]).N();
     const reStr = ce.number(s.re).toString();
-    expect(reStr.replace('.', '').replace('-', '').length).toBeLessThanOrEqual(18);
+    expect(reStr.replace('.', '').replace('-', '').length).toBeLessThanOrEqual(
+      18
+    );
     expect(s.re).toBeCloseTo(1.6741492280355401, 12);
     expect(s.im).toBeCloseTo(0.8959774761298381, 12);
   });
@@ -610,7 +644,10 @@ describe('ROOT', () => {
   });
 
   test(`Odd-denominator rational power of a negative base is the real root`, () => {
-    expect(ce.expr(['Power', -8, ['Rational', 2, 3]]).N().re).toBeCloseTo(4, 12);
+    expect(ce.expr(['Power', -8, ['Rational', 2, 3]]).N().re).toBeCloseTo(
+      4,
+      12
+    );
     expect(ce.expr(['Power', -8, ['Rational', 2, 3]]).N().im).toBe(0);
     expect(ce.expr(['Power', -8, ['Rational', 5, 3]]).N().re).toBeCloseTo(
       -32,
@@ -631,18 +668,64 @@ describe('ROOT', () => {
   // above (8^{1/3} = 2, (-8)^{1/3} = -2) and matching what N() computes.
   test(`Non-unit rational power of a perfect power evaluates exactly`, () => {
     // Positive base — any denominator
-    expect(ce.expr(['Power', 8, ['Rational', 2, 3]]).evaluate().json).toEqual(4);
-    expect(ce.expr(['Power', 4, ['Rational', 3, 2]]).evaluate().json).toEqual(8);
-    expect(
-      ce.expr(['Power', 27, ['Rational', 2, 3]]).evaluate().json
-    ).toEqual(9);
+    expect(ce.expr(['Power', 8, ['Rational', 2, 3]]).evaluate().json).toEqual(
+      4
+    );
+    expect(ce.expr(['Power', 4, ['Rational', 3, 2]]).evaluate().json).toEqual(
+      8
+    );
+    expect(ce.expr(['Power', 27, ['Rational', 2, 3]]).evaluate().json).toEqual(
+      9
+    );
     // Negative base — odd denominator (real root)
-    expect(
-      ce.expr(['Power', -8, ['Rational', 2, 3]]).evaluate().json
-    ).toEqual(4);
-    expect(
-      ce.expr(['Power', -8, ['Rational', 5, 3]]).evaluate().json
-    ).toEqual(-32);
+    expect(ce.expr(['Power', -8, ['Rational', 2, 3]]).evaluate().json).toEqual(
+      4
+    );
+    expect(ce.expr(['Power', -8, ['Rational', 5, 3]]).evaluate().json).toEqual(
+      -32
+    );
+  });
+
+  // A radicand past the safe integers is held as an exact bigint. The root of
+  // a perfect power is extracted with integer arithmetic, so it is exact at
+  // any size, and a near-power is never snapped to a false root.
+  test(`Root of a perfect power past the safe integers evaluates exactly`, () => {
+    const r = ce.parse('\\sqrt[3]{10^{60}}').evaluate();
+    expect(r.isExact).toBe(true);
+    expect(r.json).toEqual({ num: '1e+20' });
+    expect(r.N().json).toEqual({ num: '1e+20' });
+    expect(ce.parse('(10^{60})^{1/3}').evaluate().json).toEqual({
+      num: '1e+20',
+    });
+    expect(ce.parse('\\sqrt[3]{-10^{60}}').evaluate().json).toEqual({
+      num: '-1e+20',
+    });
+    expect(ce.parse('\\sqrt{10^{40}}').evaluate().json).toEqual({
+      num: '1e+20',
+    });
+    expect(ce.parse('\\sqrt[3]{2^{60}}').evaluate().json).toEqual(1048576);
+    expect(ce.parse('\\sqrt[3]{(10^{20}+1)^3}').evaluate().json).toEqual({
+      num: '100000000000000000001',
+    });
+    // Not a perfect power: stays symbolic
+    expect(ce.parse('\\sqrt[3]{10^{60}+1}').evaluate().operator).toBe('Root');
+    // A perfect power with a larger exponent: the integer part is extracted,
+    // as for a small radicand (`∛16 = 2∛2`)
+    expect(ce.parse('\\sqrt[3]{16}').evaluate().json).toEqual([
+      'Multiply',
+      2,
+      ['Root', 2, 3],
+    ]);
+    expect(ce.parse('\\sqrt[3]{10^{61}}').evaluate().json).toEqual([
+      'Multiply',
+      { num: '1e+20' },
+      ['Root', 10, 3],
+    ]);
+    expect(ce.parse('\\sqrt[3]{10^{16}}').evaluate().json).toEqual([
+      'Multiply',
+      100000,
+      ['Root', 10, 3],
+    ]);
   });
 
   test(`Non-perfect or complex rational powers stay symbolic under evaluate()`, () => {
@@ -901,9 +984,12 @@ describe('Ln of Root (REVIEW.md A2)', () => {
     expect(ce.expr(['Root', 'x', 3]).ln().toString()).toEqual('1/3 * ln(x)'));
 
   test('Ln(Root(x, 3)) = ln(x)/3 via expression evaluation', () =>
-    expect(ce.expr(['Ln', ['Root', 'x', 3]]).evaluate().toString()).toEqual(
-      '1/3 * ln(x)'
-    ));
+    expect(
+      ce
+        .expr(['Ln', ['Root', 'x', 3]])
+        .evaluate()
+        .toString()
+    ).toEqual('1/3 * ln(x)'));
 
   test('ln(Root(8, 3)) is numerically ln(2)', () =>
     expect(ce.expr(['Root', 8, 3]).ln().N().re).toBeCloseTo(Math.log(2), 12));
@@ -1047,9 +1133,7 @@ describe('SUM', () => {
     expect(result.toString()).not.toContain('NaN');
     // A numeric element mixed with a string still errors (does not silently
     // drop the string).
-    const mixed = ce
-      .expr(['Sum', ['List', 1, { str: 'a' }, 3]])
-      .evaluate();
+    const mixed = ce.expr(['Sum', ['List', 1, { str: 'a' }, 3]]).evaluate();
     expect(mixed.type.toString()).toBe('error');
   });
 
@@ -1082,9 +1166,13 @@ describe('SUM', () => {
   it('Sum/Product over a vector-valued body type as the vector (Tycho item 44a)', () => {
     const engine = new ComputeEngine();
     engine.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
-    engine.parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)').evaluate();
     engine
-      .parse('A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))')
+      .parse('h(i)\\coloneq\\operatorname{mod}(10^{4}\\sin(10^{4}i),1)')
+      .evaluate();
+    engine
+      .parse(
+        'A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
+      )
       .evaluate();
 
     const sum = engine.parse(
@@ -1206,9 +1294,7 @@ describe('SUM', () => {
   // so it has to be pinned directly). Note the yielded array is reused
   // between iterations, hence the copy.
   it('streams the full n-dimensional index product, last index fastest', () => {
-    const tuples = (
-      sets: { lower: number; upper: number }[]
-    ): number[][] => {
+    const tuples = (sets: { lower: number; upper: number }[]): number[][] => {
       const out: number[][] = [];
       for (const t of indexingSetCartesianProductIterator(
         sets.map(({ lower, upper }) => ({
@@ -1252,7 +1338,10 @@ describe('SUM', () => {
   it('reports non-enumerable (unsafe-integer) bounds as an error', () => {
     // A genuine singleton is NOT an error: exactly one term.
     expect(
-      ce.expr(['Sum', 1, ['Limits', 'n', 1e16, 1e16]]).evaluate().toString()
+      ce
+        .expr(['Sum', 1, ['Limits', 'n', 1e16, 1e16]])
+        .evaluate()
+        .toString()
     ).toMatchInlineSnapshot(`1`);
 
     const unsafe = ce
@@ -1265,18 +1354,23 @@ describe('SUM', () => {
 
     // Products go through the same seam.
     expect(
-      ce
-        .expr(['Product', 2, ['Limits', 'n', 1e16, 1e16 + 10]])
-        .evaluate().operator
+      ce.expr(['Product', 2, ['Limits', 'n', 1e16, 1e16 + 10]]).evaluate()
+        .operator
     ).toBe('Error');
 
     // Bounds that ARE enumerable keep working: a fractional upper bound
     // truncates by design, and an empty range is still empty.
     expect(
-      ce.expr(['Sum', 1, ['Limits', 'n', 1, 10.5]]).evaluate().toString()
+      ce
+        .expr(['Sum', 1, ['Limits', 'n', 1, 10.5]])
+        .evaluate()
+        .toString()
     ).toMatchInlineSnapshot(`10`);
     expect(
-      ce.expr(['Sum', 1, ['Limits', 'n', 5, 1]]).evaluate().toString()
+      ce
+        .expr(['Sum', 1, ['Limits', 'n', 5, 1]])
+        .evaluate()
+        .toString()
     ).toMatchInlineSnapshot(`0`);
   });
 
@@ -2031,22 +2125,22 @@ describe('PRODUCT', () => {
 
 describe('GCD/LCM', () => {
   it('should compute the GCD of two integers', () => {
-    expect(ce.expr(['GCD', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
-      `12`
-    );
+    expect(
+      ce.expr(['GCD', 60, 12]).evaluate().toString()
+    ).toMatchInlineSnapshot(`12`);
 
-    expect(ce.expr(['GCD', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
-      `5`
-    );
+    expect(
+      ce.expr(['GCD', 10, 15]).evaluate().toString()
+    ).toMatchInlineSnapshot(`5`);
   });
 
   it('should compute the LCM of two integers', () => {
-    expect(ce.expr(['LCM', 60, 12]).evaluate().toString()).toMatchInlineSnapshot(
-      `60`
-    );
-    expect(ce.expr(['LCM', 10, 15]).evaluate().toString()).toMatchInlineSnapshot(
-      `30`
-    );
+    expect(
+      ce.expr(['LCM', 60, 12]).evaluate().toString()
+    ).toMatchInlineSnapshot(`60`);
+    expect(
+      ce.expr(['LCM', 10, 15]).evaluate().toString()
+    ).toMatchInlineSnapshot(`30`);
   });
 
   // Regression for G9: LCM is non-negative regardless of operand signs (it was
@@ -2133,7 +2227,10 @@ describe('GCD/LCM', () => {
   describe('polynomial GCD (ROADMAP B5)', () => {
     const poly = (s: string) => ce.parse(s).canonical;
     const gcd = (...ops: ReturnType<typeof ce.parse>[]) =>
-      ce.expr(['GCD', ...ops]).evaluate().toString();
+      ce
+        .expr(['GCD', ...ops])
+        .evaluate()
+        .toString();
 
     it('gcd((x+1)(x+2), (x+1)(x+3)) → x + 1', () =>
       expect(gcd(poly('(x+1)(x+2)'), poly('(x+1)(x+3)'))).toBe('x + 1'));
@@ -2150,9 +2247,9 @@ describe('GCD/LCM', () => {
     it('reduces a variadic polynomial GCD', () =>
       // gcd(x²−1, x³−1) = x−1, which divides x²+x (x(x+1)? no): use a common
       // factor that survives. (x−1) divides all three below.
-      expect(
-        gcd(poly('x^2-1'), poly('x^3-1'), poly('x^2-3x+2'))
-      ).toBe('x - 1'));
+      expect(gcd(poly('x^2-1'), poly('x^3-1'), poly('x^2-3x+2'))).toBe(
+        'x - 1'
+      ));
 
     it('parses and evaluates \\gcd over polynomials', () =>
       expect(ce.parse('\\gcd(x^2-1, x-1)').evaluate().toString()).toBe(
@@ -2224,10 +2321,16 @@ describe('GCD/LCM', () => {
         ce.expr(['Expand', ce.expr(['Power', b, 2])]).evaluate();
       const g = pow2(lin([2, 4, 6, 8, 10, 12, 14]));
       const a = ce
-        .expr(['Expand', ce.expr(['Multiply', pow2(lin([3, 5, 7, 9, 11, 13, 15])), g])])
+        .expr([
+          'Expand',
+          ce.expr(['Multiply', pow2(lin([3, 5, 7, 9, 11, 13, 15])), g]),
+        ])
         .evaluate();
       const b = ce
-        .expr(['Expand', ce.expr(['Multiply', pow2(lin([15, 13, 11, 9, 7, 5, 3])), g])])
+        .expr([
+          'Expand',
+          ce.expr(['Multiply', pow2(lin([15, 13, 11, 9, 7, 5, 3])), g]),
+        ])
         .evaluate();
       const r = ce.expr(['GCD', a, b]).evaluate().toString();
       expect(r.startsWith('gcd(')).toBe(true);
@@ -2617,7 +2720,9 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
   it('A9: function comparison uses tolerance', () => {
     // (0.1 + 0.2) − 0.3 = 5.55e-17 (within tolerance) → equal, on the
     // arithmetic tier (no unknowns, so the difference numericizes).
-    expect(ce.expr(['Add', 0.1, 0.2]).isEqual(ce.expr(['Add', 0.3]))).toBe(true);
+    expect(ce.expr(['Add', 0.1, 0.2]).isEqual(ce.expr(['Add', 0.3]))).toBe(
+      true
+    );
     // With a free variable it is an identity question, so the PROVER tier
     // answers and the arithmetic tier stays inert.
     const a = ce.expr(['Add', 0.1, 0.2, 'x']);
@@ -2629,15 +2734,20 @@ describe('Core arithmetic correctness (REVIEW.md A6–A12)', () => {
   // A11: a/0 was inconsistent — ComplexInfinity for a JS-number denominator,
   // NaN for a boxed zero.
   it('A11: division by zero is ComplexInfinity for both denominator forms', () => {
-    expect(ce.number(5).div(0).toString()).toBe(ce.number(5).div(ce.Zero).toString());
+    expect(ce.number(5).div(0).toString()).toBe(
+      ce.number(5).div(ce.Zero).toString()
+    );
     expect(ce.number(5).div(ce.Zero).toString()).toBe('~oo');
   });
 
   // A12: negate of a product still produces the correct value.
   it('A12: negate of a product is correct', () => {
-    expect(ce.expr(['Negate', ['Multiply', 3, 'x', 'y']]).N().toString()).toBe(
-      ce.expr(['Multiply', -3, 'x', 'y']).N().toString()
-    );
+    expect(
+      ce
+        .expr(['Negate', ['Multiply', 3, 'x', 'y']])
+        .N()
+        .toString()
+    ).toBe(ce.expr(['Multiply', -3, 'x', 'y']).N().toString());
   });
 });
 
@@ -2677,7 +2787,9 @@ describe('Paired-radical branch soundness (Rubi 1.1.1.4 #39)', () => {
     expect(e.subs({ x: 1 }).N().im).toBeCloseTo(2, 10); // 2i
     expect(e.subs({ x: -1 }).N().re).toBeCloseTo(2, 10); // 2
     // and squaring recovers the radicand
-    expect(ce.expr(['Power', ['Sqrt', ['Multiply', -4, 'x']], 2]).N).toBeDefined();
+    expect(
+      ce.expr(['Power', ['Sqrt', ['Multiply', -4, 'x']], 2]).N
+    ).toBeDefined();
   });
 
   it('a rational followed by √(negative) does not crash canonicalization', () => {
@@ -2694,7 +2806,10 @@ describe('Paired-radical branch soundness (Rubi 1.1.1.4 #39)', () => {
 // factorial instead of using Γ(x+1).
 describe('Factorial of non-integer reals (REVIEW.md B16)', () => {
   it('uses Γ(x+1) for a positive non-integer (not rounding to 2)', () => {
-    expect(ce.expr(['Factorial', 2.5]).N().re).toBeCloseTo(3.323350970447843, 6);
+    expect(ce.expr(['Factorial', 2.5]).N().re).toBeCloseTo(
+      3.323350970447843,
+      6
+    );
   });
   it('integer factorials are unchanged', () => {
     expect(ce.expr(['Factorial', 5]).evaluate().json).toBe(120);
@@ -2954,20 +3069,25 @@ describe('Chop preserves exact operands', () => {
   // Chop replaces near-zero FLOATS with zero; an exact operand that does not
   // chop to zero keeps its exact form (its type claim is the operand's type).
   it('leaves an exact rational exact under evaluate', () => {
-    expect(ce.expr(['Chop', ['Rational', 2, 3]]).evaluate().toString()).toBe(
-      '2/3'
-    );
-    expect(ce.expr(['Chop', ['Sqrt', 2]]).evaluate().toString()).toBe('sqrt(2)');
+    expect(
+      ce
+        .expr(['Chop', ['Rational', 2, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('2/3');
+    expect(
+      ce
+        .expr(['Chop', ['Sqrt', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('sqrt(2)');
   });
   it('still chops tiny floats and passes larger floats through', () => {
     expect(ce.expr(['Chop', 1e-15]).evaluate().toString()).toBe('0');
     expect(ce.expr(['Chop', 0.5]).evaluate().toString()).toBe('0.5');
   });
   it('numericizes an exact operand under N()', () => {
-    expect(ce.expr(['Chop', ['Rational', 2, 3]]).N().re).toBeCloseTo(
-      2 / 3,
-      12
-    );
+    expect(ce.expr(['Chop', ['Rational', 2, 3]]).N().re).toBeCloseTo(2 / 3, 12);
   });
 });
 
@@ -3000,9 +3120,7 @@ describe('Factorial above the exact digit cap', () => {
 
   test('Factorial2 of a huge integer stays symbolic and returns promptly', () => {
     const started = Date.now();
-    expect(ce.box(['Factorial2', 1e15]).evaluate().operator).toBe(
-      'Factorial2'
-    );
+    expect(ce.box(['Factorial2', 1e15]).evaluate().operator).toBe('Factorial2');
     expect(Date.now() - started).toBeLessThan(2000);
   });
 });

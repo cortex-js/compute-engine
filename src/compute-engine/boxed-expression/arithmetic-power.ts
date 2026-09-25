@@ -3,6 +3,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
+import { bigintMaximalPerfectPower } from '../numerics/bigint.js';
 import {
   rationalize,
   reduceRationalRoot,
@@ -143,7 +144,20 @@ function isSqrt(expr: Expression): boolean {
 /** Return the maximal decomposition `n = base^exponent`, or undefined. */
 function maximalPerfectPower(
   n: number
-): { base: number; exponent: number } | undefined {
+): { base: number; exponent: number } | undefined;
+function maximalPerfectPower(
+  n: number | bigint
+): { base: number | bigint; exponent: number } | undefined;
+function maximalPerfectPower(
+  n: number | bigint
+): { base: number | bigint; exponent: number } | undefined {
+  // Past the safe integers a double cannot represent the radicand exactly,
+  // so the search runs on the exact bigint instead (`10^61 = 10^61`, with
+  // the maximal exponent 61).
+  if (typeof n === 'bigint') {
+    if (n <= BigInt(Number.MAX_SAFE_INTEGER)) n = Number(n);
+    else return bigintMaximalPerfectPower(n);
+  }
   if (!Number.isSafeInteger(n) || n <= 1) return undefined;
   for (let exponent = Math.floor(Math.log2(n)); exponent >= 2; exponent--) {
     const base = Math.round(Math.pow(n, 1 / exponent));
@@ -1001,6 +1015,66 @@ function eulerQuarterTurn(theta: Expression): number | undefined {
   return Number(((twice.toBigInt() % 4n) + 4n) % 4n);
 }
 
+/**
+ * `e^{a + iθ}` as `e^a · (cos θ + i·sin θ)`, when the exponent is a sum of
+ * real constant terms (the sum `a`) and terms with an imaginary factor
+ * (the sum `iθ`), and `e^{iθ}` has an exact closed form: `e^{1 + iπ}` is
+ * `-e`, `e^{1 + 0.5iπ}` is `e·i`. Return `undefined` otherwise — a
+ * symbolic real part (`e^{x + iπ}`), or an angle that the Euler branch of
+ * `pow()` does not reduce to an exact value (`e^{1 + 0.3iπ}`), keeps the
+ * existing evaluation of the power.
+ *
+ * The angle `θ` is evaluated by `pow(e, iθ)`, so a float multiple of a
+ * quarter-turn (`0.5·π`) is recognized as it is for a purely imaginary
+ * exponent (`eulerQuarterTurn`).
+ */
+function eulerSplit(
+  exp: number | Expression,
+  numericApproximation: boolean
+): Expression | undefined {
+  if (typeof exp === 'number' || !isFunction(exp, 'Add')) return undefined;
+  const ce = exp.engine;
+  const realTerms: Expression[] = [];
+  const imagFactors: Expression[] = [];
+  for (const op of exp.ops) {
+    const factor = getImaginaryFactor(op);
+    if (factor !== undefined) imagFactors.push(factor);
+    else if (op.type.matches('real') && op.unknowns.length === 0)
+      // The term comes from the RAW exponent (read for its structure), so a
+      // symbol that holds a value is still the symbol: evaluate it, or
+      // `e^{x + iπ}` with `x := 2` would answer `-(e^x)` instead of `-e^2`.
+      realTerms.push(op.evaluate({ numericApproximation }));
+    else return undefined;
+  }
+  if (realTerms.length === 0 || imagFactors.length === 0) return undefined;
+
+  const theta =
+    imagFactors.length === 1 ? imagFactors[0] : ce.function('Add', imagFactors);
+  const iTheta = ce.function('Multiply', [ce.I, theta]);
+  // The angle is given to `pow()` as its raw exponent too, so that its
+  // structure (`0.5·π`) is read before any numeric evaluation.
+  const euler = pow(ce.E, iTheta, {
+    numericApproximation,
+    rawExponent: iTheta,
+  });
+  // Only an exact closed form is adopted: a float or an unreduced power
+  // in `e^{iθ}` gains nothing over the evaluation of the whole power.
+  if (
+    hasInexactLiteral(euler) ||
+    isFunction(euler, 'Power') ||
+    isFunction(euler, 'Exp')
+  )
+    return undefined;
+
+  const real =
+    realTerms.length === 1 ? realTerms[0] : ce.function('Add', realTerms);
+  const magnitude = pow(ce.E, real, { numericApproximation });
+  // Assemble with the canonical constructor: the `.mul()` method folds
+  // exact literals to machine floats.
+  const result = ce.function('Multiply', [magnitude, euler]);
+  return numericApproximation ? result.N() : result;
+}
+
 /** Whether `x` holds a float (an inexact number literal) at any depth. */
 function hasInexactLiteral(x: Expression): boolean {
   if (isNumber(x)) return !x.isExact;
@@ -1257,6 +1331,24 @@ export function pow(
         ? getImaginaryFactor(rawExponent)
         : undefined;
     const imagFactor = rawFactor ?? getImaginaryFactor(exp);
+
+    // A sum of a real constant and an imaginary term, `e^{a + iθ}`: split it
+    // as `e^a · e^{iθ}` and evaluate `e^{iθ}` with the Euler branch below.
+    // The evaluated exponent of `1 + 0.5·i·π` is the machine complex
+    // `1 + 1.5707963267948966i`, and `e` to that power is
+    // `5.2e-17 + 2.718i`; the raw exponent keeps the angle `0.5·π`, and the
+    // split gives the exact `e·i`.
+    if (imagFactor === undefined) {
+      const split = eulerSplit(
+        rawExponent !== undefined &&
+          (rawExponent.isCanonical || rawExponent.isStructural)
+          ? rawExponent
+          : exp,
+        numericApproximation
+      );
+      if (split !== undefined) return split;
+    }
+
     if (imagFactor !== undefined) {
       // We have an expression of the form `e^(i theta)`, with `theta` in
       // radians.
@@ -1660,8 +1752,19 @@ export function root(
       e > 1 &&
       a.isPositive === true
     ) {
-      const n = a.re;
-      if (Number.isSafeInteger(n) && n > 1) {
+      // Read the radicand as an exact integer when it is one: a radicand
+      // past the safe integers (`10^61`) has no exact double, but its
+      // `ExactNumericValue` holds the exact bigint.
+      const exact =
+        typeof a.numericValue === 'number' ? undefined : a.numericValue.asExact;
+      const n =
+        exact instanceof ExactNumericValue &&
+        exact.radical === 1 &&
+        exact.im === 0 &&
+        exact.rational[1] === 1n
+          ? exact.rational[0]
+          : a.re;
+      if (typeof n === 'bigint' || (Number.isSafeInteger(n) && n > 1)) {
         const decomposition = maximalPerfectPower(n);
         if (decomposition) {
           // The base is not itself a perfect power (the exponent is maximal),

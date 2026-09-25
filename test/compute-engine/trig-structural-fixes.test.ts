@@ -38,6 +38,46 @@ describe('e^{iθ} for a float multiple of π', () => {
     });
   }
 
+  // A real constant plus an imaginary multiple of π: the exponent is split
+  // as `e^a · e^{iθ}`, and `e^{iθ}` is reduced as for a purely imaginary
+  // exponent. `e^{1 + 0.5iπ}` was `5.2e-17 + 2.718i`.
+  test('with a real part in the exponent', () => {
+    const ce = new ComputeEngine();
+    const evaluate = (s: string) => ce.parse(s).evaluate();
+    // The float coefficient `0.5` numericizes the result, without dust
+    const quarter = evaluate('e^{1 + 0.5i\\pi}');
+    expect(quarter.re).toBe(0);
+    expect(quarter.im).toBeCloseTo(Math.E, 15);
+    const quarterN = ce.parse('e^{1 + 0.5i\\pi}').N();
+    expect(quarterN.re).toBe(0);
+    expect(quarterN.im).toBeCloseTo(Math.E, 15);
+    // Exact exponents give exact values
+    expect(evaluate('e^{1+i\\pi}').json).toEqual(['Negate', 'ExponentialE']);
+    expect(evaluate('e^{1+i\\pi}').N().re).toBeCloseTo(-Math.E, 15);
+    expect(Math.abs(evaluate('e^{1+i\\pi}').N().im)).toBe(0);
+    expect(evaluate('e^{\\ln 2+i\\pi}').json).toEqual(-2);
+    const third = evaluate('e^{1+i\\pi/3}');
+    expect(third.toString()).toBe('e * (1/2 + sqrt(3)/2i)');
+    expect(third.N().re).toBeCloseTo(Math.E * Math.cos(Math.PI / 3), 15);
+    expect(third.N().im).toBeCloseTo(Math.E * Math.sin(Math.PI / 3), 15);
+    // A symbolic real part keeps the power
+    expect(evaluate('e^{x+i\\pi}').operator).toBe('Power');
+    // The real part comes from the raw exponent, so a symbol that holds a
+    // value is evaluated: `e^{x + iπ}` with `x := 2` is `-e^2`, not `-(e^x)`.
+    const ce2 = new ComputeEngine();
+    ce2.assign('x', 2);
+    expect(
+      ce2
+        .box([
+          'Power',
+          'ExponentialE',
+          ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'Pi']],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('-(e^2)');
+  });
+
   test('in another angular unit', () => {
     for (const unit of ['deg', 'grad', 'turn'] as const) {
       const ce = new ComputeEngine();

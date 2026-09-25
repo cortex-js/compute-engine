@@ -156,6 +156,13 @@ export function asSmallInteger(
 
   if (num.im !== 0) return null;
 
+  // The type is read before the double projection: an exact rational such as
+  // `(10^30 + 1)/10^30` projects to the double `1`, and reading `re` alone
+  // took it for the integer 1 (`Zeta(1 + 10^-30)` then took the pole branch).
+  // An `ExactNumericValue` answers `integer` only when its rational is an
+  // integer with no radical; a big decimal, only when its digits are.
+  if (num.type !== 'integer') return null;
+
   const n = num.re;
   if (Number.isInteger(n) && n >= -SMALL_INTEGER && n <= SMALL_INTEGER)
     return Number(n);

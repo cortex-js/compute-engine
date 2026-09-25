@@ -49,12 +49,22 @@ describe('OPEN BOUNDS — grammar', () => {
   });
 
   it('marker adjacency is lexically mandatory', () => {
-    for (const s of ['real<0 <..>', 'real<0< ..>', 'real<0..< 3>', 'real<0 > ..>'])
+    for (const s of [
+      'real<0 <..>',
+      'real<0< ..>',
+      'real<0..< 3>',
+      'real<0 > ..>',
+    ])
       expect(() => parseType(s)).toThrow();
   });
 
   it('a marker needs a finite bound', () => {
-    for (const s of ['real<0<..<>', 'real<<..3>', 'real<0<..<oo>', 'real<-oo<..>'])
+    for (const s of [
+      'real<0<..<>',
+      'real<<..3>',
+      'real<0<..<oo>',
+      'real<-oo<..>',
+    ])
       expect(() => parseType(s)).toThrow();
   });
 
@@ -124,7 +134,10 @@ describe('OPEN BOUNDS — the normal form', () => {
       'integer<9007199254740992<..>'
     );
     expect(
-      isSubtype(parseType('9007199254740992'), parseType('integer<9007199254740992<..>'))
+      isSubtype(
+        parseType('9007199254740992'),
+        parseType('integer<9007199254740992<..>')
+      )
     ).toBe(false);
   });
 
@@ -141,9 +154,7 @@ describe('OPEN BOUNDS — the normal form', () => {
   });
 
   it('positive/negative constructors build open ranges', () => {
-    expect(typeToString(positiveRangeType('real'))).toBe(
-      'real<0<..>'
-    );
+    expect(typeToString(positiveRangeType('real'))).toBe('real<0<..>');
     expect(typeToString(negativeRangeType('real'))).toBe('real<..<0>');
     expect(typeToString(positiveRangeType('integer'))).toBe('integer<1..>');
   });
@@ -156,8 +167,12 @@ describe('OPEN BOUNDS — algebra', () => {
   });
 
   it('subtype, range vs range: open ⊂ closed, closed ⊄ open', () => {
-    expect(isSubtype(parseType('real<0<..>'), parseType('real<0..>'))).toBe(true);
-    expect(isSubtype(parseType('real<0..>'), parseType('real<0<..>'))).toBe(false);
+    expect(isSubtype(parseType('real<0<..>'), parseType('real<0..>'))).toBe(
+      true
+    );
+    expect(isSubtype(parseType('real<0..>'), parseType('real<0<..>'))).toBe(
+      false
+    );
     expect(isSubtype(parseType('real<1..2>'), parseType('real<0<..<3>'))).toBe(
       true
     );
@@ -185,6 +200,27 @@ describe('OPEN BOUNDS — algebra', () => {
     );
   });
 
+  it('two union members that strip to the same tier appear once', () => {
+    // `signed_infinity` is the union of the two value types `+oo` and `-oo`,
+    // and each strips to `infinity`, so the union kept `infinity` twice and
+    // printed `infinity | infinity | nan | real`.
+    expect(
+      typeToString(
+        stripNumericRanges(parseType('real | signed_infinity | nan'))
+      )
+    ).toBe('infinity | nan | real');
+    expect(
+      typeToString(
+        stripNumericRanges(parseType('integer<0..> | integer<..-5>'))
+      )
+    ).toBe('integer');
+    const ce = new ComputeEngine();
+    ce.declare('C', 'list<real | signed_infinity | nan>');
+    expect(ce.parse('C + 1').type.toString()).toBe(
+      'list<infinity | nan | real>'
+    );
+  });
+
   it('the bounds reader carries flags; the hull opens only when all members do', () => {
     expect(intervalOfType(parseType('real<0<..<3>'))).toMatchObject({
       lo: 0,
@@ -192,11 +228,15 @@ describe('OPEN BOUNDS — algebra', () => {
       loOpen: true,
       hiOpen: true,
     });
-    expect(intervalOfType(parseType('real<0<..1> | real<0..2>'))).toMatchObject({
-      lo: 0,
-      hi: 2,
-    });
-    expect(intervalOfType(parseType('real<0<..1> | real<0<..2>'))).toMatchObject({
+    expect(intervalOfType(parseType('real<0<..1> | real<0..2>'))).toMatchObject(
+      {
+        lo: 0,
+        hi: 2,
+      }
+    );
+    expect(
+      intervalOfType(parseType('real<0<..1> | real<0<..2>'))
+    ).toMatchObject({
       lo: 0,
       hi: 2,
       loOpen: true,
@@ -257,9 +297,7 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     e.assume(e.box(['Greater', 'x', 2]));
     e.assume(e.box(['Greater', 'y', 3]));
     expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5<..>');
-    expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe(
-      'real<6<..>'
-    );
+    expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe('real<6<..>');
     const r = addIntervals({ lo: 2, hi: 5, loOpen: true }, { lo: 3, hi: 7 });
     expect(r).toEqual({ lo: 5, hi: 12, loOpen: true });
   });
@@ -279,14 +317,10 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     const e = new ComputeEngine();
     e.declare('b', 'real<0..5>');
     e.declare('c', 'real<2<..<3>');
-    expect(e.box(['Multiply', 'b', 'c']).type.toString()).toBe(
-      'real<0..<15>'
-    );
+    expect(e.box(['Multiply', 'b', 'c']).type.toString()).toBe('real<0..<15>');
     // An OPEN zero never attains 0.
     e.declare('d', 'real<0<..5>');
-    expect(e.box(['Multiply', 'd', 'c']).type.toString()).toBe(
-      'real<0<..<15>'
-    );
+    expect(e.box(['Multiply', 'd', 'c']).type.toString()).toBe('real<0<..<15>');
   });
 
   it('mul: a closed zero in EITHER operand attains the product 0', () => {
@@ -294,7 +328,9 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     // product open — the second operand's closed 0 attains it for every
     // point. The naive rule produced an EMPTY open singleton here
     // (dual-review catch).
-    expect(mulIntervals({ lo: 0, hi: Infinity, loOpen: true }, { lo: 0, hi: 0 })).toEqual({
+    expect(
+      mulIntervals({ lo: 0, hi: Infinity, loOpen: true }, { lo: 0, hi: 0 })
+    ).toEqual({
       lo: 0,
       hi: 0,
     });
@@ -319,9 +355,7 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     e.declare('a', 'real<-3<..<2>');
     expect(e.box(['Abs', 'a']).type.toString()).toBe('real<0..<3>');
     expect(e.box(['Power', 'a', 2]).type.toString()).toBe('real<0..<9>');
-    expect(e.box(['Power', 'a', 3]).type.toString()).toBe(
-      'real<-27<..<8>'
-    );
+    expect(e.box(['Power', 'a', 3]).type.toString()).toBe('real<-27<..<8>');
     expect(absInterval({ lo: -3, hi: 2, loOpen: true, hiOpen: true })).toEqual({
       lo: 0,
       hi: 3,
@@ -350,14 +384,28 @@ describe('OPEN BOUNDS — kernel attainability', () => {
     // claimed OPEN is never produced by any attained corner pair; a bound
     // claimed CLOSED is produced by some attained pair.
     const flags = [false, true];
-    const attained = (iv: { lo: number; hi: number; loOpen?: boolean; hiOpen?: boolean }) =>
-      [
-        ...(iv.loOpen ? [] : [iv.lo]),
-        ...(iv.hiOpen ? [] : [iv.hi]),
-        (iv.lo + iv.hi) / 2,
-      ];
-    for (const [alo, ahi] of [[-2, 3], [0, 4], [-3, 0], [1, 5]])
-      for (const [blo, bhi] of [[-1, 2], [0, 3], [-4, 0], [2, 6]])
+    const attained = (iv: {
+      lo: number;
+      hi: number;
+      loOpen?: boolean;
+      hiOpen?: boolean;
+    }) => [
+      ...(iv.loOpen ? [] : [iv.lo]),
+      ...(iv.hiOpen ? [] : [iv.hi]),
+      (iv.lo + iv.hi) / 2,
+    ];
+    for (const [alo, ahi] of [
+      [-2, 3],
+      [0, 4],
+      [-3, 0],
+      [1, 5],
+    ])
+      for (const [blo, bhi] of [
+        [-1, 2],
+        [0, 3],
+        [-4, 0],
+        [2, 6],
+      ])
         for (const alo_o of flags)
           for (const ahi_o of flags)
             for (const blo_o of flags)
@@ -368,7 +416,8 @@ describe('OPEN BOUNDS — kernel attainability', () => {
                   ['add', (x: number, y: number) => x + y],
                   ['mul', (x: number, y: number) => x * y],
                 ] as const) {
-                  const r = op === 'add' ? addIntervals(A, B) : mulIntervals(A, B);
+                  const r =
+                    op === 'add' ? addIntervals(A, B) : mulIntervals(A, B);
                   const products = attained(A).flatMap((x) =>
                     attained(B).map((y) => fn(x, y))
                   );

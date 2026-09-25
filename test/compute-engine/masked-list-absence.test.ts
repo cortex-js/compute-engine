@@ -48,11 +48,17 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
     ]);
     expect(boxed.evaluate().toString()).toBe('[NaN,NaN,sin(30)]');
     expect(boxed.evaluate().toString()).toBe(
-      ce.parse(String.raw`\sin(${MASKED})`).evaluate().toString()
+      ce
+        .parse(String.raw`\sin(${MASKED})`)
+        .evaluate()
+        .toString()
     );
     // Same answer as masking the literal cells first.
     expect(
-      ce.box(['Sin', ['List', 'Missing', 'Missing', 30]]).evaluate().toString()
+      ce
+        .box(['Sin', ['List', 'Missing', 'Missing', 30]])
+        .evaluate()
+        .toString()
     ).toBe('[NaN,NaN,sin(30)]');
   });
 
@@ -118,7 +124,12 @@ describe('an absent scalar broadcast into a numeric list', () => {
     ['Power', ['Power', 'Missing', ['List', 1, 2, 3]]],
     ['Power, reversed', ['Power', ['List', 1, 2, 3], 'Missing']],
   ])('%s', (_, json) => {
-    expect(ce.box(json as never).evaluate().toString()).toBe('[NaN,NaN,NaN]');
+    expect(
+      ce
+        .box(json as never)
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,NaN,NaN]');
   });
 
   test('numeric evaluation agrees', () => {
@@ -158,6 +169,24 @@ describe('Norm of an absent operand', () => {
     ['the L1 norm', ['Norm', ['List', 1, 'Missing'], 1]],
     ['the L-infinity norm', ['Norm', ['List', 1, 'Missing'], "'Infinity'"]],
     ['a point with an absent coordinate', ['Norm', ['Tuple', 1, 'Missing']]],
+    // A `Missing` cell types its row `list<integer | missing>`, which is not
+    // a tensor type, so a matrix that holds one stayed unevaluated.
+    [
+      'a matrix with an absent cell',
+      ['Norm', ['List', ['List', 1, 2], ['List', 3, 'Missing']]],
+    ],
+    [
+      'the L1 norm of a matrix',
+      ['Norm', ['List', ['List', 1, 2], ['List', 3, 'Missing']], 1],
+    ],
+    [
+      'the L-infinity norm of a matrix',
+      ['Norm', ['List', ['List', 1, 2], ['List', 3, 'Missing']], "'Infinity'"],
+    ],
+    [
+      'a matrix with an Undefined cell',
+      ['Norm', ['List', ['List', 1, 2], ['List', 3, 'Undefined']]],
+    ],
   ])('%s is NaN', (_, json) => {
     const e = c.box(json as never);
     expect(e.isValid).toBe(true);
@@ -173,6 +202,37 @@ describe('Norm of an absent operand', () => {
         .toString()
     ).toBe('5');
     c.assign('c', false);
+  });
+
+  test('an absent matrix cell does not hide a wrong-kind cell or an unsupported order', () => {
+    // The same precedence as a vector: a cell that is not a number is an
+    // `incompatible-type` error, and an order the matrix norms do not
+    // compute leaves the application unevaluated.
+    const withBoolean = c
+      .box(['Norm', ['List', ['List', 1, 'True'], ['List', 3, 'Missing']]])
+      .evaluate();
+    expect(withBoolean.operator).toBe('Error');
+    expect(
+      c
+        .box(['Norm', ['List', ['List', 1, 2], ['List', 3, 'Missing']], 3])
+        .evaluate().operator
+    ).toBe('Norm');
+    // Rows of different lengths are not a matrix.
+    expect(
+      c.box(['Norm', ['List', ['List', 1], ['List', 3, 'Missing']]]).evaluate()
+        .operator
+    ).toBe('Norm');
+  });
+
+  test('text beside an absent cell is a wrong-kind error at rank 1 and 2', () => {
+    // A string is a collection of characters, so it made the list look like
+    // neither a vector nor a matrix, and the application stayed
+    // unevaluated.
+    for (const json of [
+      ['Norm', ['List', 3, "'a'", 'Missing']],
+      ['Norm', ['List', ['List', 1, "'a'"], ['List', 3, 'Missing']]],
+    ])
+      expect(c.box(json as never).evaluate().operator).toBe('Error');
   });
 
   test('an absent ORDER is still refused', () => {
@@ -219,11 +279,7 @@ describe('Map over a list that holds a restricted point', () => {
   });
 
   test('a numeric cell is still NaN', () => {
-    const m = c.box([
-      'Map',
-      sinFn,
-      ['List', ['When', 2, 'c'], 3],
-    ] as never);
+    const m = c.box(['Map', sinFn, ['List', ['When', 2, 'c'], 3]] as never);
     expect(m.type.toString()).toBe('list<number>');
     expect(m.evaluate().toString()).toBe('[NaN,sin(3)]');
   });

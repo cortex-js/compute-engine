@@ -1026,7 +1026,12 @@ export const SIMPLIFY_RULES: Rule[] = [
       // Decompose as: radical primes get e/2, |num| primes get e, den primes get -e.
       if (isNumber(term)) {
         const nv = term.numericValue;
-        if (nv instanceof ExactNumericValue && nv.radical > 1) {
+        if (
+          nv instanceof ExactNumericValue &&
+          nv.radical > 1 &&
+          canFactor(Number(nv.rational[0])) &&
+          canFactor(Number(nv.rational[1]))
+        ) {
           const rational = nv.rational;
           const num = Number(rational[0]);
           const den = Number(rational[1]);
@@ -1099,7 +1104,7 @@ export const SIMPLIFY_RULES: Rule[] = [
 
       // --- Integer coefficients (positive and negative) ---
       const n = term.re;
-      if (Number.isInteger(n) && Math.abs(n) > 1) {
+      if (canFactor(n) && Math.abs(n) > 1) {
         const absN = Math.abs(n);
         const factors = primeFactors(absN);
         const primes = Object.keys(factors).filter((k) => k !== '1');
@@ -1130,10 +1135,8 @@ export const SIMPLIFY_RULES: Rule[] = [
       if (
         num !== undefined &&
         den !== undefined &&
-        Number.isFinite(num) &&
-        Number.isFinite(den) &&
-        Number.isInteger(num) &&
-        Number.isInteger(den) &&
+        canFactor(num) &&
+        canFactor(den) &&
         den > 1
       ) {
         const absNum = Math.abs(num);
@@ -1248,6 +1251,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     };
   },
 ];
+
+// `primeFactors()` accepts only integers smaller than
+// `Number.MAX_SAFE_INTEGER`. A larger machine number (for example `1e30`, the
+// value of `10^30`) is not exactly representable, and a value such as
+// `10^30 * sqrt(2)` or `10^30 / 3` rounds to an integer-valued float although
+// it is not an integer. The power-combination rule must skip such coefficients.
+function canFactor(n: number): boolean {
+  return Number.isInteger(n) && Math.abs(n) < Number.MAX_SAFE_INTEGER;
+}
 
 // Helper function to check if a value is exact
 function isExact(n: number | NumericValue | undefined): boolean {

@@ -1180,6 +1180,19 @@ function canonicalCallbackOperand(
   return accept(fn);
 }
 
+/**
+ * True when `op` is a symbol (not a wildcard) that the current scope already
+ * defines as a value. Canonicalizing such a symbol does not declare anything,
+ * so a canonical handler can read its type from `op.canonical` with no side
+ * effect. An undeclared symbol returns false: its canonicalization would
+ * declare it.
+ */
+function isDeclaredValue(op: Expression): boolean {
+  if (!isSymbol(op) || isWildcard(op)) return false;
+  const def = op.engine.lookupDefinition(op.symbol);
+  return def !== undefined && isValueDef(def);
+}
+
 /** The builtin combiners `Reduce`/`Scan` fold with natively (the JavaScript
  * target lowers exactly these — `builtinCombiner` in `javascript-target.ts`). */
 const BUILTIN_FOLD_HEADS: ReadonlySet<string> = new Set([
@@ -6290,14 +6303,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // symbolic `Map`. Surface the callback-slot type error instead, so
         // the misorder is loud and names the offending operand. The operands
         // arrive raw (every type reads `unknown`), so the first is
-        // canonicalized to read its type — but never a bare symbol, whose
-        // canonicalization would declare it as a side effect (and whose
-        // callback slot defers by design anyway).
+        // canonicalized to read its type. An undeclared bare symbol is not
+        // canonicalized: that would declare it as a side effect, and its
+        // callback slot defers to a later definition by design. A symbol
+        // that is already declared has no such side effect, and when its
+        // type is a collection the call is the same misorder as with a
+        // literal collection, so it gets the same error.
         const last = ops[ops.length - 1];
         const first =
           ops.length >= 2 &&
-          !isSymbol(ops[0]) &&
-          !isFunction(ops[0], 'Function')
+          (isSymbol(ops[0])
+            ? isDeclaredValue(ops[0])
+            : !isFunction(ops[0], 'Function'))
             ? ops[0].canonical
             : undefined;
         if (

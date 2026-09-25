@@ -62,6 +62,50 @@ describe('UNDEFINED in a numeric slot', () => {
     });
   });
 
+  describe('static type', () => {
+    // The declared type of `Undefined` is `unknown`, which a type join drops.
+    // So the type of an arithmetic application with an `Undefined` operand
+    // was the type of its PRESENT operands: `Undefined · [1, 2, 3]` claimed
+    // `vector<integer^3>` while its value is `[NaN, NaN, NaN]`. The operand
+    // is now typed like `Missing`, and each numeric cell widens to `number`.
+    it('an application with an Undefined operand types as the Missing one does', () => {
+      for (const head of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power']) {
+        for (const ops of [
+          ['@', ['List', 1, 2, 3]],
+          [['List', 1, 2, 3], '@'],
+          ['@', 2],
+        ]) {
+          const [withMissing, withUndefined] = ['Missing', 'Undefined'].map(
+            (m) =>
+              ce
+                .box([head, ...ops.map((x) => (x === '@' ? m : x))] as any)
+                .type.toString()
+          );
+          expect(withUndefined).toEqual(withMissing);
+        }
+      }
+      expect(
+        ce.box(['Multiply', 'Undefined', ['List', 1, 2, 3]]).type.toString()
+      ).toBe('vector<3>');
+      expect(ce.box(['Add', 'Undefined', 1]).type.toString()).toBe('number');
+      expect(ce.box(['Negate', 'Undefined']).type.toString()).toBe('number');
+    });
+
+    it('the static type admits the evaluated value', () => {
+      for (const expr of [
+        ['Multiply', 'Undefined', ['List', 1, 2, 3]],
+        ['Add', ['List', 1, 2, 3], 'Undefined'],
+        ['Divide', ['List', 1, 2, 3], 'Undefined'],
+        ['Power', 'Undefined', ['List', 1, 2, 3]],
+        ['Add', 'Undefined', 1],
+        ['Negate', 'Undefined'],
+      ]) {
+        const boxed = ce.box(expr as any);
+        expect(boxed.evaluate().type.matches(boxed.type)).toBe(true);
+      }
+    });
+  });
+
   describe('compiled JavaScript lane', () => {
     it('answers NaN for the same rows', () => {
       for (const expr of [

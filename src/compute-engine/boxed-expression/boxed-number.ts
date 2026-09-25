@@ -287,7 +287,15 @@ export class BoxedNumber
     options?: { metadata?: Metadata }
   ) {
     super(ce, options?.metadata);
-    if (value instanceof NumericValue || typeof value === 'number')
+    // An exact value whose factory is not the one of this engine (see
+    // `_numericValue()`) is made again with the factory of the engine, so
+    // that its float value follows the precision of the engine.
+    if (
+      value instanceof ExactNumericValue &&
+      value.factory !== ce._inexactNumericValue
+    )
+      this._value = ce._numericValue(value);
+    else if (value instanceof NumericValue || typeof value === 'number')
       this._value = value;
     else this._value = ce._numericValue(value);
   }

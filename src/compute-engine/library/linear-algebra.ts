@@ -3985,14 +3985,54 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             return undefined;
           const elements: Expression[] = [];
           for (const el of x.each()) elements.push(el);
-          if (elements.every((el) => !el.isCollection))
-            return vectorNorm(elements);
+          // Text is a collection of characters but a scalar CELL here, so a
+          // list that holds it is still a vector, and `vectorNorm` reports
+          // the wrong kind: `‖[3, "a", Missing]‖` is an `incompatible-type`
+          // error, not an inert application.
+          const isScalarCell = (el: Expression) =>
+            isString(el) || isCharacter(el) || !el.isCollection;
+          if (elements.every(isScalarCell)) return vectorNorm(elements);
           if (!elements.every((el) => el.isCollection)) return undefined;
           const matrix = ce.function(
             'List',
             elements.map((el) => el.evaluate())
           );
-          if (!isTensorValue(matrix)) return undefined;
+          if (!isTensorValue(matrix)) {
+            // A matrix with an ABSENT cell — the `Missing` or `Undefined`
+            // symbol — has the norm `NaN`, as a vector with one has (see
+            // `vectorNorm` above). A `Missing` cell types its row
+            // `list<integer | missing>`, which is not a tensor type, so the
+            // matrix branch below never sees such a matrix. The same checks
+            // as that branch and as `vectorNorm` still apply first: the rows
+            // must make a matrix (lists of one length, with no collection
+            // cell other than text), the order must be one of the matrix
+            // norms, and a cell that is provably not a number — text
+            // included — is an `incompatible-type` error.
+            if (!isFunction(matrix)) return undefined;
+            const first = matrix.ops[0];
+            if (!isFunction(first, 'List')) return undefined;
+            const width = first.nops;
+            const cells: Expression[] = [];
+            for (const row of matrix.ops) {
+              if (
+                !isFunction(row, 'List') ||
+                row.nops !== width ||
+                !row.ops.every(isScalarCell)
+              )
+                return undefined;
+              cells.push(...row.ops);
+            }
+            if (!cells.some((cell) => isAbsentSymbol(cell))) return undefined;
+            if (normType !== 1 && normType !== 2 && normType !== 'infinity')
+              return undefined;
+            for (const cell of cells)
+              if (
+                !isAbsentSymbol(cell) &&
+                admissionOf(cell, 'number') === 'refute'
+              )
+                return ce.typeError('number', cell.type, cell);
+            return ce.NaN;
+          }
           return ce
             .function('Norm', [matrix, ...ops.slice(1)])
             .evaluate({ numericApproximation });

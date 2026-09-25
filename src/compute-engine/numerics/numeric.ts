@@ -396,6 +396,20 @@ export function isMachineTrigPole(y: number, x: number): boolean {
  * the same value.
  */
 function trigPole(y: number, x: number): number {
+  // A value that overflows a double at a finite nonzero angle below `π/2`
+  // in magnitude is not a pole: it is `csc` or `cot` of an angle so small
+  // that its reciprocal is above the largest double (`csc(5·10⁻³²⁴)` is
+  // about `2·10³²³`). On `(−π/2, π/2)` the sign of `csc x` and of `cot x`
+  // is the sign of `x`, so the value keeps its sign: `-Infinity` is the
+  // compiled spelling of `-oo`, as the interpreter answers (`poleDust`,
+  // `boxed-expression/trigonometry.ts`). The pole at 0 itself stays
+  // `Infinity`.
+  if (
+    (y === Infinity || y === -Infinity) &&
+    x !== 0 &&
+    Math.abs(x) < Math.PI / 2
+  )
+    return y;
   return isMachineTrigPole(y, x) ? Infinity : y;
 }
 

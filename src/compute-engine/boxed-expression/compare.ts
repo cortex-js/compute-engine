@@ -1115,7 +1115,7 @@ export function cmp(
  *    working precision (`√(2 + 10⁻³⁰)` and `√2` at 21 digits) are ordered
  *    at 50 digits. The result is exact, as at the working precision: the
  *    order is known only when the difference is larger than its error
- *    bound. Not done at machine precision (see `orderAtRaisedPrecision`).
+ *    bound. This is also done at machine precision.
  * 2. A symbolic proof that the two constants are EQUAL: `a − b` simplifies
  *    to the literal `0` (or `b − a` does). Two equal constants (`ln 6` and `ln 2 + ln 3`,
  *    `sin²1 + cos²1` and `1`) have a difference of exactly zero, and no
@@ -1284,12 +1284,14 @@ function isProvedEqual(a: Expression, b: Expression): boolean {
  * kept apart from the ones at the working precision (see
  * `approximations`). The tolerance of the engine does not change.
  *
- * Not done at machine precision: a number literal made by an engine at
- * machine precision keeps a machine factory (`ExactNumericValue.factory`),
- * and its `.N()` is a double at any later precision. Its value would then
- * have the error of a double, not the error of the raised precision that
- * the bound assumes, and the order could be wrong: at 50 digits, the order
- * of a new `√(2 + 10⁻³⁰)` against a `√2` made at machine precision was
+ * This is also done at machine precision. A number literal made at
+ * machine precision gets its value at the raised precision: the factory
+ * of its float value (`ExactNumericValue.factory`, which is
+ * `ce._inexactNumericValue`) reads the precision of the engine when it is
+ * called. When the factory was chosen at the precision of the literal's
+ * creation, the value of such a literal was a double at any later
+ * precision, with the error of a double and not the error that the bound
+ * assumes, and at 50 digits the order of `√(2 + 10⁻³⁰)` against `√2` was
  * `−1`.
  *
  * This step is also done while a computation holds scratch declaration
@@ -1303,7 +1305,6 @@ function orderAtRaisedPrecision(
 ): -1 | 0 | 1 | undefined {
   const ce = a.engine;
   const precision = ce.precision;
-  if (precision <= MACHINE_PRECISION) return undefined;
   const raised = raisedPrecision(Math.min(precision, BigDecimal.precision));
   if (raised <= precision) return undefined;
   const atRaisedPrecision = <T>(fn: () => T): T =>
@@ -1397,6 +1398,110 @@ function correctlyRoundedMachineValue(x: Expression): number | undefined {
 }
 
 /**
+ * The special functions whose machine value `orderOfMachineSpecialValues`
+ * reads. Their machine kernels were measured against mpmath: the relative
+ * error was at most `1.4·10⁻¹³` (erfc near 2, where `1 − erf(x)` cancels;
+ * erfc(x) ≥ erfc(2) > 4·10⁻³ there, so the cancellation costs at most
+ * `3·10⁻¹³`), except for Γ at a negative argument near a pole, which is
+ * excluded.
+ */
+const MACHINE_SPECIAL_FUNCTIONS = new Set([
+  'Gamma',
+  'Erf',
+  'Erfc',
+  'Erfi',
+  'Zeta',
+]);
+
+/** A bound on the relative error of a machine kernel of
+ *  `MACHINE_SPECIAL_FUNCTIONS`: more than 30 times the largest error that
+ *  was measured. */
+const MACHINE_KERNEL_ERROR = 1e-11;
+
+/**
+ * The order of `a` and `b` at machine precision, from their machine values,
+ * when each one is a correctly rounded value (`correctlyRoundedMachineValue`)
+ * or a function of `MACHINE_SPECIAL_FUNCTIONS` applied to one. `undefined`
+ * when the values are not far apart, or when the other operands are not of
+ * that form.
+ *
+ * At machine precision, `approximate` has no bound for these functions (see
+ * `propagatedError`), so without this their order was never known. The error
+ * of the machine value of `f(c)` is at most `w·F + K·|f(c)|`, where `w` is
+ * the rounding of `c` to a double (at most `10⁻¹⁵·|c|`), `F` is the bound on
+ * `|f′|` near `c` (`logDerivativeBound`) and `K` is `MACHINE_KERNEL_ERROR`.
+ * The order is known when the two values differ by more than `10⁻⁶` of the
+ * larger one and each error is less than `10⁻⁹` of it: then the difference
+ * is much larger than the sum of the errors. An argument where `f` is badly
+ * conditioned (Γ near a pole, ζ near 1) has a large `F`, and the order is
+ * not known.
+ *
+ * Only at machine precision: at a higher precision, `approximate` gives a
+ * bound for these functions, and its values are kept for each expression,
+ * where these machine values would be computed again at each comparison.
+ */
+function orderOfMachineSpecialValues(
+  a: Expression,
+  b: Expression
+): '<' | '>' | undefined {
+  if (a.engine.precision > MACHINE_PRECISION) return undefined;
+  const x = machineSpecialValue(a);
+  if (x === undefined) return undefined;
+  const y = machineSpecialValue(b);
+  if (y === undefined) return undefined;
+  const scale = Math.max(Math.abs(x.value), Math.abs(y.value));
+  const difference = x.value - y.value;
+  const logLimit = Math.log(1e-9 * scale);
+  if (
+    !(Math.abs(difference) > 1e-6 * scale) ||
+    !(x.logError < logLimit) ||
+    !(y.logError < logLimit)
+  )
+    return undefined;
+  return difference < 0 ? '<' : '>';
+}
+
+/** The machine value of `x`, and `ln` of a bound on its absolute error, for
+ *  `orderOfMachineSpecialValues`. */
+function machineSpecialValue(
+  x: Expression
+): { value: number; logError: number } | undefined {
+  const leaf = correctlyRoundedMachineValue(x);
+  if (leaf !== undefined)
+    return {
+      value: leaf,
+      // A correctly rounded value is within 2⁻⁵³ of the exact value
+      logError: Math.log(Math.abs(leaf)) - 53 * Math.LN2,
+    };
+  if (
+    !isFunction(x) ||
+    x.nops !== 1 ||
+    !MACHINE_SPECIAL_FUNCTIONS.has(x.operator)
+  )
+    return undefined;
+  const c = correctlyRoundedMachineValue(x.op1);
+  if (c === undefined) return undefined;
+  // The reflection formula of the machine Γ loses digits near a pole.
+  if (x.operator === 'Gamma' && !(c > 0)) return undefined;
+  const v = x.N();
+  if (!isNumber(v) || v.im !== 0) return undefined;
+  const value = v.re;
+  if (!Number.isFinite(value) || value === 0) return undefined;
+  const logValue =
+    Math.log(Math.abs(value)) + Math.log1p(2 * MACHINE_KERNEL_ERROR);
+  const w = Math.abs(c) * 1e-15 + Number.MIN_VALUE;
+  const derivative = logDerivativeBound(x.operator, c - w, c + w, logValue);
+  if (derivative === undefined) return undefined;
+  return {
+    value,
+    logError: logAdd(
+      Math.log(w) + derivative,
+      logValue + Math.log(MACHINE_KERNEL_ERROR)
+    ),
+  };
+}
+
+/**
  * The order of two numeric operands `a` and `b`, at least one of which is
  * not a number literal (`π`, `1 + π`, a symbol with a value), read from
  * their values. `undefined` when the order is not known.
@@ -1436,6 +1541,8 @@ function orderByValue(
   // holds for a real number literal, `π`, `e`, and a symbol whose value is a
   // number literal. It does NOT hold for a function expression: near a root
   // its machine value can have the wrong sign, so it takes the bound below.
+  // The exception, at machine precision only, is a special function of such
+  // a value, with a bound on its error: see `orderOfMachineSpecialValues`.
   if (tolerance === 0) {
     const am = correctlyRoundedMachineValue(a);
     const bm = correctlyRoundedMachineValue(b);
@@ -1445,6 +1552,8 @@ function orderByValue(
       Math.abs(am - bm) > 1e-12 * Math.max(Math.abs(am), Math.abs(bm), 1e-300)
     )
       return am < bm ? '<' : '>';
+    const special = orderOfMachineSpecialValues(a, b);
+    if (special !== undefined) return special;
   }
 
   // With no tolerance, two operands without unknowns are ordered by the
@@ -1775,7 +1884,8 @@ const approximations = new WeakMap<
  * The list is: `Add`, `Subtract`, `Negate`, `Multiply`, `Divide`, `Square`,
  * `Sqrt`, `Root`, `Power`, `Exp`, `Ln`, `Log`, `Lb`, `Lg`, `Abs`, `Sin`,
  * `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arcsin`, `Arccos`, `Sinh`,
- * `Cosh`, `Tanh`, `Arsinh`.
+ * `Cosh`, `Tanh`, `Arsinh`, `Arcosh`, `Artanh`, and, only above machine
+ * precision, `Gamma`, `Erf`, `Erfc`, `Erfi`, `Zeta` (see `propagatedError`).
  */
 function approximate(x: Expression, unit: number): Approximation | undefined {
   return approximateNode(x, unit).approximation;
@@ -2118,6 +2228,153 @@ function propagatedError(
     case 'Tanh':
     case 'Arsinh':
       return u.logError;
+    case 'Gamma':
+    case 'Erf':
+    case 'Erfc':
+    case 'Erfi':
+    case 'Zeta':
+    case 'Arcosh':
+    case 'Artanh': {
+      if (args.length !== 1) return undefined;
+      // The machine kernels of Γ, erf, erfc, erfi and ζ are not within
+      // `unit` of the exact value everywhere: `1 − erf(x)` loses about two
+      // digits near x = 2, and the reflection formula of Γ loses digits
+      // near a pole. Their big decimal kernels were measured against mpmath
+      // to be within `unit`, so these functions have a bound only when the
+      // big decimal kernels are used. `Math.acosh` and `Math.atanh` are
+      // within a few units in the last place.
+      if (
+        op !== 'Arcosh' &&
+        op !== 'Artanh' &&
+        ce.precision <= MACHINE_PRECISION
+      )
+        return undefined;
+      const range = errorInterval(u);
+      if (range === undefined) return undefined;
+      // The computed value is `f(ũ)·(1 + δ)` with `|δ| ≤ unit`, so
+      // `|f(ũ)| ≤ |value|·(1 + 2·unit)`.
+      const derivative = logDerivativeBound(
+        op,
+        range[0],
+        range[1],
+        logMagnitude + Math.log1p(2 * Math.exp(logUnit))
+      );
+      return derivative === undefined ? undefined : u.logError + derivative;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The interval `[lo, hi]` of doubles that holds every real value within the
+ * error bound of `a`: `value ± error`, made wider by `10⁻¹⁵·|value|` (the
+ * conversion of `value` to a double and the rounding of the two ends are
+ * each at most `1.2·10⁻¹⁶·|value|`), by `10⁻¹²·error` (the rounding of the
+ * error bound) and by the smallest double (a value that is too small for a
+ * double). `undefined` when the value or the error is not a finite double.
+ */
+function errorInterval(a: Approximation): [number, number] | undefined {
+  const v = a.value.re;
+  const e = Math.exp(a.logError);
+  if (!Number.isFinite(v) || !Number.isFinite(e)) return undefined;
+  const w = e * (1 + 1e-12) + Math.abs(v) * 1e-15 + Number.MIN_VALUE;
+  return [v - w, v + w];
+}
+
+/** `ln(2/√π)`: `|erf′(t)| = (2/√π)·e^(−t²)` */
+const LOG_TWO_OVER_SQRT_PI = Math.log(2 / Math.sqrt(Math.PI));
+
+/**
+ * `ln` of an upper bound on `|f′(t)|` for every `t` in the real interval
+ * `[lo, hi]`, where `f` is the function `op` of one real argument. By the
+ * mean value theorem, an error `e` of an argument in the interval gives an
+ * error of at most `e` times this bound in `f`. `undefined` when there is
+ * no bound: the interval contains a pole of `f`, or a point where `f` is not
+ * real, or `op` is not one of the functions below.
+ *
+ * `logValue` is `ln |f(t₀)|`, or more, at a point `t₀` of the interval. Only
+ * the bound of `Gamma` uses it.
+ *
+ * The bounds were checked against mpmath at 40 digits (the digamma bounds
+ * at `t = 10⁻³⁰` to `10⁷` and on 60 negative unit intervals, the `ζ′` bound
+ * at `s = 1 + 10⁻¹¹` to 50): the ratio of the exact value to the bound was
+ * never more than 1.
+ */
+function logDerivativeBound(
+  op: string,
+  lo: number,
+  hi: number,
+  logValue: number
+): number | undefined {
+  switch (op) {
+    case 'Erf':
+    case 'Erfc': {
+      // |erf′(t)| = |erfc′(t)| = (2/√π)·e^(−t²), which is largest at the
+      // point of the interval nearest to 0.
+      const m = lo > 0 ? lo : hi < 0 ? -hi : 0;
+      return LOG_TWO_OVER_SQRT_PI - m * m;
+    }
+    case 'Erfi': {
+      // erfi′(t) = (2/√π)·e^(t²), which is largest at the end of the
+      // interval farthest from 0.
+      const m = Math.max(-lo, hi);
+      return LOG_TWO_OVER_SQRT_PI + m * m;
+    }
+    case 'Arcosh':
+      // arcosh′(t) = 1/√((t − 1)(t + 1)) for t > 1, which decreases: it is
+      // largest at `lo`. There is no bound when the interval reaches 1.
+      if (!(lo > 1)) return undefined;
+      return -0.5 * (Math.log(lo - 1) + Math.log(lo + 1));
+    case 'Artanh': {
+      // artanh′(t) = 1/((1 − t)(1 + t)) for |t| < 1, which is largest at
+      // the end of the interval farthest from 0. There is no bound when the
+      // interval reaches −1 or 1.
+      const m = Math.max(-lo, hi);
+      if (!(m < 1)) return undefined;
+      return -(Math.log(1 - m) + Math.log(1 + m));
+    }
+    case 'Zeta': {
+      // For a real s > 1, |ζ′(s)| = Σ_{n≥2} ln n/nˢ, which decreases when s
+      // increases: the bound at `lo` holds on the whole interval. The terms
+      // n = 2 and n = 3 are kept. For n ≥ 4, ln n/nˢ ≤ ∫_{n−1}^{n} ln t/tˢ dt,
+      // because ln t/tˢ decreases for t ≥ e^(1/s), and e^(1/s) < 3. So
+      // Σ_{n≥4} ln n/nˢ ≤ ∫_3^∞ ln t/tˢ dt = 3^(1−s)·(ln 3/(s − 1) + 1/(s − 1)²).
+      // There is no bound when the interval reaches s = 1 (the pole), or
+      // for s < 1, where ζ is not computed from this series.
+      if (!(lo > 1)) return undefined;
+      const s1 = lo - 1;
+      const ln3 = Math.log(3);
+      return logAdd(
+        logAdd(Math.log(Math.LN2) - lo * Math.LN2, Math.log(ln3) - lo * ln3),
+        -s1 * ln3 + Math.log(ln3 / s1 + 1 / (s1 * s1))
+      );
+    }
+    case 'Gamma': {
+      // Γ′ = Γ·ψ, where ψ is the digamma function. A bound `psi` on |ψ|
+      // over the interval:
+      // - For t > 0: ln t − 1/t < ψ(t) < ln t − 1/(2t), so
+      //   |ψ(t)| ≤ |ln t| + 1/t ≤ max(|ln lo|, |ln hi|) + 1/lo.
+      // - For t < 0 in the interval (n, n + 1), with n an integer: the
+      //   reflection formula ψ(t) = ψ(1 − t) − π·cot(πt). Since 1 − t > 1,
+      //   |ψ(1 − t)| ≤ ln(1 − t) + 1 ≤ ln(1 − lo) + 1. And
+      //   |π·cot(πt)| ≤ π/|sin(πt)| ≤ π/(2d), where d is the smallest
+      //   distance from the interval to an integer, because
+      //   |sin(πt)| ≥ 2·(distance from t to the nearest integer).
+      // - There is no bound when the interval contains a pole (0 or a
+      //   negative integer).
+      // Then ln |Γ| changes by at most psi·(hi − lo) over the interval, so
+      // |Γ(t)| ≤ |Γ(t₀)|·e^(psi·(hi − lo)), and |Γ′| ≤ psi times that.
+      let psi: number;
+      if (lo > 0)
+        psi = Math.max(Math.abs(Math.log(lo)), Math.abs(Math.log(hi))) + 1 / lo;
+      else if (hi < 0) {
+        const n = Math.floor(lo);
+        const d = Math.min(lo - n, n + 1 - hi);
+        if (!(d > 0)) return undefined;
+        psi = Math.log(1 - lo) + 1 + Math.PI / (2 * d);
+      } else return undefined;
+      return Math.log(psi) + logValue + psi * (hi - lo);
+    }
   }
   return undefined;
 }

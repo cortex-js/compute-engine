@@ -1456,9 +1456,7 @@ describe('FINITENESS GUARDS: COUNTIF/POSITION/ORDERING/DICTIONARYFROM/RECORDFROM
       // The no-key comparison declines an undecided pair, as the key
       // comparison does: a result that depended on the order of the input
       // would not be a sort. Both `Sort` and `Ordering` stay unevaluated.
-      expect(engine.box(['Sort', listsOfOne]).evaluate().operator).toBe(
-        'Sort'
-      );
+      expect(engine.box(['Sort', listsOfOne]).evaluate().operator).toBe('Sort');
       expect(engine.box(['Ordering', listsOfOne]).evaluate().operator).toBe(
         'Ordering'
       );

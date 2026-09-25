@@ -2735,6 +2735,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (args.length > 2)
           return ce._fn('Delimiter', checkArity(ce, args, 2));
 
+        // A Delimiter with no delimiter string or with parentheses returns
+        // its canonical body unchanged (see below). When that body is itself
+        // a non-canonical Delimiter, the result is therefore the canonical
+        // form of the inner Delimiter. Peel such wrappers in a loop instead of
+        // recursing through `body.canonical`: a chain of nested parentheses
+        // (`((((1))))`, built by code thousands of levels deep) would
+        // otherwise overflow the call stack inside this handler.
+        while (args.length > 0 && args.length <= 2) {
+          const outer = isString(args[1]) ? args[1].string : undefined;
+          if (outer && !(outer.startsWith('(') && outer.endsWith(')'))) break;
+          const inner = args[0];
+          if (!isFunction(inner, 'Delimiter') || inner.isCanonical) break;
+          args = inner.ops;
+        }
+        if (args.length === 0) return ce._fn('Tuple', []);
+        if (args.length > 2)
+          return ce._fn('Delimiter', checkArity(ce, args, 2));
+
         let body = args[0];
 
         // If the body is a sequence, turn it into a Tuple

@@ -310,6 +310,21 @@ describe('A MUTUALLY RECURSIVE PAIR WHOSE BODY HAS NO LOWERING FAILS CLOSED', ()
     });
   }
 
+  // The diagnostic names the root cause, `Simplify`, for every spelling.
+  // Before, `h(2)` and `g(2) + h(2)` reported that the type `number` of the
+  // call of `h` does not give its lane: a route of the call `h(n - 1)`,
+  // found while an earlier emission of `h` was in the preamble, was reused
+  // while `h` was compiling again, and so the recursive-call assumption did
+  // not answer.
+  for (const latex of ['g(2) + h(2)', 'h(2)', 'g(2)']) {
+    test(`${latex} fails closed with the diagnostic of \`Simplify\``, () => {
+      const ce = pair();
+      expect(() =>
+        compile(ce.parse(latex), { to: 'javascript', fallback: false })
+      ).toThrow(/Could not compile `Simplify`.*has no lowering/);
+    });
+  }
+
   test('a mutually recursive pair that compiles keeps every definition', () => {
     const ce = new ComputeEngine();
     ce.declare('g', { signature: '(integer) -> number' });

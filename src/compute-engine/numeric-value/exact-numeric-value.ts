@@ -2,6 +2,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 
 import { Rational, SmallInteger } from '../numerics/types.js';
 import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric.js';
+import { bigintNthRoot } from '../numerics/bigint.js';
 import {
   isOne,
   isZero,
@@ -1063,7 +1064,12 @@ export class ExactNumericValue extends NumericValue {
         const rootN = integerNthRoot(n, exponent);
         if (rootN !== null) {
           const rootD = integerNthRoot(d, exponent);
-          if (rootD !== null) return this.clone({ rational: [rootN, rootD] });
+          if (rootD !== null) {
+            // A `Rational` holds two numbers or two bigints, never a mix.
+            if (typeof rootN === 'number' && typeof rootD === 'number')
+              return this.clone({ rational: [rootN, rootD] });
+            return this.clone({ rational: [BigInt(rootN), BigInt(rootD)] });
+          }
         }
       }
       return this.factory(this.bignumRe).root(exponent);
@@ -2048,9 +2054,13 @@ function perfectSquareRoot(n: bigint): bigint | null {
  * neither cause a miss (Math.pow(64, 1/3) = 3.9999999999999996) nor a false
  * snap on a near-power. (CORRECTNESS P2 #20)
  */
-function integerNthRoot(v: number | bigint, n: number): number | null {
+function integerNthRoot(v: number | bigint, n: number): number | bigint | null {
   if (typeof v === 'bigint') {
-    if (v < 0n || v > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    if (v < 0n) return null;
+    // Past the safe integers a double cannot seed the root exactly: use the
+    // all-integer root, so `(10^60)^(1/3)` is the exact `10^20`.
+    if (v > BigInt(Number.MAX_SAFE_INTEGER))
+      return v > 1n ? bigintNthRoot(v, n) : null;
     v = Number(v);
   }
   if (!Number.isSafeInteger(v) || v <= 0) return null;

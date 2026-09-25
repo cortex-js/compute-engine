@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-23.
+**Last updated:** 2026-09-25.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -401,29 +401,22 @@ captured by the index); strict mode compiles it.
 
 ### Residues of the 2026-09-24 fix round (OPEN, small — found by the review of the fixes)
 
-Found by the review of the fixes of 2026-09-24, not fixed in that round: (1) a
-perfect-power root of a bigint radicand is no longer extracted, because the
-extraction accepted a rounded float that happened to be integer-valued and now
-requires an `ExactNumericValue`: `∛(10^60)` stays `root(3)(1e+60)` (it was
-`10^20`) while `(2^60)^{1/3}` still folds through `pow()`; an integer n-th root
-on the bigint (`arithmetic-power.ts`, `root()`) would keep both exact. (2)
-`e^{0.25iπ}` is the exact `√2/2 + √2/2·i` in degree mode and a float in radian
-and turn mode: `radiansToAngle` gives the big decimal `45.000…`, which the
-degree-mode recognizer accepts as the special angle 45°, while a float is never
-special in radians. (3) `e^{1 + 0.5iπ}` still carries dust (`5.2e-17 + 2.718i`)
-under `evaluate()`: the Euler branch reads the raw exponent only when it is
-purely imaginary. (4) The dust limit is capped at `|x| ≥ 1`, so `sin(10^6π).N()`
-is `−3.8e-19` while `evaluate()` is `0`, and `tan(10^6π + π/2).N()` is `2.6e18`
-while `evaluate()` is `~oo` (the cap exists so that `sin(10^22)` is not chopped;
-the two routes disagree for multiples of π above `10^2`). (5) A float near a
-special angle gives the sine of the DECIMAL literal on the scalar route
-(`Sin(3.141592653589793)` is `2.38e-16`, 21 digits) and the sine of the DOUBLE
-inside a machine list (`1.22e-16`, `Math.sin`), a factor of 2 at a zero
-crossing; both are exact readings of their literal. (6) A mutually recursive
-pair whose body has no lowering fails closed with the message "Cannot compile a
-call of `h`: its type is `number`…" for the spelling `h(2)`, which names the
-lane question rather than the root cause (`Simplify` has no lowering); the
-failed emission's own diagnostic should be the one reported.
+Found by the review of the fixes of 2026-09-24, not fixed in that round (the
+bigint root extraction, the `e^{1 + 0.5iπ}` dust and the mutually recursive
+diagnostic landed 2026-09-25): (1) `e^{0.25iπ}` is the exact `√2/2 + √2/2·i` in
+degree mode and a float in radian and turn mode: `radiansToAngle` gives the big
+decimal `45.000…`, which the degree-mode recognizer accepts as the special angle
+45°, while a float is never special in radians. (2) The dust limit is capped at
+`|x| ≥ 1`, so `sin(10^6π).N()` is `−3.8e-19` while `evaluate()` is `0`, and
+`tan(10^6π + π/2).N()` is `2.6e18` while `evaluate()` is `~oo` (the cap exists
+so that `sin(10^22)` is not chopped; the two routes disagree for multiples of π
+above `10^2`). Note that since 2026-09-25 a LITERAL `10^6π` argument is reduced
+exactly (`\sin(10^{6}\pi).N()` is `0`); the cap still applies to a float
+argument near a multiple of π. (3) A float near a special angle gives the sine
+of the DECIMAL literal on the scalar route (`Sin(3.141592653589793)` is
+`2.38e-16`, 21 digits) and the sine of the DOUBLE inside a machine list
+(`1.22e-16`, `Math.sin`), a factor of 2 at a zero crossing; both are exact
+readings of their literal.
 
 ### Residues of the exact-boxing rule (OPEN, decisions — found 2026-09-24)
 
@@ -482,13 +475,21 @@ value): `x4[1,2]` (the left side is already the product `x·4`), `2^3[1,2]` and
 Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
 `Tuple(4, Interval(…))`, which is probably not what an author means.
 
-### `Map` with its arguments reversed: a symbol source stays unevaluated, a literal source is an error (OPEN, small — found 2026-09-24)
+### A list literal with an `Undefined` cell is typed as a numeric tensor, and the symbol leaks into results (OPEN, decision — found 2026-09-25)
 
-`Map(P, fn)` with the arguments in the wrong order (the function first is
-correct) stays as the unevaluated `Map(P, (u) => ||u||)` when `P` is a symbol
-holding a list, but gives an `incompatible-type` error when the same list is
-written as a literal. The two routes should report the misuse the same way (the
-error, since the operand types are known once `P`'s value is read).
+`[1, Undefined]` is typed `vector<2>` while `[1, Missing]` is
+`list<integer | missing>`, so the tensor code accepts the list and leaves the
+symbol in the value: `(2·[1, Undefined]).N()` is `[2, 2·"Undefined"]`,
+`([1, Undefined]·[1, 2]).N()` is `[1, 2·"Undefined"]`, and
+`Determinant([[1, Undefined], [1, 2]])` is `2 − "Undefined"`. Wrong values. The
+fix is to type an `Undefined` cell of a `List` as `missing` in the `List` type
+handler, as an `Undefined` OPERAND of a propagating operator is read since
+2026-09-25 (`boxed-function.ts`, `derive-application-type.ts`); that is a typing
+decision with wide reach (every list-literal type), so it needs a ruling and a
+snapshot-radius measurement first. Related, recorded as a decision in
+`absFunctionType` (`library/type-handlers.ts`): `Abs(x)` with `x: number` is
+typed `real<0..> | signed_infinity` with no `nan` arm although `Abs(NaN)` is
+`NaN`, which is why `Abs([1, Undefined])` has a type without NaN.
 
 ### Residues of the tuple-of-lists change (OPEN, small — 2026-09-25)
 
@@ -504,9 +505,12 @@ a reachable decline. (3) `Length(Missing)` is
 `Error(incompatible-type, collection, missing)` while its type says `integer`.
 (4) For a parameter with no declared type, the compiled route does not handle a
 restricted list of points (`untypedPointListElement` does not remove `missing`).
-(5) A point list at an untyped parameter beside another collection argument
-still declines to compile to JavaScript (the interpreter pairs the lists). (6)
-Block-local functions and variadic parameters do not map over a list of points.
+On the interpreter, an untyped `k := P ↦ 2P` applied to `[Missing, (3,4)]`
+answers `[NaN, (6, 8)]` typed `list<number>` (found 2026-09-25): the absent cell
+is not `Missing` and the type does not describe the value. (5) A point list at
+an untyped parameter beside another collection argument still declines to
+compile to JavaScript (the interpreter pairs the lists). (6) Block-local
+functions and variadic parameters do not map over a list of points.
 
 ### Extended-real declarations lose precision through inference (OPEN, type precision — reported by Tycho 2026-09-24, measured on CE main)
 
@@ -517,40 +521,33 @@ places widen that union back: (1) a function declared
 reals (`t + 1`, `t²`, `sin t`) refines its result to `number`, and `Sum(L)`,
 `Max(L)` over `list<real | signed_infinity | nan>` type `number`; (2) arithmetic
 widens `signed_infinity` to `infinity`, which admits the complex infinity:
-`C + 1` over such a list types `list<infinity | infinity | nan | real>` (the
-union also PRINTS `infinity` twice, a normalization or printing defect of its
-own); (3) a literal list with an infinite or NaN member types `vector<2>`
-(element type `number`): `[1, ∞]` and `[1.5, NaN]` do not match
-`list<(real | signed_infinity | nan)^2>`, although the join of the members'
-types is `real | signed_infinity` (the ASSIGNMENT of `[1, ∞]` to a symbol
-declared with the union does succeed on main; Tycho measured a failure on
-0.133.0). Each is a lost precision, not a wrong value; a host that reads the
-type of a result to choose a shader type or a lane sees `number` where
-`real | signed_infinity | nan` is true. Probe: Tycho's
+`C + 1` over such a list typed `list<infinity | infinity | nan | real>` (the
+duplicate `infinity`, a union built from the two signed infinities that
+`stripNumericRanges` widened without removing duplicates, is fixed since
+2026-09-25; the union prints `list<infinity | nan | real>`); (3) a literal list
+with an infinite or NaN member types `vector<2>` (element type `number`):
+`[1, ∞]` and `[1.5, NaN]` do not match `list<(real | signed_infinity | nan)^2>`,
+although the join of the members' types is `real | signed_infinity` (the
+ASSIGNMENT of `[1, ∞]` to a symbol declared with the union does succeed on main;
+Tycho measured a failure on 0.133.0). Each is a lost precision, not a wrong
+value; a host that reads the type of a result to choose a shader type or a lane
+sees `number` where `real | signed_infinity | nan` is true. Probe: Tycho's
 `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
 
-### A number literal made at machine precision keeps a machine factory after the precision is raised (OPEN, wrong values — found 2026-09-24)
+### Ordering of constants with special functions: what stays open after the 2026-09-25 bounds (OPEN, low)
 
-An `ExactNumericValue` keeps the numeric factory of the engine that created it
-(`ExactNumericValue.factory`): with
-`e = new ComputeEngine({precision: 'machine'})`, `b = e.box(['Sqrt', 2])`, then
-`e.precision = 50`, `b.N()` is still the double `1.4142135623730951`. The exact
-ordering's raised-precision step (`exactOrder`, `compare.ts`) is therefore
-skipped at machine precision, because the error bound would assume 50-digit
-leaves while such a leaf has the error of a double, and the order came out wrong
-(`−1` for `√(2 + 10⁻³⁰)` against `√2`). Fix: a literal's numeric value follows
-the engine's CURRENT precision (the factory is looked up at `N()` time, or the
-cached machine value is dropped when the precision changes).
-
-### A constant that contains an operator with no error bound is never ordered, however far apart the values are (OPEN — found 2026-09-24)
-
-`Max(Γ(1/3), 3)` stays unevaluated (Γ(1/3) ≈ 2.679): `approximate()`
-(`compare.ts`) has no derivative bound for `Gamma`, `Erf`, `Zeta`, `Bessel`, the
-inverse hyperbolic functions or any operator outside its list, and the fast path
-uses machine values only for literals, `π` and `e`. Add bounds for the common
-special functions, or a machine-value fast path for two values that are far
-apart relative to the double's precision when the function is computed
-accurately.
+`approximate()` (`compare.ts`) propagates an error bound through `Gamma`, `Erf`,
+`Erfc`, `Erfi`, `Zeta`, `Arcosh` and `Artanh` since 2026-09-25, and at machine
+precision a fast path orders `f(literal)` from the machine values when the two
+are farther apart than `10⁻⁶` relative. Not covered: the `Bessel` family (a
+clean derivative bound exists only for an integer order, and the kernels'
+accuracy is unmeasured), `LambertW`, the polygamma functions, and any tree whose
+leaves are not literals on the machine fast path (`Max(1 + Γ(1/3), 3)` at
+machine precision stays unevaluated; above machine precision the rigorous bound
+decides it). The intervals for Γ, ζ, arcosh and artanh are computed with
+doubles, so an argument within about `10⁻¹⁵` relative of a pole is refused at
+every precision (`Γ(−3 + 10⁻³⁰)` against `0` stays undecided at 50 digits):
+never a wrong order, a lost answer.
 
 ### JavaScript entry check: an O(n) walk per call per collection input (OPEN, decision — 2026-09-24, re-measured 2026-09-24)
 
@@ -575,7 +572,11 @@ is scheduled (user decision 2026-09-24), not done. Also,
 `BigNumericValue.toString()` does not round the real part of a complex value to
 the working precision (the real-only branch does), so that part prints 25
 digits. Related: `numericCostFunction` (`cost-function.ts`) prices the imaginary
-radical of a complex literal but not its real radical.
+radical of a complex literal but not its real radical. Also found 2026-09-25:
+`.N()` of `Multiply(Complex(√2/2, √2/2), e^2)` prints the real part with about
+46 digits (`5.224851674121679747327997452771991010463873012`) and the imaginary
+part at machine precision; the digits are correct, the precision mix is the same
+defect on the `Multiply` route.
 
 ### `√i` stays a `Sqrt` head while `√(i/4)` evaluates to an exact literal (OPEN, decision — found 2026-09-24)
 
@@ -604,27 +605,39 @@ The machine pole rule (2026-09-24) declares `Tan(x)` the pole `~oo` when
 `|tan x|·min(1, |x|)·100·2⁻⁵² ≥ 1`, so at `π + 1 ulp` (`3.1415926535897936`) the
 interpreter answers `~oo` while `interval-js` gives a finite enclosure of about
 `3.1e15` (it reads the argument as exact, as the big-decimal route does). Decide
-whether the interval target should answer `singular` inside that zone. Also:
-`Csc(5e-324)` overflows to `Infinity` and is read as the pole `~oo` although the
-true value is `+2.02e323` (beyond the largest double); the sign is known, so
-`+oo` would be more precise.
+whether the interval target should answer `singular` inside that zone. (The sign
+of an overflowing `Csc`/`Cot` of a tiny angle, `+oo` for `Csc(5e-324)`, landed
+2026-09-25 on the interpreter and the JavaScript and Python targets.)
 
-### An exact integer argument of a trigonometric function is rounded to the working precision before the kernel runs (OPEN, wrong values — found 2026-09-24)
+### At machine precision, a rational multiple of π is computed from a 15-digit π (OPEN, wrong values — found 2026-09-25 by the review of the large-angle fix)
 
-`Sin(12345678901234567890123).N()` is `0.9918…`; the true value is `−0.4206…`.
-The 23-digit exact integer is rounded to 21 digits before the big-decimal kernel
-reduces it modulo π, so the argument itself is wrong at the working precision.
-The kernel reduces an exact large integer exactly when it receives it
-(`Sin(10^22).N()` is `−0.852…`, correct). Pass an exact integer argument to the
-kernel unrounded, or reduce it modulo 2π in exact arithmetic first.
+With `precision: 'machine'`, `Divide(Pi, 6).N()` is `0.5235987755982998` where
+`Math.PI / 6` is `0.5235987755982988`, and `\frac{7\pi}{6}` is
+`3.6651914291881025` (true `3.665191429188092`), so `\sin(7\pi/6).N()` is
+`-0.500000000000009` where `Math.sin` gives `-0.4999999999999997`: about ten
+units in the last place. `Multiply(7, Pi)` is exact (`21.991148575128552`), so
+the loss is on the division route, which appears to go through a big decimal at
+the 15-digit working precision that machine mode gives big decimals
+(`applyAngle` says so), then rounds to a double. Also, `\cot(5\pi/2).N()` at
+machine precision is `3.13e-20` where `\cos(5\pi/2)` is chopped to `0`. The
+exact-angle route of 2026-09-25 (`exactLargeAngle`) reduces only `|c| ≥ 2`
+multiples of π, so these small angles keep the inaccurate route; either extend
+it to every rational multiple of π at machine precision (measure the snapshot
+radius: every machine-precision trig value of a special angle can move in its
+last digits), or find the 15-digit conversion and give it a double's 17.
 
-The same class, found 2026-09-24 by the review of the ordering step swap: an
-argument `k·π` with a large integer `k` is rounded to the working precision
-before the reduction, so `\sin(10^{30}\pi).N()` is `0.8838…` and
-`\cos(10^{20}\pi).N()` is `0.99999999926…` at 21 digits (exact values `0` and
-`1`). The exact ordering is not affected (its error bound rejects the value).
-Fix: reduce `Multiply(integer, Pi)` modulo `2π` exactly before the kernel, or
-compute the product with enough guard digits.
+### Degree mode: an angle that contains π is rounded before the reduction, and the unit conversion loses the last digit (OPEN, wrong values — found 2026-09-25 while fixing the large-integer argument)
+
+With `angularUnit = 'deg'`, `\sin(10^{30}\pi).N()` is `0`; the true value is
+`sin(10³⁰·π²/180) = 0.35016022992…`. The angle in radians has a `π²` factor, so
+it is not a rational multiple of π and the exact large-angle route
+(`exactAngleParts`, `boxed-expression/trigonometry.ts`) cannot read it; the
+angle is then rounded to the working precision before the reduction, as every
+large angle was before 2026-09-25. A fix evaluates the angle at a raised
+precision (enough guard digits to hold the integer part of the product).
+Separately, `\sin(30)` in degree mode is `0.500000000000000000001` at 21 digits:
+the last digit is lost in the unit conversion (`applyAngle` / `canonicalAngle`),
+not in the reduction. Pre-existing, both.
 
 ### Complex eigenvalues, eigenvectors and decompositions of size 3 or more have no numeric route (OPEN, capability — found 2026-09-24 by the review of `168de97d`)
 
@@ -679,14 +692,6 @@ a lowering reads the lanes of its operands, emit the definitions of the
 user-function calls among its direct operands with the current target and
 frames; then `userCallLane` only reads the record, and the global, the route
 memo, the ask-time pruning and the throws inside the predicate go away.
-
-### `Cos(π/3).isPositive` is `undefined` (OPEN — found 2026-09-24)
-
-`trigSign` recognizes an exact special angle only for literal arguments, so
-`Cos(π/3).isPositive` stays `undefined` although the value is `1/2`.
-`expression-properties.test.ts` pins `undefined`. The exact angle is now
-available (`halfTurns()`, `boxed-expression/trigonometry.ts`); answering `true`
-is correct but changes that pinned test.
 
 ### A point argument with a complex-valued coordinate declines where the interpreter answers a real number (OPEN — found 2026-09-15 in the Tycho corpus document `neyret/hpr2q4kles`)
 
@@ -2363,21 +2368,35 @@ probe. So the structural levers stay unbuilt and observability landed instead:
 stores, and `evictClear` — the count of whole-cache overflow drops).
 **`evictClear > 0` on a real workload re-opens this item.**
 
-### Nested parentheses past about a thousand levels: `Delimiter` swallows its own overflow, and the parser recurses (OPEN, pre-existing — found 2026-09-22 while removing the deep-tree boxing cliff)
+### Deeply nested parentheses: the parser recurses, and the foreign-object walk is quadratic on a deep raw tree (OPEN, pre-existing — found 2026-09-22 and 2026-09-25)
 
-Boxing no longer overflows on a deep tree (a 60,000-term `1-2-3-…` chain boxes
-and evaluates, `boxing-deep-trees.test.ts`), but two limits on deeply nested
-PARENTHESES stay. `Delimiter` is a lazy operator whose canonical handler
-canonicalizes its own operand, so the recursion is the handler's; past about 999
-levels `applyOperatorDefinition`'s recovery catches the handler's `RangeError`,
-logs `console.error` and returns a NON-canonical `Delimiter` — no throw, no
-error value, a silent wrong result (`canonicalDelimiter`, `library/core.ts`).
-Above that the parser's own recursive descent
-(`parseEnclosure → parsePrimary → parseExpression`) throws at about 1,870
-levels. Unreachable from realistic input; the first half wants the recovery to
-answer an error value or the handler to devolve like boxing does, the second is
-a parser change. Also unexercised on the same path: `adoptsForeignEngineObject`
-walks operands recursively once an object exists in the session.
+A chain of `Delimiter` wrappers boxes to its operand at any depth since
+2026-09-25 (`canonicalDelimiter`, `library/core.ts`, removes consecutive
+parenthesis wrappers iteratively; `boxing-deep-trees.test.ts`), and the walk
+that looks for objects owned by another engine (`containsForeignEngineObject`,
+`boxed-expression/type-guards.ts`) uses an explicit stack. Three things stay:
+
+- The LaTeX parser's own recursive descent
+  (`parseEnclosure → parsePrimary → parseExpression`) throws at about 1,870
+  nesting levels. Unreachable from realistic input; a parser change.
+- Once any object exists in the session, boxing a raw deep tree runs the
+  foreign-object walk at every level, and its memo lasts for one adoption only,
+  so the cost is quadratic in the depth (measured 2026-09-25: a raw `Sin` nest
+  of 2,000 levels 1.4 s, 5,000 levels 4.4 s, 10,000 levels 17 s; before the fix
+  the walk overflowed the stack instead). A per-engine cache of nodes already
+  found clean would make it linear; a design change.
+- `.toString()` and `.evaluate()` on a NON-canonical `Delimiter` chain 5,000 or
+  more levels deep still overflow (the canonical route no longer produces such a
+  chain; a raw-boxed chain that is serialized before canonicalization reaches
+  it).
+
+Also found 2026-09-25, a decision: a `Delimiter` whose delimiter is not a
+parenthesis (`'[]'`) is canonical while its operand is the RAW operand, not the
+canonical body the handler computed
+(`ce.box(['Delimiter', ['Add', 1, 2, 'x'], "'[]'"]).op1.isCanonical` is
+`false`). The handler's comment says delimiters are left uninterpreted so other
+operators can read them, so this may be intended; if not, changing it touches
+snapshots.
 
 ### The LaTeX parser cannot honor a deadline at all (OPEN but DEPRIORITIZED — ruled 2026-08-19 unlikely to ever be scheduled; found while fixing canonicalization deadline granularity, shipped 2026-08-15)
 

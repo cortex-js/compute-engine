@@ -210,27 +210,75 @@ function containsForeignEngineObject(
   ce: unknown,
   memo: Map<Expression, boolean>
 ): boolean {
-  if (expr === null || typeof expr !== 'object') return false;
-  const x = expr as Expression;
-  // Raw MathJSON has no `_kind` and cannot contain boxed objects owned by
-  // another engine.
-  if (x._kind === undefined) return false;
+  // A node settles without a visit to its children when it is not boxed
+  // (raw MathJSON has no `_kind` and cannot contain boxed objects owned by
+  // another engine), when it is already in the memo, when it is an object,
+  // or when it is neither a function nor a dictionary.
+  //
   // The memo (one per adoption — see the caller) is what keeps this walk
   // linear in DISTINCT nodes: an operand referenced more than once (a
   // function applied to its own previous result shares its subtrees) would
   // otherwise be re-scanned once per path, and this guard runs on every
   // function boxing — constructing a depth-n shared tree cost 2^n scans.
-  const cached = memo.get(x);
-  if (cached !== undefined) return cached;
-  let result: boolean;
-  if (isObject(x)) result = x.engine !== ce;
-  else if (isFunction(x))
-    result = x.ops.some((op) => containsForeignEngineObject(op, ce, memo));
-  else if (isDictionary(x))
-    result = x.values.some((v) => containsForeignEngineObject(v, ce, memo));
-  else result = false;
-  memo.set(x, result);
-  return result;
+  const settle = (x: ExpressionInput | Expression | null | undefined) => {
+    if (x === null || typeof x !== 'object') return false;
+    const e = x as Expression;
+    if (e._kind === undefined) return false;
+    const cached = memo.get(e);
+    if (cached !== undefined) return cached;
+    if (isObject(e)) {
+      const result = e.engine !== ce;
+      memo.set(e, result);
+      return result;
+    }
+    if (isFunction(e) || isDictionary(e)) return undefined;
+    memo.set(e, false);
+    return false;
+  };
+
+  const first = settle(expr);
+  if (first !== undefined) return first;
+
+  // The walk uses an explicit work stack, not recursion, so that the depth of
+  // the tree does not limit it: a tree a few thousand levels deep (which
+  // boxing can build, see `boxOperands` in `box.ts`) would otherwise exhaust
+  // the JS call stack here. Each frame holds a node and the index of the next
+  // child to examine. The children are examined in order and the walk stops
+  // at the first one that holds a foreign object, as `Array.some` would.
+  type Frame = { node: Expression; children: readonly Expression[]; i: number };
+  const frame = (node: Expression): Frame => ({
+    node,
+    children: isFunction(node)
+      ? node.ops
+      : isDictionary(node)
+        ? node.values
+        : [],
+    i: 0,
+  });
+  const stack: Frame[] = [frame(expr as Expression)];
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1];
+    let result: boolean | undefined = false;
+    let descended = false;
+    while (top.i < top.children.length) {
+      const child = top.children[top.i];
+      const r = settle(child);
+      if (r === undefined) {
+        stack.push(frame(child));
+        descended = true;
+        break;
+      }
+      if (r) {
+        result = true;
+        break;
+      }
+      top.i += 1;
+    }
+    if (descended) continue;
+    memo.set(top.node, result);
+    stack.pop();
+  }
+  return memo.get(expr as Expression)!;
 }
 
 /**

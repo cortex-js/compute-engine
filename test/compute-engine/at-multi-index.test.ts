@@ -45,13 +45,14 @@ describe('At: extra indices on a non-indexable value', () => {
     expect(boxEval(['At', ['List', "'ab'", "'cd'"], 1, 2])).toBe('"b"'));
 
   test('a scalar dictionary value with a trailing index errors', () =>
-    expect(
-      boxEval(['At', ['Dictionary', ['Tuple', "'a'", 1]], "'a'", 2])
-    ).toBe(DIM_ERROR_2));
+    expect(boxEval(['At', ['Dictionary', ['Tuple', "'a'", 1]], "'a'", 2])).toBe(
+      DIM_ERROR_2
+    ));
 });
 
 describe('At: legitimate multi-index is unchanged', () => {
-  test('matrix row/column', () => expect(boxEval(['At', MATRIX, 1, 2])).toBe('2'));
+  test('matrix row/column', () =>
+    expect(boxEval(['At', MATRIX, 1, 2])).toBe('2'));
 
   test('matrix row/column, second row', () =>
     expect(boxEval(['At', MATRIX, 2, 1])).toBe('3'));
@@ -60,7 +61,12 @@ describe('At: legitimate multi-index is unchanged', () => {
 
   test('dictionary value that IS a collection', () =>
     expect(
-      boxEval(['At', ['Dictionary', ['Tuple', "'a'", ['List', 7, 8]]], "'a'", 2])
+      boxEval([
+        'At',
+        ['Dictionary', ['Tuple', "'a'", ['List', 7, 8]]],
+        "'a'",
+        2,
+      ])
     ).toBe('8'));
 
   test('gather index then a scalar index', () =>

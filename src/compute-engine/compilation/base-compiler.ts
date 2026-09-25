@@ -3896,11 +3896,14 @@ export class BaseCompiler {
     // the levels below it again.
     let name = lanes.byNode.get(expr);
     // A definition removed since the route was found
-    // (`removeDefinitionsAddedSince`) is emitted again by a new route.
+    // (`removeDefinitionsAddedSince`) is emitted again by a new route. A
+    // definition that is compiling again (the route was found while an
+    // earlier emission of it was in the preamble) is a recursive call: the
+    // route is found again, so that the recursive-call assumption below
+    // answers, not the lane-question diagnostic.
     if (
       name !== undefined &&
-      !registry.defs.has(name) &&
-      !registry.compiling.has(name)
+      (!registry.defs.has(name) || registry.compiling.has(name))
     )
       name = undefined;
     if (name === undefined) {

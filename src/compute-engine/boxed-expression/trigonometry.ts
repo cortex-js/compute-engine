@@ -230,12 +230,239 @@ const CONSTRUCTIBLE_VALUES: [
   ],
 ];
 
+/** An exact rational `[numerator, denominator]`, with a positive denominator. */
+type BigRational = [bigint, bigint];
+
+/**
+ * Read an exact angle as `c·π + t`, with `c` and `t` exact rationals.
+ *
+ * The angle is read from its structure: exact rational number literals, the
+ * constant `Pi`, and `Negate`, `Add`, `Multiply`, `Divide` and `Power` (with a
+ * non-negative integer exponent) of those. Any other part (a symbol, a float,
+ * a radical, `π²`) gives `undefined`.
+ */
+function exactAngleParts(
+  x: Expression,
+  depth = 0
+): [c: BigRational, t: BigRational] | undefined {
+  // The depth limit stops a cycle of assignments (a symbol is read through
+  // to its value, below) and bounds the walk of a deep expression, which
+  // then stays on the usual route.
+  if (depth > 16) return undefined;
+  if (isNumber(x)) {
+    if (x.isExact !== true) return undefined;
+    const r = asRational(x);
+    if (r === undefined) return undefined;
+    return [
+      [0n, 1n],
+      [BigInt(r[0]), BigInt(r[1])],
+    ];
+  }
+  if (isSymbol(x, 'Pi'))
+    return [
+      [1n, 1n],
+      [0n, 1n],
+    ];
+  // A symbol is read through to its value (`x := 12345678901234567890123`,
+  // `x := 10³⁰·π`). The value is read with the same rules, so a symbol with
+  // an inexact value (`e`, `x := 1.5`) or with no value gives `undefined`.
+  if (isSymbol(x)) {
+    const v = x.value;
+    return v === undefined || v === x
+      ? undefined
+      : exactAngleParts(v, depth + 1);
+  }
+  if (!isFunction(x)) return undefined;
+
+  if (x.operator === 'Negate' && x.nops === 1) {
+    const a = exactAngleParts(x.op1, depth + 1);
+    if (!a) return undefined;
+    return [
+      [-a[0][0], a[0][1]],
+      [-a[1][0], a[1][1]],
+    ];
+  }
+
+  if (x.operator === 'Add') {
+    let c: BigRational = [0n, 1n];
+    let t: BigRational = [0n, 1n];
+    for (const op of x.ops) {
+      const a = exactAngleParts(op, depth + 1);
+      if (!a) return undefined;
+      c = ratAdd(c, a[0]);
+      t = ratAdd(t, a[1]);
+    }
+    return [c, t];
+  }
+
+  if (x.operator === 'Multiply' || x.operator === 'Divide') {
+    if (x.operator === 'Divide' && x.nops !== 2) return undefined;
+    let c: BigRational = [0n, 1n];
+    let t: BigRational = [1n, 1n];
+    for (const [i, op] of x.ops.entries()) {
+      const a = exactAngleParts(op, depth + 1);
+      if (!a) return undefined;
+      let [ca, ta] = a;
+      if (x.operator === 'Divide' && i === 1) {
+        // Only a rational divisor keeps the angle in the form `c·π + t`.
+        if (ca[0] !== 0n || ta[0] === 0n) return undefined;
+        ta = ta[0] < 0n ? [-ta[1], -ta[0]] : [ta[1], ta[0]];
+      }
+      // (c·π + t)·(ca·π + ta) has a π² term unless c or ca is zero.
+      if (c[0] !== 0n && ca[0] !== 0n) return undefined;
+      c = ratAdd(ratMul(c, ta), ratMul(t, ca));
+      t = ratMul(t, ta);
+    }
+    return [c, t];
+  }
+
+  if (x.operator === 'Power' && x.nops === 2) {
+    const base = exactAngleParts(x.op1, depth + 1);
+    const exp = exactAngleParts(x.op2, depth + 1);
+    if (!base || !exp) return undefined;
+    if (base[0][0] !== 0n || exp[0][0] !== 0n || exp[1][1] !== 1n)
+      return undefined;
+    let n = exp[1][0];
+    let [p, q] = base[1];
+    // A negative exponent is the power of the reciprocal (`10⁻⁴⁰⁰` is
+    // `1/10⁴⁰⁰`); a zero base has no reciprocal.
+    if (n < 0n) {
+      if (p === 0n) return undefined;
+      [p, q] = p < 0n ? [-q, -p] : [q, p];
+      n = -n;
+    }
+    // Keep the exact power to a reasonable size (about 10⁵ digits).
+    const digits = Math.max(
+      (p < 0n ? -p : p).toString().length,
+      q.toString().length
+    );
+    if (Number(n) * digits > 100_000) return undefined;
+    return [
+      [0n, 1n],
+      [p ** n, q ** n],
+    ];
+  }
+
+  return undefined;
+}
+
+function ratAdd(a: BigRational, b: BigRational): BigRational {
+  if (a[1] === b[1]) return [a[0] + b[0], a[1]];
+  return [a[0] * b[1] + b[0] * a[1], a[1] * b[1]];
+}
+
+function ratMul(a: BigRational, b: BigRational): BigRational {
+  return [a[0] * b[0], a[1] * b[1]];
+}
+
+/** Number of decimal digits of the integer part of `|p/q|`. */
+function integerPartDigits([p, q]: BigRational): number {
+  const n = (p < 0n ? -p : p) / q;
+  return n === 0n ? 0 : n.toString().length;
+}
+
+/**
+ * The value, in radians, of the exact angle `raw`, as a big decimal that
+ * keeps every digit of its integer part, or `undefined` when the numeric
+ * value of the angle at the working precision is already accurate.
+ *
+ * The numeric value of an angle is rounded to the working precision before
+ * the kernel reduces it modulo 2π. For a large angle this rounding changes
+ * the value modulo 2π: the 23-digit integer `12345678901234567890123`
+ * rounded to 21 digits gives `sin = 0.9918…` instead of `−0.4206…`, and
+ * `10³⁰·π` rounded to 21 digits gives `sin = 0.8838…` instead of `0`. This
+ * function avoids both roundings:
+ * - The multiple of π is reduced exactly: `(p/q)·π` modulo `2π` is
+ *   `((p mod 2q)/q)·π`, so only a multiple of π in `(−2π, 2π)` is rounded.
+ * - The rational part keeps its exact integer part, and only its fractional
+ *   part is rounded to the working precision. The big-decimal kernels read
+ *   all the digits of their argument and reduce it with as many digits of π
+ *   as its magnitude requires.
+ *
+ * To keep ordinary angles on the usual route, this applies only when the
+ * multiple of π is `2` or more in magnitude, or when the rational part has an
+ * integer part of 3 digits or more (an integer only when it has more digits
+ * than the working precision: a shorter integer is exact at that precision).
+ */
+function exactLargeAngle(raw: Expression): BigDecimal | undefined {
+  const ce = raw.engine;
+  if (raw.unknowns.length > 0) return undefined;
+  const parts = exactAngleParts(raw);
+  if (!parts) return undefined;
+  let [c, t] = parts;
+
+  // Convert the angle to radians. In an angular unit other than radians, `π`
+  // is not a rational multiple of the unit, so only a rational angle is read.
+  const unit = ce.angularUnit;
+  if (unit !== 'rad') {
+    if (c[0] !== 0n) return undefined;
+    if (unit === 'deg') c = [t[0], t[1] * 180n];
+    else if (unit === 'grad') c = [t[0], t[1] * 200n];
+    else if (unit === 'turn') c = [t[0] * 2n, t[1]];
+    else return undefined;
+    t = [0n, 1n];
+  }
+
+  const [cp, cq] = c;
+  const [tp, tq] = t;
+  const largeMultiple = (cp < 0n ? -cp : cp) >= 2n * cq;
+  const tDigits = integerPartDigits(t);
+  const largeRational = tq === 1n ? tDigits > ce.precision : tDigits >= 3;
+  if (!largeMultiple && !largeRational) return undefined;
+
+  // (cp/cq)·π modulo 2π is ((cp mod 2cq)/cq)·π exactly
+  const cReduced = cp % (2n * cq);
+  let theta =
+    cReduced === 0n
+      ? BigDecimal.ZERO
+      : BigDecimal.PI.mul(new BigDecimal(cReduced)).div(new BigDecimal(cq));
+  // The integer part of t is added exactly (`add` does not round)
+  theta = theta.add(new BigDecimal(tp / tq));
+  const tFraction = tp % tq;
+  if (tFraction !== 0n)
+    theta = theta.add(new BigDecimal(tFraction).div(new BigDecimal(tq)));
+  return theta;
+}
+
 function applyAngle(
   angle: Expression,
   fn: (x: number) => number | Complex | Expression,
   bigFn?: (x: BigDecimal) => BigDecimal | Complex | number | Expression,
-  complexFn?: (x: Complex) => number | Complex
+  complexFn?: (x: Complex) => number | Complex,
+  raw?: Expression
 ): Expression | undefined {
+  // An exact large angle is not rounded to the working precision before the
+  // kernel reduces it modulo 2π (see `exactLargeAngle`).
+  if (raw && bigFn) {
+    const ce = raw.engine;
+    if (bignumPreferred(ce)) {
+      const big = exactLargeAngle(raw);
+      if (big !== undefined)
+        return apply(
+          ce.number(big),
+          fn as (x: number) => number | Complex,
+          bigFn as (x: BigDecimal) => BigDecimal | Complex | number,
+          complexFn
+        );
+    } else {
+      // At machine precision a double cannot hold a large angle: run the
+      // big-decimal kernel with enough digits for a double (the working
+      // precision of big decimals is then 15 digits), and round its value
+      // to a double.
+      const saved = BigDecimal.precision;
+      let r: BigDecimal | Complex | number | Expression | undefined;
+      try {
+        BigDecimal.precision = Math.max(saved, 20);
+        const big = exactLargeAngle(raw);
+        if (big !== undefined) r = bigFn(big);
+      } finally {
+        BigDecimal.precision = saved;
+      }
+      if (r instanceof BigDecimal) return ce.number(r.toNumber());
+      if (typeof r === 'number') return ce.number(r);
+      if (r !== undefined && !(r instanceof Complex)) return r;
+    }
+  }
   const angle0 = canonicalAngle(angle);
   if (angle0 === undefined) return undefined;
   // `apply` below declines anything that is not a number LITERAL, and an
@@ -402,6 +629,18 @@ function poleDust(
   value: number,
   x: number
 ): number | Expression {
+  // A value that overflows a double at a finite nonzero angle below `π/2`
+  // in magnitude is not a pole: it is `csc` or `cot` of an angle so small
+  // that its reciprocal is above the largest double (`csc(5·10⁻³²⁴)` is
+  // about `2·10³²³`). On `(−π/2, π/2)` the sign of `csc x` and of `cot x`
+  // is the sign of `x`, so the value is the signed infinity. The pole at 0
+  // itself (`x = 0`) stays `~oo`.
+  if (
+    (value === Infinity || value === -Infinity) &&
+    x !== 0 &&
+    Math.abs(x) < Math.PI / 2
+  )
+    return x > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
   if (isMachineTrigPole(value, x)) return ce.ComplexInfinity;
   return value;
 }
@@ -452,9 +691,33 @@ function inverseAngle(
   return converted ? result : radiansToAngle(result);
 }
 
+/**
+ * At machine precision, the sign of an exact NONZERO rational angle whose
+ * double is 0 (`10⁻⁴⁰⁰`): the angle underflows, so `csc` and `cot` of it
+ * would be read as the pole at 0 (`~oo`), while the true value is the signed
+ * infinity with the sign of the angle, as `Csc(5·10⁻³²⁴)` answers (`poleDust`).
+ * `undefined` for any other angle, and above machine precision, where a big
+ * decimal holds the angle and the kernel computes the finite value.
+ */
+function underflowingAngleSign(
+  raw: Expression | undefined
+): -1 | 1 | undefined {
+  if (raw === undefined || bignumPreferred(raw.engine)) return undefined;
+  if (raw.unknowns.length > 0) return undefined;
+  const parts = exactAngleParts(raw);
+  if (!parts) return undefined;
+  const [[cp], [tp, tq]] = parts;
+  if (cp !== 0n || tp === 0n) return undefined;
+  if (Number(tp) / Number(tq) !== 0) return undefined;
+  return tp < 0n !== tq < 0n ? -1 : 1;
+}
+
 export function evalTrig(
   name: string,
-  op: Expression | undefined
+  op: Expression | undefined,
+  /** The operand before its numeric evaluation, when known. An exact large
+   * angle is then not rounded before the kernel runs (`exactLargeAngle`). */
+  raw?: Expression
 ): Expression | undefined {
   if (!op) return undefined;
   const ce = op.engine;
@@ -576,12 +839,14 @@ export function evalTrig(
       return apply(
         op,
         Math.atanh,
-        // atanh(x) = 0.5 * ln((1+x)/(1-x))
-        (x) =>
-          BigDecimal.ONE.add(x)
-            .div(BigDecimal.ONE.sub(x))
-            .ln()
-            .div(BigDecimal.TWO),
+        // The big-decimal `atanh` (`big-decimal/transcendentals.ts`) keeps
+        // a tiny argument (`Artanh(10⁻³⁰)` is `10⁻³⁰`, where the direct
+        // formula ½·ln((1 + x)/(1 − x)) computed 0 at 21 digits), adds guard
+        // digits against the cancellation near 1, and answers ±∞ at ±1 and
+        // NaN for |x| > 1, where `apply` then uses the complex kernel. The
+        // exact ordering relies on a relative error of a few units in the
+        // last digit.
+        (x) => x.atanh(),
         (x) => x.atanh()
       );
 
@@ -590,7 +855,8 @@ export function evalTrig(
         op,
         Math.cos,
         (x) => chopBignumDust(ce, x.cos(), x),
-        (x) => x.cos()
+        (x) => x.cos(),
+        raw
       );
 
     // Hyperbolic functions take a dimensionless argument, NOT an angle: they
@@ -604,19 +870,26 @@ export function evalTrig(
         (x) => x.cosh()
       );
 
-    case 'Cot':
+    case 'Cot': {
       // Poles at multiples of π. A pole is recognized from the structure of
       // the argument (`isTrigPole`) when it has one. Under `.N()` the
       // argument is already a number, so a value larger than the reciprocal
       // of the rounding dust is the pole (`poleDust`): `.N()` substitutes π
       // to the working precision, and `Cot(π)` computes as −2.6e24.
+      // An exact angle that underflows to the double 0 is read before the
+      // pole check, which would take the evaluated 0 for the pole at 0.
+      const under = underflowingAngleSign(raw);
+      if (under !== undefined)
+        return under > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
       if (isTrigPole('Cot', op)) return ce.ComplexInfinity;
       return applyAngle(
         op,
         (x) => poleDust(ce, 1 / Math.tan(x), x),
         (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.tan()), x),
-        (x) => x.tan().inverse()
+        (x) => x.tan().inverse(),
+        raw
       );
+    }
     case 'Coth':
       return apply(
         op,
@@ -624,15 +897,22 @@ export function evalTrig(
         (x) => BigDecimal.ONE.div(x.tanh()),
         (x) => x.tanh().inverse()
       );
-    case 'Csc':
+    case 'Csc': {
       // Poles at multiples of π, recognized as for `Cot`.
+      // An exact angle that underflows to the double 0 is read before the
+      // pole check, which would take the evaluated 0 for the pole at 0.
+      const under = underflowingAngleSign(raw);
+      if (under !== undefined)
+        return under > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
       if (isTrigPole('Csc', op)) return ce.ComplexInfinity;
       return applyAngle(
         op,
         (x) => poleDust(ce, 1 / Math.sin(x), x),
         (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.sin()), x),
-        (x) => x.sin().inverse()
+        (x) => x.sin().inverse(),
+        raw
       );
+    }
     case 'Csch':
       return apply(
         op,
@@ -647,7 +927,8 @@ export function evalTrig(
         op,
         (x) => poleDust(ce, 1 / Math.cos(x), x),
         (x) => bigPoleDust(ce, BigDecimal.ONE.div(x.cos()), x),
-        (x) => x.cos().inverse()
+        (x) => x.cos().inverse(),
+        raw
       );
     case 'Sech':
       return apply(
@@ -661,7 +942,8 @@ export function evalTrig(
         op,
         Math.sin,
         (x) => chopBignumDust(ce, x.sin(), x),
-        (x) => x.sin()
+        (x) => x.sin(),
+        raw
       );
     case 'Sinh':
       return apply(
@@ -676,7 +958,8 @@ export function evalTrig(
         op,
         (x) => poleDust(ce, Math.tan(x), x),
         (x) => bigPoleDust(ce, x.tan(), x),
-        (x) => x.tan()
+        (x) => x.tan(),
+        raw
       );
     }
     case 'Tanh':
@@ -1057,11 +1340,13 @@ function isTrigPole(operator: string, x: Expression): boolean {
 // Return the quadrant of the angle (1..4) and the position on the
 // circle 0...4 corresponding to 0, π/2, π, 3π/2, 2π.
 //
-// Only a number literal has a quadrant. The position is known only for a
-// literal that is exactly a multiple of a quarter-turn (`halfTurns`: 0, or
-// `90` in degrees). For another literal, the quadrant is read from its
-// value, in the engine's angular unit, and it is `undefined` when that value
-// is too near a multiple of a quarter-turn for the computation to decide it.
+// The quadrant is known for an angle that is exactly a rational multiple of
+// a half-turn (`halfTurns`: `π/3`, `-5π/4`, `0`, or `90` in degrees), and for
+// a number literal. The position is known only for an angle that is exactly
+// a multiple of a quarter-turn. For another literal, the quadrant is read
+// from its value, in the engine's angular unit, and it is `undefined` when
+// that value is too near a multiple of a quarter-turn for the computation to
+// decide it. Any other expression has no known quadrant.
 //
 // Above machine precision, the value is reduced at the working precision,
 // as `evaluate()` computes the value of the function: `sin(3.1415926536)`
@@ -1072,7 +1357,6 @@ function isTrigPole(operator: string, x: Expression): boolean {
 // the literal to a machine number and the machine value of π each have a
 // relative error of about 10⁻¹⁶.
 function quadrant(theta: Expression): [number | undefined, number | undefined] {
-  if (!isNumber(theta)) return [undefined, undefined];
   const turns = halfTurns(theta);
   if (turns !== undefined) {
     const [n0, d] = turns;

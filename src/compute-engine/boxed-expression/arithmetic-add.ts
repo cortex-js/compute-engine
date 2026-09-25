@@ -42,14 +42,8 @@ import {
   broadcastOverIndexedCollections,
 } from '../collection-utils.js';
 
-import { MACHINE_PRECISION } from '../numerics/numeric.js';
-import type {
-  NumericValue,
-  NumericValueFactory,
-} from '../numeric-value/types.js';
+import type { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
-import { BigNumericValue } from '../numeric-value/big-numeric-value.js';
-import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 
 /**
  * Test whether `x` carries a `ContinuationPlaceholder` reachable through
@@ -1121,10 +1115,7 @@ function nvSum(
   ce: ComputeEngine,
   numericValues: NumericValue[]
 ): NumericValue[] {
-  const factory: NumericValueFactory =
-    ce.precision > MACHINE_PRECISION
-      ? (x) => new BigNumericValue(x)
-      : (x) => new MachineNumericValue(x);
+  const factory = ce._inexactNumericValue;
   return ExactNumericValue.sum(numericValues, factory);
 }
 
@@ -1134,10 +1125,7 @@ function nvSumN(
 ): NumericValue {
   const makeExact = (x: ConstructorParameters<typeof ExactNumericValue>[0]) =>
     new ExactNumericValue(x, factory);
-  const factory: NumericValueFactory =
-    ce.precision > MACHINE_PRECISION
-      ? (x) => new BigNumericValue(x)
-      : (x) => new MachineNumericValue(x);
+  const factory = ce._inexactNumericValue;
   const result = ExactNumericValue.sum(numericValues, factory);
 
   if (result.length === 0) return makeExact(0);

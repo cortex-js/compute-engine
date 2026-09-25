@@ -25,6 +25,7 @@ import type {
   ExactNumericValueData,
   NumericValue,
   NumericValueData,
+  NumericValueFactory,
 } from './numeric-value/types.js';
 import type { BigNum, Rational } from './numerics/types.js';
 import type { RandomSeedFrame, RandomSubstream } from './numerics/random.js';
@@ -1260,6 +1261,13 @@ export interface IComputeEngine {
       | bigint
       | OneOf<[BigNum | NumericValueData | ExactNumericValueData]>
   ): NumericValue;
+
+  /** @internal The factory of the inexact (float) numeric values of the
+   * engine: a big decimal value above machine precision, a machine value
+   * at machine precision. It reads the precision of the engine at each
+   * call, so an exact numeric value that keeps it as its factory follows
+   * a later change of the precision. */
+  readonly _inexactNumericValue: NumericValueFactory;
 
   set precision(p: number | 'machine' | 'auto');
   get precision(): number;

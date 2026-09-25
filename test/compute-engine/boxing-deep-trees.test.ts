@@ -26,13 +26,20 @@ import { _setBoxingDevolveThreshold } from '../../src/compute-engine/boxed-expre
  * settles a node from its operands. Without them a deep chain still overflowed
  * before boxing was reached, or the first read of its validity did.
  *
- * What is NOT covered: `(((…x…)))`. A LAZY operator's operands reach its
- * canonical handler raw, and `Delimiter`'s handler canonicalizes its held
- * operand itself, so the recursion is the handler's, where boxing has no say;
- * measured 2026-09-22, the result stops being canonical past about 1 000
- * levels, the same number with the devolve on and with it off. Further up,
- * the parser's own grammar recursion (`parseEnclosure → parsePrimary →
- * parseExpression`) stops at about 1 870 levels.
+ * `(((…x…)))` built as MathJSON is a separate case. A LAZY operator's
+ * operands reach its canonical handler raw, and `Delimiter`'s handler
+ * canonicalizes its held operand itself, so the recursion is the handler's,
+ * where boxing has no say. Past about 1 000 levels the handler overflowed,
+ * the recovery in `applyOperatorDefinition` logged the `RangeError` and
+ * returned a NON-canonical `Delimiter`. The handler (`library/core.ts`) now
+ * removes consecutive parenthesis wrappers in a loop before it canonicalizes
+ * the innermost operand. The walk that looks for objects owned by another
+ * engine (`containsForeignEngineObject`, `type-guards.ts`) was recursive too,
+ * and now uses a work stack.
+ *
+ * What is NOT covered: the LaTeX parser's own grammar recursion
+ * (`parseEnclosure → parsePrimary → parseExpression`) stops at about 1 870
+ * levels of `(((…)))`.
  */
 
 /** `1-2-3-…-n` as LaTeX. */
@@ -105,6 +112,85 @@ describe('boxing a deep tree', () => {
       depth += 1;
     }
     expect(depth).toBe(2000);
+  });
+});
+
+describe('a deep chain of Delimiter', () => {
+  /** Call `fn` and return its result and the `console.error` calls it made. */
+  function withConsoleErrors<T>(fn: () => T): [T, unknown[][]] {
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = fn();
+      return [result, spy.mock.calls.slice()];
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  test('a 1 500-deep Delimiter chain boxes canonically', () => {
+    const ce = new ComputeEngine();
+    const [expr, errors] = withConsoleErrors(() =>
+      ce.box(nest('Delimiter', 1500, 1))
+    );
+    expect(errors).toEqual([]);
+    expect(expr.isCanonical).toBe(true);
+    expect(expr.json).toBe(1);
+    expect(expr.evaluate().json).toBe(1);
+  });
+
+  test('a 60 000-deep Delimiter chain boxes canonically', () => {
+    const ce = new ComputeEngine();
+    const [expr, errors] = withConsoleErrors(() =>
+      ce.box(nest('Delimiter', 60000, 'x'))
+    );
+    expect(errors).toEqual([]);
+    expect(expr.symbol).toBe('x');
+  });
+
+  test('a deep chain with explicit parentheses, raw-boxed then canonicalized', () => {
+    const ce = new ComputeEngine();
+    let d: MathJsonExpression = ['Add', 'x', 1];
+    for (let i = 0; i < 1500; i++) d = ['Delimiter', d, "'()'"];
+    const [expr, errors] = withConsoleErrors(
+      () => ce.box(d, { form: 'raw' }).canonical
+    );
+    expect(errors).toEqual([]);
+    expect(expr.isCanonical).toBe(true);
+    expect(JSON.stringify(expr.json)).toBe('["Add","x",1]');
+  });
+
+  test('the innermost Delimiter keeps its meaning', () => {
+    // Removing the outer parentheses must not change what the innermost
+    // Delimiter means: a sequence is a tuple, a bracket stays a Delimiter.
+    const ce = new ComputeEngine();
+    const [tuple, errors1] = withConsoleErrors(() =>
+      ce.box(nest('Delimiter', 1500, ['Delimiter', ['Sequence', 1, 2]]))
+    );
+    expect(errors1).toEqual([]);
+    expect(JSON.stringify(tuple.json)).toBe('["Tuple",1,2]');
+
+    const [bracket, errors2] = withConsoleErrors(() =>
+      ce.box(nest('Delimiter', 1500, ['Delimiter', 'x', "'[]'"]))
+    );
+    expect(errors2).toEqual([]);
+    expect(bracket.isCanonical).toBe(true);
+    expect(JSON.stringify(bracket.json)).toBe(
+      JSON.stringify(ce.box(['Delimiter', 'x', "'[]'"]).json)
+    );
+  });
+
+  test('a deep raw tree is adopted after an object was constructed', () => {
+    // Once an object exists in the process, every function construction
+    // checks its operands for an object owned by another engine. That walk
+    // was recursive and overflowed on a deep tree.
+    // The tree is boxed BEFORE the object exists: boxing it afterwards runs
+    // the same walk once per level, which costs time quadratic in the depth.
+    const ce = new ComputeEngine();
+    const raw = ce.box(nest('Sin', 60000), { form: 'raw' });
+    ce.declareType('DeepBox', { kind: 'record', elements: {} });
+    ce._object('DeepBox', {});
+    const expr = ce.function('Cos', [raw], { form: 'raw' });
+    expect(expr.operator).toBe('Cos');
   });
 });
 

@@ -3709,6 +3709,52 @@ function compilePointListProjection(
 }
 
 /**
+ * Compile `Last` as a GPU swizzle. Unlike `First`/`Second`/`Third`, whose
+ * component is fixed, the component of `Last` depends on the width of the
+ * operand, so the width must be known statically: a `tuple` of 2 to 4 scalar
+ * numbers, or a list of 2 to 4 scalar numbers (the two spellings that lower
+ * to a `vec2`/`vec3`/`vec4`). The last component of a `vecN` is `.y`, `.z`
+ * or `.w`.
+ *
+ * An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
+ * the target and has no static width. Every component of an absent value is
+ * NaN, so its last component is that NaN, as `First` of an absent operand is
+ * (see `gpuSwizzle`). Any other operand has no GPU lowering: a longer list
+ * compiles to an array, not a vector, and has no swizzle.
+ */
+function compileGpuLast(
+  arg: Expression,
+  compile: (e: Expression) => string
+): string {
+  const code = compile(arg).trim();
+  if (
+    code === gpuNonFiniteLiteral(NaN, 'glsl') ||
+    code === gpuNonFiniteLiteral(NaN, 'wgsl')
+  )
+    return code;
+  const t = gpuType(arg);
+  const width =
+    typeof t !== 'string'
+      ? t.kind === 'tuple'
+        ? t.elements.every((el) => isSubtype(el.type, 'number'))
+          ? t.elements.length
+          : undefined
+        : t.kind === 'list' &&
+            t.dimensions?.length === 1 &&
+            t.elements !== undefined &&
+            isSubtype(t.elements, 'number')
+          ? t.dimensions[0]
+          : undefined
+      : undefined;
+  if (width !== undefined && width >= 2 && width <= 4)
+    return gpuSwizzle(code, 'xyzw'[width - 1]);
+  throw new Error(
+    'Could not compile `Last`: the operand must be a point or a list of 2 to 4 ' +
+      'numbers of known length (a `vec2`/`vec3`/`vec4`).'
+  );
+}
+
+/**
  * Compile a point-coordinate accessor (`PointX`/`PointY`/`PointZ`) as a GPU
  * swizzle. A single point is a `vec2`/`vec3`/`vec4`, so `.x`/`.y`/`.z` is
  * valid. A *list* of points is not a GPU value — a swizzle on it is invalid
@@ -3783,6 +3829,19 @@ function compilePointSwizzle(
  */
 function gpuSwizzle(code: string, sw: string): string {
   const s = code.trim();
+  // An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
+  // the target (`_gpu_nan()` on GLSL, `bitcast<f32>(0x7fc00000u)` on WGSL).
+  // A scalar has no components: WGSL rejects `.x` on an `f32`, and GLSL
+  // before 4.20 rejects it on a `float`. Every coordinate of an absent point
+  // is NaN, so one component of that NaN is the NaN itself, and several
+  // components are a vector of it.
+  for (const lang of ['glsl', 'wgsl'] as const) {
+    if (s !== gpuNonFiniteLiteral(NaN, lang)) continue;
+    if (sw.length === 1) return s;
+    return lang === 'glsl'
+      ? `vec${sw.length}(${s})`
+      : `vec${sw.length}<f32>(${s})`;
+  }
   if (gpuIsAtomicEmission(s)) return `${s}.${sw}`;
   const call = /^[A-Za-z_]\w*\(/.exec(s);
   if (call !== null && s.endsWith(')')) {
@@ -6081,6 +6140,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   First: (args, compile) => gpuSwizzle(compile(args[0]), 'x'),
   Second: (args, compile) => gpuSwizzle(compile(args[0]), 'y'),
   Third: (args, compile) => gpuSwizzle(compile(args[0]), 'z'),
+  Last: (args, compile) => compileGpuLast(args[0], compile),
   // Point-coordinate accessors. On the GPU a point is a `vec2`/`vec3`/`vec4`,
   // so a single point maps to the same swizzle as First/Second/Third. A list of
   // points is not a GPU value: emitting a swizzle on it produces invalid shader

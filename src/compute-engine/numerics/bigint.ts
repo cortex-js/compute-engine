@@ -73,3 +73,76 @@ export function bigint(
     return null;
   }
 }
+
+/** The number of bits of a non-negative bigint (0 for 0). */
+function bitLength(v: bigint): number {
+  return v === 0n ? 0 : v.toString(2).length;
+}
+
+/**
+ * Exact integer n-th root of a non-negative bigint: the integer `r` with
+ * `r^n = v`, or `null` when `v` is not a perfect n-th power.
+ *
+ * The computation is all-integer (Newton's method on the floor of the
+ * root, seeded above the root from the bit length), so a radicand of any
+ * size is decided exactly: `10^60` has the cube root `10^20`, while
+ * `10^60 + 1` has none.
+ */
+export function bigintNthRoot(v: bigint, n: number): bigint | null {
+  if (!Number.isInteger(n) || n < 1 || v < 0n) return null;
+  if (n === 1 || v < 2n) return v;
+  const bits = bitLength(v);
+  // A perfect n-th power with a base ≥ 2 has at least n bits.
+  if (n >= bits) return null;
+  const bn = BigInt(n);
+  const bn1 = bn - 1n;
+  // 2^ceil(bits/n) is strictly greater than the root, so the Newton
+  // iteration below decreases monotonically toward the floor of the root.
+  let x = 1n << BigInt(Math.ceil(bits / n));
+  for (;;) {
+    const y = (bn1 * x + v / x ** bn1) / bn;
+    if (y >= x) break;
+    x = y;
+  }
+  return x ** bn === v ? x : null;
+}
+
+/**
+ * Write the integer `v > 1` as `base^exponent` with the largest possible
+ * `exponent ≥ 2`, or return `undefined` when `v` is not a perfect power.
+ *
+ * The largest exponent is the product of the prime exponents that can be
+ * extracted in turn: `v` is a perfect k-th power exactly when it is a
+ * perfect p-th power for every prime power p dividing k. Each prime `p`
+ * is tried only while `p` is below the bit length of the remaining base.
+ *
+ * A radicand longer than `maxBits` bits is not decomposed (returns
+ * `undefined`). The search computes one integer root per prime below the
+ * bit length, so its cost grows faster than the square of the bit length:
+ * about 30 ms at 4096 bits, but more than a minute at 63,000 bits.
+ */
+export function bigintMaximalPerfectPower(
+  v: bigint,
+  maxBits = 4096
+): { base: bigint; exponent: number } | undefined {
+  if (v <= 1n) return undefined;
+  if (bitLength(v) > maxBits) return undefined;
+  let base = v;
+  let exponent = 1;
+  for (let p = 2; p < bitLength(base); p++) {
+    if (!isSmallPrime(p)) continue;
+    for (;;) {
+      const r = bigintNthRoot(base, p);
+      if (r === null) break;
+      base = r;
+      exponent *= p;
+    }
+  }
+  return exponent > 1 ? { base, exponent } : undefined;
+}
+
+function isSmallPrime(p: number): boolean {
+  if (p < 2) return false;
+  for (let d = 2; d * d <= p; d++) if (p % d === 0) return false;
+  return true;
+}
